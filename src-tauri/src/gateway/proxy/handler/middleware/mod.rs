@@ -137,6 +137,7 @@ impl<R: tauri::Runtime> ProxyContext<R> {
             created_at_ms: self.created_at_ms,
             created_at: self.created_at,
             session_id: self.session_id,
+            enable_session_reuse: rs.enable_session_reuse,
             requested_model: self.requested_model,
             requested_model_location: self.requested_model_location,
             managed_model_route: self.managed_model_route,

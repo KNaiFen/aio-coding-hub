@@ -3,7 +3,8 @@
 use crate::app_state::{ensure_db_ready, DbInitState};
 use crate::gateway::events::GATEWAY_STATUS_EVENT_NAME;
 use crate::gateway_control::{
-    app_start_gateway_with_config, try_app_gateway_update_circuit_config,
+    app_gateway_clear_all_session_bindings, app_start_gateway_with_config,
+    try_app_gateway_update_circuit_config,
 };
 use crate::gateway_runtime_access::app_gateway_status;
 use crate::{blocking, cli_proxy, resident, settings};
@@ -25,7 +26,7 @@ where
 }
 
 /// Encapsulates ordinary `settings_set` owned fields only.
-/// Rectifier / circuit-notice / Codex-completion / Image Gen / Grok fields are
+/// Rectifier / circuit-notice / session-reuse / Codex-completion / Image Gen / Grok fields are
 /// intentionally absent; dedicated writers own those groups.
 #[derive(serde::Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -332,6 +333,7 @@ pub(crate) struct SettingsView {
     pub enable_thinking_signature_rectifier: bool,
     pub enable_thinking_budget_rectifier: bool,
     pub enable_billing_header_rectifier: bool,
+    pub enable_session_reuse: bool,
     pub enable_codex_session_id_completion: bool,
     pub enable_claude_metadata_user_id_injection: bool,
     pub enable_cache_anomaly_monitor: bool,
@@ -404,6 +406,12 @@ pub(crate) struct CodexSessionIdCompletionUpdate {
     pub enable_codex_session_id_completion: bool,
 }
 
+#[derive(Debug, Clone, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SessionReuseUpdate {
+    pub enable_session_reuse: bool,
+}
+
 #[derive(Debug, Clone)]
 struct SettingsRuntimePlan {
     cli_proxy_sync_required: bool,
@@ -455,6 +463,7 @@ impl From<&settings::AppSettings> for SettingsView {
             enable_thinking_signature_rectifier: value.enable_thinking_signature_rectifier,
             enable_thinking_budget_rectifier: value.enable_thinking_budget_rectifier,
             enable_billing_header_rectifier: value.enable_billing_header_rectifier,
+            enable_session_reuse: value.enable_session_reuse,
             enable_codex_session_id_completion: value.enable_codex_session_id_completion,
             enable_claude_metadata_user_id_injection: value
                 .enable_claude_metadata_user_id_injection,
@@ -1981,6 +1990,43 @@ pub(crate) async fn settings_circuit_breaker_notice_set<R: tauri::Runtime>(
     .map_err(Into::into)
 }
 
+/// Synchronous production body for global session-reuse ownership.
+pub(crate) fn settings_session_reuse_set_sync<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    update: SessionReuseUpdate,
+) -> Result<SettingsView, String> {
+    let (updated, changed) = settings::update(app, |settings| {
+        settings.schema_version = settings::SCHEMA_VERSION;
+        let changed = settings.enable_session_reuse != update.enable_session_reuse;
+        settings.enable_session_reuse = update.enable_session_reuse;
+        Ok(changed)
+    })
+    .map_err(|err| err.to_string())?;
+
+    if changed {
+        let cleared = app_gateway_clear_all_session_bindings(app);
+        tracing::info!(
+            enable_session_reuse = update.enable_session_reuse,
+            cleared_session_bindings = cleared,
+            "cleared session bindings after session reuse setting changed"
+        );
+    }
+
+    Ok(SettingsView::from(&updated))
+}
+
+pub(crate) async fn settings_session_reuse_set<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    update: SessionReuseUpdate,
+) -> Result<SettingsView, String> {
+    let app_for_work = app.clone();
+    blocking::run("settings_session_reuse_set", move || {
+        settings_session_reuse_set_sync(&app_for_work, update)
+    })
+    .await
+    .map_err(Into::into)
+}
+
 /// Synchronous production body for Codex session-id completion ownership.
 pub(crate) fn settings_codex_session_id_completion_set_sync<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
@@ -2454,6 +2500,13 @@ mod tests {
             },
         )
         .expect("circuit notice production command path");
+        settings_session_reuse_set_sync(
+            &handle,
+            SessionReuseUpdate {
+                enable_session_reuse: false,
+            },
+        )
+        .expect("session reuse production command path");
         settings_codex_session_id_completion_set_sync(
             &handle,
             CodexSessionIdCompletionUpdate {
@@ -2509,6 +2562,7 @@ mod tests {
             previous.log_retention_days + 3
         );
         assert!(canonical.enable_circuit_breaker_notice);
+        assert!(!canonical.enable_session_reuse);
         assert!(canonical.enable_codex_session_id_completion);
         assert!(canonical.verbose_provider_error);
         assert!(canonical.intercept_anthropic_warmup_requests);
@@ -2560,7 +2614,8 @@ mod tests {
             "verboseProviderError": true,
             "enableThinkingSignatureRectifier": false,
             "enableResponseFixer": true,
-            "responseFixerFixEncoding": true
+            "responseFixerFixEncoding": true,
+            "enableSessionReuse": true
         });
         let parsed: SettingsUpdate =
             serde_json::from_value(with_extra).expect("extra rectifier fields ignored");

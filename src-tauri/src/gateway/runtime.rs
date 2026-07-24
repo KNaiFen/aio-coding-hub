@@ -179,6 +179,10 @@ impl GatewayRuntime {
         self.session.clear_cli_bindings(cli_key)
     }
 
+    pub(crate) fn clear_all_session_bindings(&self) -> usize {
+        self.session.clear_all_bindings()
+    }
+
     pub(crate) fn clear_recent_errors(&self) -> usize {
         self.recent_errors.lock_or_recover().clear()
     }

@@ -295,6 +295,9 @@ pub struct AppSettings {
     pub enable_thinking_budget_rectifier: bool,
     // Billing header rectifier: strip x-anthropic-billing-header from system prompt (default enabled).
     pub enable_billing_header_rectifier: bool,
+    // Session routing reuse (default enabled). Disabling this bypasses all in-memory bindings.
+    #[serde(default = "default_enable_session_reuse")]
+    pub enable_session_reuse: bool,
     // Codex Session ID completion (default enabled).
     pub enable_codex_session_id_completion: bool,
     // Claude metadata.user_id injection (default enabled).
@@ -380,6 +383,7 @@ impl Default for AppSettings {
             enable_thinking_signature_rectifier: DEFAULT_ENABLE_THINKING_SIGNATURE_RECTIFIER,
             enable_thinking_budget_rectifier: DEFAULT_ENABLE_THINKING_BUDGET_RECTIFIER,
             enable_billing_header_rectifier: DEFAULT_ENABLE_BILLING_HEADER_RECTIFIER,
+            enable_session_reuse: DEFAULT_ENABLE_SESSION_REUSE,
             enable_codex_session_id_completion: DEFAULT_ENABLE_CODEX_SESSION_ID_COMPLETION,
             enable_claude_metadata_user_id_injection:
                 DEFAULT_ENABLE_CLAUDE_METADATA_USER_ID_INJECTION,
@@ -418,6 +422,10 @@ fn default_show_home_heatmap() -> bool {
 
 fn default_show_home_usage() -> bool {
     DEFAULT_SHOW_HOME_USAGE
+}
+
+fn default_enable_session_reuse() -> bool {
+    DEFAULT_ENABLE_SESSION_REUSE
 }
 
 pub(super) fn default_cli_priority_order() -> Vec<String> {

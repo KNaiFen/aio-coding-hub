@@ -76,6 +76,9 @@ function createDefaultTabProps(overrides: DefaultPropsOverrides = {}) {
     circuitBreakerNoticeEnabled: false,
     circuitBreakerNoticeSaving: false,
     onPersistCircuitBreakerNotice: vi.fn(),
+    sessionReuseEnabled: true,
+    sessionReuseSaving: false,
+    onPersistSessionReuse: vi.fn(),
     codexSessionIdCompletionEnabled: true,
     codexSessionIdCompletionSaving: false,
     onPersistCodexSessionIdCompletion: vi.fn(),
@@ -126,6 +129,9 @@ describe("cli-manager/GeneralTab", () => {
         circuitBreakerNoticeEnabled={false}
         circuitBreakerNoticeSaving={false}
         onPersistCircuitBreakerNotice={vi.fn()}
+        sessionReuseEnabled={true}
+        sessionReuseSaving={false}
+        onPersistSessionReuse={vi.fn()}
         codexSessionIdCompletionEnabled={true}
         codexSessionIdCompletionSaving={false}
         onPersistCodexSessionIdCompletion={vi.fn()}
@@ -170,6 +176,7 @@ describe("cli-manager/GeneralTab", () => {
     const rectifier = createRectifierPatch();
     const onPersistRectifier = vi.fn();
     const onPersistCircuitBreakerNotice = vi.fn();
+    const onPersistSessionReuse = vi.fn();
     const onPersistCodexSessionIdCompletion = vi.fn();
     const onPersistCacheAnomalyMonitor = vi.fn();
     const onPersistCommonSettings = vi
@@ -198,6 +205,9 @@ describe("cli-manager/GeneralTab", () => {
         circuitBreakerNoticeEnabled={false}
         circuitBreakerNoticeSaving={false}
         onPersistCircuitBreakerNotice={onPersistCircuitBreakerNotice}
+        sessionReuseEnabled={true}
+        sessionReuseSaving={false}
+        onPersistSessionReuse={onPersistSessionReuse}
         codexSessionIdCompletionEnabled={true}
         codexSessionIdCompletionSaving={false}
         onPersistCodexSessionIdCompletion={onPersistCodexSessionIdCompletion}
@@ -247,6 +257,7 @@ describe("cli-manager/GeneralTab", () => {
     }
     expect(onPersistRectifier).toHaveBeenCalled();
     expect(onPersistCircuitBreakerNotice).toHaveBeenCalled();
+    expect(onPersistSessionReuse).toHaveBeenCalledWith(false);
     expect(onPersistCodexSessionIdCompletion).toHaveBeenCalled();
     expect(onPersistCacheAnomalyMonitor).toHaveBeenCalled();
 
@@ -348,6 +359,9 @@ describe("cli-manager/GeneralTab", () => {
         circuitBreakerNoticeEnabled={false}
         circuitBreakerNoticeSaving={false}
         onPersistCircuitBreakerNotice={vi.fn()}
+        sessionReuseEnabled={true}
+        sessionReuseSaving={false}
+        onPersistSessionReuse={vi.fn()}
         codexSessionIdCompletionEnabled={true}
         codexSessionIdCompletionSaving={false}
         onPersistCodexSessionIdCompletion={vi.fn()}

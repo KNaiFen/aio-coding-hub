@@ -115,6 +115,14 @@ export const handlers = [
   http.post(`${TAURI_ENDPOINT}/settings_gateway_rectifier_set`, () =>
     HttpResponse.json(getSettingsState())
   ),
+  http.post(`${TAURI_ENDPOINT}/settings_session_reuse_set`, async ({ request }) => {
+    const payload = await withJson<{ update?: { enableSessionReuse?: boolean } }>(request);
+    return HttpResponse.json(
+      mergeSettingsState({
+        enable_session_reuse: payload.update?.enableSessionReuse ?? true,
+      })
+    );
+  }),
   http.post(`${TAURI_ENDPOINT}/settings_codex_session_id_completion_set`, () =>
     HttpResponse.json(getSettingsState())
   ),

@@ -1094,6 +1094,7 @@ mod tests {
             )),
             session: Arc::new(session_manager::SessionManager::new()),
             session_id: Some("sess-usage-tee-drain".to_string()),
+            enable_session_reuse: true,
             sort_mode_id: None,
             trace_id: "trace-usage-tee-drain".to_string(),
             cli_key: "codex".to_string(),

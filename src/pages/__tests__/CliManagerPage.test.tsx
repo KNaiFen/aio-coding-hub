@@ -16,6 +16,7 @@ import {
   useSettingsGatewayRectifierSetMutation,
   useSettingsPatchMutation,
   useSettingsQuery,
+  useSettingsSessionReuseSetMutation,
 } from "../../query/settings";
 import {
   useCliManagerClaudeInfoQuery,
@@ -45,6 +46,7 @@ vi.mock("../../components/cli-manager/tabs/GeneralTab", () => ({
   CliManagerGeneralTab: ({
     onPersistRectifier,
     onPersistCircuitBreakerNotice,
+    onPersistSessionReuse,
     onPersistCodexSessionIdCompletion,
     onPersistCacheAnomalyMonitor,
     onPersistCommonSettings,
@@ -60,6 +62,9 @@ vi.mock("../../components/cli-manager/tabs/GeneralTab", () => ({
       </button>
       <button type="button" onClick={() => onPersistCircuitBreakerNotice(false)}>
         disable-circuit-notice
+      </button>
+      <button type="button" onClick={() => onPersistSessionReuse(false)}>
+        persist-session-reuse
       </button>
       <button type="button" onClick={() => onPersistCodexSessionIdCompletion(false)}>
         persist-codex-completion
@@ -170,6 +175,7 @@ vi.mock("../../query/settings", async () => {
     useSettingsQuery: vi.fn(),
     useSettingsGatewayRectifierSetMutation: vi.fn(),
     useSettingsCircuitBreakerNoticeSetMutation: vi.fn(),
+    useSettingsSessionReuseSetMutation: vi.fn(),
     useSettingsCodexSessionIdCompletionSetMutation: vi.fn(),
     useSettingsPatchMutation: vi.fn(),
   };
@@ -258,6 +264,10 @@ beforeEach(() => {
     mutateAsync: vi.fn(),
   } as any);
   vi.mocked(useSettingsCircuitBreakerNoticeSetMutation).mockReturnValue({
+    isPending: false,
+    mutateAsync: vi.fn(),
+  } as any);
+  vi.mocked(useSettingsSessionReuseSetMutation).mockReturnValue({
     isPending: false,
     mutateAsync: vi.fn(),
   } as any);
@@ -386,6 +396,12 @@ describe("pages/CliManagerPage", () => {
       .mockResolvedValueOnce(null);
     vi.mocked(useSettingsCircuitBreakerNoticeSetMutation).mockReturnValue(noticeMutation as any);
 
+    const sessionReuseMutation = { isPending: false, mutateAsync: vi.fn() };
+    sessionReuseMutation.mutateAsync.mockResolvedValueOnce(
+      createAppSettings({ enable_session_reuse: false })
+    );
+    vi.mocked(useSettingsSessionReuseSetMutation).mockReturnValue(sessionReuseMutation as any);
+
     const completionMutation = { isPending: false, mutateAsync: vi.fn() };
     completionMutation.mutateAsync
       .mockResolvedValueOnce(createAppSettings({ enable_codex_session_id_completion: false }))
@@ -468,6 +484,10 @@ describe("pages/CliManagerPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "persist-circuit-notice" }));
     await waitFor(() => expect(noticeMutation.mutateAsync).toHaveBeenCalledTimes(2));
 
+    fireEvent.click(screen.getByRole("button", { name: "persist-session-reuse" }));
+    await waitFor(() => expect(sessionReuseMutation.mutateAsync).toHaveBeenCalledWith(false));
+    expect(toast).toHaveBeenCalledWith("已关闭会话复用");
+
     fireEvent.click(screen.getByRole("button", { name: "persist-codex-completion" }));
     await waitFor(() => expect(completionMutation.mutateAsync).toHaveBeenCalledWith(false));
     expect(toast).toHaveBeenCalledWith("已关闭 Codex Session ID 补全");
@@ -493,10 +513,12 @@ describe("pages/CliManagerPage", () => {
 
     const rectifierMutation = { isPending: false, mutateAsync: vi.fn() };
     const noticeMutation = { isPending: false, mutateAsync: vi.fn() };
+    const sessionReuseMutation = { isPending: false, mutateAsync: vi.fn() };
     const completionMutation = { isPending: false, mutateAsync: vi.fn() };
     const commonMutation = { isPending: false, mutateAsync: vi.fn() };
     vi.mocked(useSettingsGatewayRectifierSetMutation).mockReturnValue(rectifierMutation as any);
     vi.mocked(useSettingsCircuitBreakerNoticeSetMutation).mockReturnValue(noticeMutation as any);
+    vi.mocked(useSettingsSessionReuseSetMutation).mockReturnValue(sessionReuseMutation as any);
     vi.mocked(useSettingsCodexSessionIdCompletionSetMutation).mockReturnValue(
       completionMutation as any
     );
@@ -549,11 +571,13 @@ describe("pages/CliManagerPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "persist-rectifier" }));
     fireEvent.click(screen.getByRole("button", { name: "persist-circuit-notice" }));
+    fireEvent.click(screen.getByRole("button", { name: "persist-session-reuse" }));
     fireEvent.click(screen.getByRole("button", { name: "persist-codex-completion" }));
     fireEvent.click(screen.getByRole("button", { name: "persist-common" }));
 
     expect(rectifierMutation.mutateAsync).not.toHaveBeenCalled();
     expect(noticeMutation.mutateAsync).not.toHaveBeenCalled();
+    expect(sessionReuseMutation.mutateAsync).not.toHaveBeenCalled();
     expect(completionMutation.mutateAsync).not.toHaveBeenCalled();
     expect(commonMutation.mutateAsync).not.toHaveBeenCalled();
     expect(toast).toHaveBeenCalledWith(

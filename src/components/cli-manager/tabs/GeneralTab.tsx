@@ -18,7 +18,7 @@ import { SettingsRow } from "../../../ui/SettingsRow";
 import { Switch } from "../../../ui/Switch";
 import { NetworkSettingsCard } from "../NetworkSettingsCard";
 import { WslSettingsCard } from "../WslSettingsCard";
-import { Bell, ChevronDown, Shield, TrendingDown, Globe } from "lucide-react";
+import { Bell, ChevronDown, Shield, TrendingDown, Globe, Route } from "lucide-react";
 import type { UpstreamRetryPolicy } from "../../../services/settings/settings";
 import {
   cloneUpstreamRetryPolicy,
@@ -40,6 +40,10 @@ export type CliManagerGeneralTabProps = {
   circuitBreakerNoticeEnabled: boolean;
   circuitBreakerNoticeSaving: boolean;
   onPersistCircuitBreakerNotice: (enable: boolean) => Promise<void> | void;
+
+  sessionReuseEnabled: boolean;
+  sessionReuseSaving: boolean;
+  onPersistSessionReuse: (enable: boolean) => Promise<void> | void;
 
   codexSessionIdCompletionEnabled: boolean;
   codexSessionIdCompletionSaving: boolean;
@@ -95,6 +99,9 @@ export function CliManagerGeneralTab({
   circuitBreakerNoticeEnabled,
   circuitBreakerNoticeSaving,
   onPersistCircuitBreakerNotice,
+  sessionReuseEnabled,
+  sessionReuseSaving,
+  onPersistSessionReuse,
   codexSessionIdCompletionEnabled,
   codexSessionIdCompletionSaving,
   onPersistCodexSessionIdCompletion,
@@ -133,6 +140,7 @@ export function CliManagerGeneralTab({
   const rectifierDisabled = rectifierSaving || settingsUnavailable || settingsWriteBlocked;
   const circuitNoticeDisabled =
     circuitBreakerNoticeSaving || settingsUnavailable || settingsWriteBlocked;
+  const sessionReuseDisabled = sessionReuseSaving || settingsUnavailable || settingsWriteBlocked;
   const codexCompletionDisabled =
     codexSessionIdCompletionSaving || settingsUnavailable || settingsWriteBlocked;
   const taskNotifyDisabled =
@@ -290,6 +298,25 @@ export function CliManagerGeneralTab({
                     checked={codexSessionIdCompletionEnabled}
                     onCheckedChange={(checked) => void onPersistCodexSessionIdCompletion(checked)}
                     disabled={codexCompletionDisabled}
+                  />
+                </SettingsRow>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-border bg-white dark:bg-secondary p-5">
+              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">
+                <Route className="h-4 w-4 text-muted-foreground" />
+                会话路由
+              </h3>
+              <div className="divide-y divide-border">
+                <SettingsRow
+                  label="会话复用"
+                  subtitle="同一会话短时间内优先延续上次成功的供应商。关闭后每次请求按当前激活路由与供应商顺序重新选择，切换设置会清空已有会话绑定。"
+                >
+                  <Switch
+                    checked={sessionReuseEnabled}
+                    onCheckedChange={(checked) => void onPersistSessionReuse(checked)}
+                    disabled={sessionReuseDisabled}
                   />
                 </SettingsRow>
               </div>

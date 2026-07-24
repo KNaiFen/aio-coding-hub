@@ -312,6 +312,7 @@ mod tests {
             )),
             session: Arc::new(session_manager::SessionManager::new()),
             session_id: Some("sess-stream-end".to_string()),
+            enable_session_reuse: true,
             sort_mode_id: None,
             trace_id: "trace-stream-end".to_string(),
             cli_key: "codex".to_string(),

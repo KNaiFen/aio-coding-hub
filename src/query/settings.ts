@@ -10,6 +10,7 @@ import {
 } from "../services/settings/settings";
 import { settingsCircuitBreakerNoticeSet } from "../services/settings/settingsCircuitBreakerNotice";
 import { settingsCodexSessionIdCompletionSet } from "../services/settings/settingsCodexSessionIdCompletion";
+import { settingsSessionReuseSet } from "../services/settings/settingsSessionReuse";
 import {
   settingsGatewayRectifierSet,
   type GatewayRectifierSettingsPatch,
@@ -119,6 +120,21 @@ export function useSettingsCircuitBreakerNoticeSetMutation() {
 
   return useMutation({
     mutationFn: (enable: boolean) => settingsCircuitBreakerNoticeSet(enable),
+    onSuccess: (updated) => {
+      if (!updated) return;
+      queryClient.setQueryData<AppSettings | null>(settingsKeys.get(), updated);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: settingsKeys.get() });
+    },
+  });
+}
+
+export function useSettingsSessionReuseSetMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (enable: boolean) => settingsSessionReuseSet(enable),
     onSuccess: (updated) => {
       if (!updated) return;
       queryClient.setQueryData<AppSettings | null>(settingsKeys.get(), updated);

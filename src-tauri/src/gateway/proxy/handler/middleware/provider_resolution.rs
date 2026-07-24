@@ -28,6 +28,11 @@ impl ProviderResolutionMiddleware {
         );
         ctx.session_id = decision.session_id;
         ctx.allow_session_reuse = decision.allow_session_reuse && ctx.managed_model_route.is_none();
+        let enable_session_reuse = ctx
+            .runtime_settings
+            .as_ref()
+            .expect("runtime_settings must be populated before provider resolution")
+            .enable_session_reuse;
 
         // --- provider selection ---
         // Runs rusqlite queries; keep them off the async worker via the bounded
@@ -64,6 +69,7 @@ impl ProviderResolutionMiddleware {
                         &cli_key,
                         session_id.as_deref(),
                         created_at,
+                        enable_session_reuse,
                     )
                 }
             })
@@ -117,6 +123,7 @@ impl ProviderResolutionMiddleware {
             &ctx.cli_key,
             ctx.session_id.as_deref(),
             ctx.created_at,
+            enable_session_reuse,
             ctx.allow_session_reuse,
             ctx.forced_provider_id,
             &mut ctx.providers,

@@ -5,7 +5,7 @@ use crate::app_state::DbInitState;
 
 pub(crate) use crate::app::settings_service::{
     CircuitBreakerNoticeUpdate, CodexSessionIdCompletionUpdate, GatewayRectifierSettingsUpdate,
-    SettingsMutationResult, SettingsUpdate, SettingsView,
+    SessionReuseUpdate, SettingsMutationResult, SettingsUpdate, SettingsView,
 };
 
 #[tauri::command]
@@ -40,6 +40,15 @@ pub(crate) async fn settings_circuit_breaker_notice_set(
     update: CircuitBreakerNoticeUpdate,
 ) -> Result<SettingsView, String> {
     settings_service::settings_circuit_breaker_notice_set(app, update).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn settings_session_reuse_set(
+    app: tauri::AppHandle,
+    update: SessionReuseUpdate,
+) -> Result<SettingsView, String> {
+    settings_service::settings_session_reuse_set(app, update).await
 }
 
 #[tauri::command]

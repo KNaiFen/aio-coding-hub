@@ -20,6 +20,7 @@ macro_rules! generated_command_registry {
             settings_set => crate::commands::settings::settings_set,
             settings_gateway_rectifier_set => crate::commands::settings::settings_gateway_rectifier_set,
             settings_circuit_breaker_notice_set => crate::commands::settings::settings_circuit_breaker_notice_set,
+            settings_session_reuse_set => crate::commands::settings::settings_session_reuse_set,
             settings_codex_session_id_completion_set => crate::commands::settings::settings_codex_session_id_completion_set,
             config_export => crate::commands::config_migrate::config_export,
             config_import => crate::commands::config_migrate::config_import,

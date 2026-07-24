@@ -5,6 +5,7 @@ import { settingsGet, settingsSet } from "../../services/settings/settings";
 import { settingsCircuitBreakerNoticeSet } from "../../services/settings/settingsCircuitBreakerNotice";
 import { settingsCodexSessionIdCompletionSet } from "../../services/settings/settingsCodexSessionIdCompletion";
 import { settingsGatewayRectifierSet } from "../../services/settings/settingsGatewayRectifier";
+import { settingsSessionReuseSet } from "../../services/settings/settingsSessionReuse";
 import { createTestAppSettings } from "../../test/fixtures/settings";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
@@ -16,6 +17,7 @@ import {
   useSettingsCodexSessionIdCompletionSetMutation,
   useSettingsGatewayRectifierSetMutation,
   useSettingsQuery,
+  useSettingsSessionReuseSetMutation,
   useSettingsSetMutation,
 } from "../settings";
 
@@ -42,6 +44,12 @@ vi.mock("../../services/settings/settingsCodexSessionIdCompletion", async () => 
     typeof import("../../services/settings/settingsCodexSessionIdCompletion")
   >("../../services/settings/settingsCodexSessionIdCompletion");
   return { ...actual, settingsCodexSessionIdCompletionSet: vi.fn() };
+});
+vi.mock("../../services/settings/settingsSessionReuse", async () => {
+  const actual = await vi.importActual<
+    typeof import("../../services/settings/settingsSessionReuse")
+  >("../../services/settings/settingsSessionReuse");
+  return { ...actual, settingsSessionReuseSet: vi.fn() };
 });
 
 describe("query/settings", () => {
@@ -262,6 +270,44 @@ describe("query/settings", () => {
     const { result } = renderHook(() => useSettingsCircuitBreakerNoticeSetMutation(), { wrapper });
     await act(async () => {
       await result.current.mutateAsync(true);
+    });
+
+    expect(client.getQueryData(settingsKeys.get())).toEqual(initial);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: settingsKeys.get() });
+  });
+
+  it("useSettingsSessionReuseSetMutation updates cache", async () => {
+    setTauriRuntime();
+
+    const updated = createTestAppSettings({ enable_session_reuse: false });
+    vi.mocked(settingsSessionReuseSet).mockResolvedValue(updated);
+
+    const client = createTestQueryClient();
+    client.setQueryData(settingsKeys.get(), createTestAppSettings());
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(() => useSettingsSessionReuseSetMutation(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync(false);
+    });
+
+    expect(client.getQueryData(settingsKeys.get())).toEqual(updated);
+  });
+
+  it("useSettingsSessionReuseSetMutation keeps cache when service returns null", async () => {
+    setTauriRuntime();
+
+    const initial = createTestAppSettings();
+    vi.mocked(settingsSessionReuseSet).mockResolvedValue(null as any);
+
+    const client = createTestQueryClient();
+    client.setQueryData(settingsKeys.get(), initial);
+    const invalidateSpy = vi.spyOn(client, "invalidateQueries");
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(() => useSettingsSessionReuseSetMutation(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync(false);
     });
 
     expect(client.getQueryData(settingsKeys.get())).toEqual(initial);

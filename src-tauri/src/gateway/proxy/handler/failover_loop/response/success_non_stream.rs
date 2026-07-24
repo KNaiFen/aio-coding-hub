@@ -1419,7 +1419,10 @@ where
             last.circuit_failure_count = Some(change.after.failure_count);
             last.circuit_failure_threshold = Some(change.after.failure_threshold);
         }
-        if (200..300).contains(&status.as_u16()) && common.managed_model_route.is_none() {
+        if (200..300).contains(&status.as_u16())
+            && common.enable_session_reuse
+            && common.managed_model_route.is_none()
+        {
             if let Some(session_id) = common.session_id.as_deref() {
                 state.session.bind_success(
                     &common.cli_key,

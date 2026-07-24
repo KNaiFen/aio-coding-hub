@@ -48,6 +48,14 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async settingsSessionReuseSet(update: SessionReuseUpdate): Promise<Result<SettingsView, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("settings_session_reuse_set", { update }) };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async settingsCodexSessionIdCompletionSet(
     update: CodexSessionIdCompletionUpdate
   ): Promise<Result<SettingsView, string>> {
@@ -4215,6 +4223,7 @@ export type SensitiveStringUpdate =
   | { mode: "preserve" }
   | { mode: "clear" }
   | { mode: "replace"; value: string };
+export type SessionReuseUpdate = { enableSessionReuse: boolean };
 export type SettingsMutationResult = { settings: SettingsView; runtime: SettingsMutationRuntime };
 export type SettingsMutationRuntime = {
   gateway_rebound: boolean;
@@ -4224,7 +4233,7 @@ export type SettingsMutationRuntime = {
 };
 /**
  * Encapsulates ordinary `settings_set` owned fields only.
- * Rectifier / circuit-notice / Codex-completion / Image Gen / Grok fields are
+ * Rectifier / circuit-notice / session-reuse / Codex-completion / Image Gen / Grok fields are
  * intentionally absent; dedicated writers own those groups.
  */
 export type SettingsUpdate = {
@@ -4323,6 +4332,7 @@ export type SettingsView = {
   enable_thinking_signature_rectifier: boolean;
   enable_thinking_budget_rectifier: boolean;
   enable_billing_header_rectifier: boolean;
+  enable_session_reuse: boolean;
   enable_codex_session_id_completion: boolean;
   enable_claude_metadata_user_id_injection: boolean;
   enable_cache_anomaly_monitor: boolean;

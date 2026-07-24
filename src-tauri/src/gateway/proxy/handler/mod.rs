@@ -905,6 +905,7 @@ mod tests {
         assert!(runtime.verbose_provider_error);
         assert!(!runtime.intercept_warmup);
         assert!(runtime.enable_thinking_signature_rectifier);
+        assert!(runtime.enable_session_reuse);
         assert_eq!(runtime.cx2cc_settings.fallback_model_main, "gpt-5.4");
         assert!(runtime.cx2cc_settings.disable_response_storage);
         assert!(runtime.enable_response_fixer);
@@ -926,6 +927,7 @@ mod tests {
     fn handler_runtime_settings_respects_count_tokens_override() {
         let cfg = settings::AppSettings {
             enable_thinking_signature_rectifier: true,
+            enable_session_reuse: false,
             failover_max_attempts_per_provider: 9,
             failover_max_providers_to_try: 7,
             cx2cc_fallback_model_main: "custom-main".to_string(),
@@ -936,6 +938,7 @@ mod tests {
         let runtime = handler_runtime_settings(Some(&cfg), true, false);
 
         assert!(!runtime.enable_thinking_signature_rectifier);
+        assert!(!runtime.enable_session_reuse);
         assert_eq!(runtime.max_attempts_per_provider, 1);
         assert_eq!(runtime.max_providers_to_try, 1);
         assert_eq!(runtime.cx2cc_settings.fallback_model_main, "custom-main");

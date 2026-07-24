@@ -720,7 +720,19 @@ mod tests {
         assert_eq!(settings.log_retention_days, DEFAULT_LOG_RETENTION_DAYS);
         assert!(settings.tray_enabled);
         assert!(!settings.auto_start);
+        assert!(settings.enable_session_reuse);
         assert_eq!(settings.grok_proxy_preferences, None);
+    }
+
+    #[test]
+    fn legacy_settings_migrate_session_reuse_to_enabled() {
+        let (mut settings, schema_present, raw) =
+            parse_settings_json(r#"{"schema_version": 53}"#).expect("parse legacy settings");
+
+        assert!(settings.enable_session_reuse);
+        assert!(repair_settings(&mut settings, schema_present, &raw).expect("repair settings"));
+        assert_eq!(settings.schema_version, SCHEMA_VERSION);
+        assert!(settings.enable_session_reuse);
     }
 
     #[test]

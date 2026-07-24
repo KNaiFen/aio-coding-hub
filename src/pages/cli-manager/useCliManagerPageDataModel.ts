@@ -26,6 +26,7 @@ import {
   useSettingsGatewayRectifierSetMutation,
   useSettingsPatchMutation,
   useSettingsQuery,
+  useSettingsSessionReuseSetMutation,
 } from "../../query/settings";
 import { useProvidersListQuery } from "../../query/providers";
 import {
@@ -100,16 +101,19 @@ export function useCliManagerPageDataModel() {
 
   const rectifierMutation = useSettingsGatewayRectifierSetMutation();
   const circuitBreakerNoticeMutation = useSettingsCircuitBreakerNoticeSetMutation();
+  const sessionReuseMutation = useSettingsSessionReuseSetMutation();
   const codexSessionIdCompletionMutation = useSettingsCodexSessionIdCompletionSetMutation();
   const commonSettingsMutation = useSettingsPatchMutation();
 
   const rectifierSaving = rectifierMutation.isPending;
   const circuitBreakerNoticeSaving = circuitBreakerNoticeMutation.isPending;
+  const sessionReuseSaving = sessionReuseMutation.isPending;
   const codexSessionIdCompletionSaving = codexSessionIdCompletionMutation.isPending;
   const commonSettingsSaving = commonSettingsMutation.isPending;
 
   const [rectifier, setRectifier] = useState<GatewayRectifierSettingsPatch>(DEFAULT_RECTIFIER);
   const [circuitBreakerNoticeEnabled, setCircuitBreakerNoticeEnabled] = useState(false);
+  const [sessionReuseEnabled, setSessionReuseEnabled] = useState(true);
   const [codexSessionIdCompletionEnabled, setCodexSessionIdCompletionEnabled] = useState(true);
   const [upstreamFirstByteTimeoutSeconds, setUpstreamFirstByteTimeoutSeconds] = useState<number>(0);
   const [upstreamStreamIdleTimeoutSeconds, setUpstreamStreamIdleTimeoutSeconds] =
@@ -223,6 +227,7 @@ export function useCliManagerPageDataModel() {
       response_fixer_max_fix_size: appSettings.response_fixer_max_fix_size,
     });
     setCircuitBreakerNoticeEnabled(appSettings.enable_circuit_breaker_notice ?? false);
+    setSessionReuseEnabled(appSettings.enable_session_reuse ?? true);
     setCodexSessionIdCompletionEnabled(appSettings.enable_codex_session_id_completion ?? true);
     setUpstreamFirstByteTimeoutSeconds(appSettings.upstream_first_byte_timeout_seconds);
     setUpstreamStreamIdleTimeoutSeconds(appSettings.upstream_stream_idle_timeout_seconds);
@@ -298,6 +303,32 @@ export function useCliManagerPageDataModel() {
       logToConsole("error", "更新熔断通知配置失败", { error: String(err) });
       toast("更新熔断通知配置失败：请稍后重试");
       setCircuitBreakerNoticeEnabled(prev);
+    }
+  }
+
+  async function persistSessionReuse(enable: boolean) {
+    if (settingsWriteBlocked) {
+      blockSettingsWrite();
+      return;
+    }
+    if (sessionReuseSaving) return;
+    if (rectifierAvailable !== "available") return;
+
+    const prev = sessionReuseEnabled;
+    setSessionReuseEnabled(enable);
+    try {
+      const updated = await sessionReuseMutation.mutateAsync(enable);
+      if (!updated) {
+        setSessionReuseEnabled(prev);
+        return;
+      }
+
+      setSessionReuseEnabled(updated.enable_session_reuse ?? enable);
+      toast(enable ? "已开启会话复用" : "已关闭会话复用");
+    } catch (err) {
+      logToConsole("error", "更新会话复用配置失败", { error: String(err) });
+      toast("更新会话复用配置失败：请稍后重试");
+      setSessionReuseEnabled(prev);
     }
   }
 
@@ -661,6 +692,9 @@ export function useCliManagerPageDataModel() {
       circuitBreakerNoticeEnabled,
       circuitBreakerNoticeSaving,
       onPersistCircuitBreakerNotice: persistCircuitBreakerNotice,
+      sessionReuseEnabled,
+      sessionReuseSaving,
+      onPersistSessionReuse: persistSessionReuse,
       codexSessionIdCompletionEnabled,
       codexSessionIdCompletionSaving,
       onPersistCodexSessionIdCompletion: persistCodexSessionIdCompletion,

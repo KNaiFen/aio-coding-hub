@@ -1,7 +1,13 @@
-use super::resolve_session_bound_provider_id;
+use super::{resolve_session_bound_provider_id, select_providers_with_session_binding};
 use crate::circuit_breaker;
+use crate::gateway::active_requests::ActiveRequestRegistry;
+use crate::gateway::codex_session_id::CodexSessionIdCache;
+use crate::gateway::plugins::pipeline::GatewayPluginPipeline;
+use crate::gateway::proxy::{ProviderBaseUrlPingCache, RecentErrorCache};
+use crate::gateway::runtime::GatewayAppState;
 use crate::{providers, session_manager};
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 fn ids(items: &[providers::ProviderForGateway]) -> Vec<i64> {
     items.iter().map(|p| p.id).collect()
@@ -99,6 +105,107 @@ fn open_circuit_for_provider(provider_id: i64, now: i64) -> circuit_breaker::Cir
     circuit
 }
 
+fn gateway_state_for_selection(
+    db: crate::db::Db,
+    session: Arc<session_manager::SessionManager>,
+) -> GatewayAppState<tauri::test::MockRuntime> {
+    let app = tauri::test::mock_app();
+    let (log_tx, _log_rx) = tokio::sync::mpsc::channel(1);
+
+    GatewayAppState {
+        app: app.handle().clone(),
+        db,
+        log_tx,
+        circuit: Arc::new(circuit_breaker::CircuitBreaker::new(
+            circuit_breaker::CircuitBreakerConfig::default(),
+            HashMap::new(),
+            None,
+        )),
+        session,
+        codex_session_cache: Arc::new(Mutex::new(CodexSessionIdCache::default())),
+        recent_errors: Arc::new(Mutex::new(RecentErrorCache::default())),
+        latency_cache: Arc::new(Mutex::new(ProviderBaseUrlPingCache::default())),
+        plugin_pipeline: GatewayPluginPipeline::empty_shared(),
+        http_client_override: None,
+        active_requests: Arc::new(ActiveRequestRegistry::default()),
+    }
+}
+
+#[test]
+fn provider_selection_ignores_bound_sort_mode_and_order_when_globally_disabled() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("test.db");
+    let db = crate::db::init_for_tests(&db_path).expect("init db");
+    let p1 = insert_provider(&db, "P1", true);
+    let p2 = insert_provider(&db, "P2", true);
+    providers::default_route_set_order(&db, "claude", vec![p1.id, p2.id])
+        .expect("set default route order");
+
+    let bound_mode_id = insert_sort_mode_with_providers(&db, &[p2.id, p1.id]);
+    let session = Arc::new(session_manager::SessionManager::new());
+    session.bind_sort_mode(
+        "claude",
+        "sess-global-disabled",
+        Some(bound_mode_id),
+        Some(vec![p2.id, p1.id]),
+        100,
+    );
+    let state = gateway_state_for_selection(db, session.clone());
+
+    let selection = select_providers_with_session_binding(
+        &state,
+        "claude",
+        Some("sess-global-disabled"),
+        101,
+        false,
+    )
+    .expect("select providers");
+
+    assert_eq!(selection.effective_sort_mode_id, None);
+    assert_eq!(ids(&selection.providers), vec![p1.id, p2.id]);
+    assert_eq!(selection.bound_provider_order, None);
+    assert_eq!(selection.session_bound_sort_mode_id, None);
+    assert_eq!(
+        session.list_active(101, 10)[0].expires_at,
+        400,
+        "disabled reuse must not refresh a stale binding"
+    );
+}
+
+#[test]
+fn provider_selection_keeps_legacy_bound_sort_mode_when_enabled() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("test.db");
+    let db = crate::db::init_for_tests(&db_path).expect("init db");
+    let p1 = insert_provider(&db, "P1", true);
+    let p2 = insert_provider(&db, "P2", true);
+    providers::default_route_set_order(&db, "claude", vec![p1.id, p2.id])
+        .expect("set default route order");
+
+    let bound_mode_id = insert_sort_mode_with_providers(&db, &[p2.id, p1.id]);
+    let session = Arc::new(session_manager::SessionManager::new());
+    session.bind_sort_mode(
+        "claude",
+        "sess-global-enabled",
+        Some(bound_mode_id),
+        Some(vec![p2.id, p1.id]),
+        100,
+    );
+    let state = gateway_state_for_selection(db, session);
+
+    let selection = select_providers_with_session_binding(
+        &state,
+        "claude",
+        Some("sess-global-enabled"),
+        101,
+        true,
+    )
+    .expect("select providers");
+
+    assert_eq!(selection.effective_sort_mode_id, Some(bound_mode_id));
+    assert_eq!(ids(&selection.providers), vec![p2.id, p1.id]);
+}
+
 #[test]
 fn resolve_session_bound_provider_id_skips_disabled_bound_provider() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -132,6 +239,7 @@ fn resolve_session_bound_provider_id_skips_disabled_bound_provider() {
         "claude",
         Some("sess_1"),
         now,
+        true,
         true,
         None,
         &mut enabled,
@@ -177,6 +285,7 @@ fn resolve_session_bound_provider_id_skips_insertion_when_forced_provider_presen
         Some("sess_1"),
         now,
         true,
+        true,
         Some(id2),
         &mut enabled,
         Some(&order),
@@ -219,6 +328,7 @@ fn resolve_session_bound_provider_id_does_not_insert_when_reuse_disabled() {
         "claude",
         Some("sess_1"),
         now,
+        true,
         false,
         None,
         &mut enabled,
@@ -227,6 +337,46 @@ fn resolve_session_bound_provider_id_does_not_insert_when_reuse_disabled() {
 
     assert_eq!(selected, None);
     assert_eq!(ids(&enabled), vec![id2]);
+}
+
+#[test]
+fn resolve_session_bound_provider_id_ignores_binding_when_globally_disabled() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("test.db");
+    let db = crate::db::init_for_tests(&db_path).expect("init db");
+
+    let p1 = insert_provider(&db, "P1", true);
+    let p2 = insert_provider(&db, "P2", true);
+    let now = 1000;
+    let session = session_manager::SessionManager::new();
+    session.bind_success("claude", "sess_1", p2.id, None, now);
+    let circuit = circuit_breaker::CircuitBreaker::new(
+        circuit_breaker::CircuitBreakerConfig::default(),
+        HashMap::new(),
+        None,
+    );
+
+    let mut enabled =
+        providers::list_enabled_for_gateway_in_mode(&db, "claude", None).expect("list enabled");
+    let selected = resolve_session_bound_provider_id(
+        &session,
+        &circuit,
+        "claude",
+        Some("sess_1"),
+        now,
+        false,
+        true,
+        None,
+        &mut enabled,
+        Some(&[p2.id, p1.id]),
+    );
+
+    assert_eq!(selected, None);
+    assert_eq!(ids(&enabled), vec![p1.id, p2.id]);
+    assert_eq!(
+        session.get_bound_provider("claude", "sess_1", now),
+        Some(p2.id)
+    );
 }
 
 #[test]
@@ -262,6 +412,7 @@ fn resolve_session_bound_provider_id_clears_stale_binding_when_bound_provider_no
         "claude",
         Some("sess_1"),
         now,
+        true,
         true,
         None,
         &mut candidates,
@@ -300,6 +451,7 @@ fn default_mode_switches_to_enabled_provider_after_bound_provider_disabled_and_c
         Some("sess_1"),
         now,
         true,
+        true,
         None,
         &mut enabled,
         Some(&[p1.id, p2.id]),
@@ -336,6 +488,7 @@ fn sort_mode_retains_open_bound_provider_for_the_common_gate() {
         "claude",
         Some("sess_1"),
         now,
+        true,
         true,
         None,
         &mut enabled,

@@ -13,6 +13,7 @@ pub(super) struct HandlerRuntimeSettings {
     pub(super) enable_thinking_signature_rectifier: bool,
     pub(super) enable_thinking_budget_rectifier: bool,
     pub(super) enable_billing_header_rectifier: bool,
+    pub(super) enable_session_reuse: bool,
     pub(super) cx2cc_settings: crate::gateway::proxy::cx2cc::settings::Cx2ccSettings,
     pub(super) enable_response_fixer: bool,
     pub(super) response_fixer_stream_config: response_fixer::ResponseFixerConfig,
@@ -49,6 +50,9 @@ pub(super) fn handler_runtime_settings(
         && !is_claude_count_tokens;
     let enable_billing_header_rectifier = settings_cfg
         .map(|cfg| cfg.enable_billing_header_rectifier)
+        .unwrap_or(true);
+    let enable_session_reuse = settings_cfg
+        .map(|cfg| cfg.enable_session_reuse)
         .unwrap_or(true);
     let cx2cc_settings = settings_cfg
         .map(crate::gateway::proxy::cx2cc::settings::Cx2ccSettings::from_app_settings)
@@ -95,6 +99,7 @@ pub(super) fn handler_runtime_settings(
         enable_thinking_signature_rectifier,
         enable_thinking_budget_rectifier,
         enable_billing_header_rectifier,
+        enable_session_reuse,
         cx2cc_settings,
         enable_response_fixer,
         response_fixer_stream_config: response_fixer::ResponseFixerConfig {

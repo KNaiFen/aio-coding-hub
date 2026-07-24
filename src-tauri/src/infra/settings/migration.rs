@@ -936,6 +936,14 @@ fn migrate_add_upstream_http_retry_rules(
     )
 }
 
+fn migrate_add_session_reuse(settings: &mut AppSettings, schema_version_present: bool) -> bool {
+    migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_ADD_SESSION_REUSE,
+    )
+}
+
 type SettingsMigration = fn(&mut AppSettings, bool) -> bool;
 
 const SETTINGS_MIGRATIONS: &[SettingsMigration] = &[
@@ -974,6 +982,7 @@ const SETTINGS_MIGRATIONS: &[SettingsMigration] = &[
     migrate_add_image_gen_storage_dir,
     migrate_add_image_gen_storage_roots,
     migrate_add_upstream_http_retry_rules,
+    migrate_add_session_reuse,
 ];
 
 fn apply_settings_migrations(settings: &mut AppSettings, schema_version_present: bool) -> bool {

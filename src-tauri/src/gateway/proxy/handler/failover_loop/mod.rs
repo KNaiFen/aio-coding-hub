@@ -281,6 +281,7 @@ where
         created_at_ms,
         created_at,
         session_id: &input.session_id,
+        enable_session_reuse: input.enable_session_reuse,
         requested_model: &input.requested_model,
         managed_model_route: input.managed_model_route.as_ref(),
         cx2cc_settings: &input.cx2cc_settings,

@@ -46,6 +46,7 @@ export function createTestAppSettings(overrides?: Partial<AppSettings>): AppSett
     enable_thinking_signature_rectifier: true,
     enable_thinking_budget_rectifier: true,
     enable_billing_header_rectifier: false,
+    enable_session_reuse: true,
     enable_codex_session_id_completion: true,
     enable_claude_metadata_user_id_injection: true,
     enable_cache_anomaly_monitor: false,

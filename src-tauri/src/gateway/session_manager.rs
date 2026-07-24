@@ -79,6 +79,13 @@ impl SessionManager {
         before.saturating_sub(guard.len())
     }
 
+    pub fn clear_all_bindings(&self) -> usize {
+        let mut guard = self.bindings.lock_or_recover();
+        let cleared = guard.len();
+        guard.clear();
+        cleared
+    }
+
     pub fn extract_session_id_from_json(
         headers: &HeaderMap,
         root: Option<&Value>,

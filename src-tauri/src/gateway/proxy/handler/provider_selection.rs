@@ -17,12 +17,17 @@ pub(super) fn select_providers_with_session_binding<R: tauri::Runtime>(
     cli_key: &str,
     session_id: Option<&str>,
     created_at: i64,
+    enable_session_reuse: bool,
 ) -> crate::shared::error::AppResult<ProviderSelection> {
-    let bound_sort_mode_id = session_id.and_then(|sid| {
-        state
-            .session
-            .get_bound_sort_mode_id(cli_key, sid, created_at)
-    });
+    let bound_sort_mode_id = if enable_session_reuse {
+        session_id.and_then(|sid| {
+            state
+                .session
+                .get_bound_sort_mode_id(cli_key, sid, created_at)
+        })
+    } else {
+        None
+    };
 
     let (active_sort_mode_id, effective_sort_mode_id, mut providers) = match bound_sort_mode_id {
         Some(sort_mode_id) => {
@@ -44,22 +49,24 @@ pub(super) fn select_providers_with_session_binding<R: tauri::Runtime>(
     };
 
     let mut bound_provider_order: Option<Vec<i64>> = None;
-    if let Some(sid) = session_id {
-        let provider_order: Vec<i64> = providers.iter().map(|p| p.id).collect();
-        state.session.bind_sort_mode(
-            cli_key,
-            sid,
-            effective_sort_mode_id,
-            Some(provider_order),
-            created_at,
-        );
+    if enable_session_reuse {
+        if let Some(sid) = session_id {
+            let provider_order: Vec<i64> = providers.iter().map(|p| p.id).collect();
+            state.session.bind_sort_mode(
+                cli_key,
+                sid,
+                effective_sort_mode_id,
+                Some(provider_order),
+                created_at,
+            );
 
-        bound_provider_order = state
-            .session
-            .get_bound_provider_order(cli_key, sid, created_at);
+            bound_provider_order = state
+                .session
+                .get_bound_provider_order(cli_key, sid, created_at);
 
-        if let Some(order) = bound_provider_order.as_deref() {
-            provider_order::reorder_providers_by_bound_order(&mut providers, order);
+            if let Some(order) = bound_provider_order.as_deref() {
+                provider_order::reorder_providers_by_bound_order(&mut providers, order);
+            }
         }
     }
 
@@ -123,11 +130,16 @@ pub(super) fn resolve_session_bound_provider_id(
     cli_key: &str,
     session_id: Option<&str>,
     created_at: i64,
+    enable_session_reuse: bool,
     allow_session_reuse: bool,
     forced_provider_id: Option<i64>,
     providers: &mut [providers::ProviderForGateway],
     bound_provider_order: Option<&[i64]>,
 ) -> Option<i64> {
+    if !enable_session_reuse {
+        return None;
+    }
+
     let bound_provider_id =
         session_id.and_then(|sid| session.get_bound_provider(cli_key, sid, created_at));
 
