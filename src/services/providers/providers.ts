@@ -36,6 +36,7 @@ import {
 } from "../generatedTypeUtils";
 import { createRiskyIpcConfirm } from "../ipcConfirm";
 import { CLI_KEYS, type CliKey } from "../../constants/clis";
+import { FeValidationError } from "../../utils/errors";
 import { isCanonicalUuidV4 } from "./uuid";
 
 export type {
@@ -70,6 +71,7 @@ const PROVIDER_AUTH_MODE_VALUES = [
   "oauth",
 ] as const satisfies readonly ProviderAuthMode[];
 export const MAX_PROVIDER_ORDER_IDS = 512;
+export const MAX_SESSION_REUSE_PRIORITY = 1000;
 
 export type ProviderSummary = Override<
   GeneratedProviderSummary,
@@ -81,6 +83,7 @@ export type ProviderSummary = Override<
 
 export type ProviderRouteRow = {
   provider_id: number;
+  session_reuse_priority: number;
 };
 
 type ProviderDeleteCommandArgs = Parameters<typeof commands.providerDelete>;
@@ -383,6 +386,45 @@ export async function defaultRouteProvidersSetOrder(cliKey: CliKey, orderedProvi
       commands.defaultRouteProvidersSetOrder(normalizedCliKey, orderedProviderIds) as Promise<
         GeneratedCommandResult<ProviderRouteRow[]>
       >,
+  });
+}
+
+export function validateSessionReusePriority(sessionReusePriority: number): number {
+  if (
+    !Number.isSafeInteger(sessionReusePriority) ||
+    sessionReusePriority < 0 ||
+    sessionReusePriority > MAX_SESSION_REUSE_PRIORITY
+  ) {
+    throw new FeValidationError(
+      `SEC_INVALID_INPUT: sessionReusePriority must be between 0 and ${MAX_SESSION_REUSE_PRIORITY}`
+    );
+  }
+  return sessionReusePriority;
+}
+
+export async function defaultRouteProviderSetSessionReusePriority(
+  cliKey: CliKey,
+  providerId: number,
+  sessionReusePriority: number
+) {
+  const normalizedCliKey = validateProviderCliKey(cliKey);
+  const normalizedProviderId = validateProviderId(providerId);
+  const normalizedPriority = validateSessionReusePriority(sessionReusePriority);
+
+  return invokeGeneratedIpc<ProviderRouteRow>({
+    title: "更新 Default 会话复用优先级失败",
+    cmd: "default_route_provider_set_session_reuse_priority",
+    args: {
+      cliKey: normalizedCliKey,
+      providerId: normalizedProviderId,
+      sessionReusePriority: normalizedPriority,
+    },
+    invoke: () =>
+      commands.defaultRouteProviderSetSessionReusePriority(
+        normalizedCliKey,
+        normalizedProviderId,
+        normalizedPriority
+      ) as Promise<GeneratedCommandResult<ProviderRouteRow>>,
   });
 }
 

@@ -12,6 +12,7 @@ import {
   sortModeDelete,
   sortModeProvidersList,
   sortModeProviderSetEnabled,
+  sortModeProviderSetSessionReusePriority,
   sortModeProvidersSetOrder,
   sortModeRename,
   sortModesList,
@@ -35,6 +36,7 @@ vi.mock("../../../generated/bindings", async () => {
       sortModeProvidersList: vi.fn(),
       sortModeProvidersSetOrder: vi.fn(),
       sortModeProviderSetEnabled: vi.fn(),
+      sortModeProviderSetSessionReusePriority: vi.fn(),
     },
   };
 });
@@ -64,6 +66,7 @@ function makeSortModeProviderRow(
   return {
     provider_id: 101,
     enabled: true,
+    session_reuse_priority: 0,
     ...overrides,
   };
 }
@@ -99,6 +102,10 @@ describe("services/providers/sortModes", () => {
     vi.mocked(commands.sortModeProviderSetEnabled).mockResolvedValue({
       status: "ok",
       data: makeSortModeProviderRow({ provider_id: 9, enabled: false }),
+    });
+    vi.mocked(commands.sortModeProviderSetSessionReusePriority).mockResolvedValue({
+      status: "ok",
+      data: makeSortModeProviderRow({ provider_id: 9, session_reuse_priority: 75 }),
     });
 
     await sortModesList();
@@ -136,6 +143,19 @@ describe("services/providers/sortModes", () => {
       enabled: false,
     });
     expect(commands.sortModeProviderSetEnabled).toHaveBeenCalledWith(5, "claude", 9, false);
+
+    await sortModeProviderSetSessionReusePriority({
+      mode_id: 5,
+      cli_key: "claude",
+      provider_id: 9,
+      session_reuse_priority: 75,
+    });
+    expect(commands.sortModeProviderSetSessionReusePriority).toHaveBeenCalledWith(
+      5,
+      "claude",
+      9,
+      75
+    );
   });
 
   it("normalizes and validates sort mode command inputs before IPC", async () => {
@@ -145,6 +165,7 @@ describe("services/providers/sortModes", () => {
     vi.mocked(commands.sortModeProvidersList).mockClear();
     vi.mocked(commands.sortModeProvidersSetOrder).mockClear();
     vi.mocked(commands.sortModeProviderSetEnabled).mockClear();
+    vi.mocked(commands.sortModeProviderSetSessionReusePriority).mockClear();
 
     vi.mocked(commands.sortModeCreate).mockResolvedValue({
       status: "ok",
@@ -226,9 +247,18 @@ describe("services/providers/sortModes", () => {
     await expect(
       sortModeProviderSetEnabled({ mode_id: 1, cli_key: "claude", provider_id: -1, enabled: true })
     ).rejects.toThrow("invalid providerId=-1");
+    await expect(
+      sortModeProviderSetSessionReusePriority({
+        mode_id: 1,
+        cli_key: "claude",
+        provider_id: 1,
+        session_reuse_priority: 1001,
+      })
+    ).rejects.toThrow("sessionReusePriority must be between 0 and 1000");
 
     expect(commands.sortModeRename).not.toHaveBeenCalled();
     expect(commands.sortModeProvidersSetOrder).not.toHaveBeenCalled();
     expect(commands.sortModeProviderSetEnabled).not.toHaveBeenCalled();
+    expect(commands.sortModeProviderSetSessionReusePriority).not.toHaveBeenCalled();
   });
 });

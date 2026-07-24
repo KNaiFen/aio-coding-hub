@@ -102,6 +102,7 @@ macro_rules! generated_command_registry {
             providers_reorder => crate::commands::providers::providers_reorder,
             default_route_providers_list => crate::commands::providers::default_route_providers_list,
             default_route_providers_set_order => crate::commands::providers::default_route_providers_set_order,
+            default_route_provider_set_session_reuse_priority => crate::commands::providers::default_route_provider_set_session_reuse_priority,
             provider_models_get => crate::commands::providers::provider_models_get,
             provider_models_refresh => crate::commands::providers::provider_models_refresh,
             provider_model_manual_upsert => crate::commands::providers::provider_model_manual_upsert,
@@ -144,6 +145,7 @@ macro_rules! generated_command_registry {
             sort_mode_providers_list => crate::commands::sort_modes::sort_mode_providers_list,
             sort_mode_providers_set_order => crate::commands::sort_modes::sort_mode_providers_set_order,
             sort_mode_provider_set_enabled => crate::commands::sort_modes::sort_mode_provider_set_enabled,
+            sort_mode_provider_set_session_reuse_priority => crate::commands::sort_modes::sort_mode_provider_set_session_reuse_priority,
             // ── model_prices ──
             model_prices_list => crate::commands::model_prices::model_prices_list,
             model_price_upsert => crate::commands::model_prices::model_price_upsert,

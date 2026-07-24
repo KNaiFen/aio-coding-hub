@@ -1082,6 +1082,40 @@ fn pool_order_is_independent_from_default_route_order() {
 }
 
 #[test]
+fn default_route_reorder_preserves_session_reuse_priorities() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("providers_default_route_reuse_priority.db");
+    let db = crate::db::init_for_tests(&db_path).expect("init db");
+
+    let p1 = upsert(&db, default_provider_params("route-priority-p1")).expect("save p1");
+    let p2 = upsert(&db, default_provider_params("route-priority-p2")).expect("save p2");
+    default_route_set_order(&db, "claude", vec![p1.id, p2.id]).expect("set default route");
+    default_route_set_session_reuse_priority(&db, "claude", p1.id, 100)
+        .expect("set first priority");
+
+    let reordered =
+        default_route_set_order(&db, "claude", vec![p2.id, p1.id]).expect("reorder route");
+    assert_eq!(
+        reordered
+            .iter()
+            .map(|row| (row.provider_id, row.session_reuse_priority))
+            .collect::<Vec<_>>(),
+        vec![(p2.id, 0), (p1.id, 100)]
+    );
+
+    let selection =
+        list_enabled_for_gateway_using_active_mode(&db, "claude").expect("list gateway route");
+    assert_eq!(
+        selection
+            .providers
+            .iter()
+            .map(|provider| (provider.id, provider.session_reuse_priority))
+            .collect::<Vec<_>>(),
+        vec![(p2.id, 0), (p1.id, 100)]
+    );
+}
+
+#[test]
 fn default_route_gateway_uses_membership_and_global_enabled() {
     let dir = tempfile::tempdir().expect("tempdir");
     let db_path = dir.path().join("providers_default_route_gateway.db");

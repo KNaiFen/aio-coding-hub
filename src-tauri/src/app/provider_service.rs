@@ -1,5 +1,7 @@
 use crate::app_state::{ensure_db_ready, DbInitState};
-use crate::gateway_control::app_gateway_clear_cli_route_runtime_state;
+use crate::gateway_control::{
+    app_gateway_clear_cli_route_runtime_state, app_gateway_clear_cli_session_bindings,
+};
 use crate::{blocking, providers};
 
 #[derive(serde::Deserialize, specta::Type)]
@@ -480,6 +482,43 @@ pub(crate) async fn default_route_providers_set_order(
             cleared_sessions = cleared.cleared_sessions,
             cleared_recent_errors = cleared.cleared_recent_errors,
             "default route provider order updated"
+        );
+    }
+
+    result
+}
+
+pub(crate) async fn default_route_provider_set_session_reuse_priority(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    cli_key: String,
+    provider_id: i64,
+    session_reuse_priority: i64,
+) -> Result<providers::ProviderRouteRow, String> {
+    let cli_key_for_db = cli_key.clone();
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
+    let result = blocking::run(
+        "default_route_provider_set_session_reuse_priority",
+        move || {
+            providers::default_route_set_session_reuse_priority(
+                &db,
+                &cli_key_for_db,
+                provider_id,
+                session_reuse_priority,
+            )
+        },
+    )
+    .await
+    .map_err(Into::into);
+
+    if result.is_ok() {
+        let cleared = app_gateway_clear_cli_session_bindings(&app, &cli_key);
+        tracing::info!(
+            cli_key = %cli_key,
+            provider_id,
+            session_reuse_priority,
+            cleared_session_bindings = cleared,
+            "default route session reuse priority updated"
         );
     }
 

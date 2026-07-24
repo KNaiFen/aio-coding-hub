@@ -6,6 +6,7 @@ import {
   sortModeCreate,
   sortModeDelete,
   sortModeProviderSetEnabled,
+  sortModeProviderSetSessionReusePriority,
   sortModeProvidersList,
   sortModeProvidersSetOrder,
   sortModeRename,
@@ -181,6 +182,37 @@ export function useSortModeProviderSetEnabledMutation() {
         cli_key: validateProviderCliKey(input.cliKey),
         provider_id: input.providerId,
         enabled: input.enabled,
+      }),
+    onSettled: (_data, _error, input) => {
+      try {
+        const cliKey = validateProviderCliKey(input.cliKey);
+        const modeId = validateSortModeId(input.modeId);
+        void queryClient.invalidateQueries({
+          queryKey: sortModeProvidersQueryKey(modeId, cliKey),
+        });
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("SEC_INVALID_INPUT")) return;
+        throw error;
+      }
+    },
+  });
+}
+
+export function useSortModeProviderSetSessionReusePriorityMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: {
+      modeId: number;
+      cliKey: CliKey;
+      providerId: number;
+      sessionReusePriority: number;
+    }) =>
+      sortModeProviderSetSessionReusePriority({
+        mode_id: validateSortModeId(input.modeId),
+        cli_key: validateProviderCliKey(input.cliKey),
+        provider_id: input.providerId,
+        session_reuse_priority: input.sessionReusePriority,
       }),
     onSettled: (_data, _error, input) => {
       try {

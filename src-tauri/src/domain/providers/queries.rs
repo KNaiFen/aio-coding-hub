@@ -674,11 +674,13 @@ ORDER BY
 fn map_gateway_provider_row(
     row: &rusqlite::Row<'_>,
     cli_key: &str,
+    session_reuse_priority: i64,
 ) -> Result<ProviderForGateway, rusqlite::Error> {
     let decoded = decode_provider_row(row, cli_key)?;
 
     Ok(ProviderForGateway {
         id: decoded.id,
+        session_reuse_priority,
         name: decoded.name,
         base_urls: decoded.base_urls,
         base_url_mode: decoded.base_url_mode,
@@ -714,6 +716,7 @@ fn list_enabled_for_gateway_in_sort_mode(
         .prepare_cached(
             r#"
 SELECT
+  mp.session_reuse_priority,
   p.id,
   p.name,
   p.base_url,
@@ -749,7 +752,7 @@ ORDER BY mp.sort_order ASC
 
     let rows = stmt
         .query_map(params![mode_id, cli_key], |row| {
-            map_gateway_provider_row(row, &cli_key_owned)
+            map_gateway_provider_row(row, &cli_key_owned, row.get("session_reuse_priority")?)
         })
         .map_err(|e| db_err!("failed to list gateway sort_mode providers: {e}"))?;
 
@@ -771,49 +774,42 @@ fn list_enabled_for_gateway_default(
         .prepare_cached(
             r#"
 SELECT
-  id,
-  name,
-  base_url,
-  base_urls_json,
-  base_url_mode,
-  api_key_plaintext,
-  claude_models_json,
-  model_mapping_json,
-  availability_test_model,
-  limit_5h_usd,
-  limit_daily_usd,
-  daily_reset_mode,
-  daily_reset_time,
-  limit_weekly_usd,
-  limit_monthly_usd,
-  limit_total_usd,
-  auth_mode,
-  oauth_provider_type,
-  source_provider_id,
-  bridge_type,
-  stream_idle_timeout_seconds,
-  upstream_retry_policy_json
-FROM providers
-WHERE cli_key = ?1
-  AND enabled = 1
-  AND EXISTS (
-    SELECT 1
-    FROM default_route_providers drp
-    WHERE drp.cli_key = providers.cli_key
-      AND drp.provider_id = providers.id
-  )
-ORDER BY
-  (SELECT drp.sort_order
-   FROM default_route_providers drp
-   WHERE drp.cli_key = providers.cli_key
-     AND drp.provider_id = providers.id) ASC
+  drp.session_reuse_priority,
+  p.id,
+  p.name,
+  p.base_url,
+  p.base_urls_json,
+  p.base_url_mode,
+  p.api_key_plaintext,
+  p.claude_models_json,
+  p.model_mapping_json,
+  p.availability_test_model,
+  p.limit_5h_usd,
+  p.limit_daily_usd,
+  p.daily_reset_mode,
+  p.daily_reset_time,
+  p.limit_weekly_usd,
+  p.limit_monthly_usd,
+  p.limit_total_usd,
+  p.auth_mode,
+  p.oauth_provider_type,
+  p.source_provider_id,
+  p.bridge_type,
+  p.stream_idle_timeout_seconds,
+  p.upstream_retry_policy_json
+FROM default_route_providers drp
+JOIN providers p ON p.id = drp.provider_id
+WHERE drp.cli_key = ?1
+  AND p.cli_key = ?1
+  AND p.enabled = 1
+ORDER BY drp.sort_order ASC
 "#,
         )
         .map_err(|e| db_err!("failed to prepare gateway provider query: {e}"))?;
 
     let rows = stmt
         .query_map(params![cli_key], |row| {
-            map_gateway_provider_row(row, &cli_key_owned)
+            map_gateway_provider_row(row, &cli_key_owned, row.get("session_reuse_priority")?)
         })
         .map_err(|e| db_err!("failed to list gateway providers: {e}"))?;
 
@@ -965,7 +961,7 @@ WHERE id = ?1{enabled_filter} AND source_provider_id IS NULL AND bridge_type IS 
 
     let mut provider = conn
         .query_row(&sql, params![source_provider_id], |row| {
-            map_gateway_provider_row(row, &cli_key_owned)
+            map_gateway_provider_row(row, &cli_key_owned, 0)
         })
         .optional()
         .map_err(|e| db_err!("failed to query source provider: {e}"))?
@@ -1017,7 +1013,7 @@ WHERE id = ?1
   AND bridge_type IS NULL
 "#,
             params![provider_id, provider_uuid],
-            |row| map_gateway_provider_row(row, "codex"),
+            |row| map_gateway_provider_row(row, "codex", 0),
         )
         .optional()
         .map_err(|e| db_err!("failed to query managed model provider: {e}"))?;
@@ -2062,7 +2058,8 @@ pub fn default_route_list(
         .prepare_cached(
             r#"
 SELECT
-  provider_id
+  provider_id,
+  session_reuse_priority
 FROM default_route_providers
 WHERE cli_key = ?1
 ORDER BY sort_order ASC
@@ -2073,6 +2070,7 @@ ORDER BY sort_order ASC
         .query_map(params![cli_key], |row| {
             Ok(ProviderRouteRow {
                 provider_id: row.get(0)?,
+                session_reuse_priority: row.get(1)?,
             })
         })
         .map_err(|e| db_err!("failed to query default_route_providers: {e}"))?;
@@ -2098,6 +2096,27 @@ pub fn default_route_set_order(
     let existing_ids = existing_provider_ids_for_cli(&tx, cli_key)?;
     validate_ordered_provider_ids(cli_key, &ordered_provider_ids, &existing_ids)?;
 
+    let mut existing_priorities: HashMap<i64, i64> = HashMap::new();
+    {
+        let mut stmt = tx
+            .prepare_cached(
+                r#"
+SELECT provider_id, session_reuse_priority
+FROM default_route_providers
+WHERE cli_key = ?1
+"#,
+            )
+            .map_err(|e| db_err!("failed to prepare default_route priority query: {e}"))?;
+        let rows = stmt
+            .query_map(params![cli_key], |row| Ok((row.get(0)?, row.get(1)?)))
+            .map_err(|e| db_err!("failed to list default_route priorities: {e}"))?;
+        for row in rows {
+            let (provider_id, priority): (i64, i64) =
+                row.map_err(|e| db_err!("failed to read default_route priority: {e}"))?;
+            existing_priorities.insert(provider_id, priority);
+        }
+    }
+
     let now = now_unix_seconds();
     tx.execute(
         "DELETE FROM default_route_providers WHERE cli_key = ?1",
@@ -2112,11 +2131,19 @@ INSERT INTO default_route_providers(
   cli_key,
   provider_id,
   sort_order,
+  session_reuse_priority,
   created_at,
   updated_at
-) VALUES (?1, ?2, ?3, ?4, ?5)
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
 "#,
-            params![cli_key, id, idx as i64, now, now],
+            params![
+                cli_key,
+                id,
+                idx as i64,
+                existing_priorities.get(id).copied().unwrap_or_default(),
+                now,
+                now
+            ],
         )
         .map_err(|e| db_err!("failed to insert default_route_provider for provider {id}: {e}"))?;
     }
@@ -2126,6 +2153,56 @@ INSERT INTO default_route_providers(
     drop(conn);
 
     default_route_list(db, cli_key)
+}
+
+pub fn default_route_set_session_reuse_priority(
+    db: &db::Db,
+    cli_key: &str,
+    provider_id: i64,
+    session_reuse_priority: i64,
+) -> crate::shared::error::AppResult<ProviderRouteRow> {
+    validate_cli_key(cli_key)?;
+    if provider_id <= 0 {
+        return Err(format!("SEC_INVALID_INPUT: invalid provider_id={provider_id}").into());
+    }
+    validate_session_reuse_priority(session_reuse_priority)?;
+
+    let conn = db.open_connection()?;
+    let changed = conn
+        .execute(
+            r#"
+UPDATE default_route_providers
+SET session_reuse_priority = ?1, updated_at = ?2
+WHERE cli_key = ?3 AND provider_id = ?4
+"#,
+            params![
+                session_reuse_priority,
+                now_unix_seconds(),
+                cli_key,
+                provider_id
+            ],
+        )
+        .map_err(|e| db_err!("failed to update default_route session reuse priority: {e}"))?;
+    if changed == 0 {
+        return Err("DB_NOT_FOUND: default_route_provider not found".into());
+    }
+
+    Ok(ProviderRouteRow {
+        provider_id,
+        session_reuse_priority,
+    })
+}
+
+fn validate_session_reuse_priority(
+    session_reuse_priority: i64,
+) -> crate::shared::error::AppResult<()> {
+    if !(0..=MAX_SESSION_REUSE_PRIORITY).contains(&session_reuse_priority) {
+        return Err(format!(
+            "SEC_INVALID_INPUT: session_reuse_priority must be between 0 and {MAX_SESSION_REUSE_PRIORITY}"
+        )
+        .into());
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -207,6 +207,46 @@ fn provider_selection_keeps_legacy_bound_sort_mode_when_enabled() {
 }
 
 #[test]
+fn lower_priority_session_binding_keeps_higher_priority_route_candidate_first() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("priority-session-binding.db");
+    let db = crate::db::init_for_tests(&db_path).expect("init db");
+    let preferred = insert_provider(&db, "Preferred", true);
+    let fallback = insert_provider(&db, "Fallback", true);
+    providers::default_route_set_order(&db, "claude", vec![preferred.id, fallback.id])
+        .expect("set default route order");
+    providers::default_route_set_session_reuse_priority(&db, "claude", preferred.id, 100)
+        .expect("raise preferred priority");
+
+    let session = session_manager::SessionManager::new();
+    let circuit = circuit_breaker::CircuitBreaker::new(
+        circuit_breaker::CircuitBreakerConfig::default(),
+        HashMap::new(),
+        None,
+    );
+    let now = 1000;
+    session.bind_success("claude", "priority-session", fallback.id, None, now);
+    let mut providers = providers::list_enabled_for_gateway_in_mode(&db, "claude", None)
+        .expect("list enabled providers");
+
+    let selected = resolve_session_bound_provider_id(
+        &session,
+        &circuit,
+        "claude",
+        Some("priority-session"),
+        now,
+        true,
+        true,
+        None,
+        &mut providers,
+        Some(&[preferred.id, fallback.id]),
+    );
+
+    assert_eq!(selected, None);
+    assert_eq!(ids(&providers), vec![preferred.id, fallback.id]);
+}
+
+#[test]
 fn resolve_session_bound_provider_id_skips_disabled_bound_provider() {
     let dir = tempfile::tempdir().expect("tempdir");
     let db_path = dir.path().join("test.db");

@@ -9,6 +9,7 @@ import type { QueryClient, QueryFunctionContext } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 import {
   defaultRouteProvidersList,
+  defaultRouteProviderSetSessionReusePriority,
   defaultRouteProvidersSetOrder,
   providerClaudeTerminalLaunchCommand,
   providerUpsert,
@@ -414,6 +415,59 @@ export function useDefaultRouteProvidersSetOrderMutation() {
       if (!next) return;
       const cliKey = validateProviderCliKey(input.cliKey);
       queryClient.setQueryData(providersKeys.defaultRoute(cliKey), next);
+    },
+    onSettled: (_data, _error, input) => {
+      const cliKey = validateProviderCliKey(input.cliKey);
+      void queryClient.invalidateQueries({ queryKey: providersKeys.defaultRoute(cliKey) });
+    },
+  });
+}
+
+export function useDefaultRouteProviderSetSessionReusePriorityMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation<
+    ProviderRouteRow | null,
+    Error,
+    { cliKey: CliKey; providerId: number; sessionReusePriority: number },
+    { previousRows: ProviderRouteRow[] | null | undefined }
+  >({
+    mutationFn: (input) =>
+      defaultRouteProviderSetSessionReusePriority(
+        validateProviderCliKey(input.cliKey),
+        validateProviderId(input.providerId),
+        input.sessionReusePriority
+      ),
+    onMutate: async (input) => {
+      const cliKey = validateProviderCliKey(input.cliKey);
+      await queryClient.cancelQueries({ queryKey: providersKeys.defaultRoute(cliKey) });
+      const previousRows = queryClient.getQueryData<ProviderRouteRow[] | null>(
+        providersKeys.defaultRoute(cliKey)
+      );
+      queryClient.setQueryData<ProviderRouteRow[] | null>(
+        providersKeys.defaultRoute(cliKey),
+        (rows) =>
+          rows?.map((row) =>
+            row.provider_id === input.providerId
+              ? { ...row, session_reuse_priority: input.sessionReusePriority }
+              : row
+          ) ?? null
+      );
+      return { previousRows };
+    },
+    onError: (_error, input, context) => {
+      if (context?.previousRows !== undefined) {
+        const cliKey = validateProviderCliKey(input.cliKey);
+        queryClient.setQueryData(providersKeys.defaultRoute(cliKey), context.previousRows);
+      }
+    },
+    onSuccess: (next, input) => {
+      if (!next) return;
+      const cliKey = validateProviderCliKey(input.cliKey);
+      queryClient.setQueryData<ProviderRouteRow[] | null>(
+        providersKeys.defaultRoute(cliKey),
+        (rows) => rows?.map((row) => (row.provider_id === next.provider_id ? next : row)) ?? null
+      );
     },
     onSettled: (_data, _error, input) => {
       const cliKey = validateProviderCliKey(input.cliKey);

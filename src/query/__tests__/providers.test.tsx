@@ -2,10 +2,12 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type {
   ProviderAccountUsageResult,
+  ProviderRouteRow,
   ProviderSummary,
 } from "../../services/providers/providers";
 import type { ProviderModelCatalog } from "../../services/providers/providerModels";
 import {
+  defaultRouteProviderSetSessionReusePriority,
   providerOAuthFetchLimits,
   providerOAuthResetCodexQuota,
   providerOAuthStatus,
@@ -34,6 +36,7 @@ import {
   useProviderClaudeTerminalLaunchCommandMutation,
   useProviderDeleteMutation,
   useProviderDuplicateMutation,
+  useDefaultRouteProviderSetSessionReusePriorityMutation,
   useProviderOAuthStatusQuery,
   useProviderSetEnabledMutation,
   useProviderTestAvailabilityMutation,
@@ -69,6 +72,7 @@ vi.mock("../../services/providers/providers", async () => {
     providerDuplicate: vi.fn(),
     providerTestAvailability: vi.fn(),
     providersReorder: vi.fn(),
+    defaultRouteProviderSetSessionReusePriority: vi.fn(),
     providerClaudeTerminalLaunchCommand: vi.fn(),
   };
 });
@@ -1594,6 +1598,55 @@ describe("query/providers", () => {
     });
 
     expect(providerClaudeTerminalLaunchCommand).toHaveBeenCalledWith(8);
+  });
+
+  it("updates the default route session reuse priority optimistically and stores the response", async () => {
+    setTauriRuntime();
+
+    const rows: ProviderRouteRow[] = [
+      { provider_id: 1, session_reuse_priority: 0 },
+      { provider_id: 2, session_reuse_priority: 0 },
+    ];
+    const update = deferred<ProviderRouteRow>();
+    vi.mocked(defaultRouteProviderSetSessionReusePriority).mockImplementation(() => update.promise);
+
+    const client = createTestQueryClient();
+    const invalidateSpy = vi.spyOn(client, "invalidateQueries");
+    client.setQueryData(providersKeys.defaultRoute("claude"), rows);
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(() => useDefaultRouteProviderSetSessionReusePriorityMutation(), {
+      wrapper,
+    });
+
+    act(() => {
+      result.current.mutate({
+        cliKey: " claude " as never,
+        providerId: 2,
+        sessionReusePriority: 75,
+      });
+    });
+
+    await waitFor(() => {
+      expect(client.getQueryData(providersKeys.defaultRoute("claude"))).toEqual([
+        rows[0],
+        { provider_id: 2, session_reuse_priority: 75 },
+      ]);
+    });
+    expect(defaultRouteProviderSetSessionReusePriority).toHaveBeenCalledWith("claude", 2, 75);
+
+    update.resolve({ provider_id: 2, session_reuse_priority: 100 });
+    await act(async () => {
+      await update.promise;
+    });
+
+    expect(client.getQueryData(providersKeys.defaultRoute("claude"))).toEqual([
+      rows[0],
+      { provider_id: 2, session_reuse_priority: 100 },
+    ]);
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: providersKeys.defaultRoute("claude"),
+    });
   });
 
   it("useProviderTestAvailabilityMutation calls service with provider id", async () => {

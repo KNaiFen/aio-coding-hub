@@ -8,6 +8,7 @@ mod validation;
 pub use types::{
     ClaudeModels, DailyResetMode, ModelMapping, ProviderAuthMode, ProviderBaseUrlMode,
     ProviderExtensionValues, ProviderExtensionValuesInput, ProviderSummary, ProviderUpsertParams,
+    MAX_SESSION_REUSE_PRIORITY,
 };
 
 #[allow(unused_imports)]
@@ -20,8 +21,8 @@ pub(crate) use types::{
 };
 
 pub use queries::{
-    default_route_list, default_route_set_order, delete, get_api_key_plaintext, list_by_cli,
-    names_by_id, reorder, upsert,
+    default_route_list, default_route_set_order, default_route_set_session_reuse_priority, delete,
+    get_api_key_plaintext, list_by_cli, names_by_id, reorder, upsert,
 };
 
 pub(crate) use queries::{

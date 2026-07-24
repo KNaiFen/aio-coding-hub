@@ -246,7 +246,8 @@ SELECT
   mp.cli_key,
   p.name,
   mp.sort_order,
-  mp.enabled
+  mp.enabled,
+  mp.session_reuse_priority
 FROM sort_mode_providers mp
 JOIN providers p ON p.id = mp.provider_id
 WHERE mp.mode_id = ?1
@@ -262,6 +263,7 @@ ORDER BY mp.sort_order ASC, p.id ASC
                 provider_cli_key: row.get(1)?,
                 sort_order: row.get(2)?,
                 enabled: row.get::<_, i64>(3)? != 0,
+                session_reuse_priority: row.get(4)?,
             })
         })
         .map_err(|e| db_err!("failed to query sort_mode_providers for export: {e}"))?;

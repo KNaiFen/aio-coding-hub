@@ -4,6 +4,7 @@ import {
   baseUrlPingMs,
   MAX_PROVIDER_ORDER_IDS,
   type ProviderSummary,
+  defaultRouteProviderSetSessionReusePriority,
   providerClaudeTerminalLaunchCommand,
   providerCopyApiKeyToClipboard,
   providerDelete,
@@ -25,6 +26,7 @@ import {
   providerUpsert,
   validateProviderCliKey,
   validateProviderId,
+  validateSessionReusePriority,
   getProviderTypeInfo,
 } from "../providers";
 import { commands } from "../../../generated/bindings";
@@ -44,6 +46,7 @@ vi.mock("../../../generated/bindings", async () => {
       providerSetEnabled: vi.fn(),
       providerDelete: vi.fn(),
       providersReorder: vi.fn(),
+      defaultRouteProviderSetSessionReusePriority: vi.fn(),
       providerClaudeTerminalLaunchCommand: vi.fn(),
       providerCopyApiKeyToClipboard: vi.fn(),
       baseUrlPingMs: vi.fn(),
@@ -114,6 +117,25 @@ function createProviderSummary(overrides: Partial<ProviderSummary> = {}): Provid
 }
 
 describe("services/providers/providers", () => {
+  it("validates and invokes default route session reuse priority updates", async () => {
+    vi.mocked(commands.defaultRouteProviderSetSessionReusePriority).mockResolvedValueOnce({
+      status: "ok",
+      data: { provider_id: 7, session_reuse_priority: 75 },
+    });
+
+    await expect(
+      defaultRouteProviderSetSessionReusePriority(" claude " as never, 7, 75)
+    ).resolves.toEqual({ provider_id: 7, session_reuse_priority: 75 });
+    expect(commands.defaultRouteProviderSetSessionReusePriority).toHaveBeenCalledWith(
+      "claude",
+      7,
+      75
+    );
+    expect(() => validateSessionReusePriority(-1)).toThrow("SEC_INVALID_INPUT");
+    expect(() => validateSessionReusePriority(1001)).toThrow("SEC_INVALID_INPUT");
+    expect(() => validateSessionReusePriority(1.5)).toThrow("SEC_INVALID_INPUT");
+  });
+
   it("does not classify source_provider_id alone as cx2cc", () => {
     const info = getProviderTypeInfo(
       createProviderSummary({

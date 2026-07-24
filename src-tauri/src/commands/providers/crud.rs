@@ -94,3 +94,22 @@ pub(crate) async fn default_route_providers_set_order(
     )
     .await
 }
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn default_route_provider_set_session_reuse_priority(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    cli_key: String,
+    provider_id: i64,
+    session_reuse_priority: i64,
+) -> Result<crate::providers::ProviderRouteRow, String> {
+    provider_service::default_route_provider_set_session_reuse_priority(
+        app,
+        db_state,
+        cli_key,
+        provider_id,
+        session_reuse_priority,
+    )
+    .await
+}

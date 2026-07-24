@@ -95,6 +95,7 @@ mod tests {
     fn provider(id: i64) -> providers::ProviderForGateway {
         providers::ProviderForGateway {
             id,
+            session_reuse_priority: 0,
             name: format!("p{id}"),
             base_urls: vec!["https://example.com".to_string()],
             base_url_mode: providers::ProviderBaseUrlMode::Order,

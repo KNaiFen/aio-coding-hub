@@ -363,6 +363,89 @@ fn seed_direct_codex_provider(
     .expect("seed direct Codex provider")
 }
 
+#[test]
+fn config_export_import_round_trips_sort_mode_session_reuse_priority() {
+    let test_app = ConfigMigrateTestApp::new();
+    let app = test_app.handle();
+    let preferred = seed_direct_codex_provider(&test_app, "Priority Preferred");
+    let fallback = seed_direct_codex_provider(&test_app, "Priority Fallback");
+    let mode = crate::sort_modes::create_mode(&test_app.db, "Priority Route")
+        .expect("create priority route");
+    crate::sort_modes::set_mode_providers_order(
+        &test_app.db,
+        mode.id,
+        "codex",
+        vec![preferred.id, fallback.id],
+    )
+    .expect("set priority route members");
+    crate::sort_modes::set_mode_provider_session_reuse_priority(
+        &test_app.db,
+        mode.id,
+        "codex",
+        preferred.id,
+        75,
+    )
+    .expect("set preferred reuse priority");
+
+    let bundle = config_export(&app, &test_app.db).expect("export priority route");
+    let exported = bundle
+        .sort_modes
+        .iter()
+        .find(|candidate| candidate.name == "Priority Route")
+        .expect("exported priority route");
+    assert_eq!(
+        exported
+            .providers
+            .iter()
+            .map(|provider| {
+                (
+                    provider.provider_cli_key.as_str(),
+                    provider.session_reuse_priority,
+                )
+            })
+            .collect::<Vec<_>>(),
+        vec![("Priority Preferred", 75), ("Priority Fallback", 0)]
+    );
+
+    config_import(&app, &test_app.db, bundle).expect("import priority route");
+    let conn = test_app.db.open_connection().expect("open restored db");
+    let mut stmt = conn
+        .prepare(
+            r#"
+SELECT p.name, mp.session_reuse_priority
+FROM sort_mode_providers mp
+JOIN providers p ON p.id = mp.provider_id
+JOIN sort_modes sm ON sm.id = mp.mode_id
+WHERE sm.name = ?1
+ORDER BY mp.sort_order ASC
+"#,
+        )
+        .expect("prepare restored priority query");
+    let restored: Vec<(String, i64)> = stmt
+        .query_map(params!["Priority Route"], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })
+        .expect("query restored priority rows")
+        .collect::<Result<_, _>>()
+        .expect("read restored priority rows");
+    assert_eq!(
+        restored,
+        vec![
+            ("Priority Preferred".to_string(), 75),
+            ("Priority Fallback".to_string(), 0)
+        ]
+    );
+
+    let legacy: SortModeProviderExport = serde_json::from_value(serde_json::json!({
+        "cli_key": "codex",
+        "provider_cli_key": "Priority Preferred",
+        "sort_order": 0,
+        "enabled": true
+    }))
+    .expect("deserialize legacy sort mode provider export");
+    assert_eq!(legacy.session_reuse_priority, 0);
+}
+
 fn configure_provider_model_for_profile(
     test_app: &ConfigMigrateTestApp,
     provider: &crate::providers::ProviderSummary,

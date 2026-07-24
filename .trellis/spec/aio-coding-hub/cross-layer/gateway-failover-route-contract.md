@@ -42,6 +42,15 @@ buildRequestRouteMeta({
   denies reuse, keep it in the list and let the later common gate decide. Clear
   the binding only when the provider is no longer eligible for that candidate
   set.
+- Route members may set `session_reuse_priority` in `0..=1000`; it is not the
+  provider-global priority or ordinary route `sort_order`. A bound provider may
+  be promoted only when no current eligible candidate has a higher reuse
+  priority. Bound route-order snapshots may reorder candidates only within the
+  same priority tier, so a lower-tier historical binding cannot bypass a
+  higher-tier candidate. Equal tiers retain legacy session reuse behavior.
+- Updating a route member's reuse priority clears only that CLI's session
+  bindings after the durable write; circuit and recent-error runtime state must
+  remain intact.
 - Every eligible candidate reaches
   `failover_loop/prepare/provider_checks::run_gates`. A circuit, cooldown, or
   provider-limit denial creates one `outcome="skipped"` attempt with its stable
@@ -113,6 +122,9 @@ buildRequestRouteMeta({
 
 - Unit-test selection so a temporarily denied bound provider stays in the
   candidate list while reuse selection returns no bound provider.
+- Unit-test that a lower-priority binding and a lower-priority bound-order
+  fallback leave higher-priority candidates ahead, while equal-priority
+  bindings retain their existing rotation behavior.
 - Route-test all-gate-skip behavior: 503, one skipped row and route hop per
   candidate, preserved session binding, and zero upstream calls.
 - Route-test that skipped candidates do not consume the Ready-provider cap,

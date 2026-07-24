@@ -11,6 +11,7 @@ import {
   sortModeCreate,
   sortModeDelete,
   sortModeProviderSetEnabled,
+  sortModeProviderSetSessionReusePriority,
   sortModeProvidersList,
   sortModeProvidersSetOrder,
   sortModeRename,
@@ -27,6 +28,7 @@ import {
   useSortModeCreateMutation,
   useSortModeDeleteMutation,
   useSortModeProviderSetEnabledMutation,
+  useSortModeProviderSetSessionReusePriorityMutation,
   useSortModeProvidersListQuery,
   useSortModeProvidersSetOrderMutation,
   useSortModeRenameMutation,
@@ -48,6 +50,7 @@ vi.mock("../../services/providers/sortModes", async () => {
     sortModeProvidersList: vi.fn(),
     sortModeProvidersSetOrder: vi.fn(),
     sortModeProviderSetEnabled: vi.fn(),
+    sortModeProviderSetSessionReusePriority: vi.fn(),
   };
 });
 
@@ -67,6 +70,7 @@ function makeSortModeProviderRow(
   return {
     provider_id: 101,
     enabled: true,
+    session_reuse_priority: 0,
     ...overrides,
   };
 }
@@ -373,6 +377,40 @@ describe("query/sortModes", () => {
       cli_key: "gemini",
       provider_id: 101,
       enabled: false,
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: sortModeProvidersQueryKey(4, "gemini"),
+    });
+  });
+
+  it("useSortModeProviderSetSessionReusePriorityMutation invalidates the provider list on settle", async () => {
+    setTauriRuntime();
+
+    vi.mocked(sortModeProviderSetSessionReusePriority).mockResolvedValue(
+      makeSortModeProviderRow({ session_reuse_priority: 75 })
+    );
+
+    const client = createTestQueryClient();
+    const invalidateSpy = vi.spyOn(client, "invalidateQueries");
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(() => useSortModeProviderSetSessionReusePriorityMutation(), {
+      wrapper,
+    });
+    await act(async () => {
+      await result.current.mutateAsync({
+        modeId: 4,
+        cliKey: " gemini " as never,
+        providerId: 101,
+        sessionReusePriority: 75,
+      });
+    });
+
+    expect(sortModeProviderSetSessionReusePriority).toHaveBeenCalledWith({
+      mode_id: 4,
+      cli_key: "gemini",
+      provider_id: 101,
+      session_reuse_priority: 75,
     });
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: sortModeProvidersQueryKey(4, "gemini"),

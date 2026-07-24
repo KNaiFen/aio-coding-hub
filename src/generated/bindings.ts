@@ -753,6 +753,25 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async defaultRouteProviderSetSessionReusePriority(
+    cliKey: string,
+    providerId: number,
+    sessionReusePriority: number
+  ): Promise<Result<ProviderRouteRow, string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("default_route_provider_set_session_reuse_priority", {
+          cliKey,
+          providerId,
+          sessionReusePriority,
+        }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async providerModelsGet(
     providerId: number,
     providerUuid: string
@@ -1265,6 +1284,27 @@ export const commands = {
           cliKey,
           providerId,
           enabled,
+        }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async sortModeProviderSetSessionReusePriority(
+    modeId: number,
+    cliKey: string,
+    providerId: number,
+    sessionReusePriority: number
+  ): Promise<Result<SortModeProviderRow, string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("sort_mode_provider_set_session_reuse_priority", {
+          modeId,
+          cliKey,
+          providerId,
+          sessionReusePriority,
         }),
       };
     } catch (e) {
@@ -4004,7 +4044,7 @@ export type ProviderOAuthStatusResult = {
   expires_at: number | null;
   has_refresh_token: boolean | null;
 };
-export type ProviderRouteRow = { provider_id: number };
+export type ProviderRouteRow = { provider_id: number; session_reuse_priority: number };
 export type ProviderShareCredentialStatus =
   | "configured"
   | "needs_api_key"
@@ -4391,7 +4431,11 @@ export type SkillUpdateInfo = {
 };
 export type SkillsPaths = { ssot_dir: string; repos_dir: string; cli_dir: string };
 export type SortModeActiveRow = { cli_key: string; mode_id: number | null; updated_at: number };
-export type SortModeProviderRow = { provider_id: number; enabled: boolean };
+export type SortModeProviderRow = {
+  provider_id: number;
+  enabled: boolean;
+  session_reuse_priority: number;
+};
 export type SortModeSummary = { id: number; name: string; created_at: number; updated_at: number };
 export type TargetCliKey = "claude" | "codex" | "gemini";
 export type UiContribution = {

@@ -2262,6 +2262,125 @@ WHERE model_uuid = 'new-model'
 }
 
 #[test]
+fn migrate_v41_to_v42_adds_route_priorities_with_legacy_defaults() {
+    let mut conn = Connection::open_in_memory().expect("open migration db");
+    conn.execute_batch(
+        r#"
+CREATE TABLE default_route_providers (
+  cli_key TEXT NOT NULL,
+  provider_id INTEGER NOT NULL,
+  sort_order INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY(cli_key, provider_id)
+);
+CREATE TABLE sort_mode_providers (
+  mode_id INTEGER NOT NULL,
+  cli_key TEXT NOT NULL,
+  provider_id INTEGER NOT NULL,
+  sort_order INTEGER NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY(mode_id, cli_key, provider_id)
+);
+INSERT INTO default_route_providers(cli_key, provider_id, sort_order, created_at, updated_at)
+VALUES ('claude', 1, 0, 1, 1);
+INSERT INTO sort_mode_providers(mode_id, cli_key, provider_id, sort_order, enabled, created_at, updated_at)
+VALUES (1, 'claude', 1, 0, 1, 1, 1);
+PRAGMA user_version = 41;
+"#,
+    )
+    .expect("create v41 fixture");
+
+    v41_to_v42::migrate_v41_to_v42(&mut conn).expect("migrate v41->v42");
+    v41_to_v42::migrate_v41_to_v42(&mut conn).expect("repeat v41->v42");
+
+    assert!(test_has_column(
+        &conn,
+        "default_route_providers",
+        "session_reuse_priority"
+    ));
+    assert!(test_has_column(
+        &conn,
+        "sort_mode_providers",
+        "session_reuse_priority"
+    ));
+    let defaults: (i64, i64) = conn
+        .query_row(
+            "SELECT (SELECT session_reuse_priority FROM default_route_providers), (SELECT session_reuse_priority FROM sort_mode_providers)",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("read priority defaults");
+    assert_eq!(defaults, (0, 0));
+
+    let error = conn
+        .execute(
+            "UPDATE default_route_providers SET session_reuse_priority = 1001",
+            [],
+        )
+        .expect_err("priority range must be constrained");
+    assert!(error.to_string().contains("CHECK constraint failed"));
+
+    let user_version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("read user version");
+    assert_eq!(user_version, 42);
+}
+
+#[test]
+fn migrate_v41_to_v42_defers_missing_route_tables_to_ensure_patches() {
+    let mut conn = Connection::open_in_memory().expect("open migration db");
+    conn.execute_batch("PRAGMA user_version = 41;")
+        .expect("set v41 fixture version");
+
+    v41_to_v42::migrate_v41_to_v42(&mut conn)
+        .expect("missing route tables must not block the migration");
+
+    let user_version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("read user version");
+    assert_eq!(user_version, 42);
+}
+
+#[test]
+fn fresh_baseline_includes_route_session_reuse_priorities() {
+    let mut conn = Connection::open_in_memory().expect("open fresh migration db");
+
+    apply_migrations(&mut conn).expect("initialize fresh database");
+
+    for table in ["default_route_providers", "sort_mode_providers"] {
+        assert!(
+            test_has_column(&conn, table, "session_reuse_priority"),
+            "fresh baseline must include {table}.session_reuse_priority"
+        );
+    }
+}
+
+#[test]
+fn ensure_patches_restore_route_session_reuse_priorities_on_schema_drift() {
+    let mut conn = Connection::open_in_memory().expect("open current-schema migration db");
+    baseline_v25::create_baseline_v25(&mut conn).expect("create current baseline");
+    conn.execute_batch(
+        r#"
+ALTER TABLE default_route_providers DROP COLUMN session_reuse_priority;
+ALTER TABLE sort_mode_providers DROP COLUMN session_reuse_priority;
+"#,
+    )
+    .expect("create current-schema drift fixture");
+
+    apply_migrations(&mut conn).expect("apply current-schema ensure patches");
+
+    for table in ["default_route_providers", "sort_mode_providers"] {
+        assert!(
+            test_has_column(&conn, table, "session_reuse_priority"),
+            "ensure patches must restore {table}.session_reuse_priority"
+        );
+    }
+}
+
+#[test]
 fn fresh_v41_schema_rejects_missing_or_noncanonical_provider_uuid() {
     let mut conn = Connection::open_in_memory().expect("open migration db");
     apply_migrations(&mut conn).expect("apply migrations");

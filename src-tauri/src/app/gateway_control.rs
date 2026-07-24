@@ -111,6 +111,18 @@ pub(crate) fn app_gateway_clear_all_session_bindings<R: tauri::Runtime>(
     .unwrap_or_default()
 }
 
+pub(crate) fn app_gateway_clear_cli_session_bindings<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    cli_key: &str,
+) -> usize {
+    super::gateway_state::try_with_app_running_gateway(app, |running| {
+        running
+            .map(|runtime| runtime.clear_cli_session_bindings(cli_key))
+            .unwrap_or_default()
+    })
+    .unwrap_or_default()
+}
+
 pub(crate) fn app_refresh_gateway_plugins<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     db: &db::Db,

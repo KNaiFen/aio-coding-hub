@@ -1,7 +1,7 @@
 import { commands } from "../../generated/bindings";
 import { FeValidationError } from "../../utils/errors";
 import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
-import { validateProviderCliKey, type CliKey } from "./providers";
+import { validateProviderCliKey, validateSessionReusePriority, type CliKey } from "./providers";
 
 export const MAX_SORT_MODE_NAME_CHARS = 32;
 export const MAX_SORT_MODE_PROVIDER_IDS = 512;
@@ -22,6 +22,7 @@ export type SortModeActiveRow = {
 export type SortModeProviderRow = {
   provider_id: number;
   enabled: boolean;
+  session_reuse_priority: number;
 };
 
 function normalizeSortModeName(name: string) {
@@ -199,6 +200,36 @@ export async function sortModeProviderSetEnabled(input: {
         cliKey,
         input.provider_id,
         input.enabled
+      ) as Promise<GeneratedCommandResult<SortModeProviderRow>>,
+  });
+}
+
+export async function sortModeProviderSetSessionReusePriority(input: {
+  mode_id: number;
+  cli_key: CliKey;
+  provider_id: number;
+  session_reuse_priority: number;
+}) {
+  const cliKey = validateProviderCliKey(input.cli_key);
+  const modeId = validateSortModeId(input.mode_id);
+  validatePositiveId("providerId", input.provider_id);
+  const sessionReusePriority = validateSessionReusePriority(input.session_reuse_priority);
+
+  return invokeGeneratedIpc<SortModeProviderRow>({
+    title: "更新排序模板会话复用优先级失败",
+    cmd: "sort_mode_provider_set_session_reuse_priority",
+    args: {
+      modeId,
+      cliKey,
+      providerId: input.provider_id,
+      sessionReusePriority,
+    },
+    invoke: () =>
+      commands.sortModeProviderSetSessionReusePriority(
+        modeId,
+        cliKey,
+        input.provider_id,
+        sessionReusePriority
       ) as Promise<GeneratedCommandResult<SortModeProviderRow>>,
   });
 }

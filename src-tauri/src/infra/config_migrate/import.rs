@@ -363,6 +363,15 @@ VALUES (?1, ?2, ?2)
         sort_mode_id_by_name.insert(mode_name, mode_id);
 
         for provider in sort_mode.providers {
+            if !(0..=crate::providers::MAX_SESSION_REUSE_PRIORITY)
+                .contains(&provider.session_reuse_priority)
+            {
+                return Err(format!(
+                    "SEC_INVALID_INPUT: session_reuse_priority must be between 0 and {}",
+                    crate::providers::MAX_SESSION_REUSE_PRIORITY
+                )
+                .into());
+            }
             let provider_id = provider_id_by_cli_and_name
                 .get(&(provider.cli_key.clone(), provider.provider_cli_key.clone()))
                 .copied()
@@ -381,9 +390,10 @@ INSERT INTO sort_mode_providers(
   provider_id,
   sort_order,
   enabled,
+  session_reuse_priority,
   created_at,
   updated_at
-) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
 "#,
                 params![
                     mode_id,
@@ -391,6 +401,7 @@ INSERT INTO sort_mode_providers(
                     provider_id,
                     provider.sort_order,
                     bool_to_int(provider.enabled),
+                    provider.session_reuse_priority,
                     now,
                 ],
             )

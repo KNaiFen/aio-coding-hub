@@ -1,6 +1,7 @@
 //! Usage: Sort mode persistence and provider ordering configuration helpers.
 
 use crate::db;
+use crate::providers::MAX_SESSION_REUSE_PRIORITY;
 use crate::shared::error::db_err;
 use crate::shared::time::now_unix_seconds;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
@@ -29,6 +30,7 @@ pub struct SortModeActiveRow {
 pub struct SortModeProviderRow {
     pub provider_id: i64,
     pub enabled: bool,
+    pub session_reuse_priority: i64,
 }
 
 fn enabled_to_int(enabled: bool) -> i64 {
@@ -41,6 +43,18 @@ fn enabled_to_int(enabled: bool) -> i64 {
 
 fn enabled_from_int(value: i64) -> bool {
     value != 0
+}
+
+fn validate_session_reuse_priority(
+    session_reuse_priority: i64,
+) -> crate::shared::error::AppResult<()> {
+    if !(0..=MAX_SESSION_REUSE_PRIORITY).contains(&session_reuse_priority) {
+        return Err(format!(
+            "SEC_INVALID_INPUT: session_reuse_priority must be between 0 and {MAX_SESSION_REUSE_PRIORITY}"
+        )
+        .into());
+    }
+    Ok(())
 }
 
 fn validate_cli_key(cli_key: &str) -> crate::shared::error::AppResult<()> {
@@ -359,7 +373,8 @@ pub fn list_mode_providers(
             r#"
 SELECT
   provider_id,
-  enabled
+  enabled,
+  session_reuse_priority
 FROM sort_mode_providers
 WHERE mode_id = ?1
   AND cli_key = ?2
@@ -375,6 +390,7 @@ ORDER BY sort_order ASC
             Ok(SortModeProviderRow {
                 provider_id,
                 enabled: enabled_from_int(enabled_raw),
+                session_reuse_priority: row.get(2)?,
             })
         })
         .map_err(|e| db_err!("failed to list sort_mode_providers: {e}"))?;
@@ -460,14 +476,15 @@ pub fn set_mode_providers_order(
         .transaction()
         .map_err(|e| db_err!("failed to start transaction: {e}"))?;
 
-    let mut existing_enabled: HashMap<i64, bool> = HashMap::new();
+    let mut existing_rows: HashMap<i64, (bool, i64)> = HashMap::new();
     {
         let mut stmt = tx
             .prepare_cached(
                 r#"
 SELECT
   provider_id,
-  enabled
+  enabled,
+  session_reuse_priority
 FROM sort_mode_providers
 WHERE mode_id = ?1
   AND cli_key = ?2
@@ -478,13 +495,18 @@ WHERE mode_id = ?1
             .query_map(params![mode_id, cli_key], |row| {
                 let provider_id: i64 = row.get(0)?;
                 let enabled_raw: i64 = row.get(1)?;
-                Ok((provider_id, enabled_from_int(enabled_raw)))
+                let session_reuse_priority: i64 = row.get(2)?;
+                Ok((
+                    provider_id,
+                    enabled_from_int(enabled_raw),
+                    session_reuse_priority,
+                ))
             })
             .map_err(|e| db_err!("failed to list sort_mode_providers: {e}"))?;
         for row in rows {
-            let (provider_id, enabled) =
+            let (provider_id, enabled, session_reuse_priority) =
                 row.map_err(|e| db_err!("failed to read sort_mode_provider row: {e}"))?;
-            existing_enabled.insert(provider_id, enabled);
+            existing_rows.insert(provider_id, (enabled, session_reuse_priority));
         }
     }
 
@@ -496,7 +518,8 @@ WHERE mode_id = ?1
 
     let now = now_unix_seconds();
     for (idx, provider_id) in ordered_provider_ids.iter().enumerate() {
-        let enabled = existing_enabled.get(provider_id).copied().unwrap_or(true);
+        let (enabled, session_reuse_priority) =
+            existing_rows.get(provider_id).copied().unwrap_or((true, 0));
         tx.execute(
             r#"
 INSERT INTO sort_mode_providers(
@@ -505,9 +528,10 @@ INSERT INTO sort_mode_providers(
   provider_id,
   sort_order,
   enabled,
+  session_reuse_priority,
   created_at,
   updated_at
-) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
 "#,
             params![
                 mode_id,
@@ -515,6 +539,7 @@ INSERT INTO sort_mode_providers(
                 provider_id,
                 idx as i64,
                 enabled_to_int(enabled),
+                session_reuse_priority,
                 now,
                 now
             ],
@@ -524,6 +549,7 @@ INSERT INTO sort_mode_providers(
 
     tx.commit()
         .map_err(|e| db_err!("failed to commit transaction: {e}"))?;
+    drop(conn);
 
     list_mode_providers(db, mode_id, cli_key)
 }
@@ -566,7 +592,8 @@ WHERE mode_id = ?3
         r#"
 SELECT
   provider_id,
-  enabled
+  enabled,
+  session_reuse_priority
 FROM sort_mode_providers
 WHERE mode_id = ?1
   AND cli_key = ?2
@@ -579,6 +606,64 @@ WHERE mode_id = ?1
             Ok(SortModeProviderRow {
                 provider_id,
                 enabled: enabled_from_int(enabled_raw),
+                session_reuse_priority: row.get(2)?,
+            })
+        },
+    )
+    .map_err(|e| db_err!("failed to read sort_mode_provider: {e}"))
+}
+
+pub fn set_mode_provider_session_reuse_priority(
+    db: &db::Db,
+    mode_id: i64,
+    cli_key: &str,
+    provider_id: i64,
+    session_reuse_priority: i64,
+) -> crate::shared::error::AppResult<SortModeProviderRow> {
+    let cli_key = cli_key.trim();
+    validate_cli_key(cli_key)?;
+    if provider_id <= 0 {
+        return Err("SEC_INVALID_INPUT: invalid provider_id".into());
+    }
+    validate_session_reuse_priority(session_reuse_priority)?;
+
+    let conn = db.open_connection()?;
+    ensure_mode_exists(&conn, mode_id)?;
+    ensure_providers_belong_to_cli(&conn, cli_key, &[provider_id])?;
+
+    let changed = conn
+        .execute(
+            r#"
+UPDATE sort_mode_providers
+SET session_reuse_priority = ?1, updated_at = ?2
+WHERE mode_id = ?3 AND cli_key = ?4 AND provider_id = ?5
+"#,
+            params![
+                session_reuse_priority,
+                now_unix_seconds(),
+                mode_id,
+                cli_key,
+                provider_id
+            ],
+        )
+        .map_err(|e| db_err!("failed to update sort_mode session reuse priority: {e}"))?;
+    if changed == 0 {
+        return Err("DB_NOT_FOUND: sort_mode_provider not found".into());
+    }
+
+    conn.query_row(
+        r#"
+SELECT provider_id, enabled, session_reuse_priority
+FROM sort_mode_providers
+WHERE mode_id = ?1 AND cli_key = ?2 AND provider_id = ?3
+"#,
+        params![mode_id, cli_key, provider_id],
+        |row| {
+            let enabled_raw: i64 = row.get(1)?;
+            Ok(SortModeProviderRow {
+                provider_id: row.get(0)?,
+                enabled: enabled_from_int(enabled_raw),
+                session_reuse_priority: row.get(2)?,
             })
         },
     )
@@ -589,6 +674,45 @@ WHERE mode_id = ?1
 mod tests {
     use super::*;
     use rusqlite::params;
+
+    fn insert_provider(db: &db::Db, name: &str) -> crate::providers::ProviderSummary {
+        crate::providers::upsert(
+            db,
+            crate::providers::ProviderUpsertParams {
+                provider_id: None,
+                cli_key: "claude".to_string(),
+                name: name.to_string(),
+                base_urls: vec!["https://example.com".to_string()],
+                base_url_mode: crate::providers::ProviderBaseUrlMode::Order,
+                auth_mode: Some(crate::providers::ProviderAuthMode::ApiKey),
+                api_key: Some("test-key".to_string()),
+                enabled: true,
+                cost_multiplier: 1.0,
+                priority: Some(100),
+                claude_models: None,
+                availability_test_model: None,
+                limit_5h_usd: None,
+                limit_daily_usd: None,
+                daily_reset_mode: Some(crate::providers::DailyResetMode::Fixed),
+                daily_reset_time: Some("00:00:00".to_string()),
+                limit_weekly_usd: None,
+                limit_monthly_usd: None,
+                limit_total_usd: None,
+                tags: None,
+                note: None,
+                source_provider_id: None,
+                bridge_type: None,
+                stream_idle_timeout_seconds: None,
+                model_mapping: None,
+                extension_values: None,
+                account_usage_credentials_patch: None,
+                account_usage_credentials_copy_from_provider_id: None,
+                upstream_retry_policy_override: None,
+                upstream_retry_policy_override_specified: false,
+            },
+        )
+        .expect("insert provider")
+    }
 
     fn active_mode_id(db: &db::Db, cli_key: &str) -> Option<i64> {
         let conn = db.open_connection().expect("open db");
@@ -622,5 +746,41 @@ mod tests {
         assert_eq!(active_mode_id(&db, "claude"), None);
         assert_eq!(active_mode_id(&db, "codex"), None);
         assert_eq!(active_mode_id(&db, "gemini"), Some(other_mode.id));
+    }
+
+    #[test]
+    fn mode_reorder_preserves_session_reuse_priority() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("sort_mode_reuse_priority.db");
+        let db = db::init_for_tests(&db_path).expect("init db");
+        let p1 = insert_provider(&db, "P1");
+        let p2 = insert_provider(&db, "P2");
+        let mode = create_mode(&db, "Reuse Priority").expect("create mode");
+
+        set_mode_providers_order(&db, mode.id, "claude", vec![p1.id, p2.id])
+            .expect("set mode order");
+        let updated = set_mode_provider_session_reuse_priority(&db, mode.id, "claude", p1.id, 25)
+            .expect("set priority");
+        assert_eq!(updated.session_reuse_priority, 25);
+
+        let reordered = set_mode_providers_order(&db, mode.id, "claude", vec![p2.id, p1.id])
+            .expect("reorder mode");
+        assert_eq!(
+            reordered
+                .iter()
+                .map(|row| (row.provider_id, row.enabled, row.session_reuse_priority))
+                .collect::<Vec<_>>(),
+            vec![(p2.id, true, 0), (p1.id, true, 25)]
+        );
+
+        let error = set_mode_provider_session_reuse_priority(
+            &db,
+            mode.id,
+            "claude",
+            p1.id,
+            MAX_SESSION_REUSE_PRIORITY + 1,
+        )
+        .expect_err("out-of-range priority must fail");
+        assert!(error.to_string().contains("session_reuse_priority"));
     }
 }

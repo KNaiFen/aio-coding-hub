@@ -18,6 +18,7 @@ fn provider_for_base_url_test(
 ) -> providers::ProviderForGateway {
     providers::ProviderForGateway {
         id: 1,
+        session_reuse_priority: 0,
         name: "test".to_string(),
         base_urls: base_urls.into_iter().map(str::to_string).collect(),
         base_url_mode: providers::ProviderBaseUrlMode::Order,

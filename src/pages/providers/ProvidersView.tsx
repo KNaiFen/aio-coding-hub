@@ -19,6 +19,7 @@ import { ProviderShareDialog } from "./ProviderShareDialog";
 import { ProviderModelCatalogDialog } from "./ProviderModelCatalogDialog";
 import { SortableProviderCard } from "./SortableProviderCard";
 import { SortableProviderOrderItem } from "./SortableProviderOrderItem";
+import { SessionReusePriorityInput } from "./SessionReusePriorityInput";
 import { useProvidersViewDataModel } from "./hooks/useProvidersViewDataModel";
 import { isCodexDirectProvider } from "../../services/providers/providerModels";
 
@@ -80,6 +81,7 @@ export function ProvidersView({ activeCli, setActiveCli }: ProvidersViewProps) {
     addProviderToCurrentRoute,
     removeProviderFromCurrentRoute,
     setRouteProviderEnabled,
+    setRouteProviderSessionReusePriority,
     handleRouteDragEnd,
     createSortMode,
     renameSortMode,
@@ -502,6 +504,7 @@ export function ProvidersView({ activeCli, setActiveCli }: ProvidersViewProps) {
                             routeDraftSelection.kind === "default"
                               ? (provider?.enabled ?? false)
                               : getRouteRowEnabled(row);
+                          const sessionReusePriority = row.session_reuse_priority ?? 0;
                           return (
                             <SortableProviderOrderItem
                               key={row.provider_id}
@@ -512,6 +515,17 @@ export function ProvidersView({ activeCli, setActiveCli }: ProvidersViewProps) {
                               showProviderDisabledBadge={false}
                               trailing={
                                 <div className="flex shrink-0 items-center gap-2">
+                                  <SessionReusePriorityInput
+                                    value={sessionReusePriority}
+                                    providerLabel={providerLabel}
+                                    disabled={routeSaving || provider == null}
+                                    onCommit={(priority) =>
+                                      void setRouteProviderSessionReusePriority(
+                                        row.provider_id,
+                                        priority
+                                      )
+                                    }
+                                  />
                                   <div
                                     className="flex shrink-0 items-center"
                                     onPointerDown={(event) => event.stopPropagation()}

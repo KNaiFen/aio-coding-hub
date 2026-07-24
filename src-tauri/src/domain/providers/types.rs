@@ -335,11 +335,15 @@ pub(crate) struct ProviderAccountUsageFetchContext {
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct ProviderRouteRow {
     pub provider_id: i64,
+    pub session_reuse_priority: i64,
 }
+
+pub const MAX_SESSION_REUSE_PRIORITY: i64 = 1000;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ProviderForGateway {
     pub id: i64,
+    pub session_reuse_priority: i64,
     pub name: String,
     pub base_urls: Vec<String>,
     pub base_url_mode: ProviderBaseUrlMode,

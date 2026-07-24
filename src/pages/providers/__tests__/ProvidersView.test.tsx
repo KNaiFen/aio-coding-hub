@@ -25,6 +25,7 @@ import {
   useGatewaySessionsListQuery,
 } from "../../../query/gateway";
 import {
+  useDefaultRouteProviderSetSessionReusePriorityMutation,
   useDefaultRouteProvidersQuery,
   useDefaultRouteProvidersSetOrderMutation,
   useProviderClaudeTerminalLaunchCommandMutation,
@@ -176,6 +177,7 @@ vi.mock("../../../query/providers", async () => {
     useProvidersListQuery: vi.fn(),
     useDefaultRouteProvidersQuery: vi.fn(),
     useDefaultRouteProvidersSetOrderMutation: vi.fn(),
+    useDefaultRouteProviderSetSessionReusePriorityMutation: vi.fn(),
     useProviderClaudeTerminalLaunchCommandMutation: vi.fn(),
     useProviderSetEnabledMutation: vi.fn(),
     useProviderDeleteMutation: vi.fn(),
@@ -242,6 +244,9 @@ beforeEach(() => {
   } as any);
   vi.mocked(useDefaultRouteProvidersSetOrderMutation).mockReturnValue({
     mutateAsync: vi.fn().mockResolvedValue([]),
+  } as any);
+  vi.mocked(useDefaultRouteProviderSetSessionReusePriorityMutation).mockReturnValue({
+    mutateAsync: vi.fn(),
   } as any);
   vi.mocked(useSortModesListQuery).mockReturnValue({
     data: [],
@@ -1308,7 +1313,10 @@ describe("pages/providers/ProvidersView", () => {
     vi.mocked(useProviderDeleteMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
     vi.mocked(useProvidersReorderMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
     vi.mocked(useDefaultRouteProvidersQuery).mockReturnValue({
-      data: [{ provider_id: 1 }, { provider_id: 2 }],
+      data: [
+        { provider_id: 1, session_reuse_priority: 0 },
+        { provider_id: 2, session_reuse_priority: 0 },
+      ],
       isFetching: false,
     } as any);
     vi.mocked(useGatewayCircuitResetProviderMutation).mockReturnValue({
@@ -2514,8 +2522,12 @@ describe("pages/providers/ProvidersView", () => {
     const defaultRouteMutation = {
       mutateAsync: vi
         .fn()
-        .mockResolvedValueOnce([{ provider_id: 1 }, { provider_id: 2 }, { provider_id: 3 }])
-        .mockResolvedValueOnce([{ provider_id: 2 }])
+        .mockResolvedValueOnce([
+          { provider_id: 1, session_reuse_priority: 0 },
+          { provider_id: 2, session_reuse_priority: 0 },
+          { provider_id: 3, session_reuse_priority: 0 },
+        ])
+        .mockResolvedValueOnce([{ provider_id: 2, session_reuse_priority: 0 }])
         .mockRejectedValueOnce(new Error("route down")),
     };
     vi.mocked(useDefaultRouteProvidersSetOrderMutation).mockReturnValue(
@@ -2534,7 +2546,11 @@ describe("pages/providers/ProvidersView", () => {
     expect(defaultRouteMutation.mutateAsync).toHaveBeenNthCalledWith(1, {
       cliKey: "claude",
       orderedProviderIds: [1, 2, 3],
-      optimisticRows: [{ provider_id: 1 }, { provider_id: 2 }, { provider_id: 3 }],
+      optimisticRows: [
+        { provider_id: 1, session_reuse_priority: 0 },
+        { provider_id: 2, session_reuse_priority: 0 },
+        { provider_id: 3, session_reuse_priority: 0 },
+      ],
     });
     expect(toast).toHaveBeenCalledWith("Default 调用顺序已更新");
 
@@ -2546,7 +2562,7 @@ describe("pages/providers/ProvidersView", () => {
     expect(defaultRouteMutation.mutateAsync).toHaveBeenNthCalledWith(2, {
       cliKey: "claude",
       orderedProviderIds: [2],
-      optimisticRows: [{ provider_id: 2 }],
+      optimisticRows: [{ provider_id: 2, session_reuse_priority: 0 }],
     });
 
     act(() => {
@@ -2559,7 +2575,10 @@ describe("pages/providers/ProvidersView", () => {
     expect(defaultRouteMutation.mutateAsync).toHaveBeenNthCalledWith(3, {
       cliKey: "claude",
       orderedProviderIds: [2, 1],
-      optimisticRows: [{ provider_id: 2 }, { provider_id: 1 }],
+      optimisticRows: [
+        { provider_id: 2, session_reuse_priority: 0 },
+        { provider_id: 1, session_reuse_priority: 0 },
+      ],
     });
     await waitFor(() => expect(toast).toHaveBeenCalledWith("调用顺序更新失败：Error: route down"));
     expect(logToConsole).toHaveBeenCalledWith(
@@ -2567,6 +2586,60 @@ describe("pages/providers/ProvidersView", () => {
       "更新调用顺序失败",
       expect.objectContaining({ route: "default" })
     );
+  });
+
+  it("persists a route member session reuse priority on blur", async () => {
+    const providers = [
+      {
+        id: 1,
+        cli_key: "claude",
+        name: "P1",
+        enabled: true,
+        base_urls: ["https://a"],
+        base_url_mode: "order",
+        cost_multiplier: 1,
+        claude_models: {},
+      },
+    ] as any[];
+    const priorityMutation = {
+      mutateAsync: vi.fn().mockResolvedValue({ provider_id: 1, session_reuse_priority: 75 }),
+    };
+
+    vi.mocked(useProvidersListQuery).mockReturnValue({ data: providers, isFetching: false } as any);
+    vi.mocked(useDefaultRouteProvidersQuery).mockReturnValue({
+      data: [{ provider_id: 1, session_reuse_priority: 0 }],
+      isFetching: false,
+    } as any);
+    vi.mocked(useGatewayCircuitStatusQuery).mockReturnValue({
+      data: [],
+      isFetching: false,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useProviderSetEnabledMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProviderDeleteMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProvidersReorderMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useGatewayCircuitResetProviderMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+    } as any);
+    vi.mocked(useGatewayCircuitResetCliMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useDefaultRouteProviderSetSessionReusePriorityMutation).mockReturnValue(
+      priorityMutation as any
+    );
+
+    renderWithQuery(<ProvidersView activeCli="claude" setActiveCli={vi.fn()} />);
+
+    const input = screen.getByRole("spinbutton", { name: "P1 的会话复用优先级" });
+    fireEvent.change(input, { target: { value: "75" } });
+    fireEvent.blur(input);
+
+    await waitFor(() => {
+      expect(priorityMutation.mutateAsync).toHaveBeenCalledWith({
+        cliKey: "claude",
+        providerId: 1,
+        sessionReusePriority: 75,
+      });
+    });
+    expect(toast).toHaveBeenCalledWith("会话复用优先级已更新");
   });
 
   it("manages sort mode CRUD, member changes, route persistence, and activation confirmation", async () => {

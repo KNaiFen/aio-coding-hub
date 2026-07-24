@@ -386,6 +386,7 @@ mod tests {
     fn provider(id: i64) -> crate::providers::ProviderForGateway {
         crate::providers::ProviderForGateway {
             id,
+            session_reuse_priority: 0,
             name: format!("p{id}"),
             base_urls: vec!["https://example.com".to_string()],
             base_url_mode: crate::providers::ProviderBaseUrlMode::Order,

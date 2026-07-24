@@ -10,27 +10,53 @@ pub(super) fn reorder_providers_by_bound_order(
         return;
     }
 
-    let mut by_id: HashMap<i64, providers::ProviderForGateway> =
-        HashMap::with_capacity(providers.len());
-    let mut original_ids: Vec<i64> = Vec::with_capacity(providers.len());
-    for item in providers.drain(..) {
-        original_ids.push(item.id);
-        by_id.insert(item.id, item);
+    let mut order_rank = HashMap::with_capacity(order.len());
+    for (index, provider_id) in order.iter().copied().enumerate() {
+        order_rank.entry(provider_id).or_insert(index);
     }
 
-    let mut reordered: Vec<providers::ProviderForGateway> = Vec::with_capacity(original_ids.len());
-    for provider_id in order {
-        if let Some(item) = by_id.remove(provider_id) {
-            reordered.push(item);
-        }
+    let provider_ids: Vec<i64> = providers.iter().map(|provider| provider.id).collect();
+    let mut positions_by_priority: HashMap<i64, Vec<usize>> = HashMap::new();
+    for (index, provider) in providers.iter().enumerate() {
+        positions_by_priority
+            .entry(provider.session_reuse_priority)
+            .or_default()
+            .push(index);
     }
-    for provider_id in original_ids {
-        if let Some(item) = by_id.remove(&provider_id) {
-            reordered.push(item);
+
+    let mut source_for_position: Vec<usize> = (0..providers.len()).collect();
+    for positions in positions_by_priority.values() {
+        let mut ordered_sources = positions.clone();
+        ordered_sources.sort_by_key(|index| {
+            order_rank
+                .get(&provider_ids[*index])
+                .copied()
+                .unwrap_or(usize::MAX)
+        });
+        for (position, source) in positions.iter().zip(ordered_sources) {
+            source_for_position[*position] = source;
         }
     }
 
-    *providers = reordered;
+    let mut original: Vec<Option<providers::ProviderForGateway>> =
+        providers.drain(..).map(Some).collect();
+    *providers = source_for_position
+        .into_iter()
+        .map(|source| {
+            original[source]
+                .take()
+                .expect("each provider must appear once after ordering")
+        })
+        .collect();
+}
+
+fn has_higher_session_reuse_priority(
+    providers: &[providers::ProviderForGateway],
+    session_reuse_priority: i64,
+) -> bool {
+    providers
+        .iter()
+        .any(|provider| provider.session_reuse_priority > session_reuse_priority)
 }
 
 pub(super) fn apply_session_provider_preference(
@@ -43,6 +69,12 @@ pub(super) fn apply_session_provider_preference(
     }
 
     if let Some(idx) = providers.iter().position(|p| p.id == bound_provider_id) {
+        let bound_priority = providers[idx].session_reuse_priority;
+        if has_higher_session_reuse_priority(providers, bound_priority) {
+            // Do not turn session reuse into a second availability gate. Keeping the
+            // configured route order lets the common gate record any skipped higher tier.
+            return None;
+        }
         if idx > 0 {
             providers.rotate_left(idx);
         }
@@ -59,6 +91,9 @@ pub(super) fn apply_session_provider_preference(
         select_next_provider_id_from_order(bound_provider_id, order, &current_provider_ids)?;
 
     if let Some(idx) = providers.iter().position(|p| p.id == next_provider_id) {
+        if has_higher_session_reuse_priority(providers, providers[idx].session_reuse_priority) {
+            return None;
+        }
         if idx > 0 {
             providers.rotate_left(idx);
         }
@@ -75,6 +110,7 @@ mod tests {
     fn provider(id: i64) -> providers::ProviderForGateway {
         providers::ProviderForGateway {
             id,
+            session_reuse_priority: 0,
             name: format!("p{id}"),
             base_urls: vec!["https://example.com".to_string()],
             base_url_mode: providers::ProviderBaseUrlMode::Order,
@@ -110,6 +146,16 @@ mod tests {
     }
 
     #[test]
+    fn reorder_by_bound_order_does_not_promote_lower_priority_members() {
+        let mut providers = vec![provider(1), provider(2)];
+        providers[0].session_reuse_priority = 100;
+
+        reorder_providers_by_bound_order(&mut providers, &[2, 1]);
+
+        assert_eq!(ids(&providers), vec![1, 2]);
+    }
+
+    #[test]
     fn apply_session_preference_rotates_from_bound_provider_when_present() {
         let mut providers = vec![provider(11), provider(22), provider(33)];
         let selected = apply_session_provider_preference(&mut providers, 22, Some(&[11, 22, 33]));
@@ -118,11 +164,33 @@ mod tests {
     }
 
     #[test]
+    fn apply_session_preference_keeps_route_order_for_lower_priority_binding() {
+        let mut providers = vec![provider(11), provider(22), provider(33)];
+        providers[0].session_reuse_priority = 100;
+
+        let selected = apply_session_provider_preference(&mut providers, 22, Some(&[11, 22, 33]));
+
+        assert_eq!(selected, None);
+        assert_eq!(ids(&providers), vec![11, 22, 33]);
+    }
+
+    #[test]
     fn apply_session_preference_rotates_to_next_when_bound_missing() {
         let mut providers = vec![provider(10), provider(20), provider(30)];
         let selected = apply_session_provider_preference(&mut providers, 99, Some(&[99, 30, 20]));
         assert_eq!(selected, None);
         assert_eq!(ids(&providers), vec![30, 10, 20]);
+    }
+
+    #[test]
+    fn apply_session_preference_does_not_promote_lower_priority_fallback() {
+        let mut providers = vec![provider(10), provider(20)];
+        providers[0].session_reuse_priority = 100;
+
+        let selected = apply_session_provider_preference(&mut providers, 99, Some(&[20, 10]));
+
+        assert_eq!(selected, None);
+        assert_eq!(ids(&providers), vec![10, 20]);
     }
 
     #[test]

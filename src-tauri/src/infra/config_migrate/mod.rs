@@ -143,6 +143,8 @@ pub struct SortModeProviderExport {
     pub provider_cli_key: String,
     pub sort_order: i64,
     pub enabled: bool,
+    #[serde(default)]
+    pub session_reuse_priority: i64,
 }
 
 #[derive(Serialize, Deserialize, specta::Type)]

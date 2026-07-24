@@ -7,6 +7,8 @@ use crate::shared::text::normalize_name;
 use crate::shared::time::now_unix_seconds;
 use rusqlite::{params, Connection, OptionalExtension};
 
+const MAX_SESSION_REUSE_PRIORITY: i64 = 1000;
+
 /// Apply all idempotent ensure patches.
 pub(super) fn apply_ensure_patches(conn: &mut Connection) -> crate::shared::error::AppResult<()> {
     ensure_workspace_cluster(conn)?;
@@ -15,6 +17,7 @@ pub(super) fn apply_ensure_patches(conn: &mut Connection) -> crate::shared::erro
     ensure_provider_oauth_limit_snapshots(conn)?;
     ensure_sort_mode_providers_enabled(conn)?;
     ensure_provider_route_order_tables(conn)?;
+    ensure_route_session_reuse_priorities(conn)?;
     ensure_usage_indexes(conn)?;
     ensure_provider_tags(conn)?;
     ensure_provider_note(conn)?;
@@ -728,6 +731,36 @@ ORDER BY cli_key ASC, sort_order ASC, id DESC
         [now],
     )
     .map_err(|e| format!("failed to ensure provider_pool_order rows: {e}"))?;
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// ensure_route_session_reuse_priorities (from v41_to_v42.rs)
+// ---------------------------------------------------------------------------
+fn ensure_route_session_reuse_priorities(conn: &Connection) -> Result<(), String> {
+    for table in ["default_route_providers", "sort_mode_providers"] {
+        let table_exists: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+                [table],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| format!("failed to inspect {table} table: {error}"))?
+            != 0;
+
+        if table_exists && !column_exists(conn, table, "session_reuse_priority")? {
+            let add_column_sql = format!(
+                "ALTER TABLE {table} ADD COLUMN session_reuse_priority INTEGER NOT NULL DEFAULT 0 \
+                 CHECK(session_reuse_priority BETWEEN 0 AND {MAX_SESSION_REUSE_PRIORITY});"
+            );
+            conn.execute_batch(&add_column_sql).map_err(|error| {
+                format!(
+                    "failed to ensure {table}.session_reuse_priority (maximum {MAX_SESSION_REUSE_PRIORITY}): {error}"
+                )
+            })?;
+        }
+    }
 
     Ok(())
 }

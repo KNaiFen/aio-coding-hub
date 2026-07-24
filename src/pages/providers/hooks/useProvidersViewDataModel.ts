@@ -31,6 +31,7 @@ import {
 } from "../../../query/gateway";
 import {
   useDefaultRouteProvidersQuery,
+  useDefaultRouteProviderSetSessionReusePriorityMutation,
   useDefaultRouteProvidersSetOrderMutation,
   useProviderClaudeTerminalLaunchCommandMutation,
   useProviderDeleteMutation,
@@ -47,6 +48,7 @@ import {
   useSortModeDeleteMutation,
   useSortModeProvidersListQuery,
   useSortModeProviderSetEnabledMutation,
+  useSortModeProviderSetSessionReusePriorityMutation,
   useSortModeProvidersSetOrderMutation,
   useSortModeRenameMutation,
   useSortModesListQuery,
@@ -141,7 +143,7 @@ function modeProvidersResetKey(
 ) {
   if (selection.kind !== "mode") return `${activeCli}:default`;
   return `${activeCli}:mode:${selection.modeId}:${rows
-    .map((row) => `${row.provider_id}:${row.enabled}`)
+    .map((row) => `${row.provider_id}:${row.enabled}:${row.session_reuse_priority}`)
     .join(",")}`;
 }
 
@@ -519,12 +521,16 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
   const providerDuplicateMutation = useProviderDuplicateMutation();
   const providersReorderMutation = useProvidersReorderMutation();
   const defaultRouteSetOrderMutation = useDefaultRouteProvidersSetOrderMutation();
+  const defaultRouteSetSessionReusePriorityMutation =
+    useDefaultRouteProviderSetSessionReusePriorityMutation();
   const sortModeCreateMutation = useSortModeCreateMutation();
   const sortModeRenameMutation = useSortModeRenameMutation();
   const sortModeDeleteMutation = useSortModeDeleteMutation();
   const sortModeActiveSetMutation = useSortModeActiveSetMutation();
   const sortModeProvidersSetOrderMutation = useSortModeProvidersSetOrderMutation();
   const sortModeProviderSetEnabledMutation = useSortModeProviderSetEnabledMutation();
+  const sortModeProviderSetSessionReusePriorityMutation =
+    useSortModeProviderSetSessionReusePriorityMutation();
   const terminalLaunchCommandMutation = useProviderClaudeTerminalLaunchCommandMutation();
   const testAvailabilityMutation = useProviderTestAvailabilityMutation();
 
@@ -1098,7 +1104,10 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
         await defaultRouteSetOrderMutation.mutateAsync({
           cliKey,
           orderedProviderIds: nextRows.map((row) => row.provider_id),
-          optimisticRows: nextRows.map((row) => ({ provider_id: row.provider_id })),
+          optimisticRows: nextRows.map((row) => ({
+            provider_id: row.provider_id,
+            session_reuse_priority: row.session_reuse_priority ?? 0,
+          })),
         });
         toast("Default 调用顺序已更新");
       } else {
@@ -1200,12 +1209,95 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
     await toggleProviderEnabled(provider);
   }
 
+  async function setRouteProviderSessionReusePriority(
+    providerId: number,
+    sessionReusePriority: number
+  ) {
+    const selection = routeDraftSelectionRef.current;
+    const cliKey = activeCliRef.current;
+    if (routeSavingRef.current) return;
+
+    routeSavingRef.current = true;
+    setRouteSaving(true);
+    try {
+      if (selection.kind === "default") {
+        const currentRow = defaultRouteRows.find((row) => row.provider_id === providerId);
+        if (!currentRow || currentRow.session_reuse_priority === sessionReusePriority) return;
+
+        await defaultRouteSetSessionReusePriorityMutation.mutateAsync({
+          cliKey,
+          providerId,
+          sessionReusePriority,
+        });
+      } else {
+        const previousRows = modeProvidersRef.current;
+        const currentRow = previousRows.find((row) => row.provider_id === providerId);
+        if (!currentRow || currentRow.session_reuse_priority === sessionReusePriority) return;
+
+        const nextRows = previousRows.map((row) =>
+          row.provider_id === providerId
+            ? { ...row, session_reuse_priority: sessionReusePriority }
+            : row
+        );
+        setModeProviders(nextRows);
+        modeProvidersRef.current = nextRows;
+
+        try {
+          const saved = await sortModeProviderSetSessionReusePriorityMutation.mutateAsync({
+            modeId: selection.modeId,
+            cliKey,
+            providerId,
+            sessionReusePriority,
+          });
+          if (
+            routeDraftSelectionRef.current.kind === "mode" &&
+            routeDraftSelectionRef.current.modeId === selection.modeId &&
+            activeCliRef.current === cliKey
+          ) {
+            const savedRows = modeProvidersRef.current.map((row) =>
+              row.provider_id === saved.provider_id ? saved : row
+            );
+            setModeProviders(savedRows);
+            modeProvidersRef.current = savedRows;
+          }
+        } catch (error) {
+          if (
+            routeDraftSelectionRef.current.kind === "mode" &&
+            routeDraftSelectionRef.current.modeId === selection.modeId &&
+            activeCliRef.current === cliKey
+          ) {
+            setModeProviders(previousRows);
+            modeProvidersRef.current = previousRows;
+          }
+          throw error;
+        }
+      }
+
+      toast("会话复用优先级已更新");
+    } catch (error) {
+      logToConsole("error", "更新会话复用优先级失败", {
+        cli: cliKey,
+        route: routeDraftKey(selection),
+        provider_id: providerId,
+        session_reuse_priority: sessionReusePriority,
+        error: String(error),
+      });
+      toast(`会话复用优先级更新失败：${String(error)}`);
+    } finally {
+      routeSavingRef.current = false;
+      setRouteSaving(false);
+    }
+  }
+
   function addProviderToCurrentRoute(providerId: number) {
     if (routeProviderIdSet.has(providerId)) return;
     const nextRows =
       routeDraftSelection.kind === "default"
-        ? [...defaultRouteRows, { provider_id: providerId }]
-        : [...modeProvidersRef.current, { provider_id: providerId, enabled: true }];
+        ? [...defaultRouteRows, { provider_id: providerId, session_reuse_priority: 0 }]
+        : [
+            ...modeProvidersRef.current,
+            { provider_id: providerId, enabled: true, session_reuse_priority: 0 },
+          ];
     void persistRouteRows(nextRows);
   }
 
@@ -1397,6 +1489,7 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
     removeProviderFromCurrentRoute,
     setModeProviderEnabled,
     setRouteProviderEnabled,
+    setRouteProviderSessionReusePriority,
     handleRouteDragEnd,
     createSortMode,
     renameSortMode,
