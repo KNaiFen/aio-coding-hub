@@ -1052,6 +1052,23 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async providerAccountUsageTestCustomScript(
+    providerId: number,
+    draft: ProviderAccountUsageCustomScriptDraft
+  ): Promise<Result<ProviderAccountUsageResult, string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("provider_account_usage_test_custom_script", {
+          providerId,
+          draft,
+        }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async providerOauthResetCodexQuota(
     providerId: number,
     confirm: RiskyIpcConfirm | null
@@ -3869,11 +3886,16 @@ export type ProtocolBridgeContribution = {
 };
 export type ProtocolContribution = { protocolId: string; direction: ProtocolDirection };
 export type ProtocolDirection = "inbound" | "outbound" | "both";
-export type ProviderAccountUsageAdapterKind = "sub2api" | "newapi";
+export type ProviderAccountUsageAdapterKind = "sub2api" | "newapi" | "custom";
 export type ProviderAccountUsageCredentialsPatch = {
   newApiUserId: string | null;
   newApiAccessToken: string | null;
   clearNewApiAccessToken?: boolean;
+};
+export type ProviderAccountUsageCustomScriptDraft = {
+  customScript: string;
+  customAllowedOrigins?: string[];
+  customTimeoutSeconds: number;
 };
 export type ProviderAccountUsageFreshness = "not_fetched" | "fresh";
 export type ProviderAccountUsageResult = {

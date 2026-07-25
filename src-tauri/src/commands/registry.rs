@@ -124,6 +124,7 @@ macro_rules! generated_command_registry {
             provider_oauth_status => crate::commands::providers::provider_oauth_status,
             provider_oauth_fetch_limits => crate::commands::providers::provider_oauth_fetch_limits,
             provider_account_usage_fetch => crate::commands::providers::provider_account_usage_fetch,
+            provider_account_usage_test_custom_script => crate::commands::providers::provider_account_usage_test_custom_script,
             provider_oauth_reset_codex_quota => crate::commands::providers::provider_oauth_reset_codex_quota,
             provider_share_copy_to_clipboard => crate::commands::providers::provider_share_copy_to_clipboard,
             provider_share_save_to_file => crate::commands::providers::provider_share_save_to_file,

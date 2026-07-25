@@ -17,7 +17,8 @@ TypeScript bindings, frontend adapters, and React UI.
 - [Provider account-usage query contract](./provider-account-usage-query-contract.md):
   one TanStack Query owner for automatic, timed, and forced manual refreshes,
   bounded NewAPI model-token/account protocols, private credential ownership,
-  and validated sub2api daily-limit projection.
+  validated sub2api daily-limit projection, and the local-only confirmed custom
+  JavaScript trust boundary.
 - [Provider OAuth device-flow contract](./provider-oauth-device-flow-contract.md):
   bounded Codex/Grok device responses, safe polling arithmetic, flow ownership,
   cancellation, and token persistence.
@@ -75,7 +76,12 @@ When changing provider account-usage fetching:
    signed identity validation, field/unit normalization, IPC, and display.
 6. For sub2api changes, distinguish account balance from the exact `1d`
    periodic window and fail closed on malformed or duplicate known windows.
-7. Confirm account usage remains display-only and that fixtures/specs contain
+7. For custom JavaScript changes, trace placeholder materialization, the
+   one-shot QuickJS worker protocol and hard process deadline, exact HTTPS
+   origins, native confirmation/fingerprint ownership, credential snapshots,
+   complete-workflow concurrency, and portable-data stripping. Treat the exact
+   script and every allowed target as an explicit API-key trust boundary.
+8. Confirm account usage remains display-only and that fixtures/specs contain
    no upstream body/message, credential, PII, live host, token name, or actual
    account amount.
 

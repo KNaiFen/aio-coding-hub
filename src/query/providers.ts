@@ -571,7 +571,7 @@ export function useProviderAccountUsageQuery(provider: ProviderSummary, enabled 
   const normalizedProviderId = validateProviderId(provider.id);
   const options = providerAccountUsageQueryOptions(normalizedProviderId);
   const configured = isProviderAccountUsageConfigured(provider);
-  const config = readProviderAccountUsageConfig(provider.extension_values);
+  const config = readProviderAccountUsageConfig(provider);
   const autoFetchEnabled = enabled && provider.enabled && configured;
   const refetchInterval =
     autoFetchEnabled && config.timedRefreshEnabled ? config.refreshIntervalSeconds * 1000 : false;

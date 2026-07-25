@@ -584,3 +584,196 @@ result.daily_used = Some(validated_used);
 
 Window semantics stay in their matching DTO fields; field-name similarity does
 not create a wallet-balance contract.
+
+## Scenario: Local Custom JavaScript Account-Usage Adapter
+
+### 1. Scope / Trigger
+
+Use this scenario when changing the `custom` account-usage adapter, its local
+extension fields, native confirmation, QuickJS boundary, draft-test IPC,
+credential loading, HTTPS request policy, portable configuration sanitizers,
+or normalized result mapping.
+
+The adapter is available only to direct API-key providers. It performs one
+display-only JSON request and reuses the existing provider-scoped query owner;
+it never affects routing, availability, circuit state, provider order, or
+enablement.
+
+### 2. Signatures And Script Contract
+
+The JavaScript source evaluates to one object with two synchronous functions:
+
+```javascript
+({
+  request: (ctx) => ({
+    url: ctx.baseUrl + "/v1/usage",
+    method: "GET",
+    headers: { Authorization: `Bearer ${ctx.apiKey}` }
+  }),
+  parse: (response) => ({
+    status: "available",
+    balance: response.data.balance,
+    unit: "USD"
+  })
+})
+```
+
+`request(ctx)` sees opaque internal placeholders for `ctx.apiKey` and
+`ctx.baseUrl`, not the plaintext credential values. `ctx.baseUrl` represents a
+Base URL whose trailing slashes are removed by the backend, so scripts append
+paths directly to it. String transforms applied in JavaScript affect only the
+opaque placeholder and must not be used to transform the later plaintext
+replacement. Rust serializes and validates the returned
+request plan, then replaces each placeholder exactly once while enforcing the
+final URL/header/body size limits. Replacement values are never scanned again,
+so placeholder-looking text inside a real key or Base URL cannot trigger a
+second substitution.
+
+`parse(response)` receives only `{ status, data }`, where `data` is the bounded
+JSON response after exact plaintext credential/Base-URL redaction. It receives
+no `ctx`, API key, Base URL, request headers, request URL, or raw response body.
+It returns the existing normalized `ProviderAccountUsageResult` fields.
+
+The draft entry point is:
+
+```rust
+provider_account_usage_test_custom_script(
+    provider_id: i64,
+    draft: ProviderAccountUsageCustomScriptDraft,
+) -> Result<ProviderAccountUsageResult, String>;
+```
+
+The renderer sends only the provider ID, source, extra origins, and timeout.
+The backend owns native confirmation and credential loading. Draft tests do not
+persist configuration or write the TanStack Query cache.
+
+### 3. Local Configuration And Permission Contracts
+
+- Custom source is at most 32 KiB in UTF-8, has one bounded timeout in 2-15
+  seconds, and has at most 16 normalized extra HTTPS origins of at most 512
+  bytes each. Origin entries must be origin-only URLs without user info, path,
+  query, or fragment.
+- `customEnabled` defaults to false. Enabling or testing requires a native
+  confirmation that lists every effective HTTPS origin and the full SHA-256
+  permission fingerprint. The confirmation states that the script and all
+  target services are trusted to read or forward the API key.
+- Only one native custom-usage confirmation may be open. A concurrent request
+  fails immediately with `SEC_CONFIRM_BUSY`; it does not queue another dialog.
+- The permission fingerprint binds the exact script bytes and normalized extra
+  origins. The confirmed Base URL origin is stored and checked separately.
+  Changing the script, extra-origin set, or Base URL origin revokes automatic
+  execution until another native confirmation succeeds.
+- Renderer-supplied proof fields are stripped before permission evaluation.
+  Only the backend may inject the transient proof after confirmation. Proof
+  fields are never persisted, returned, shared, exported, backed up, or
+  imported; only the derived local fingerprint/Base-origin binding may persist.
+- Saved execution loads Base URLs, auth/source identity, extension values, and
+  plaintext key from one credential-context query, then rejects a stale mix if
+  it differs from the configuration snapshot that authorized execution. Draft
+  execution confirms first, then loads the same credential snapshot and rejects
+  provider identity or Base URL changes before using the key.
+- An API-key-only rotation does not revoke a confirmation: permission binds the
+  exact script and target origins, not one secret version. The post-confirmation
+  snapshot deliberately uses the provider's current key. Base URL, auth mode,
+  or source-provider identity changes still fail as stale.
+- No API key is read before the draft native confirmation succeeds. Canceling,
+  closing, or failing confirmation performs no credentialed request.
+
+### 4. Runtime, Network, And Result Contracts
+
+- Each `request` and `parse` phase uses a fresh one-shot child process hosting a
+  QuickJS runtime with an 8 MiB memory limit, 256 KiB stack, and 100 ms engine
+  interrupt deadline. After a bounded startup handshake, the parent applies a
+  separate 100 ms call deadline and kills and reaps the child on timeout. The
+  process deadline is the hard boundary for native QuickJS built-ins that do
+  not poll the engine interrupt handler.
+- The script worker receives only source, a fixed `request`/`parse` selector,
+  opaque request placeholders, or the already-redacted response JSON over a
+  bounded stdio protocol. Plaintext credentials and the materialized Base URL
+  remain in the parent process and never enter worker arguments, environment,
+  configuration files, or stdio.
+- The runtime exposes only the required JavaScript/JSON/RegExp intrinsics. It
+  has no `fetch`, modules, filesystem, process, environment, Tauri IPC, timers,
+  WebSocket, or other host/network primitive.
+- At most four complete custom workflows may run concurrently. A non-waiting
+  semaphore covers request evaluation, credentialed HTTP, and response parsing;
+  excess work returns a stable busy result instead of creating an unbounded
+  wait or HTTP queue.
+- One request may use only `GET` or `POST` and only an HTTPS URL whose exact
+  origin is the configured Base URL origin or a normalized extra origin.
+  Redirects are disabled and every 3xx response fails. Reject user info and
+  forbidden hop-by-hop, host, length, or proxy-authorization headers.
+- Enforce final materialized limits: URL 16 KiB, at most 32 headers, header name
+  128 bytes, header value 8 KiB, request body 64 KiB, response body 64 KiB, and
+  serialized JavaScript output 64 KiB.
+- Require a successful HTTP status and valid JSON. Reject `NaN`, infinity,
+  invalid statuses, invalid field types, non-integer expiry, and strings longer
+  than the result text cap. Unknown output fields are ignored.
+- Error/auth/configuration statuses are all-or-nothing: no balance, usage,
+  total, unit, expiry, or other partial account fields survive. Errors are
+  stable local categories and never include source, URL, request headers,
+  response body, upstream message, or plaintext credentials.
+
+### 5. Explicit Trust Boundary
+
+Arbitrary secret-bearing requests plus arbitrary response parsing create an
+inherent information channel. A trusted endpoint can echo the key after an
+encoding or transformation, and a trusted script can map that value into a
+normalized result field. Exact recursive plaintext redaction is defense in
+depth against accidental reflection; it is not a claim that the application
+can prove what arbitrary code or a remote service intends.
+
+Therefore native confirmation means the user explicitly trusts both the exact
+fingerprinted script and every displayed target origin with the provider API
+key. Do not describe this adapter as safe for untrusted scripts or endpoints.
+If a future product requirement needs a hard guarantee that transformed key
+material cannot reach the renderer, replace arbitrary JavaScript/request
+construction with a backend-owned declarative credential and field-mapping
+protocol; additional redaction heuristics cannot establish that guarantee.
+
+### 6. Portability Contract
+
+Custom source, extra origins, enabled state, permission fingerprint, confirmed
+Base origin, and all proof fields are local-only. Provider sharing,
+configuration export, and configuration backup must omit them and serialize a
+disabled account-usage adapter while preserving canonical portable refresh
+settings. Import sanitization must drop crafted custom fields and cannot
+activate a script. Native Sub2API/NewAPI adapter settings and their existing
+portability rules remain unchanged.
+
+### 7. Validation Matrix
+
+| Input / condition | Required result |
+| --- | --- |
+| Valid direct API-key provider, confirmed local config | Run one bounded request and return one normalized snapshot |
+| Script or normalized extra origins change | Clear enabled permission; require native confirmation |
+| Base URL changes to another origin | Reject saved execution and require native confirmation |
+| Concurrent native confirmation | Reject immediately with `SEC_CONFIRM_BUSY` |
+| Concurrent custom workflow beyond four | Return busy result without waiting or sending HTTP |
+| URL is HTTP, credentialed, redirected, or outside the exact allowlist | Send no credential or reject the response |
+| Request/output exceeds a final materialized limit | Fail closed before the oversized allocation/request crosses the boundary |
+| Base URL, auth mode, or source-provider identity changes while draft confirmation is open | Reject as stale; do not send a key under old network authorization |
+| Only the provider API key rotates while draft confirmation is open | Use the current key; script and target permission remain unchanged |
+| Parser returns a failure status with account values | Drop every partial account value |
+| Crafted share/export/backup/import contains custom fields | Strip and disable; never execute |
+
+### 8. Tests Required
+
+- Cover UTF-8 source limits, origin normalization/count/length limits including
+  duplicate canonical origins, timeout bounds, permission invalidation,
+  Base-origin rebinding, proof stripping, and proof/fingerprint non-portability.
+- Cover absent host capabilities, missing functions, syntax/runtime failure,
+  interpreted infinite execution, a native built-in that does not poll the
+  QuickJS interrupt handler, child timeout/reaping, non-finite output after
+  mutable-global tampering, strict field normalization, exact credential
+  redaction, single-pass placeholder replacement, and expansion limits using
+  synthetic secrets and reserved test origins.
+- Cover method, HTTPS origin, user-info, redirect, header, request body,
+  response body, strict UTF-8/JSON, HTTP/auth, timeout, percent-encoded final
+  URL expansion, and all-or-nothing failure paths. Script-provided failure
+  messages and upstream response content must not survive those failures.
+- Cover saved and draft credential-snapshot races, native confirmation content,
+  confirmation single-flight, full-workflow concurrency, cancellation before
+  credential loading, and local-only share/export/backup/import behavior.
+- Keep generated bindings, TypeScript config normalization, editor reset/test
+  races, query ownership, native adapters, and routing/circuit isolation green.

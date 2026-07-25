@@ -120,6 +120,17 @@ fn provider_runtime_reset_decision(
     }
 }
 
+fn custom_account_usage_permission_request(
+    values: Option<&[providers::ProviderExtensionValuesInput]>,
+    base_url: &str,
+) -> Result<
+    Option<crate::domain::provider_account_usage::ProviderAccountUsageCustomPermissionRequest>,
+    String,
+> {
+    crate::domain::provider_account_usage::custom_account_usage_permission_request(values, base_url)
+        .map_err(|message| format!("SEC_INVALID_INPUT: {message}"))
+}
+
 pub(crate) async fn providers_list(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
@@ -136,8 +147,70 @@ pub(crate) async fn providers_list(
 pub(crate) async fn provider_upsert(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
-    input: ProviderUpsertInput,
+    mut input: ProviderUpsertInput,
 ) -> Result<providers::ProviderSummary, String> {
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
+    crate::domain::provider_account_usage::strip_custom_account_usage_permission_proofs(
+        &mut input.extension_values,
+    );
+    let permission_base_url = input
+        .base_urls
+        .iter()
+        .map(|value| value.trim())
+        .find(|value| !value.is_empty())
+        .unwrap_or_default();
+    if let Some(permission) = custom_account_usage_permission_request(
+        input.extension_values.as_deref(),
+        permission_base_url,
+    )? {
+        let already_confirmed = if let Some(provider_id) = input.provider_id {
+            let db = db.clone();
+            let fingerprint = permission.fingerprint.clone();
+            let base_origin = permission.base_origin.clone();
+            blocking::run(
+                "provider_upsert_check_custom_account_usage_permission",
+                move || {
+                    let conn = db.open_connection()?;
+                    let provider = providers::get_by_id(&conn, provider_id)?;
+                    Ok::<_, crate::shared::error::AppError>(
+                    crate::domain::provider_account_usage::
+                        custom_account_usage_saved_permission_matches(
+                            &provider.extension_values,
+                            &fingerprint,
+                            &base_origin,
+                        ),
+                )
+                },
+            )
+            .await
+            .map_err(Into::<String>::into)?
+        } else {
+            false
+        };
+        if !already_confirmed {
+            let confirmed = crate::app::provider_account_usage_confirmation::
+                confirm_custom_account_usage_network_access(
+                    &app,
+                    crate::app::provider_account_usage_confirmation::
+                        CustomAccountUsageConfirmationKind::Enable,
+                    &permission.network_origins,
+                    &permission.fingerprint,
+                )
+                .await?;
+            if !confirmed {
+                return Err(
+                    "SEC_CONFIRM_REQUIRED: custom account usage permission was not confirmed"
+                        .to_string(),
+                );
+            }
+            crate::domain::provider_account_usage::add_custom_account_usage_permission_proof(
+                &mut input.extension_values,
+                &permission.fingerprint,
+                &permission.base_origin,
+            )?;
+        }
+    }
+
     let ProviderUpsertInput {
         provider_id,
         cli_key,
@@ -174,7 +247,6 @@ pub(crate) async fn provider_upsert(
     let name_for_log = name.clone();
     let cli_key_for_log = cli_key.clone();
     let submitted_api_key = api_key.clone();
-    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
     let result = blocking::run("provider_upsert", move || {
         let previous = match provider_id {
             Some(id) => {
@@ -528,6 +600,26 @@ pub(crate) async fn default_route_provider_set_session_reuse_priority(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_account_usage_permission_precheck_classifies_invalid_input() {
+        let values = vec![providers::ProviderExtensionValuesInput {
+            plugin_id: crate::domain::provider_account_usage::ACCOUNT_USAGE_PLUGIN_ID.to_string(),
+            namespace: crate::domain::provider_account_usage::ACCOUNT_USAGE_NAMESPACE.to_string(),
+            values: serde_json::json!({
+                "adapterKind": "custom",
+                "customAllowedOrigins": [],
+                "customTimeoutSeconds": 5,
+                "customEnabled": true
+            }),
+        }];
+
+        let error =
+            custom_account_usage_permission_request(Some(&values), "https://api.example.test/v1")
+                .expect_err("invalid custom config must fail precheck");
+
+        assert_eq!(error, "SEC_INVALID_INPUT: 自定义账户用量脚本不能为空");
+    }
 
     #[test]
     fn provider_upsert_input_deserializes_runtime_camel_case_shape() {

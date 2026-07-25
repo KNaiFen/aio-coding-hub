@@ -82,6 +82,8 @@ describe("services/generatedIpc", () => {
             flowId: "flow-capability",
             flow_id: "flow-capability-snake",
             nonce: "confirm-capability",
+            customScript: "SYNTHETIC_CUSTOM_SOURCE",
+            customAllowedOrigins: ["https://private-usage.example.test"],
             nested: {
               refreshToken: "rt-secret",
               safe: "ok",
@@ -100,6 +102,8 @@ describe("services/generatedIpc", () => {
           flowId: "[REDACTED]",
           flow_id: "[REDACTED]",
           nonce: "[REDACTED]",
+          customScript: "[REDACTED]",
+          customAllowedOrigins: "[REDACTED]",
           nested: {
             refreshToken: "[REDACTED]",
             safe: "ok",

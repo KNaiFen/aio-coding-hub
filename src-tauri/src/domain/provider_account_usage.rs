@@ -8,6 +8,8 @@ use chrono::{Datelike, Duration, TimeZone, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest as _, Sha256};
+use std::collections::BTreeSet;
 
 pub(crate) const ACCOUNT_USAGE_PLUGIN_ID: &str = "core.provider-account-usage";
 pub(crate) const ACCOUNT_USAGE_NAMESPACE: &str = "accountUsage";
@@ -22,12 +24,23 @@ const ACCOUNT_USAGE_REFRESH_INTERVAL_MIN_SECONDS: i64 = 60;
 const ACCOUNT_USAGE_REFRESH_INTERVAL_MAX_SECONDS: i64 = 300;
 const ACCOUNT_USAGE_REFRESH_INTERVAL_DEFAULT_SECONDS: i64 = 300;
 const NEWAPI_UNLIMITED_TOKEN_HARD_LIMIT_USD: f64 = 100_000_000.0;
+pub(crate) const CUSTOM_ACCOUNT_USAGE_MAX_SCRIPT_BYTES: usize = 32 * 1024;
+pub(crate) const CUSTOM_ACCOUNT_USAGE_MAX_ALLOWED_ORIGINS: usize = 16;
+pub(crate) const CUSTOM_ACCOUNT_USAGE_MAX_ORIGIN_BYTES: usize = 512;
+pub(crate) const CUSTOM_ACCOUNT_USAGE_TIMEOUT_MIN_SECONDS: u64 = 2;
+pub(crate) const CUSTOM_ACCOUNT_USAGE_TIMEOUT_MAX_SECONDS: u64 = 15;
+const CUSTOM_ACCOUNT_USAGE_PERMISSION_FINGERPRINT_FIELD: &str = "customPermissionFingerprint";
+const CUSTOM_ACCOUNT_USAGE_PERMISSION_PROOF_FIELD: &str = "customPermissionProof";
+const CUSTOM_ACCOUNT_USAGE_PERMISSION_BASE_ORIGIN_FIELD: &str = "customPermissionBaseOrigin";
+const CUSTOM_ACCOUNT_USAGE_PERMISSION_BASE_ORIGIN_PROOF_FIELD: &str =
+    "customPermissionBaseOriginProof";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum ProviderAccountUsageAdapterKind {
     Sub2api,
     Newapi,
+    Custom,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type, PartialEq, Eq)]
@@ -42,6 +55,7 @@ impl ProviderAccountUsageAdapterKind {
         match self {
             Self::Sub2api => "/v1/usage",
             Self::Newapi => "NewAPI billing",
+            Self::Custom => "自定义账户用量接口",
         }
     }
 }
@@ -150,6 +164,32 @@ impl ProviderAccountUsageResult {
 pub(crate) struct ProviderAccountUsageConfig {
     pub adapter_kind: ProviderAccountUsageAdapterKind,
     pub new_api_query_mode: NewapiQueryMode,
+    pub custom: Option<ProviderAccountUsageCustomConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProviderAccountUsageCustomConfig {
+    pub script: String,
+    pub allowed_origins: Vec<String>,
+    pub timeout_seconds: u64,
+    pub enabled: bool,
+    pub permission_base_origin: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProviderAccountUsageCustomScriptDraft {
+    pub custom_script: String,
+    #[serde(default)]
+    pub custom_allowed_origins: Vec<String>,
+    pub custom_timeout_seconds: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProviderAccountUsageCustomPermissionRequest {
+    pub fingerprint: String,
+    pub base_origin: String,
+    pub network_origins: Vec<String>,
 }
 
 #[derive(Clone, Default, PartialEq, Eq)]
@@ -176,9 +216,18 @@ pub(crate) enum ProviderAccountUsageConfigState {
 }
 
 pub(crate) fn sanitize_account_usage_extension_value(values: &Value) -> Value {
+    sanitize_account_usage_extension_value_for_persistence(values, None, None)
+}
+
+pub(crate) fn sanitize_account_usage_extension_value_for_persistence(
+    values: &Value,
+    existing_values: Option<&Value>,
+    base_url: Option<&str>,
+) -> Value {
     let adapter_kind = match values.get("adapterKind").and_then(Value::as_str) {
         Some("sub2api") => "sub2api",
         Some("newapi") => "newapi",
+        Some("custom") => "custom",
         _ => "disabled",
     };
     let new_api_query_mode = match values.get("newApiQueryMode").and_then(Value::as_str) {
@@ -200,12 +249,394 @@ pub(crate) fn sanitize_account_usage_extension_value(values: &Value) -> Value {
             ACCOUNT_USAGE_REFRESH_INTERVAL_MAX_SECONDS,
         );
 
-    serde_json::json!({
+    let mut normalized = serde_json::json!({
         "adapterKind": adapter_kind,
         "newApiQueryMode": new_api_query_mode,
         "timedRefreshEnabled": timed_refresh_enabled,
         "refreshIntervalSeconds": refresh_interval_seconds,
+    });
+    if adapter_kind == "custom" {
+        let custom = custom_config_from_value_raw(values).ok();
+        let fingerprint = custom
+            .as_ref()
+            .map(custom_account_usage_permission_fingerprint);
+        let base_origin = base_url.and_then(|value| custom_account_usage_base_origin(value).ok());
+        let existing_permission_matches = existing_values
+            .and_then(|existing| custom_config_from_value(existing).ok())
+            .is_some_and(|existing| {
+                existing.enabled
+                    && fingerprint.as_deref()
+                        == Some(custom_account_usage_permission_fingerprint(&existing).as_str())
+                    && existing.permission_base_origin.as_deref() == base_origin.as_deref()
+            });
+        let proof_matches = fingerprint.as_deref().is_some_and(|fingerprint| {
+            values
+                .get(CUSTOM_ACCOUNT_USAGE_PERMISSION_PROOF_FIELD)
+                .and_then(Value::as_str)
+                == Some(fingerprint)
+        }) && base_origin.as_deref().is_some_and(|base_origin| {
+            values
+                .get(CUSTOM_ACCOUNT_USAGE_PERMISSION_BASE_ORIGIN_PROOF_FIELD)
+                .and_then(Value::as_str)
+                == Some(base_origin)
+        });
+        let custom_enabled = custom.as_ref().is_some_and(|config| config.enabled)
+            && (existing_permission_matches || proof_matches);
+        let object = normalized
+            .as_object_mut()
+            .expect("account usage normalized value must be an object");
+        object.insert(
+            "customScript".to_string(),
+            Value::String(
+                custom
+                    .as_ref()
+                    .map(|config| config.script.clone())
+                    .unwrap_or_default(),
+            ),
+        );
+        object.insert(
+            "customAllowedOrigins".to_string(),
+            Value::Array(
+                custom
+                    .as_ref()
+                    .map(|config| {
+                        config
+                            .allowed_origins
+                            .iter()
+                            .cloned()
+                            .map(Value::String)
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            ),
+        );
+        object.insert(
+            "customTimeoutSeconds".to_string(),
+            Value::Number(serde_json::Number::from(
+                custom
+                    .as_ref()
+                    .map(|config| config.timeout_seconds)
+                    .unwrap_or(CUSTOM_ACCOUNT_USAGE_TIMEOUT_MIN_SECONDS),
+            )),
+        );
+        object.insert("customEnabled".to_string(), Value::Bool(custom_enabled));
+        if let Some(fingerprint) = fingerprint {
+            object.insert(
+                CUSTOM_ACCOUNT_USAGE_PERMISSION_FINGERPRINT_FIELD.to_string(),
+                Value::String(fingerprint),
+            );
+        }
+        if custom_enabled {
+            if let Some(base_origin) = base_origin {
+                object.insert(
+                    CUSTOM_ACCOUNT_USAGE_PERMISSION_BASE_ORIGIN_FIELD.to_string(),
+                    Value::String(base_origin),
+                );
+            }
+        }
+    }
+    normalized
+}
+
+/// Produces the portable account-usage representation used by provider sharing
+/// and configuration migration. Custom scripts deliberately become disabled:
+/// source, origin permissions, and local acknowledgement must never leave the
+/// local profile.
+pub(crate) fn sanitize_account_usage_extension_value_for_portable(values: &Value) -> Value {
+    let mut normalized = sanitize_account_usage_extension_value(values);
+    if normalized.get("adapterKind").and_then(Value::as_str) == Some("custom") {
+        let object = normalized
+            .as_object_mut()
+            .expect("account usage normalized value must be an object");
+        object.insert(
+            "adapterKind".to_string(),
+            Value::String("disabled".to_string()),
+        );
+        object.remove("customScript");
+        object.remove("customAllowedOrigins");
+        object.remove("customTimeoutSeconds");
+        object.remove("customEnabled");
+        object.remove(CUSTOM_ACCOUNT_USAGE_PERMISSION_FINGERPRINT_FIELD);
+        object.remove(CUSTOM_ACCOUNT_USAGE_PERMISSION_BASE_ORIGIN_FIELD);
+    }
+    normalized
+}
+
+pub(crate) fn validate_account_usage_extension_value(values: &Value) -> Result<(), String> {
+    if values.get("adapterKind").and_then(Value::as_str) == Some("custom") {
+        custom_config_from_value_raw(values)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn strip_custom_account_usage_permission_proofs(
+    values: &mut Option<Vec<ProviderExtensionValuesInput>>,
+) {
+    let Some(values) = values.as_mut() else {
+        return;
+    };
+    for value in values {
+        if is_account_usage_extension_input(value) {
+            if let Some(object) = value.values.as_object_mut() {
+                object.remove(CUSTOM_ACCOUNT_USAGE_PERMISSION_PROOF_FIELD);
+                object.remove(CUSTOM_ACCOUNT_USAGE_PERMISSION_BASE_ORIGIN_PROOF_FIELD);
+            }
+        }
+    }
+}
+
+pub(crate) fn custom_account_usage_permission_request(
+    values: Option<&[ProviderExtensionValuesInput]>,
+    base_url: &str,
+) -> Result<Option<ProviderAccountUsageCustomPermissionRequest>, String> {
+    let Some(value) = values.and_then(|values| {
+        values
+            .iter()
+            .find(|value| is_account_usage_extension_input(value))
+    }) else {
+        return Ok(None);
+    };
+    if value.values.get("adapterKind").and_then(Value::as_str) != Some("custom")
+        || value.values.get("customEnabled").and_then(Value::as_bool) != Some(true)
+    {
+        return Ok(None);
+    }
+    let custom = custom_config_from_value_raw(&value.values)?;
+    let base_origin = custom_account_usage_base_origin(base_url)?;
+    let network_origins = custom_account_usage_network_origins(base_url, &custom.allowed_origins)?;
+    Ok(Some(ProviderAccountUsageCustomPermissionRequest {
+        fingerprint: custom_account_usage_permission_fingerprint(&custom),
+        base_origin,
+        network_origins,
+    }))
+}
+
+pub(crate) fn add_custom_account_usage_permission_proof(
+    values: &mut Option<Vec<ProviderExtensionValuesInput>>,
+    fingerprint: &str,
+    base_origin: &str,
+) -> Result<(), String> {
+    let value = values
+        .as_mut()
+        .and_then(|values| {
+            values
+                .iter_mut()
+                .find(|value| is_account_usage_extension_input(value))
+        })
+        .ok_or_else(|| "自定义账户用量配置不存在".to_string())?;
+    let object = value
+        .values
+        .as_object_mut()
+        .ok_or_else(|| "自定义账户用量配置必须是对象".to_string())?;
+    object.insert(
+        CUSTOM_ACCOUNT_USAGE_PERMISSION_PROOF_FIELD.to_string(),
+        Value::String(fingerprint.to_string()),
+    );
+    object.insert(
+        CUSTOM_ACCOUNT_USAGE_PERMISSION_BASE_ORIGIN_PROOF_FIELD.to_string(),
+        Value::String(base_origin.to_string()),
+    );
+    Ok(())
+}
+
+pub(crate) fn custom_account_usage_saved_permission_matches(
+    values: &[ProviderExtensionValues],
+    fingerprint: &str,
+    base_origin: &str,
+) -> bool {
+    matches!(
+        config_from_extension_values(values),
+        ProviderAccountUsageConfigState::Configured(ProviderAccountUsageConfig {
+            adapter_kind: ProviderAccountUsageAdapterKind::Custom,
+            custom: Some(ref custom),
+            ..
+        }) if custom.enabled
+            && custom_account_usage_permission_fingerprint(custom) == fingerprint
+            && custom.permission_base_origin.as_deref() == Some(base_origin)
+    )
+}
+
+fn is_account_usage_extension_input(value: &ProviderExtensionValuesInput) -> bool {
+    value.plugin_id.trim() == ACCOUNT_USAGE_PLUGIN_ID
+        && value.namespace.trim() == ACCOUNT_USAGE_NAMESPACE
+}
+
+pub(crate) fn custom_config_from_draft(
+    draft: ProviderAccountUsageCustomScriptDraft,
+) -> Result<ProviderAccountUsageCustomConfig, String> {
+    validate_custom_script(&draft.custom_script)?;
+    let allowed_origins = normalize_custom_allowed_origins(&draft.custom_allowed_origins)?;
+    let timeout_seconds = validate_custom_timeout_seconds(draft.custom_timeout_seconds)?;
+    Ok(ProviderAccountUsageCustomConfig {
+        script: draft.custom_script,
+        allowed_origins,
+        timeout_seconds,
+        enabled: true,
+        permission_base_origin: None,
     })
+}
+
+fn custom_config_from_value_raw(
+    values: &Value,
+) -> Result<ProviderAccountUsageCustomConfig, String> {
+    let script = values
+        .get("customScript")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "自定义账户用量脚本不能为空".to_string())?
+        .to_string();
+    validate_custom_script(&script)?;
+
+    let raw_allowed_origins = match values.get("customAllowedOrigins") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(origins)) => origins
+            .iter()
+            .map(|origin| {
+                origin
+                    .as_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| "自定义账户用量允许域名必须是字符串数组".to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        Some(_) => {
+            return Err("自定义账户用量允许域名必须是字符串数组".to_string());
+        }
+    };
+    let allowed_origins = normalize_custom_allowed_origins(&raw_allowed_origins)?;
+
+    let timeout_seconds = values
+        .get("customTimeoutSeconds")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "自定义账户用量请求超时必须是整数秒".to_string())?;
+    let timeout_seconds = validate_custom_timeout_seconds(timeout_seconds)?;
+
+    Ok(ProviderAccountUsageCustomConfig {
+        script,
+        allowed_origins,
+        timeout_seconds,
+        enabled: values
+            .get("customEnabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        permission_base_origin: None,
+    })
+}
+
+fn custom_config_from_value(values: &Value) -> Result<ProviderAccountUsageCustomConfig, String> {
+    let mut custom = custom_config_from_value_raw(values)?;
+    let expected = custom_account_usage_permission_fingerprint(&custom);
+    custom.permission_base_origin = values
+        .get(CUSTOM_ACCOUNT_USAGE_PERMISSION_BASE_ORIGIN_FIELD)
+        .and_then(Value::as_str)
+        .and_then(|origin| normalize_custom_allowed_origins(&[origin.to_string()]).ok())
+        .and_then(|mut origins| origins.pop());
+    custom.enabled = custom.enabled
+        && values
+            .get(CUSTOM_ACCOUNT_USAGE_PERMISSION_FINGERPRINT_FIELD)
+            .and_then(Value::as_str)
+            == Some(expected.as_str())
+        && custom.permission_base_origin.is_some();
+    Ok(custom)
+}
+
+pub(crate) fn custom_account_usage_permission_fingerprint(
+    config: &ProviderAccountUsageCustomConfig,
+) -> String {
+    let mut hasher = Sha256::new();
+    hash_custom_permission_segment(&mut hasher, config.script.as_bytes());
+    for origin in &config.allowed_origins {
+        hash_custom_permission_segment(&mut hasher, origin.as_bytes());
+    }
+    format!("{:x}", hasher.finalize())
+}
+
+fn hash_custom_permission_segment(hasher: &mut Sha256, value: &[u8]) {
+    hasher.update((value.len() as u64).to_be_bytes());
+    hasher.update(value);
+}
+
+fn validate_custom_script(script: &str) -> Result<(), String> {
+    if script.trim().is_empty() {
+        return Err("自定义账户用量脚本不能为空".to_string());
+    }
+    if script.len() > CUSTOM_ACCOUNT_USAGE_MAX_SCRIPT_BYTES {
+        return Err("自定义账户用量脚本超过大小限制".to_string());
+    }
+    Ok(())
+}
+
+fn validate_custom_timeout_seconds(timeout_seconds: u64) -> Result<u64, String> {
+    if !(CUSTOM_ACCOUNT_USAGE_TIMEOUT_MIN_SECONDS..=CUSTOM_ACCOUNT_USAGE_TIMEOUT_MAX_SECONDS)
+        .contains(&timeout_seconds)
+    {
+        return Err(format!(
+            "自定义账户用量请求超时必须在 {}-{} 秒之间",
+            CUSTOM_ACCOUNT_USAGE_TIMEOUT_MIN_SECONDS, CUSTOM_ACCOUNT_USAGE_TIMEOUT_MAX_SECONDS
+        ));
+    }
+    Ok(timeout_seconds)
+}
+
+pub(crate) fn normalize_custom_allowed_origins(raw: &[String]) -> Result<Vec<String>, String> {
+    let mut normalized = BTreeSet::new();
+    for origin in raw {
+        if origin.len() > CUSTOM_ACCOUNT_USAGE_MAX_ORIGIN_BYTES {
+            return Err("自定义账户用量允许域名过长".to_string());
+        }
+        let value = origin.trim();
+        if value.is_empty() {
+            return Err("自定义账户用量允许域名不能为空".to_string());
+        }
+        let url =
+            reqwest::Url::parse(value).map_err(|_| "自定义账户用量允许域名无效".to_string())?;
+        if url.scheme() != "https"
+            || url.host_str().is_none()
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.query().is_some()
+            || url.fragment().is_some()
+            || !matches!(url.path(), "" | "/")
+        {
+            return Err("自定义账户用量允许域名必须是 HTTPS Origin".to_string());
+        }
+        let canonical = url.origin().ascii_serialization();
+        if canonical == "null" {
+            return Err("自定义账户用量允许域名无效".to_string());
+        }
+        normalized.insert(canonical);
+    }
+    if normalized.len() > CUSTOM_ACCOUNT_USAGE_MAX_ALLOWED_ORIGINS {
+        return Err("自定义账户用量允许域名数量超过限制".to_string());
+    }
+    Ok(normalized.into_iter().collect())
+}
+
+pub(crate) fn custom_account_usage_network_origins(
+    base_url: &str,
+    allowed_origins: &[String],
+) -> Result<Vec<String>, String> {
+    let base_origin = custom_account_usage_base_origin(base_url)?;
+    let mut origins = BTreeSet::from([base_origin]);
+    origins.extend(allowed_origins.iter().cloned());
+    Ok(origins.into_iter().collect())
+}
+
+pub(crate) fn custom_account_usage_base_origin(base_url: &str) -> Result<String, String> {
+    let base_url = reqwest::Url::parse(base_url.trim())
+        .map_err(|_| "供应商 Base URL 必须是有效 HTTPS URL".to_string())?;
+    if base_url.scheme() != "https"
+        || base_url.host_str().is_none()
+        || !base_url.username().is_empty()
+        || base_url.password().is_some()
+        || base_url.query().is_some()
+        || base_url.fragment().is_some()
+    {
+        return Err("供应商 Base URL 必须是有效 HTTPS URL".to_string());
+    }
+    let origin = base_url.origin().ascii_serialization();
+    if origin == "null" {
+        return Err("供应商 Base URL 必须是有效 HTTPS URL".to_string());
+    }
+    Ok(origin)
 }
 
 pub(crate) fn normalize_newapi_user_id(raw: &str) -> Result<String, String> {
@@ -425,6 +856,7 @@ fn config_from_value(values: &Value) -> ProviderAccountUsageConfigState {
         "sub2api" => ProviderAccountUsageConfigState::Configured(ProviderAccountUsageConfig {
             adapter_kind: ProviderAccountUsageAdapterKind::Sub2api,
             new_api_query_mode: NewapiQueryMode::Billing,
+            custom: None,
         }),
         "newapi" => {
             let new_api_query_mode = match values.get("newApiQueryMode").and_then(Value::as_str) {
@@ -434,8 +866,17 @@ fn config_from_value(values: &Value) -> ProviderAccountUsageConfigState {
             ProviderAccountUsageConfigState::Configured(ProviderAccountUsageConfig {
                 adapter_kind: ProviderAccountUsageAdapterKind::Newapi,
                 new_api_query_mode,
+                custom: None,
             })
         }
+        "custom" => match custom_config_from_value(values) {
+            Ok(custom) => ProviderAccountUsageConfigState::Configured(ProviderAccountUsageConfig {
+                adapter_kind: ProviderAccountUsageAdapterKind::Custom,
+                new_api_query_mode: NewapiQueryMode::Billing,
+                custom: Some(custom),
+            }),
+            Err(message) => ProviderAccountUsageConfigState::Invalid(message),
+        },
         other => ProviderAccountUsageConfigState::Invalid(format!(
             "unsupported account usage adapterKind={other}"
         )),
@@ -536,6 +977,11 @@ pub(crate) fn build_account_usage_url(
         }
         ProviderAccountUsageAdapterKind::Newapi => {
             return Err("SEC_INVALID_INPUT: NewAPI requires the billing endpoint set".to_string());
+        }
+        ProviderAccountUsageAdapterKind::Custom => {
+            return Err(
+                "SEC_INVALID_INPUT: custom account usage requires a script request".to_string(),
+            );
         }
     }
 
@@ -906,6 +1352,15 @@ pub(crate) fn parse_account_usage_response(
         }
         ProviderAccountUsageAdapterKind::Newapi => {
             parse_newapi_response(body, fetched_at, now_unix)
+        }
+        ProviderAccountUsageAdapterKind::Custom => {
+            let mut result = ProviderAccountUsageResult::fetched(
+                ProviderAccountUsageAdapterKind::Custom,
+                ProviderAccountUsageStatus::QueryFailed,
+                fetched_at,
+            );
+            result.message = Some("自定义账户用量查询必须由脚本解析".to_string());
+            result
         }
     }
 }
@@ -2363,6 +2818,7 @@ mod tests {
             ProviderAccountUsageConfigState::Configured(ProviderAccountUsageConfig {
                 adapter_kind: ProviderAccountUsageAdapterKind::Newapi,
                 new_api_query_mode: NewapiQueryMode::Billing,
+                custom: None,
             })
         );
 
@@ -2387,6 +2843,273 @@ mod tests {
         assert!(!serialized.contains("UserId"));
         assert!(!serialized.contains("AccessToken"));
         assert!(!serialized.contains("SYNTHETIC_PRIVATE_VALUE"));
+    }
+
+    #[test]
+    fn custom_account_usage_config_stays_local_and_requires_acknowledgement() {
+        let source = json!({
+            "adapterKind": "custom",
+            "customScript": "({ request: () => ({}), parse: () => ({ status: 'available' }) })",
+            "customAllowedOrigins": [
+                "https://usage.example.test:443/",
+                "https://usage.example.test"
+            ],
+            "customTimeoutSeconds": 7,
+            "customEnabled": true,
+            "timedRefreshEnabled": false,
+            "refreshIntervalSeconds": 120
+        });
+
+        validate_account_usage_extension_value(&source).expect("valid custom config");
+        let local = sanitize_account_usage_extension_value(&source);
+        assert_eq!(local["adapterKind"], "custom");
+        assert_eq!(
+            local["customAllowedOrigins"],
+            json!(["https://usage.example.test"])
+        );
+        assert_eq!(local["customTimeoutSeconds"], 7);
+        assert_eq!(local["customEnabled"], false);
+        assert!(local
+            .get(CUSTOM_ACCOUNT_USAGE_PERMISSION_FINGERPRINT_FIELD)
+            .is_some());
+        assert!(local
+            .get(CUSTOM_ACCOUNT_USAGE_PERMISSION_PROOF_FIELD)
+            .is_none());
+
+        let mut values = Some(vec![ProviderExtensionValuesInput {
+            plugin_id: ACCOUNT_USAGE_PLUGIN_ID.to_string(),
+            namespace: ACCOUNT_USAGE_NAMESPACE.to_string(),
+            values: source,
+        }]);
+        let permission = custom_account_usage_permission_request(
+            values.as_deref(),
+            "https://api.example.test/v1",
+        )
+        .expect("valid permission request")
+        .expect("enabled custom config requires acknowledgement");
+        assert_eq!(
+            permission.network_origins,
+            vec![
+                "https://api.example.test".to_string(),
+                "https://usage.example.test".to_string(),
+            ]
+        );
+        add_custom_account_usage_permission_proof(
+            &mut values,
+            &permission.fingerprint,
+            &permission.base_origin,
+        )
+        .expect("add backend permission proof");
+
+        let acknowledged = sanitize_account_usage_extension_value_for_persistence(
+            &values.as_ref().expect("custom values")[0].values,
+            None,
+            Some("https://api.example.test/v1"),
+        );
+        assert_eq!(acknowledged["customEnabled"], true);
+        assert_eq!(
+            acknowledged[CUSTOM_ACCOUNT_USAGE_PERMISSION_FINGERPRINT_FIELD],
+            permission.fingerprint
+        );
+        assert!(acknowledged
+            .get(CUSTOM_ACCOUNT_USAGE_PERMISSION_PROOF_FIELD)
+            .is_none());
+        assert_eq!(
+            acknowledged[CUSTOM_ACCOUNT_USAGE_PERMISSION_BASE_ORIGIN_FIELD],
+            "https://api.example.test"
+        );
+
+        let portable = sanitize_account_usage_extension_value_for_portable(&acknowledged);
+        assert_eq!(portable["adapterKind"], "disabled");
+        assert!(portable.get("customScript").is_none());
+        assert!(portable.get("customAllowedOrigins").is_none());
+        assert!(portable.get("customEnabled").is_none());
+        assert!(portable
+            .get(CUSTOM_ACCOUNT_USAGE_PERMISSION_FINGERPRINT_FIELD)
+            .is_none());
+        assert!(portable
+            .get(CUSTOM_ACCOUNT_USAGE_PERMISSION_BASE_ORIGIN_FIELD)
+            .is_none());
+    }
+
+    #[test]
+    fn custom_account_usage_changes_invalidate_the_saved_permission_fingerprint() {
+        let source = json!({
+            "adapterKind": "custom",
+            "customScript": "({ request: () => ({}), parse: () => ({ status: 'available' }) })",
+            "customAllowedOrigins": ["https://usage.example.test"],
+            "customTimeoutSeconds": 7,
+            "customEnabled": true
+        });
+        let mut values = Some(vec![ProviderExtensionValuesInput {
+            plugin_id: ACCOUNT_USAGE_PLUGIN_ID.to_string(),
+            namespace: ACCOUNT_USAGE_NAMESPACE.to_string(),
+            values: source,
+        }]);
+        let permission = custom_account_usage_permission_request(
+            values.as_deref(),
+            "https://api.example.test/v1",
+        )
+        .expect("valid permission request")
+        .expect("enabled custom config requires acknowledgement");
+        add_custom_account_usage_permission_proof(
+            &mut values,
+            &permission.fingerprint,
+            &permission.base_origin,
+        )
+        .expect("add backend permission proof");
+        let acknowledged = sanitize_account_usage_extension_value_for_persistence(
+            &values.as_ref().expect("custom values")[0].values,
+            None,
+            Some("https://api.example.test/v1"),
+        );
+        assert_eq!(acknowledged["customEnabled"], true);
+
+        let mut changed_script = acknowledged.clone();
+        changed_script["customScript"] = json!(
+            "({ request: () => ({ path: '/usage' }), parse: () => ({ status: 'available' }) })"
+        );
+        let mut changed_origin = acknowledged.clone();
+        changed_origin["customAllowedOrigins"] = json!(["https://billing.example.test"]);
+
+        for (change, changed) in [
+            ("script", changed_script),
+            ("allowed origin", changed_origin),
+        ] {
+            assert_eq!(
+                changed[CUSTOM_ACCOUNT_USAGE_PERMISSION_FINGERPRINT_FIELD],
+                acknowledged[CUSTOM_ACCOUNT_USAGE_PERMISSION_FINGERPRINT_FIELD],
+                "test input must reuse the old {change} permission fingerprint"
+            );
+            let ProviderAccountUsageConfigState::Configured(config) = config_from_value(&changed)
+            else {
+                panic!("changed {change} config must remain structurally valid");
+            };
+            assert!(
+                !config.custom.expect("custom config").enabled,
+                "changed {change} must invalidate the saved acknowledgement"
+            );
+
+            let persisted = sanitize_account_usage_extension_value_for_persistence(
+                &changed,
+                Some(&acknowledged),
+                Some("https://api.example.test/v1"),
+            );
+            assert_eq!(
+                persisted["customEnabled"], false,
+                "changed {change} must require a new backend permission proof"
+            );
+            assert_ne!(
+                persisted[CUSTOM_ACCOUNT_USAGE_PERMISSION_FINGERPRINT_FIELD],
+                acknowledged[CUSTOM_ACCOUNT_USAGE_PERMISSION_FINGERPRINT_FIELD],
+                "changed {change} must receive a new permission fingerprint"
+            );
+        }
+
+        let changed_base_origin = sanitize_account_usage_extension_value_for_persistence(
+            &acknowledged,
+            Some(&acknowledged),
+            Some("https://replacement.example.test/v1"),
+        );
+        assert_eq!(changed_base_origin["customEnabled"], false);
+        assert!(changed_base_origin
+            .get(CUSTOM_ACCOUNT_USAGE_PERMISSION_BASE_ORIGIN_FIELD)
+            .is_none());
+        let ProviderAccountUsageConfigState::Configured(config) =
+            config_from_value(&changed_base_origin)
+        else {
+            panic!("changed Base Origin config must remain structurally valid");
+        };
+        assert!(!config.custom.expect("custom config").enabled);
+    }
+
+    #[test]
+    fn custom_account_usage_proof_stripping_normalizes_extension_routing_keys() {
+        let mut values = Some(vec![ProviderExtensionValuesInput {
+            plugin_id: format!(" {ACCOUNT_USAGE_PLUGIN_ID} "),
+            namespace: format!(" {ACCOUNT_USAGE_NAMESPACE} "),
+            values: json!({
+                "adapterKind": "custom",
+                "customScript": "({ request: () => ({}), parse: () => ({ status: 'available' }) })",
+                "customAllowedOrigins": [],
+                "customTimeoutSeconds": 5,
+                "customEnabled": true,
+                "customPermissionProof": "FORGED",
+                "customPermissionBaseOriginProof": "https://attacker.example.test"
+            }),
+        }]);
+
+        strip_custom_account_usage_permission_proofs(&mut values);
+        let values = values.as_ref().expect("extension values");
+        assert!(values[0]
+            .values
+            .get(CUSTOM_ACCOUNT_USAGE_PERMISSION_PROOF_FIELD)
+            .is_none());
+        assert!(values[0]
+            .values
+            .get(CUSTOM_ACCOUNT_USAGE_PERMISSION_BASE_ORIGIN_PROOF_FIELD)
+            .is_none());
+        assert!(custom_account_usage_permission_request(
+            Some(values),
+            "https://api.example.test/v1"
+        )
+        .expect("valid permission request")
+        .is_some());
+    }
+
+    #[test]
+    fn custom_account_usage_config_rejects_unsafe_origin_and_oversized_source() {
+        let invalid_origin = json!({
+            "adapterKind": "custom",
+            "customScript": "({ request: () => ({}), parse: () => ({ status: 'available' }) })",
+            "customAllowedOrigins": ["http://usage.example.test"],
+            "customTimeoutSeconds": 5
+        });
+        assert!(validate_account_usage_extension_value(&invalid_origin)
+            .unwrap_err()
+            .contains("HTTPS Origin"));
+
+        let oversized_source = json!({
+            "adapterKind": "custom",
+            "customScript": "x".repeat(CUSTOM_ACCOUNT_USAGE_MAX_SCRIPT_BYTES + 1),
+            "customAllowedOrigins": [],
+            "customTimeoutSeconds": 5
+        });
+        assert!(validate_account_usage_extension_value(&oversized_source)
+            .unwrap_err()
+            .contains("大小限制"));
+    }
+
+    #[test]
+    fn custom_account_usage_origin_limit_counts_normalized_unique_origins() {
+        let repeated = (0..=CUSTOM_ACCOUNT_USAGE_MAX_ALLOWED_ORIGINS)
+            .map(|index| {
+                if index % 2 == 0 {
+                    "https://USAGE.example.test".to_string()
+                } else {
+                    "https://usage.example.test/".to_string()
+                }
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            normalize_custom_allowed_origins(&repeated).unwrap(),
+            vec!["https://usage.example.test".to_string()]
+        );
+
+        let unique = (0..=CUSTOM_ACCOUNT_USAGE_MAX_ALLOWED_ORIGINS)
+            .map(|index| format!("https://usage-{index}.example.test"))
+            .collect::<Vec<_>>();
+        assert!(normalize_custom_allowed_origins(&unique)
+            .unwrap_err()
+            .contains("数量超过限制"));
+
+        let oversized_raw = vec![format!(
+            "{}https://usage.example.test",
+            " ".repeat(CUSTOM_ACCOUNT_USAGE_MAX_ORIGIN_BYTES)
+        )];
+        assert!(normalize_custom_allowed_origins(&oversized_raw)
+            .unwrap_err()
+            .contains("域名过长"));
     }
 
     #[test]

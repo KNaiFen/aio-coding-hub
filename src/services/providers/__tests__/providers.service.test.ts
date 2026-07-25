@@ -12,6 +12,7 @@ import {
   providerOAuthCancelDeviceFlow,
   providerOAuthDisconnect,
   providerAccountUsageFetch,
+  providerAccountUsageTestCustomScript,
   providerOAuthFetchLimits,
   providerOAuthPollDeviceFlow,
   providerOAuthRefresh,
@@ -58,6 +59,7 @@ vi.mock("../../../generated/bindings", async () => {
       providerOauthDisconnect: vi.fn(),
       providerOauthStatus: vi.fn(),
       providerAccountUsageFetch: vi.fn(),
+      providerAccountUsageTestCustomScript: vi.fn(),
       providerOauthFetchLimits: vi.fn(),
       providerOauthResetCodexQuota: vi.fn(),
       providerTestAvailability: vi.fn(),
@@ -852,6 +854,44 @@ describe("services/providers/providers", () => {
       expect.anything(),
       expect.objectContaining({ apiKey: expect.anything() })
     );
+  });
+
+  it("providerAccountUsageTestCustomScript uses generated ipc without exposing credentials", async () => {
+    vi.mocked(commands.providerAccountUsageTestCustomScript).mockResolvedValueOnce({
+      status: "ok",
+      data: {
+        adapter_kind: "custom",
+        status: "available",
+        freshness: "fresh",
+        plan_name: null,
+        balance: 9,
+        plan_remaining: null,
+        used: 1,
+        total: 10,
+        unit: "USD",
+        unit_note: null,
+        daily_used: null,
+        daily_total: null,
+        weekly_used: null,
+        weekly_total: null,
+        monthly_used: null,
+        monthly_total: null,
+        expires_at: null,
+        last_fetched_at: 1_700_000_000,
+        message: null,
+      },
+    });
+    const draft = {
+      customScript: "({ request: () => ({}), parse: () => ({ status: 'available' }) })",
+      customAllowedOrigins: ["https://usage.example.test"],
+      customTimeoutSeconds: 5,
+    };
+
+    const result = await providerAccountUsageTestCustomScript(53, draft);
+
+    expect(result?.adapter_kind).toBe("custom");
+    expect(result?.balance).toBe(9);
+    expect(commands.providerAccountUsageTestCustomScript).toHaveBeenCalledWith(53, draft);
   });
 
   it("providerOAuthResetCodexQuota uses risky confirm resource scoped to provider", async () => {

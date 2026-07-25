@@ -41,6 +41,8 @@ function isSensitiveLogKey(key: string): boolean {
     compact === "usercode" ||
     compact === "codeverifier" ||
     compact === "nonce" ||
+    compact === "customscript" ||
+    compact === "customallowedorigins" ||
     compact.includes("capability")
   );
 }

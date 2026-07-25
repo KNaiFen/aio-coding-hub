@@ -240,8 +240,75 @@ pub(crate) fn replace_extension_values(
     provider_id: i64,
     values: Option<&[ProviderExtensionValuesInput]>,
 ) -> crate::shared::error::AppResult<bool> {
+    let existing_account_usage_values = conn
+        .query_row(
+            r#"
+SELECT values_json
+FROM provider_extension_values
+WHERE provider_id = ?1 AND plugin_id = ?2 AND namespace = ?3
+"#,
+            params![
+                provider_id,
+                crate::domain::provider_account_usage::ACCOUNT_USAGE_PLUGIN_ID,
+                crate::domain::provider_account_usage::ACCOUNT_USAGE_NAMESPACE,
+            ],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| db_err!("failed to read provider account usage values: {error}"))?
+        .map(|raw| {
+            serde_json::from_str::<serde_json::Value>(&raw).map_err(|_| {
+                crate::shared::error::AppError::from(
+                    "DB_INVALID_DATA: provider account usage values are invalid".to_string(),
+                )
+            })
+        })
+        .transpose()?;
+    let current_base_url = conn
+        .query_row(
+            "SELECT base_url FROM providers WHERE id = ?1",
+            params![provider_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| db_err!("failed to read provider base URL: {error}"))?
+        .ok_or_else(|| crate::shared::error::AppError::from("DB_NOT_FOUND: provider not found"))?;
+
     let Some(values) = values else {
-        return Ok(false);
+        let Some(existing_values) = existing_account_usage_values.as_ref() else {
+            return Ok(false);
+        };
+        let normalized_values = crate::domain::provider_account_usage::
+            sanitize_account_usage_extension_value_for_persistence(
+                existing_values,
+                Some(existing_values),
+                Some(&current_base_url),
+            );
+        if normalized_values == *existing_values {
+            return Ok(false);
+        }
+
+        let values_json = serde_json::to_string(&normalized_values)
+            .map_err(|error| format!("SYSTEM_ERROR: {error}"))?;
+        let changed = conn
+            .execute(
+                r#"
+UPDATE provider_extension_values
+SET values_json = ?1, updated_at = ?2
+WHERE provider_id = ?3 AND plugin_id = ?4 AND namespace = ?5
+"#,
+                params![
+                    values_json,
+                    now_unix_seconds(),
+                    provider_id,
+                    crate::domain::provider_account_usage::ACCOUNT_USAGE_PLUGIN_ID,
+                    crate::domain::provider_account_usage::ACCOUNT_USAGE_NAMESPACE,
+                ],
+            )
+            .map_err(|error| {
+                db_err!("failed to sanitize provider account usage values: {error}")
+            })?;
+        return Ok(changed > 0);
     };
 
     conn.execute(
@@ -270,9 +337,16 @@ pub(crate) fn replace_extension_values(
             == crate::domain::provider_account_usage::ACCOUNT_USAGE_PLUGIN_ID
             && namespace == crate::domain::provider_account_usage::ACCOUNT_USAGE_NAMESPACE
         {
-            crate::domain::provider_account_usage::sanitize_account_usage_extension_value(
+            crate::domain::provider_account_usage::validate_account_usage_extension_value(
                 &value.values,
             )
+            .map_err(|message| crate::shared::error::AppError::new("SEC_INVALID_INPUT", message))?;
+            crate::domain::provider_account_usage::
+                sanitize_account_usage_extension_value_for_persistence(
+                    &value.values,
+                    existing_account_usage_values.as_ref(),
+                    Some(&current_base_url),
+                )
         } else {
             value.values.clone()
         };
@@ -360,32 +434,150 @@ pub(crate) fn get_account_usage_fetch_context(
     conn: &Connection,
     provider_id: i64,
 ) -> crate::shared::error::AppResult<ProviderAccountUsageFetchContext> {
-    let mut context = conn
+    let row = conn
         .query_row(
             r#"
-SELECT base_url, base_urls_json, auth_mode, source_provider_id
-FROM providers
-WHERE id = ?1
+SELECT
+  p.provider_uuid,
+  p.base_url,
+  p.base_urls_json,
+  p.auth_mode,
+  p.source_provider_id,
+  e.values_json,
+  e.updated_at
+FROM providers p
+LEFT JOIN provider_extension_values e
+  ON e.provider_id = p.id
+ AND e.plugin_id = ?2
+ AND e.namespace = ?3
+WHERE p.id = ?1
 "#,
-            params![provider_id],
+            params![
+                provider_id,
+                crate::domain::provider_account_usage::ACCOUNT_USAGE_PLUGIN_ID,
+                crate::domain::provider_account_usage::ACCOUNT_USAGE_NAMESPACE,
+            ],
             |row| {
-                let base_url: String = row.get(0)?;
-                let base_urls_json: String = row.get(1)?;
-                Ok(ProviderAccountUsageFetchContext {
-                    base_urls: base_urls_from_row(&base_url, &base_urls_json),
-                    auth_mode: row
-                        .get::<_, Option<String>>(2)?
-                        .unwrap_or_else(|| "api_key".to_string()),
-                    source_provider_id: row.get(3)?,
-                    extension_values: Vec::new(),
-                })
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<i64>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<i64>>(6)?,
+                ))
             },
         )
         .optional()
         .map_err(|error| db_err!("failed to query provider account usage context: {error}"))?
         .ok_or_else(|| crate::shared::error::AppError::from("DB_NOT_FOUND: provider not found"))?;
-    context.extension_values = list_extension_values(conn, provider_id)?;
-    Ok(context)
+    let (
+        provider_uuid,
+        base_url,
+        base_urls_json,
+        auth_mode,
+        source_provider_id,
+        values_json,
+        updated_at,
+    ) = row;
+    Ok(ProviderAccountUsageFetchContext {
+        provider_uuid,
+        base_urls: base_urls_from_row(&base_url, &base_urls_json),
+        auth_mode: auth_mode.unwrap_or_else(|| "api_key".to_string()),
+        source_provider_id,
+        extension_values: account_usage_extension_values_from_row(values_json, updated_at)?,
+    })
+}
+
+pub(crate) fn get_account_usage_credential_context(
+    conn: &Connection,
+    provider_id: i64,
+) -> crate::shared::error::AppResult<ProviderAccountUsageCredentialContext> {
+    let row = conn
+        .query_row(
+            r#"
+SELECT
+  p.provider_uuid,
+  p.base_url,
+  p.base_urls_json,
+  p.auth_mode,
+  p.source_provider_id,
+  p.api_key_plaintext,
+  e.values_json,
+  e.updated_at
+FROM providers p
+LEFT JOIN provider_extension_values e
+  ON e.provider_id = p.id
+ AND e.plugin_id = ?2
+ AND e.namespace = ?3
+WHERE p.id = ?1
+"#,
+            params![
+                provider_id,
+                crate::domain::provider_account_usage::ACCOUNT_USAGE_PLUGIN_ID,
+                crate::domain::provider_account_usage::ACCOUNT_USAGE_NAMESPACE,
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<i64>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<i64>>(7)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| {
+            db_err!("failed to query provider account usage credential context: {error}")
+        })?
+        .ok_or_else(|| crate::shared::error::AppError::from("DB_NOT_FOUND: provider not found"))?;
+    let (
+        provider_uuid,
+        base_url,
+        base_urls_json,
+        auth_mode,
+        source_provider_id,
+        api_key_plaintext,
+        values_json,
+        updated_at,
+    ) = row;
+    Ok(ProviderAccountUsageCredentialContext {
+        provider_uuid,
+        base_urls: base_urls_from_row(&base_url, &base_urls_json),
+        auth_mode: auth_mode.unwrap_or_else(|| "api_key".to_string()),
+        source_provider_id,
+        extension_values: account_usage_extension_values_from_row(values_json, updated_at)?,
+        api_key_plaintext: api_key_plaintext.unwrap_or_default(),
+    })
+}
+
+fn account_usage_extension_values_from_row(
+    values_json: Option<String>,
+    updated_at: Option<i64>,
+) -> crate::shared::error::AppResult<Vec<ProviderExtensionValues>> {
+    let Some(values_json) = values_json else {
+        return Ok(Vec::new());
+    };
+    let values = serde_json::from_str(&values_json).map_err(|_| {
+        crate::shared::error::AppError::from(
+            "DB_INVALID_DATA: provider account usage values are invalid".to_string(),
+        )
+    })?;
+    Ok(vec![ProviderExtensionValues {
+        plugin_id: crate::domain::provider_account_usage::ACCOUNT_USAGE_PLUGIN_ID.to_string(),
+        namespace: crate::domain::provider_account_usage::ACCOUNT_USAGE_NAMESPACE.to_string(),
+        values,
+        updated_at: updated_at.ok_or_else(|| {
+            crate::shared::error::AppError::from(
+                "DB_INVALID_DATA: provider account usage updated_at is missing".to_string(),
+            )
+        })?,
+    }])
 }
 
 pub(crate) fn claude_terminal_launch_context(
