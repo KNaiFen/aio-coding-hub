@@ -5,6 +5,7 @@ use crate::providers;
 use crate::{circuit_breaker, session_manager};
 
 pub(super) struct ProviderSelection {
+    pub(super) route_generation: session_manager::SessionRouteGeneration,
     pub(super) effective_sort_mode_id: Option<i64>,
     pub(super) providers: Vec<providers::ProviderForGateway>,
     pub(super) bound_provider_order: Option<Vec<i64>>,
@@ -19,11 +20,12 @@ pub(super) fn select_providers_with_session_binding<R: tauri::Runtime>(
     created_at: i64,
     enable_session_reuse: bool,
 ) -> crate::shared::error::AppResult<ProviderSelection> {
+    let route_generation = state.session.capture_route_generation(cli_key);
     let bound_sort_mode_id = if enable_session_reuse {
         session_id.and_then(|sid| {
             state
                 .session
-                .get_bound_sort_mode_id(cli_key, sid, created_at)
+                .get_bound_sort_mode_id(cli_key, sid, route_generation, created_at)
         })
     } else {
         None
@@ -55,14 +57,16 @@ pub(super) fn select_providers_with_session_binding<R: tauri::Runtime>(
             state.session.bind_sort_mode(
                 cli_key,
                 sid,
+                route_generation,
                 effective_sort_mode_id,
                 Some(provider_order),
                 created_at,
             );
 
-            bound_provider_order = state
-                .session
-                .get_bound_provider_order(cli_key, sid, created_at);
+            bound_provider_order =
+                state
+                    .session
+                    .get_bound_provider_order(cli_key, sid, route_generation, created_at);
 
             if let Some(order) = bound_provider_order.as_deref() {
                 provider_order::reorder_providers_by_bound_order(&mut providers, order);
@@ -71,6 +75,7 @@ pub(super) fn select_providers_with_session_binding<R: tauri::Runtime>(
     }
 
     Ok(ProviderSelection {
+        route_generation,
         effective_sort_mode_id,
         providers,
         bound_provider_order,
@@ -129,6 +134,7 @@ pub(super) fn resolve_session_bound_provider_id(
     circuit: &circuit_breaker::CircuitBreaker,
     cli_key: &str,
     session_id: Option<&str>,
+    route_generation: session_manager::SessionRouteGeneration,
     created_at: i64,
     enable_session_reuse: bool,
     allow_session_reuse: bool,
@@ -140,8 +146,8 @@ pub(super) fn resolve_session_bound_provider_id(
         return None;
     }
 
-    let bound_provider_id =
-        session_id.and_then(|sid| session.get_bound_provider(cli_key, sid, created_at));
+    let bound_provider_id = session_id
+        .and_then(|sid| session.get_bound_provider(cli_key, sid, route_generation, created_at));
 
     if allow_session_reuse && forced_provider_id.is_none() {
         if let (Some(session_id), Some(bound_provider_id)) = (session_id, bound_provider_id) {
@@ -149,7 +155,7 @@ pub(super) fn resolve_session_bound_provider_id(
                 // The bound provider is no longer eligible for the current session's provider list
                 // (e.g. sort_mode/provider membership changed). Clear the stale binding so it
                 // cannot bypass selection constraints.
-                session.clear_bound_provider(cli_key, session_id, created_at);
+                session.clear_bound_provider(cli_key, session_id, route_generation, created_at);
             } else {
                 let allow = circuit.should_allow(bound_provider_id, created_at).allow;
                 if !allow {

@@ -68,6 +68,7 @@ pub(in crate::gateway) struct StreamFinalizeCtx<R: tauri::Runtime = tauri::Wry> 
     pub(in crate::gateway) plugin_pipeline: Arc<GatewayPluginPipeline>,
     pub(in crate::gateway) circuit: Arc<circuit_breaker::CircuitBreaker>,
     pub(in crate::gateway) session: Arc<session_manager::SessionManager>,
+    pub(in crate::gateway) route_generation: session_manager::SessionRouteGeneration,
     pub(in crate::gateway) session_id: Option<String>,
     pub(in crate::gateway) enable_session_reuse: bool,
     pub(in crate::gateway) sort_mode_id: Option<i64>,

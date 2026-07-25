@@ -98,6 +98,7 @@ pub(super) struct ProxyContext<R: tauri::Runtime = tauri::Wry> {
     // -- session routing --
     pub(super) session_id: Option<String>,
     pub(super) allow_session_reuse: bool,
+    pub(super) route_generation: Option<crate::session_manager::SessionRouteGeneration>,
 
     // -- provider resolution --
     pub(super) effective_sort_mode_id: Option<i64>,
@@ -137,6 +138,9 @@ impl<R: tauri::Runtime> ProxyContext<R> {
             created_at_ms: self.created_at_ms,
             created_at: self.created_at,
             session_id: self.session_id,
+            route_generation: self
+                .route_generation
+                .expect("route_generation must be captured before forwarding"),
             enable_session_reuse: rs.enable_session_reuse,
             requested_model: self.requested_model,
             requested_model_location: self.requested_model_location,

@@ -51,6 +51,20 @@ buildRequestRouteMeta({
 - Updating a route member's reuse priority clears only that CLI's session
   bindings after the durable write; circuit and recent-error runtime state must
   remain intact.
+- A route switch becomes authoritative when its backend command succeeds. The
+  command must durably write the new active route, then advance that CLI's
+  in-memory route generation and clear its bindings before returning success.
+  Advancing the generation is required even when zero bindings are removed.
+- A request captures the current global and CLI route generation before reading
+  session routing state. Binding reads, writes, and provider clears must verify
+  that token under the same lock that owns generations and bindings. Requests
+  that selected a provider before a switch may finish on that provider, but a
+  stale request must not recreate, refresh, replace, or clear a binding after
+  the switch.
+- Active-route persistence must not expose a committed route change through an
+  error result that skips runtime invalidation. Keep result projection inside
+  the write transaction, reserve the WAL writer before validation reads, and
+  make commit the final fallible database step.
 - Every eligible candidate reaches
   `failover_loop/prepare/provider_checks::run_gates`. A circuit, cooldown, or
   provider-limit denial creates one `outcome="skipped"` attempt with its stable
@@ -122,6 +136,16 @@ buildRequestRouteMeta({
 
 - Unit-test selection so a temporarily denied bound provider stays in the
   candidate list while reuse selection returns no bound provider.
+- Unit-test CLI and global route-generation invalidation, including clears that
+  remove zero bindings, and prove stale reads/writes cannot affect a binding
+  created under the current generation.
+- Route-test a gated non-streaming A-to-Default switch and a gated streaming
+  A-to-B switch. Release the old response only after the durable write and
+  generation clear, then prove the next same-session request selects the new
+  route and the late old success cannot overwrite it.
+- Force active-route result projection to fail during A-to-B and A-to-Default
+  updates; both operations must roll back to A instead of committing a change
+  that would skip runtime invalidation.
 - Unit-test that a lower-priority binding and a lower-priority bound-order
   fallback leave higher-priority candidates ahead, while equal-priority
   bindings retain their existing rotation behavior.

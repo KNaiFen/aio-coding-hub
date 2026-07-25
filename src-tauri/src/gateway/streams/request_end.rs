@@ -299,6 +299,8 @@ mod tests {
         log_tx: tokio::sync::mpsc::Sender<request_logs::RequestLogInsert>,
         active_requests: Arc<ActiveRequestRegistry>,
     ) -> StreamFinalizeCtx<tauri::test::MockRuntime> {
+        let session = Arc::new(session_manager::SessionManager::new());
+        let route_generation = session.capture_route_generation("codex");
         StreamFinalizeCtx {
             app,
             db,
@@ -310,7 +312,8 @@ mod tests {
                 HashMap::new(),
                 None,
             )),
-            session: Arc::new(session_manager::SessionManager::new()),
+            session,
+            route_generation,
             session_id: Some("sess-stream-end".to_string()),
             enable_session_reuse: true,
             sort_mode_id: None,

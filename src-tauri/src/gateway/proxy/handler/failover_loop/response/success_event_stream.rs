@@ -10,7 +10,6 @@ use crate::domain::provider_oauth_limits;
 use crate::gateway::proxy::gemini_oauth;
 use crate::gateway::proxy::protocol_bridge;
 use crate::gateway::proxy::provider_router;
-use crate::gateway::proxy::request_context::RequestContext;
 use crate::gateway::proxy::status_override;
 use crate::gateway::proxy::upstream_client_error_rules;
 use std::time::Duration;
@@ -612,7 +611,6 @@ fn buffered_provider_failure_reason(error_code: &str, quota_exhausted: bool) -> 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn handle_success_event_stream<R>(
     ctx: CommonCtx<'_, R>,
-    _input: &RequestContext<R>,
     provider_ctx: ProviderCtx<'_>,
     attempt_ctx: AttemptCtx<'_>,
     _prepared: PreparedProvider,

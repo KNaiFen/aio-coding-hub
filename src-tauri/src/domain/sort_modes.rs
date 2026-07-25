@@ -4,7 +4,7 @@ use crate::db;
 use crate::providers::MAX_SESSION_REUSE_PRIORITY;
 use crate::shared::error::db_err;
 use crate::shared::time::now_unix_seconds;
-use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension, TransactionBehavior};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 
@@ -334,13 +334,18 @@ pub fn set_active(
     let cli_key = cli_key.trim();
     validate_cli_key(cli_key)?;
 
-    let conn = db.open_connection()?;
+    let mut conn = db.open_connection()?;
+    // Reserve the WAL writer before validation reads so concurrent switches cannot
+    // fail while upgrading a stale deferred-transaction snapshot.
+    let tx = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|e| db_err!("failed to start transaction: {e}"))?;
     if let Some(mode_id) = mode_id {
-        ensure_mode_exists(&conn, mode_id)?;
+        ensure_mode_exists(&tx, mode_id)?;
     }
     let now = now_unix_seconds();
 
-    conn.execute(
+    tx.execute(
         r#"
 INSERT INTO sort_mode_active(
   cli_key,
@@ -355,7 +360,10 @@ ON CONFLICT(cli_key) DO UPDATE SET
     )
     .map_err(|e| db_err!("failed to upsert sort_mode_active: {e}"))?;
 
-    read_active_row(&conn, cli_key)
+    let row = read_active_row(&tx, cli_key)?;
+    tx.commit()
+        .map_err(|e| db_err!("failed to commit transaction: {e}"))?;
+    Ok(row)
 }
 
 pub fn list_mode_providers(
@@ -746,6 +754,44 @@ mod tests {
         assert_eq!(active_mode_id(&db, "claude"), None);
         assert_eq!(active_mode_id(&db, "codex"), None);
         assert_eq!(active_mode_id(&db, "gemini"), Some(other_mode.id));
+    }
+
+    #[test]
+    fn set_active_update_rolls_back_when_result_projection_fails() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("sort_mode_active_projection_failure.db");
+        let db = db::init_for_tests(&db_path).expect("init db");
+        let mode_a = create_mode(&db, "Mode A").expect("create Mode A");
+        let mode_b = create_mode(&db, "Mode B").expect("create Mode B");
+        let original = set_active(&db, "claude", Some(mode_a.id)).expect("activate Mode A");
+
+        let conn = db.open_connection().expect("open db");
+        conn.execute_batch(
+            r#"
+CREATE TRIGGER corrupt_sort_mode_active_projection
+AFTER UPDATE ON sort_mode_active
+BEGIN
+  UPDATE sort_mode_active
+  SET updated_at = 'invalid'
+  WHERE cli_key = NEW.cli_key;
+END;
+"#,
+        )
+        .expect("create projection failure trigger");
+        drop(conn);
+
+        for target_mode_id in [Some(mode_b.id), None] {
+            let error = set_active(&db, "claude", target_mode_id)
+                .expect_err("invalid projected row must fail the route switch");
+            assert!(error
+                .to_string()
+                .contains("failed to query sort_mode_active"));
+
+            let conn = db.open_connection().expect("reopen db");
+            let current = read_active_row(&conn, "claude").expect("read current active mode");
+            assert_eq!(current.mode_id, Some(mode_a.id));
+            assert_eq!(current.updated_at, original.updated_at);
+        }
     }
 
     #[test]

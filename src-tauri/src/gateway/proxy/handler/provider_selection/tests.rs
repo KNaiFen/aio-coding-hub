@@ -143,9 +143,11 @@ fn provider_selection_ignores_bound_sort_mode_and_order_when_globally_disabled()
 
     let bound_mode_id = insert_sort_mode_with_providers(&db, &[p2.id, p1.id]);
     let session = Arc::new(session_manager::SessionManager::new());
+    let route_generation = session.capture_route_generation("claude");
     session.bind_sort_mode(
         "claude",
         "sess-global-disabled",
+        route_generation,
         Some(bound_mode_id),
         Some(vec![p2.id, p1.id]),
         100,
@@ -184,9 +186,11 @@ fn provider_selection_keeps_legacy_bound_sort_mode_when_enabled() {
 
     let bound_mode_id = insert_sort_mode_with_providers(&db, &[p2.id, p1.id]);
     let session = Arc::new(session_manager::SessionManager::new());
+    let route_generation = session.capture_route_generation("claude");
     session.bind_sort_mode(
         "claude",
         "sess-global-enabled",
+        route_generation,
         Some(bound_mode_id),
         Some(vec![p2.id, p1.id]),
         100,
@@ -204,6 +208,64 @@ fn provider_selection_keeps_legacy_bound_sort_mode_when_enabled() {
 
     assert_eq!(selection.effective_sort_mode_id, Some(bound_mode_id));
     assert_eq!(ids(&selection.providers), vec![p2.id, p1.id]);
+}
+
+#[test]
+fn stale_sort_mode_write_after_clear_does_not_change_next_selection() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("stale-route-generation.db");
+    let db = crate::db::init_for_tests(&db_path).expect("init db");
+    let p1 = insert_provider(&db, "P1", true);
+    let p2 = insert_provider(&db, "P2", true);
+    providers::default_route_set_order(&db, "claude", vec![p1.id, p2.id])
+        .expect("set default route order");
+
+    let bound_mode_id = insert_sort_mode_with_providers(&db, &[p2.id, p1.id]);
+    let session = Arc::new(session_manager::SessionManager::new());
+    let stale_generation = session.capture_route_generation("claude");
+    session.bind_sort_mode(
+        "claude",
+        "sess-stale-generation",
+        stale_generation,
+        Some(bound_mode_id),
+        Some(vec![p2.id, p1.id]),
+        100,
+    );
+    let state = gateway_state_for_selection(db, session.clone());
+
+    let before_clear = select_providers_with_session_binding(
+        &state,
+        "claude",
+        Some("sess-stale-generation"),
+        101,
+        true,
+    )
+    .expect("select providers before clear");
+    assert_eq!(before_clear.effective_sort_mode_id, Some(bound_mode_id));
+    assert_eq!(ids(&before_clear.providers), vec![p2.id, p1.id]);
+
+    session.clear_cli_bindings("claude");
+    session.bind_sort_mode(
+        "claude",
+        "sess-stale-generation",
+        stale_generation,
+        Some(bound_mode_id),
+        Some(vec![p2.id, p1.id]),
+        102,
+    );
+
+    let after_clear = select_providers_with_session_binding(
+        &state,
+        "claude",
+        Some("sess-stale-generation"),
+        103,
+        true,
+    )
+    .expect("select providers after clear");
+
+    assert!(after_clear.route_generation != stale_generation);
+    assert_eq!(after_clear.effective_sort_mode_id, None);
+    assert_eq!(ids(&after_clear.providers), vec![p1.id, p2.id]);
 }
 
 #[test]
@@ -225,7 +287,15 @@ fn lower_priority_session_binding_keeps_higher_priority_route_candidate_first() 
         None,
     );
     let now = 1000;
-    session.bind_success("claude", "priority-session", fallback.id, None, now);
+    let route_generation = session.capture_route_generation("claude");
+    session.bind_success(
+        "claude",
+        "priority-session",
+        route_generation,
+        fallback.id,
+        None,
+        now,
+    );
     let mut providers = providers::list_enabled_for_gateway_in_mode(&db, "claude", None)
         .expect("list enabled providers");
 
@@ -234,6 +304,7 @@ fn lower_priority_session_binding_keeps_higher_priority_route_candidate_first() 
         &circuit,
         "claude",
         Some("priority-session"),
+        route_generation,
         now,
         true,
         true,
@@ -266,7 +337,8 @@ fn resolve_session_bound_provider_id_skips_disabled_bound_provider() {
         None,
     );
     let now = 1000;
-    session.bind_success("claude", "sess_1", id1, None, now);
+    let route_generation = session.capture_route_generation("claude");
+    session.bind_success("claude", "sess_1", route_generation, id1, None, now);
 
     let mut enabled =
         providers::list_enabled_for_gateway_in_mode(&db, "claude", None).expect("list enabled");
@@ -278,6 +350,7 @@ fn resolve_session_bound_provider_id_skips_disabled_bound_provider() {
         &circuit,
         "claude",
         Some("sess_1"),
+        route_generation,
         now,
         true,
         true,
@@ -311,7 +384,8 @@ fn resolve_session_bound_provider_id_skips_insertion_when_forced_provider_presen
         None,
     );
     let now = 1000;
-    session.bind_success("claude", "sess_1", id1, None, now);
+    let route_generation = session.capture_route_generation("claude");
+    session.bind_success("claude", "sess_1", route_generation, id1, None, now);
 
     let mut enabled =
         providers::list_enabled_for_gateway_in_mode(&db, "claude", None).expect("list enabled");
@@ -323,6 +397,7 @@ fn resolve_session_bound_provider_id_skips_insertion_when_forced_provider_presen
         &circuit,
         "claude",
         Some("sess_1"),
+        route_generation,
         now,
         true,
         true,
@@ -355,7 +430,8 @@ fn resolve_session_bound_provider_id_does_not_insert_when_reuse_disabled() {
         None,
     );
     let now = 1000;
-    session.bind_success("claude", "sess_1", id1, None, now);
+    let route_generation = session.capture_route_generation("claude");
+    session.bind_success("claude", "sess_1", route_generation, id1, None, now);
 
     let mut enabled =
         providers::list_enabled_for_gateway_in_mode(&db, "claude", None).expect("list enabled");
@@ -367,6 +443,7 @@ fn resolve_session_bound_provider_id_does_not_insert_when_reuse_disabled() {
         &circuit,
         "claude",
         Some("sess_1"),
+        route_generation,
         now,
         true,
         false,
@@ -389,7 +466,8 @@ fn resolve_session_bound_provider_id_ignores_binding_when_globally_disabled() {
     let p2 = insert_provider(&db, "P2", true);
     let now = 1000;
     let session = session_manager::SessionManager::new();
-    session.bind_success("claude", "sess_1", p2.id, None, now);
+    let route_generation = session.capture_route_generation("claude");
+    session.bind_success("claude", "sess_1", route_generation, p2.id, None, now);
     let circuit = circuit_breaker::CircuitBreaker::new(
         circuit_breaker::CircuitBreakerConfig::default(),
         HashMap::new(),
@@ -403,6 +481,7 @@ fn resolve_session_bound_provider_id_ignores_binding_when_globally_disabled() {
         &circuit,
         "claude",
         Some("sess_1"),
+        route_generation,
         now,
         false,
         true,
@@ -414,7 +493,7 @@ fn resolve_session_bound_provider_id_ignores_binding_when_globally_disabled() {
     assert_eq!(selected, None);
     assert_eq!(ids(&enabled), vec![p1.id, p2.id]);
     assert_eq!(
-        session.get_bound_provider("claude", "sess_1", now),
+        session.get_bound_provider("claude", "sess_1", route_generation, now),
         Some(p2.id)
     );
 }
@@ -437,7 +516,8 @@ fn resolve_session_bound_provider_id_clears_stale_binding_when_bound_provider_no
         None,
     );
     let now = 1000;
-    session.bind_success("claude", "sess_1", id1, None, now);
+    let route_generation = session.capture_route_generation("claude");
+    session.bind_success("claude", "sess_1", route_generation, id1, None, now);
 
     // Simulate a mode/provider list that no longer contains the bound provider.
     let mut candidates =
@@ -451,6 +531,7 @@ fn resolve_session_bound_provider_id_clears_stale_binding_when_bound_provider_no
         &circuit,
         "claude",
         Some("sess_1"),
+        route_generation,
         now,
         true,
         true,
@@ -462,7 +543,10 @@ fn resolve_session_bound_provider_id_clears_stale_binding_when_bound_provider_no
     // Must NOT re-insert the stale provider; reuse should fall through.
     assert_eq!(selected, None);
     assert_eq!(ids(&candidates), vec![id2]);
-    assert_eq!(session.get_bound_provider("claude", "sess_1", now), None);
+    assert_eq!(
+        session.get_bound_provider("claude", "sess_1", route_generation, now),
+        None
+    );
 }
 
 #[test]
@@ -475,7 +559,8 @@ fn default_mode_switches_to_enabled_provider_after_bound_provider_disabled_and_c
     let p2 = insert_provider(&db, "P2", true);
     let now = 1000;
     let session = session_manager::SessionManager::new();
-    session.bind_success("claude", "sess_1", p1.id, None, now);
+    let route_generation = session.capture_route_generation("claude");
+    session.bind_success("claude", "sess_1", route_generation, p1.id, None, now);
     let circuit = open_circuit_for_provider(p1.id, now);
 
     providers::set_enabled(&db, p1.id, false).expect("disable provider 1 globally");
@@ -489,6 +574,7 @@ fn default_mode_switches_to_enabled_provider_after_bound_provider_disabled_and_c
         &circuit,
         "claude",
         Some("sess_1"),
+        route_generation,
         now,
         true,
         true,
@@ -499,7 +585,10 @@ fn default_mode_switches_to_enabled_provider_after_bound_provider_disabled_and_c
 
     assert_eq!(ids(&enabled), vec![p2.id]);
     assert_eq!(selected, None);
-    assert_eq!(session.get_bound_provider("claude", "sess_1", now), None);
+    assert_eq!(
+        session.get_bound_provider("claude", "sess_1", route_generation, now),
+        None
+    );
 }
 
 #[test]
@@ -513,7 +602,15 @@ fn sort_mode_retains_open_bound_provider_for_the_common_gate() {
     let mode_id = insert_sort_mode_with_providers(&db, &[p1.id, p2.id]);
     let now = 1000;
     let session = session_manager::SessionManager::new();
-    session.bind_success("claude", "sess_1", p1.id, Some(mode_id), now);
+    let route_generation = session.capture_route_generation("claude");
+    session.bind_success(
+        "claude",
+        "sess_1",
+        route_generation,
+        p1.id,
+        Some(mode_id),
+        now,
+    );
     let circuit = open_circuit_for_provider(p1.id, now);
 
     providers::set_enabled(&db, p1.id, false).expect("disable provider 1 globally");
@@ -527,6 +624,7 @@ fn sort_mode_retains_open_bound_provider_for_the_common_gate() {
         &circuit,
         "claude",
         Some("sess_1"),
+        route_generation,
         now,
         true,
         true,
@@ -538,7 +636,7 @@ fn sort_mode_retains_open_bound_provider_for_the_common_gate() {
     assert_eq!(ids(&enabled), vec![p1.id, p2.id]);
     assert_eq!(selected, None);
     assert_eq!(
-        session.get_bound_provider("claude", "sess_1", now),
+        session.get_bound_provider("claude", "sess_1", route_generation, now),
         Some(p1.id)
     );
     assert!(!circuit.should_allow(p1.id, now).allow);

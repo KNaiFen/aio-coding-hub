@@ -48,6 +48,7 @@ impl ProviderResolutionMiddleware {
                 .map(|route| (route.provider_id, route.provider_uuid.clone()));
             crate::blocking::run("gateway_provider_selection", move || {
                 if let Some((provider_id, provider_uuid)) = managed_provider_identity {
+                    let route_generation = state.session.capture_route_generation(&cli_key);
                     let providers =
                         crate::providers::get_enabled_direct_codex_for_gateway_by_identity(
                             &state.db,
@@ -57,6 +58,7 @@ impl ProviderResolutionMiddleware {
                         .into_iter()
                         .collect();
                     Ok(ProviderSelection {
+                        route_generation,
                         effective_sort_mode_id: None,
                         providers,
                         bound_provider_order: None,
@@ -106,6 +108,7 @@ impl ProviderResolutionMiddleware {
         };
 
         let initial_provider_ids = provider_ids(&selection.providers);
+        ctx.route_generation = Some(selection.route_generation);
         ctx.effective_sort_mode_id = selection.effective_sort_mode_id;
         ctx.providers = selection.providers;
 
@@ -122,6 +125,7 @@ impl ProviderResolutionMiddleware {
             ctx.state.circuit.as_ref(),
             &ctx.cli_key,
             ctx.session_id.as_deref(),
+            selection.route_generation,
             ctx.created_at,
             enable_session_reuse,
             ctx.allow_session_reuse,

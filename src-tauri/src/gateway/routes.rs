@@ -238,6 +238,39 @@ mod tests {
         (format!("http://{addr}"), task)
     }
 
+    async fn spawn_gated_json_upstream(
+        body: &'static str,
+    ) -> (
+        String,
+        tokio::sync::oneshot::Receiver<()>,
+        tokio::sync::oneshot::Sender<()>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind gated json upstream stub");
+        let addr = listener.local_addr().expect("gated json upstream addr");
+        let (reached_tx, reached_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            if let Ok((mut socket, _)) = listener.accept().await {
+                let mut buf = [0_u8; 1024];
+                let _ = socket.read(&mut buf).await;
+                let _ = reached_tx.send(());
+                let _ = release_rx.await;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = socket.write_all(response.as_bytes()).await;
+                let _ = socket.shutdown().await;
+            }
+        });
+
+        (format!("http://{addr}"), reached_rx, release_tx, task)
+    }
+
     async fn spawn_counting_status_upstream(
         status: StatusCode,
         body: &'static str,
@@ -735,6 +768,50 @@ mod tests {
         (format!("http://{addr}"), task)
     }
 
+    async fn spawn_gated_chunked_sse_upstream(
+        first_chunk: &'static str,
+        completion_chunk: &'static str,
+    ) -> (
+        String,
+        tokio::sync::oneshot::Receiver<()>,
+        tokio::sync::oneshot::Sender<()>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind gated sse upstream stub");
+        let addr = listener.local_addr().expect("gated sse upstream addr");
+        let (reached_tx, reached_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            if let Ok((mut socket, _)) = listener.accept().await {
+                let mut buf = [0_u8; 1024];
+                let _ = socket.read(&mut buf).await;
+                let headers = concat!(
+                    "HTTP/1.1 200 OK\r\n",
+                    "content-type: text/event-stream; charset=utf-8\r\n",
+                    "transfer-encoding: chunked\r\n",
+                    "connection: close\r\n",
+                    "\r\n"
+                );
+                let _ = socket.write_all(headers.as_bytes()).await;
+                let first = format!("{:X}\r\n{}\r\n", first_chunk.len(), first_chunk);
+                let _ = socket.write_all(first.as_bytes()).await;
+                let _ = reached_tx.send(());
+                let _ = release_rx.await;
+                let completion = format!(
+                    "{:X}\r\n{}\r\n0\r\n\r\n",
+                    completion_chunk.len(),
+                    completion_chunk
+                );
+                let _ = socket.write_all(completion.as_bytes()).await;
+                let _ = socket.shutdown().await;
+            }
+        });
+
+        (format!("http://{addr}"), reached_rx, release_tx, task)
+    }
+
     async fn spawn_delayed_chunked_json_upstream(
         first_chunk: Vec<u8>,
         second_chunk: Vec<u8>,
@@ -834,6 +911,18 @@ mod tests {
         provider_ids.push(provider_id);
         providers::default_route_set_order(db, cli_key, provider_ids)
             .expect("append default route provider");
+    }
+
+    fn insert_sort_mode_route(
+        db: &db::Db,
+        name: &str,
+        cli_key: &str,
+        provider_ids: Vec<i64>,
+    ) -> i64 {
+        let mode = crate::sort_modes::create_mode(db, name).expect("create sort mode");
+        crate::sort_modes::set_mode_providers_order(db, mode.id, cli_key, provider_ids)
+            .expect("set sort mode providers");
+        mode.id
     }
 
     fn insert_codex_provider_with_priority(
@@ -1841,20 +1930,319 @@ INSERT INTO codex_managed_profiles(
             Some(success_provider_id)
         );
         assert_eq!(
-            session
-                .get_bound_provider("grok", session_id, crate::shared::time::now_unix_seconds(),),
+            session.get_bound_provider(
+                "grok",
+                session_id,
+                session.capture_route_generation("grok"),
+                crate::shared::time::now_unix_seconds(),
+            ),
             Some(success_provider_id)
         );
         assert_eq!(
             session.get_bound_provider(
                 "grok",
                 "request-id-must-not-bind",
+                session.capture_route_generation("grok"),
                 crate::shared::time::now_unix_seconds(),
             ),
             None
         );
         failed_task.abort();
         success_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn route_switch_to_default_ignores_late_non_stream_success_from_mode_a() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.enable_session_reuse = true;
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 1;
+        app_settings.provider_cooldown_seconds = 0;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        let proxy_result =
+            crate::cli_proxy::set_enabled(&app_handle, "grok", true, "http://127.0.0.1:37123")
+                .expect("enable Grok CLI proxy");
+        assert!(proxy_result.ok, "{}", proxy_result.message);
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("route-switch-default.sqlite"))
+            .expect("init test db");
+        let mode_a_body = r#"{"id":"resp-mode-a","object":"response","model":"grok-route-switch","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}"#;
+        let default_body = r#"{"id":"resp-default","object":"response","model":"grok-route-switch","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}"#;
+        let (mode_a_url, mode_a_reached, release_mode_a, mode_a_upstream_task) =
+            spawn_gated_json_upstream(mode_a_body).await;
+        let (default_url, default_upstream_task) = spawn_json_upstream(default_body).await;
+        let mode_a_provider =
+            insert_provider_with_priority(&db, "grok", "Mode A Stub", mode_a_url, 0);
+        let default_provider =
+            insert_provider_with_priority(&db, "grok", "Default Stub", default_url, 0);
+        providers::default_route_set_order(&db, "grok", vec![default_provider])
+            .expect("set default route");
+        let mode_a = insert_sort_mode_route(&db, "Mode A", "grok", vec![mode_a_provider]);
+        crate::sort_modes::set_active(&db, "grok", Some(mode_a)).expect("activate Mode A");
+
+        let session = Arc::new(session_manager::SessionManager::new());
+        let (log_tx, _log_rx) = tokio::sync::mpsc::channel(8);
+        let router = build_router(gateway_state_with_parts(
+            app_handle,
+            db.clone(),
+            log_tx,
+            Arc::new(circuit_breaker::CircuitBreaker::new(
+                circuit_breaker::CircuitBreakerConfig::default(),
+                HashMap::new(),
+                None,
+            )),
+            Arc::clone(&session),
+        ));
+        let session_id = "route-switch-default-session";
+        let old_request = Request::builder()
+            .method(Method::POST)
+            .uri("/grok/v1/responses")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header("x-grok-session-id", session_id)
+            .body(Body::from(
+                r#"{"model":"grok-route-switch","input":"old","stream":false}"#,
+            ))
+            .expect("old request");
+        let old_router = router.clone();
+        let old_response_task = tokio::spawn(async move {
+            let response = old_router
+                .oneshot(old_request)
+                .await
+                .expect("old route response");
+            let status = response.status();
+            let body = String::from_utf8(
+                to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .expect("old response body")
+                    .to_vec(),
+            )
+            .expect("old UTF-8 response");
+            (status, body)
+        });
+
+        tokio::time::timeout(Duration::from_secs(2), mode_a_reached)
+            .await
+            .expect("timed out waiting for Mode A request")
+            .expect("Mode A request reached upstream");
+        crate::sort_modes::set_active(&db, "grok", None).expect("activate default route");
+        assert_eq!(session.clear_cli_bindings("grok"), 1);
+        release_mode_a.send(()).expect("release Mode A response");
+        let (old_status, old_body) =
+            tokio::time::timeout(Duration::from_secs(2), old_response_task)
+                .await
+                .expect("timed out waiting for old response")
+                .expect("join old response");
+        assert_eq!(old_status, StatusCode::OK);
+        assert!(old_body.contains("resp-mode-a"));
+
+        let current_generation = session.capture_route_generation("grok");
+        let now_unix = crate::shared::time::now_unix_seconds();
+        assert_eq!(
+            session.get_bound_sort_mode_id("grok", session_id, current_generation, now_unix),
+            None
+        );
+        assert_eq!(
+            session.get_bound_provider("grok", session_id, current_generation, now_unix),
+            None
+        );
+
+        let next_request = Request::builder()
+            .method(Method::POST)
+            .uri("/grok/v1/responses")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header("x-grok-session-id", session_id)
+            .body(Body::from(
+                r#"{"model":"grok-route-switch","input":"next","stream":false}"#,
+            ))
+            .expect("next request");
+        let next_response =
+            tokio::time::timeout(Duration::from_secs(2), router.oneshot(next_request))
+                .await
+                .expect("timed out waiting for default-route response")
+                .expect("next route response");
+        assert_eq!(next_response.status(), StatusCode::OK);
+        let next_body = String::from_utf8(
+            to_bytes(next_response.into_body(), usize::MAX)
+                .await
+                .expect("next response body")
+                .to_vec(),
+        )
+        .expect("next UTF-8 response");
+        assert!(next_body.contains("resp-default"));
+        assert_eq!(
+            session.get_bound_provider("grok", session_id, current_generation, now_unix),
+            Some(default_provider)
+        );
+
+        tokio::time::timeout(Duration::from_secs(2), mode_a_upstream_task)
+            .await
+            .expect("timed out waiting for Mode A upstream task")
+            .expect("Mode A upstream task");
+        tokio::time::timeout(Duration::from_secs(2), default_upstream_task)
+            .await
+            .expect("timed out waiting for default upstream task")
+            .expect("default upstream task");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn route_switch_to_mode_b_ignores_late_sse_success_from_mode_a() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.enable_session_reuse = true;
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 1;
+        app_settings.provider_cooldown_seconds = 0;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        let proxy_result =
+            crate::cli_proxy::set_enabled(&app_handle, "grok", true, "http://127.0.0.1:37123")
+                .expect("enable Grok CLI proxy");
+        assert!(proxy_result.ok, "{}", proxy_result.message);
+
+        let mode_a_first = concat!(
+            "event: response.output_text.delta\n",
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"from-a\"}\n\n"
+        );
+        let mode_a_completion = concat!(
+            "event: response.completed\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-stream-a\",\"status\":\"completed\",\"model\":\"grok-route-switch\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n"
+        );
+        let mode_b_body = concat!(
+            "event: response.output_text.delta\n",
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"from-b\"}\n\n",
+            "event: response.completed\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-stream-b\",\"status\":\"completed\",\"model\":\"grok-route-switch\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2}}}\n\n"
+        );
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("route-switch-mode-b.sqlite"))
+            .expect("init test db");
+        let (mode_a_url, mode_a_reached, release_mode_a, mode_a_upstream_task) =
+            spawn_gated_chunked_sse_upstream(mode_a_first, mode_a_completion).await;
+        let (mode_b_url, mode_b_upstream_task) = spawn_sse_upstream(mode_b_body).await;
+        let mode_a_provider =
+            insert_provider_with_priority(&db, "grok", "Mode A SSE Stub", mode_a_url, 0);
+        let mode_b_provider =
+            insert_provider_with_priority(&db, "grok", "Mode B SSE Stub", mode_b_url, 0);
+        let mode_a = insert_sort_mode_route(&db, "Mode A SSE", "grok", vec![mode_a_provider]);
+        let mode_b = insert_sort_mode_route(&db, "Mode B SSE", "grok", vec![mode_b_provider]);
+        crate::sort_modes::set_active(&db, "grok", Some(mode_a)).expect("activate Mode A");
+
+        let session = Arc::new(session_manager::SessionManager::new());
+        let (log_tx, _log_rx) = tokio::sync::mpsc::channel(8);
+        let router = build_router(gateway_state_with_parts(
+            app_handle,
+            db.clone(),
+            log_tx,
+            Arc::new(circuit_breaker::CircuitBreaker::new(
+                circuit_breaker::CircuitBreakerConfig::default(),
+                HashMap::new(),
+                None,
+            )),
+            Arc::clone(&session),
+        ));
+        let session_id = "route-switch-sse-session";
+        let old_request = Request::builder()
+            .method(Method::POST)
+            .uri("/grok/v1/responses")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header("x-grok-session-id", session_id)
+            .body(Body::from(
+                r#"{"model":"grok-route-switch","input":"old","stream":true,"store":false}"#,
+            ))
+            .expect("old stream request");
+        let old_router = router.clone();
+        let old_response_task = tokio::spawn(async move {
+            let response = old_router
+                .oneshot(old_request)
+                .await
+                .expect("old stream response");
+            let status = response.status();
+            let body = String::from_utf8(
+                to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .expect("old stream body")
+                    .to_vec(),
+            )
+            .expect("old UTF-8 stream");
+            (status, body)
+        });
+
+        tokio::time::timeout(Duration::from_secs(2), mode_a_reached)
+            .await
+            .expect("timed out waiting for Mode A stream")
+            .expect("Mode A stream reached upstream");
+        crate::sort_modes::set_active(&db, "grok", Some(mode_b)).expect("activate Mode B");
+        assert_eq!(session.clear_cli_bindings("grok"), 1);
+        release_mode_a.send(()).expect("release Mode A stream");
+        let (old_status, old_body) =
+            tokio::time::timeout(Duration::from_secs(2), old_response_task)
+                .await
+                .expect("timed out waiting for old stream response")
+                .expect("join old stream response");
+        assert_eq!(old_status, StatusCode::OK);
+        assert!(old_body.contains("resp-stream-a"));
+
+        let current_generation = session.capture_route_generation("grok");
+        let now_unix = crate::shared::time::now_unix_seconds();
+        assert_eq!(
+            session.get_bound_sort_mode_id("grok", session_id, current_generation, now_unix),
+            None
+        );
+        assert_eq!(
+            session.get_bound_provider("grok", session_id, current_generation, now_unix),
+            None
+        );
+
+        let next_request = Request::builder()
+            .method(Method::POST)
+            .uri("/grok/v1/responses")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header("x-grok-session-id", session_id)
+            .body(Body::from(
+                r#"{"model":"grok-route-switch","input":"next","stream":true,"store":false}"#,
+            ))
+            .expect("next stream request");
+        let next_response =
+            tokio::time::timeout(Duration::from_secs(2), router.oneshot(next_request))
+                .await
+                .expect("timed out waiting for Mode B stream response")
+                .expect("next stream response");
+        assert_eq!(next_response.status(), StatusCode::OK);
+        let next_body = String::from_utf8(
+            to_bytes(next_response.into_body(), usize::MAX)
+                .await
+                .expect("next stream body")
+                .to_vec(),
+        )
+        .expect("next UTF-8 stream");
+        assert!(next_body.contains("resp-stream-b"));
+        assert_eq!(
+            session.get_bound_provider("grok", session_id, current_generation, now_unix),
+            Some(mode_b_provider)
+        );
+        assert_eq!(
+            session.get_bound_sort_mode_id("grok", session_id, current_generation, now_unix),
+            Some(Some(mode_b))
+        );
+
+        tokio::time::timeout(Duration::from_secs(2), mode_a_upstream_task)
+            .await
+            .expect("timed out waiting for Mode A upstream task")
+            .expect("Mode A upstream task");
+        tokio::time::timeout(Duration::from_secs(2), mode_b_upstream_task)
+            .await
+            .expect("timed out waiting for Mode B upstream task")
+            .expect("Mode B upstream task");
     }
 
     fn gateway_state_with_plugin_pipeline(
@@ -5286,7 +5674,8 @@ INSERT INTO codex_managed_profiles(
         }
         let session = Arc::new(session_manager::SessionManager::new());
         let session_id = "0190c0de-0000-7000-8000-000000000001";
-        session.bind_success("codex", session_id, bound_id, None, now);
+        let generation = session.capture_route_generation("codex");
+        assert!(session.bind_success("codex", session_id, generation, bound_id, None, now));
 
         let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
         let router = build_router(gateway_state_with_parts(
@@ -5342,7 +5731,7 @@ INSERT INTO codex_managed_profiles(
             .iter()
             .all(|hop| hop.get("outcome").and_then(Value::as_str) == Some("skipped")));
         assert_eq!(
-            session.get_bound_provider("codex", session_id, now),
+            session.get_bound_provider("codex", session_id, generation, now),
             Some(bound_id)
         );
         for call_count in [&first_calls, &bound_calls, &third_calls] {
@@ -5400,7 +5789,8 @@ INSERT INTO codex_managed_profiles(
         circuit.record_failure(second_id, now, None);
         let session = Arc::new(session_manager::SessionManager::new());
         let session_id = "0190c0de-0000-7000-8000-000000000002";
-        session.bind_success("codex", session_id, second_id, None, now);
+        let generation = session.capture_route_generation("codex");
+        assert!(session.bind_success("codex", session_id, generation, second_id, None, now));
 
         let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
         let router = build_router(gateway_state_with_parts(
@@ -5456,7 +5846,7 @@ INSERT INTO codex_managed_profiles(
         // Gate denial itself does not clear the binding; the later successful
         // fallback legitimately advances it to the provider that served the session.
         assert_eq!(
-            session.get_bound_provider("codex", session_id, now),
+            session.get_bound_provider("codex", session_id, generation, now),
             Some(third_id)
         );
 
@@ -6532,7 +6922,12 @@ INSERT INTO codex_managed_profiles(
         );
         assert_eq!(circuit_snapshot.failure_count, 0);
         assert_eq!(
-            session.get_bound_provider("codex", logged_session_id, 0),
+            session.get_bound_provider(
+                "codex",
+                logged_session_id,
+                session.capture_route_generation("codex"),
+                0,
+            ),
             None
         );
 
@@ -6681,7 +7076,15 @@ INSERT INTO codex_managed_profiles(
             circuit.snapshot(provider_id, 0).state,
             circuit_breaker::CircuitState::Closed
         );
-        assert_eq!(session.get_bound_provider("grok", session_id, 0), None);
+        assert_eq!(
+            session.get_bound_provider(
+                "grok",
+                session_id,
+                session.capture_route_generation("grok"),
+                0,
+            ),
+            None
+        );
 
         sse_task.abort();
     }
@@ -6957,7 +7360,12 @@ INSERT INTO codex_managed_profiles(
         );
         assert_eq!(circuit_snapshot.failure_count, 1);
         assert_eq!(
-            session.get_bound_provider("codex", logged_session_id, 0),
+            session.get_bound_provider(
+                "codex",
+                logged_session_id,
+                session.capture_route_generation("codex"),
+                0,
+            ),
             None
         );
 
@@ -7108,7 +7516,12 @@ INSERT INTO codex_managed_profiles(
         assert_eq!(circuit_snapshot.failure_count, 1);
         assert!(circuit_snapshot.cooldown_until.is_some());
         assert_eq!(
-            session.get_bound_provider("codex", logged_session_id, 0),
+            session.get_bound_provider(
+                "codex",
+                logged_session_id,
+                session.capture_route_generation("codex"),
+                0,
+            ),
             None
         );
 
@@ -7349,7 +7762,12 @@ INSERT INTO codex_managed_profiles(
         );
         assert_eq!(circuit_snapshot.failure_count, 1);
         assert_eq!(
-            session.get_bound_provider("codex", logged_session_id, 0),
+            session.get_bound_provider(
+                "codex",
+                logged_session_id,
+                session.capture_route_generation("codex"),
+                0,
+            ),
             None
         );
 
@@ -7855,7 +8273,15 @@ INSERT INTO codex_managed_profiles(
             Some("switch")
         );
         assert_eq!(circuit.snapshot(provider_id, 0).failure_count, 1);
-        assert_eq!(session.get_bound_provider("codex", session_id, 0), None);
+        assert_eq!(
+            session.get_bound_provider(
+                "codex",
+                session_id,
+                session.capture_route_generation("codex"),
+                0,
+            ),
+            None
+        );
 
         empty_task.abort();
     }
@@ -8033,7 +8459,15 @@ INSERT INTO codex_managed_profiles(
             Some("switch")
         );
         assert_eq!(circuit.snapshot(provider_id, 0).failure_count, 1);
-        assert_eq!(session.get_bound_provider("codex", session_id, 0), None);
+        assert_eq!(
+            session.get_bound_provider(
+                "codex",
+                session_id,
+                session.capture_route_generation("codex"),
+                0,
+            ),
+            None
+        );
 
         fake_200_task.abort();
     }
@@ -8129,7 +8563,15 @@ INSERT INTO codex_managed_profiles(
         );
         assert_eq!(attempt.get("circuit_failure_count"), Some(&Value::Null));
         assert_eq!(circuit.snapshot(provider_id, 0).failure_count, 0);
-        assert_eq!(session.get_bound_provider("codex", session_id, 0), None);
+        assert_eq!(
+            session.get_bound_provider(
+                "codex",
+                session_id,
+                session.capture_route_generation("codex"),
+                0,
+            ),
+            None
+        );
 
         fake_200_task.abort();
     }
@@ -8197,7 +8639,15 @@ INSERT INTO codex_managed_profiles(
         let log = recv_terminal_request_log(&mut log_rx).await;
         assert_eq!(log.status, Some(502));
         assert_eq!(log.error_code.as_deref(), Some("GW_EMPTY_RESPONSE"));
-        assert_eq!(session.get_bound_provider("codex", session_id, 0), None);
+        assert_eq!(
+            session.get_bound_provider(
+                "codex",
+                session_id,
+                session.capture_route_generation("codex"),
+                0,
+            ),
+            None
+        );
 
         empty_task.abort();
     }

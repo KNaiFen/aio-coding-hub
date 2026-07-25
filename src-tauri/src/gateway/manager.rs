@@ -126,19 +126,36 @@ mod tests {
             crate::gateway::proxy::RecentErrorCache::default(),
         ));
         let now_unix = 100;
+        let claude_generation = session.capture_route_generation("claude");
+        let codex_generation = session.capture_route_generation("codex");
 
-        session.bind_sort_mode(
+        assert!(session.bind_sort_mode(
             "claude",
             "session_a",
+            claude_generation,
             Some(1),
             Some(vec![101, 102]),
             now_unix,
-        );
-        session.bind_sort_mode("claude", "session_b", None, None, now_unix);
-        session.bind_sort_mode("codex", "session_c", Some(2), Some(vec![201]), now_unix);
+        ));
+        assert!(session.bind_sort_mode(
+            "claude",
+            "session_b",
+            claude_generation,
+            None,
+            None,
+            now_unix,
+        ));
+        assert!(session.bind_sort_mode(
+            "codex",
+            "session_c",
+            codex_generation,
+            Some(2),
+            Some(vec![201]),
+            now_unix,
+        ));
 
         assert_eq!(
-            session.get_bound_sort_mode_id("claude", "session_a", now_unix),
+            session.get_bound_sort_mode_id("claude", "session_a", claude_generation, now_unix,),
             Some(Some(1))
         );
 
@@ -152,17 +169,28 @@ mod tests {
             .expect("running gateway")
             .clear_cli_session_bindings("claude");
         assert_eq!(removed, 2);
+        let current_claude_generation = session.capture_route_generation("claude");
 
         assert_eq!(
-            session.get_bound_sort_mode_id("claude", "session_a", now_unix),
+            session.get_bound_sort_mode_id(
+                "claude",
+                "session_a",
+                current_claude_generation,
+                now_unix,
+            ),
             None
         );
         assert_eq!(
-            session.get_bound_sort_mode_id("claude", "session_b", now_unix),
+            session.get_bound_sort_mode_id(
+                "claude",
+                "session_b",
+                current_claude_generation,
+                now_unix,
+            ),
             None
         );
         assert_eq!(
-            session.get_bound_sort_mode_id("codex", "session_c", now_unix),
+            session.get_bound_sort_mode_id("codex", "session_c", codex_generation, now_unix),
             Some(Some(2))
         );
     }
@@ -175,15 +203,25 @@ mod tests {
             crate::gateway::proxy::RecentErrorCache::default(),
         ));
         let now_unix = 100;
+        let codex_generation = session.capture_route_generation("codex");
+        let claude_generation = session.capture_route_generation("claude");
 
-        session.bind_sort_mode(
+        assert!(session.bind_sort_mode(
             "codex",
             "session_a",
+            codex_generation,
             Some(1),
             Some(vec![101, 102]),
             now_unix,
-        );
-        session.bind_sort_mode("claude", "session_b", Some(2), Some(vec![201]), now_unix);
+        ));
+        assert!(session.bind_sort_mode(
+            "claude",
+            "session_b",
+            claude_generation,
+            Some(2),
+            Some(vec![201]),
+            now_unix,
+        ));
 
         {
             let mut cache = recent_errors.lock().expect("lock recent_errors");
@@ -206,13 +244,19 @@ mod tests {
             .clear_cli_route_runtime_state("codex");
         assert_eq!(cleared.cleared_sessions, 1);
         assert_eq!(cleared.cleared_recent_errors, 2);
+        let current_codex_generation = session.capture_route_generation("codex");
 
         assert_eq!(
-            session.get_bound_sort_mode_id("codex", "session_a", now_unix),
+            session.get_bound_sort_mode_id(
+                "codex",
+                "session_a",
+                current_codex_generation,
+                now_unix,
+            ),
             None
         );
         assert_eq!(
-            session.get_bound_sort_mode_id("claude", "session_b", now_unix),
+            session.get_bound_sort_mode_id("claude", "session_b", claude_generation, now_unix,),
             Some(Some(2))
         );
 
@@ -229,15 +273,25 @@ mod tests {
             crate::gateway::proxy::RecentErrorCache::default(),
         ));
         let now_unix = 100;
+        let claude_generation = session.capture_route_generation("claude");
+        let codex_generation = session.capture_route_generation("codex");
 
-        session.bind_sort_mode(
+        assert!(session.bind_sort_mode(
             "claude",
             "session_a",
+            claude_generation,
             Some(1),
             Some(vec![101, 102]),
             now_unix,
-        );
-        session.bind_sort_mode("codex", "session_b", Some(2), Some(vec![201]), now_unix);
+        ));
+        assert!(session.bind_sort_mode(
+            "codex",
+            "session_b",
+            codex_generation,
+            Some(2),
+            Some(vec![201]),
+            now_unix,
+        ));
         {
             let mut cache = recent_errors.lock().expect("lock recent_errors");
             cache.insert_unavailable_for_tests(now_unix, 77, "fp-claude", 30);
@@ -258,12 +312,24 @@ mod tests {
             .clear_all_session_bindings();
 
         assert_eq!(cleared, 2);
+        let current_claude_generation = session.capture_route_generation("claude");
+        let current_codex_generation = session.capture_route_generation("codex");
         assert_eq!(
-            session.get_bound_sort_mode_id("claude", "session_a", now_unix),
+            session.get_bound_sort_mode_id(
+                "claude",
+                "session_a",
+                current_claude_generation,
+                now_unix,
+            ),
             None
         );
         assert_eq!(
-            session.get_bound_sort_mode_id("codex", "session_b", now_unix),
+            session.get_bound_sort_mode_id(
+                "codex",
+                "session_b",
+                current_codex_generation,
+                now_unix,
+            ),
             None
         );
         assert!(recent_errors

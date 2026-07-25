@@ -109,7 +109,6 @@ where
         if is_event_stream(&response_headers) {
             return success_event_stream::handle_success_event_stream(
                 ctx,
-                input,
                 provider_ctx,
                 attempt_ctx,
                 prepared.clone(),
@@ -123,7 +122,6 @@ where
         }
         return success_non_stream::handle_success_non_stream(
             ctx,
-            input,
             provider_ctx,
             attempt_ctx,
             loop_state.reborrow(),

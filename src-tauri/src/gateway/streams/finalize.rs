@@ -72,6 +72,7 @@ pub(super) fn finalize_circuit_and_session<R: tauri::Runtime>(
                 ctx.session.bind_success(
                     &ctx.cli_key,
                     session_id,
+                    ctx.route_generation,
                     ctx.provider_id,
                     ctx.sort_mode_id,
                     now_unix,
@@ -114,6 +115,8 @@ mod tests {
         db: db::Db,
         log_tx: tokio::sync::mpsc::Sender<request_logs::RequestLogInsert>,
     ) -> StreamFinalizeCtx<tauri::test::MockRuntime> {
+        let session = Arc::new(session_manager::SessionManager::new());
+        let route_generation = session.capture_route_generation("codex");
         StreamFinalizeCtx {
             app,
             db,
@@ -128,7 +131,8 @@ mod tests {
                 HashMap::new(),
                 None,
             )),
-            session: Arc::new(session_manager::SessionManager::new()),
+            session,
+            route_generation,
             session_id: Some("sess-stream-finalize".to_string()),
             enable_session_reuse: true,
             sort_mode_id: None,
@@ -281,11 +285,56 @@ mod tests {
                 ctx.session.get_bound_provider(
                     &ctx.cli_key,
                     ctx.session_id.as_deref().expect("session id"),
+                    ctx.route_generation,
                     crate::gateway::util::now_unix_seconds() as i64,
                 ),
                 expected_provider,
                 "enable_session_reuse={enabled}"
             );
         }
+    }
+
+    #[test]
+    fn stale_generation_stream_success_does_not_overwrite_current_binding() {
+        let app = tauri::test::mock_app();
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("stale-stream-success.sqlite"))
+            .expect("init db");
+        let (log_tx, _log_rx) = tokio::sync::mpsc::channel(4);
+        let ctx = test_stream_finalize_ctx(app.handle().clone(), db, log_tx);
+
+        ctx.session.clear_cli_bindings(&ctx.cli_key);
+        let current_generation = ctx.session.capture_route_generation(&ctx.cli_key);
+        assert_ne!(ctx.route_generation, current_generation);
+        let now_unix = crate::gateway::util::now_unix_seconds() as i64;
+        assert!(ctx.session.bind_success(
+            &ctx.cli_key,
+            ctx.session_id.as_deref().expect("session id"),
+            current_generation,
+            2,
+            Some(9),
+            now_unix,
+        ));
+
+        assert_eq!(finalize_circuit_and_session(&ctx, None), None);
+
+        assert_eq!(
+            ctx.session.get_bound_provider(
+                &ctx.cli_key,
+                ctx.session_id.as_deref().expect("session id"),
+                current_generation,
+                now_unix,
+            ),
+            Some(2)
+        );
+        assert_eq!(
+            ctx.session.get_bound_sort_mode_id(
+                &ctx.cli_key,
+                ctx.session_id.as_deref().expect("session id"),
+                current_generation,
+                now_unix,
+            ),
+            Some(Some(9))
+        );
     }
 }

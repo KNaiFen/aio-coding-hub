@@ -8,11 +8,33 @@ use super::*;
 use crate::domain::provider_oauth_limits;
 use crate::domain::providers::CODEX_TO_OPENAI_RESPONSES_BRIDGE_TYPE;
 use crate::gateway::plugins::context::{GatewayPluginHookName, GatewayResponseHookInput};
-use crate::gateway::proxy::request_context::RequestContext;
 use crate::gateway::proxy::{
     gemini_oauth, is_fake_200_non_stream_body, protocol_bridge, provider_router,
     upstream_client_error_rules, GatewayErrorCode,
 };
+use crate::session_manager::{SessionManager, SessionRouteGeneration};
+
+fn bind_non_stream_session_success(
+    session: &SessionManager,
+    cli_key: &str,
+    session_id: Option<&str>,
+    route_generation: SessionRouteGeneration,
+    provider_id: i64,
+    sort_mode_id: Option<i64>,
+    now_unix: i64,
+) -> bool {
+    let Some(session_id) = session_id else {
+        return false;
+    };
+    session.bind_success(
+        cli_key,
+        session_id,
+        route_generation,
+        provider_id,
+        sort_mode_id,
+        now_unix,
+    )
+}
 
 fn resolve_requested_model_for_log(
     requested_model: Option<String>,
@@ -454,7 +476,6 @@ fn cache_bridge_non_stream_response(
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn handle_success_non_stream<R>(
     ctx: CommonCtx<'_, R>,
-    _input: &RequestContext<R>,
     provider_ctx: ProviderCtx<'_>,
     attempt_ctx: AttemptCtx<'_>,
     loop_state: LoopState<'_, R>,
@@ -1423,15 +1444,15 @@ where
             && common.enable_session_reuse
             && common.managed_model_route.is_none()
         {
-            if let Some(session_id) = common.session_id.as_deref() {
-                state.session.bind_success(
-                    &common.cli_key,
-                    session_id,
-                    provider_id,
-                    common.effective_sort_mode_id,
-                    now_unix,
-                );
-            }
+            let _ = bind_non_stream_session_success(
+                state.session.as_ref(),
+                &common.cli_key,
+                common.session_id.as_deref(),
+                common.route_generation,
+                provider_id,
+                common.effective_sort_mode_id,
+                now_unix,
+            );
         }
     }
 
@@ -1477,18 +1498,60 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        buffer_cx2cc_event_stream_as_json, cache_bridge_non_stream_response,
-        classify_cx2cc_success_payload, read_non_stream_body_with_limit,
-        resolve_requested_model_for_log, should_passthrough_non_stream_success,
-        translate_bridge_non_stream_body, Cx2ccSuccessPayloadKind, NonStreamBodyReadError,
+        bind_non_stream_session_success, buffer_cx2cc_event_stream_as_json,
+        cache_bridge_non_stream_response, classify_cx2cc_success_payload,
+        read_non_stream_body_with_limit, resolve_requested_model_for_log,
+        should_passthrough_non_stream_success, translate_bridge_non_stream_body,
+        Cx2ccSuccessPayloadKind, NonStreamBodyReadError,
     };
     use crate::domain::usage;
+    use crate::session_manager::SessionManager;
     use axum::body::Bytes;
     use axum::http::{header, HeaderMap, HeaderValue};
     use serde_json::json;
     use std::time::{Duration, Instant};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
+
+    #[test]
+    fn stale_generation_non_stream_late_success_does_not_overwrite_current_binding() {
+        let session = SessionManager::new();
+        let cli_key = "claude";
+        let session_id = "late-non-stream";
+        let now_unix = 1_700_000_000;
+        let stale_generation = session.capture_route_generation(cli_key);
+        session.clear_cli_bindings(cli_key);
+
+        let current_generation = session.capture_route_generation(cli_key);
+        assert_ne!(stale_generation, current_generation);
+        assert!(session.bind_success(
+            cli_key,
+            session_id,
+            current_generation,
+            84,
+            Some(8),
+            now_unix,
+        ));
+
+        assert!(!bind_non_stream_session_success(
+            &session,
+            cli_key,
+            Some(session_id),
+            stale_generation,
+            42,
+            Some(7),
+            now_unix,
+        ));
+
+        assert_eq!(
+            session.get_bound_provider(cli_key, session_id, current_generation, now_unix),
+            Some(84)
+        );
+        assert_eq!(
+            session.get_bound_sort_mode_id(cli_key, session_id, current_generation, now_unix),
+            Some(Some(8))
+        );
+    }
 
     async fn known_length_response(
         declared_content_length: usize,

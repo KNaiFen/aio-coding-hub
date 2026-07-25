@@ -28,7 +28,20 @@ pub struct ActiveSessionSnapshot {
 #[derive(Debug)]
 pub struct SessionManager {
     ttl_secs: i64,
-    bindings: Mutex<HashMap<SessionKey, SessionBinding>>,
+    state: Mutex<State>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SessionRouteGeneration {
+    global: u64,
+    cli: u64,
+}
+
+#[derive(Debug, Default)]
+struct State {
+    bindings: HashMap<SessionKey, SessionBinding>,
+    global_generation: u64,
+    cli_generations: HashMap<String, u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -63,7 +76,16 @@ impl SessionManager {
     pub fn new() -> Self {
         Self {
             ttl_secs: DEFAULT_SESSION_TTL_SECS,
-            bindings: Mutex::new(HashMap::new()),
+            state: Mutex::new(State::default()),
+        }
+    }
+
+    pub(crate) fn capture_route_generation(&self, cli_key: &str) -> SessionRouteGeneration {
+        let cli_key = cli_key.trim();
+        let guard = self.state.lock_or_recover();
+        SessionRouteGeneration {
+            global: guard.global_generation,
+            cli: current_cli_generation(&guard, cli_key),
         }
     }
 
@@ -73,16 +95,23 @@ impl SessionManager {
             return 0;
         }
 
-        let mut guard = self.bindings.lock_or_recover();
-        let before = guard.len();
-        guard.retain(|k, _| k.cli_key != cli_key);
-        before.saturating_sub(guard.len())
+        let mut guard = self.state.lock_or_recover();
+        let generation = guard
+            .cli_generations
+            .entry(cli_key.to_string())
+            .or_default();
+        *generation = generation.wrapping_add(1);
+
+        let before = guard.bindings.len();
+        guard.bindings.retain(|k, _| k.cli_key != cli_key);
+        before.saturating_sub(guard.bindings.len())
     }
 
     pub fn clear_all_bindings(&self) -> usize {
-        let mut guard = self.bindings.lock_or_recover();
-        let cleared = guard.len();
-        guard.clear();
+        let mut guard = self.state.lock_or_recover();
+        guard.global_generation = guard.global_generation.wrapping_add(1);
+        let cleared = guard.bindings.len();
+        guard.bindings.clear();
         cleared
     }
 
@@ -174,6 +203,7 @@ impl SessionManager {
         &self,
         cli_key: &str,
         session_id: &str,
+        generation: SessionRouteGeneration,
         now_unix: i64,
     ) -> Option<i64> {
         let key = SessionKey {
@@ -181,14 +211,18 @@ impl SessionManager {
             session_id: session_id.to_string(),
         };
 
-        let mut guard = self.bindings.lock_or_recover();
-        match guard.get_mut(&key) {
+        let mut guard = self.state.lock_or_recover();
+        if !route_generation_is_current(&guard, cli_key, generation) {
+            return None;
+        }
+
+        match guard.bindings.get_mut(&key) {
             Some(binding) if binding.expires_at > now_unix => {
                 binding.expires_at = now_unix.saturating_add(binding.ttl_secs.max(1));
                 (binding.provider_id > 0).then_some(binding.provider_id)
             }
             Some(_) => {
-                guard.remove(&key);
+                guard.bindings.remove(&key);
                 None
             }
             None => None,
@@ -200,6 +234,7 @@ impl SessionManager {
         &self,
         cli_key: &str,
         session_id: &str,
+        generation: SessionRouteGeneration,
         now_unix: i64,
     ) -> Option<Option<i64>> {
         let key = SessionKey {
@@ -207,14 +242,18 @@ impl SessionManager {
             session_id: session_id.to_string(),
         };
 
-        let mut guard = self.bindings.lock_or_recover();
-        match guard.get_mut(&key) {
+        let mut guard = self.state.lock_or_recover();
+        if !route_generation_is_current(&guard, cli_key, generation) {
+            return None;
+        }
+
+        match guard.bindings.get_mut(&key) {
             Some(binding) if binding.expires_at > now_unix => {
                 binding.expires_at = now_unix.saturating_add(binding.ttl_secs.max(1));
                 Some(binding.sort_mode_id)
             }
             Some(_) => {
-                guard.remove(&key);
+                guard.bindings.remove(&key);
                 None
             }
             None => None,
@@ -227,12 +266,13 @@ impl SessionManager {
         &self,
         cli_key: &str,
         session_id: &str,
+        generation: SessionRouteGeneration,
         sort_mode_id: Option<i64>,
         provider_order: Option<Vec<i64>>,
         now_unix: i64,
-    ) {
+    ) -> bool {
         if cli_key.trim().is_empty() || session_id.trim().is_empty() {
-            return;
+            return false;
         }
 
         let key = SessionKey {
@@ -240,26 +280,30 @@ impl SessionManager {
             session_id: session_id.to_string(),
         };
 
-        let mut guard = self.bindings.lock_or_recover();
-        if guard.len() >= MAX_BINDINGS {
-            drop_expired(&mut guard, now_unix);
-            if guard.len() >= MAX_BINDINGS {
-                evict_oldest_quarter(&mut guard);
+        let mut guard = self.state.lock_or_recover();
+        if !route_generation_is_current(&guard, cli_key, generation) {
+            return false;
+        }
+
+        if guard.bindings.len() >= MAX_BINDINGS {
+            drop_expired(&mut guard.bindings, now_unix);
+            if guard.bindings.len() >= MAX_BINDINGS {
+                evict_oldest_quarter(&mut guard.bindings);
             }
         }
 
-        if let Some(existing) = guard.get_mut(&key) {
+        if let Some(existing) = guard.bindings.get_mut(&key) {
             if existing.expires_at > now_unix {
                 existing.expires_at = now_unix.saturating_add(self.ttl_secs.max(1));
                 if existing.provider_order.is_none() {
                     existing.provider_order = provider_order;
                 }
-                return;
+                return true;
             }
-            guard.remove(&key);
+            guard.bindings.remove(&key);
         }
 
-        guard.insert(
+        guard.bindings.insert(
             key,
             SessionBinding {
                 provider_id: 0,
@@ -269,12 +313,14 @@ impl SessionManager {
                 ttl_secs: self.ttl_secs,
             },
         );
+        true
     }
 
     pub fn get_bound_provider_order(
         &self,
         cli_key: &str,
         session_id: &str,
+        generation: SessionRouteGeneration,
         now_unix: i64,
     ) -> Option<Vec<i64>> {
         let key = SessionKey {
@@ -282,14 +328,18 @@ impl SessionManager {
             session_id: session_id.to_string(),
         };
 
-        let mut guard = self.bindings.lock_or_recover();
-        match guard.get_mut(&key) {
+        let mut guard = self.state.lock_or_recover();
+        if !route_generation_is_current(&guard, cli_key, generation) {
+            return None;
+        }
+
+        match guard.bindings.get_mut(&key) {
             Some(binding) if binding.expires_at > now_unix => {
                 binding.expires_at = now_unix.saturating_add(binding.ttl_secs.max(1));
                 binding.provider_order.clone()
             }
             Some(_) => {
-                guard.remove(&key);
+                guard.bindings.remove(&key);
                 None
             }
             None => None,
@@ -300,12 +350,13 @@ impl SessionManager {
         &self,
         cli_key: &str,
         session_id: &str,
+        generation: SessionRouteGeneration,
         provider_id: i64,
         sort_mode_id: Option<i64>,
         now_unix: i64,
-    ) {
+    ) -> bool {
         if cli_key.trim().is_empty() || session_id.trim().is_empty() || provider_id <= 0 {
-            return;
+            return false;
         }
 
         let key = SessionKey {
@@ -313,28 +364,32 @@ impl SessionManager {
             session_id: session_id.to_string(),
         };
 
-        let mut guard = self.bindings.lock_or_recover();
-        if guard.len() >= MAX_BINDINGS {
-            drop_expired(&mut guard, now_unix);
-            if guard.len() >= MAX_BINDINGS {
-                evict_oldest_quarter(&mut guard);
+        let mut guard = self.state.lock_or_recover();
+        if !route_generation_is_current(&guard, cli_key, generation) {
+            return false;
+        }
+
+        if guard.bindings.len() >= MAX_BINDINGS {
+            drop_expired(&mut guard.bindings, now_unix);
+            if guard.bindings.len() >= MAX_BINDINGS {
+                evict_oldest_quarter(&mut guard.bindings);
             }
         }
 
         let expires_at = now_unix.saturating_add(self.ttl_secs.max(1));
-        if let Some(existing) = guard.get_mut(&key) {
+        if let Some(existing) = guard.bindings.get_mut(&key) {
             if existing.expires_at > now_unix {
                 existing.provider_id = provider_id;
                 existing.expires_at = expires_at;
                 if existing.sort_mode_id.is_none() {
                     existing.sort_mode_id = sort_mode_id;
                 }
-                return;
+                return true;
             }
-            guard.remove(&key);
+            guard.bindings.remove(&key);
         }
 
-        guard.insert(
+        guard.bindings.insert(
             key,
             SessionBinding {
                 provider_id,
@@ -344,9 +399,16 @@ impl SessionManager {
                 ttl_secs: self.ttl_secs,
             },
         );
+        true
     }
 
-    pub fn clear_bound_provider(&self, cli_key: &str, session_id: &str, now_unix: i64) -> bool {
+    pub fn clear_bound_provider(
+        &self,
+        cli_key: &str,
+        session_id: &str,
+        generation: SessionRouteGeneration,
+        now_unix: i64,
+    ) -> bool {
         if cli_key.trim().is_empty() || session_id.trim().is_empty() {
             return false;
         }
@@ -356,14 +418,18 @@ impl SessionManager {
             session_id: session_id.to_string(),
         };
 
-        let mut guard = self.bindings.lock_or_recover();
-        match guard.get_mut(&key) {
+        let mut guard = self.state.lock_or_recover();
+        if !route_generation_is_current(&guard, cli_key, generation) {
+            return false;
+        }
+
+        match guard.bindings.get_mut(&key) {
             Some(binding) if binding.expires_at > now_unix => {
                 binding.provider_id = 0;
                 true
             }
             Some(_) => {
-                guard.remove(&key);
+                guard.bindings.remove(&key);
                 true
             }
             None => false,
@@ -375,10 +441,11 @@ impl SessionManager {
             return Vec::new();
         }
 
-        let mut guard = self.bindings.lock_or_recover();
-        drop_expired(&mut guard, now_unix);
+        let mut guard = self.state.lock_or_recover();
+        drop_expired(&mut guard.bindings, now_unix);
 
         let mut rows: Vec<ActiveSessionSnapshot> = guard
+            .bindings
             .iter()
             .map(|(k, v)| ActiveSessionSnapshot {
                 cli_key: k.cli_key.clone(),
@@ -393,6 +460,23 @@ impl SessionManager {
         rows.truncate(limit);
         rows
     }
+}
+
+fn current_cli_generation(state: &State, cli_key: &str) -> u64 {
+    state
+        .cli_generations
+        .get(cli_key.trim())
+        .copied()
+        .unwrap_or(0)
+}
+
+fn route_generation_is_current(
+    state: &State,
+    cli_key: &str,
+    generation: SessionRouteGeneration,
+) -> bool {
+    generation.global == state.global_generation
+        && generation.cli == current_cli_generation(state, cli_key)
 }
 
 fn header_string(headers: &HeaderMap, key: &str) -> Option<String> {

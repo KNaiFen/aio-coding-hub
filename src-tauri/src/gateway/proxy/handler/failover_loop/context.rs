@@ -8,6 +8,7 @@ use crate::gateway::proxy::gemini_oauth;
 use crate::gateway::response_fixer;
 use crate::gateway::runtime::GatewayAppState;
 use crate::gateway::streams::StreamFinalizeCtx;
+use crate::session_manager::SessionRouteGeneration;
 use axum::response::Response;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -27,6 +28,7 @@ pub(super) struct CommonCtxArgs<'a, R: tauri::Runtime = tauri::Wry> {
     pub(super) created_at_ms: i64,
     pub(super) created_at: i64,
     pub(super) session_id: &'a Option<String>,
+    pub(super) route_generation: SessionRouteGeneration,
     pub(super) enable_session_reuse: bool,
     pub(super) requested_model: &'a Option<String>,
     pub(super) managed_model_route:
@@ -59,6 +61,7 @@ pub(super) struct CommonCtx<'a, R: tauri::Runtime = tauri::Wry> {
     pub(super) created_at_ms: i64,
     pub(super) created_at: i64,
     pub(super) session_id: &'a Option<String>,
+    pub(super) route_generation: SessionRouteGeneration,
     pub(super) enable_session_reuse: bool,
     pub(super) requested_model: &'a Option<String>,
     pub(super) managed_model_route:
@@ -101,6 +104,7 @@ impl<'a, R: tauri::Runtime> CommonCtx<'a, R> {
             created_at_ms: args.created_at_ms,
             created_at: args.created_at,
             session_id: args.session_id,
+            route_generation: args.route_generation,
             enable_session_reuse: args.enable_session_reuse,
             requested_model: args.requested_model,
             managed_model_route: args.managed_model_route,
@@ -140,6 +144,7 @@ pub(super) struct CommonCtxOwned<'a, R: tauri::Runtime = tauri::Wry> {
     pub(super) created_at_ms: i64,
     pub(super) created_at: i64,
     pub(super) session_id: Option<String>,
+    pub(super) route_generation: SessionRouteGeneration,
     pub(super) enable_session_reuse: bool,
     pub(super) requested_model: Option<String>,
     pub(super) managed_model_route: Option<crate::gateway::managed_model_route::ManagedModelRoute>,
@@ -172,6 +177,7 @@ impl<'a, R: tauri::Runtime> From<CommonCtx<'a, R>> for CommonCtxOwned<'a, R> {
             created_at_ms: ctx.created_at_ms,
             created_at: ctx.created_at,
             session_id: ctx.session_id.clone(),
+            route_generation: ctx.route_generation,
             enable_session_reuse: ctx.enable_session_reuse,
             requested_model: ctx.requested_model.clone(),
             managed_model_route: ctx.managed_model_route.cloned(),
@@ -258,6 +264,7 @@ pub(super) fn build_stream_finalize_ctx<R: tauri::Runtime>(
         plugin_pipeline: ctx.state.plugin_pipeline.clone(),
         circuit: ctx.state.circuit.clone(),
         session: ctx.state.session.clone(),
+        route_generation: ctx.route_generation,
         session_id: ctx.session_id.clone(),
         enable_session_reuse: ctx.enable_session_reuse,
         sort_mode_id: ctx.effective_sort_mode_id,
