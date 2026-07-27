@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   collectPackageVersions,
+  evaluateBlockingAdvisories,
   extractSeverityCounts,
   formatBlockingAdvisories,
   hasBlockingVulnerabilities,
@@ -38,6 +39,73 @@ import {
       dup: ["3.0.0"],
       opt: ["4.0.0"],
     }
+  );
+}
+
+// 精确豁免：仅匹配 package + GHSA，且到期后自动恢复阻断。
+{
+  const advisory = {
+    severity: "high",
+    title: "RSC-only issue",
+    url: "https://github.com/advisories/GHSA-qwww-vcr4-c8h2",
+  };
+  const exceptions = [
+    {
+      packageName: "react-router",
+      advisoryId: "GHSA-QWWW-VCR4-C8H2",
+      expiresOn: "2026-10-27",
+      reason: "RSC is not enabled.",
+    },
+  ];
+
+  const active = evaluateBlockingAdvisories(
+    { "react-router": [advisory] },
+    new Date("2026-10-27T23:59:59.999Z"),
+    exceptions
+  );
+  assert.equal(active.blocking.length, 0);
+  assert.equal(active.exempted.length, 1);
+
+  const expired = evaluateBlockingAdvisories(
+    { "react-router": [advisory] },
+    new Date("2026-10-28T00:00:00.000Z"),
+    exceptions
+  );
+  assert.equal(expired.blocking.length, 1);
+  assert.equal(expired.exempted.length, 0);
+  assert.equal(expired.blocking[0].expiredException, exceptions[0]);
+
+  const wrongPackage = evaluateBlockingAdvisories(
+    { "another-package": [advisory] },
+    new Date("2026-07-27T00:00:00.000Z"),
+    exceptions
+  );
+  assert.equal(wrongPackage.blocking.length, 1);
+  assert.equal(wrongPackage.exempted.length, 0);
+
+  const wrongAdvisory = evaluateBlockingAdvisories(
+    {
+      "react-router": [
+        {
+          ...advisory,
+          url: "https://github.com/advisories/GHSA-chx6-hx7r-mcp5",
+        },
+      ],
+    },
+    new Date("2026-07-27T00:00:00.000Z"),
+    exceptions
+  );
+  assert.equal(wrongAdvisory.blocking.length, 1);
+  assert.equal(wrongAdvisory.exempted.length, 0);
+
+  assert.throws(
+    () =>
+      evaluateBlockingAdvisories(
+        { "react-router": [advisory] },
+        new Date("2026-07-27T00:00:00.000Z"),
+        [{ ...exceptions[0], expiresOn: "2026-02-31" }]
+      ),
+    /Invalid exception expiry/
   );
 }
 

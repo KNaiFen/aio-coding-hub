@@ -19,6 +19,15 @@ const logger = {
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(scriptDir);
 const BLOCKING_SEVERITIES = Object.freeze(["high", "critical"]);
+const AUDIT_EXCEPTIONS = Object.freeze([
+  Object.freeze({
+    packageName: "react-router",
+    advisoryId: "GHSA-QWWW-VCR4-C8H2",
+    expiresOn: "2026-10-27",
+    reason:
+      "This Tauri SPA uses only client-side routers and does not enable React Router RSC mode or Server Actions.",
+  }),
+]);
 const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 const auditRegistry = process.env.PNPM_AUDIT_REGISTRY?.trim() || "https://registry.npmjs.org/";
 const BULK_ADVISORY_ENDPOINT = new URL(
@@ -108,8 +117,8 @@ export function formatCounts(counts) {
     .join(", ");
 }
 
-export function formatBlockingAdvisories(advisoriesByPackage) {
-  const lines = [];
+function blockingAdvisoryEntries(advisoriesByPackage) {
+  const entries = [];
   for (const [name, advisories] of Object.entries(advisoriesByPackage)) {
     if (!Array.isArray(advisories)) {
       continue;
@@ -120,13 +129,97 @@ export function formatBlockingAdvisories(advisoriesByPackage) {
       }
       const severity = typeof advisory.severity === "string" ? advisory.severity.toLowerCase() : "";
       if (BLOCKING_SEVERITIES.includes(severity)) {
-        lines.push(
-          `[pnpm-audit] ${severity}: ${name} — ${advisory.title ?? "untitled advisory"} (${advisory.url ?? "no url"})`
-        );
+        entries.push({ name, advisory, severity });
       }
     }
   }
-  return lines;
+  return entries;
+}
+
+function advisoryIdFromUrl(advisory) {
+  if (typeof advisory.url !== "string") {
+    return null;
+  }
+
+  try {
+    const url = new URL(advisory.url);
+    if (url.protocol !== "https:" || url.hostname !== "github.com" || url.search || url.hash) {
+      return null;
+    }
+    const match = /^\/advisories\/(GHSA-[a-z0-9-]+)\/?$/i.exec(url.pathname);
+    return match?.[1].toUpperCase() ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function exceptionExpiryMs(exception) {
+  if (typeof exception.expiresOn !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(exception.expiresOn)) {
+    throw new Error(`[pnpm-audit] Invalid exception expiry: ${exception.expiresOn ?? "missing"}`);
+  }
+  const expiryMs = Date.parse(`${exception.expiresOn}T23:59:59.999Z`);
+  if (
+    !Number.isFinite(expiryMs) ||
+    new Date(expiryMs).toISOString().slice(0, 10) !== exception.expiresOn
+  ) {
+    throw new Error(`[pnpm-audit] Invalid exception expiry: ${exception.expiresOn}`);
+  }
+  return expiryMs;
+}
+
+function exceptionMap(exceptions) {
+  const byPackageAndId = new Map();
+  for (const exception of exceptions) {
+    if (
+      !exception ||
+      typeof exception.packageName !== "string" ||
+      !/^GHSA-[A-Z0-9-]+$/.test(exception.advisoryId ?? "") ||
+      typeof exception.reason !== "string" ||
+      exception.reason.trim() === ""
+    ) {
+      throw new Error("[pnpm-audit] Invalid advisory exception configuration.");
+    }
+    exceptionExpiryMs(exception);
+    const key = `${exception.packageName}\0${exception.advisoryId}`;
+    if (byPackageAndId.has(key)) {
+      throw new Error(`[pnpm-audit] Duplicate advisory exception: ${exception.advisoryId}`);
+    }
+    byPackageAndId.set(key, exception);
+  }
+  return byPackageAndId;
+}
+
+export function evaluateBlockingAdvisories(
+  advisoriesByPackage,
+  now = new Date(),
+  exceptions = AUDIT_EXCEPTIONS
+) {
+  const nowMs = now instanceof Date ? now.getTime() : Number.NaN;
+  if (!Number.isFinite(nowMs)) {
+    throw new Error("[pnpm-audit] Invalid audit evaluation time.");
+  }
+
+  const configuredExceptions = exceptionMap(exceptions);
+  const blocking = [];
+  const exempted = [];
+  for (const entry of blockingAdvisoryEntries(advisoriesByPackage)) {
+    const advisoryId = advisoryIdFromUrl(entry.advisory);
+    const exception = configuredExceptions.get(`${entry.name}\0${advisoryId}`);
+    if (exception && nowMs <= exceptionExpiryMs(exception)) {
+      exempted.push({ ...entry, advisoryId, exception });
+    } else {
+      blocking.push({ ...entry, advisoryId, expiredException: exception ?? null });
+    }
+  }
+
+  return { blocking, exempted };
+}
+
+export function formatBlockingAdvisories(advisoriesByPackage) {
+  return blockingAdvisoryEntries(advisoriesByPackage).map(
+    ({ name, advisory, severity }) =>
+      `[pnpm-audit] ${severity}: ${name} — ${advisory.title ?? "untitled advisory"} (${advisory.url ?? "no url"})`
+  );
 }
 
 async function main() {
@@ -205,9 +298,27 @@ async function main() {
   const counts = extractSeverityCounts(advisoriesByPackage);
   logger.info("[pnpm-audit] 审计结果：%s", formatCounts(counts));
 
-  if (hasBlockingVulnerabilities(counts)) {
-    for (const line of formatBlockingAdvisories(advisoriesByPackage)) {
-      logger.error(line);
+  const evaluation = evaluateBlockingAdvisories(advisoriesByPackage);
+  for (const { name, advisoryId, exception } of evaluation.exempted) {
+    logger.info(
+      "[pnpm-audit] exception: %s/%s allowed through %s — %s",
+      name,
+      advisoryId,
+      exception.expiresOn,
+      exception.reason
+    );
+  }
+
+  if (evaluation.blocking.length > 0) {
+    for (const { name, advisory, severity, expiredException } of evaluation.blocking) {
+      logger.error(
+        `[pnpm-audit] ${severity}: ${name} — ${advisory.title ?? "untitled advisory"} (${advisory.url ?? "no url"})`
+      );
+      if (expiredException) {
+        logger.error(
+          `[pnpm-audit] exception expired on ${expiredException.expiresOn}: ${expiredException.advisoryId}`
+        );
+      }
     }
     throw new Error("[pnpm-audit] Detected blocking vulnerabilities (high/critical).");
   }
