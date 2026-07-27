@@ -222,10 +222,7 @@ jobs:
             Copy-Item -Recurse $resourceDir (Join-Path $portableDir "resources")
           }
 
-          Compress-Archive \
-            -Path "$portableDir/*" \
-            -DestinationPath "stable-assets/aio-coding-hub-${{ matrix.stable_label }}-portable.zip" \
-            -Force
+          Compress-Archive -Path "$portableDir/*" -DestinationPath "stable-assets/aio-coding-hub-${{ matrix.stable_label }}-portable.zip" -Force
 
       - name: Upload temporary build assets
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

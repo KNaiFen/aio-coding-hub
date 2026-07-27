@@ -731,6 +731,11 @@ function checkWorkflowContracts() {
   );
   assertWorkflowContains(
     releaseWorkflow,
+    'Compress-Archive -Path "$portableDir/*" -DestinationPath "stable-assets/aio-coding-hub-${{ matrix.stable_label }}-portable.zip" -Force',
+    "Windows portable ZIP packaging"
+  );
+  assertWorkflowContains(
+    releaseWorkflow,
     "APPLE_SIGNING_IDENTITY:",
     "macOS ad-hoc signing identity"
   );
