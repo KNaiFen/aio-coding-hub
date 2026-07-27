@@ -5,6 +5,7 @@ use crate::circuit_breaker;
 use crate::gateway::events::decision_chain as dc;
 use crate::gateway::proxy::status_override;
 use crate::gateway::proxy::{is_claude_count_tokens_request, provider_router};
+use std::time::Duration;
 
 pub(super) struct RecordSystemFailureArgs<'a, R: tauri::Runtime = tauri::Wry> {
     pub(super) ctx: CommonCtx<'a, R>,
@@ -17,6 +18,8 @@ pub(super) struct RecordSystemFailureArgs<'a, R: tauri::Runtime = tauri::Wry> {
     pub(super) outcome: String,
     pub(super) reason: String,
     pub(super) record_circuit_failure: bool,
+    /// Delay for a configured transient retry. Applied only if the final decision remains retry.
+    pub(super) configured_retry_backoff: Option<Duration>,
     /// First-byte timeout seconds in effect; `Some` only for timeout-class failures.
     pub(super) timeout_secs: Option<u32>,
 }
@@ -54,6 +57,7 @@ async fn record_system_failure_and_decide_impl<R: tauri::Runtime>(
         mut outcome,
         reason,
         record_circuit_failure,
+        configured_retry_backoff,
         timeout_secs,
     } = args;
     let ProviderCtx {
@@ -186,6 +190,7 @@ async fn record_system_failure_and_decide_impl<R: tauri::Runtime>(
         }
     }
 
+    apply_configured_retry_backoff(decision, configured_retry_backoff).await;
     match decision {
         FailoverDecision::RetrySameProvider => LoopControl::ContinueRetry,
         FailoverDecision::SwitchProvider => {
@@ -193,6 +198,14 @@ async fn record_system_failure_and_decide_impl<R: tauri::Runtime>(
             LoopControl::BreakRetry
         }
         FailoverDecision::Abort => LoopControl::BreakRetry,
+    }
+}
+
+async fn apply_configured_retry_backoff(decision: FailoverDecision, delay: Option<Duration>) {
+    if matches!(decision, FailoverDecision::RetrySameProvider) {
+        if let Some(delay) = delay {
+            tokio::time::sleep(delay).await;
+        }
     }
 }
 
@@ -231,9 +244,11 @@ fn system_failure_outcome_after_decision_override(
 #[cfg(test)]
 mod tests {
     use super::{
-        circuit_breaker, system_failure_decision_after_circuit_record,
+        apply_configured_retry_backoff, circuit_breaker,
+        system_failure_decision_after_circuit_record,
         system_failure_outcome_after_decision_override, FailoverDecision,
     };
+    use std::time::Duration;
 
     #[test]
     fn system_failure_switches_when_circuit_opens() {
@@ -244,6 +259,65 @@ mod tests {
         );
 
         assert!(matches!(decision, FailoverDecision::SwitchProvider));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn configured_retry_backoff_waits_for_same_provider_retry() {
+        let started = tokio::time::Instant::now();
+
+        apply_configured_retry_backoff(
+            FailoverDecision::RetrySameProvider,
+            Some(Duration::from_millis(250)),
+        )
+        .await;
+
+        assert_eq!(started.elapsed(), Duration::from_millis(250));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn configured_retry_backoff_does_not_wait_after_switch() {
+        let started = tokio::time::Instant::now();
+
+        apply_configured_retry_backoff(
+            FailoverDecision::SwitchProvider,
+            Some(Duration::from_millis(250)),
+        )
+        .await;
+
+        assert_eq!(started.elapsed(), Duration::ZERO);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn configured_retry_backoff_does_not_wait_after_abort() {
+        let started = tokio::time::Instant::now();
+
+        apply_configured_retry_backoff(FailoverDecision::Abort, Some(Duration::from_millis(250)))
+            .await;
+
+        assert_eq!(started.elapsed(), Duration::ZERO);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn configured_retry_backoff_does_not_wait_when_circuit_opens() {
+        let decision = system_failure_decision_after_circuit_record(
+            FailoverDecision::RetrySameProvider,
+            false,
+            Some(circuit_breaker::CircuitState::Open),
+        );
+        let started = tokio::time::Instant::now();
+
+        apply_configured_retry_backoff(decision, Some(Duration::from_millis(250))).await;
+
+        assert_eq!(started.elapsed(), Duration::ZERO);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn configured_retry_backoff_does_not_wait_without_delay() {
+        let started = tokio::time::Instant::now();
+
+        apply_configured_retry_backoff(FailoverDecision::RetrySameProvider, None).await;
+
+        assert_eq!(started.elapsed(), Duration::ZERO);
     }
 
     #[test]

@@ -3,7 +3,8 @@
 use super::attempt_executor::RetryLoopState;
 use super::provider_iterator::PreparedProvider;
 use super::upstream_retry_policy::{
-    should_record_circuit_failure, transient_failure_decision, RetryPolicyMatch,
+    configured_retry_backoff_delay, should_record_circuit_failure, transient_failure_decision,
+    RetryPolicyMatch,
 };
 use super::*;
 use crate::domain::provider_oauth_limits;
@@ -770,6 +771,10 @@ where
                         &provider_ctx_owned.upstream_retry_policy,
                         configured_retry,
                     ),
+                    configured_retry_backoff: configured_retry_backoff_delay(
+                        &provider_ctx_owned.upstream_retry_policy,
+                        configured_retry,
+                    ),
                     timeout_secs: Some(upstream_first_byte_timeout_secs),
                 })
                 .await;
@@ -815,6 +820,10 @@ where
                     outcome,
                     reason: "first byte timeout (event-stream)".to_string(),
                     record_circuit_failure: should_record_circuit_failure(
+                        &provider_ctx_owned.upstream_retry_policy,
+                        configured_retry,
+                    ),
+                    configured_retry_backoff: configured_retry_backoff_delay(
                         &provider_ctx_owned.upstream_retry_policy,
                         configured_retry,
                     ),
@@ -870,6 +879,10 @@ where
                 outcome,
                 reason: "upstream returned empty event-stream".to_string(),
                 record_circuit_failure: should_record_circuit_failure(
+                    &provider_ctx_owned.upstream_retry_policy,
+                    configured_retry,
+                ),
+                configured_retry_backoff: configured_retry_backoff_delay(
                     &provider_ctx_owned.upstream_retry_policy,
                     configured_retry,
                 ),
@@ -983,6 +996,10 @@ where
                                 &provider_ctx_owned.upstream_retry_policy,
                                 configured_retry,
                             ),
+                            configured_retry_backoff: configured_retry_backoff_delay(
+                                &provider_ctx_owned.upstream_retry_policy,
+                                configured_retry,
+                            ),
                             timeout_secs: None,
                         })
                         .await;
@@ -1032,6 +1049,10 @@ where
                                 &provider_ctx_owned.upstream_retry_policy,
                                 configured_retry,
                             ),
+                            configured_retry_backoff: configured_retry_backoff_delay(
+                                &provider_ctx_owned.upstream_retry_policy,
+                                configured_retry,
+                            ),
                             timeout_secs,
                         })
                         .await;
@@ -1078,6 +1099,10 @@ where
                             outcome,
                             reason: format!("failed to inspect event-stream prefix: {err}"),
                             record_circuit_failure: should_record_circuit_failure(
+                                &provider_ctx_owned.upstream_retry_policy,
+                                configured_retry,
+                            ),
+                            configured_retry_backoff: configured_retry_backoff_delay(
                                 &provider_ctx_owned.upstream_retry_policy,
                                 configured_retry,
                             ),
