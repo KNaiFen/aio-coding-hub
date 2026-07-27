@@ -19,10 +19,11 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: write
     outputs:
       build_matrix: ${{ steps.matrix.outputs.build_matrix }}
-      checkout_ref: ${{ steps.release.outputs.checkout_ref }}
+      checkout_ref: ${{ steps.source.outputs.checkout_ref }}
       release_id: ${{ steps.release.outputs.release_id }}
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
@@ -35,11 +36,104 @@ jobs:
         with:
           node-version: 22
 
-      - name: Validate support matrix contract
-        run: node scripts/support-matrix.mjs check
-
       - name: Validate tag and application versions
         run: node scripts/support-matrix.mjs validate-release-version --tag "$GITHUB_REF_NAME"
+
+      - id: source
+        name: Resolve immutable release commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          checkout_ref="$(git rev-parse HEAD^{commit})"
+          echo "release commit: $checkout_ref"
+          echo "checkout_ref=$checkout_ref" >> "$GITHUB_OUTPUT"
+
+      # Main already runs the complete CI suite. Reuse that result for the
+      # exact release commit instead of spending a second runner set on it.
+      - name: Reuse successful main CI validation
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        timeout-minutes: 45
+        env:
+          CHECKOUT_REF: ${{ steps.source.outputs.checkout_ref }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const sha = process.env.CHECKOUT_REF;
+            const discoveryDeadline = Date.now() + 2 * 60 * 1000;
+            const completionDeadline = Date.now() + 40 * 60 * 1000;
+            const sleep = (milliseconds) =>
+              new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+            for (;;) {
+              const runs = await github.paginate(
+                github.rest.actions.listWorkflowRuns,
+                {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  workflow_id: 'ci.yml',
+                  head_sha: sha,
+                  per_page: 100,
+                },
+              );
+              const eligibleRuns = runs
+                .filter(
+                  (run) =>
+                    run.head_sha === sha &&
+                    run.head_branch === 'main' &&
+                    ['push', 'workflow_dispatch'].includes(run.event),
+                )
+                .sort(
+                  (left, right) =>
+                    new Date(right.created_at) - new Date(left.created_at),
+                );
+              const successfulRun = eligibleRuns.find(
+                (run) => run.conclusion === 'success',
+              );
+
+              if (successfulRun) {
+                core.notice(`Reusing successful CI run: ${successfulRun.html_url}`);
+                return;
+              }
+
+              const activeRun = eligibleRuns.find(
+                (run) => run.status !== 'completed',
+              );
+              if (activeRun) {
+                if (Date.now() >= completionDeadline) {
+                  core.setFailed(
+                    `Timed out waiting for CI run ${activeRun.html_url}`,
+                  );
+                  return;
+                }
+                core.info(
+                  `CI run ${activeRun.html_url} is ${activeRun.status}; waiting...`,
+                );
+                await sleep(15_000);
+                continue;
+              }
+
+              if (eligibleRuns.length > 0) {
+                const results = eligibleRuns
+                  .map(
+                    (run) =>
+                      `${run.html_url} (${run.conclusion || run.status})`,
+                  )
+                  .join(', ');
+                core.setFailed(
+                  `Commit ${sha} has no successful main CI run: ${results}`,
+                );
+                return;
+              }
+
+              if (Date.now() >= discoveryDeadline) {
+                core.setFailed(
+                  `No main CI run was found for release commit ${sha}`,
+                );
+                return;
+              }
+              core.info(`No CI run for ${sha} is visible yet; waiting...`);
+              await sleep(10_000);
+            }
 
       - id: matrix
         name: Load release build matrix
@@ -53,12 +147,13 @@ jobs:
         name: Create or reuse draft release
         shell: bash
         env:
+          CHECKOUT_REF: ${{ steps.source.outputs.checkout_ref }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
           tag="$GITHUB_REF_NAME"
-          checkout_ref="$(git rev-parse HEAD^{commit})"
+          checkout_ref="$CHECKOUT_REF"
           version="${tag#aio-coding-hub-v}"
 
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
@@ -78,18 +173,11 @@ jobs:
 
           release_id="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json databaseId --jq .databaseId)"
           echo "build commit: $checkout_ref"
-          echo "checkout_ref=$checkout_ref" >> "$GITHUB_OUTPUT"
           echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
           echo "tag_name=$tag" >> "$GITHUB_OUTPUT"
 
-  ci:
-    needs: validate
-    permissions:
-      contents: read
-    uses: ./.github/workflows/ci.yml
-
   build:
-    needs: [validate, ci]
+    needs: validate
     strategy:
       fail-fast: false
       matrix:

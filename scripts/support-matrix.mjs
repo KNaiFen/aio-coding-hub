@@ -650,7 +650,9 @@ function checkWorkflowContracts() {
     "ci desktop matrix loader"
   );
   assertWorkflowContains(ciWorkflow, "  workflow_dispatch:", "manual CI trigger");
-  assertWorkflowContains(ciWorkflow, "  workflow_call:", "reusable CI trigger");
+  if (/^  workflow_call:/m.test(ciWorkflow)) {
+    throw new Error("Workflow contract drifted: CI must not expose a reusable trigger.");
+  }
   assertWorkflowContains(
     ciWorkflow,
     "include: ${{ fromJson(needs.support-contract.outputs.desktop_matrix) }}",
@@ -683,11 +685,9 @@ function checkWorkflowContracts() {
   if (/^  workflow_dispatch:/m.test(releaseWorkflow)) {
     throw new Error("Workflow contract drifted: release packaging must be version-tag-only.");
   }
-  assertWorkflowContains(
-    releaseWorkflow,
-    "run: node scripts/support-matrix.mjs check",
-    "release support matrix validation"
-  );
+  if (releaseWorkflow.includes("run: node scripts/support-matrix.mjs check")) {
+    throw new Error("Workflow contract drifted: release must reuse the main CI matrix check.");
+  }
   assertWorkflowContains(
     releaseWorkflow,
     'node scripts/support-matrix.mjs validate-release-version --tag "$GITHUB_REF_NAME"',
@@ -703,12 +703,24 @@ function checkWorkflowContracts() {
     "include: ${{ fromJson(needs.validate.outputs.build_matrix) }}",
     "release matrix usage"
   );
+  if (releaseWorkflow.includes("uses: ./.github/workflows/ci.yml")) {
+    throw new Error("Workflow contract drifted: release must not rerun the full CI workflow.");
+  }
+  assertWorkflowContains(releaseWorkflow, "actions: read", "CI result read permission");
   assertWorkflowContains(
     releaseWorkflow,
-    "uses: ./.github/workflows/ci.yml",
-    "full CI release gate"
+    "name: Reuse successful main CI validation",
+    "successful CI reuse gate"
   );
-  assertWorkflowContains(releaseWorkflow, "needs: [validate, ci]", "build dependency on full CI");
+  assertWorkflowContains(releaseWorkflow, "workflow_id: 'ci.yml'", "CI workflow lookup");
+  assertWorkflowContains(releaseWorkflow, "head_sha: sha", "exact CI commit lookup");
+  assertWorkflowContains(releaseWorkflow, "run.head_branch === 'main'", "main CI restriction");
+  assertWorkflowContains(
+    releaseWorkflow,
+    "run.conclusion === 'success'",
+    "successful CI conclusion requirement"
+  );
+  assertWorkflowContains(releaseWorkflow, "needs: validate", "build dependency on release gate");
   assertWorkflowContains(
     releaseWorkflow,
     "node scripts/support-matrix.mjs prepare-stable-assets \\",
