@@ -649,6 +649,7 @@ function checkWorkflowContracts() {
     "desktop_matrix=$(node scripts/support-matrix.mjs ci-matrix)",
     "ci desktop matrix loader"
   );
+  assertWorkflowContains(ciWorkflow, "  workflow_dispatch:", "manual CI trigger");
   assertWorkflowContains(ciWorkflow, "  workflow_call:", "reusable CI trigger");
   assertWorkflowContains(
     ciWorkflow,
