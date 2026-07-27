@@ -39,7 +39,7 @@ fn settings_read_defaults() {
     );
     assert_eq!(
         settings["update_releases_url"],
-        serde_json::json!("https://github.com/FingerCaster/aio-coding-hub/releases")
+        serde_json::json!("https://github.com/KNaiFen/aio-coding-hub/releases")
     );
 }
 
@@ -73,7 +73,7 @@ fn settings_migrates_legacy_update_releases_url_to_fork() {
     );
     assert_eq!(
         migrated["update_releases_url"],
-        serde_json::json!("https://github.com/FingerCaster/aio-coding-hub/releases")
+        serde_json::json!("https://github.com/KNaiFen/aio-coding-hub/releases")
     );
 }
 

@@ -5,7 +5,7 @@
 
 **Local AI CLI Unified Gateway** — Route Claude Code / Codex / Gemini CLI through a single entry point
 
-[![Release](https://img.shields.io/github/v/release/FingerCaster/aio-coding-hub?style=flat-square)](https://github.com/FingerCaster/aio-coding-hub/releases)
+[![Release](https://img.shields.io/github/v/release/KNaiFen/aio-coding-hub?style=flat-square)](https://github.com/KNaiFen/aio-coding-hub/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20|%20macOS%20|%20Linux-lightgrey?style=flat-square)](#installation)
 
@@ -114,18 +114,17 @@
 
 ### Download from Releases (Recommended)
 
-Go to [Releases](https://github.com/FingerCaster/aio-coding-hub/releases) and download for your platform:
+Go to [Releases](https://github.com/KNaiFen/aio-coding-hub/releases) and download for your platform.
+This fork currently publishes tagged builds only for Windows x64 and macOS Apple Silicon; build other targets from source or use the upstream releases:
 
 <!-- SUPPORT_MATRIX_RELEASE_DOWNLOAD:START -->
 | Platform | Official release packages |
 | --- | --- |
 | Windows x64 | `.msi` / `-portable.zip` |
-| macOS Intel | `.zip` |
 | macOS Apple Silicon | `.zip` |
-| Linux x64 | `.deb` / `.AppImage` / `-wayland.AppImage` |
 <!-- SUPPORT_MATRIX_RELEASE_DOWNLOAD:END -->
 
-The official support matrix only covers those four targets. `mac:universal` and `win:arm64` remain local build scripts and do not ship in Release assets or `latest.json`.
+This fork's release matrix only covers the two targets above. macOS Intel and Linux x64 remain source-build targets; `mac:universal` and `win:arm64` also remain local build scripts and do not ship in Release assets or `latest.json`.
 
 <details>
 <summary>Linux Arch / Wayland users</summary>
@@ -183,7 +182,7 @@ sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev 
 </details>
 
 ```bash
-git clone https://github.com/FingerCaster/aio-coding-hub.git
+git clone https://github.com/KNaiFen/aio-coding-hub.git
 cd aio-coding-hub
 pnpm install
 
@@ -200,9 +199,9 @@ pnpm tauri:build
 | Scope | Command | Notes |
 | --- | --- | --- |
 | Official | `pnpm tauri:build:win:x64` | Windows x64; Official; included in Release / updater matrix |
-| Official | `pnpm tauri:build:mac:x64` | macOS Intel; Official; included in Release / updater matrix |
+| Official | `pnpm tauri:build:mac:x64` | macOS Intel; Source-supported; excluded from this fork's Release / updater matrix |
 | Official | `pnpm tauri:build:mac:arm64` | macOS Apple Silicon; Official; included in Release / updater matrix |
-| Official | `pnpm tauri:build:linux:x64` | Linux x64; Official; included in Release / updater matrix |
+| Official | `pnpm tauri:build:linux:x64` | Linux x64; Source-supported; excluded from this fork's Release / updater matrix |
 | Local only | `pnpm tauri:build:mac:universal` | macOS Universal; Local build only; excluded from the official release / updater matrix |
 | Local only | `pnpm tauri:build:win:arm64` | Windows ARM64; Local build only; excluded from the official release / updater matrix |
 <!-- SUPPORT_MATRIX_SOURCE_BUILD:END -->
@@ -280,4 +279,4 @@ docs: update installation guide
 
 ---
 
-[![Stargazers over time](https://starchart.cc/FingerCaster/aio-coding-hub.svg?variant=adaptive)](https://starchart.cc/FingerCaster/aio-coding-hub)
+[![Stargazers over time](https://starchart.cc/KNaiFen/aio-coding-hub.svg?variant=adaptive)](https://starchart.cc/KNaiFen/aio-coding-hub)

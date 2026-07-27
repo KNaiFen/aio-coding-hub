@@ -944,6 +944,33 @@ fn migrate_add_session_reuse(settings: &mut AppSettings, schema_version_present:
     )
 }
 
+fn migrate_update_releases_url_to_user_fork(
+    settings: &mut AppSettings,
+    schema_version_present: bool,
+) -> bool {
+    if schema_version_present
+        && settings.schema_version >= SCHEMA_VERSION_UPDATE_RELEASES_URL_TO_USER_FORK
+    {
+        return false;
+    }
+
+    let mut changed = migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_UPDATE_RELEASES_URL_TO_USER_FORK,
+    );
+    let current = settings.update_releases_url.trim();
+    if current.is_empty()
+        || current == LEGACY_UPDATE_RELEASES_URL
+        || current == PREVIOUS_DEFAULT_UPDATE_RELEASES_URL
+    {
+        settings.update_releases_url = DEFAULT_UPDATE_RELEASES_URL.to_string();
+        changed = true;
+    }
+
+    changed
+}
+
 type SettingsMigration = fn(&mut AppSettings, bool) -> bool;
 
 const SETTINGS_MIGRATIONS: &[SettingsMigration] = &[
@@ -983,6 +1010,7 @@ const SETTINGS_MIGRATIONS: &[SettingsMigration] = &[
     migrate_add_image_gen_storage_roots,
     migrate_add_upstream_http_retry_rules,
     migrate_add_session_reuse,
+    migrate_update_releases_url_to_user_fork,
 ];
 
 fn apply_settings_migrations(settings: &mut AppSettings, schema_version_present: bool) -> bool {
@@ -1476,6 +1504,43 @@ mod tests {
         assert_eq!(s.schema_version, SCHEMA_VERSION_UPDATE_RELEASES_URL_TO_FORK);
         assert_eq!(
             s.update_releases_url,
+            "https://mirror.example.invalid/releases"
+        );
+    }
+
+    #[test]
+    fn migrate_update_releases_url_to_user_fork_rewrites_previous_default() {
+        let mut settings = AppSettings {
+            schema_version: SCHEMA_VERSION_ADD_SESSION_REUSE,
+            update_releases_url: PREVIOUS_DEFAULT_UPDATE_RELEASES_URL.to_string(),
+            ..Default::default()
+        };
+
+        assert!(migrate_update_releases_url_to_user_fork(
+            &mut settings,
+            true
+        ));
+        assert_eq!(
+            settings.schema_version,
+            SCHEMA_VERSION_UPDATE_RELEASES_URL_TO_USER_FORK
+        );
+        assert_eq!(settings.update_releases_url, DEFAULT_UPDATE_RELEASES_URL);
+    }
+
+    #[test]
+    fn migrate_update_releases_url_to_user_fork_preserves_custom_url() {
+        let mut settings = AppSettings {
+            schema_version: SCHEMA_VERSION_ADD_SESSION_REUSE,
+            update_releases_url: "https://mirror.example.invalid/releases".to_string(),
+            ..Default::default()
+        };
+
+        assert!(migrate_update_releases_url_to_user_fork(
+            &mut settings,
+            true
+        ));
+        assert_eq!(
+            settings.update_releases_url,
             "https://mirror.example.invalid/releases"
         );
     }

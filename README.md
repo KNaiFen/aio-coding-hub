@@ -5,7 +5,7 @@
 
 **本地 AI CLI 统一网关** — 让 Claude Code / Codex / Gemini CLI 请求走同一个入口
 
-[![Release](https://img.shields.io/github/v/release/FingerCaster/aio-coding-hub?style=flat-square)](https://github.com/FingerCaster/aio-coding-hub/releases)
+[![Release](https://img.shields.io/github/v/release/KNaiFen/aio-coding-hub?style=flat-square)](https://github.com/KNaiFen/aio-coding-hub/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20|%20macOS%20|%20Linux-lightgrey?style=flat-square)](#安装)
 
@@ -119,18 +119,17 @@
 
 ### 从 Release 下载（推荐）
 
-前往 [Releases](https://github.com/FingerCaster/aio-coding-hub/releases) 下载对应平台安装包：
+前往 [Releases](https://github.com/KNaiFen/aio-coding-hub/releases) 下载对应平台安装包。
+本 Fork 的标签发布当前只提供 Windows x64 与 macOS Apple Silicon；其他平台请从源码构建或使用 upstream 发布：
 
 <!-- SUPPORT_MATRIX_RELEASE_DOWNLOAD:START -->
 | 平台 | 官方发布安装包 |
 | --- | --- |
 | Windows x64 | `.msi` / `-portable.zip` |
-| macOS Intel | `.zip` |
 | macOS Apple Silicon | `.zip` |
-| Linux x64 | `.deb` / `.AppImage` / `-wayland.AppImage` |
 <!-- SUPPORT_MATRIX_RELEASE_DOWNLOAD:END -->
 
-官方支持矩阵只覆盖上表 4 个目标。`mac:universal` 和 `win:arm64` 只保留本地构建命令，不进入 Release 产物和 `latest.json`。
+本 Fork 的发布矩阵只覆盖上表 2 个目标。macOS Intel 与 Linux x64 仍可从源码构建；`mac:universal` 和 `win:arm64` 也只保留本地构建命令，不进入 Release 产物和 `latest.json`。
 
 <details>
 <summary>Linux Arch / Wayland 用户</summary>
@@ -186,7 +185,7 @@ sudo apt-get install -y libasound2-dev libwebkit2gtk-4.1-dev libappindicator3-de
 </details>
 
 ```bash
-git clone https://github.com/FingerCaster/aio-coding-hub.git
+git clone https://github.com/KNaiFen/aio-coding-hub.git
 cd aio-coding-hub
 pnpm install
 
@@ -203,9 +202,9 @@ pnpm tauri:build
 | 分类 | 命令 | 说明 |
 | --- | --- | --- |
 | 官方支持 | `pnpm tauri:build:win:x64` | Windows x64；官方支持；进入 Release / updater 矩阵 |
-| 官方支持 | `pnpm tauri:build:mac:x64` | macOS Intel；官方支持；进入 Release / updater 矩阵 |
+| 官方支持 | `pnpm tauri:build:mac:x64` | macOS Intel；源码支持；不进入本 Fork 的 Release / updater 矩阵 |
 | 官方支持 | `pnpm tauri:build:mac:arm64` | macOS Apple Silicon；官方支持；进入 Release / updater 矩阵 |
-| 官方支持 | `pnpm tauri:build:linux:x64` | Linux x64；官方支持；进入 Release / updater 矩阵 |
+| 官方支持 | `pnpm tauri:build:linux:x64` | Linux x64；源码支持；不进入本 Fork 的 Release / updater 矩阵 |
 | 本地构建 | `pnpm tauri:build:mac:universal` | macOS Universal；仅本地构建；不进入官方发布 / updater 矩阵 |
 | 本地构建 | `pnpm tauri:build:win:arm64` | Windows ARM64；仅本地构建；不进入官方发布 / updater 矩阵 |
 <!-- SUPPORT_MATRIX_SOURCE_BUILD:END -->
@@ -294,4 +293,4 @@ docs: update installation guide
 
 ## Star History
 
-[![Stargazers over time](https://starchart.cc/FingerCaster/aio-coding-hub.svg?variant=adaptive)](https://starchart.cc/FingerCaster/aio-coding-hub)
+[![Stargazers over time](https://starchart.cc/KNaiFen/aio-coding-hub.svg?variant=adaptive)](https://starchart.cc/KNaiFen/aio-coding-hub)

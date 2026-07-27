@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.60.31](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.31) (2026-07-27)
+
+### Features
+
+* add configurable and priority-aware session reuse
+* add custom JavaScript provider account usage requests
+* move release builds to the public KNaiFen fork
+
+### Bug Fixes
+
+* clear stale session bindings after switching route plans
+* apply configured backoff to transport retries before reusing a provider
+
 ## [0.60.30](https://github.com/FingerCaster/aio-coding-hub/compare/aio-coding-hub-v0.60.29...aio-coding-hub-v0.60.30) (2026-07-21)
 
 

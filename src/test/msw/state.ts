@@ -52,7 +52,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   upstream_first_byte_timeout_seconds: 30,
   upstream_stream_idle_timeout_seconds: 300,
   upstream_request_timeout_non_streaming_seconds: 0,
-  update_releases_url: "https://github.com/FingerCaster/aio-coding-hub/releases",
+  update_releases_url: "https://github.com/KNaiFen/aio-coding-hub/releases",
   failover_max_attempts_per_provider: 5,
   failover_max_providers_to_try: 5,
   upstream_retry_policy: DEFAULT_UPSTREAM_RETRY_POLICY,

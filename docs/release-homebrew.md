@@ -28,7 +28,7 @@ Use the latest release asset digests:
 ```bash
 node scripts/support-matrix.mjs homebrew-cask \
   --tag aio-coding-hub-v0.60.4 \
-  --repo FingerCaster/aio-coding-hub \
+  --repo KNaiFen/aio-coding-hub \
   --macos-arm-sha256 6b126f39ec625e97d182301fafcbfff81ce6f332e297880aef2b0eab0a3c0c4a \
   --macos-intel-sha256 18f376bc6266e8cef4fb3978240ba0247c56b703370f6a95269443c2adbbbcc6 \
   --output Casks/aio-coding-hub.rb
