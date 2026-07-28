@@ -173,10 +173,7 @@ fn active_count_is_exact_beyond_list_limit_and_prunes_expired_bindings() {
 
     assert_eq!(manager.list_active(t0, 50).len(), 50);
     assert_eq!(manager.active_count(t0), 51);
-    assert_eq!(
-        manager.active_count(t0 + DEFAULT_SESSION_TTL_SECS + 1),
-        0
-    );
+    assert_eq!(manager.active_count(t0 + DEFAULT_SESSION_TTL_SECS + 1), 0);
 }
 
 #[test]
