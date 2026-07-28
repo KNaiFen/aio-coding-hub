@@ -513,6 +513,9 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async gatewayActiveSessionCount(): Promise<number> {
+    return await TAURI_INVOKE("gateway_active_session_count");
+  },
   async gatewayCircuitStatus(
     cliKey: string
   ): Promise<Result<GatewayProviderCircuitStatus[], string>> {

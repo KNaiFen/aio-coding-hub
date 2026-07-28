@@ -511,6 +511,7 @@ export type HomeRequestLogsPanelProps = {
 
   traces: TraceSession[];
   activeRequests?: ActiveRequestSnapshotItem[];
+  activeSessionCount?: number | null;
 
   requestLogs: RequestLogSummary[];
   requestLogsLoading: boolean;
@@ -531,6 +532,7 @@ export function HomeRequestLogsPanel({
   devPreviewEnabled = false,
   traces,
   activeRequests = [],
+  activeSessionCount,
   requestLogs,
   requestLogsLoading,
   requestLogsRefreshing,
@@ -666,6 +668,18 @@ export function HomeRequestLogsPanel({
       <div className="flex flex-wrap items-center justify-between gap-3 shrink-0">
         <div className="flex flex-wrap items-center gap-2">
           <div className="text-sm font-semibold">{title ?? "最近代理记录"}</div>
+          {activeSessionCount !== undefined ? (
+            <div
+              className="inline-flex items-baseline gap-1 text-xs text-muted-foreground"
+              aria-label={`当前并发 ${activeSessionCount ?? "不可用"}`}
+              title="按 5 分钟 TTL 内的活跃 Session 统计"
+            >
+              <span>当前并发</span>
+              <span className="font-mono font-semibold tabular-nums text-indigo-600 dark:text-indigo-400">
+                {activeSessionCount ?? "--"}
+              </span>
+            </div>
+          ) : null}
         </div>
 
         <div className="flex items-center gap-2">

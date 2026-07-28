@@ -58,6 +58,7 @@ describe("generated/bindings.ts contract", () => {
     expect(bindingsSource).toContain("app_data_reset");
     expect(bindingsSource).toContain("gateway_status");
     expect(bindingsSource).toContain("gateway_sessions_list");
+    expect(bindingsSource).toContain("gateway_active_session_count");
     expect(bindingsSource).toContain("gateway_upstream_proxy_validate");
     expect(bindingsSource).toContain("request_logs_list_all");
     expect(bindingsSource).toContain("request_attempt_logs_by_trace_id");

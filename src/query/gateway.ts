@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  gatewayActiveSessionCount,
   gatewayStart,
   gatewayStop,
   gatewayCircuitResetCli,
@@ -195,6 +196,23 @@ export function useGatewaySessionsListQuery(
   return useQuery({
     queryKey: gatewayKeys.sessionsList(normalizedLimit),
     queryFn: () => gatewaySessionsList(normalizedLimit),
+    enabled: options?.enabled ?? true,
+    placeholderData: keepPreviousData,
+    refetchInterval: documentVisible ? (options?.refetchIntervalMs ?? false) : false,
+    refetchIntervalInBackground: true,
+  });
+}
+
+export function useGatewayActiveSessionCountQuery(options?: {
+  enabled?: boolean;
+  refetchIntervalMs?: number | false;
+}) {
+  // Keep the title metric on the same foreground-only cadence as the session detail list.
+  const documentVisible = useDocumentVisibility();
+
+  return useQuery({
+    queryKey: gatewayKeys.activeSessionCount(),
+    queryFn: gatewayActiveSessionCount,
     enabled: options?.enabled ?? true,
     placeholderData: keepPreviousData,
     refetchInterval: documentVisible ? (options?.refetchIntervalMs ?? false) : false,

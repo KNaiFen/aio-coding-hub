@@ -6,6 +6,7 @@ import {
   GATEWAY_PORT_MIN,
   GATEWAY_SESSIONS_MAX_LIMIT,
   GATEWAY_SESSIONS_MIN_LIMIT,
+  gatewayActiveSessionCount,
   gatewayCheckPortAvailable,
   gatewayCircuitResetCli,
   gatewayCircuitResetProvider,
@@ -40,6 +41,7 @@ vi.mock("../../../generated/bindings", async () => {
       gatewayStop: vi.fn(),
       gatewayCheckPortAvailable: vi.fn(),
       gatewaySessionsList: vi.fn(),
+      gatewayActiveSessionCount: vi.fn(),
       gatewayCircuitStatus: vi.fn(),
       gatewayCircuitResetProvider: vi.fn(),
       gatewayCircuitResetCli: vi.fn(),
@@ -94,6 +96,7 @@ describe("services/gateway/gateway", () => {
 
     vi.mocked(commands.gatewayStatus).mockResolvedValueOnce(status as any);
     vi.mocked(commands.gatewaySessionsList).mockResolvedValueOnce({ status: "ok", data: sessions });
+    vi.mocked(commands.gatewayActiveSessionCount).mockResolvedValueOnce(73);
     vi.mocked(commands.gatewayCircuitStatus).mockResolvedValueOnce({
       status: "ok",
       data: circuits,
@@ -101,6 +104,7 @@ describe("services/gateway/gateway", () => {
 
     await expect(gatewayStatus()).resolves.toEqual(status);
     await expect(gatewaySessionsList(20)).resolves.toEqual(sessions);
+    await expect(gatewayActiveSessionCount()).resolves.toBe(73);
     await expect(gatewayCircuitStatus(" claude ")).resolves.toEqual(circuits);
     expect(commands.gatewayCircuitStatus).toHaveBeenCalledWith("claude");
   });

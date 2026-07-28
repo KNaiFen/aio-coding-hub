@@ -155,6 +155,31 @@ fn sliding_ttl_lru_eviction_works_with_refreshed_bindings() {
 }
 
 #[test]
+fn active_count_is_exact_beyond_list_limit_and_prunes_expired_bindings() {
+    let manager = SessionManager::new();
+    let t0 = 1000;
+    let generation = manager.capture_route_generation("claude");
+
+    for index in 0..51 {
+        assert!(manager.bind_success(
+            "claude",
+            &format!("session-{index}"),
+            generation,
+            index + 1,
+            None,
+            t0,
+        ));
+    }
+
+    assert_eq!(manager.list_active(t0, 50).len(), 50);
+    assert_eq!(manager.active_count(t0), 51);
+    assert_eq!(
+        manager.active_count(t0 + DEFAULT_SESSION_TTL_SECS + 1),
+        0
+    );
+}
+
+#[test]
 fn clear_cli_bindings_removes_only_target_cli() {
     let manager = SessionManager::new();
     let now_unix = 100;

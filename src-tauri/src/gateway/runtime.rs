@@ -175,6 +175,10 @@ impl GatewayRuntime {
         self.session.list_active(now_unix, limit)
     }
 
+    pub(crate) fn active_session_count(&self, now_unix: i64) -> usize {
+        self.session.active_count(now_unix)
+    }
+
     pub(crate) fn clear_cli_session_bindings(&self, cli_key: &str) -> usize {
         self.session.clear_cli_bindings(cli_key)
     }

@@ -60,6 +60,7 @@ export const gatewayKeys = {
   status: () => [...gatewayAllKey, "status"] as const,
   sessions: () => [...gatewayAllKey, "sessions"] as const,
   sessionsList: (limit: number | null) => [...gatewayAllKey, "sessions", limit] as const,
+  activeSessionCount: () => [...gatewayAllKey, "sessions", "count"] as const,
   circuits: () => [...gatewayAllKey, "circuitStatus"] as const,
   circuitStatus: (cliKey: CliKey) => [...gatewayAllKey, "circuitStatus", cliKey] as const,
 };

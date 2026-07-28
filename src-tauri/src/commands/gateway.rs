@@ -67,6 +67,12 @@ pub(crate) async fn gateway_sessions_list(
 
 #[tauri::command]
 #[specta::specta]
+pub(crate) fn gateway_active_session_count(app: tauri::AppHandle) -> usize {
+    gateway_service::active_session_count(app)
+}
+
+#[tauri::command]
+#[specta::specta]
 pub(crate) async fn gateway_circuit_status(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,

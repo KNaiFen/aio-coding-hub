@@ -200,6 +200,7 @@ function renderPanel(overrides: HomeOverviewPanelTestOverrides = {}) {
       activeModeToggling={{ claude: false, codex: false, gemini: false, grok: false }}
       onSetCliActiveMode={onSetCliActiveMode}
       activeSessions={[]}
+      activeSessionCount={0}
       activeSessionsLoading={false}
       activeSessionsAvailable={true}
       workspaceConfigs={[
@@ -256,6 +257,19 @@ describe("components/home/HomeOverviewPanel", () => {
   beforeEach(() => {
     window.localStorage.clear();
     homeRequestLogsPanelMock.mockClear();
+  });
+
+  it("passes the exact active Session count independently of the detail list size", () => {
+    const activeSessions = Array.from({ length: 50 }, (_, index) => ({
+      cli_key: "codex",
+      session_id: `session-${index}`,
+    }));
+
+    renderPanel({ activeSessions: activeSessions as any, activeSessionCount: 73 });
+
+    const latestCall =
+      homeRequestLogsPanelMock.mock.calls[homeRequestLogsPanelMock.mock.calls.length - 1];
+    expect(latestCall?.[0]).toMatchObject({ activeSessionCount: 73 });
   });
 
   it("renders preview circuit rows when dev preview is enabled and there are no real open circuits", () => {
@@ -644,6 +658,7 @@ describe("components/home/HomeOverviewPanel", () => {
         activeModeToggling={{ claude: false, codex: false, gemini: false, grok: false }}
         onSetCliActiveMode={vi.fn()}
         activeSessions={[]}
+        activeSessionCount={0}
         activeSessionsLoading={false}
         activeSessionsAvailable={true}
         workspaceConfigs={[
@@ -739,6 +754,7 @@ describe("components/home/HomeOverviewPanel", () => {
             activeModeToggling={{ claude: false, codex: false, gemini: false, grok: false }}
             onSetCliActiveMode={vi.fn()}
             activeSessions={[]}
+            activeSessionCount={0}
             activeSessionsLoading={false}
             activeSessionsAvailable={true}
             workspaceConfigs={[
@@ -871,6 +887,7 @@ describe("components/home/HomeOverviewPanel", () => {
         activeModeToggling={{ claude: false, codex: false, gemini: false, grok: false }}
         onSetCliActiveMode={vi.fn()}
         activeSessions={[]}
+        activeSessionCount={0}
         activeSessionsLoading={false}
         activeSessionsAvailable={true}
         workspaceConfigs={[]}
@@ -947,6 +964,7 @@ describe("components/home/HomeOverviewPanel", () => {
         activeModeToggling={{ claude: false, codex: false, gemini: false, grok: false }}
         onSetCliActiveMode={vi.fn()}
         activeSessions={[]}
+        activeSessionCount={0}
         activeSessionsLoading={false}
         activeSessionsAvailable={true}
         workspaceConfigs={[]}
@@ -1030,6 +1048,7 @@ describe("components/home/HomeOverviewPanel", () => {
         activeModeToggling={{ claude: false, codex: false, gemini: false, grok: false }}
         onSetCliActiveMode={vi.fn()}
         activeSessions={[]}
+        activeSessionCount={0}
         activeSessionsLoading={false}
         activeSessionsAvailable={true}
         workspaceConfigs={[

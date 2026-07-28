@@ -77,6 +77,7 @@ macro_rules! generated_command_registry {
             gateway_status => crate::commands::gateway::gateway_status,
             gateway_check_port_available => crate::commands::gateway::gateway_check_port_available,
             gateway_sessions_list => crate::commands::gateway::gateway_sessions_list,
+            gateway_active_session_count => crate::commands::gateway::gateway_active_session_count,
             gateway_circuit_status => crate::commands::gateway::gateway_circuit_status,
             gateway_circuit_reset_provider => crate::commands::gateway::gateway_circuit_reset_provider,
             gateway_circuit_reset_cli => crate::commands::gateway::gateway_circuit_reset_cli,

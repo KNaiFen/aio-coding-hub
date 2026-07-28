@@ -154,6 +154,8 @@ export const handlers = [
 
   http.post(`${TAURI_ENDPOINT}/gateway_sessions_list`, () => HttpResponse.json([])),
 
+  http.post(`${TAURI_ENDPOINT}/gateway_active_session_count`, () => HttpResponse.json(0)),
+
   http.post(`${TAURI_ENDPOINT}/gateway_circuit_status`, () => HttpResponse.json([])),
 
   http.post(`${TAURI_ENDPOINT}/gateway_circuit_reset_provider`, () => HttpResponse.json(true)),

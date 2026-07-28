@@ -1,6 +1,8 @@
 //! Usage: Gateway active-session aggregation for IPC and diagnostics.
 
-use crate::gateway_runtime_access::app_gateway_active_sessions;
+use crate::gateway_runtime_access::{
+    app_gateway_active_session_count, app_gateway_active_sessions,
+};
 use crate::shared::error::AppResult;
 use crate::{blocking, db, providers, request_logs};
 
@@ -29,17 +31,23 @@ fn gateway_sessions_limit(limit: Option<u32>) -> usize {
         .clamp(1, GATEWAY_SESSIONS_MAX_LIMIT) as usize
 }
 
+fn now_unix() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+pub(crate) fn active_session_count<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> usize {
+    app_gateway_active_session_count(&app, now_unix())
+}
+
 pub(crate) async fn list_active_sessions<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     db: db::Db,
     limit: Option<u32>,
 ) -> AppResult<Vec<GatewayActiveSessionSummary>> {
-    let now_unix = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_secs() as i64)
-        .unwrap_or(0);
-
-    let sessions = app_gateway_active_sessions(&app, now_unix, gateway_sessions_limit(limit));
+    let sessions = app_gateway_active_sessions(&app, now_unix(), gateway_sessions_limit(limit));
     if sessions.is_empty() {
         return Ok(Vec::new());
     }

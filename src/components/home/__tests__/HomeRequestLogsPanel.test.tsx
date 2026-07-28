@@ -56,6 +56,40 @@ describe("components/home/HomeRequestLogsPanel", () => {
     useCliSessionsFolderLookupByIdsQueryMock.mockReturnValue({ data: [], isLoading: false });
   });
 
+  it("renders the optional active Session concurrency metric", () => {
+    const renderPanel = (activeSessionCount?: number | null) => (
+      <MemoryRouter>
+        <HomeRequestLogsPanel
+          traces={[]}
+          activeSessionCount={activeSessionCount}
+          requestLogs={[]}
+          requestLogsLoading={false}
+          requestLogsRefreshing={false}
+          requestLogsAvailable={true}
+          onRefreshRequestLogs={vi.fn()}
+          selectedLogId={null}
+          onSelectLogId={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+    const view = render(renderPanel(73));
+
+    const exactCount = screen.getByLabelText("当前并发 73");
+    expect(within(exactCount).getByText("73")).toHaveClass(
+      "text-indigo-600",
+      "dark:text-indigo-400"
+    );
+
+    view.rerender(renderPanel(0));
+    expect(screen.getByLabelText("当前并发 0")).toBeInTheDocument();
+
+    view.rerender(renderPanel(null));
+    expect(within(screen.getByLabelText("当前并发 不可用")).getByText("--")).toBeInTheDocument();
+
+    view.rerender(renderPanel());
+    expect(screen.queryByText("当前并发")).not.toBeInTheDocument();
+  });
+
   it("shows the Codex system request badge only for a valid structured marker", () => {
     render(
       <MemoryRouter>

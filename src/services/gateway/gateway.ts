@@ -126,6 +126,10 @@ export async function gatewaySessionsList(limit?: number | null) {
   });
 }
 
+export async function gatewayActiveSessionCount() {
+  return commands.gatewayActiveSessionCount();
+}
+
 export async function gatewayCircuitStatus(cliKey: string) {
   const normalizedCliKey = validateGatewayCliKey(cliKey);
 

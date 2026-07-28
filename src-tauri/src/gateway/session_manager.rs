@@ -460,6 +460,12 @@ impl SessionManager {
         rows.truncate(limit);
         rows
     }
+
+    pub fn active_count(&self, now_unix: i64) -> usize {
+        let mut guard = self.state.lock_or_recover();
+        drop_expired(&mut guard.bindings, now_unix);
+        guard.bindings.len()
+    }
 }
 
 fn current_cli_generation(state: &State, cli_key: &str) -> u64 {

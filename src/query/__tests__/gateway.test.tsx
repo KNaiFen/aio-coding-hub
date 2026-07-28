@@ -4,6 +4,7 @@ import type { GatewayProviderCircuitStatus } from "../../services/gateway/gatewa
 import {
   GATEWAY_SESSIONS_DEFAULT_LIMIT,
   GATEWAY_SESSIONS_MAX_LIMIT,
+  gatewayActiveSessionCount,
   gatewayCircuitResetCli,
   gatewayCircuitResetProvider,
   gatewayCircuitStatus,
@@ -16,6 +17,7 @@ import { gatewayKeys } from "../keys";
 import {
   getGatewayCircuitDerivedState,
   summarizeGatewayCircuitRows,
+  useGatewayActiveSessionCountQuery,
   useGatewayCircuitByProviderId,
   useGatewayCircuitStatusQuery,
   useGatewayCircuitResetCliMutation,
@@ -34,6 +36,7 @@ vi.mock("../../services/gateway/gateway", async () => {
     gatewayStatus: vi.fn(),
     gatewayCircuitStatus: vi.fn(),
     gatewaySessionsList: vi.fn(),
+    gatewayActiveSessionCount: vi.fn(),
     gatewayCircuitResetProvider: vi.fn(),
     gatewayCircuitResetCli: vi.fn(),
   };
@@ -393,6 +396,66 @@ describe("query/gateway", () => {
     await waitFor(() => {
       expect(result.current.isError).toBe(true);
     });
+  });
+
+  it("useGatewayActiveSessionCountQuery respects options.enabled", async () => {
+    setTauriRuntime();
+    vi.mocked(gatewayActiveSessionCount).mockClear();
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    renderHook(() => useGatewayActiveSessionCountQuery({ enabled: false }), { wrapper });
+    await Promise.resolve();
+
+    expect(gatewayActiveSessionCount).not.toHaveBeenCalled();
+  });
+
+  it("useGatewayActiveSessionCountQuery fetches an exact count", async () => {
+    setTauriRuntime();
+    vi.mocked(gatewayActiveSessionCount).mockClear();
+    vi.mocked(gatewayActiveSessionCount).mockResolvedValue(73);
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(() => useGatewayActiveSessionCountQuery(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.data).toBe(73);
+    });
+    expect(client.getQueryData(gatewayKeys.activeSessionCount())).toBe(73);
+  });
+
+  it("useGatewayActiveSessionCountQuery pauses polling while the document is hidden", async () => {
+    setTauriRuntime();
+    vi.mocked(gatewayActiveSessionCount).mockClear();
+    vi.mocked(gatewayActiveSessionCount).mockResolvedValue(2);
+
+    const visibilitySpy = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    try {
+      const client = createTestQueryClient();
+      const wrapper = createQueryWrapper(client);
+
+      renderHook(
+        () => useGatewayActiveSessionCountQuery({ refetchIntervalMs: 20 }),
+        { wrapper }
+      );
+
+      await waitFor(() => expect(gatewayActiveSessionCount).toHaveBeenCalledTimes(1));
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      expect(gatewayActiveSessionCount).toHaveBeenCalledTimes(1);
+
+      visibilitySpy.mockReturnValue("visible");
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      await waitFor(() => {
+        expect(vi.mocked(gatewayActiveSessionCount).mock.calls.length).toBeGreaterThan(1);
+      });
+    } finally {
+      visibilitySpy.mockRestore();
+    }
   });
 
   it("useGatewayStatusQuery respects options.enabled=false", async () => {

@@ -900,6 +900,7 @@ export type HomeOverviewPanelProps = {
   onSetCliActiveMode: (cliKey: CliKey, modeId: number | null) => void;
 
   activeSessions: GatewayActiveSession[];
+  activeSessionCount: number | null;
   activeSessionsLoading: boolean;
   activeSessionsAvailable: boolean | null;
 
@@ -1104,6 +1105,7 @@ export function HomeOverviewPanel({
   activeModeToggling,
   onSetCliActiveMode,
   activeSessions,
+  activeSessionCount,
   activeSessionsLoading,
   activeSessionsAvailable,
   workspaceConfigs,
@@ -1156,6 +1158,10 @@ export function HomeOverviewPanel({
   const displayedCircuits = circuitPreviewActive ? PREVIEW_CIRCUITS : openCircuits;
   const displayedActiveSessions =
     devPreviewEnabled && activeSessions.length === 0 ? PREVIEW_ACTIVE_SESSIONS : activeSessions;
+  const displayedActiveSessionCount =
+    devPreviewEnabled && activeSessions.length === 0
+      ? PREVIEW_ACTIVE_SESSIONS.length
+      : activeSessionCount;
   const displayedProviderLimitRows =
     devPreviewEnabled && providerLimitRows.length === 0
       ? PREVIEW_PROVIDER_LIMIT_ROWS
@@ -1212,6 +1218,7 @@ export function HomeOverviewPanel({
       traces={traces}
       requestLogs={requestLogs}
       activeRequests={activeRequests}
+      activeSessionCount={displayedActiveSessionCount}
       requestLogsLoading={requestLogsLoading}
       requestLogsRefreshing={requestLogsRefreshing}
       requestLogsAvailable={requestLogsAvailable}

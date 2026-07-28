@@ -11,6 +11,7 @@ import { HomePage } from "../HomePage";
 import { logToConsole } from "../../services/consoleLog";
 import { gatewayKeys, mcpKeys, promptsKeys, skillsKeys, workspacesKeys } from "../../query/keys";
 import {
+  useGatewayActiveSessionCountQuery,
   useGatewayCircuitResetProviderMutation,
   useGatewayCircuitStatusQuery,
   useGatewaySessionsListQuery,
@@ -160,6 +161,7 @@ vi.mock("../../query/gateway", async () => {
     ...actual,
     useGatewayCircuitResetProviderMutation: vi.fn(),
     useGatewayCircuitStatusQuery: vi.fn(),
+    useGatewayActiveSessionCountQuery: vi.fn(),
     useGatewaySessionsListQuery: vi.fn(),
   };
 });
@@ -223,6 +225,10 @@ function mockHomePageBaseQueries() {
     data: null,
     isFetching: false,
     refetch: vi.fn(),
+  } as any);
+  vi.mocked(useGatewayActiveSessionCountQuery).mockReturnValue({
+    data: 0,
+    isLoading: false,
   } as any);
   vi.mocked(useGatewaySessionsListQuery).mockReturnValue({ data: null, isLoading: false } as any);
   vi.mocked(useRequestLogsListAllQuery).mockReturnValue({
@@ -288,6 +294,10 @@ describe("pages/HomePage", () => {
     localStorage.removeItem("aio-home-overview-logs-primary-layout");
     localStorage.removeItem("aio-home-workspace-config-show-all");
     resetMswState();
+    vi.mocked(useGatewayActiveSessionCountQuery).mockReturnValue({
+      data: 0,
+      isLoading: false,
+    } as any);
     vi.mocked(useProviderLimitUsageV1Query).mockReturnValue({
       data: null,
       isLoading: false,
@@ -340,6 +350,25 @@ describe("pages/HomePage", () => {
     expect(homeOverviewPanelMock.latestProps).not.toHaveProperty("cliProxyAppliedToCurrentGateway");
     expect(homeOverviewPanelMock.latestProps).not.toHaveProperty("cliProxyToggling");
     expect(homeOverviewPanelMock.latestProps).not.toHaveProperty("onSetCliProxyEnabled");
+  });
+
+  it("passes the exact active Session count with foreground polling enabled", () => {
+    setTauriRuntime();
+
+    const client = createTestQueryClient();
+    mockHomePageBaseQueries();
+    vi.mocked(useGatewayActiveSessionCountQuery).mockReturnValue({
+      data: 73,
+      isLoading: false,
+    } as any);
+
+    renderWithProviders(client, <HomePage />);
+
+    expect(homeOverviewPanelMock.latestProps?.activeSessionCount).toBe(73);
+    expect(useGatewayActiveSessionCountQuery).toHaveBeenCalledWith({
+      enabled: true,
+      refetchIntervalMs: 5000,
+    });
   });
 
   it("covers circuits auto refresh, reset provider, mode switching, and refetch flows", async () => {

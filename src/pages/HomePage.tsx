@@ -12,7 +12,10 @@ import {
 import type { HomeWorkspaceConfigItem } from "../components/home/homeWorkspaceConfigTypes";
 import { useDevPreviewData } from "../hooks/useDevPreviewData";
 import { useDocumentVisibility } from "../hooks/useDocumentVisibility";
-import { useGatewaySessionsListQuery } from "../query/gateway";
+import {
+  useGatewayActiveSessionCountQuery,
+  useGatewaySessionsListQuery,
+} from "../query/gateway";
 import { mcpKeys, promptsKeys, skillsKeys, workspacesKeys } from "../query/keys";
 import { useSettingsQuery } from "../query/settings";
 import { useWorkspaceApplyMutation } from "../query/workspaces";
@@ -347,6 +350,13 @@ export function HomePage() {
   const activeSessionsAvailable: boolean | null = sessionsQuery.isLoading
     ? null
     : sessionsQuery.data != null;
+  const activeSessionCountQuery = useGatewayActiveSessionCountQuery({
+    enabled: overviewForegroundPollingEnabled,
+    refetchIntervalMs: overviewForegroundPollingEnabled ? 5000 : false,
+  });
+  const activeSessionCount = activeSessionCountQuery.isLoading
+    ? null
+    : (activeSessionCountQuery.data ?? null);
 
   const {
     usageHeatmapRows,
@@ -484,6 +494,7 @@ export function HomePage() {
     activeModeToggling: sortMode.activeModeToggling,
     onSetCliActiveMode: sortMode.requestCliActiveModeSwitch,
     activeSessions,
+    activeSessionCount,
     activeSessionsLoading,
     activeSessionsAvailable,
     workspaceConfigs,

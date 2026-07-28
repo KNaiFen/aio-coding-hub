@@ -31,6 +31,18 @@ pub(crate) fn app_gateway_active_sessions<R: tauri::Runtime>(
     })
 }
 
+pub(crate) fn app_gateway_active_session_count<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    now_unix: i64,
+) -> usize {
+    super::gateway_state::try_with_app_running_gateway(app, |running| {
+        running
+            .map(|runtime| runtime.active_session_count(now_unix))
+            .unwrap_or_default()
+    })
+    .unwrap_or_default()
+}
+
 pub(crate) fn app_gateway_active_requests_snapshot<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> Vec<gateway::active_requests::ActiveRequestSnapshotItem> {
@@ -61,5 +73,12 @@ mod tests {
         let app = tauri::test::mock_app();
 
         assert!(app_gateway_active_requests_snapshot(app.handle()).is_empty());
+    }
+
+    #[test]
+    fn active_session_count_returns_zero_without_running_gateway() {
+        let app = tauri::test::mock_app();
+
+        assert_eq!(app_gateway_active_session_count(app.handle(), 1_000), 0);
     }
 }
