@@ -270,8 +270,9 @@ describe("components/home/HomeOverviewPanel", () => {
 
     renderPanel({ activeSessions: activeSessions as any, activeSessionCount: 73 });
 
-    const latestCall =
-      homeRequestLogsPanelMock.mock.calls[homeRequestLogsPanelMock.mock.calls.length - 1];
+    const latestCall = (homeRequestLogsPanelMock as any).mock.calls[
+      (homeRequestLogsPanelMock as any).mock.calls.length - 1
+    ];
     expect(latestCall?.[0]).toMatchObject({ activeSessionCount: 73 });
   });
 
