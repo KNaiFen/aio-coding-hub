@@ -371,6 +371,22 @@ describe("pages/HomePage", () => {
     });
   });
 
+  it("marks the active Session count unavailable when the query fails", () => {
+    setTauriRuntime();
+
+    const client = createTestQueryClient();
+    mockHomePageBaseQueries();
+    vi.mocked(useGatewayActiveSessionCountQuery).mockReturnValue({
+      data: 73,
+      isError: true,
+      isLoading: false,
+    } as any);
+
+    renderWithProviders(client, <HomePage />);
+
+    expect(homeOverviewPanelMock.latestProps?.activeSessionCount).toBeNull();
+  });
+
   it("covers circuits auto refresh, reset provider, mode switching, and refetch flows", async () => {
     vi.useFakeTimers();
     try {

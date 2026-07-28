@@ -354,9 +354,10 @@ export function HomePage() {
     enabled: overviewForegroundPollingEnabled,
     refetchIntervalMs: overviewForegroundPollingEnabled ? 5000 : false,
   });
-  const activeSessionCount = activeSessionCountQuery.isLoading
-    ? null
-    : (activeSessionCountQuery.data ?? null);
+  const activeSessionCount =
+    activeSessionCountQuery.isLoading || activeSessionCountQuery.isError
+      ? null
+      : (activeSessionCountQuery.data ?? null);
 
   const {
     usageHeatmapRows,
