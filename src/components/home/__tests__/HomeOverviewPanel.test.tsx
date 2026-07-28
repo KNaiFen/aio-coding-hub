@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { useState, type ComponentProps, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HomeOverviewPanel } from "../HomeOverviewPanel";
+import type { HomeRequestLogsPanelProps } from "../HomeRequestLogsPanel";
 import type {
   HomeCliWorkspaceConfig,
   HomeWorkspaceConfigItem,
@@ -9,7 +10,9 @@ import type {
 } from "../homeWorkspaceConfigTypes";
 
 const { homeRequestLogsPanelMock } = vi.hoisted(() => ({
-  homeRequestLogsPanelMock: vi.fn(() => <div>request-logs</div>),
+  homeRequestLogsPanelMock: vi.fn((_props: HomeRequestLogsPanelProps) => (
+    <div>request-logs</div>
+  )),
 }));
 
 const TEST_NOW_SECONDS = 1_764_000_000;
