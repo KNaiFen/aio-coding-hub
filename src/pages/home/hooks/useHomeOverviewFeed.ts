@@ -132,6 +132,7 @@ export function useHomeOverviewFeed({
       : null,
     requestLogs: requestLogsFeed.requestLogs,
     activeRequests,
+    activeRequestsAvailable: requestLogsFeed.activeRequestsAvailable,
     requestLogsLoading: requestLogsFeed.requestLogsLoading,
     requestLogsRefreshing: requestLogsFeed.requestLogsRefreshing,
     requestLogsAvailable: requestLogsFeed.requestLogsAvailable,

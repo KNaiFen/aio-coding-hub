@@ -49,6 +49,8 @@ describe("pages/home/hooks/useHomeOverviewFeed", () => {
     } as any);
     vi.mocked(useRequestLogsFeed).mockReturnValue({
       requestLogs: [],
+      activeRequests: [],
+      activeRequestsAvailable: true,
       requestLogsLoading: false,
       requestLogsRefreshing: false,
       requestLogsAvailable: true,
@@ -209,6 +211,7 @@ describe("pages/home/hooks/useHomeOverviewFeed", () => {
     vi.mocked(useRequestLogsFeed).mockReturnValue({
       requestLogs: [],
       activeRequests: [{ trace_id: "trace-active" }],
+      activeRequestsAvailable: false,
       requestLogsLoading: false,
       requestLogsRefreshing: false,
       requestLogsAvailable: true,
@@ -216,7 +219,7 @@ describe("pages/home/hooks/useHomeOverviewFeed", () => {
       refreshRequestLogs: vi.fn().mockResolvedValue({ error: null }),
     } as any);
 
-    renderHook(() =>
+    const { result } = renderHook(() =>
       useHomeOverviewFeed({
         overviewActive: true,
         foregroundActive: true,
@@ -226,6 +229,7 @@ describe("pages/home/hooks/useHomeOverviewFeed", () => {
       })
     );
 
+    expect(result.current.activeRequestsAvailable).toBe(false);
     expect(useHomeFreshnessOwner).toHaveBeenCalledWith(
       expect.objectContaining({
         requestActivityPending: true,

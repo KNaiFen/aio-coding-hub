@@ -210,7 +210,7 @@ describe("query/requestLogs", () => {
     expect(client.getQueryState(requestLogsKeys.activeSnapshot())).toBeTruthy();
   });
 
-  it("fails closed to no active requests when active snapshot loading rejects", async () => {
+  it("preserves the active snapshot query error state when loading rejects", async () => {
     setTauriRuntime();
 
     vi.mocked(activeRequestLogsSnapshot).mockRejectedValue(new Error("snapshot unavailable"));
@@ -221,9 +221,9 @@ describe("query/requestLogs", () => {
     const { result } = renderHook(() => useActiveRequestLogsSnapshotQuery(), { wrapper });
 
     await waitFor(() => {
-      expect(result.current.isSuccess).toBe(true);
+      expect(result.current.isError).toBe(true);
     });
-    expect(result.current.data).toEqual([]);
+    expect(result.current.data).toBeUndefined();
   });
 
   it("does not call requestLogGet when logId is null (even on manual refetch)", async () => {

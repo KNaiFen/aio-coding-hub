@@ -56,12 +56,18 @@ describe("components/home/HomeRequestLogsPanel", () => {
     useCliSessionsFolderLookupByIdsQueryMock.mockReturnValue({ data: [], isLoading: false });
   });
 
-  it("renders the optional active Session concurrency metric", () => {
-    const renderPanel = (activeSessionCount?: number | null) => (
+  it("renders unique live inference Session concurrency when explicitly enabled", () => {
+    const renderPanel = (
+      activeRequests: ActiveRequestSnapshotItem[],
+      activeRequestsAvailable: boolean | null,
+      showCurrentConcurrency = true
+    ) => (
       <MemoryRouter>
         <HomeRequestLogsPanel
           traces={[]}
-          activeSessionCount={activeSessionCount}
+          activeRequests={activeRequests}
+          activeRequestsAvailable={activeRequestsAvailable}
+          showCurrentConcurrency={showCurrentConcurrency}
           requestLogs={[]}
           requestLogsLoading={false}
           requestLogsRefreshing={false}
@@ -72,21 +78,31 @@ describe("components/home/HomeRequestLogsPanel", () => {
         />
       </MemoryRouter>
     );
-    const view = render(renderPanel(73));
+    const view = render(
+      renderPanel(
+        [
+          activeRequest({ trace_id: "main-1", session_id: "main-session" }),
+          activeRequest({ trace_id: "main-2", session_id: "main-session" }),
+          activeRequest({ trace_id: "subagent-1", session_id: "subagent-session" }),
+          activeRequest({ trace_id: "search", path: "/v1/alpha/search", session_id: "search" }),
+        ],
+        true
+      )
+    );
 
-    const exactCount = screen.getByLabelText("当前并发 73");
-    expect(within(exactCount).getByText("73")).toHaveClass(
+    const exactCount = screen.getByLabelText("当前并发 2");
+    expect(within(exactCount).getByText("2")).toHaveClass(
       "text-indigo-600",
       "dark:text-indigo-400"
     );
 
-    view.rerender(renderPanel(0));
+    view.rerender(renderPanel([], true));
     expect(screen.getByLabelText("当前并发 0")).toBeInTheDocument();
 
-    view.rerender(renderPanel(null));
+    view.rerender(renderPanel([], false));
     expect(within(screen.getByLabelText("当前并发 不可用")).getByText("--")).toBeInTheDocument();
 
-    view.rerender(renderPanel());
+    view.rerender(renderPanel([], true, false));
     expect(screen.queryByText("当前并发")).not.toBeInTheDocument();
   });
 
@@ -334,8 +350,8 @@ describe("components/home/HomeRequestLogsPanel", () => {
       return metric as HTMLElement;
     };
 
-    expectMetric("输入", "700");
-    expectMetric("缓存创建", "200");
+    expectMetric("未缓存输入", "700");
+    expectMetric("缓存写入", "200");
     expectMetric("缓存读取", "100");
 
     view.rerender(
@@ -347,7 +363,7 @@ describe("components/home/HomeRequestLogsPanel", () => {
         })
       )
     );
-    expect(within(expectMetric("缓存创建", "25")).getByText("(5m)")).toBeInTheDocument();
+    expect(within(expectMetric("缓存写入", "25")).getByText("(5m)")).toBeInTheDocument();
 
     view.rerender(
       renderPanel(
@@ -359,7 +375,7 @@ describe("components/home/HomeRequestLogsPanel", () => {
         })
       )
     );
-    expectMetric("缓存创建", "0");
+    expectMetric("缓存写入", "0");
 
     view.rerender(
       renderPanel(
@@ -371,7 +387,7 @@ describe("components/home/HomeRequestLogsPanel", () => {
         })
       )
     );
-    expect(within(expectMetric("缓存创建", "0")).queryByText("(5m)")).not.toBeInTheDocument();
+    expect(within(expectMetric("缓存写入", "0")).queryByText("(5m)")).not.toBeInTheDocument();
 
     view.rerender(
       renderPanel(
@@ -384,9 +400,7 @@ describe("components/home/HomeRequestLogsPanel", () => {
         })
       )
     );
-    expect(
-      within(screen.getByRole("button", { name: /gpt-5\.6-sol/ })).queryByText("缓存创建")
-    ).not.toBeInTheDocument();
+    expectMetric("缓存写入", "—");
     const outputMetric = expectMetric("输出", "—");
     expect(outputMetric).toHaveClass("col-start-1", "row-start-2");
   });
@@ -1948,14 +1962,14 @@ describe("components/home/HomeRequestLogsPanel", () => {
     expect(screen.getAllByText("P1").length).toBeGreaterThan(0);
     expect(screen.getByText("流中断")).toBeInTheDocument();
     expect(screen.queryByText("3.20s")).not.toBeInTheDocument();
-    expect(screen.queryByText("输入")).not.toBeInTheDocument();
+    expect(screen.queryByText("未缓存输入")).not.toBeInTheDocument();
     expect(screen.getByText("会话复用")).toBeInTheDocument();
     expect(screen.queryByText("客户端中断")).not.toBeInTheDocument();
     expect(screen.queryByText("fast")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("switch", { name: "最近使用记录简洁模式" }));
 
-    expect(screen.getByText("输入")).toBeInTheDocument();
+    expect(screen.getByText("未缓存输入")).toBeInTheDocument();
     expect(screen.getAllByText("P1").length).toBeGreaterThan(0);
     expect(screen.getAllByText("fast")).toHaveLength(1);
   });

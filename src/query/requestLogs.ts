@@ -95,7 +95,7 @@ export function useActiveRequestLogsSnapshotQuery(options?: { enabled?: boolean 
         return await activeRequestLogsSnapshot();
       } catch (error) {
         logToConsole("warn", "读取进行中请求快照失败", { error: String(error) });
-        return [];
+        throw error;
       }
     },
     enabled,

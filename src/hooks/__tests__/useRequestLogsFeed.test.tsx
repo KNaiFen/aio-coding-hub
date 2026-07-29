@@ -92,6 +92,7 @@ describe("hooks/useRequestLogsFeed", () => {
     expect(result.current.requestLogsLoading).toBe(true);
     expect(result.current.requestLogsAvailable).toBeNull();
     expect(result.current.activeRequests).toEqual([]);
+    expect(result.current.activeRequestsAvailable).toBeNull();
 
     act(() => {
       void result.current.refreshRequestLogs();
@@ -129,9 +130,10 @@ describe("hooks/useRequestLogsFeed", () => {
 
     expect(useActiveRequestLogsSnapshotQuery).toHaveBeenCalledWith({ enabled: true });
     expect(result.current.activeRequests.map((row) => row.trace_id)).toEqual(["trace-active"]);
+    expect(result.current.activeRequestsAvailable).toBe(true);
   });
 
-  it("falls closed to no active requests when active snapshot data is unavailable", () => {
+  it("marks active requests unavailable when the snapshot query fails", () => {
     vi.mocked(useRequestLogsListAllQuery).mockReturnValue({
       data: [{ id: 1 }],
       isLoading: false,
@@ -142,12 +144,14 @@ describe("hooks/useRequestLogsFeed", () => {
       data: undefined,
       isLoading: false,
       isFetching: false,
+      isError: true,
       refetch: vi.fn(),
     } as any);
 
     const { result } = renderHook(() => useRequestLogsFeed({ limit: 20 }));
 
     expect(result.current.activeRequests).toEqual([]);
+    expect(result.current.activeRequestsAvailable).toBe(false);
   });
 
   it("refreshRequestLogs reloads request logs and active request snapshots together", async () => {

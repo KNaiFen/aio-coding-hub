@@ -21,6 +21,7 @@ import {
   type ProjectedRealtimeCard,
   type ProjectedRequestLogRow,
 } from "../../services/gateway/requestActivityProjection";
+import { countActiveInferenceSessions } from "../../services/gateway/activeRequests";
 import type { RequestLogSummary } from "../../services/gateway/requestLogs";
 import { hasCodexSystemRequestSpecialSetting } from "../../services/gateway/requestLogSpecialSettings";
 import type { TraceSession } from "../../services/gateway/traceStore";
@@ -375,30 +376,28 @@ const RequestLogCard = memo(function RequestLogCard({
                   title="Input Tokens"
                 >
                   <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/75 select-none shrink-0">
-                    输入
+                    未缓存输入
                   </span>
                   <span className="font-mono tabular-nums text-xs font-semibold text-foreground/90 truncate">
                     {effectiveInputTokens != null ? formatInteger(effectiveInputTokens) : "—"}
                   </span>
                 </div>
-                {cacheWrite ? (
-                  <div
-                    className="col-start-2 row-start-1 flex items-center gap-1 h-4"
-                    title="Cache Write"
-                  >
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/75 select-none shrink-0">
-                      缓存创建
+                <div
+                  className="col-start-2 row-start-1 flex items-center gap-1 h-4"
+                  title="Cache Write"
+                >
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/75 select-none shrink-0">
+                    缓存写入
+                  </span>
+                  <span className="font-mono tabular-nums text-xs font-semibold text-foreground/90 truncate">
+                    {cacheWrite ? formatInteger(cacheWrite.tokens) : "—"}
+                  </span>
+                  {cacheWrite?.ttl && cacheWrite.tokens > 0 ? (
+                    <span className="text-[10px] font-medium text-muted-foreground/60">
+                      ({cacheWrite.ttl})
                     </span>
-                    <span className="font-mono tabular-nums text-xs font-semibold text-foreground/90 truncate">
-                      {formatInteger(cacheWrite.tokens)}
-                    </span>
-                    {cacheWrite.ttl && cacheWrite.tokens > 0 ? (
-                      <span className="text-[10px] font-medium text-muted-foreground/60">
-                        ({cacheWrite.ttl})
-                      </span>
-                    ) : null}
-                  </div>
-                ) : null}
+                  ) : null}
+                </div>
                 <div className="col-start-3 row-start-1 flex items-center gap-1 h-4" title="TTFB">
                   <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/75 select-none shrink-0">
                     首字
@@ -511,7 +510,8 @@ export type HomeRequestLogsPanelProps = {
 
   traces: TraceSession[];
   activeRequests?: ActiveRequestSnapshotItem[];
-  activeSessionCount?: number | null;
+  activeRequestsAvailable?: boolean | null;
+  showCurrentConcurrency?: boolean;
 
   requestLogs: RequestLogSummary[];
   requestLogsLoading: boolean;
@@ -532,7 +532,8 @@ export function HomeRequestLogsPanel({
   devPreviewEnabled = false,
   traces,
   activeRequests = [],
-  activeSessionCount,
+  activeRequestsAvailable,
+  showCurrentConcurrency = false,
   requestLogs,
   requestLogsLoading,
   requestLogsRefreshing,
@@ -595,6 +596,12 @@ export function HomeRequestLogsPanel({
   const displayedRequestLogs = requestLogs.length > 0 ? requestLogs : previewRequestLogs;
   const displayedActiveRequests =
     activeRequests.length > 0 ? activeRequests : previewActiveRequests;
+  const displayedActiveRequestsAvailable =
+    devPreviewEnabled && activeRequests.length === 0 ? true : activeRequestsAvailable;
+  const currentConcurrency =
+    displayedActiveRequestsAvailable === true
+      ? countActiveInferenceSessions(displayedActiveRequests)
+      : null;
   const wallClockNowMs = Date.now();
   const clockEnabled = shouldTickRequestActivityClock({
     requestLogs: displayedRequestLogs,
@@ -668,15 +675,15 @@ export function HomeRequestLogsPanel({
       <div className="flex flex-wrap items-center justify-between gap-3 shrink-0">
         <div className="flex flex-wrap items-center gap-2">
           <div className="text-sm font-semibold">{title ?? "最近代理记录"}</div>
-          {activeSessionCount !== undefined ? (
+          {showCurrentConcurrency ? (
             <div
               className="inline-flex items-baseline gap-1 text-xs text-muted-foreground"
-              aria-label={`当前并发 ${activeSessionCount ?? "不可用"}`}
-              title="按 5 分钟 TTL 内的活跃 Session 统计"
+              aria-label={`当前并发 ${currentConcurrency ?? "不可用"}`}
+              title="按当前正在执行的推理会话统计；同一会话的并行请求只计一次"
             >
               <span>当前并发</span>
               <span className="font-mono font-semibold tabular-nums text-indigo-600 dark:text-indigo-400">
-                {activeSessionCount ?? "--"}
+                {currentConcurrency ?? "--"}
               </span>
             </div>
           ) : null}

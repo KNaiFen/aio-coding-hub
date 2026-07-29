@@ -113,7 +113,7 @@ export function RequestLogDetailSummaryTab({
           </div>
 
           <div className="mt-3 grid gap-2 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
-            <MetricCard label="输入 Token" value={selectedLog.effective_input_tokens} />
+            <MetricCard label="未缓存输入 Token" value={selectedLog.effective_input_tokens} />
             <MetricCard label="输出 Token" value={selectedLog.output_tokens} />
             <MetricCard label="思考 Token" value={usageReasoningTokens} />
             {modelDisplayMeta.isRouteMismatch ? (
@@ -133,16 +133,16 @@ export function RequestLogDetailSummaryTab({
                 />
               </>
             ) : null}
-            {cacheCreation ? (
-              <MetricCard
-                label="缓存创建"
-                value={
-                  cacheCreation.ttl && cacheCreation.tokens > 0
+            <MetricCard
+              label="缓存写入"
+              value={
+                cacheCreation
+                  ? cacheCreation.ttl && cacheCreation.tokens > 0
                     ? `${cacheCreation.tokens} (${cacheCreation.ttl})`
                     : cacheCreation.tokens
-                }
-              />
-            ) : null}
+                  : "—"
+              }
+            />
             <MetricCard label="缓存读取" value={selectedLog.cache_read_input_tokens} />
             <MetricCard label="总耗时" value={formatDurationMs(displayDurationMs)} />
             <MetricCard label="TTFB" value={ttfbMs != null ? formatDurationMs(ttfbMs) : "—"} />

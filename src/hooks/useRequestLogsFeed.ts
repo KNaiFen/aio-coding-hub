@@ -261,6 +261,13 @@ export function useRequestLogsFeed({
 
   const requestLogs = useMemo(() => requestLogsQuery.data ?? [], [requestLogsQuery.data]);
   const activeRequests = useMemo(() => activeRequestsQuery.data ?? [], [activeRequestsQuery.data]);
+  const activeRequestsAvailable: boolean | null = !enabled
+    ? null
+    : activeRequestsQuery.isLoading
+      ? null
+      : activeRequestsQuery.isError
+        ? false
+        : activeRequestsQuery.data != null;
   const requestLogsLoading = requestLogsQuery.isLoading;
   const requestLogsRefreshing =
     (requestLogsQuery.isFetching && !requestLogsQuery.isLoading) ||
@@ -273,6 +280,7 @@ export function useRequestLogsFeed({
   return {
     requestLogs,
     activeRequests,
+    activeRequestsAvailable,
     requestLogsLoading,
     requestLogsRefreshing,
     requestLogsAvailable,

@@ -180,8 +180,8 @@ describe("components/home/RealtimeTraceCards", () => {
       expect(within(metric as HTMLElement).getByText(value)).toBeInTheDocument();
       return metric as HTMLElement;
     };
-    expectMetric("输入", "700");
-    expectMetric("缓存创建", "200");
+    expectMetric("未缓存输入", "700");
+    expectMetric("缓存写入", "200");
     expectMetric("缓存读取", "100");
 
     view.rerender(
@@ -193,7 +193,7 @@ describe("components/home/RealtimeTraceCards", () => {
         cache_creation_1h_input_tokens: 50,
       })
     );
-    expect(within(expectMetric("缓存创建", "25")).getByText("(5m)")).toBeInTheDocument();
+    expect(within(expectMetric("缓存写入", "25")).getByText("(5m)")).toBeInTheDocument();
 
     view.rerender(
       renderCards({
@@ -204,7 +204,7 @@ describe("components/home/RealtimeTraceCards", () => {
         cache_creation_1h_input_tokens: null,
       })
     );
-    expectMetric("缓存创建", "0");
+    expectMetric("缓存写入", "0");
 
     view.rerender(
       renderCards({
@@ -215,7 +215,7 @@ describe("components/home/RealtimeTraceCards", () => {
         cache_creation_1h_input_tokens: null,
       })
     );
-    expect(within(expectMetric("缓存创建", "0")).queryByText("(5m)")).not.toBeInTheDocument();
+    expect(within(expectMetric("缓存写入", "0")).queryByText("(5m)")).not.toBeInTheDocument();
 
     view.rerender(
       renderCards({
@@ -228,7 +228,7 @@ describe("components/home/RealtimeTraceCards", () => {
         cache_creation_1h_input_tokens: null,
       })
     );
-    expect(screen.queryByText("缓存创建")).not.toBeInTheDocument();
+    expectMetric("缓存写入", "—");
   });
 
   it("keeps in-progress traces visible after five minutes without new events", () => {

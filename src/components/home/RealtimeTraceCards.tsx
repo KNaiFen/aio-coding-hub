@@ -475,27 +475,25 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                     <div className="grid flex-1 grid-cols-4 gap-x-3 gap-y-0.5 text-slate-500 dark:text-slate-400">
                       <div className="flex items-center gap-1 h-4" title="Input Tokens">
                         <span className="text-slate-400 dark:text-slate-500 font-medium shrink-0">
-                          输入
+                          未缓存输入
                         </span>
                         <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 font-semibold truncate">
                           {formatInteger(displayInputTokens)}
                         </span>
                       </div>
-                      {cacheWrite ? (
-                        <div className="flex items-center gap-1 h-4" title="Cache Write">
-                          <span className="text-slate-400 dark:text-slate-500 font-medium shrink-0">
-                            缓存创建
+                      <div className="flex items-center gap-1 h-4" title="Cache Write">
+                        <span className="text-slate-400 dark:text-slate-500 font-medium shrink-0">
+                          缓存写入
+                        </span>
+                        <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 font-semibold truncate">
+                          {cacheWrite ? formatInteger(cacheWrite.tokens) : "—"}
+                        </span>
+                        {cacheWrite?.ttl && cacheWrite.tokens > 0 ? (
+                          <span className="text-slate-400/70 dark:text-slate-500/70 text-[10px]">
+                            ({cacheWrite.ttl})
                           </span>
-                          <span className="font-mono tabular-nums text-slate-700 dark:text-slate-200 font-semibold truncate">
-                            {formatInteger(cacheWrite.tokens)}
-                          </span>
-                          {cacheWrite.ttl && cacheWrite.tokens > 0 ? (
-                            <span className="text-slate-400/70 dark:text-slate-500/70 text-[10px]">
-                              ({cacheWrite.ttl})
-                            </span>
-                          ) : null}
-                        </div>
-                      ) : null}
+                        ) : null}
+                      </div>
                       <div className="flex items-center gap-1 h-4" title="TTFB">
                         <span className="text-slate-400 dark:text-slate-500 font-medium shrink-0">
                           首字

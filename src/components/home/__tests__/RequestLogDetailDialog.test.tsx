@@ -185,9 +185,9 @@ describe("home/RequestLogDetailDialog", () => {
     expect(screen.getByText("代理记录详情")).toBeInTheDocument();
     // Summary tab should be active by default
     expect(screen.getByText("关键指标")).toBeInTheDocument();
-    expect(screen.getByText("输入 Token")).toBeInTheDocument();
+    expect(screen.getByText("未缓存输入 Token")).toBeInTheDocument();
     expect(screen.getByText("输出 Token")).toBeInTheDocument();
-    expect(screen.getByText("缓存创建")).toBeInTheDocument();
+    expect(screen.getByText("缓存写入")).toBeInTheDocument();
     expect(screen.getByText("缓存读取")).toBeInTheDocument();
     expect(screen.getByText("总耗时")).toBeInTheDocument();
     expect(screen.getByText("TTFB")).toBeInTheDocument();
@@ -556,7 +556,7 @@ describe("home/RequestLogDetailDialog", () => {
     render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
 
     expect(screen.getByText("200 切换后成功")).toBeInTheDocument();
-    expectMetricValue("缓存创建", "8 (1h)");
+    expectMetricValue("缓存写入", "8 (1h)");
   });
 
   it("hides error observation for 200 success even when error_details_json exists", () => {
@@ -942,7 +942,7 @@ describe("home/RequestLogDetailDialog", () => {
 
     render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
 
-    expectMetricValue("缓存创建", "2");
+    expectMetricValue("缓存写入", "2");
     expectMetricValue("TTFB", "—");
     expectMetricValue("速率", "—");
   });
@@ -961,8 +961,8 @@ describe("home/RequestLogDetailDialog", () => {
 
     render(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
 
-    expectMetricValue("输入 Token", "700");
-    expectMetricValue("缓存创建", "200");
+    expectMetricValue("未缓存输入 Token", "700");
+    expectMetricValue("缓存写入", "200");
     expectMetricValue("缓存读取", "100");
   });
 
@@ -977,7 +977,7 @@ describe("home/RequestLogDetailDialog", () => {
       }),
     });
     view.rerender(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
-    expectMetricValue("缓存创建", "0");
+    expectMetricValue("缓存写入", "0");
 
     setRequestLogQueryState({
       selectedLog: createSelectedLog({
@@ -987,7 +987,7 @@ describe("home/RequestLogDetailDialog", () => {
       }),
     });
     view.rerender(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
-    expectMetricValue("缓存创建", "0");
+    expectMetricValue("缓存写入", "0");
 
     setRequestLogQueryState({
       selectedLog: createSelectedLog({
@@ -997,7 +997,7 @@ describe("home/RequestLogDetailDialog", () => {
       }),
     });
     view.rerender(<RequestLogDetailDialog selectedLogId={1} onSelectLogId={vi.fn()} />);
-    expect(screen.queryByText("缓存创建")).not.toBeInTheDocument();
+    expectMetricValue("缓存写入", "—");
   });
 
   // --- Tab switching tests ---
