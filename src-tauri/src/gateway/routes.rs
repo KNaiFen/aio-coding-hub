@@ -3369,10 +3369,7 @@ INSERT INTO codex_managed_profiles(
 
         let request_log = recv_terminal_request_log(&mut log_rx).await;
         assert_eq!(request_log.status, Some(200));
-        assert_eq!(
-            request_log.requested_model.as_deref(),
-            Some("gpt-5.6-sol")
-        );
+        assert_eq!(request_log.requested_model.as_deref(), Some("gpt-5.6-sol"));
         let settings = parse_special_settings(&request_log);
         let effort = settings
             .iter()
