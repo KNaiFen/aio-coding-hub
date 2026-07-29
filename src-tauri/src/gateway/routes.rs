@@ -602,6 +602,14 @@ mod tests {
         out
     }
 
+    fn zstd_bytes(input: &[u8]) -> Vec<u8> {
+        zstd::stream::encode_all(input, 3).expect("zstd encode")
+    }
+
+    fn unzstd_bytes(input: &[u8]) -> Vec<u8> {
+        zstd::stream::decode_all(input).expect("zstd decode")
+    }
+
     async fn spawn_status_upstream(
         status_line: &'static str,
         content_type: &'static str,
@@ -3294,6 +3302,89 @@ INSERT INTO codex_managed_profiles(
 
         let request_log = recv_terminal_request_log(&mut log_rx).await;
         assert_eq!(request_log.status, Some(200));
+
+        upstream_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn gateway_inspects_and_preserves_zstd_codex_request() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 1;
+        app_settings.enable_codex_session_id_completion = false;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("gateway-zstd-passthrough-test.sqlite"))
+            .expect("init test db");
+        let (upstream_base_url, captured_rx, upstream_task) =
+            spawn_capturing_raw_upstream(r#"{"id":"stub-ok","object":"response","output":[]}"#)
+                .await;
+        let provider_id = insert_codex_provider(&db, upstream_base_url);
+
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+        let router = build_router(gateway_state(app_handle, db, log_tx));
+        let plain_body = serde_json::json!({
+            "model": "gpt-5.6-sol",
+            "reasoning": {
+                "effort": "max"
+            },
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [{
+                    "type": "input_text",
+                    "text": "hello"
+                }]
+            }]
+        })
+        .to_string();
+        let compressed_body = zstd_bytes(plain_body.as_bytes());
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(format!("/codex/_aio/provider/{provider_id}/v1/responses"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::CONTENT_ENCODING, "zstd")
+            .body(Body::from(compressed_body.clone()))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let captured = tokio::time::timeout(Duration::from_secs(2), captured_rx)
+            .await
+            .expect("captured upstream request")
+            .expect("captured request");
+
+        assert!(captured.has_header_line("content-encoding: zstd"));
+        assert_eq!(captured.body, compressed_body);
+        assert_eq!(unzstd_bytes(&captured.body), plain_body.as_bytes());
+
+        let request_log = recv_terminal_request_log(&mut log_rx).await;
+        assert_eq!(request_log.status, Some(200));
+        assert_eq!(
+            request_log.requested_model.as_deref(),
+            Some("gpt-5.6-sol")
+        );
+        let settings = parse_special_settings(&request_log);
+        let effort = settings
+            .iter()
+            .find(|setting| {
+                setting.get("type").and_then(Value::as_str) == Some("codex_reasoning_effort")
+            })
+            .expect("request reasoning effort setting");
+        assert_eq!(effort.get("effort").and_then(Value::as_str), Some("max"));
+        assert_eq!(
+            effort.get("source").and_then(Value::as_str),
+            Some("request")
+        );
 
         upstream_task.abort();
     }

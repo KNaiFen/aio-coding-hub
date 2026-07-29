@@ -1,6 +1,9 @@
 //! Usage: request body raw/decoded model for gateway passthrough.
 
-use super::http_util::{gunzip_bytes_with_limit, gzip_bytes_with_limit, has_gzip_content_encoding};
+use super::http_util::{
+    gunzip_bytes_with_limit, gzip_bytes_with_limit, has_gzip_content_encoding,
+    has_zstd_content_encoding, unzstd_bytes_with_limit, zstd_bytes_with_limit,
+};
 use axum::body::Bytes;
 use axum::http::{header, HeaderMap, HeaderValue};
 
@@ -8,6 +11,7 @@ use axum::http::{header, HeaderMap, HeaderValue};
 pub(super) enum RequestBodyEncoding {
     Identity,
     Gzip,
+    Zstd,
     Unsupported,
 }
 
@@ -38,6 +42,29 @@ impl GatewayRequestBody {
                     },
                     Err(err) => {
                         tracing::warn!(error = %err, "failed to decode request gzip body for inspection; preserving raw body");
+                        Self {
+                            decoded: raw.clone(),
+                            raw,
+                            encoding,
+                            original_content_encoding,
+                            decoded_from_raw: false,
+                            mutated: false,
+                        }
+                    }
+                }
+            }
+            RequestBodyEncoding::Zstd => {
+                match unzstd_bytes_with_limit(raw.as_ref(), max_decoded_bytes) {
+                    Ok(decoded) => Self {
+                        raw,
+                        decoded,
+                        encoding,
+                        original_content_encoding,
+                        decoded_from_raw: true,
+                        mutated: false,
+                    },
+                    Err(err) => {
+                        tracing::warn!(error = %err, "failed to decode request zstd body for inspection; preserving raw body");
                         Self {
                             decoded: raw.clone(),
                             raw,
@@ -116,10 +143,28 @@ impl GatewayRequestBody {
                     }
                 }
             }
-            RequestBodyEncoding::Gzip | RequestBodyEncoding::Unsupported => {
+            RequestBodyEncoding::Zstd if self.decoded_from_raw => {
+                match zstd_bytes_with_limit(self.decoded.as_ref(), max_encoded_bytes) {
+                    Ok(encoded) => {
+                        restore_original_content_encoding(
+                            headers,
+                            self.original_content_encoding.as_ref(),
+                        );
+                        encoded
+                    }
+                    Err(err) => {
+                        tracing::warn!(error = %err, "failed to re-encode request zstd body; sending identity body");
+                        headers.remove(header::CONTENT_ENCODING);
+                        self.decoded.clone()
+                    }
+                }
+            }
+            RequestBodyEncoding::Gzip
+            | RequestBodyEncoding::Zstd
+            | RequestBodyEncoding::Unsupported => {
                 tracing::warn!(
                     encoding = ?self.encoding,
-                    "request body mutated after unsupported content encoding; sending identity body"
+                    "request body mutated without a decoded content encoding; sending identity body"
                 );
                 headers.remove(header::CONTENT_ENCODING);
                 self.decoded.clone()
@@ -153,6 +198,9 @@ fn classify_request_encoding(headers: &HeaderMap) -> RequestBodyEncoding {
     }
     if encodings.len() == 1 && has_gzip_content_encoding(headers) {
         return RequestBodyEncoding::Gzip;
+    }
+    if encodings.len() == 1 && has_zstd_content_encoding(headers) {
+        return RequestBodyEncoding::Zstd;
     }
     RequestBodyEncoding::Unsupported
 }
@@ -191,6 +239,24 @@ mod tests {
     fn gzip_headers(content_len: usize) -> HeaderMap {
         let mut headers = HeaderMap::new();
         headers.insert(header::CONTENT_ENCODING, HeaderValue::from_static("gzip"));
+        headers.insert(
+            header::CONTENT_LENGTH,
+            HeaderValue::from_str(&content_len.to_string()).expect("len header"),
+        );
+        headers
+    }
+
+    fn zstd_bytes(input: &[u8]) -> Vec<u8> {
+        zstd::stream::encode_all(input, 3).expect("zstd encode")
+    }
+
+    fn unzstd_bytes(input: &[u8]) -> Vec<u8> {
+        zstd::stream::decode_all(input).expect("zstd decode")
+    }
+
+    fn zstd_headers(content_len: usize) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::CONTENT_ENCODING, HeaderValue::from_static("zstd"));
         headers.insert(
             header::CONTENT_LENGTH,
             HeaderValue::from_str(&content_len.to_string()).expect("len header"),
@@ -275,6 +341,77 @@ mod tests {
     }
 
     #[test]
+    fn unchanged_zstd_body_uses_semantic_headers_for_hooks_and_raw_bytes_for_upstream() {
+        let plain = Bytes::from_static(br#"{"input":"hello 13344441520"}"#);
+        let raw = Bytes::from(zstd_bytes(plain.as_ref()));
+        let wire_headers = zstd_headers(raw.len());
+
+        let body = GatewayRequestBody::from_wire(raw.clone(), &wire_headers, 1024 * 1024);
+        let mut hook_headers = body.semantic_headers(&wire_headers);
+        let upstream = body.finalize_for_upstream(&mut hook_headers, 1024 * 1024);
+
+        assert_eq!(body.decoded(), &plain);
+        assert!(!body.is_mutated());
+        assert_eq!(upstream, raw);
+        assert!(body
+            .semantic_headers(&wire_headers)
+            .get(header::CONTENT_ENCODING)
+            .is_none());
+        assert_eq!(hook_headers.get(header::CONTENT_ENCODING).unwrap(), "zstd");
+        assert!(hook_headers.get(header::CONTENT_LENGTH).is_none());
+    }
+
+    #[test]
+    fn mutated_zstd_body_is_reencoded_and_length_is_removed() {
+        let plain = Bytes::from_static(br#"{"input":"hello 13344441520"}"#);
+        let raw = Bytes::from(zstd_bytes(plain.as_ref()));
+        let wire_headers = zstd_headers(raw.len());
+        let mut body = GatewayRequestBody::from_wire(raw, &wire_headers, 1024 * 1024);
+        let mut hook_headers = body.semantic_headers(&wire_headers);
+
+        body.replace_decoded(Bytes::from(r#"{"input":"hello [电话]"}"#));
+        let upstream = body.finalize_for_upstream(&mut hook_headers, 1024 * 1024);
+
+        assert!(body.is_mutated());
+        assert_eq!(hook_headers.get(header::CONTENT_ENCODING).unwrap(), "zstd");
+        assert!(hook_headers.get(header::CONTENT_LENGTH).is_none());
+        assert_eq!(
+            unzstd_bytes(upstream.as_ref()),
+            r#"{"input":"hello [电话]"}"#.as_bytes()
+        );
+    }
+
+    #[test]
+    fn invalid_zstd_body_stays_raw_when_unchanged() {
+        let raw = Bytes::from_static(b"not-zstd");
+        let wire_headers = zstd_headers(raw.len());
+
+        let body = GatewayRequestBody::from_wire(raw.clone(), &wire_headers, 1024 * 1024);
+        let mut hook_headers = body.semantic_headers(&wire_headers);
+        let upstream = body.finalize_for_upstream(&mut hook_headers, 1024 * 1024);
+
+        assert_eq!(body.decoded(), &raw);
+        assert_eq!(upstream, raw);
+        assert_eq!(hook_headers.get(header::CONTENT_ENCODING).unwrap(), "zstd");
+        assert!(hook_headers.get(header::CONTENT_LENGTH).is_none());
+    }
+
+    #[test]
+    fn mutated_invalid_zstd_body_falls_back_to_identity() {
+        let raw = Bytes::from_static(b"not-zstd");
+        let wire_headers = zstd_headers(raw.len());
+        let mut body = GatewayRequestBody::from_wire(raw, &wire_headers, 1024 * 1024);
+        let mut hook_headers = body.semantic_headers(&wire_headers);
+
+        body.replace_decoded(Bytes::from_static(br#"{"input":"changed"}"#));
+        let upstream = body.finalize_for_upstream(&mut hook_headers, 1024 * 1024);
+
+        assert_eq!(upstream, Bytes::from_static(br#"{"input":"changed"}"#));
+        assert!(hook_headers.get(header::CONTENT_ENCODING).is_none());
+        assert!(hook_headers.get(header::CONTENT_LENGTH).is_none());
+    }
+
+    #[test]
     fn mutated_unsupported_encoding_drops_encoding_header() {
         let raw = Bytes::from_static(br#"{"input":"hello"}"#);
         let mut wire_headers = HeaderMap::new();
@@ -289,5 +426,20 @@ mod tests {
         assert_eq!(upstream, Bytes::from_static(br#"{"input":"changed"}"#));
         assert!(hook_headers.get(header::CONTENT_ENCODING).is_none());
         assert!(hook_headers.get(header::CONTENT_LENGTH).is_none());
+    }
+
+    #[test]
+    fn compound_zstd_encoding_stays_unsupported() {
+        let raw = Bytes::from_static(br#"{"input":"hello"}"#);
+        let mut wire_headers = HeaderMap::new();
+        wire_headers.insert(
+            header::CONTENT_ENCODING,
+            HeaderValue::from_static("gzip, zstd"),
+        );
+
+        let body = GatewayRequestBody::from_wire(raw.clone(), &wire_headers, 1024 * 1024);
+
+        assert_eq!(body.encoding, RequestBodyEncoding::Unsupported);
+        assert_eq!(body.decoded(), &raw);
     }
 }

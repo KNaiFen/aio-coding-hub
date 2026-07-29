@@ -30,6 +30,19 @@ pub(super) fn has_gzip_content_encoding(headers: &HeaderMap) -> bool {
         .unwrap_or(false)
 }
 
+pub(super) fn has_zstd_content_encoding(headers: &HeaderMap) -> bool {
+    headers
+        .get(header::CONTENT_ENCODING)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| {
+            v.split(',')
+                .map(str::trim)
+                .filter(|enc| !enc.is_empty())
+                .any(|enc| enc.eq_ignore_ascii_case("zstd"))
+        })
+        .unwrap_or(false)
+}
+
 pub(super) fn has_non_identity_content_encoding(headers: &HeaderMap) -> bool {
     let Some(value) = headers
         .get(header::CONTENT_ENCODING)
@@ -141,6 +154,45 @@ pub(super) fn gzip_bytes_with_limit(
     if out.len() > max_output_bytes {
         return Err(format!(
             "gzip encoded body exceeded limit: limit={max_output_bytes} bytes"
+        ));
+    }
+    Ok(Bytes::from(out))
+}
+
+pub(super) fn unzstd_bytes_with_limit(
+    input: &[u8],
+    max_output_bytes: usize,
+) -> Result<Bytes, String> {
+    let mut decoder = zstd::stream::read::Decoder::new(input)
+        .map_err(|err| format!("failed to decode zstd body: {err}"))?;
+    let mut out: Vec<u8> = Vec::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = decoder
+            .read(&mut buf)
+            .map_err(|err| format!("failed to decode zstd body: {err}"))?;
+        if n == 0 {
+            break;
+        }
+        if out.len().saturating_add(n) > max_output_bytes {
+            return Err(format!(
+                "zstd decoded body exceeded limit: limit={max_output_bytes} bytes"
+            ));
+        }
+        out.extend_from_slice(&buf[..n]);
+    }
+    Ok(Bytes::from(out))
+}
+
+pub(super) fn zstd_bytes_with_limit(
+    input: &[u8],
+    max_output_bytes: usize,
+) -> Result<Bytes, String> {
+    let out = zstd::stream::encode_all(input, 3)
+        .map_err(|err| format!("failed to encode zstd body: {err}"))?;
+    if out.len() > max_output_bytes {
+        return Err(format!(
+            "zstd encoded body exceeded limit: limit={max_output_bytes} bytes"
         ));
     }
     Ok(Bytes::from(out))
@@ -280,5 +332,35 @@ mod tests {
         let err = super::gzip_bytes_with_limit(&plain, 4).expect_err("should exceed tiny limit");
 
         assert!(err.contains("gzip encoded body exceeded limit"));
+    }
+
+    #[test]
+    fn zstd_round_trip_helpers_preserve_body() {
+        let plain = Bytes::from_static(br#"{"input":"hello"}"#);
+
+        let encoded = super::zstd_bytes_with_limit(plain.as_ref(), 1024).expect("encode");
+        let decoded = super::unzstd_bytes_with_limit(encoded.as_ref(), 1024).expect("decode");
+
+        assert_eq!(decoded, plain);
+    }
+
+    #[test]
+    fn zstd_decode_helper_rejects_oversized_output() {
+        let plain = vec![b'a'; 128 * 1024];
+        let encoded = zstd::stream::encode_all(plain.as_slice(), 3).expect("encode");
+
+        let err = super::unzstd_bytes_with_limit(encoded.as_ref(), 1024)
+            .expect_err("should exceed output limit");
+
+        assert!(err.contains("zstd decoded body exceeded limit"));
+    }
+
+    #[test]
+    fn zstd_encode_helper_rejects_oversized_output() {
+        let plain = vec![b'a'; 128 * 1024];
+
+        let err = super::zstd_bytes_with_limit(&plain, 4).expect_err("should exceed tiny limit");
+
+        assert!(err.contains("zstd encoded body exceeded limit"));
     }
 }
