@@ -4120,7 +4120,8 @@ fn config_import_with_local_profile_fails_before_clear_when_rebind_is_unprovable
     );
 }
 
-#[cfg(unix)]
+// macOS rejects non-UTF-8 path components before application validation.
+#[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn export_skill_dir_files_rejects_non_utf8_path() {
     use std::os::unix::ffi::OsStringExt;

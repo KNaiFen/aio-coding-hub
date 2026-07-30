@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { realpathSync } from "node:fs";
 import path, { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -18,12 +19,25 @@ function sanitizeWindowsPath(rawPath) {
     .join(path.delimiter);
 }
 
+function canonicalizeMacosTempDir(rawPath) {
+  if (process.platform !== "darwin" || typeof rawPath !== "string" || !rawPath) {
+    return rawPath;
+  }
+
+  try {
+    return realpathSync.native(rawPath);
+  } catch {
+    return rawPath;
+  }
+}
+
 function run() {
   const userArgs = process.argv.slice(2);
   if (userArgs[0] === "--") {
     userArgs.shift();
   }
 
+  const tmpDir = canonicalizeMacosTempDir(process.env.TMPDIR);
   const child = spawn("cargo", ["test", "--locked", ...userArgs], {
     cwd: tauriRoot,
     stdio: "inherit",
@@ -32,6 +46,7 @@ function run() {
       ...process.env,
       PATH: sanitizeWindowsPath(process.env.PATH),
       CARGO_TARGET_DIR: process.env.CARGO_TARGET_DIR || defaultTargetDir,
+      ...(tmpDir ? { TMPDIR: tmpDir } : {}),
       ...(process.platform === "win32" && !process.env.CARGO_BUILD_JOBS
         ? { CARGO_BUILD_JOBS: "1" }
         : {}),

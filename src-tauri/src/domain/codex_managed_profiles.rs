@@ -1755,7 +1755,8 @@ DROP TABLE provider_model_capability_commit_probe;
         delete(&app, &test_app.db, &profile.profile_uuid).expect("cleanup profile");
     }
 
-    #[cfg(unix)]
+    // macOS rejects non-UTF-8 path components before application validation.
+    #[cfg(all(unix, not(target_os = "macos")))]
     #[test]
     fn create_rejects_non_utf8_codex_home_without_writing_metadata() {
         use std::os::unix::ffi::OsStringExt as _;
