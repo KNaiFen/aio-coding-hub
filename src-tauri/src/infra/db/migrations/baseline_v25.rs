@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS providers (
   supported_models_json TEXT NOT NULL DEFAULT '{}',
   model_mapping_json TEXT NOT NULL DEFAULT '{}',
   claude_models_json TEXT NOT NULL DEFAULT '{}',
+  source_provider_id INTEGER DEFAULT NULL REFERENCES providers(id) ON DELETE SET NULL,
+  bridge_type TEXT DEFAULT NULL,
   availability_test_model TEXT DEFAULT NULL,
   UNIQUE(cli_key, name)
 );

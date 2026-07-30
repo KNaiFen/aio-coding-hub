@@ -11,6 +11,10 @@ const MAX_SESSION_REUSE_PRIORITY: i64 = 1000;
 
 /// Apply all idempotent ensure patches.
 pub(super) fn apply_ensure_patches(conn: &mut Connection) -> crate::shared::error::AppResult<()> {
+    // `usage_events` references these provider columns. Ensure them before
+    // workspace repairs can execute SQL that forces SQLite to validate views.
+    ensure_provider_source_provider_id(conn)?;
+    ensure_provider_bridge_type(conn)?;
     ensure_workspace_cluster(conn)?;
     ensure_provider_limits(conn)?;
     ensure_provider_oauth_columns(conn)?;
@@ -21,8 +25,6 @@ pub(super) fn apply_ensure_patches(conn: &mut Connection) -> crate::shared::erro
     ensure_usage_indexes(conn)?;
     ensure_provider_tags(conn)?;
     ensure_provider_note(conn)?;
-    ensure_provider_source_provider_id(conn)?;
-    ensure_provider_bridge_type(conn)?;
     drop_legacy_request_attempt_logs_table(conn)?;
     ensure_request_logs_extended_columns(conn)?;
     ensure_usage_ledger(conn)?;

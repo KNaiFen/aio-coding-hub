@@ -1493,6 +1493,8 @@ fn baseline_v25_creates_complete_schema_for_fresh_install() {
     // Verify ensure patches ran (provider limit columns)
     assert!(test_has_column(&conn, "providers", "limit_5h_usd"));
     assert!(test_has_column(&conn, "providers", "limit_daily_usd"));
+    assert!(test_has_column(&conn, "providers", "source_provider_id"));
+    assert!(test_has_column(&conn, "providers", "bridge_type"));
     assert!(test_has_column(&conn, "providers", "tags_json"));
     assert!(test_has_column(&conn, "skills", "installed_commit"));
     assert!(test_has_column(&conn, "skills", "installed_content_hash"));
