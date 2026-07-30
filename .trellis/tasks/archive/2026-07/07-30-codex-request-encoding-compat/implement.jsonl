@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/archive/2026-07/07-30-codex-request-encoding-compat/design.md", "reason": "Approved technical boundary and failure contract"}
+{"file": ".trellis/tasks/archive/2026-07/07-30-codex-request-encoding-compat/research/root-cause.md", "reason": "Cross-repository implementation evidence"}
+{"file": ".trellis/spec/aio-coding-hub/backend/index.md", "reason": "Backend specification routing"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse existing request-body limits and error infrastructure"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Synchronize Rust and frontend error contracts"}
+{"file": ".trellis/spec/aio-coding-hub/backend/codex-request-content-encoding-contract.md", "reason": "Normative request encoding boundary and failure contract"}

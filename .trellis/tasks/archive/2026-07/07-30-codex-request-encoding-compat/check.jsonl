@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/archive/2026-07/07-30-codex-request-encoding-compat/prd.md", "reason": "Acceptance criteria"}
+{"file": ".trellis/tasks/archive/2026-07/07-30-codex-request-encoding-compat/design.md", "reason": "Behavioral invariants and failure classification"}
+{"file": ".trellis/spec/aio-coding-hub/cross-layer/index.md", "reason": "Cross-layer verification routing"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Verify contract consistency"}
+{"file": ".trellis/spec/aio-coding-hub/backend/codex-request-content-encoding-contract.md", "reason": "Verify identity forwarding and bounded failure behavior"}
