@@ -227,6 +227,7 @@ mod tests {
     use super::*;
     use rusqlite::params;
 
+    #[allow(clippy::too_many_arguments)]
     fn insert_ledger_event(
         conn: &Connection,
         request_log_id: i64,

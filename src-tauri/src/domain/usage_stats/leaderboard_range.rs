@@ -332,25 +332,6 @@ pub fn leaderboard_provider(
     Ok(out)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn provider_leaderboard_aggregates_orders_and_limits_in_sql() {
-        let query = provider_leaderboard_query();
-
-        assert!(query.contains("COUNT(*) AS requests_total"));
-        assert!(query.contains(
-            "GROUP BY cli_key, final_provider_id, NULLIF(TRIM(provider_name_snapshot), '')"
-        ));
-        assert!(query.contains(
-            "ORDER BY total_tokens DESC, requests_total DESC, cli_key ASC, provider_name ASC"
-        ));
-        assert!(query.contains("LIMIT ?3"));
-    }
-}
-
 pub fn leaderboard_day(
     db: &db::Db,
     range: &str,
@@ -430,4 +411,23 @@ pub fn leaderboard_day(
         out.push(row.map_err(|e| db_err!("failed to read day row: {e}"))?);
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_leaderboard_aggregates_orders_and_limits_in_sql() {
+        let query = provider_leaderboard_query();
+
+        assert!(query.contains("COUNT(*) AS requests_total"));
+        assert!(query.contains(
+            "GROUP BY cli_key, final_provider_id, NULLIF(TRIM(provider_name_snapshot), '')"
+        ));
+        assert!(query.contains(
+            "ORDER BY total_tokens DESC, requests_total DESC, cli_key ASC, provider_name ASC"
+        ));
+        assert!(query.contains("LIMIT ?3"));
+    }
 }
