@@ -472,11 +472,9 @@ pub(super) fn migrate_v42_to_v43(conn: &mut Connection) -> Result<(), String> {
     // Historical development schemas can be partial. A missing request_logs
     // table means there is no usage history to backfill.
     let target_request_log_id: i64 = if table_exists(&tx, "request_logs")? {
-        tx.query_row(
-            "SELECT COALESCE(MAX(id), 0) FROM request_logs",
-            [],
-            |row| row.get(0),
-        )
+        tx.query_row("SELECT COALESCE(MAX(id), 0) FROM request_logs", [], |row| {
+            row.get(0)
+        })
         .map_err(|error| format!("failed to capture usage ledger high-water mark: {error}"))?
     } else {
         0
