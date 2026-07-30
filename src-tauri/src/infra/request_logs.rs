@@ -12,9 +12,13 @@ use std::time::Duration;
 use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 
 mod types;
+// These DTOs are part of this crate's IPC-facing request-log API. Some are
+// referenced only by nested fields or tests, so retain the re-exports even
+// when a non-test build has no direct Rust call site.
+#[allow(unused_imports)]
 pub use types::{
-    RequestLogDetail, RequestLogInsert, RequestLogPage, RequestLogPageFilters, RequestLogSummary,
-    SessionStatsAggregate,
+    RequestLogDetail, RequestLogInsert, RequestLogPage, RequestLogPageFilters, RequestLogRouteHop,
+    RequestLogStatusFilter, RequestLogStatusFilterOp, RequestLogSummary, SessionStatsAggregate,
 };
 
 mod costing;
