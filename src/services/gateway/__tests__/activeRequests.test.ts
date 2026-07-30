@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ActiveRequest } from "../activeRequests";
-import { countActiveInferenceSessions, isActiveInferenceRequest } from "../activeRequests";
+import { countActiveInferenceRequests, isActiveInferenceRequest } from "../activeRequests";
 
 function activeRequest(overrides: Partial<ActiveRequest> = {}): ActiveRequest {
   return {
@@ -66,31 +66,45 @@ describe("services/gateway/activeRequests", () => {
     ).toBe(false);
   });
 
-  it("counts unique live sessions and treats subagent sessions separately", () => {
-    expect(
-      countActiveInferenceSessions([
-        activeRequest({ trace_id: "main-1", session_id: "main" }),
-        activeRequest({ trace_id: "main-2", session_id: " main " }),
-        activeRequest({ trace_id: "subagent", session_id: "subagent-1" }),
-        activeRequest({
-          trace_id: "other-cli",
-          cli_key: "claude",
-          path: "/v1/messages",
-          session_id: "main",
-        }),
-        activeRequest({ trace_id: "search", path: "/v1/alpha/search", session_id: "search" }),
-      ])
-    ).toBe(3);
+  it("counts each parent and subagent inference request", () => {
+    const parents = Array.from({ length: 3 }, (_, index) =>
+      activeRequest({
+        trace_id: `parent-${index + 1}`,
+        session_id: `parent-session-${index + 1}`,
+      })
+    );
+    const subagents = Array.from({ length: 10 }, (_, index) =>
+      activeRequest({
+        trace_id: `subagent-${index + 1}`,
+        session_id: `subagent-session-${index + 1}`,
+      })
+    );
+
+    expect(countActiveInferenceRequests([...parents, ...subagents])).toBe(13);
+    expect(countActiveInferenceRequests([...parents, ...subagents.slice(0, -2)])).toBe(11);
   });
 
-  it("falls back to trace identity when the session id is missing", () => {
+  it("counts parallel inference requests in the same session separately", () => {
     expect(
-      countActiveInferenceSessions([
-        activeRequest({ trace_id: "trace-a", session_id: null }),
-        activeRequest({ trace_id: "trace-a", session_id: " " }),
-        activeRequest({ trace_id: "trace-b", session_id: null }),
-        activeRequest({ trace_id: "", session_id: null }),
+      countActiveInferenceRequests([
+        activeRequest({ trace_id: "parallel-1", session_id: "shared-session" }),
+        activeRequest({ trace_id: "parallel-2", session_id: "shared-session" }),
       ])
     ).toBe(2);
+  });
+
+  it("excludes auxiliary and non-POST requests from the active inference count", () => {
+    expect(
+      countActiveInferenceRequests([
+        activeRequest({ trace_id: "inference" }),
+        activeRequest({ trace_id: "models", method: "GET", path: "/v1/models" }),
+        activeRequest({ trace_id: "search", path: "/v1/alpha/search" }),
+        activeRequest({
+          trace_id: "token-count",
+          cli_key: "claude",
+          path: "/v1/messages/count_tokens",
+        }),
+      ])
+    ).toBe(1);
   });
 });

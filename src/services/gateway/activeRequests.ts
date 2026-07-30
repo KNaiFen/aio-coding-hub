@@ -44,21 +44,8 @@ export function isActiveInferenceRequest(
   return false;
 }
 
-export function countActiveInferenceSessions(requests: ActiveRequest[]) {
-  const sessionKeys = new Set<string>();
-
-  for (const request of requests) {
-    if (!isActiveInferenceRequest(request)) continue;
-
-    const cliKey = request.cli_key.trim().toLowerCase();
-    const sessionId = request.session_id?.trim();
-    const traceId = request.trace_id.trim();
-    const identity = sessionId ? `session:${sessionId}` : traceId ? `trace:${traceId}` : null;
-    if (!identity) continue;
-    sessionKeys.add(`${cliKey}:${identity}`);
-  }
-
-  return sessionKeys.size;
+export function countActiveInferenceRequests(requests: ActiveRequest[]) {
+  return requests.filter(isActiveInferenceRequest).length;
 }
 
 export async function activeRequestLogsSnapshot() {
