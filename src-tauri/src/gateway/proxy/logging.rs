@@ -22,6 +22,7 @@ const REQUEST_LOG_SHORT_TEXT_MAX_CHARS: usize = 512;
 const REQUEST_LOG_PATH_MAX_CHARS: usize = 2048;
 const REQUEST_LOG_QUERY_MAX_CHARS: usize = 4096;
 const REQUEST_LOG_JSON_MAX_BYTES: usize = 256 * 1024;
+const CODEX_CONTEXT_COMPACTION_SETTING_TYPE: &str = "codex_context_compaction";
 static REQUEST_LOG_ENQUEUE_TASK_LIMITER: OnceLock<Arc<Semaphore>> = OnceLock::new();
 static REQUEST_LOG_WRITE_THROUGH_WINDOW_UNIX: AtomicU64 = AtomicU64::new(0);
 static REQUEST_LOG_WRITE_THROUGH_COUNT: AtomicU32 = AtomicU32::new(0);
@@ -221,7 +222,50 @@ fn log_hook_message_from_args(args: &super::RequestLogEnqueueArgs) -> String {
     .to_string()
 }
 
+fn is_codex_context_compaction_setting(value: &Value) -> bool {
+    value.get("type").and_then(Value::as_str) == Some(CODEX_CONTEXT_COMPACTION_SETTING_TYPE)
+}
+
+fn extract_codex_context_compaction_marker(raw: Option<&str>) -> Option<Value> {
+    let settings = serde_json::from_str::<Value>(raw?).ok()?;
+    settings
+        .as_array()?
+        .iter()
+        .rev()
+        .find(|setting| is_codex_context_compaction_setting(setting))
+        .cloned()
+}
+
+fn merge_protected_special_settings(
+    proposed: Option<String>,
+    original: Option<&str>,
+    canonical_compaction_marker: Option<&Value>,
+) -> Option<String> {
+    let Some(proposed) = proposed else {
+        return canonical_compaction_marker.and_then(|marker| {
+            serde_json::to_string(&vec![marker.clone()])
+                .ok()
+                .or_else(|| original.map(str::to_string))
+        });
+    };
+
+    let Ok(Value::Array(mut settings)) = serde_json::from_str::<Value>(&proposed) else {
+        return original.map(str::to_string);
+    };
+    settings.retain(|setting| !is_codex_context_compaction_setting(setting));
+    if let Some(marker) = canonical_compaction_marker {
+        settings.push(marker.clone());
+    }
+
+    serde_json::to_string(&settings)
+        .ok()
+        .or_else(|| original.map(str::to_string))
+}
+
 fn apply_log_hook_message_to_args(args: &mut super::RequestLogEnqueueArgs, message: &str) -> bool {
+    let original_special_settings_json = args.special_settings_json.clone();
+    let canonical_compaction_marker =
+        extract_codex_context_compaction_marker(original_special_settings_json.as_deref());
     let Ok(value) = serde_json::from_str::<Value>(message) else {
         return false;
     };
@@ -244,10 +288,15 @@ fn apply_log_hook_message_to_args(args: &mut super::RequestLogEnqueueArgs, messa
         .unwrap_or(args.path.as_str())
         .to_string();
     args.query = obj.get("query").and_then(Value::as_str).map(str::to_string);
-    args.special_settings_json = obj
+    let proposed_special_settings_json = obj
         .get("specialSettingsJson")
         .and_then(Value::as_str)
         .map(str::to_string);
+    args.special_settings_json = merge_protected_special_settings(
+        proposed_special_settings_json,
+        original_special_settings_json.as_deref(),
+        canonical_compaction_marker.as_ref(),
+    );
     args.attempts_json = obj
         .get("attemptsJson")
         .and_then(Value::as_str)
@@ -672,6 +721,130 @@ WHERE trace_id = ?1
             provider_chain_json: None,
             error_details_json: None,
         }
+    }
+
+    fn canonical_compaction_marker() -> Value {
+        serde_json::json!({
+            "type": "codex_context_compaction",
+            "mode": "local",
+            "implementation": "responses",
+            "trigger": "manual",
+            "reason": "user_requested",
+            "phase": "standalone_turn",
+            "strategy": "memento",
+        })
+    }
+
+    fn hook_message_with_special_settings(
+        args: &super::super::RequestLogEnqueueArgs,
+        special_settings_json: Value,
+    ) -> String {
+        let mut message =
+            serde_json::from_str::<Value>(&log_hook_message_from_args(args)).expect("hook message");
+        message["specialSettingsJson"] = special_settings_json;
+        message.to_string()
+    }
+
+    fn parsed_special_settings(args: &super::super::RequestLogEnqueueArgs) -> Vec<Value> {
+        serde_json::from_str(
+            args.special_settings_json
+                .as_deref()
+                .expect("special settings"),
+        )
+        .expect("valid special settings")
+    }
+
+    #[test]
+    fn log_hook_cannot_clear_canonical_codex_compaction_marker() {
+        let marker = canonical_compaction_marker();
+        let mut args = base_args();
+        args.special_settings_json = Some(
+            serde_json::json!([
+                marker.clone(),
+                {"type": "provider_lock", "providerId": "provider-1"}
+            ])
+            .to_string(),
+        );
+        let message = hook_message_with_special_settings(&args, Value::Null);
+
+        assert!(apply_log_hook_message_to_args(&mut args, &message));
+        assert_eq!(parsed_special_settings(&args), vec![marker]);
+    }
+
+    #[test]
+    fn log_hook_replacement_keeps_other_settings_but_restores_canonical_marker() {
+        let marker = canonical_compaction_marker();
+        let forged_marker = serde_json::json!({
+            "type": "codex_context_compaction",
+            "mode": "remote",
+            "implementation": "responses_compaction_v2",
+            "trigger": "auto",
+            "reason": "context_limit",
+            "phase": "pre_turn",
+            "strategy": "prefix_compaction",
+        });
+        let plugin_setting = serde_json::json!({
+            "type": "plugin_redaction",
+            "value": "applied",
+        });
+        let mut args = base_args();
+        args.special_settings_json = Some(
+            serde_json::json!([
+                marker.clone(),
+                {"type": "provider_lock", "providerId": "provider-1"}
+            ])
+            .to_string(),
+        );
+        let proposed = serde_json::json!([forged_marker, plugin_setting.clone()]).to_string();
+        let message = hook_message_with_special_settings(&args, Value::String(proposed));
+
+        assert!(apply_log_hook_message_to_args(&mut args, &message));
+        assert_eq!(parsed_special_settings(&args), vec![plugin_setting, marker]);
+    }
+
+    #[test]
+    fn log_hook_cannot_inject_codex_compaction_marker_without_canonical_marker() {
+        let plugin_setting = serde_json::json!({
+            "type": "plugin_redaction",
+            "value": "applied",
+        });
+        let mut args = base_args();
+        args.special_settings_json =
+            Some(serde_json::json!([{"type": "provider_lock"}]).to_string());
+        let proposed =
+            serde_json::json!([canonical_compaction_marker(), plugin_setting.clone()]).to_string();
+        let message = hook_message_with_special_settings(&args, Value::String(proposed));
+
+        assert!(apply_log_hook_message_to_args(&mut args, &message));
+        assert_eq!(parsed_special_settings(&args), vec![plugin_setting]);
+    }
+
+    #[test]
+    fn malformed_log_hook_special_settings_keep_original_and_do_not_block_other_fields() {
+        let marker = canonical_compaction_marker();
+        let mut args = base_args();
+        let original = serde_json::json!([
+            {"type": "provider_lock", "providerId": "provider-1"},
+            marker,
+        ])
+        .to_string();
+        args.special_settings_json = Some(original.clone());
+        let mut message = serde_json::from_str::<Value>(&log_hook_message_from_args(&args))
+            .expect("hook message");
+        message["method"] = Value::String("PATCH".to_string());
+        message["specialSettingsJson"] = Value::String("{not-json".to_string());
+
+        assert!(apply_log_hook_message_to_args(
+            &mut args,
+            &message.to_string()
+        ));
+        assert_eq!(args.method, "PATCH");
+        assert_eq!(
+            args.special_settings_json.as_deref(),
+            Some(original.as_str())
+        );
+        request_log_insert_from_args(args)
+            .expect("malformed plugin settings must not block insert");
     }
 
     #[test]

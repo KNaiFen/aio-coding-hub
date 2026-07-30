@@ -1,7 +1,10 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { UsageAvailabilityPanel } from "../UsageAvailabilityPanel";
-import { buildAvailabilityTimeline } from "../usageAvailabilityTimeline";
+import {
+  buildAvailabilityTimeline,
+  buildAvailabilityTimelineFromBuckets,
+} from "../usageAvailabilityTimeline";
 import type { RequestLogSummary } from "../../../services/gateway/requestLogs";
 import type { GatewayProviderCircuitStatus } from "../../../services/gateway/gateway";
 import type { CliKey } from "../../../services/providers/providers";
@@ -346,6 +349,59 @@ describe("buildAvailabilityTimeline", () => {
     const p1 = result.providers[0]!;
     expect(p1.buckets).toHaveLength(result.bucketCount);
     expect(result.bucketCount).toBe(Math.ceil(DAY_MS / result.bucketSizeMs));
+  });
+});
+
+describe("buildAvailabilityTimelineFromBuckets", () => {
+  it("fills empty buckets and preserves provider totals, duration, and circuit state", () => {
+    const result = buildAvailabilityTimelineFromBuckets(
+      {
+        start_ms: 0,
+        end_ms: HOUR_MS,
+        bucket_size_ms: 5 * 60_000,
+        buckets: [
+          {
+            cli_key: "claude",
+            provider_id: 1,
+            provider_name: "P1",
+            bucket_start_ms: 0,
+            requests_total: 2,
+            requests_success: 2,
+            total_duration_ms: 300,
+          },
+          {
+            cli_key: "claude",
+            provider_id: 1,
+            provider_name: "P1",
+            bucket_start_ms: 10 * 60_000,
+            requests_total: 1,
+            requests_success: 0,
+            total_duration_ms: 300,
+          },
+        ],
+      },
+      {
+        1: {
+          provider_id: 1,
+          state: "OPEN",
+          failure_count: 3,
+          failure_threshold: 3,
+          open_until: 999,
+          cooldown_until: null,
+        },
+      }
+    );
+
+    expect(result.bucketCount).toBe(12);
+    expect(result.bucketSizeLabel).toBe("5 分钟");
+    const provider = result.providers[0]!;
+    expect(provider.totalRequests).toBe(3);
+    expect(provider.successCount).toBe(2);
+    expect(provider.availabilityRate).toBeCloseTo(2 / 3);
+    expect(provider.avgDurationMs).toBe(200);
+    expect(provider.circuitState).toBe("OPEN");
+    expect(provider.buckets).toHaveLength(12);
+    expect(provider.buckets.filter((bucket) => bucket.totalRequests > 0)).toHaveLength(2);
   });
 });
 

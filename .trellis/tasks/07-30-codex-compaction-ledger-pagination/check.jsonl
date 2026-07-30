@@ -1,0 +1,6 @@
+{"file":".trellis/spec/aio-coding-hub/backend/index.md","reason":"Backend quality checks and gateway isolation requirements."}
+{"file":".trellis/spec/aio-coding-hub/backend/codex-context-compaction-observation-contract.md","reason":"Verify classifier fail-open behavior, source precedence and fixed marker shape."}
+{"file":".trellis/spec/aio-coding-hub/backend/codex-request-content-encoding-contract.md","reason":"Regression-check request decoding and upstream identity behavior."}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/index.md","reason":"Cross-layer binding, frontend and test requirements."}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/request-log-usage-ledger-pagination-contract.md","reason":"Verify pagination, ledger cutover, retention coverage and UI behavior."}
+{"file":".trellis/tasks/07-30-codex-compaction-ledger-pagination/research/codex-compaction-signatures.md","reason":"Review classifier behavior against source evidence."}

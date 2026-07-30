@@ -1,4 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { QueryObserver } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { dbDiskUsageGet, requestLogsClearAll } from "../../services/app/dataManagement";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
@@ -107,6 +108,20 @@ describe("query/dataManagement", () => {
     client.setQueryData(providerModelsKeys.catalog(1, providerUuid), { providerId: 1 });
     client.setQueryData(codexManagedProfilesKeys.list(), [{ providerId: 1 }]);
     client.setQueryData(requestLogsKeys.listAll(null), [{ id: 1 }]);
+    const requestLogsPageKey = requestLogsKeys.pageAll(
+      {
+        cliKey: null,
+        status: null,
+        errorCodeContains: null,
+        methodPathContains: null,
+      },
+      null,
+      50
+    );
+    client.setQueryData(requestLogsPageKey, {
+      items: [{ id: 2 }],
+      nextCursor: "opaque-next",
+    });
     client.setQueryData(usageKeys.summary("today", { cliKey: null }), { requests_total: 3 });
     client.setQueryData(modelPricesKeys.aliases(), { aliases: [] });
     client.setQueryData(settingsKeys.get(), { preferred_port: 37123 });
@@ -124,11 +139,43 @@ describe("query/dataManagement", () => {
     expect(client.getQueryData(providerModelsKeys.catalog(1, providerUuid))).toBeUndefined();
     expect(client.getQueryData(codexManagedProfilesKeys.list())).toBeUndefined();
     expect(client.getQueryData(requestLogsKeys.listAll(null))).toBeUndefined();
+    expect(client.getQueryData(requestLogsPageKey)).toBeUndefined();
     expect(client.getQueryData(usageKeys.summary("today", { cliKey: null }))).toBeUndefined();
     expect(client.getQueryData(modelPricesKeys.aliases())).toBeUndefined();
     expect(client.getQueryData(settingsKeys.get())).toBeUndefined();
     expect(client.getQueryData(dataManagementKeys.dbDiskUsage())).toBeUndefined();
     expect(client.getQueryData(appAboutKeys.get())).toEqual({ version: "keep" });
+  });
+
+  it("resetAppDataQueryCaches keeps active page caches object-shaped", async () => {
+    const client = createTestQueryClient();
+    const pageKey = requestLogsKeys.pageAll(
+      {
+        cliKey: "codex",
+        status: { op: "gte", value: 400 },
+        errorCodeContains: null,
+        methodPathContains: null,
+      },
+      "opaque-current",
+      100
+    );
+    const observer = new QueryObserver(client, {
+      queryKey: pageKey,
+      queryFn: async () => ({
+        items: [{ id: 7 }],
+        nextCursor: "opaque-next",
+      }),
+    });
+    const unsubscribe = observer.subscribe(() => {});
+    await observer.refetch();
+
+    await resetAppDataQueryCaches(client);
+
+    expect(client.getQueryData(pageKey)).toEqual({
+      items: [],
+      nextCursor: null,
+    });
+    unsubscribe();
   });
 
   it("resetAppDataQueryCaches overwrites active db usage without refetching", async () => {

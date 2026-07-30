@@ -12,6 +12,7 @@ pub(crate) struct ActiveRequestStart {
     pub(crate) query: Option<String>,
     pub(crate) session_id: Option<String>,
     pub(crate) requested_model: Option<String>,
+    pub(crate) special_settings_json: Option<String>,
     pub(crate) created_at_ms: i64,
 }
 
@@ -24,6 +25,7 @@ pub(crate) struct ActiveRequestSnapshotItem {
     pub query: Option<String>,
     pub session_id: Option<String>,
     pub requested_model: Option<String>,
+    pub special_settings_json: Option<String>,
     pub created_at_ms: i64,
     pub last_activity_ms: i64,
     pub current_attempt: Option<GatewayAttemptEvent>,
@@ -140,6 +142,7 @@ impl ActiveRequestEntry {
             query: self.start.query,
             session_id: self.start.session_id,
             requested_model: self.start.requested_model,
+            special_settings_json: self.start.special_settings_json,
             created_at_ms: self.start.created_at_ms,
             last_activity_ms: self.last_activity_ms,
             current_attempt: self.current_attempt,
@@ -169,6 +172,7 @@ mod tests {
             query: None,
             session_id: None,
             requested_model: Some("claude-sonnet-4".to_string()),
+            special_settings_json: None,
             created_at_ms: 1_000,
         }
     }
@@ -258,6 +262,29 @@ mod tests {
         let snapshot = registry.snapshot();
         assert_eq!(snapshot[0].current_attempt, Some(attempt));
         assert_eq!(snapshot[0].last_activity_ms, 1_100);
+    }
+
+    #[test]
+    fn registry_snapshot_preserves_special_settings_json_exactly() {
+        let registry = ActiveRequestRegistry::default();
+        let mut start = active_request_start("trace-settings");
+        let settings = r#"[{"type":"codex_context_compaction","mode":"remote"}]"#.to_string();
+        start.special_settings_json = Some(settings.clone());
+
+        registry.register(start);
+
+        let snapshot = registry.snapshot();
+        assert_eq!(
+            snapshot[0].special_settings_json.as_deref(),
+            Some(settings.as_str())
+        );
+        let finished = registry
+            .finish("trace-settings", ActiveRequestFinishReason::Completed)
+            .expect("active request should finish");
+        assert_eq!(
+            finished.special_settings_json.as_deref(),
+            Some(settings.as_str())
+        );
     }
 
     #[test]

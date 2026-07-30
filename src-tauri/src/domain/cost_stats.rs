@@ -3,8 +3,8 @@
 use crate::cost;
 use crate::db;
 use crate::model_price_aliases;
-use crate::request_logs;
 use crate::shared::error::db_err;
+use crate::usage_ledger;
 use rusqlite::{params, OptionalExtension};
 
 fn has_any_cost_usage(usage: &cost::CostUsage) -> bool {
@@ -45,19 +45,18 @@ fn backfill_missing_for_cli_with_aliases(
             .prepare(
                 r#"
 SELECT
-  id,
-  cli_key,
-  requested_model,
-  special_settings_json,
-  final_provider_id,
+  trace_id,
+  cost_basis_cli_key,
+  cost_basis_model,
   cost_multiplier,
   input_tokens,
   output_tokens,
   cache_read_input_tokens,
   cache_creation_input_tokens,
   cache_creation_5m_input_tokens,
-  cache_creation_1h_input_tokens
-FROM request_logs
+  cache_creation_1h_input_tokens,
+  priority_service_tier_applied
+FROM usage_events
 WHERE excluded_from_stats = 0
 AND status >= 200 AND status < 300 AND error_code IS NULL
 AND cost_usd_femto IS NULL
@@ -72,18 +71,12 @@ LIMIT ?2
             .prepare_cached("SELECT price_json FROM model_prices WHERE cli_key = ?1 AND model = ?2")
             .map_err(|e| db_err!("failed to prepare model_prices query: {e}"))?;
 
-        let mut stmt_update = tx
-            .prepare_cached(
-                "UPDATE request_logs SET cost_usd_femto = ?1 WHERE id = ?2 AND cost_usd_femto IS NULL",
-            )
-            .map_err(|e| db_err!("failed to prepare backfill update: {e}"))?;
-
         let rows = stmt_candidates
             .query_map(params![cli_key, max_rows], |row| {
                 Ok((
-                    row.get::<_, i64>("id")?,
-                    row.get::<_, String>("cli_key")?,
-                    row.get::<_, Option<String>>("requested_model")?,
+                    row.get::<_, String>("trace_id")?,
+                    row.get::<_, Option<String>>("cost_basis_cli_key")?,
+                    row.get::<_, Option<String>>("cost_basis_model")?,
                     row.get::<_, f64>("cost_multiplier")?,
                     row.get::<_, Option<i64>>("input_tokens")?.unwrap_or(0),
                     row.get::<_, Option<i64>>("output_tokens")?.unwrap_or(0),
@@ -95,17 +88,16 @@ LIMIT ?2
                         .unwrap_or(0),
                     row.get::<_, Option<i64>>("cache_creation_1h_input_tokens")?
                         .unwrap_or(0),
-                    row.get::<_, Option<String>>("special_settings_json")?,
-                    row.get::<_, Option<i64>>("final_provider_id")?,
+                    row.get::<_, i64>("priority_service_tier_applied")? != 0,
                 ))
             })
             .map_err(|e| db_err!("failed to run backfill candidates query: {e}"))?;
 
         for row in rows {
             let (
-                id,
-                cli_key,
-                requested_model,
+                trace_id,
+                cost_basis_cli_key,
+                cost_basis_model,
                 cost_multiplier,
                 input_tokens,
                 output_tokens,
@@ -113,20 +105,13 @@ LIMIT ?2
                 cache_creation_input_tokens,
                 cache_creation_5m_input_tokens,
                 cache_creation_1h_input_tokens,
-                special_settings_json,
-                final_provider_id,
+                priority_service_tier_applied,
             ) = row.map_err(|e| db_err!("failed to read backfill candidate row: {e}"))?;
 
-            let Some(cost_basis) = request_logs::effective_cost_basis(
-                &cli_key,
-                requested_model.as_deref(),
-                special_settings_json.as_deref(),
-                final_provider_id,
-            ) else {
+            let (Some(effective_cli_key), Some(mut model)) = (cost_basis_cli_key, cost_basis_model)
+            else {
                 continue;
             };
-            let effective_cli_key = cost_basis.cli_key;
-            let mut model = cost_basis.model;
 
             let usage = cost::CostUsage {
                 input_tokens,
@@ -148,8 +133,7 @@ LIMIT ?2
             };
 
             if multiplier == 0.0 {
-                stmt_update
-                    .execute(params![0_i64, id])
+                usage_ledger::update_missing_cost_usd_femto(&tx, &trace_id, 0)
                     .map_err(|e| db_err!("failed to update zero cost_usd_femto: {e}"))?;
                 continue;
             }
@@ -181,9 +165,7 @@ LIMIT ?2
             };
 
             let options = cost::CostCalculationOptions {
-                priority_service_tier_applied: request_logs::parse_effective_priority(
-                    special_settings_json.as_deref(),
-                ),
+                priority_service_tier_applied,
             };
             let cost_usd_femto = cost::calculate_cost_usd_femto_with_options(
                 &usage,
@@ -197,8 +179,7 @@ LIMIT ?2
                 continue;
             };
 
-            stmt_update
-                .execute(params![cost_usd_femto, id])
+            usage_ledger::update_missing_cost_usd_femto(&tx, &trace_id, cost_usd_femto)
                 .map_err(|e| db_err!("failed to update cost_usd_femto: {e}"))?;
         }
     }
@@ -215,6 +196,22 @@ mod tests {
 
     const TEST_FEMTO_USD: i64 = 1_000_000_000_000_000;
 
+    fn mark_usage_ledger_backfill_incomplete(conn: &rusqlite::Connection) {
+        conn.execute(
+            r#"
+UPDATE usage_ledger_backfill_state
+SET
+  status = 'incomplete',
+  target_request_log_id = (SELECT COALESCE(MAX(id), 0) FROM request_logs),
+  last_request_log_id = 0,
+  completed_at = NULL
+WHERE id = 1
+"#,
+            [],
+        )
+        .expect("mark usage ledger backfill incomplete");
+    }
+
     fn insert_backfill_candidate(conn: &rusqlite::Connection, trace_id: &str, cli_key: &str) {
         conn.execute(
             r#"
@@ -230,6 +227,7 @@ INSERT INTO request_logs (
             params![trace_id, cli_key],
         )
         .expect("insert backfill candidate");
+        mark_usage_ledger_backfill_incomplete(conn);
     }
 
     #[test]
@@ -277,6 +275,79 @@ INSERT INTO request_logs (
 
         assert_eq!(codex_cost, Some(TEST_FEMTO_USD));
         assert_eq!(claude_cost, None);
+    }
+
+    #[test]
+    fn backfill_updates_usage_ledger_and_any_remaining_request_log() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = db::init_for_tests(&dir.path().join("cost-backfill-ledger.db")).expect("init db");
+        crate::model_prices::upsert(&db, "codex", "gpt-test", r#"{"input_cost_per_token":0.01}"#)
+            .expect("insert model price");
+
+        let conn = db.open_connection().expect("open db");
+        for trace_id in ["backfill-ledger-and-log", "backfill-ledger-only"] {
+            insert_backfill_candidate(&conn, trace_id, "codex");
+            assert_eq!(
+                usage_ledger::project_trace(&conn, trace_id).expect("project usage ledger row"),
+                1
+            );
+        }
+        conn.execute(
+            "DELETE FROM request_logs WHERE trace_id = 'backfill-ledger-only'",
+            [],
+        )
+        .expect("remove one request detail row");
+        conn.execute(
+            r#"
+UPDATE usage_ledger_backfill_state
+SET
+  status = 'complete',
+  last_request_log_id = target_request_log_id,
+  completed_at = 1000
+WHERE id = 1
+"#,
+            [],
+        )
+        .expect("complete usage ledger backfill");
+        drop(conn);
+
+        backfill_missing_for_cli_with_aliases(
+            &db,
+            "codex",
+            5000,
+            &model_price_aliases::ModelPriceAliasesV1::default(),
+        )
+        .expect("backfill ledger costs");
+
+        let conn = db.open_connection().expect("reopen db");
+        for trace_id in ["backfill-ledger-and-log", "backfill-ledger-only"] {
+            let ledger_cost = conn
+                .query_row(
+                    "SELECT cost_usd_femto FROM usage_ledger WHERE trace_id = ?1",
+                    [trace_id],
+                    |row| row.get::<_, Option<i64>>(0),
+                )
+                .expect("read ledger cost");
+            assert_eq!(ledger_cost, Some(TEST_FEMTO_USD));
+        }
+        let request_log_cost = conn
+            .query_row(
+                "SELECT cost_usd_femto FROM request_logs WHERE trace_id = 'backfill-ledger-and-log'",
+                [],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .expect("read remaining request-log cost");
+        assert_eq!(request_log_cost, Some(TEST_FEMTO_USD));
+        let ledger_only_log_exists = conn
+            .query_row(
+                "SELECT 1 FROM request_logs WHERE trace_id = 'backfill-ledger-only'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .expect("read deleted request log")
+            .is_some();
+        assert!(!ledger_only_log_exists);
     }
 
     #[test]
@@ -414,6 +485,7 @@ INSERT INTO request_logs (
             )
             .expect("insert model identity backfill candidate");
         }
+        mark_usage_ledger_backfill_incomplete(&conn);
         drop(conn);
 
         backfill_missing_for_cli_with_aliases(
@@ -481,6 +553,7 @@ INSERT INTO request_logs (
             )
             .expect("insert CX2CC backfill candidate");
         }
+        mark_usage_ledger_backfill_incomplete(&conn);
         drop(conn);
 
         backfill_missing_for_cli_with_aliases(
@@ -551,6 +624,7 @@ INSERT INTO request_logs (
             [special_settings_json],
         )
         .expect("insert alias/priority backfill candidate");
+        mark_usage_ledger_backfill_incomplete(&conn);
         drop(conn);
 
         backfill_missing_for_cli_with_aliases(&db, "codex", 5000, &aliases)

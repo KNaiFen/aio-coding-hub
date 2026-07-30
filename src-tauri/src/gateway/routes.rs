@@ -2834,6 +2834,156 @@ INSERT INTO codex_managed_profiles(
         upstream_task.abort();
     }
 
+    #[tokio::test(flavor = "current_thread")]
+    async fn gateway_plugin_cannot_overwrite_original_codex_compaction_marker() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 1;
+        app_settings.enable_codex_session_id_completion = false;
+        disable_upstream_retry_policy(&mut app_settings);
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(
+            &db_dir
+                .path()
+                .join("gateway-plugin-compaction-marker-test.sqlite"),
+        )
+        .expect("init test db");
+        let (upstream_base_url, captured_rx, upstream_task) = spawn_capturing_json_upstream(
+            r#"{"id":"resp-compaction","object":"response","model":"gpt-plugin","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}"#,
+        )
+        .await;
+        let provider_id = insert_codex_provider(&db, upstream_base_url);
+
+        let forged_metadata = serde_json::json!({
+            "request_kind": "compaction",
+            "compaction": {
+                "trigger": "manual",
+                "reason": "user_requested",
+                "implementation": "responses_compaction_v2",
+                "phase": "mid_turn",
+                "strategy": "memento",
+            }
+        })
+        .to_string();
+        let forged_body = serde_json::json!({
+            "model": "gpt-plugin",
+            "input": [{ "type": "compaction_trigger" }],
+            "client_metadata": {
+                "x-codex-turn-metadata": forged_metadata,
+            }
+        })
+        .to_string();
+        let executor = InMemoryGatewayPluginExecutor::new().with_request_handler(
+            "test.request-rewrite",
+            move |_ctx| GatewayHookResult {
+                request_body: Some(forged_body.clone()),
+                ..GatewayHookResult::continue_unchanged()
+            },
+        );
+        let plugin = request_rewrite_plugin();
+        persist_test_plugin(&db, &plugin);
+        let plugin_pipeline = GatewayPluginPipeline::for_tests_shared(
+            vec![plugin],
+            Arc::new(executor),
+            GatewayPluginPipelineConfig::default(),
+        );
+
+        let original_metadata = serde_json::json!({
+            "request_kind": "compaction",
+            "compaction": {
+                "trigger": "auto",
+                "reason": "context_limit",
+                "implementation": "responses",
+                "phase": "pre_turn",
+                "strategy": "prefix_compaction",
+            }
+        })
+        .to_string();
+        let original_body = serde_json::json!({
+            "model": "gpt-plugin",
+            "input": [],
+            "client_metadata": {
+                "x-codex-turn-metadata": original_metadata,
+            }
+        })
+        .to_string();
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+        let router = build_router(gateway_state_with_plugin_pipeline(
+            app_handle,
+            db,
+            log_tx,
+            plugin_pipeline,
+        ));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(format!("/codex/_aio/provider/{provider_id}/v1/responses"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(original_body))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let _ = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        let captured = tokio::time::timeout(Duration::from_secs(2), captured_rx)
+            .await
+            .expect("captured upstream request")
+            .expect("captured body");
+        let captured: Value = serde_json::from_str(&captured).expect("captured request json");
+        assert!(captured
+            .get("input")
+            .and_then(Value::as_array)
+            .is_some_and(|input| {
+                input.iter().any(|item| {
+                    item.get("type").and_then(Value::as_str) == Some("compaction_trigger")
+                })
+            }));
+
+        let request_log = recv_terminal_request_log(&mut log_rx).await;
+        assert_eq!(request_log.status, Some(200));
+        assert!(!request_log.excluded_from_stats);
+        let settings = parse_special_settings(&request_log);
+        let markers = settings
+            .iter()
+            .filter(|setting| {
+                setting.get("type").and_then(Value::as_str) == Some("codex_context_compaction")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(markers.len(), 1);
+        let marker = markers[0];
+        assert_eq!(marker.get("mode").and_then(Value::as_str), Some("local"));
+        assert_eq!(
+            marker.get("implementation").and_then(Value::as_str),
+            Some("responses")
+        );
+        assert_eq!(marker.get("trigger").and_then(Value::as_str), Some("auto"));
+        assert_eq!(
+            marker.get("reason").and_then(Value::as_str),
+            Some("context_limit")
+        );
+        assert_eq!(
+            marker.get("phase").and_then(Value::as_str),
+            Some("pre_turn")
+        );
+        assert_eq!(
+            marker.get("strategy").and_then(Value::as_str),
+            Some("prefix_compaction")
+        );
+
+        upstream_task.abort();
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn official_privacy_filter_redacts_gzipped_codex_responses_as_identity_upstream() {
         let _env_lock = crate::test_support::test_env_lock();
@@ -3503,6 +3653,9 @@ INSERT INTO codex_managed_profiles(
             effort.get("source").and_then(Value::as_str),
             Some("request")
         );
+        assert!(!settings.iter().any(|setting| {
+            setting.get("type").and_then(Value::as_str) == Some("codex_context_compaction")
+        }));
         let session_completion = settings
             .iter()
             .find(|setting| {
@@ -3541,6 +3694,18 @@ INSERT INTO codex_managed_profiles(
         assert_eq!(request_log.status, Some(200));
         assert_eq!(request_log.requested_model.as_deref(), Some("gpt-5.6-sol"));
         assert_eq!(request_log.path, "/nested/openai/v1/responses/compact/");
+        let settings = parse_special_settings(&request_log);
+        let marker = settings
+            .iter()
+            .find(|setting| {
+                setting.get("type").and_then(Value::as_str) == Some("codex_context_compaction")
+            })
+            .expect("context compaction marker");
+        assert_eq!(marker.get("mode").and_then(Value::as_str), Some("remote"));
+        assert_eq!(
+            marker.get("implementation").and_then(Value::as_str),
+            Some("responses_compact")
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]

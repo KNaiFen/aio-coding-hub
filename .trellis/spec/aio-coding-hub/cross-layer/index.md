@@ -36,6 +36,9 @@ TypeScript bindings, frontend adapters, and React UI.
   lock-internal field-owned RMW, whole-snapshot CAS, and safe rollback.
 - [Trellis task context archive contract](./trellis-task-context-archive-contract.md):
   exact self-reference rewriting and repository-wide context validation before archive commit.
+- [Request-log retention, usage-ledger, and pagination contract](./request-log-usage-ledger-pagination-contract.md):
+  independent detail/statistics lifetimes, non-blocking ledger backfill, and
+  opaque cursor pagination without changing the Home realtime feed.
 
 ## Pre-Development Checklist
 
@@ -147,6 +150,14 @@ When changing Trellis task archive or context validation:
 2. Keep path rewriting JSON-aware and limited to the archived task's exact `file` prefix.
 3. Validate all active and archived manifests before archive auto-commit.
 
+When changing request-log retention, usage statistics, or the Logs page:
+
+1. Read [Request-log retention, usage-ledger, and pagination contract](./request-log-usage-ledger-pagination-contract.md).
+2. Trace detail and aggregate storage separately.
+3. Keep the Home realtime feed isolated from historical cursor pagination.
+4. Verify manual clear, automatic retention, provider deletion, and cost
+   backfill against both lifetimes.
+
 ## Quality Check
 
 - Regenerate and verify `src/generated/bindings.ts` from Rust source.
@@ -186,6 +197,10 @@ When changing Trellis task archive or context validation:
 - Audit account-usage diffs for credential, PII, host, upstream-message/body,
   token-name, and actual-account-value leakage, and verify routing, circuit,
   availability, order, and enablement remain untouched.
+- Verify usage totals, cost, Session aggregates, folders, trends, and provider
+  limits remain unchanged after request-detail retention deletes old rows.
+- Verify request-log keyset pages have no duplicate or missing rows at equal
+  timestamps and that page caches never receive realtime-feed array shapes.
 - When changing config migration payloads, verify export/import boundary
   symmetry, failure before target-directory creation or file writes, v1/v2 and
   installed/local compatibility, and file-count, total-size, Base64, path,

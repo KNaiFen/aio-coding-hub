@@ -5,6 +5,32 @@ export type ParsedRequestLogSpecialSetting = {
   reason?: string;
 } & Record<string, unknown>;
 
+export type CodexContextCompactionMode = "local" | "remote" | "unknown";
+export type CodexContextCompactionImplementation =
+  | "responses"
+  | "responses_compact"
+  | "responses_compaction_v2"
+  | "unknown";
+export type CodexContextCompactionTrigger = "manual" | "auto" | "unknown";
+export type CodexContextCompactionReason =
+  | "user_requested"
+  | "context_limit"
+  | "model_downshift"
+  | "comp_hash_changed"
+  | "unknown";
+export type CodexContextCompactionPhase = "standalone_turn" | "pre_turn" | "mid_turn" | "unknown";
+export type CodexContextCompactionStrategy = "memento" | "prefix_compaction" | "unknown";
+
+export type CodexContextCompactionMarker = {
+  type: "codex_context_compaction";
+  mode: CodexContextCompactionMode;
+  implementation: CodexContextCompactionImplementation;
+  trigger: CodexContextCompactionTrigger;
+  reason: CodexContextCompactionReason;
+  phase: CodexContextCompactionPhase;
+  strategy: CodexContextCompactionStrategy;
+};
+
 export type CodexReasoningEffort =
   | "none"
   | "minimal"
@@ -77,6 +103,90 @@ const KNOWN_CODEX_MODEL_DEFAULT_REASONING_EFFORTS: Readonly<Record<string, Codex
 
 const CODEX_REASONING_EFFORT_FIELD_NAMES = new Set(["effort", "rawEffort"]);
 
+const CODEX_CONTEXT_COMPACTION_MODES = new Set<CodexContextCompactionMode>([
+  "local",
+  "remote",
+  "unknown",
+]);
+const CODEX_CONTEXT_COMPACTION_IMPLEMENTATIONS = new Set<CodexContextCompactionImplementation>([
+  "responses",
+  "responses_compact",
+  "responses_compaction_v2",
+  "unknown",
+]);
+const CODEX_CONTEXT_COMPACTION_TRIGGERS = new Set<CodexContextCompactionTrigger>([
+  "manual",
+  "auto",
+  "unknown",
+]);
+const CODEX_CONTEXT_COMPACTION_REASONS = new Set<CodexContextCompactionReason>([
+  "user_requested",
+  "context_limit",
+  "model_downshift",
+  "comp_hash_changed",
+  "unknown",
+]);
+const CODEX_CONTEXT_COMPACTION_PHASES = new Set<CodexContextCompactionPhase>([
+  "standalone_turn",
+  "pre_turn",
+  "mid_turn",
+  "unknown",
+]);
+const CODEX_CONTEXT_COMPACTION_STRATEGIES = new Set<CodexContextCompactionStrategy>([
+  "memento",
+  "prefix_compaction",
+  "unknown",
+]);
+
+const CODEX_CONTEXT_COMPACTION_MODE_LABELS: Readonly<Record<CodexContextCompactionMode, string>> = {
+  local: "本地",
+  remote: "远程",
+  unknown: "未知",
+};
+
+const CODEX_CONTEXT_COMPACTION_IMPLEMENTATION_LABELS: Readonly<
+  Record<CodexContextCompactionImplementation, string>
+> = {
+  responses: "本地（responses）",
+  responses_compact: "远程 v1（responses_compact）",
+  responses_compaction_v2: "远程 v2（responses_compaction_v2）",
+  unknown: "未知",
+};
+
+const CODEX_CONTEXT_COMPACTION_TRIGGER_LABELS: Readonly<
+  Record<CodexContextCompactionTrigger, string>
+> = {
+  manual: "手动（manual）",
+  auto: "自动（auto）",
+  unknown: "未知",
+};
+
+const CODEX_CONTEXT_COMPACTION_REASON_LABELS: Readonly<
+  Record<CodexContextCompactionReason, string>
+> = {
+  user_requested: "用户请求（user_requested）",
+  context_limit: "上下文上限（context_limit）",
+  model_downshift: "模型降级（model_downshift）",
+  comp_hash_changed: "压缩哈希变化（comp_hash_changed）",
+  unknown: "未知",
+};
+
+const CODEX_CONTEXT_COMPACTION_PHASE_LABELS: Readonly<Record<CodexContextCompactionPhase, string>> =
+  {
+    standalone_turn: "独立轮次（standalone_turn）",
+    pre_turn: "轮次前（pre_turn）",
+    mid_turn: "轮次中（mid_turn）",
+    unknown: "未知",
+  };
+
+const CODEX_CONTEXT_COMPACTION_STRATEGY_LABELS: Readonly<
+  Record<CodexContextCompactionStrategy, string>
+> = {
+  memento: "Memento（memento）",
+  prefix_compaction: "前缀压缩（prefix_compaction）",
+  unknown: "未知",
+};
+
 export const CODEX_SYSTEM_REQUEST_SPECIAL_SETTING = {
   type: "codex_system_request",
   threadSource: "system",
@@ -116,6 +226,82 @@ function parsedSettingBoolean(value: unknown): boolean {
 
 function parsedSettingNullableBoolean(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
+}
+
+function normalizeCodexContextCompactionValue<T extends string>(
+  value: unknown,
+  allowed: ReadonlySet<T>
+): T | null {
+  return typeof value === "string" && allowed.has(value as T) ? (value as T) : null;
+}
+
+function normalizeCodexContextCompactionMarker(
+  setting: ParsedRequestLogSpecialSetting
+): CodexContextCompactionMarker | null {
+  if (setting.type !== "codex_context_compaction") return null;
+
+  const mode = normalizeCodexContextCompactionValue(setting.mode, CODEX_CONTEXT_COMPACTION_MODES);
+  const implementation = normalizeCodexContextCompactionValue(
+    setting.implementation,
+    CODEX_CONTEXT_COMPACTION_IMPLEMENTATIONS
+  );
+  const trigger = normalizeCodexContextCompactionValue(
+    setting.trigger,
+    CODEX_CONTEXT_COMPACTION_TRIGGERS
+  );
+  const reason = normalizeCodexContextCompactionValue(
+    setting.reason,
+    CODEX_CONTEXT_COMPACTION_REASONS
+  );
+  const phase = normalizeCodexContextCompactionValue(
+    setting.phase,
+    CODEX_CONTEXT_COMPACTION_PHASES
+  );
+  const strategy = normalizeCodexContextCompactionValue(
+    setting.strategy,
+    CODEX_CONTEXT_COMPACTION_STRATEGIES
+  );
+
+  if (!mode || !implementation || !trigger || !reason || !phase || !strategy) return null;
+
+  return {
+    type: "codex_context_compaction",
+    mode,
+    implementation,
+    trigger,
+    reason,
+    phase,
+    strategy,
+  };
+}
+
+export function resolveCodexContextCompactionMarker(
+  specialSettingsJson: string | null | undefined
+): CodexContextCompactionMarker | null {
+  const settings = parseRequestLogSpecialSettings(specialSettingsJson);
+  for (let index = settings.length - 1; index >= 0; index -= 1) {
+    const marker = normalizeCodexContextCompactionMarker(settings[index]!);
+    if (marker) return marker;
+  }
+  return null;
+}
+
+export function formatCodexContextCompactionBadgeLabel(
+  marker: CodexContextCompactionMarker
+): string {
+  return `上下文压缩 · ${CODEX_CONTEXT_COMPACTION_MODE_LABELS[marker.mode]}`;
+}
+
+export function formatCodexContextCompactionTooltip(marker: CodexContextCompactionMarker): string {
+  return [
+    "Codex 上下文压缩",
+    `模式：${CODEX_CONTEXT_COMPACTION_MODE_LABELS[marker.mode]}`,
+    `实现：${CODEX_CONTEXT_COMPACTION_IMPLEMENTATION_LABELS[marker.implementation]}`,
+    `触发：${CODEX_CONTEXT_COMPACTION_TRIGGER_LABELS[marker.trigger]}`,
+    `原因：${CODEX_CONTEXT_COMPACTION_REASON_LABELS[marker.reason]}`,
+    `阶段：${CODEX_CONTEXT_COMPACTION_PHASE_LABELS[marker.phase]}`,
+    `策略：${CODEX_CONTEXT_COMPACTION_STRATEGY_LABELS[marker.strategy]}`,
+  ].join("\n");
 }
 
 function normalizeCodexReasoningEffort(value: unknown): KnownCodexReasoningEffort | null {

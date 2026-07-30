@@ -34,7 +34,6 @@ pub(super) struct UsageEventAgg {
     pub bucket_key: Option<String>,
     pub bucket_provider_id: Option<i64>,
     pub bucket_provider_name: Option<String>,
-    pub bucket_provider_attempts_json: Option<String>,
     pub hour: Option<i64>,
     pub requests_with_usage: i64,
     pub agg: ProviderAgg,
@@ -175,8 +174,8 @@ pub(super) fn row_to_agg(row: &Row<'_>) -> rusqlite::Result<ProviderAgg> {
             .get::<_, Option<i64>>("cost_covered_success")?
             .unwrap_or(0),
         total_cost_usd_femto: row
-            .get::<_, Option<i64>>("total_cost_usd_femto")?
-            .unwrap_or(0),
+            .get::<_, Option<f64>>("total_cost_usd_femto")?
+            .unwrap_or(0.0),
     })
 }
 
@@ -226,28 +225,18 @@ SELECT
   r.cli_key,
   NULLIF(TRIM(COALESCE(r.session_id, '')), '') AS session_id{bucket_select}{hour_select},
   MAX(r.final_provider_id) AS bucket_provider_id,
-  MAX(NULLIF(TRIM(COALESCE(p.name, '')), '')) AS bucket_provider_name,
-  MAX(r.attempts_json) AS bucket_provider_attempts_json,
+  MAX(NULLIF(TRIM(COALESCE(r.provider_name_snapshot, '')), '')) AS bucket_provider_name_snapshot,
   COUNT(*) AS requests_total,
   SUM(
-    CASE WHEN (
-      r.total_tokens IS NOT NULL OR
-      r.input_tokens IS NOT NULL OR
-      r.output_tokens IS NOT NULL OR
-      r.cache_read_input_tokens IS NOT NULL OR
-      r.cache_creation_input_tokens IS NOT NULL OR
-      r.cache_creation_5m_input_tokens IS NOT NULL OR
-      r.cache_creation_1h_input_tokens IS NOT NULL OR
-      r.usage_json IS NOT NULL
-    ) THEN 1 ELSE 0 END
+    CASE WHEN r.usage_present = 1 THEN 1 ELSE 0 END
   ) AS requests_with_usage,
-  SUM(CASE WHEN r.status >= 200 AND r.status < 300 AND r.error_code IS NULL THEN 1 ELSE 0 END) AS requests_success,
+  SUM(CASE WHEN r.status >= 200 AND r.status < 300 AND r.error_present = 0 THEN 1 ELSE 0 END) AS requests_success,
   SUM(
     CASE WHEN (
       r.status IS NULL OR
       r.status < 200 OR
       r.status >= 300 OR
-      r.error_code IS NOT NULL
+      r.error_present != 0
     ) THEN 1 ELSE 0 END
   ) AS requests_failed,
   SUM({effective_input_expr}) AS input_tokens,
@@ -258,37 +247,37 @@ SELECT
   SUM(COALESCE(r.cache_creation_1h_input_tokens, 0)) AS cache_creation_1h_input_tokens,
   SUM(
     CASE WHEN (
-      r.status >= 200 AND r.status < 300 AND r.error_code IS NULL AND
+      r.status >= 200 AND r.status < 300 AND r.error_present = 0 AND
       r.cost_usd_femto IS NOT NULL
     ) THEN 1 ELSE 0 END
   ) AS cost_covered_success,
-  SUM(
+  TOTAL(
     CASE WHEN (
-      r.status >= 200 AND r.status < 300 AND r.error_code IS NULL AND
+      r.status >= 200 AND r.status < 300 AND r.error_present = 0 AND
       r.cost_usd_femto IS NOT NULL AND r.cost_usd_femto > 0
     ) THEN r.cost_usd_femto ELSE 0 END
   ) AS total_cost_usd_femto,
   SUM(r.duration_ms) AS total_duration_ms,
   MIN(CASE WHEN r.created_at_ms > 0 THEN r.created_at_ms ELSE r.created_at * 1000 END) AS first_request_created_at_ms,
   MAX(CASE WHEN r.created_at_ms > 0 THEN r.created_at_ms ELSE r.created_at * 1000 END) AS last_request_created_at_ms,
-  SUM(CASE WHEN r.status >= 200 AND r.status < 300 AND r.error_code IS NULL THEN r.duration_ms ELSE 0 END) AS success_duration_ms_sum,
+  SUM(CASE WHEN r.status >= 200 AND r.status < 300 AND r.error_present = 0 THEN r.duration_ms ELSE 0 END) AS success_duration_ms_sum,
   SUM(
     CASE WHEN (
-      r.status >= 200 AND r.status < 300 AND r.error_code IS NULL AND
+      r.status >= 200 AND r.status < 300 AND r.error_present = 0 AND
       r.ttfb_ms IS NOT NULL AND
       r.ttfb_ms < r.duration_ms
     ) THEN r.ttfb_ms ELSE 0 END
   ) AS success_ttfb_ms_sum,
   SUM(
     CASE WHEN (
-      r.status >= 200 AND r.status < 300 AND r.error_code IS NULL AND
+      r.status >= 200 AND r.status < 300 AND r.error_present = 0 AND
       r.ttfb_ms IS NOT NULL AND
       r.ttfb_ms < r.duration_ms
     ) THEN 1 ELSE 0 END
   ) AS success_ttfb_ms_count,
   SUM(
     CASE WHEN (
-      r.status >= 200 AND r.status < 300 AND r.error_code IS NULL AND
+      r.status >= 200 AND r.status < 300 AND r.error_present = 0 AND
       r.output_tokens IS NOT NULL AND
       r.ttfb_ms IS NOT NULL AND
       r.ttfb_ms < r.duration_ms
@@ -296,14 +285,13 @@ SELECT
   ) AS success_generation_ms_sum,
   SUM(
     CASE WHEN (
-      r.status >= 200 AND r.status < 300 AND r.error_code IS NULL AND
+      r.status >= 200 AND r.status < 300 AND r.error_present = 0 AND
       r.output_tokens IS NOT NULL AND
       r.ttfb_ms IS NOT NULL AND
       r.ttfb_ms < r.duration_ms
     ) THEN r.output_tokens ELSE 0 END
   ) AS success_output_tokens_for_rate_sum
-FROM request_logs r
-LEFT JOIN providers p ON p.id = r.final_provider_id
+FROM usage_events r
 WHERE r.excluded_from_stats = 0
 {where_clause}
 {cx2cc_filter_clause}
@@ -332,8 +320,7 @@ GROUP BY r.cli_key, session_id{bucket_group}{hour_group}
                     None
                 },
                 bucket_provider_id: row.get("bucket_provider_id")?,
-                bucket_provider_name: row.get("bucket_provider_name")?,
-                bucket_provider_attempts_json: row.get("bucket_provider_attempts_json")?,
+                bucket_provider_name: row.get("bucket_provider_name_snapshot")?,
                 hour: if include_hour { row.get("hour")? } else { None },
                 requests_with_usage: row
                     .get::<_, Option<i64>>("requests_with_usage")?

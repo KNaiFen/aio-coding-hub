@@ -66,10 +66,31 @@ export const gatewayKeys = {
 };
 
 const requestLogsAllKey = ["requestLogs"] as const;
+type RequestLogPageKeyFilters = {
+  cliKey: CliKey | null;
+  status: { op: string; value: number } | null;
+  errorCodeContains: string | null;
+  methodPathContains: string | null;
+};
+
 export const requestLogsKeys = {
   all: requestLogsAllKey,
   lists: () => [...requestLogsAllKey, "list"] as const,
   listAll: (limit: number | null) => [...requestLogsAllKey, "list", "all", limit] as const,
+  pages: () => [...requestLogsAllKey, "page"] as const,
+  pageAll: (filters: RequestLogPageKeyFilters, cursor: string | null, limit: number | null) =>
+    [
+      ...requestLogsAllKey,
+      "page",
+      "all",
+      filters.cliKey,
+      filters.status?.op ?? null,
+      filters.status?.value ?? null,
+      filters.errorCodeContains,
+      filters.methodPathContains,
+      cursor,
+      limit,
+    ] as const,
   activeSnapshot: () => [...requestLogsAllKey, "activeSnapshot"] as const,
   detail: (logId: number | null) => [...requestLogsAllKey, "detail", logId] as const,
   attemptsByTrace: (traceId: string | null, limit: number | null) =>
@@ -86,6 +107,22 @@ export const sortModesKeys = {
 const usageAllKey = ["usage"] as const;
 export const usageKeys = {
   all: usageAllKey,
+  availabilityTimelineV1: (input: {
+    lookbackMs: number | null;
+    startMs: number | null;
+    endMs: number | null;
+    cliKey: CliKey | null;
+    providerId: number | null;
+  }) =>
+    [
+      ...usageAllKey,
+      "availabilityTimelineV1",
+      input.lookbackMs,
+      input.startMs,
+      input.endMs,
+      input.cliKey,
+      input.providerId,
+    ] as const,
   summary: (range: UsageRange, input: { cliKey: CliKey | null }) =>
     [...usageAllKey, "summary", range, input.cliKey] as const,
   hourlySeries: (days: number) => [...usageAllKey, "hourlySeries", days] as const,

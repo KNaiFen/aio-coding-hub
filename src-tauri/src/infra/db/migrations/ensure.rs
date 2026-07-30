@@ -11,6 +11,9 @@ const MAX_SESSION_REUSE_PRIORITY: i64 = 1000;
 
 /// Apply all idempotent ensure patches.
 pub(super) fn apply_ensure_patches(conn: &mut Connection) -> crate::shared::error::AppResult<()> {
+    // `usage_events` references these provider columns. Ensure them before
+    // workspace repairs can execute SQL that forces SQLite to validate views.
+    ensure_provider_bridge_columns(conn)?;
     ensure_workspace_cluster(conn)?;
     ensure_provider_limits(conn)?;
     ensure_provider_oauth_columns(conn)?;
@@ -21,10 +24,9 @@ pub(super) fn apply_ensure_patches(conn: &mut Connection) -> crate::shared::erro
     ensure_usage_indexes(conn)?;
     ensure_provider_tags(conn)?;
     ensure_provider_note(conn)?;
-    ensure_provider_source_provider_id(conn)?;
-    ensure_provider_bridge_type(conn)?;
     drop_legacy_request_attempt_logs_table(conn)?;
     ensure_request_logs_extended_columns(conn)?;
+    ensure_usage_ledger(conn)?;
     ensure_provider_stream_idle_timeout(conn)?;
     ensure_provider_availability_test_model(conn)?;
     ensure_provider_upstream_retry_policy(conn)?;
@@ -923,16 +925,14 @@ fn ensure_provider_note(conn: &mut Connection) -> Result<(), String> {
 // ensure_provider_source_provider_id (CX2CC translation provider)
 // ---------------------------------------------------------------------------
 
-fn ensure_provider_source_provider_id(conn: &mut Connection) -> Result<(), String> {
-    let has_providers_table: bool = conn
-        .query_row(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'providers' LIMIT 1",
-            [],
-            |_| Ok(true),
-        )
-        .optional()
-        .map_err(|e| format!("failed to query sqlite_master: {e}"))?
-        .unwrap_or(false);
+pub(super) fn ensure_provider_bridge_columns(conn: &Connection) -> Result<(), String> {
+    ensure_provider_source_provider_id(conn)?;
+    ensure_provider_bridge_type(conn)?;
+    Ok(())
+}
+
+fn ensure_provider_source_provider_id(conn: &Connection) -> Result<(), String> {
+    let has_providers_table = table_exists(conn, "providers")?;
 
     if !has_providers_table {
         return Ok(());
@@ -951,14 +951,8 @@ fn ensure_provider_source_provider_id(conn: &mut Connection) -> Result<(), Strin
 // ensure_provider_bridge_type (protocol bridge type identifier)
 // ---------------------------------------------------------------------------
 
-fn ensure_provider_bridge_type(conn: &mut Connection) -> Result<(), String> {
-    let has_providers_table: bool = conn
-        .query_row(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'providers' LIMIT 1",
-            [],
-            |_| Ok(true),
-        )
-        .unwrap_or(false);
+fn ensure_provider_bridge_type(conn: &Connection) -> Result<(), String> {
+    let has_providers_table = table_exists(conn, "providers")?;
 
     if !has_providers_table {
         return Ok(());
@@ -1104,6 +1098,73 @@ fn ensure_request_logs_extended_columns(conn: &mut Connection) -> Result<(), Str
             .map_err(|e| format!("failed to ensure request_logs.activity_details_json: {e}"))?;
     }
 
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// ensure_usage_ledger
+// ---------------------------------------------------------------------------
+
+fn ensure_usage_ledger(conn: &mut Connection) -> Result<(), String> {
+    let ledger_existed = table_exists(conn, "usage_ledger")?;
+    let state_table_existed = table_exists(conn, "usage_ledger_backfill_state")?;
+    let state_row_existed = if state_table_existed {
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM usage_ledger_backfill_state WHERE id = 1)",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(|error| format!("failed to inspect usage ledger backfill state: {error}"))?
+    } else {
+        false
+    };
+
+    let tx = conn
+        .transaction()
+        .map_err(|error| format!("failed to start usage ledger ensure transaction: {error}"))?;
+    super::v42_to_v43::create_usage_ledger_schema(&tx)?;
+
+    if !ledger_existed || !state_row_existed {
+        let target_request_log_id: i64 = tx
+            .query_row("SELECT COALESCE(MAX(id), 0) FROM request_logs", [], |row| {
+                row.get(0)
+            })
+            .map_err(|error| {
+                format!("failed to capture usage ledger ensure high-water mark: {error}")
+            })?;
+        let now = now_unix_seconds();
+        let status = if target_request_log_id == 0 {
+            super::v42_to_v43::USAGE_LEDGER_STATUS_COMPLETE
+        } else {
+            super::v42_to_v43::USAGE_LEDGER_STATUS_INCOMPLETE
+        };
+        let completed_at = (target_request_log_id == 0).then_some(now);
+
+        tx.execute(
+            r#"
+INSERT INTO usage_ledger_backfill_state(
+  id,
+  status,
+  target_request_log_id,
+  last_request_log_id,
+  completed_at,
+  updated_at
+) VALUES (1, ?1, ?2, 0, ?3, ?4)
+ON CONFLICT(id) DO UPDATE SET
+  status = excluded.status,
+  target_request_log_id = excluded.target_request_log_id,
+  last_request_log_id = 0,
+  completed_at = excluded.completed_at,
+  updated_at = excluded.updated_at
+"#,
+            params![status, target_request_log_id, completed_at, now],
+        )
+        .map_err(|error| format!("failed to repair usage ledger backfill state: {error}"))?;
+    }
+
+    super::v42_to_v43::refresh_usage_events_view(&tx)?;
+    tx.commit()
+        .map_err(|error| format!("failed to commit usage ledger ensure transaction: {error}"))?;
     Ok(())
 }
 
@@ -1280,4 +1341,13 @@ fn column_exists(
         }
     }
     Ok(false)
+}
+
+fn table_exists(conn: &Connection, table: &str) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+        [table],
+        |row| row.get(0),
+    )
+    .map_err(|error| format!("failed to inspect table {table}: {error}"))
 }

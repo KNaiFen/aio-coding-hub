@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   chooseModelRouteAwareSpecialSettingsJson,
+  formatCodexContextCompactionBadgeLabel,
+  formatCodexContextCompactionTooltip,
   formatCodexReasoningEffortSource,
   hasClaudeModelMappingSpecialSetting,
   hasCodexSystemRequestSpecialSetting,
@@ -8,11 +10,124 @@ import {
   hasModelRouteMappingSpecialSetting,
   resolveClaudeModelMappingFromSpecialSettings,
   resolveAioManagedModelRouteFromSpecialSettings,
+  resolveCodexContextCompactionMarker,
   resolveCodexReasoningEffort,
   resolveModelRouteMappingFromSpecialSettings,
 } from "../requestLogSpecialSettings";
 
 describe("services/gateway/requestLogSpecialSettings", () => {
+  it("parses fixed Codex context compaction markers and formats complete display text", () => {
+    const marker = resolveCodexContextCompactionMarker(
+      JSON.stringify([
+        { type: "noop" },
+        {
+          type: "codex_context_compaction",
+          mode: "remote",
+          implementation: "responses_compaction_v2",
+          trigger: "auto",
+          reason: "context_limit",
+          phase: "pre_turn",
+          strategy: "prefix_compaction",
+        },
+      ])
+    );
+
+    expect(marker).toEqual({
+      type: "codex_context_compaction",
+      mode: "remote",
+      implementation: "responses_compaction_v2",
+      trigger: "auto",
+      reason: "context_limit",
+      phase: "pre_turn",
+      strategy: "prefix_compaction",
+    });
+    expect(formatCodexContextCompactionBadgeLabel(marker!)).toBe("上下文压缩 · 远程");
+    expect(formatCodexContextCompactionTooltip(marker!)).toBe(
+      [
+        "Codex 上下文压缩",
+        "模式：远程",
+        "实现：远程 v2（responses_compaction_v2）",
+        "触发：自动（auto）",
+        "原因：上下文上限（context_limit）",
+        "阶段：轮次前（pre_turn）",
+        "策略：前缀压缩（prefix_compaction）",
+      ].join("\n")
+    );
+  });
+
+  it("accepts known local, remote v1, and fixed unknown compaction values", () => {
+    const cases = [
+      {
+        mode: "local",
+        implementation: "responses",
+        implementationLabel: "本地（responses）",
+      },
+      {
+        mode: "remote",
+        implementation: "responses_compact",
+        implementationLabel: "远程 v1（responses_compact）",
+      },
+      {
+        mode: "unknown",
+        implementation: "unknown",
+        implementationLabel: "未知",
+      },
+    ] as const;
+
+    for (const item of cases) {
+      const marker = resolveCodexContextCompactionMarker(
+        JSON.stringify({
+          type: "codex_context_compaction",
+          mode: item.mode,
+          implementation: item.implementation,
+          trigger: "unknown",
+          reason: "unknown",
+          phase: "unknown",
+          strategy: "unknown",
+        })
+      );
+
+      expect(marker).not.toBeNull();
+      expect(formatCodexContextCompactionTooltip(marker!)).toContain(
+        `实现：${item.implementationLabel}`
+      );
+    }
+  });
+
+  it("fails open for malformed or future Codex context compaction shapes", () => {
+    const invalidSettings = [
+      "bad-json",
+      JSON.stringify("codex_context_compaction"),
+      JSON.stringify([{ type: "codex_context_compaction" }]),
+      JSON.stringify([
+        {
+          type: "codex_context_compaction",
+          mode: "remote",
+          implementation: "future_remote",
+          trigger: "auto",
+          reason: "context_limit",
+          phase: "pre_turn",
+          strategy: "prefix_compaction",
+        },
+      ]),
+      JSON.stringify([
+        {
+          type: "codex_context_compaction",
+          mode: "remote",
+          implementation: "responses_compact",
+          trigger: "scheduled",
+          reason: "context_limit",
+          phase: "pre_turn",
+          strategy: "prefix_compaction",
+        },
+      ]),
+    ];
+
+    for (const settings of invalidSettings) {
+      expect(resolveCodexContextCompactionMarker(settings)).toBeNull();
+    }
+  });
+
   it("resolves Claude model mapping with final provider preference", () => {
     const settings = JSON.stringify([
       { type: "noop" },

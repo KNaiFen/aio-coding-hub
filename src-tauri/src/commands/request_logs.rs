@@ -7,6 +7,8 @@ use crate::{blocking, request_attempt_logs, request_logs};
 
 const REQUEST_LOGS_DEFAULT_LIMIT: u32 = 50;
 const REQUEST_LOGS_MAX_LIMIT: u32 = 500;
+const REQUEST_LOGS_PAGE_DEFAULT_LIMIT: i64 = 50;
+const REQUEST_LOGS_PAGE_MAX_LIMIT: i64 = 200;
 const REQUEST_ATTEMPT_LOGS_MAX_LIMIT: u32 = 200;
 
 fn request_logs_limit(limit: Option<u32>) -> usize {
@@ -20,6 +22,16 @@ fn request_attempt_logs_limit(limit: Option<u32>) -> usize {
         1,
         REQUEST_ATTEMPT_LOGS_MAX_LIMIT,
     )
+}
+
+fn request_logs_page_limit(limit: Option<i64>) -> Result<usize, String> {
+    let limit = limit.unwrap_or(REQUEST_LOGS_PAGE_DEFAULT_LIMIT);
+    if !(1..=REQUEST_LOGS_PAGE_MAX_LIMIT).contains(&limit) {
+        return Err(format!(
+            "SEC_INVALID_INPUT: request logs page limit must be between 1 and {REQUEST_LOGS_PAGE_MAX_LIMIT}"
+        ));
+    }
+    Ok(limit as usize)
 }
 
 #[tauri::command]
@@ -50,6 +62,34 @@ pub(crate) async fn request_logs_list_all(
     let limit = request_logs_limit(limit);
     blocking::run("request_logs_list_all", move || {
         request_logs::list_recent_all(&db, limit)
+    })
+    .await
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn request_logs_page_all(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    filters: request_logs::RequestLogPageFilters,
+    cursor: Option<String>,
+    limit: Option<i64>,
+) -> Result<request_logs::RequestLogPage, String> {
+    let limit = request_logs_page_limit(limit)?;
+    let active_trace_ids = app_gateway_active_requests_snapshot(&app)
+        .into_iter()
+        .map(|item| item.trace_id)
+        .collect::<Vec<_>>();
+    let db = ensure_db_ready(app, db_state.inner()).await?;
+    blocking::run("request_logs_page_all", move || {
+        request_logs::page_all_excluding_traces(
+            &db,
+            &filters,
+            cursor.as_deref(),
+            limit,
+            &active_trace_ids,
+        )
     })
     .await
     .map_err(Into::into)
@@ -167,7 +207,7 @@ pub(crate) async fn active_request_logs_snapshot(
 
 #[cfg(test)]
 mod tests {
-    use super::{request_attempt_logs_limit, request_logs_limit};
+    use super::{request_attempt_logs_limit, request_logs_limit, request_logs_page_limit};
 
     #[test]
     fn request_logs_limit_uses_default_and_clamps() {
@@ -183,5 +223,16 @@ mod tests {
         assert_eq!(request_attempt_logs_limit(Some(0)), 1);
         assert_eq!(request_attempt_logs_limit(Some(999)), 200);
         assert_eq!(request_attempt_logs_limit(Some(88)), 88);
+    }
+
+    #[test]
+    fn request_logs_page_limit_defaults_and_rejects_out_of_range_values() {
+        assert_eq!(request_logs_page_limit(None), Ok(50));
+        assert_eq!(request_logs_page_limit(Some(1)), Ok(1));
+        assert_eq!(request_logs_page_limit(Some(200)), Ok(200));
+        for limit in [-1, 0, 201, i64::MAX] {
+            let error = request_logs_page_limit(Some(limit)).unwrap_err();
+            assert!(error.starts_with("SEC_INVALID_INPUT:"));
+        }
     }
 }

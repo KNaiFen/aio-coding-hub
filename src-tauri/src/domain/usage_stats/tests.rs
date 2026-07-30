@@ -24,13 +24,15 @@ fn setup_conn() -> Connection {
 	  bridge_type TEXT
 	);
 
-	CREATE TABLE request_logs (
+	CREATE TABLE usage_events (
 	  cli_key TEXT NOT NULL,
 	  attempts_json TEXT NOT NULL,
 	  final_provider_id INTEGER,
+	  provider_name_snapshot TEXT,
 	  requested_model TEXT,
 	  status INTEGER,
 	  error_code TEXT,
+	  error_present INTEGER,
 	  duration_ms INTEGER NOT NULL,
 	  ttfb_ms INTEGER,
 	  input_tokens INTEGER,
@@ -43,11 +45,75 @@ fn setup_conn() -> Connection {
 	  special_settings_json TEXT,
 	  cost_usd_femto INTEGER,
 	  usage_json TEXT,
+	  usage_present INTEGER,
+	  persisted_openai_input_semantics INTEGER,
 	  excluded_from_stats INTEGER NOT NULL DEFAULT 0,
 	  session_id TEXT,
 	  created_at INTEGER NOT NULL,
 	  created_at_ms INTEGER NOT NULL DEFAULT 0
 	);
+
+	CREATE TRIGGER normalize_usage_event_fixture
+	AFTER INSERT ON usage_events
+	BEGIN
+	  UPDATE usage_events
+	  SET
+	    provider_name_snapshot = COALESCE(
+	      NULLIF(TRIM(NEW.provider_name_snapshot), ''),
+	      (
+	        SELECT NULLIF(TRIM(json_extract(attempt.value, '$.provider_name')), '')
+	        FROM json_each(NEW.attempts_json) attempt
+	        WHERE attempt.type = 'object'
+	        AND json_extract(attempt.value, '$.outcome') = 'success'
+	        ORDER BY CAST(attempt.key AS INTEGER) DESC
+	        LIMIT 1
+	      ),
+	      (
+	        SELECT NULLIF(TRIM(json_extract(attempt.value, '$.provider_name')), '')
+	        FROM json_each(NEW.attempts_json) attempt
+	        WHERE attempt.type = 'object'
+	        AND json_extract(attempt.value, '$.outcome') != 'skipped'
+	        ORDER BY CAST(attempt.key AS INTEGER) DESC
+	        LIMIT 1
+	      ),
+	      (
+	        SELECT NULLIF(TRIM(p.name), '')
+	        FROM providers p
+	        WHERE p.id = NEW.final_provider_id
+	      )
+	    ),
+	    error_present = COALESCE(
+	      NEW.error_present,
+	      CASE WHEN NEW.error_code IS NULL THEN 0 ELSE 1 END
+	    ),
+	    usage_present = COALESCE(
+	      NEW.usage_present,
+	      CASE WHEN (
+	        NEW.usage_json IS NOT NULL OR
+	        NEW.input_tokens IS NOT NULL OR
+	        NEW.output_tokens IS NOT NULL OR
+	        NEW.total_tokens IS NOT NULL OR
+	        NEW.cache_read_input_tokens IS NOT NULL OR
+	        NEW.cache_creation_input_tokens IS NOT NULL OR
+	        NEW.cache_creation_5m_input_tokens IS NOT NULL OR
+	        NEW.cache_creation_1h_input_tokens IS NOT NULL
+	      ) THEN 1 ELSE 0 END
+	    ),
+	    persisted_openai_input_semantics = COALESCE(
+	      NEW.persisted_openai_input_semantics,
+	      CASE
+	        WHEN NEW.cli_key IN ('codex', 'grok') THEN 1
+	        WHEN EXISTS (
+	          SELECT 1
+	          FROM providers p
+	          WHERE p.id = NEW.final_provider_id
+	          AND (p.source_provider_id IS NOT NULL OR p.bridge_type = 'cx2cc')
+	        ) THEN 1
+	        ELSE 0
+	      END
+	    )
+	  WHERE rowid = NEW.rowid;
+	END;
 	"#,
     )
     .expect("create schema");
@@ -58,6 +124,17 @@ fn setup_temp_db() -> (tempfile::TempDir, db::Db) {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("usage-stats-test.db");
     let db = db::init_for_tests(&path).expect("init test db");
+    let conn = db.open_connection().expect("open migrated test db");
+    conn.execute(
+        r#"
+UPDATE usage_ledger_backfill_state
+SET status = 'incomplete', completed_at = NULL
+WHERE id = 1
+        "#,
+        [],
+    )
+    .expect("switch usage events fixture to request-log compatibility mode");
+    drop(conn);
     (dir, db)
 }
 
@@ -140,7 +217,7 @@ fn insert_usage_log(conn: &Connection, log: TestUsageLog<'_>) {
 
     conn.execute(
         r#"
-INSERT INTO request_logs (
+INSERT INTO usage_events (
   cli_key,
   attempts_json,
   final_provider_id,
@@ -408,6 +485,65 @@ INSERT INTO request_logs (
 }
 
 #[test]
+fn completed_usage_ledger_keeps_summary_and_provider_stats_after_log_deletion() {
+    let (_dir, db) = setup_temp_db();
+    let conn = db.open_connection().expect("open test db connection");
+    insert_migrated_provider(&conn, 410, "codex", "Ledger Provider", None, None);
+    insert_migrated_usage_log(
+        &conn,
+        "trace-ledger-stats",
+        "codex",
+        410,
+        "Ledger Provider",
+        100,
+        20,
+        1_000,
+        Some("ledger-session"),
+    );
+
+    assert_eq!(
+        crate::usage_ledger::project_trace(&conn, "trace-ledger-stats")
+            .expect("project request into usage ledger"),
+        1
+    );
+    conn.execute(
+        r#"
+UPDATE usage_ledger_backfill_state
+SET status = 'complete', completed_at = 1000
+WHERE id = 1
+        "#,
+        [],
+    )
+    .expect("complete usage ledger backfill");
+    conn.execute(
+        "DELETE FROM request_logs WHERE trace_id = ?1",
+        ["trace-ledger-stats"],
+    )
+    .expect("delete request log detail");
+
+    let summary = summary_query(&conn, None, None, None, None, false).expect("ledger summary");
+    assert_eq!(summary.requests_total, 1);
+    assert_eq!(summary.requests_with_usage, 1);
+    assert_eq!(summary.total_tokens, 120);
+
+    let rows = leaderboard_v2_with_conn(
+        &conn,
+        UsageScopeV2::Provider,
+        None,
+        None,
+        None,
+        None,
+        Some(50),
+        false,
+    )
+    .expect("ledger provider leaderboard");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].key, "codex:410");
+    assert_eq!(rows[0].name, "codex/Ledger Provider");
+    assert_eq!(rows[0].total_tokens, 120);
+}
+
+#[test]
 fn usage_params_accept_generated_and_legacy_cx2cc_filter_keys() {
     let params: UsageQueryParams = serde_json::from_value(serde_json::json!({
         "period": "daily",
@@ -489,6 +625,81 @@ fn fixture_folder_lookup(keys: &[UsageSessionLookupKey]) -> Vec<UsageResolvedFol
             },
         )
         .collect()
+}
+
+#[test]
+fn cost_aggregates_above_sqlite_integer_ceiling_across_leaderboard_and_folder_paths() {
+    let conn = setup_conn();
+    let start_ts = 1_000;
+    for created_at in [1_001, 1_002] {
+        insert_usage_log(
+            &conn,
+            TestUsageLog {
+                cost_usd_femto: Some(i64::MAX),
+                session_id: Some("codex-alpha-1"),
+                created_at,
+                ..base_usage_log(created_at)
+            },
+        );
+    }
+
+    let expected_cost_usd = (i64::MAX as f64 * 2.0) / 1_000_000_000_000_000.0;
+    let assert_cost = |actual: Option<f64>| {
+        let actual = actual.expect("covered cost");
+        assert!(actual > i64::MAX as f64 / 1_000_000_000_000_000.0);
+        assert!((actual - expected_cost_usd).abs() < expected_cost_usd * 1e-12);
+    };
+
+    let rows = leaderboard_v2_with_conn(
+        &conn,
+        UsageScopeV2::Provider,
+        Some(start_ts),
+        Some(2_000),
+        None,
+        None,
+        Some(50),
+        false,
+    )
+    .expect("provider leaderboard");
+    assert_eq!(rows.len(), 1);
+    assert_cost(rows[0].cost_usd);
+
+    let folder_rows = leaderboard_v2_folder_filtered_with_conn(
+        &conn,
+        FolderFilteredLeaderboardParams {
+            scope: UsageScopeV2::Provider,
+            start_ts: Some(start_ts),
+            end_ts: Some(2_000),
+            cli_key: None,
+            provider_id: None,
+            folder_keys: &["/work/alpha".to_string()],
+            limit: Some(50),
+            exclude_cx2cc_gateway_bridge: false,
+            day_start_hour: 0,
+        },
+        fixture_folder_lookup,
+    )
+    .expect("folder-filtered provider leaderboard");
+    assert_eq!(folder_rows.len(), 1);
+    assert_cost(folder_rows[0].cost_usd);
+
+    let summary = summary_v2_with_conn(
+        &conn,
+        &UsageQueryParams {
+            period: "custom".to_string(),
+            start_ts: Some(start_ts),
+            end_ts: Some(2_000),
+            cli_key: None,
+            provider_id: None,
+            folder_keys: Some(vec!["/work/alpha".to_string()]),
+            day_start_hour: None,
+            exclude_cx2cc_gateway_bridge: None,
+        },
+        fixture_folder_lookup,
+    )
+    .expect("folder-filtered summary");
+    assert_eq!(summary.requests_total, 2);
+    assert_eq!(summary.cost_covered_success, 2);
 }
 
 #[test]
@@ -810,7 +1021,7 @@ fn v2_cache_rate_denominator_aligns_across_clis() {
     // Codex/Gemini: cache_read_input_tokens is a subset of input_tokens.
     conn.execute(
         r#"
-INSERT INTO request_logs (
+INSERT INTO usage_events (
   cli_key,
   attempts_json,
   final_provider_id,
@@ -858,7 +1069,7 @@ INSERT INTO request_logs (
 
     conn.execute(
         r#"
-INSERT INTO request_logs (
+INSERT INTO usage_events (
   cli_key,
   attempts_json,
   final_provider_id,
@@ -907,7 +1118,7 @@ INSERT INTO request_logs (
     // Claude: cache_read/cache_creation are additional buckets (not a subset of input_tokens).
     conn.execute(
         r#"
-INSERT INTO request_logs (
+INSERT INTO usage_events (
   cli_key,
   attempts_json,
   final_provider_id,
@@ -1074,7 +1285,7 @@ fn v2_cache_rate_denominator_treats_cx2cc_like_cached_input_subtract() {
 
     conn.execute(
         r#"
-INSERT INTO request_logs (
+INSERT INTO usage_events (
   cli_key,
   attempts_json,
   final_provider_id,
@@ -1163,7 +1374,7 @@ fn v2_cache_rate_denominator_treats_source_provider_id_as_bridged_input_semantic
 
     conn.execute(
         r#"
-INSERT INTO request_logs (
+INSERT INTO usage_events (
   cli_key,
   attempts_json,
   final_provider_id,
@@ -1232,6 +1443,18 @@ INSERT INTO request_logs (
     assert_eq!(row.input_tokens, 70);
     assert_eq!(row.cache_read_input_tokens, 30);
     assert_eq!(row.total_tokens, 110);
+
+    conn.execute(
+        "UPDATE providers SET source_provider_id = NULL, bridge_type = NULL WHERE id = 901",
+        [],
+    )
+    .expect("remove live bridge relationship");
+    let summary_after_provider_change =
+        summary_query(&conn, None, None, None, None, false).expect("summary after provider change");
+    assert_eq!(
+        summary_after_provider_change.input_tokens, 70,
+        "persisted input semantics must not drift with later provider edits"
+    );
 }
 
 #[test]
@@ -1245,7 +1468,7 @@ fn v2_provider_leaderboard_dedupes_by_provider_id() {
 
         conn.execute(
             r#"
-INSERT INTO request_logs (
+INSERT INTO usage_events (
   cli_key,
   attempts_json,
   final_provider_id,
@@ -1313,7 +1536,7 @@ fn v1_provider_cache_rate_trend_uses_effective_denom_and_bucket() {
     ] {
         conn.execute(
             r#"
-INSERT INTO request_logs (
+INSERT INTO usage_events (
   cli_key,
   attempts_json,
   final_provider_id,
@@ -1457,6 +1680,27 @@ fn provider_cache_rate_trend_excludes_cx2cc_gateway_bridge_when_requested() {
     .expect("cache trend without bridge");
     assert_eq!(rows_without_bridge.len(), 1);
     assert_eq!(rows_without_bridge[0].key, "codex:123");
+
+    conn.execute("UPDATE providers SET bridge_type = NULL WHERE id = 900", [])
+        .expect("remove live gateway bridge relationship");
+    let rows_after_provider_change = provider_cache_rate_trend_v1_with_conn(
+        &conn,
+        ProviderCacheRateTrendQuery {
+            period: UsagePeriodV2::Daily,
+            start_ts: None,
+            end_ts: None,
+            cli_key: None,
+            provider_id: None,
+            limit: None,
+            exclude_cx2cc_gateway_bridge: true,
+        },
+    )
+    .expect("cache trend after bridge relationship change");
+    assert_eq!(
+        rows_after_provider_change.len(),
+        2,
+        "gateway exclusion must follow the current provider relationship"
+    );
 }
 
 #[test]
@@ -1481,7 +1725,7 @@ fn v2_queries_apply_provider_filter() {
 
         conn.execute(
             r#"
-INSERT INTO request_logs (
+INSERT INTO usage_events (
   cli_key,
   attempts_json,
   final_provider_id,
@@ -1645,7 +1889,7 @@ fn v2_day_leaderboard_groups_by_local_day_and_applies_filters() {
 
         conn.execute(
             r#"
-INSERT INTO request_logs (
+INSERT INTO usage_events (
   cli_key,
   attempts_json,
   final_provider_id,

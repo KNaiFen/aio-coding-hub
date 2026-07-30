@@ -102,6 +102,7 @@ fn register_active_request_from_proxy_context<R: tauri::Runtime>(
         query: ctx.query.clone(),
         session_id: ctx.session_id.clone(),
         requested_model: ctx.requested_model.clone(),
+        special_settings_json: response_fixer::special_settings_json(&ctx.special_settings),
         created_at_ms: ctx.created_at_ms,
     });
 }
@@ -492,6 +493,20 @@ mod tests {
             unavailable_fingerprint_key: 0,
             unavailable_fingerprint_debug: String::new(),
         };
+        response_fixer::push_special_setting(
+            &ctx.special_settings,
+            serde_json::json!({
+                "type": "codex_context_compaction",
+                "mode": "remote",
+                "implementation": "responses_compact",
+                "trigger": "unknown",
+                "reason": "unknown",
+                "phase": "unknown",
+                "strategy": "unknown",
+            }),
+        );
+        let expected_special_settings =
+            response_fixer::special_settings_json(&ctx.special_settings);
 
         register_active_request_from_proxy_context(&ctx);
 
@@ -503,6 +518,7 @@ mod tests {
             snapshot[0].requested_model.as_deref(),
             Some("claude-sonnet-4")
         );
+        assert_eq!(snapshot[0].special_settings_json, expected_special_settings);
     }
 
     #[test]

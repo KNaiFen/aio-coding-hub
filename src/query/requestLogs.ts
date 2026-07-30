@@ -2,13 +2,18 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import {
   REQUEST_ATTEMPT_LOGS_DEFAULT_LIMIT,
   REQUEST_LOGS_DEFAULT_LIMIT,
+  REQUEST_LOGS_PAGE_DEFAULT_LIMIT,
   requestAttemptLogsByTraceId,
   requestLogGet,
+  requestLogsPageAll,
   requestLogsListAfterIdAll,
   requestLogsListAll,
   normalizeRequestAttemptLogsLimit,
   normalizeRequestLogTraceIdOrNull,
+  normalizeRequestLogsPageLimit,
   normalizeRequestLogsLimit,
+  type RequestLogPage,
+  type RequestLogPageFilters,
   type RequestLogSummary,
 } from "../services/gateway/requestLogs";
 import { activeRequestLogsSnapshot, type ActiveRequest } from "../services/gateway/activeRequests";
@@ -82,6 +87,26 @@ export function useRequestLogsListAllQuery(
     enabled,
     placeholderData: keepPreviousData,
     refetchInterval: options?.refetchIntervalMs ?? false,
+  });
+}
+
+export function useRequestLogsPageAllQuery(
+  filters: RequestLogPageFilters,
+  cursor: string | null,
+  limit?: number | null,
+  options?: { enabled?: boolean }
+) {
+  const enabled = isRequestLogsQueryEnabled(options?.enabled);
+  const normalizedLimit = normalizeRequestLogsPageLimit(limit) ?? REQUEST_LOGS_PAGE_DEFAULT_LIMIT;
+
+  return useQuery<RequestLogPage>({
+    queryKey: requestLogsKeys.pageAll(filters, cursor, normalizedLimit),
+    queryFn: () => requestLogsPageAll(filters, cursor, normalizedLimit),
+    enabled,
+    placeholderData: keepPreviousData,
+    // The latest page is a moving head. Keep it stale so returning from a
+    // stable history cursor fetches completions that arrived while inactive.
+    ...(cursor == null ? { staleTime: 0 } : {}),
   });
 }
 

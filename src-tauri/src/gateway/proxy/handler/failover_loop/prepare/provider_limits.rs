@@ -58,11 +58,11 @@ fn limit_usd_to_femto(limit_usd: f64) -> Option<i128> {
     Some(limit_femto)
 }
 
-fn limit_exceeded(limit_usd: f64, spent_femto: i64) -> bool {
+fn limit_exceeded(limit_usd: f64, spent_femto: i128) -> bool {
     let Some(limit_femto) = limit_usd_to_femto(limit_usd) else {
         return false;
     };
-    (spent_femto.max(0) as i128) >= limit_femto
+    spent_femto.max(0) >= limit_femto
 }
 
 fn has_any_limit(provider: &providers::ProviderForGateway) -> bool {
@@ -75,12 +75,12 @@ fn has_any_limit(provider: &providers::ProviderForGateway) -> bool {
 
 #[derive(Debug, Clone, Copy, Default)]
 struct SpendSums {
-    spent_5h: i64,
-    spent_daily_rolling: i64,
-    spent_daily_fixed: i64,
-    spent_weekly: i64,
-    spent_monthly: i64,
-    spent_total: i64,
+    spent_5h: i128,
+    spent_daily_rolling: i128,
+    spent_daily_fixed: i128,
+    spent_weekly: i128,
+    spent_monthly: i128,
+    spent_total: i128,
 }
 
 fn min_start_ts(values: &[Option<i64>]) -> Option<i64> {
@@ -98,6 +98,232 @@ struct SpendQueryBounds {
     min_start: Option<i64>,
 }
 
+/// The ledger is authoritative only after its fixed-high-water backfill has
+/// completed. While it is incomplete, the gateway hot path must use the
+/// request-log provider index directly instead of expanding `usage_events`'s
+/// attribution compatibility view for every candidate provider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProviderCostSource {
+    UsageLedger,
+    RequestLogs,
+}
+
+const USAGE_LEDGER_COST_WINDOW_ROWS_SQL: &str = r#"
+SELECT
+  created_at,
+  cost_usd_femto
+FROM usage_ledger
+WHERE excluded_from_stats = 0
+  AND status >= 200 AND status < 300 AND error_present = 0
+  AND cost_usd_femto IS NOT NULL
+  AND final_provider_id = ?1
+  AND created_at < ?2
+  AND (?3 IS NULL OR created_at >= ?3)
+"#;
+
+const REQUEST_LOG_COST_WINDOW_ROWS_SQL: &str = r#"
+SELECT
+  created_at,
+  cost_usd_femto
+FROM request_logs
+WHERE excluded_from_stats = 0
+  AND status >= 200 AND status < 300 AND error_code IS NULL
+  AND cost_usd_femto IS NOT NULL
+  AND final_provider_id = ?1
+  AND created_at < ?2
+  AND (?3 IS NULL OR created_at >= ?3)
+"#;
+
+// Older request-log rows can lack the persisted final provider id. Keep the
+// expensive attempts fallback strictly scoped to that indexed NULL subset;
+// current rows use the fast provider-id branch above.
+const REQUEST_LOG_NULL_PROVIDER_COST_WINDOW_ROWS_SQL: &str = r#"
+SELECT
+  r.created_at,
+  r.cost_usd_femto
+FROM request_logs r
+WHERE r.excluded_from_stats = 0
+  AND r.status >= 200 AND r.status < 300 AND r.error_code IS NULL
+  AND r.cost_usd_femto IS NOT NULL
+  AND r.final_provider_id IS NULL
+  AND r.created_at < ?2
+  AND (?3 IS NULL OR r.created_at >= ?3)
+  AND COALESCE(
+    (
+      SELECT json_extract(attempt.value, '$.provider_id')
+      FROM json_each(CASE
+        WHEN json_valid(r.attempts_json)
+         AND json_type(r.attempts_json) = 'array'
+        THEN r.attempts_json
+        ELSE '[]'
+      END) attempt
+      WHERE attempt.type = 'object'
+        AND json_type(attempt.value, '$.outcome') = 'text'
+        AND json_extract(attempt.value, '$.outcome') = 'success'
+        AND json_type(attempt.value, '$.provider_id') = 'integer'
+        AND typeof(json_extract(attempt.value, '$.provider_id')) = 'integer'
+        AND json_extract(attempt.value, '$.provider_id') > 0
+      ORDER BY CAST(attempt.key AS INTEGER) DESC
+      LIMIT 1
+    ),
+    (
+      SELECT json_extract(attempt.value, '$.provider_id')
+      FROM json_each(CASE
+        WHEN json_valid(r.attempts_json)
+         AND json_type(r.attempts_json) = 'array'
+        THEN r.attempts_json
+        ELSE '[]'
+      END) attempt
+      WHERE attempt.type = 'object'
+        AND json_type(attempt.value, '$.outcome') = 'text'
+        AND json_extract(attempt.value, '$.outcome') != 'skipped'
+        AND json_type(attempt.value, '$.provider_id') = 'integer'
+        AND typeof(json_extract(attempt.value, '$.provider_id')) = 'integer'
+        AND json_extract(attempt.value, '$.provider_id') > 0
+      ORDER BY CAST(attempt.key AS INTEGER) DESC
+      LIMIT 1
+    )
+  ) = ?1
+"#;
+
+const USAGE_LEDGER_COST_BUCKET_ROWS_SQL: &str = r#"
+SELECT
+  created_at,
+  cost_usd_femto
+FROM usage_ledger
+WHERE excluded_from_stats = 0
+  AND status >= 200 AND status < 300 AND error_present = 0
+  AND cost_usd_femto IS NOT NULL
+  AND final_provider_id = ?1
+  AND created_at >= ?2 AND created_at < ?3
+ORDER BY created_at ASC
+"#;
+
+const REQUEST_LOG_COST_BUCKET_ROWS_SQL: &str = r#"
+SELECT
+  created_at,
+  cost_usd_femto
+FROM request_logs
+WHERE excluded_from_stats = 0
+  AND status >= 200 AND status < 300 AND error_code IS NULL
+  AND cost_usd_femto IS NOT NULL
+  AND final_provider_id = ?1
+  AND created_at >= ?2 AND created_at < ?3
+ORDER BY created_at ASC
+"#;
+
+const REQUEST_LOG_NULL_PROVIDER_COST_BUCKET_ROWS_SQL: &str = r#"
+SELECT
+  r.created_at,
+  r.cost_usd_femto
+FROM request_logs r
+WHERE r.excluded_from_stats = 0
+  AND r.status >= 200 AND r.status < 300 AND r.error_code IS NULL
+  AND r.cost_usd_femto IS NOT NULL
+  AND r.final_provider_id IS NULL
+  AND r.created_at >= ?2 AND r.created_at < ?3
+  AND COALESCE(
+    (
+      SELECT json_extract(attempt.value, '$.provider_id')
+      FROM json_each(CASE
+        WHEN json_valid(r.attempts_json)
+         AND json_type(r.attempts_json) = 'array'
+        THEN r.attempts_json
+        ELSE '[]'
+      END) attempt
+      WHERE attempt.type = 'object'
+        AND json_type(attempt.value, '$.outcome') = 'text'
+        AND json_extract(attempt.value, '$.outcome') = 'success'
+        AND json_type(attempt.value, '$.provider_id') = 'integer'
+        AND typeof(json_extract(attempt.value, '$.provider_id')) = 'integer'
+        AND json_extract(attempt.value, '$.provider_id') > 0
+      ORDER BY CAST(attempt.key AS INTEGER) DESC
+      LIMIT 1
+    ),
+    (
+      SELECT json_extract(attempt.value, '$.provider_id')
+      FROM json_each(CASE
+        WHEN json_valid(r.attempts_json)
+         AND json_type(r.attempts_json) = 'array'
+        THEN r.attempts_json
+        ELSE '[]'
+      END) attempt
+      WHERE attempt.type = 'object'
+        AND json_type(attempt.value, '$.outcome') = 'text'
+        AND json_extract(attempt.value, '$.outcome') != 'skipped'
+        AND json_type(attempt.value, '$.provider_id') = 'integer'
+        AND typeof(json_extract(attempt.value, '$.provider_id')) = 'integer'
+        AND json_extract(attempt.value, '$.provider_id') > 0
+      ORDER BY CAST(attempt.key AS INTEGER) DESC
+      LIMIT 1
+    )
+  ) = ?1
+ORDER BY r.created_at ASC
+"#;
+
+fn provider_cost_source(conn: &Connection) -> crate::shared::error::AppResult<ProviderCostSource> {
+    crate::usage_ledger::is_backfill_complete(conn)
+        .map(|complete| {
+            if complete {
+                ProviderCostSource::UsageLedger
+            } else {
+                ProviderCostSource::RequestLogs
+            }
+        })
+        .map_err(|error| {
+            db_err!("failed to read usage ledger backfill state for provider limits: {error}")
+        })
+}
+
+fn visit_cost_window_rows(
+    conn: &Connection,
+    sql: &str,
+    provider_id: i64,
+    end_ts: i64,
+    min_start: Option<i64>,
+    mut visit: impl FnMut(i64, i128),
+) -> crate::shared::error::AppResult<()> {
+    let mut stmt = conn
+        .prepare_cached(sql)
+        .map_err(|error| db_err!("failed to prepare provider cost window query: {error}"))?;
+    let rows = stmt
+        .query_map(params![provider_id, end_ts, min_start], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+        })
+        .map_err(|error| db_err!("failed to query provider cost windows: {error}"))?;
+
+    for row in rows {
+        let (created_at, raw_cost) =
+            row.map_err(|error| db_err!("failed to read provider cost window row: {error}"))?;
+        visit(created_at, i128::from(raw_cost.max(0)));
+    }
+    Ok(())
+}
+
+fn append_cost_bucket_rows(
+    conn: &Connection,
+    sql: &str,
+    provider_id: i64,
+    start_ts: i64,
+    end_ts: i64,
+    rows_out: &mut Vec<(i64, i128)>,
+) -> crate::shared::error::AppResult<()> {
+    let mut stmt = conn
+        .prepare_cached(sql)
+        .map_err(|error| db_err!("failed to prepare provider cost bucket query: {error}"))?;
+    let rows = stmt
+        .query_map(params![provider_id, start_ts, end_ts], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+        })
+        .map_err(|error| db_err!("failed to query provider cost buckets: {error}"))?;
+    for row in rows {
+        let (created_at, raw_cost) =
+            row.map_err(|error| db_err!("failed to read provider cost bucket row: {error}"))?;
+        rows_out.push((created_at, i128::from(raw_cost.max(0))));
+    }
+    Ok(())
+}
+
 fn sum_cost_usd_femto_windows(
     conn: &Connection,
     provider_id: i64,
@@ -113,57 +339,56 @@ fn sum_cost_usd_femto_windows(
         min_start,
     } = bounds;
 
-    conn.query_row(
-        r#"
-SELECT
-  COALESCE(SUM(CASE WHEN created_at >= ?2 THEN CASE WHEN cost_usd_femto < 0 THEN 0 ELSE cost_usd_femto END ELSE 0 END), 0) AS spent_5h,
-  COALESCE(SUM(CASE WHEN created_at >= ?3 THEN CASE WHEN cost_usd_femto < 0 THEN 0 ELSE cost_usd_femto END ELSE 0 END), 0) AS spent_daily_rolling,
-  COALESCE(SUM(CASE WHEN created_at >= ?4 THEN CASE WHEN cost_usd_femto < 0 THEN 0 ELSE cost_usd_femto END ELSE 0 END), 0) AS spent_daily_fixed,
-  COALESCE(SUM(CASE WHEN created_at >= ?5 THEN CASE WHEN cost_usd_femto < 0 THEN 0 ELSE cost_usd_femto END ELSE 0 END), 0) AS spent_weekly,
-  COALESCE(SUM(CASE WHEN created_at >= ?6 THEN CASE WHEN cost_usd_femto < 0 THEN 0 ELSE cost_usd_femto END ELSE 0 END), 0) AS spent_monthly,
-  COALESCE(SUM(CASE WHEN cost_usd_femto < 0 THEN 0 ELSE cost_usd_femto END), 0) AS spent_total
-FROM request_logs
-WHERE excluded_from_stats = 0
-  AND status >= 200 AND status < 300 AND error_code IS NULL
-  AND cost_usd_femto IS NOT NULL
-  AND final_provider_id = ?1
-  AND created_at < ?7
-  AND (?8 IS NULL OR created_at >= ?8)
-"#,
-        params![
+    let mut sums = SpendSums::default();
+    let mut accumulate = |created_at: i64, cost: i128| {
+        sums.spent_total = sums.spent_total.saturating_add(cost);
+        if start_5h.is_some_and(|start| created_at >= start) {
+            sums.spent_5h = sums.spent_5h.saturating_add(cost);
+        }
+        if start_daily_rolling.is_some_and(|start| created_at >= start) {
+            sums.spent_daily_rolling = sums.spent_daily_rolling.saturating_add(cost);
+        }
+        if start_daily_fixed.is_some_and(|start| created_at >= start) {
+            sums.spent_daily_fixed = sums.spent_daily_fixed.saturating_add(cost);
+        }
+        if start_weekly.is_some_and(|start| created_at >= start) {
+            sums.spent_weekly = sums.spent_weekly.saturating_add(cost);
+        }
+        if start_monthly.is_some_and(|start| created_at >= start) {
+            sums.spent_monthly = sums.spent_monthly.saturating_add(cost);
+        }
+    };
+
+    match provider_cost_source(conn)? {
+        ProviderCostSource::UsageLedger => visit_cost_window_rows(
+            conn,
+            USAGE_LEDGER_COST_WINDOW_ROWS_SQL,
             provider_id,
-            start_5h,
-            start_daily_rolling,
-            start_daily_fixed,
-            start_weekly,
-            start_monthly,
             end_ts,
-            min_start
-        ],
-        |row| {
-            Ok(SpendSums {
-                spent_5h: row.get::<_, Option<i64>>("spent_5h")?.unwrap_or(0).max(0),
-                spent_daily_rolling: row
-                    .get::<_, Option<i64>>("spent_daily_rolling")?
-                    .unwrap_or(0)
-                    .max(0),
-                spent_daily_fixed: row
-                    .get::<_, Option<i64>>("spent_daily_fixed")?
-                    .unwrap_or(0)
-                    .max(0),
-                spent_weekly: row
-                    .get::<_, Option<i64>>("spent_weekly")?
-                    .unwrap_or(0)
-                    .max(0),
-                spent_monthly: row
-                    .get::<_, Option<i64>>("spent_monthly")?
-                    .unwrap_or(0)
-                    .max(0),
-                spent_total: row.get::<_, Option<i64>>("spent_total")?.unwrap_or(0).max(0),
-            })
-        },
-    )
-    .map_err(|e| db_err!("failed to sum provider cost windows: {e}"))
+            min_start,
+            &mut accumulate,
+        )?,
+        ProviderCostSource::RequestLogs => {
+            visit_cost_window_rows(
+                conn,
+                REQUEST_LOG_COST_WINDOW_ROWS_SQL,
+                provider_id,
+                end_ts,
+                min_start,
+                &mut accumulate,
+            )?;
+            visit_cost_window_rows(
+                conn,
+                REQUEST_LOG_NULL_PROVIDER_COST_WINDOW_ROWS_SQL,
+                provider_id,
+                end_ts,
+                min_start,
+                &mut accumulate,
+            )?;
+        }
+    }
+
+    Ok(sums)
 }
 
 fn fetch_cost_buckets(
@@ -171,42 +396,53 @@ fn fetch_cost_buckets(
     provider_id: i64,
     start_ts: i64,
     end_ts: i64,
-) -> crate::shared::error::AppResult<Vec<(i64, i64)>> {
-    let mut stmt = conn
-        .prepare_cached(
-            r#"
-    SELECT
-      created_at,
-      SUM(CASE WHEN cost_usd_femto < 0 THEN 0 ELSE cost_usd_femto END) AS cost
-    FROM request_logs
-    WHERE excluded_from_stats = 0
-      AND status >= 200 AND status < 300 AND error_code IS NULL
-      AND cost_usd_femto IS NOT NULL
-      AND final_provider_id = ?1
-      AND created_at >= ?2 AND created_at < ?3
-    GROUP BY created_at
-    ORDER BY created_at ASC
-    "#,
-        )
-        .map_err(|e| db_err!("failed to prepare provider cost bucket query: {e}"))?;
+) -> crate::shared::error::AppResult<Vec<(i64, i128)>> {
+    let mut raw_rows = Vec::new();
+    match provider_cost_source(conn)? {
+        ProviderCostSource::UsageLedger => append_cost_bucket_rows(
+            conn,
+            USAGE_LEDGER_COST_BUCKET_ROWS_SQL,
+            provider_id,
+            start_ts,
+            end_ts,
+            &mut raw_rows,
+        )?,
+        ProviderCostSource::RequestLogs => {
+            append_cost_bucket_rows(
+                conn,
+                REQUEST_LOG_COST_BUCKET_ROWS_SQL,
+                provider_id,
+                start_ts,
+                end_ts,
+                &mut raw_rows,
+            )?;
+            append_cost_bucket_rows(
+                conn,
+                REQUEST_LOG_NULL_PROVIDER_COST_BUCKET_ROWS_SQL,
+                provider_id,
+                start_ts,
+                end_ts,
+                &mut raw_rows,
+            )?;
+        }
+    }
 
-    let rows = stmt
-        .query_map(params![provider_id, start_ts, end_ts], |row| {
-            let ts: i64 = row.get(0)?;
-            let cost: i64 = row.get::<_, Option<i64>>(1)?.unwrap_or(0).max(0);
-            Ok((ts, cost))
-        })
-        .map_err(|e| db_err!("failed to query provider cost buckets: {e}"))?;
-
-    let mut out = Vec::new();
-    for row in rows {
-        out.push(row.map_err(|e| db_err!("failed to read provider cost bucket: {e}"))?);
+    raw_rows.sort_unstable_by_key(|(created_at, _)| *created_at);
+    let mut out: Vec<(i64, i128)> = Vec::with_capacity(raw_rows.len());
+    for (ts, cost) in raw_rows {
+        if let Some((last_ts, last_cost)) = out.last_mut() {
+            if *last_ts == ts {
+                *last_cost = last_cost.saturating_add(cost);
+                continue;
+            }
+        }
+        out.push((ts, cost));
     }
     Ok(out)
 }
 
 fn compute_next_available_rolling_from_buckets(
-    buckets: &[(i64, i64)],
+    buckets: &[(i64, i128)],
     window_start: i64,
     window_secs: i64,
     limit_femto: i128,
@@ -223,7 +459,7 @@ fn compute_next_available_rolling_from_buckets(
         if ts < window_start {
             continue;
         }
-        total = total.saturating_add(cost.max(0) as i128);
+        total = total.saturating_add(cost.max(0));
     }
     if total < limit_femto {
         return None;
@@ -235,7 +471,7 @@ fn compute_next_available_rolling_from_buckets(
         if ts < window_start {
             continue;
         }
-        prefix = prefix.saturating_add(cost.max(0) as i128);
+        prefix = prefix.saturating_add(cost.max(0));
         if prefix >= threshold {
             return Some(ts.saturating_add(1).saturating_add(window_secs));
         }
@@ -598,6 +834,336 @@ pub(super) fn gate_provider<R: tauri::Runtime>(input: ProviderLimitsInput<'_, R>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::params;
+
+    fn insert_ledger_cost(
+        conn: &Connection,
+        request_log_id: i64,
+        provider_id: i64,
+        created_at: i64,
+        cost_usd_femto: i64,
+    ) {
+        conn.execute(
+            r#"
+INSERT INTO usage_ledger (
+  request_log_id, trace_id, cli_key, created_at, created_at_ms, status,
+  error_present, excluded_from_stats, duration_ms, final_provider_id,
+  cost_usd_femto
+) VALUES (
+  ?1, ?2, 'codex', ?3, ?4, 200, 0, 0, 10, ?5, ?6
+)
+"#,
+            params![
+                request_log_id,
+                format!("trace-ledger-{request_log_id}"),
+                created_at,
+                created_at.saturating_mul(1000),
+                provider_id,
+                cost_usd_femto
+            ],
+        )
+        .expect("insert usage ledger cost");
+    }
+
+    fn insert_request_log_cost(
+        conn: &Connection,
+        request_log_id: i64,
+        provider_id: Option<i64>,
+        created_at: i64,
+        cost_usd_femto: i64,
+        attempts_json: &str,
+    ) {
+        conn.execute(
+            r#"
+INSERT INTO request_logs (
+  id, trace_id, cli_key, method, path, excluded_from_stats, status,
+  error_code, duration_ms, attempts_json, cost_usd_femto, created_at,
+  created_at_ms, final_provider_id
+) VALUES (
+  ?1, ?2, 'codex', 'POST', '/v1/responses', 0, 200,
+  NULL, 10, ?3, ?4, ?5, ?6, ?7
+)
+"#,
+            params![
+                request_log_id,
+                format!("trace-request-log-{request_log_id}"),
+                attempts_json,
+                cost_usd_femto,
+                created_at,
+                created_at.saturating_mul(1000),
+                provider_id,
+            ],
+        )
+        .expect("insert request log cost");
+    }
+
+    fn mark_backfill_incomplete(conn: &Connection) {
+        conn.execute(
+            r#"
+UPDATE usage_ledger_backfill_state
+SET
+  status = 'incomplete',
+  target_request_log_id = (SELECT COALESCE(MAX(id), 0) FROM request_logs),
+  last_request_log_id = 0,
+  completed_at = NULL
+WHERE id = 1
+"#,
+            [],
+        )
+        .expect("mark usage ledger backfill incomplete");
+    }
+
+    fn test_spend_bounds(end_ts: i64) -> SpendQueryBounds {
+        SpendQueryBounds {
+            start_5h: Some(100),
+            start_daily_rolling: Some(100),
+            start_daily_fixed: None,
+            start_weekly: Some(100),
+            start_monthly: Some(100),
+            end_ts,
+            min_start: Some(100),
+        }
+    }
+
+    #[test]
+    fn provider_cost_queries_read_usage_ledger_without_request_logs() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = crate::db::init_for_tests(&dir.path().join("provider-limit-ledger.db"))
+            .expect("init db");
+        let conn = db.open_connection().expect("open db");
+        let provider_id = 42;
+        insert_ledger_cost(&conn, 1, provider_id, 100, 60);
+        insert_ledger_cost(&conn, 2, provider_id, 101, 50);
+        assert_eq!(
+            provider_cost_source(&conn).expect("read complete source"),
+            ProviderCostSource::UsageLedger
+        );
+
+        let sums = sum_cost_usd_femto_windows(
+            &conn,
+            provider_id,
+            SpendQueryBounds {
+                start_5h: Some(100),
+                start_daily_rolling: Some(100),
+                start_daily_fixed: None,
+                start_weekly: Some(100),
+                start_monthly: Some(100),
+                end_ts: 102,
+                min_start: Some(100),
+            },
+        )
+        .expect("sum ledger costs");
+        assert_eq!(sums.spent_5h, 110);
+        assert_eq!(sums.spent_daily_rolling, 110);
+        assert_eq!(sums.spent_total, 110);
+
+        let buckets =
+            fetch_cost_buckets(&conn, provider_id, 100, 102).expect("fetch ledger buckets");
+        assert_eq!(buckets, vec![(100, 60), (101, 50)]);
+    }
+
+    #[test]
+    fn incomplete_backfill_uses_indexed_request_logs_and_null_attempt_fallback() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = crate::db::init_for_tests(&dir.path().join("provider-limit-incomplete.db"))
+            .expect("init db");
+        let conn = db.open_connection().expect("open db");
+        let provider_id = 42;
+        insert_request_log_cost(&conn, 1, Some(provider_id), 100, 60, "[]");
+        insert_request_log_cost(
+            &conn,
+            2,
+            None,
+            101,
+            50,
+            r#"[{"provider_id":42,"provider_name":"legacy","outcome":"success"}]"#,
+        );
+        insert_request_log_cost(&conn, 3, Some(99), 100, 9_999, "[]");
+        mark_backfill_incomplete(&conn);
+
+        assert_eq!(
+            provider_cost_source(&conn).expect("read incomplete source"),
+            ProviderCostSource::RequestLogs
+        );
+        let sums = sum_cost_usd_femto_windows(&conn, provider_id, test_spend_bounds(102))
+            .expect("sum incomplete request-log costs");
+        assert_eq!(sums.spent_total, 110);
+        assert_eq!(sums.spent_5h, 110);
+        assert_eq!(
+            fetch_cost_buckets(&conn, provider_id, 100, 102)
+                .expect("read incomplete request-log buckets"),
+            vec![(100, 60), (101, 50)]
+        );
+
+        let mut stmt = conn
+            .prepare(&format!(
+                "EXPLAIN QUERY PLAN {REQUEST_LOG_COST_BUCKET_ROWS_SQL}"
+            ))
+            .expect("prepare incomplete request-log query plan");
+        let details = stmt
+            .query_map(params![provider_id, 100_i64, 102_i64], |row| {
+                row.get::<_, String>(3)
+            })
+            .expect("query incomplete request-log plan")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("read incomplete request-log plan")
+            .join("\n");
+        assert!(
+            details.contains("idx_request_logs_provider_success_cost"),
+            "incomplete provider cost query must use the request-log provider cost index: {details}"
+        );
+    }
+
+    #[test]
+    fn provider_cost_window_and_bucket_predicates_use_the_partial_ledger_index() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db =
+            crate::db::init_for_tests(&dir.path().join("provider-limit-plan.db")).expect("init db");
+        let conn = db.open_connection().expect("open db");
+        conn.execute(
+            "UPDATE usage_ledger_backfill_state SET status = 'complete' WHERE id = 1",
+            [],
+        )
+        .expect("complete backfill");
+
+        let mut stmt = conn
+            .prepare(
+                r#"
+EXPLAIN QUERY PLAN
+SELECT created_at, cost_usd_femto
+FROM usage_ledger
+WHERE excluded_from_stats = 0
+  AND status >= 200 AND status < 300
+  AND error_present = 0
+  AND cost_usd_femto IS NOT NULL
+  AND final_provider_id = ?1
+  AND created_at >= ?2 AND created_at < ?3
+"#,
+            )
+            .expect("prepare provider cost query plan");
+        let details = stmt
+            .query_map(params![42i64, 100i64, 200i64], |row| {
+                row.get::<_, String>(3)
+            })
+            .expect("query provider cost plan")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("read provider cost plan")
+            .join("\n");
+
+        assert!(
+            details.contains("idx_usage_ledger_provider_success_cost"),
+            "provider cost windows and buckets should use the partial success-cost index: {details}"
+        );
+    }
+
+    #[test]
+    fn provider_cost_totals_do_not_overflow_and_do_not_fail_open() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = crate::db::init_for_tests(&dir.path().join("provider-limit-overflow.db"))
+            .expect("init db");
+        let conn = db.open_connection().expect("open db");
+        let provider_id = 42;
+        insert_ledger_cost(&conn, 1, provider_id, 100, i64::MAX);
+        insert_ledger_cost(&conn, 2, provider_id, 101, i64::MAX);
+        insert_ledger_cost(&conn, 3, provider_id, 102, i64::MAX);
+        conn.execute(
+            "UPDATE usage_ledger SET error_present = 1 WHERE request_log_id = 3",
+            [],
+        )
+        .expect("mark failed event");
+
+        let sums = sum_cost_usd_femto_windows(
+            &conn,
+            provider_id,
+            SpendQueryBounds {
+                start_5h: Some(100),
+                start_daily_rolling: Some(100),
+                start_daily_fixed: None,
+                start_weekly: Some(100),
+                start_monthly: Some(100),
+                end_ts: 103,
+                min_start: Some(100),
+            },
+        )
+        .expect("exact cost accumulator must not overflow");
+
+        assert!(sums.spent_total > i64::MAX as i128);
+        assert!(sums.spent_total < i64::MAX as i128 * 3);
+        assert!(
+            limit_exceeded(10_000.0, sums.spent_total),
+            "large ledger spend must block the provider instead of failing open"
+        );
+        let buckets = fetch_cost_buckets(&conn, provider_id, 100, 103).expect("fetch cost buckets");
+        assert_eq!(
+            buckets.len(),
+            2,
+            "error_present = 1 must not enter cost buckets"
+        );
+    }
+
+    #[test]
+    fn provider_cost_gating_preserves_single_femto_limit_boundaries() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = crate::db::init_for_tests(&dir.path().join("provider-limit-precision.db"))
+            .expect("init db");
+        let conn = db.open_connection().expect("open db");
+        let provider_id = 42;
+        let one_femto_below_ten_usd = 9_999_999_999_999_999_i64;
+        insert_ledger_cost(&conn, 1, provider_id, 100, one_femto_below_ten_usd);
+
+        let bounds = SpendQueryBounds {
+            start_5h: Some(100),
+            start_daily_rolling: Some(100),
+            start_daily_fixed: None,
+            start_weekly: Some(100),
+            start_monthly: Some(100),
+            end_ts: 102,
+            min_start: Some(100),
+        };
+        let sums = sum_cost_usd_femto_windows(&conn, provider_id, bounds).expect("sum exact cost");
+        assert_eq!(
+            sums.spent_total,
+            i128::from(one_femto_below_ten_usd),
+            "the accumulator must not round a single femto"
+        );
+        assert!(
+            !limit_exceeded(10.0, sums.spent_total),
+            "one femto below the limit must remain eligible"
+        );
+
+        insert_ledger_cost(&conn, 2, provider_id, 101, 1);
+        let sums =
+            sum_cost_usd_femto_windows(&conn, provider_id, bounds).expect("sum exact boundary");
+        assert_eq!(sums.spent_total, 10_000_000_000_000_000_i128);
+        assert!(
+            limit_exceeded(10.0, sums.spent_total),
+            "the exact limit must block the provider"
+        );
+        assert_eq!(
+            fetch_cost_buckets(&conn, provider_id, 100, 102).expect("read exact buckets"),
+            vec![(100, i128::from(one_femto_below_ten_usd)), (101, 1),]
+        );
+    }
+
+    #[test]
+    fn missing_usage_events_is_an_error_instead_of_zero_usage() {
+        let conn = Connection::open_in_memory().expect("open sqlite");
+        let result = sum_cost_usd_femto_windows(
+            &conn,
+            42,
+            SpendQueryBounds {
+                start_5h: Some(100),
+                start_daily_rolling: None,
+                start_daily_fixed: None,
+                start_weekly: None,
+                start_monthly: None,
+                end_ts: 102,
+                min_start: Some(100),
+            },
+        );
+
+        assert!(result.is_err());
+    }
 
     #[test]
     fn rolling_next_available_returns_cutoff_plus_window_plus_1() {
@@ -707,7 +1273,7 @@ mod tests {
     fn limit_exceeded_checks_correctly() {
         // 1 USD limit = 1_000_000_000_000_000 femto
         let limit_usd = 1.0;
-        let limit_femto = 1_000_000_000_000_000_i64;
+        let limit_femto = 1_000_000_000_000_000_i128;
 
         // Exactly at limit - should be exceeded
         assert!(limit_exceeded(limit_usd, limit_femto));

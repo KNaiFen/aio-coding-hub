@@ -104,8 +104,8 @@ pub(crate) async fn list_active_sessions<R: tauri::Runtime>(
                     .filter(|value| *value > 0),
                 total_cost_usd: stats
                     .map(|row| row.total_cost_usd_femto)
-                    .filter(|value| *value > 0)
-                    .map(|value| value as f64 / USD_FEMTO_DIVISOR),
+                    .filter(|value| *value > 0.0)
+                    .map(|value| value / USD_FEMTO_DIVISOR),
                 total_duration_ms: stats
                     .map(|row| row.total_duration_ms)
                     .filter(|value| *value > 0),

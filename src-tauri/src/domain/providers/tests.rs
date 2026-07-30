@@ -751,10 +751,52 @@ INSERT INTO codex_managed_profiles(
         rusqlite::params![profile_uuid, model_uuid],
     )
     .expect("profile metadata");
+    conn.execute(
+        r#"
+INSERT INTO request_logs(
+  trace_id,
+  cli_key,
+  method,
+  path,
+  attempts_json,
+  created_at,
+  created_at_ms,
+  final_provider_id
+) VALUES (
+  'managed-profile-precheck-unprojected',
+  'codex',
+  'POST',
+  '/v1/responses',
+  '[]',
+  1,
+  1000,
+  ?1
+)
+"#,
+        [provider.id],
+    )
+    .expect("insert unprojected provider usage");
+    conn.execute(
+        r#"
+UPDATE usage_ledger_backfill_state
+SET
+  status = 'incomplete',
+  target_request_log_id = (SELECT MAX(id) FROM request_logs),
+  last_request_log_id = 0,
+  completed_at = NULL
+WHERE id = 1
+"#,
+        [],
+    )
+    .expect("mark provider usage incomplete");
     drop(conn);
 
     let error = delete(&db, provider.id, false).expect_err("referenced provider must remain");
     assert_eq!(error.code(), "PROVIDER_MANAGED_PROFILE_REFERENCED");
+    assert!(
+        !usage_ledger_exists(&db, "managed-profile-precheck-unprojected"),
+        "the managed-profile precheck must reject before any provider usage projection"
+    );
     let conn = db.open_connection().expect("open db");
     conn.execute(
         "DELETE FROM codex_managed_profiles WHERE profile_uuid = ?1",
@@ -1434,6 +1476,24 @@ INSERT INTO request_logs (
         rusqlite::params![trace_id, provider_id],
     )
     .expect("insert request log");
+    conn.execute(
+        r#"
+INSERT INTO usage_ledger (
+  request_log_id, trace_id, cli_key, created_at, created_at_ms,
+  final_provider_id, provider_name_snapshot, usage_present,
+  input_tokens, output_tokens, total_tokens
+)
+SELECT
+  id, trace_id, cli_key, created_at, created_at_ms,
+  final_provider_id,
+  (SELECT name FROM providers WHERE id = request_logs.final_provider_id),
+  1, input_tokens, output_tokens, total_tokens
+FROM request_logs
+WHERE trace_id = ?1
+"#,
+        rusqlite::params![trace_id],
+    )
+    .expect("insert usage ledger row");
 }
 
 fn request_log_exists(db: &crate::db::Db, trace_id: &str) -> bool {
@@ -1448,8 +1508,30 @@ fn request_log_exists(db: &crate::db::Db, trace_id: &str) -> bool {
     .is_some()
 }
 
+fn usage_ledger_exists(db: &crate::db::Db, trace_id: &str) -> bool {
+    let conn = db.open_connection().expect("open db connection");
+    conn.query_row(
+        "SELECT 1 FROM usage_ledger WHERE trace_id = ?1",
+        rusqlite::params![trace_id],
+        |row| row.get::<_, i64>(0),
+    )
+    .optional()
+    .expect("read usage ledger")
+    .is_some()
+}
+
+fn usage_ledger_provider_name(db: &crate::db::Db, trace_id: &str) -> Option<String> {
+    let conn = db.open_connection().expect("open db connection");
+    conn.query_row(
+        "SELECT provider_name_snapshot FROM usage_ledger WHERE trace_id = ?1",
+        rusqlite::params![trace_id],
+        |row| row.get::<_, Option<String>>(0),
+    )
+    .expect("read provider name snapshot")
+}
+
 #[test]
-fn delete_keeps_request_logs_by_default() {
+fn delete_keeps_request_logs_and_usage_ledger_by_default() {
     let dir = tempfile::tempdir().expect("tempdir");
     let db_path = dir.path().join("providers_delete_keep_logs.db");
     let db = crate::db::init_for_tests(&db_path).expect("init db");
@@ -1460,10 +1542,136 @@ fn delete_keeps_request_logs_by_default() {
     delete(&db, saved.id, false).expect("delete provider");
 
     assert!(request_log_exists(&db, "trace-delete-keep"));
+    assert!(usage_ledger_exists(&db, "trace-delete-keep"));
+    assert_eq!(
+        usage_ledger_provider_name(&db, "trace-delete-keep").as_deref(),
+        Some("delete-keep-logs")
+    );
 }
 
 #[test]
-fn delete_removes_provider_request_logs_when_requested() {
+fn delete_projects_unbackfilled_usage_before_preserving_provider_history() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("providers_delete_project_usage.db");
+    let db = crate::db::init_for_tests(&db_path).expect("init db");
+
+    let saved =
+        upsert(&db, default_provider_params("delete-project-usage")).expect("save provider");
+    seed_usage_request_log(&db, "trace-delete-project", saved.id);
+    {
+        let conn = db.open_connection().expect("open db connection");
+        let attempts_json = serde_json::json!([{
+            "provider_id": saved.id,
+            "provider_name": "delete-project-usage",
+            "outcome": "success",
+        }])
+        .to_string();
+        conn.execute(
+            r#"
+UPDATE request_logs
+SET final_provider_id = NULL, attempts_json = ?1
+WHERE trace_id = 'trace-delete-project'
+"#,
+            [attempts_json],
+        )
+        .expect("make request log use legacy attempt provider fallback");
+        conn.execute(
+            "DELETE FROM usage_ledger WHERE trace_id = 'trace-delete-project'",
+            [],
+        )
+        .expect("remove preprojected usage");
+        conn.execute(
+            r#"
+UPDATE usage_ledger_backfill_state
+SET
+  status = 'incomplete',
+  target_request_log_id = (SELECT MAX(id) FROM request_logs),
+  last_request_log_id = 0,
+  completed_at = NULL
+WHERE id = 1
+"#,
+            [],
+        )
+        .expect("mark usage ledger backfill incomplete");
+    }
+
+    delete(&db, saved.id, false).expect("delete provider");
+    let backfill = crate::usage_ledger::run_backfill(&db).expect("finish usage ledger backfill");
+    assert!(backfill.completed);
+
+    assert!(request_log_exists(&db, "trace-delete-project"));
+    assert!(usage_ledger_exists(&db, "trace-delete-project"));
+    assert_eq!(
+        usage_ledger_provider_name(&db, "trace-delete-project").as_deref(),
+        Some("delete-project-usage")
+    );
+}
+
+#[test]
+fn delete_preserves_unbackfilled_usage_across_bounded_projection_batches() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("providers_delete_project_usage_batches.db");
+    let db = crate::db::init_for_tests(&db_path).expect("init db");
+    let saved =
+        upsert(&db, default_provider_params("delete-project-batches")).expect("save provider");
+    let mut conn = db.open_connection().expect("open db connection");
+    let tx = conn
+        .transaction()
+        .expect("start request fixture transaction");
+    for index in 0_i64..101 {
+        tx.execute(
+            r#"
+INSERT INTO request_logs(
+  trace_id,
+  cli_key,
+  method,
+  path,
+  attempts_json,
+  created_at,
+  created_at_ms,
+  final_provider_id
+) VALUES (?1, 'claude', 'POST', '/v1/messages', '[]', ?2, ?3, ?4)
+"#,
+            rusqlite::params![
+                format!("trace-delete-batch-{index}"),
+                index + 1,
+                (index + 1) * 1000,
+                saved.id
+            ],
+        )
+        .expect("insert provider usage fixture");
+    }
+    tx.execute(
+        r#"
+UPDATE usage_ledger_backfill_state
+SET
+  status = 'incomplete',
+  target_request_log_id = (SELECT MAX(id) FROM request_logs),
+  last_request_log_id = 0,
+  completed_at = NULL
+WHERE id = 1
+"#,
+        [],
+    )
+    .expect("mark batched provider usage incomplete");
+    tx.commit().expect("commit request fixture transaction");
+    drop(conn);
+
+    delete(&db, saved.id, false).expect("delete provider after bounded projection");
+
+    let conn = db.open_connection().expect("open db connection");
+    let preserved: i64 = conn
+        .query_row(
+            "SELECT COUNT(1) FROM usage_ledger WHERE final_provider_id = ?1",
+            [saved.id],
+            |row| row.get(0),
+        )
+        .expect("count preserved provider usage");
+    assert_eq!(preserved, 101);
+}
+
+#[test]
+fn delete_removes_provider_request_logs_and_usage_ledger_when_requested() {
     let dir = tempfile::tempdir().expect("tempdir");
     let db_path = dir.path().join("providers_delete_clear_logs.db");
     let db = crate::db::init_for_tests(&db_path).expect("init db");
@@ -1473,11 +1681,31 @@ fn delete_removes_provider_request_logs_when_requested() {
         upsert(&db, default_provider_params("delete-clear-other")).expect("save other provider");
     seed_usage_request_log(&db, "trace-delete-clear", saved.id);
     seed_usage_request_log(&db, "trace-delete-other", other.id);
+    {
+        let conn = db.open_connection().expect("open db connection");
+        let attempts_json = serde_json::json!([{
+            "provider_id": saved.id,
+            "provider_name": "delete-clear-logs",
+            "outcome": "success",
+        }])
+        .to_string();
+        conn.execute(
+            r#"
+UPDATE request_logs
+SET final_provider_id = NULL, attempts_json = ?1
+WHERE trace_id = 'trace-delete-clear'
+"#,
+            [attempts_json],
+        )
+        .expect("make request log use ledger provider identity");
+    }
 
     delete(&db, saved.id, true).expect("delete provider");
 
     assert!(!request_log_exists(&db, "trace-delete-clear"));
+    assert!(!usage_ledger_exists(&db, "trace-delete-clear"));
     assert!(request_log_exists(&db, "trace-delete-other"));
+    assert!(usage_ledger_exists(&db, "trace-delete-other"));
 }
 
 fn create_oauth_provider_for_cas_test(db: &crate::db::Db, name: &str) -> i64 {

@@ -20,6 +20,7 @@ function activeRequest(
     path: "/v1/messages",
     query: null,
     requested_model: "claude-3-opus",
+    special_settings_json: null,
     created_at_ms: 1_700_000_000_000,
     last_activity_ms: 1_700_000_000_000,
     current_attempt: null,
@@ -169,6 +170,37 @@ describe("services/gateway/requestActivityProjection", () => {
     expect(projection.requestRows.map((row) => row.log.trace_id)).toEqual(["old-pending"]);
     expect(projection.requestRows[0]?.liveTrace).toBeNull();
     expect(projection.requestRows[0]?.activityState).toBe("interrupted");
+  });
+
+  it("preserves source order on request while activity order demotes interrupted rows", () => {
+    const requestLogs = [
+      log({
+        id: 2,
+        trace_id: "interrupted-newer",
+        status: null,
+        created_at_ms: 1_700_000_002_000,
+        created_at: 1_700_000_002,
+      }),
+      log({
+        id: 1,
+        trace_id: "completed-older",
+        status: 200,
+        created_at_ms: 1_700_000_001_000,
+        created_at: 1_700_000_001,
+      }),
+    ];
+    const project = (requestLogOrder?: "activity" | "source") =>
+      buildRequestActivityProjection({
+        requestLogs,
+        activeRequests: [],
+        traces: [],
+        nowMs: 1_700_000_003_000,
+        realtimeCardLimit: 5,
+        requestLogOrder,
+      }).requestRows.map((row) => row.log.trace_id);
+
+    expect(project()).toEqual(["completed-older", "interrupted-newer"]);
+    expect(project("source")).toEqual(["interrupted-newer", "completed-older"]);
   });
 
   it("projects active request logs as realtime cards from active registry activity", () => {
@@ -479,6 +511,80 @@ describe("services/gateway/requestActivityProjection", () => {
     });
 
     expect(projection.realtimeCards[0]?.trace.special_settings_json).toBe(specialSettingsJson);
+  });
+
+  it("prefers active snapshot special settings and falls back to the current attempt", () => {
+    const snapshotSettings = JSON.stringify([
+      {
+        type: "codex_context_compaction",
+        mode: "local",
+        implementation: "responses",
+        trigger: "manual",
+        reason: "user_requested",
+        phase: "standalone_turn",
+        strategy: "memento",
+      },
+    ]);
+    const attemptSettings = JSON.stringify([
+      {
+        type: "codex_context_compaction",
+        mode: "remote",
+        implementation: "responses_compact",
+        trigger: "unknown",
+        reason: "unknown",
+        phase: "unknown",
+        strategy: "unknown",
+      },
+    ]);
+    const currentAttempt = {
+      ...attempt("codex-snapshot", 1, "Provider A"),
+      cli_key: "codex",
+      path: "/v1/responses",
+      special_settings_json: attemptSettings,
+    };
+
+    const projection = buildRequestActivityProjection({
+      requestLogs: [],
+      activeRequests: [
+        activeRequest({
+          trace_id: "codex-snapshot",
+          cli_key: "codex",
+          path: "/v1/responses",
+          requested_model: "gpt-5.5",
+          special_settings_json: snapshotSettings,
+          current_attempt: currentAttempt,
+        }),
+        activeRequest({
+          trace_id: "codex-attempt-fallback",
+          cli_key: "codex",
+          path: "/v1/responses/compact",
+          requested_model: "gpt-5.5",
+          special_settings_json: null,
+          current_attempt: {
+            ...currentAttempt,
+            trace_id: "codex-attempt-fallback",
+          },
+        }),
+      ],
+      traces: [
+        trace({
+          trace_id: "codex-snapshot",
+          cli_key: "codex",
+          special_settings_json: JSON.stringify([{ type: "stale_trace_setting" }]),
+        }),
+      ],
+      nowMs: 1_700_000_000_000,
+      realtimeCardLimit: 5,
+    });
+
+    const settingsByTrace = new Map(
+      projection.realtimeCards.map((card) => [
+        card.trace.trace_id,
+        card.trace.special_settings_json,
+      ])
+    );
+    expect(settingsByTrace.get("codex-snapshot")).toBe(snapshotSettings);
+    expect(settingsByTrace.get("codex-attempt-fallback")).toBe(attemptSettings);
   });
 
   it("prefers persisted model route mapping settings over stale trace start settings", () => {

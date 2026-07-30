@@ -1,40 +1,69 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { LogsPage } from "../LogsPage";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { useRequestLogsPageFeed } from "../../hooks/useRequestLogsPageFeed";
+import type { TraceSession } from "../../services/gateway/traceStore";
 import { createTestQueryClient } from "../../test/utils/reactQuery";
 import { clearTauriRuntime, setTauriRuntime } from "../../test/utils/tauriRuntime";
-import {
-  useRequestAttemptLogsByTraceIdQuery,
-  useRequestLogDetailQuery,
-  useRequestLogsListAllQuery,
-} from "../../query/requestLogs";
-import type { TraceSession, TraceSummary } from "../../services/gateway/traceStore";
+import { LOGS_PAGE_SIZE_STORAGE_KEY, LogsPage } from "../LogsPage";
 
 const traceStoreState = vi.hoisted(() => ({
   traces: [] as TraceSession[],
 }));
 
+const originalLocalStorageDescriptor = Object.getOwnPropertyDescriptor(window, "localStorage");
+const localStorageEntries = new Map<string, string>();
+const testLocalStorage: Storage = {
+  get length() {
+    return localStorageEntries.size;
+  },
+  clear() {
+    localStorageEntries.clear();
+  },
+  getItem(key) {
+    return localStorageEntries.get(key) ?? null;
+  },
+  key(index) {
+    return Array.from(localStorageEntries.keys())[index] ?? null;
+  },
+  removeItem(key) {
+    localStorageEntries.delete(key);
+  },
+  setItem(key, value) {
+    localStorageEntries.set(key, String(value));
+  },
+};
+
 vi.mock("../../components/home/HomeRequestLogsPanel", () => ({
   HomeRequestLogsPanel: ({
     requestLogs,
+    activeRequests,
     summaryTextOverride,
     emptyStateTitle,
     traces,
+    requestLogOrder,
+    onRefreshRequestLogs,
   }: {
     requestLogs: Array<{ id: number }>;
+    activeRequests: Array<{ trace_id: string }>;
     summaryTextOverride?: string;
     emptyStateTitle?: string;
     traces: TraceSession[];
+    requestLogOrder?: string;
+    onRefreshRequestLogs: () => void;
   }) => (
     <div data-testid="home-request-logs-panel">
-      count:{requestLogs.length}|summary:{summaryTextOverride ?? ""}|empty:{emptyStateTitle ?? ""}
-      <span data-testid="home-request-logs-traces-count">{traces.length}</span>
-      <span data-testid="home-request-logs-trace-ids">
-        {traces.map((trace) => trace.trace_id).join(",")}
-      </span>
+      <span data-testid="page-log-ids">{requestLogs.map((log) => log.id).join(",")}</span>
+      <span data-testid="active-count">{activeRequests.length}</span>
+      <span data-testid="summary">{summaryTextOverride ?? ""}</span>
+      <span data-testid="empty-title">{emptyStateTitle ?? ""}</span>
+      <span data-testid="trace-ids">{traces.map((trace) => trace.trace_id).join(",")}</span>
+      <span data-testid="request-log-order">{requestLogOrder ?? ""}</span>
+      <button type="button" onClick={onRefreshRequestLogs}>
+        刷新当前页
+      </button>
     </div>
   ),
 }));
@@ -43,16 +72,9 @@ vi.mock("../../components/home/RequestLogDetailDialog", () => ({
   RequestLogDetailDialog: () => <div data-testid="request-log-detail-dialog" />,
 }));
 
-vi.mock("../../query/requestLogs", async () => {
-  const actual =
-    await vi.importActual<typeof import("../../query/requestLogs")>("../../query/requestLogs");
-  return {
-    ...actual,
-    useRequestLogsListAllQuery: vi.fn(),
-    useRequestLogDetailQuery: vi.fn(),
-    useRequestAttemptLogsByTraceIdQuery: vi.fn(),
-  };
-});
+vi.mock("../../hooks/useRequestLogsPageFeed", () => ({
+  useRequestLogsPageFeed: vi.fn(),
+}));
 
 vi.mock("../../services/gateway/traceStore", () => ({
   useTraceStore: () => ({
@@ -69,109 +91,78 @@ function renderWithProviders(element: ReactElement) {
   );
 }
 
-type TraceFixture = Omit<Partial<TraceSession>, "trace_id" | "summary"> & {
-  trace_id: string;
-  summary?: Partial<TraceSummary>;
-};
-
-function createTrace({
-  trace_id,
-  cli_key = "claude",
-  method = "POST",
-  path = "/v1/messages",
-  summary,
-  ...overrides
-}: TraceFixture): TraceSession {
-  const trace: TraceSession = {
-    trace_id,
-    cli_key,
-    method,
-    path,
+function createTrace(traceId: string, overrides: Partial<TraceSession> = {}): TraceSession {
+  return {
+    trace_id: traceId,
+    cli_key: "claude",
+    method: "POST",
+    path: "/v1/messages",
     query: null,
     requested_model: "test-model",
-    first_seen_ms: Date.now() - 1000,
-    last_seen_ms: Date.now(),
+    first_seen_ms: 1_000,
+    last_seen_ms: 2_000,
     attempts: [],
     ...overrides,
-  };
-
-  if (summary) {
-    const traceSummary: TraceSummary = {
-      trace_id,
-      cli_key,
-      session_id: trace.session_id ?? null,
-      method,
-      path,
-      query: trace.query,
-      requested_model: trace.requested_model ?? null,
-      special_settings_json: null,
-      status: 200,
-      error_category: null,
-      error_code: null,
-      duration_ms: 100,
-      ttfb_ms: null,
-      visible_ttfb_ms: null,
-      attempts: [],
-      input_tokens: null,
-      output_tokens: null,
-      total_tokens: null,
-      cache_read_input_tokens: null,
-      cache_creation_input_tokens: null,
-      cache_creation_5m_input_tokens: null,
-      cache_creation_1h_input_tokens: null,
-      effective_input_tokens: null,
-      claude_model_mapping: null,
-    };
-    Object.assign(traceSummary, summary);
-    trace.summary = traceSummary;
-  }
-
-  return trace;
+  } as TraceSession;
 }
 
-function mockRequestLogQueries(data: unknown[] = []) {
-  vi.mocked(useRequestLogsListAllQuery).mockReturnValue({
-    data,
-    isLoading: false,
-    isFetching: false,
-    refetch: vi.fn(),
+function mockPageFeed(overrides: Record<string, unknown> = {}) {
+  const refreshRequestLogs = vi.fn().mockResolvedValue({ data: null });
+  vi.mocked(useRequestLogsPageFeed).mockReturnValue({
+    requestLogs: [],
+    nextCursor: null,
+    activeRequests: [],
+    activeRequestsAvailable: true,
+    requestLogsLoading: false,
+    requestLogsRefreshing: false,
+    requestLogsPageFetching: false,
+    requestLogsAvailable: true,
+    refreshActiveRequests: vi.fn(),
+    refreshRequestLogs,
+    ...overrides,
   } as any);
-  vi.mocked(useRequestLogDetailQuery).mockReturnValue({ data: null, isFetching: false } as any);
-  vi.mocked(useRequestAttemptLogsByTraceIdQuery).mockReturnValue({
-    data: [],
-    isFetching: false,
-  } as any);
+  return refreshRequestLogs;
 }
 
-function traceIds() {
-  return screen.getByTestId("home-request-logs-trace-ids");
-}
-
-function expectTraceIds(expected: string[]) {
-  expect(traceIds().textContent?.trim()).toBe(expected.join(","));
+function latestFeedOptions() {
+  const calls = vi.mocked(useRequestLogsPageFeed).mock.calls;
+  return calls[calls.length - 1]?.[0];
 }
 
 describe("pages/LogsPage", () => {
+  beforeAll(() => {
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: testLocalStorage,
+    });
+  });
+
+  afterAll(() => {
+    if (originalLocalStorageDescriptor) {
+      Object.defineProperty(window, "localStorage", originalLocalStorageDescriptor);
+      return;
+    }
+    Reflect.deleteProperty(window, "localStorage");
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useRealTimers();
+    window.localStorage.clear();
+    setTauriRuntime();
+    traceStoreState.traces = [];
+    mockPageFeed();
+  });
+
   afterEach(() => {
+    vi.useRealTimers();
+    window.localStorage.clear();
+    clearTauriRuntime();
     traceStoreState.traces = [];
   });
 
-  it("disables filters when not running in tauri runtime", () => {
-    clearTauriRuntime();
-    traceStoreState.traces = [];
-
-    vi.mocked(useRequestLogsListAllQuery).mockReturnValue({
-      data: null,
-      isLoading: false,
-      isFetching: false,
-      refetch: vi.fn(),
-    } as any);
-    vi.mocked(useRequestLogDetailQuery).mockReturnValue({ data: null, isFetching: false } as any);
-    vi.mocked(useRequestAttemptLogsByTraceIdQuery).mockReturnValue({
-      data: [],
-      isFetching: false,
-    } as any);
-
+  it("disables filters when request logs are unavailable", () => {
+    mockPageFeed({ requestLogsAvailable: false });
     renderWithProviders(<LogsPage />);
 
     expect(screen.getByRole("switch")).toBeDisabled();
@@ -180,305 +171,267 @@ describe("pages/LogsPage", () => {
     expect(screen.getByPlaceholderText("例：/v1/messages")).toBeDisabled();
   });
 
-  it("shows validation error when status filter expression is invalid", () => {
-    setTauriRuntime();
-    traceStoreState.traces = [];
-
-    vi.mocked(useRequestLogsListAllQuery).mockReturnValue({
-      data: [],
-      isLoading: false,
-      isFetching: false,
-      refetch: vi.fn(),
-    } as any);
-    vi.mocked(useRequestLogDetailQuery).mockReturnValue({ data: null, isFetching: false } as any);
-    vi.mocked(useRequestAttemptLogsByTraceIdQuery).mockReturnValue({
-      data: [],
-      isFetching: false,
-    } as any);
-
+  it("shows status validation immediately and does not apply an invalid expression", () => {
     renderWithProviders(<LogsPage />);
 
     fireEvent.change(screen.getByPlaceholderText("例：499 / 524 / !200 / >=400"), {
       target: { value: "nope" },
     });
+
     expect(screen.getByText(/表达式不合法/)).toBeInTheDocument();
+    expect(latestFeedOptions()?.filters.status).toBeNull();
   });
 
-  it("passes live traces through to the request logs panel", () => {
-    setTauriRuntime();
-    traceStoreState.traces = [createTrace({ trace_id: "trace-live" })];
-    mockRequestLogQueries();
-
-    renderWithProviders(<LogsPage />);
-
-    expect(screen.getByTestId("home-request-logs-traces-count")).toHaveTextContent("1");
-    expectTraceIds(["trace-live"]);
-  });
-
-  it("filters live traces by selected CLI tab", () => {
-    setTauriRuntime();
-    traceStoreState.traces = [
-      createTrace({ trace_id: "trace-claude", cli_key: "claude" }),
-      createTrace({ trace_id: "trace-codex", cli_key: "codex" }),
-    ];
-    mockRequestLogQueries();
-
-    renderWithProviders(<LogsPage />);
-
-    expectTraceIds(["trace-claude", "trace-codex"]);
-
-    fireEvent.click(screen.getByRole("tab", { name: "Claude" }));
-    expectTraceIds(["trace-claude"]);
-
-    fireEvent.click(screen.getByRole("tab", { name: "Codex" }));
-    expectTraceIds(["trace-codex"]);
-
-    fireEvent.click(screen.getByRole("tab", { name: "全部" }));
-    expectTraceIds(["trace-claude", "trace-codex"]);
-  });
-
-  it("filters completed traces by status expression and hides in-progress traces", () => {
-    setTauriRuntime();
-    traceStoreState.traces = [
-      createTrace({ trace_id: "trace-ok", summary: { status: 200 } }),
-      createTrace({ trace_id: "trace-timeout", summary: { status: 524 } }),
-      createTrace({ trace_id: "trace-live" }),
-    ];
-    mockRequestLogQueries();
-
-    renderWithProviders(<LogsPage />);
-
-    fireEvent.change(screen.getByPlaceholderText("例：499 / 524 / !200 / >=400"), {
-      target: { value: "524" },
+  it("debounces text filters and resets a history cursor when they apply", () => {
+    vi.useFakeTimers();
+    vi.mocked(useRequestLogsPageFeed).mockImplementation(({ cursor }) => {
+      return {
+        requestLogs: [],
+        nextCursor: cursor == null ? "opaque-next" : null,
+        activeRequests: [],
+        activeRequestsAvailable: true,
+        requestLogsLoading: false,
+        requestLogsRefreshing: false,
+        requestLogsPageFetching: false,
+        requestLogsAvailable: true,
+        refreshActiveRequests: vi.fn(),
+        refreshRequestLogs: vi.fn(),
+      } as any;
     });
-    expectTraceIds(["trace-timeout"]);
-  });
-
-  it("filters completed traces by error code and hides in-progress traces", () => {
-    setTauriRuntime();
-    traceStoreState.traces = [
-      createTrace({
-        trace_id: "trace-timeout",
-        summary: { error_code: "GW_UPSTREAM_TIMEOUT" },
-      }),
-      createTrace({
-        trace_id: "trace-aborted",
-        summary: { error_code: "GW_ABORTED" },
-      }),
-      createTrace({ trace_id: "trace-live" }),
-    ];
-    mockRequestLogQueries();
-
     renderWithProviders(<LogsPage />);
 
-    fireEvent.change(screen.getByPlaceholderText("例：GW_UPSTREAM_TIMEOUT"), {
-      target: { value: "GW_UPSTREAM_TIMEOUT" },
-    });
-    expectTraceIds(["trace-timeout"]);
-  });
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(latestFeedOptions()?.cursor).toBe("opaque-next");
 
-  it("filters in-progress traces by path", () => {
-    setTauriRuntime();
-    traceStoreState.traces = [
-      createTrace({ trace_id: "trace-messages", method: "POST", path: "/v1/messages" }),
-      createTrace({ trace_id: "trace-health", method: "GET", path: "/health" }),
-    ];
-    mockRequestLogQueries();
-
-    renderWithProviders(<LogsPage />);
-
-    fireEvent.change(screen.getByPlaceholderText("例：/v1/messages"), {
-      target: { value: "/v1/messages" },
-    });
-    expectTraceIds(["trace-messages"]);
-  });
-
-  it("filters logs by status expression", () => {
-    setTauriRuntime();
-    traceStoreState.traces = [];
-
-    vi.mocked(useRequestLogsListAllQuery).mockReturnValue({
-      data: [
-        { id: 1, cli_key: "claude", status: 200, error_code: null, method: "GET", path: "/" },
-        {
-          id: 2,
-          cli_key: "claude",
-          status: 499,
-          error_code: "GW_ABORTED",
-          method: "POST",
-          path: "/v1",
-        },
-        {
-          id: 3,
-          cli_key: "codex",
-          status: 524,
-          error_code: "GW_TIMEOUT",
-          method: "POST",
-          path: "/v1/messages",
-        },
-      ],
-      isLoading: false,
-      isFetching: false,
-      refetch: vi.fn(),
-    } as any);
-    vi.mocked(useRequestLogDetailQuery).mockReturnValue({ data: null, isFetching: false } as any);
-    vi.mocked(useRequestAttemptLogsByTraceIdQuery).mockReturnValue({
-      data: [],
-      isFetching: false,
-    } as any);
-
-    renderWithProviders(<LogsPage />);
-
-    expect(
-      screen.getByText("count:3|summary:共 3 / 3 条|empty:当前没有代理记录")
-    ).toBeInTheDocument();
-
-    fireEvent.change(screen.getByPlaceholderText("例：499 / 524 / !200 / >=400"), {
-      target: { value: "499" },
-    });
-    expect(
-      screen.getByText("count:1|summary:共 1 / 3 条|empty:没有符合筛选条件的代理记录")
-    ).toBeInTheDocument();
-  });
-  it("filters logs by negated status expression (!200)", () => {
-    setTauriRuntime();
-    traceStoreState.traces = [];
-    vi.mocked(useRequestLogsListAllQuery).mockReturnValue({
-      data: [
-        { id: 1, cli_key: "claude", status: 200, error_code: null, method: "GET", path: "/" },
-        { id: 2, cli_key: "claude", status: 499, error_code: null, method: "POST", path: "/v1" },
-        { id: 3, cli_key: "claude", status: 524, error_code: null, method: "POST", path: "/v1" },
-      ],
-      isLoading: false,
-      isFetching: false,
-      refetch: vi.fn(),
-    } as any);
-    vi.mocked(useRequestLogDetailQuery).mockReturnValue({ data: null, isFetching: false } as any);
-    vi.mocked(useRequestAttemptLogsByTraceIdQuery).mockReturnValue({
-      data: [],
-      isFetching: false,
-    } as any);
-    renderWithProviders(<LogsPage />);
-    fireEvent.change(screen.getByPlaceholderText("例：499 / 524 / !200 / >=400"), {
-      target: { value: "!200" },
-    });
-    expect(
-      screen.getByText("count:2|summary:共 2 / 3 条|empty:没有符合筛选条件的代理记录")
-    ).toBeInTheDocument();
-  });
-
-  it("filters logs by >=400 status expression", () => {
-    setTauriRuntime();
-    vi.mocked(useRequestLogsListAllQuery).mockReturnValue({
-      data: [
-        { id: 1, cli_key: "claude", status: 200, error_code: null, method: "GET", path: "/" },
-        { id: 2, cli_key: "claude", status: 400, error_code: null, method: "POST", path: "/v1" },
-        { id: 3, cli_key: "claude", status: 524, error_code: null, method: "POST", path: "/v1" },
-      ],
-      isLoading: false,
-      isFetching: false,
-      refetch: vi.fn(),
-    } as any);
-    vi.mocked(useRequestLogDetailQuery).mockReturnValue({ data: null, isFetching: false } as any);
-    vi.mocked(useRequestAttemptLogsByTraceIdQuery).mockReturnValue({
-      data: [],
-      isFetching: false,
-    } as any);
-    renderWithProviders(<LogsPage />);
-    fireEvent.change(screen.getByPlaceholderText("例：499 / 524 / !200 / >=400"), {
-      target: { value: ">=400" },
-    });
-    expect(
-      screen.getByText("count:2|summary:共 2 / 3 条|empty:没有符合筛选条件的代理记录")
-    ).toBeInTheDocument();
-  });
-
-  it("filters logs by <=399 status expression", () => {
-    setTauriRuntime();
-    vi.mocked(useRequestLogsListAllQuery).mockReturnValue({
-      data: [
-        { id: 1, cli_key: "claude", status: 200, error_code: null, method: "GET", path: "/" },
-        { id: 2, cli_key: "claude", status: 400, error_code: null, method: "POST", path: "/v1" },
-      ],
-      isLoading: false,
-      isFetching: false,
-      refetch: vi.fn(),
-    } as any);
-    vi.mocked(useRequestLogDetailQuery).mockReturnValue({ data: null, isFetching: false } as any);
-    vi.mocked(useRequestAttemptLogsByTraceIdQuery).mockReturnValue({
-      data: [],
-      isFetching: false,
-    } as any);
-    renderWithProviders(<LogsPage />);
-    fireEvent.change(screen.getByPlaceholderText("例：499 / 524 / !200 / >=400"), {
-      target: { value: "<=399" },
-    });
-    expect(
-      screen.getByText("count:1|summary:共 1 / 2 条|empty:没有符合筛选条件的代理记录")
-    ).toBeInTheDocument();
-  });
-
-  it("filters logs by error_code", () => {
-    setTauriRuntime();
-    vi.mocked(useRequestLogsListAllQuery).mockReturnValue({
-      data: [
-        { id: 1, cli_key: "claude", status: 200, error_code: null, method: "GET", path: "/" },
-        {
-          id: 2,
-          cli_key: "claude",
-          status: 499,
-          error_code: "GW_ABORTED",
-          method: "POST",
-          path: "/v1",
-        },
-      ],
-      isLoading: false,
-      isFetching: false,
-      refetch: vi.fn(),
-    } as any);
-    vi.mocked(useRequestLogDetailQuery).mockReturnValue({ data: null, isFetching: false } as any);
-    vi.mocked(useRequestAttemptLogsByTraceIdQuery).mockReturnValue({
-      data: [],
-      isFetching: false,
-    } as any);
-    renderWithProviders(<LogsPage />);
-    fireEvent.change(screen.getByPlaceholderText("例：GW_UPSTREAM_TIMEOUT"), {
-      target: { value: "ABORTED" },
-    });
-    expect(
-      screen.getByText("count:1|summary:共 1 / 2 条|empty:没有符合筛选条件的代理记录")
-    ).toBeInTheDocument();
-  });
-
-  it("filters logs by path", () => {
-    setTauriRuntime();
-    vi.mocked(useRequestLogsListAllQuery).mockReturnValue({
-      data: [
-        { id: 1, cli_key: "claude", status: 200, error_code: null, method: "GET", path: "/" },
-        {
-          id: 2,
-          cli_key: "claude",
-          status: 200,
-          error_code: null,
-          method: "POST",
-          path: "/v1/messages",
-        },
-      ],
-      isLoading: false,
-      isFetching: false,
-      refetch: vi.fn(),
-    } as any);
-    vi.mocked(useRequestLogDetailQuery).mockReturnValue({ data: null, isFetching: false } as any);
-    vi.mocked(useRequestAttemptLogsByTraceIdQuery).mockReturnValue({
-      data: [],
-      isFetching: false,
-    } as any);
-    renderWithProviders(<LogsPage />);
     fireEvent.change(screen.getByPlaceholderText("例：/v1/messages"), {
       target: { value: "messages" },
     });
-    expect(
-      screen.getByText("count:1|summary:共 1 / 2 条|empty:没有符合筛选条件的代理记录")
-    ).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(299));
+    expect(latestFeedOptions()?.cursor).toBe("opaque-next");
+    expect(latestFeedOptions()?.filters.methodPathContains).toBeNull();
+
+    act(() => vi.advanceTimersByTime(1));
+    expect(latestFeedOptions()?.cursor).toBeNull();
+    expect(latestFeedOptions()?.filters.methodPathContains).toBe("messages");
+  });
+
+  it("maps status expressions to the server DTO after the debounce", () => {
+    vi.useFakeTimers();
+    renderWithProviders(<LogsPage />);
+
+    fireEvent.change(screen.getByPlaceholderText("例：499 / 524 / !200 / >=400"), {
+      target: { value: "!200" },
+    });
+    act(() => vi.advanceTimersByTime(300));
+
+    expect(latestFeedOptions()?.filters.status).toEqual({ op: "neq", value: 200 });
+  });
+
+  it("keeps null-status active requests for neq while exact status filters hide them", () => {
+    vi.useFakeTimers();
+    traceStoreState.traces = [
+      createTrace("trace-live"),
+      createTrace("trace-ok", { summary: { status: 200 } as any }),
+      createTrace("trace-error", { summary: { status: 524 } as any }),
+    ];
+    mockPageFeed({
+      activeRequests: [
+        {
+          trace_id: "active-live",
+          cli_key: "claude",
+          method: "POST",
+          path: "/v1/messages",
+        },
+      ],
+    });
+    renderWithProviders(<LogsPage />);
+
+    fireEvent.change(screen.getByPlaceholderText("例：499 / 524 / !200 / >=400"), {
+      target: { value: "!200" },
+    });
+    act(() => vi.advanceTimersByTime(300));
+    expect(screen.getByTestId("active-count")).toHaveTextContent("1");
+    expect(screen.getByTestId("trace-ids")).toHaveTextContent("trace-live,trace-error");
+
+    fireEvent.change(screen.getByPlaceholderText("例：499 / 524 / !200 / >=400"), {
+      target: { value: "200" },
+    });
+    act(() => vi.advanceTimersByTime(300));
+    expect(screen.getByTestId("active-count")).toHaveTextContent("0");
+    expect(screen.getByTestId("trace-ids")).toHaveTextContent("trace-ok");
+  });
+
+  it("resets the cursor immediately when the CLI filter changes", () => {
+    vi.mocked(useRequestLogsPageFeed).mockImplementation(({ cursor }) => {
+      return {
+        requestLogs: [],
+        nextCursor: cursor == null ? "opaque-next" : null,
+        activeRequests: [],
+        activeRequestsAvailable: true,
+        requestLogsLoading: false,
+        requestLogsRefreshing: false,
+        requestLogsPageFetching: false,
+        requestLogsAvailable: true,
+        refreshActiveRequests: vi.fn(),
+        refreshRequestLogs: vi.fn(),
+      } as any;
+    });
+    renderWithProviders(<LogsPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(latestFeedOptions()?.cursor).toBe("opaque-next");
+    fireEvent.click(screen.getByRole("tab", { name: "Codex" }));
+
+    expect(latestFeedOptions()?.cursor).toBeNull();
+    expect(latestFeedOptions()?.filters.cliKey).toBe("codex");
+  });
+
+  it("navigates with the opaque cursor stack and preserves server row order", () => {
+    vi.mocked(useRequestLogsPageFeed).mockImplementation(({ cursor }) => {
+      const latest = cursor == null;
+      return {
+        requestLogs: latest ? [{ id: 9 }, { id: 7 }] : [{ id: 5 }],
+        nextCursor: latest ? "opaque-next" : null,
+        activeRequests: [],
+        activeRequestsAvailable: true,
+        requestLogsLoading: false,
+        requestLogsRefreshing: false,
+        requestLogsPageFetching: false,
+        requestLogsAvailable: true,
+        refreshActiveRequests: vi.fn(),
+        refreshRequestLogs: vi.fn(),
+      } as any;
+    });
+    renderWithProviders(<LogsPage />);
+
+    expect(screen.getByTestId("page-log-ids")).toHaveTextContent("9,7");
+    expect(screen.getByTestId("summary")).toHaveTextContent("第 1 页 · 本页 2 条");
+    expect(screen.getByTestId("request-log-order")).toHaveTextContent("source");
+
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(screen.getByTestId("page-log-ids")).toHaveTextContent("5");
+    expect(screen.getByTestId("summary")).toHaveTextContent("第 2 页 · 本页 1 条");
+    expect(screen.getByRole("button", { name: "下一页" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "上一页" }));
+    expect(latestFeedOptions()?.cursor).toBeNull();
+    expect(screen.getByTestId("page-log-ids")).toHaveTextContent("9,7");
+  });
+
+  it("returns directly to the latest page from history", () => {
+    vi.mocked(useRequestLogsPageFeed).mockImplementation(({ cursor }) => {
+      return {
+        requestLogs: [],
+        nextCursor: cursor == null ? "opaque-next" : null,
+        activeRequests: [],
+        activeRequestsAvailable: true,
+        requestLogsLoading: false,
+        requestLogsRefreshing: false,
+        requestLogsPageFetching: false,
+        requestLogsAvailable: true,
+        refreshActiveRequests: vi.fn(),
+        refreshRequestLogs: vi.fn(),
+      } as any;
+    });
+    renderWithProviders(<LogsPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    fireEvent.click(screen.getByRole("button", { name: "回到最新" }));
+
+    expect(latestFeedOptions()?.cursor).toBeNull();
+    expect(screen.getByText("第 1 页", { selector: "span" })).toBeInTheDocument();
+  });
+
+  it("loads and persists the selected page size while resetting history", () => {
+    window.localStorage.setItem(LOGS_PAGE_SIZE_STORAGE_KEY, "100");
+    vi.mocked(useRequestLogsPageFeed).mockImplementation(({ cursor }) => {
+      return {
+        requestLogs: [],
+        nextCursor: cursor == null ? "opaque-next" : null,
+        activeRequests: [],
+        activeRequestsAvailable: true,
+        requestLogsLoading: false,
+        requestLogsRefreshing: false,
+        requestLogsPageFetching: false,
+        requestLogsAvailable: true,
+        refreshActiveRequests: vi.fn(),
+        refreshRequestLogs: vi.fn(),
+      } as any;
+    });
+    renderWithProviders(<LogsPage />);
+
+    expect(screen.getByRole("combobox", { name: "每页条数" })).toHaveValue("100");
+    expect(latestFeedOptions()?.limit).toBe(100);
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+
+    fireEvent.change(screen.getByRole("combobox", { name: "每页条数" }), {
+      target: { value: "200" },
+    });
+    expect(latestFeedOptions()?.limit).toBe(200);
+    expect(latestFeedOptions()?.cursor).toBeNull();
+    expect(window.localStorage.getItem(LOGS_PAGE_SIZE_STORAGE_KEY)).toBe("200");
+  });
+
+  it("falls back to 50 when the stored page size is unsupported", () => {
+    window.localStorage.setItem(LOGS_PAGE_SIZE_STORAGE_KEY, "75");
+    renderWithProviders(<LogsPage />);
+
+    expect(screen.getByRole("combobox", { name: "每页条数" })).toHaveValue("50");
+    expect(latestFeedOptions()?.limit).toBe(50);
+  });
+
+  it("manually refreshes the currently selected page", () => {
+    const latestRefresh = vi.fn();
+    const historyRefresh = vi.fn();
+    vi.mocked(useRequestLogsPageFeed).mockImplementation(({ cursor }) => {
+      return {
+        requestLogs: [],
+        nextCursor: cursor == null ? "opaque-next" : null,
+        activeRequests: [],
+        activeRequestsAvailable: true,
+        requestLogsLoading: false,
+        requestLogsRefreshing: false,
+        requestLogsPageFetching: false,
+        requestLogsAvailable: true,
+        refreshActiveRequests: vi.fn(),
+        refreshRequestLogs: cursor == null ? latestRefresh : historyRefresh,
+      } as any;
+    });
+    renderWithProviders(<LogsPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    fireEvent.click(screen.getByRole("button", { name: "刷新当前页" }));
+
+    expect(historyRefresh).toHaveBeenCalledTimes(1);
+    expect(latestRefresh).not.toHaveBeenCalled();
+  });
+
+  it("keeps active cards separate from the persisted page-size count", () => {
+    mockPageFeed({
+      requestLogs: Array.from({ length: 50 }, (_, index) => ({ id: 100 - index })),
+      activeRequests: [{ trace_id: "active-1" }, { trace_id: "active-2" }],
+    });
+    renderWithProviders(<LogsPage />);
+
+    expect(screen.getByTestId("page-log-ids").textContent?.split(",")).toHaveLength(50);
+    expect(screen.getByTestId("active-count")).toHaveTextContent("2");
+    expect(screen.getByTestId("summary")).toHaveTextContent("本页 50 条");
+  });
+
+  it("filters live traces with the applied server filter semantics", () => {
+    vi.useFakeTimers();
+    traceStoreState.traces = [
+      createTrace("trace-messages"),
+      createTrace("trace-health", { method: "GET", path: "/health" }),
+    ];
+    renderWithProviders(<LogsPage />);
+    expect(screen.getByTestId("trace-ids")).toHaveTextContent("trace-messages,trace-health");
+
+    fireEvent.change(screen.getByPlaceholderText("例：/v1/messages"), {
+      target: { value: "messages" },
+    });
+    act(() => vi.advanceTimersByTime(300));
+
+    expect(screen.getByTestId("trace-ids")).toHaveTextContent("trace-messages");
   });
 });

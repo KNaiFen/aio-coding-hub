@@ -1,38 +1,36 @@
 import { useMemo } from "react";
-import { CLI_KEYS, type CliFilterKey } from "../../constants/clis";
+import { type CliFilterKey } from "../../constants/clis";
 import type { UsagePeriod } from "../../services/usage/usage";
 import type { CustomDateRangeApplied } from "../../hooks/useCustomDateRange";
-import { useRequestLogsListAllQuery } from "../../query/requestLogs";
+import { useUsageAvailabilityTimelineV1Query } from "../../query/usage";
 import { useGatewayCircuitByProviderId } from "../../query/gateway";
 import {
-  buildAvailabilityTimeline,
+  buildAvailabilityTimelineFromBuckets,
   type AvailabilityTimelineData,
 } from "../../components/usage/usageAvailabilityTimeline";
 
-const REQUEST_LOGS_LIMIT = 2000;
-
-function periodRangeMs(
+function availabilityQueryRange(
   period: UsagePeriod,
   customApplied: CustomDateRangeApplied | null
-): { startMs: number; endMs: number } {
-  const now = Date.now();
+): { lookbackMs: number | null; startMs: number | null; endMs: number | null } {
   switch (period) {
     case "daily":
-      return { startMs: now - 24 * 60 * 60 * 1000, endMs: now };
+      return { lookbackMs: 24 * 60 * 60 * 1000, startMs: null, endMs: null };
     case "weekly":
-      return { startMs: now - 7 * 24 * 60 * 60 * 1000, endMs: now };
+      return { lookbackMs: 7 * 24 * 60 * 60 * 1000, startMs: null, endMs: null };
     case "monthly":
-      return { startMs: now - 30 * 24 * 60 * 60 * 1000, endMs: now };
+      return { lookbackMs: 30 * 24 * 60 * 60 * 1000, startMs: null, endMs: null };
     case "allTime":
-      return { startMs: now - 90 * 24 * 60 * 60 * 1000, endMs: now };
+      return { lookbackMs: 90 * 24 * 60 * 60 * 1000, startMs: null, endMs: null };
     case "custom":
       if (customApplied) {
         return {
+          lookbackMs: null,
           startMs: customApplied.startTs * 1000,
           endMs: customApplied.endTs * 1000,
         };
       }
-      return { startMs: now - 24 * 60 * 60 * 1000, endMs: now };
+      return { lookbackMs: 24 * 60 * 60 * 1000, startMs: null, endMs: null };
   }
 }
 
@@ -49,10 +47,18 @@ export function useUsageAvailabilityData({
   period: UsagePeriod;
   customApplied: CustomDateRangeApplied | null;
 }) {
-  const logsQuery = useRequestLogsListAllQuery(REQUEST_LOGS_LIMIT, {
-    enabled,
-    refetchIntervalMs: enabled ? 15000 : false,
-  });
+  const queryRange = availabilityQueryRange(period, customApplied);
+  const timelineQuery = useUsageAvailabilityTimelineV1Query(
+    {
+      ...queryRange,
+      cliKey: cliKey === "all" ? null : cliKey,
+      providerId,
+    },
+    {
+      enabled,
+      refetchIntervalMs: enabled ? 15000 : false,
+    }
+  );
 
   const claudeCircuit = useGatewayCircuitByProviderId("claude");
   const codexCircuit = useGatewayCircuitByProviderId("codex");
@@ -74,34 +80,20 @@ export function useUsageAvailabilityData({
   ]);
 
   const data: AvailabilityTimelineData | null = useMemo(() => {
-    const allLogs = logsQuery.data;
-    if (!allLogs) return null;
-
-    const { startMs, endMs } = periodRangeMs(period, customApplied);
-
-    const filtered = allLogs.filter((log) => {
-      const ts = log.created_at_ms;
-      if (ts < startMs || ts > endMs) return false;
-      if (cliKey !== "all" && log.cli_key !== cliKey) return false;
-      if (providerId != null && log.final_provider_id !== providerId) return false;
-      return true;
-    });
-
-    return buildAvailabilityTimeline(filtered, mergedCircuitMap, startMs, endMs);
-  }, [logsQuery.data, period, customApplied, cliKey, providerId, mergedCircuitMap]);
+    if (!timelineQuery.data) return null;
+    return buildAvailabilityTimelineFromBuckets(timelineQuery.data, mergedCircuitMap);
+  }, [timelineQuery.data, mergedCircuitMap]);
 
   return {
     data,
-    loading: enabled && logsQuery.isLoading,
-    refreshing: enabled && logsQuery.isFetching && !logsQuery.isLoading,
+    loading: enabled && timelineQuery.isLoading,
+    refreshing: enabled && timelineQuery.isFetching && !timelineQuery.isLoading,
     refetch: () => {
-      void logsQuery.refetch();
-      for (const cli of CLI_KEYS) {
-        if (cli === "claude") void claudeCircuit.refetch();
-        if (cli === "codex") void codexCircuit.refetch();
-        if (cli === "gemini") void geminiCircuit.refetch();
-        if (cli === "grok") void grokCircuit.refetch();
-      }
+      void timelineQuery.refetch();
+      void claudeCircuit.refetch();
+      void codexCircuit.refetch();
+      void geminiCircuit.refetch();
+      void grokCircuit.refetch();
     },
   };
 }

@@ -10,6 +10,9 @@ Rules for the root application's Rust backend and local gateway runtime.
 - [Codex request content-encoding contract](./codex-request-content-encoding-contract.md):
   bounded decoding at the gateway boundary, supported HTTP encodings, identity
   forwarding, and local failure classification.
+- [Codex context compaction observation contract](./codex-context-compaction-observation-contract.md):
+  original-request signatures, fail-open classification, bounded markers, and
+  strict separation from routing and HTTP request encoding.
 - [Codex managed model route contract](../cross-layer/codex-managed-model-route-contract.md):
   readable profile aliases plus legacy UUID lookup, complete picker catalog
   lifecycle, one-provider routing, same-provider retry, and terminal
@@ -39,6 +42,15 @@ When changing Codex request-body encoding:
 3. Bound every decoded layer and preserve non-Codex transport behavior.
 4. Keep decoding failures before provider selection and circuit accounting.
 
+When changing Codex context-compaction observation:
+
+1. Read [Codex context compaction observation contract](./codex-context-compaction-observation-contract.md).
+2. Capture only bounded evidence from the original decoded request before
+   plugins.
+3. Keep every classifier outcome observational; malformed or future input must
+   continue forwarding without a marker.
+4. Test local, remote v1, remote v2, unknown, and conflicting metadata.
+
 ## Quality Check
 
 - Unit-test the attempt-budget calculation at its boundary values.
@@ -49,3 +61,5 @@ When changing Codex request-body encoding:
   provider selection, final wire-model tracking, or response observation.
 - Verify supported Codex encodings arrive upstream as identity JSON, while
   invalid or oversized encoded bodies make zero upstream attempts.
+- Prove context-compaction classification cannot change request bytes, headers,
+  timeouts, provider selection, retries, circuit state, or response status.

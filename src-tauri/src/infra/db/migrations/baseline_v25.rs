@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS providers (
   supported_models_json TEXT NOT NULL DEFAULT '{}',
   model_mapping_json TEXT NOT NULL DEFAULT '{}',
   claude_models_json TEXT NOT NULL DEFAULT '{}',
+  source_provider_id INTEGER DEFAULT NULL REFERENCES providers(id) ON DELETE SET NULL,
+  bridge_type TEXT DEFAULT NULL,
   availability_test_model TEXT DEFAULT NULL,
   UNIQUE(cli_key, name)
 );
@@ -387,8 +389,26 @@ CREATE INDEX IF NOT EXISTS idx_image_gen_tasks_created ON image_gen_tasks(create
     )
     .map_err(|e| format!("failed to create baseline v25 schema: {e}"))?;
 
+    super::v42_to_v43::create_usage_ledger_schema(&tx)?;
+
     // Seed default skill repos
     let now = now_unix_seconds();
+    tx.execute(
+        r#"
+INSERT OR IGNORE INTO usage_ledger_backfill_state(
+  id,
+  status,
+  target_request_log_id,
+  last_request_log_id,
+  completed_at,
+  updated_at
+) VALUES (1, 'complete', 0, 0, ?1, ?1)
+"#,
+        [now],
+    )
+    .map_err(|e| format!("failed to initialize fresh usage ledger state: {e}"))?;
+    super::v42_to_v43::recreate_usage_events_view(&tx)?;
+
     for (git_url, branch) in [
         ("https://github.com/anthropics/skills", "auto"),
         (

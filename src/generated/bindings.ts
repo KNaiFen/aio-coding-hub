@@ -1987,6 +1987,21 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async requestLogsPageAll(
+    filters: RequestLogPageFilters,
+    cursor: string | null,
+    limit: number | null
+  ): Promise<Result<RequestLogPage, string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("request_logs_page_all", { filters, cursor, limit }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async requestLogsListAfterId(
     cliKey: string,
     afterId: number,
@@ -2111,6 +2126,19 @@ export const commands = {
   async usageSummaryV2(params: UsageQueryParams): Promise<Result<UsageSummary, string>> {
     try {
       return { status: "ok", data: await TAURI_INVOKE("usage_summary_v2", { params }) };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async usageAvailabilityTimelineV1(
+    params: UsageAvailabilityParams
+  ): Promise<Result<UsageAvailabilityTimelineV1, string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("usage_availability_timeline_v1", { params }),
+      };
     } catch (e) {
       if (e instanceof Error) throw e;
       else return { status: "error", error: e as any };
@@ -2558,6 +2586,7 @@ export type ActiveRequestSnapshotItem = {
   query: string | null;
   session_id: string | null;
   requested_model: string | null;
+  special_settings_json: string | null;
   created_at_ms: number;
   last_activity_ms: number;
   current_attempt: GatewayAttemptEvent | null;
@@ -4226,6 +4255,13 @@ export type RequestLogDetail = {
   activity_details_json: string | null;
   created_at: number;
 };
+export type RequestLogPage = { items: RequestLogSummary[]; nextCursor: string | null };
+export type RequestLogPageFilters = {
+  cliKey: string | null;
+  status: RequestLogStatusFilter | null;
+  errorCodeContains: string | null;
+  methodPathContains: string | null;
+};
 export type RequestLogRouteHop = {
   provider_id: number;
   provider_name: string;
@@ -4240,6 +4276,8 @@ export type RequestLogRouteHop = {
   decision?: string | null;
   reason?: string | null;
 };
+export type RequestLogStatusFilter = { op: RequestLogStatusFilterOp; value: number };
+export type RequestLogStatusFilterOp = "eq" | "neq" | "gte" | "lte";
 export type RequestLogSummary = {
   id: number;
   trace_id: string;
@@ -4485,6 +4523,28 @@ export type UpstreamRetryPolicy = {
   counts_toward_circuit_breaker: boolean;
 };
 export type UpstreamTransportRetryKind = "connect" | "timeout" | "read";
+export type UsageAvailabilityBucketV1 = {
+  cli_key: string;
+  provider_id: number;
+  provider_name: string;
+  bucket_start_ms: number;
+  requests_total: number;
+  requests_success: number;
+  total_duration_ms: number;
+};
+export type UsageAvailabilityParams = {
+  lookbackMs: number | null;
+  startMs: number | null;
+  endMs: number | null;
+  cliKey: string | null;
+  providerId: number | null;
+};
+export type UsageAvailabilityTimelineV1 = {
+  start_ms: number;
+  end_ms: number;
+  bucket_size_ms: number;
+  buckets: UsageAvailabilityBucketV1[];
+};
 export type UsageDayDetailParams = {
   day: string;
   cliKey: string | null;

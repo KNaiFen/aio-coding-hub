@@ -49,14 +49,14 @@ pub(super) fn build_optional_range_cli_provider_filters(
 }
 
 pub(super) fn sql_exclude_cx2cc_gateway_bridge_clause(
-    request_log_alias: Option<&str>,
+    usage_event_alias: Option<&str>,
     enabled: bool,
 ) -> String {
     if !enabled {
         return String::new();
     }
 
-    let final_provider_id_column = match request_log_alias {
+    let final_provider_id_column = match usage_event_alias {
         Some(alias) if !alias.trim().is_empty() => format!("{}.final_provider_id", alias.trim()),
         _ => "final_provider_id".to_string(),
     };
@@ -71,42 +71,4 @@ AND NOT EXISTS (
   AND usage_filter_provider.source_provider_id IS NULL
 )"#
     )
-}
-
-/// Build optional AND clauses for time-range filters with a placeholder offset.
-///
-/// Similar to [`build_optional_range_cli_provider_filters`] but only handles
-/// `start_ts`/`end_ts` and numbers placeholders starting at `placeholder_offset + 1`.
-pub(super) fn build_optional_range_filters_with_offset(
-    created_at_column: &str,
-    start_ts: Option<i64>,
-    end_ts: Option<i64>,
-    placeholder_offset: usize,
-) -> (String, SqlValues) {
-    let mut clauses = Vec::new();
-    let mut values: SqlValues = Vec::with_capacity(2);
-
-    if let Some(ts) = start_ts {
-        values.push(ts.into());
-        clauses.push(format!(
-            "{created_at_column} >= ?{}",
-            placeholder_offset + values.len()
-        ));
-    }
-
-    if let Some(ts) = end_ts {
-        values.push(ts.into());
-        clauses.push(format!(
-            "{created_at_column} < ?{}",
-            placeholder_offset + values.len()
-        ));
-    }
-
-    let sql = if clauses.is_empty() {
-        String::new()
-    } else {
-        format!("\nAND {}", clauses.join("\nAND "))
-    };
-
-    (sql, values)
 }

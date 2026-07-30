@@ -2,15 +2,24 @@
 
 use crate::db;
 use crate::shared::error::db_err;
+use base64::Engine as _;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 use super::costing::cost_usd_from_femto;
-use super::{RequestLogDetail, RequestLogRouteHop, RequestLogSummary};
+use super::types::{
+    RequestLogDetail, RequestLogPage, RequestLogPageFilters, RequestLogRouteHop,
+    RequestLogStatusFilter, RequestLogStatusFilterOp, RequestLogSummary,
+};
 
 const CLAUDE_VISIBLE_LOG_PATH: &str = "/v1/messages";
 const CLAUDE_VISIBLE_LOG_CONDITION: &str = "(cli_key != 'claude' OR path = '/v1/messages')";
+const REQUEST_LOG_PAGE_CURSOR_VERSION: u8 = 1;
+const REQUEST_LOG_PAGE_CURSOR_MAX_BYTES: usize = 512;
+const REQUEST_LOG_PAGE_MAX_LIMIT: usize = 200;
+const REQUEST_LOG_PAGE_ERROR_CODE_FILTER_MAX_BYTES: usize = 256;
+const REQUEST_LOG_PAGE_METHOD_PATH_FILTER_MAX_BYTES: usize = 512;
 
 /// Common SELECT fields for request_logs queries (summary view).
 const REQUEST_LOG_SUMMARY_FIELDS: &str = "
@@ -82,9 +91,123 @@ const REQUEST_LOG_DETAIL_FIELDS: &str = "
   error_details_json
 ";
 
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RequestLogPageCursor {
+    v: u8,
+    created_at_ms: i64,
+    id: i64,
+}
+
+#[derive(Debug)]
+struct ValidatedPageFilters<'a> {
+    cli_key: Option<&'a str>,
+    status: Option<&'a RequestLogStatusFilter>,
+    error_code_contains: Option<&'a str>,
+    method_path_contains: Option<&'a str>,
+}
+
 pub(super) fn validate_cli_key(cli_key: &str) -> Result<(), String> {
     crate::shared::cli_key::validate_cli_key(cli_key)?;
     Ok(())
+}
+
+fn invalid_page_input(message: &str) -> crate::shared::error::AppError {
+    crate::shared::error::AppError::new("SEC_INVALID_INPUT", message)
+}
+
+fn normalize_contains_filter<'a>(
+    value: Option<&'a str>,
+    field: &str,
+    max_bytes: usize,
+) -> crate::shared::error::AppResult<Option<&'a str>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if value.len() > max_bytes {
+        return Err(invalid_page_input(&format!(
+            "{field} exceeds maximum length of {max_bytes} UTF-8 bytes"
+        )));
+    }
+    let trimmed = value.trim();
+    Ok((!trimmed.is_empty()).then_some(trimmed))
+}
+
+fn validate_page_filters(
+    filters: &RequestLogPageFilters,
+) -> crate::shared::error::AppResult<ValidatedPageFilters<'_>> {
+    if let Some(cli_key) = filters.cli_key.as_deref() {
+        crate::shared::cli_key::validate_cli_key(cli_key)?;
+    }
+    if let Some(status) = filters.status.as_ref() {
+        if !(0..=999).contains(&status.value) {
+            return Err(invalid_page_input(
+                "status filter value must be between 0 and 999",
+            ));
+        }
+    }
+
+    Ok(ValidatedPageFilters {
+        cli_key: filters.cli_key.as_deref(),
+        status: filters.status.as_ref(),
+        error_code_contains: normalize_contains_filter(
+            filters.error_code_contains.as_deref(),
+            "error_code_contains",
+            REQUEST_LOG_PAGE_ERROR_CODE_FILTER_MAX_BYTES,
+        )?,
+        method_path_contains: normalize_contains_filter(
+            filters.method_path_contains.as_deref(),
+            "method_path_contains",
+            REQUEST_LOG_PAGE_METHOD_PATH_FILTER_MAX_BYTES,
+        )?,
+    })
+}
+
+fn decode_page_cursor(
+    cursor: Option<&str>,
+) -> crate::shared::error::AppResult<Option<RequestLogPageCursor>> {
+    let Some(cursor) = cursor else {
+        return Ok(None);
+    };
+    if cursor.len() > REQUEST_LOG_PAGE_CURSOR_MAX_BYTES {
+        return Err(invalid_page_input("invalid request logs cursor"));
+    }
+    let cursor = cursor.trim();
+    if cursor.is_empty() {
+        return Err(invalid_page_input("invalid request logs cursor"));
+    }
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(cursor.as_bytes())
+        .map_err(|_| invalid_page_input("invalid request logs cursor"))?;
+    if bytes.len() > REQUEST_LOG_PAGE_CURSOR_MAX_BYTES {
+        return Err(invalid_page_input("invalid request logs cursor"));
+    }
+    let decoded: RequestLogPageCursor = serde_json::from_slice(&bytes)
+        .map_err(|_| invalid_page_input("invalid request logs cursor"))?;
+    if decoded.v != REQUEST_LOG_PAGE_CURSOR_VERSION {
+        return Err(invalid_page_input(
+            "unsupported request logs cursor version",
+        ));
+    }
+    if decoded.created_at_ms < 0 || decoded.id <= 0 {
+        return Err(invalid_page_input("invalid request logs cursor"));
+    }
+    Ok(Some(decoded))
+}
+
+fn encode_page_cursor(row: &RequestLogSummary) -> crate::shared::error::AppResult<String> {
+    let bytes = serde_json::to_vec(&RequestLogPageCursor {
+        v: REQUEST_LOG_PAGE_CURSOR_VERSION,
+        created_at_ms: row.created_at_ms,
+        id: row.id,
+    })
+    .map_err(|e| {
+        crate::shared::error::AppError::new(
+            "SYSTEM_ERROR",
+            format!("failed to encode request logs cursor: {e}"),
+        )
+    })?;
+    Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes))
 }
 
 #[derive(Debug, Deserialize)]
@@ -537,6 +660,105 @@ pub fn list_recent_all(
     Ok(items)
 }
 
+#[cfg(test)]
+pub fn page_all(
+    db: &db::Db,
+    filters: &RequestLogPageFilters,
+    cursor: Option<&str>,
+    limit: usize,
+) -> crate::shared::error::AppResult<RequestLogPage> {
+    page_all_excluding_traces(db, filters, cursor, limit, &[])
+}
+
+pub fn page_all_excluding_traces(
+    db: &db::Db,
+    filters: &RequestLogPageFilters,
+    cursor: Option<&str>,
+    limit: usize,
+    excluded_trace_ids: &[String],
+) -> crate::shared::error::AppResult<RequestLogPage> {
+    if !(1..=REQUEST_LOG_PAGE_MAX_LIMIT).contains(&limit) {
+        return Err(invalid_page_input(
+            "request logs page limit must be between 1 and 200",
+        ));
+    }
+    let filters = validate_page_filters(filters)?;
+    let cursor = decode_page_cursor(cursor)?;
+
+    let mut conditions = vec![CLAUDE_VISIBLE_LOG_CONDITION.to_string()];
+    let mut query_params = Vec::<rusqlite::types::Value>::new();
+
+    if let Some(cli_key) = filters.cli_key {
+        conditions.push("cli_key = ?".to_string());
+        query_params.push(cli_key.to_owned().into());
+    }
+    if let Some(status) = filters.status {
+        let condition = match status.op {
+            RequestLogStatusFilterOp::Eq => "status = ?",
+            RequestLogStatusFilterOp::Neq => "(status IS NULL OR status != ?)",
+            RequestLogStatusFilterOp::Gte => "status >= ?",
+            RequestLogStatusFilterOp::Lte => "status <= ?",
+        };
+        conditions.push(condition.to_string());
+        query_params.push(status.value.into());
+    }
+    if let Some(needle) = filters.error_code_contains {
+        conditions.push("instr(lower(COALESCE(error_code, '')), lower(?)) > 0".to_string());
+        query_params.push(needle.to_owned().into());
+    }
+    if let Some(needle) = filters.method_path_contains {
+        conditions.push("instr(lower(method || ' ' || path), lower(?)) > 0".to_string());
+        query_params.push(needle.to_owned().into());
+    }
+    if !excluded_trace_ids.is_empty() {
+        if let Ok(encoded_trace_ids) = serde_json::to_string(excluded_trace_ids) {
+            conditions.push(
+                "trace_id NOT IN (SELECT value FROM json_each(?) WHERE type = 'text')".to_string(),
+            );
+            query_params.push(encoded_trace_ids.into());
+        }
+    }
+    if let Some(cursor) = cursor {
+        conditions.push("(created_at_ms < ? OR (created_at_ms = ? AND id < ?))".to_string());
+        query_params.push(cursor.created_at_ms.into());
+        query_params.push(cursor.created_at_ms.into());
+        query_params.push(cursor.id.into());
+    }
+
+    let query_limit = i64::try_from(limit + 1)
+        .map_err(|_| invalid_page_input("request logs page limit is invalid"))?;
+    query_params.push(query_limit.into());
+    let sql = format!(
+        "SELECT{}FROM request_logs WHERE {} ORDER BY created_at_ms DESC, id DESC LIMIT ?",
+        REQUEST_LOG_SUMMARY_FIELDS,
+        conditions.join(" AND ")
+    );
+    let conn = db.open_connection()?;
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| db_err!("failed to prepare request_logs page query: {e}"))?;
+    let rows = stmt
+        .query_map(params_from_iter(query_params.iter()), row_to_summary)
+        .map_err(|e| db_err!("failed to query request_logs page: {e}"))?;
+
+    let mut items = Vec::new();
+    for row in rows {
+        items.push(row.map_err(|e| db_err!("failed to read request_log page row: {e}"))?);
+    }
+    let has_more = items.len() > limit;
+    if has_more {
+        items.pop();
+    }
+    attach_source_provider_info(&conn, &mut items)?;
+    let next_cursor = if has_more {
+        items.last().map(encode_page_cursor).transpose()?
+    } else {
+        None
+    };
+
+    Ok(RequestLogPage { items, next_cursor })
+}
+
 pub fn list_after_id(
     db: &db::Db,
     cli_key: &str,
@@ -689,11 +911,16 @@ pub fn terminal_trace_ids(
 mod tests {
     use super::{
         final_provider_from_attempts, get_by_id, get_by_trace_id, list_after_id_all, list_recent,
-        list_recent_all, load_source_provider_info_map, parse_attempts, route_from_attempts,
-        start_provider_from_attempts, terminal_trace_ids,
+        list_recent_all, load_source_provider_info_map, page_all, page_all_excluding_traces,
+        parse_attempts, route_from_attempts, start_provider_from_attempts, terminal_trace_ids,
     };
     use crate::db;
+    use crate::request_logs::{
+        RequestLogPageFilters, RequestLogStatusFilter, RequestLogStatusFilterOp,
+    };
+    use base64::Engine as _;
     use rusqlite::Connection;
+    use std::collections::HashSet;
     use tempfile::tempdir;
 
     fn seed_request_log(conn: &Connection, id: i64, trace_id: &str, cli_key: &str, path: &str) {
@@ -712,6 +939,56 @@ INSERT INTO request_logs (
             rusqlite::params![id, trace_id, cli_key, path, id * 1000, id],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn page_all_excludes_active_placeholders_without_consuming_page_capacity() {
+        let dir = tempdir().expect("tempdir");
+        let db = db::init_for_tests(&dir.path().join("request-logs-page-active.db"))
+            .expect("initialize test db");
+        let conn = db.open_connection().expect("open db");
+        for id in 1..=53 {
+            seed_request_log(&conn, id, &format!("trace-{id}"), "codex", "/v1/responses");
+        }
+        conn.execute(
+            "UPDATE request_logs SET status = NULL WHERE trace_id = 'trace-53'",
+            [],
+        )
+        .expect("mark newest row as active placeholder");
+        drop(conn);
+
+        let excluded = vec!["trace-53".to_string()];
+        let first =
+            page_all_excluding_traces(&db, &RequestLogPageFilters::default(), None, 50, &excluded)
+                .expect("load first page");
+        assert_eq!(first.items.len(), 50);
+        assert_eq!(
+            first.items.first().map(|item| item.trace_id.as_str()),
+            Some("trace-52")
+        );
+        assert_eq!(
+            first.items.last().map(|item| item.trace_id.as_str()),
+            Some("trace-3")
+        );
+        assert!(first.items.iter().all(|item| item.trace_id != "trace-53"));
+
+        let second = page_all_excluding_traces(
+            &db,
+            &RequestLogPageFilters::default(),
+            first.next_cursor.as_deref(),
+            50,
+            &excluded,
+        )
+        .expect("load second page");
+        assert_eq!(
+            second
+                .items
+                .iter()
+                .map(|item| item.trace_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["trace-2", "trace-1"]
+        );
+        assert!(second.next_cursor.is_none());
     }
 
     #[test]
@@ -922,6 +1199,235 @@ INSERT INTO providers (id, name, source_provider_id, bridge_type) VALUES (12, 'C
             after.iter().map(|item| item.id).collect::<Vec<_>>(),
             vec![3]
         );
+    }
+
+    #[test]
+    fn page_all_uses_two_key_cursor_without_gaps_for_tied_timestamps() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("request-logs-page.db");
+        let db = db::init_for_tests(&db_path).unwrap();
+        let conn = db.open_connection().unwrap();
+        for id in 1..=7 {
+            seed_request_log(
+                &conn,
+                id,
+                &format!("trace-page-{id}"),
+                "codex",
+                "/v1/responses",
+            );
+        }
+        conn.execute("UPDATE request_logs SET created_at_ms = 123456", [])
+            .unwrap();
+        drop(conn);
+
+        let filters = RequestLogPageFilters::default();
+        let mut cursor = None;
+        let mut ids = Vec::new();
+        loop {
+            let page = page_all(&db, &filters, cursor.as_deref(), 3).unwrap();
+            ids.extend(page.items.iter().map(|item| item.id));
+            let Some(next_cursor) = page.next_cursor else {
+                break;
+            };
+            if ids.len() == 3 {
+                let cursor_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .decode(next_cursor.as_bytes())
+                    .unwrap();
+                assert_eq!(
+                    serde_json::from_slice::<serde_json::Value>(&cursor_bytes).unwrap(),
+                    serde_json::json!({"v": 1, "createdAtMs": 123456, "id": 5})
+                );
+            }
+            cursor = Some(next_cursor);
+        }
+
+        assert_eq!(ids, vec![7, 6, 5, 4, 3, 2, 1]);
+        let unique = ids.iter().copied().collect::<HashSet<_>>();
+        assert_eq!(unique.len(), ids.len());
+    }
+
+    #[test]
+    fn page_all_applies_filters_with_literal_contains_and_null_neq() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("request-logs-page-filters.db");
+        let db = db::init_for_tests(&db_path).unwrap();
+        let conn = db.open_connection().unwrap();
+
+        seed_request_log(&conn, 1, "trace-visible-null", "claude", "/v1/messages");
+        seed_request_log(
+            &conn,
+            2,
+            "trace-hidden-null",
+            "claude",
+            "/v1/messages/count_tokens",
+        );
+        seed_request_log(&conn, 3, "trace-codex-error", "codex", "/v1/responses");
+        seed_request_log(&conn, 4, "trace-codex-ok", "codex", "/v1/other");
+        seed_request_log(&conn, 5, "trace-gemini", "gemini", "/v1/responses");
+        conn.execute(
+            "UPDATE request_logs SET method = 'GET', status = NULL, error_code = 'GW_LITERAL_%_NEEDLE' WHERE id IN (1, 2)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE request_logs SET status = 503, error_code = 'GW_UPSTREAM_TIMEOUT' WHERE id = 3",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE request_logs SET status = 404, error_code = 'GW_NOT_FOUND' WHERE id = 5",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let codex_error = page_all(
+            &db,
+            &RequestLogPageFilters {
+                cli_key: Some("codex".to_string()),
+                status: Some(RequestLogStatusFilter {
+                    op: RequestLogStatusFilterOp::Gte,
+                    value: 500,
+                }),
+                error_code_contains: Some("upstream".to_string()),
+                method_path_contains: Some("post /V1/RESPONSES".to_string()),
+            },
+            None,
+            50,
+        )
+        .unwrap();
+        assert_eq!(
+            codex_error
+                .items
+                .iter()
+                .map(|item| item.id)
+                .collect::<Vec<_>>(),
+            vec![3]
+        );
+
+        for (op, value, expected_ids) in [
+            (RequestLogStatusFilterOp::Eq, 503, vec![3]),
+            (RequestLogStatusFilterOp::Lte, 200, vec![4]),
+        ] {
+            let page = page_all(
+                &db,
+                &RequestLogPageFilters {
+                    status: Some(RequestLogStatusFilter { op, value }),
+                    ..RequestLogPageFilters::default()
+                },
+                None,
+                50,
+            )
+            .unwrap();
+            assert_eq!(
+                page.items.iter().map(|item| item.id).collect::<Vec<_>>(),
+                expected_ids
+            );
+        }
+
+        let not_503 = page_all(
+            &db,
+            &RequestLogPageFilters {
+                status: Some(RequestLogStatusFilter {
+                    op: RequestLogStatusFilterOp::Neq,
+                    value: 503,
+                }),
+                ..RequestLogPageFilters::default()
+            },
+            None,
+            50,
+        )
+        .unwrap();
+        assert_eq!(
+            not_503.items.iter().map(|item| item.id).collect::<Vec<_>>(),
+            vec![5, 4, 1],
+            "neq must include NULL while Claude visibility still hides non-message rows"
+        );
+
+        let literal = page_all(
+            &db,
+            &RequestLogPageFilters {
+                error_code_contains: Some("%_".to_string()),
+                ..RequestLogPageFilters::default()
+            },
+            None,
+            50,
+        )
+        .unwrap();
+        assert_eq!(
+            literal.items.iter().map(|item| item.id).collect::<Vec<_>>(),
+            vec![1],
+            "contains filters must treat SQL wildcard characters literally"
+        );
+    }
+
+    #[test]
+    fn page_all_rejects_invalid_cursor_and_filter_boundaries() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("request-logs-page-invalid.db");
+        let db = db::init_for_tests(&db_path).unwrap();
+        let filters = RequestLogPageFilters::default();
+        let encode_json = |value: serde_json::Value| {
+            base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .encode(serde_json::to_vec(&value).unwrap())
+        };
+
+        for cursor in [
+            " ".to_string(),
+            "*not-base64*".to_string(),
+            encode_json(serde_json::json!([])),
+            encode_json(serde_json::json!({"v": 2, "createdAtMs": 1, "id": 1})),
+            encode_json(serde_json::json!({"v": 1, "createdAtMs": -1, "id": 1})),
+            encode_json(serde_json::json!({"v": 1, "createdAtMs": 1, "id": 0})),
+            encode_json(serde_json::json!({"v": 1, "createdAtMs": 1, "id": 1, "extra": true})),
+            encode_json(serde_json::json!({"v": 1, "created_at_ms": 1, "id": 1})),
+            "a".repeat(513),
+        ] {
+            let error = page_all(&db, &filters, Some(&cursor), 50).unwrap_err();
+            assert_eq!(error.code(), "SEC_INVALID_INPUT", "cursor={cursor}");
+        }
+
+        let invalid_filters = [
+            RequestLogPageFilters {
+                status: Some(RequestLogStatusFilter {
+                    op: RequestLogStatusFilterOp::Eq,
+                    value: 1_000,
+                }),
+                ..RequestLogPageFilters::default()
+            },
+            RequestLogPageFilters {
+                error_code_contains: Some("界".repeat(86)),
+                ..RequestLogPageFilters::default()
+            },
+            RequestLogPageFilters {
+                method_path_contains: Some("x".repeat(513)),
+                ..RequestLogPageFilters::default()
+            },
+            RequestLogPageFilters {
+                cli_key: Some("unknown".to_string()),
+                ..RequestLogPageFilters::default()
+            },
+        ];
+        for filters in invalid_filters {
+            let error = page_all(&db, &filters, None, 50).unwrap_err();
+            assert_eq!(error.code(), "SEC_INVALID_INPUT");
+        }
+        for limit in [0, 201] {
+            let error = page_all(&db, &filters, None, limit).unwrap_err();
+            assert_eq!(error.code(), "SEC_INVALID_INPUT");
+        }
+        for status_value in [0, 999] {
+            let boundary_filters = RequestLogPageFilters {
+                status: Some(RequestLogStatusFilter {
+                    op: RequestLogStatusFilterOp::Eq,
+                    value: status_value,
+                }),
+                error_code_contains: Some("x".repeat(256)),
+                method_path_contains: Some("y".repeat(512)),
+                ..RequestLogPageFilters::default()
+            };
+            page_all(&db, &boundary_filters, None, 200).unwrap();
+        }
     }
 
     #[test]
