@@ -2,7 +2,11 @@ import {
   commands,
   type RequestAttemptLog as GeneratedRequestAttemptLog,
   type RequestLogDetail as GeneratedRequestLogDetail,
+  type RequestLogPage as GeneratedRequestLogPage,
+  type RequestLogPageFilters as GeneratedRequestLogPageFilters,
   type RequestLogRouteHop as GeneratedRequestLogRouteHop,
+  type RequestLogStatusFilter as GeneratedRequestLogStatusFilter,
+  type RequestLogStatusFilterOp as GeneratedRequestLogStatusFilterOp,
   type RequestLogSummary as GeneratedRequestLogSummary,
 } from "../../generated/bindings";
 import type { CliKey } from "../providers/providers";
@@ -15,6 +19,8 @@ const CLI_KEY_VALUES = CLI_KEYS;
 export const REQUEST_LOGS_DEFAULT_LIMIT = 50;
 export const REQUEST_LOGS_MIN_LIMIT = 1;
 export const REQUEST_LOGS_MAX_LIMIT = 500;
+export const REQUEST_LOGS_PAGE_DEFAULT_LIMIT = 50;
+export const REQUEST_LOGS_PAGE_MAX_LIMIT = 200;
 export const REQUEST_ATTEMPT_LOGS_DEFAULT_LIMIT = REQUEST_LOGS_DEFAULT_LIMIT;
 export const REQUEST_ATTEMPT_LOGS_MAX_LIMIT = 200;
 export const REQUEST_LOG_TRACE_ID_MAX_LENGTH = 256;
@@ -42,6 +48,23 @@ export type RequestAttemptLog = Override<
   }
 >;
 
+export type RequestLogStatusFilterOp = GeneratedRequestLogStatusFilterOp;
+export type RequestLogStatusFilter = GeneratedRequestLogStatusFilter;
+
+export type RequestLogPageFilters = Override<
+  GeneratedRequestLogPageFilters,
+  {
+    cliKey: CliKey | null;
+  }
+>;
+
+export type RequestLogPage = Override<
+  GeneratedRequestLogPage,
+  {
+    items: RequestLogSummary[];
+  }
+>;
+
 function toCliKey(value: string, label: string): CliKey {
   return narrowGeneratedStringUnion(value, CLI_KEY_VALUES, label);
 }
@@ -60,6 +83,18 @@ function normalizeBoundedLimit(
 
 export function normalizeRequestLogsLimit(limit?: number | null): number | null {
   return normalizeBoundedLimit("request logs", limit, REQUEST_LOGS_MAX_LIMIT);
+}
+
+export function normalizeRequestLogsPageLimit(limit?: number | null): number | null {
+  if (limit == null) return null;
+  if (
+    !Number.isSafeInteger(limit) ||
+    limit < REQUEST_LOGS_MIN_LIMIT ||
+    limit > REQUEST_LOGS_PAGE_MAX_LIMIT
+  ) {
+    throw new Error(`SEC_INVALID_INPUT: invalid request logs page limit=${limit}`);
+  }
+  return limit;
 }
 
 export function normalizeRequestAttemptLogsLimit(limit?: number | null): number | null {
@@ -124,6 +159,13 @@ function toRequestAttemptLog(value: GeneratedRequestAttemptLog): RequestAttemptL
   };
 }
 
+function toRequestLogPage(value: GeneratedRequestLogPage): RequestLogPage {
+  return {
+    items: value.items.map(toRequestLogSummary),
+    nextCursor: value.nextCursor,
+  };
+}
+
 export async function requestLogsList(cliKey: CliKey, limit?: number | null) {
   const normalizedLimit = normalizeRequestLogsLimit(limit);
 
@@ -148,6 +190,25 @@ export async function requestLogsListAll(limit?: number | null) {
     invoke: async () =>
       mapGeneratedCommandResponse(await commands.requestLogsListAll(normalizedLimit), (rows) =>
         rows.map(toRequestLogSummary)
+      ),
+  });
+}
+
+export async function requestLogsPageAll(
+  filters: RequestLogPageFilters,
+  cursor: string | null,
+  limit?: number | null
+) {
+  const normalizedLimit = normalizeRequestLogsPageLimit(limit);
+
+  return invokeGeneratedIpc<RequestLogPage>({
+    title: "分页读取全局请求日志失败",
+    cmd: "request_logs_page_all",
+    args: { filters, cursor, limit: normalizedLimit },
+    invoke: async () =>
+      mapGeneratedCommandResponse(
+        await commands.requestLogsPageAll(filters, cursor, normalizedLimit),
+        toRequestLogPage
       ),
   });
 }

@@ -2,6 +2,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import type { CliKey } from "../services/providers/providers";
 import {
   USAGE_LEADERBOARD_V2_DEFAULT_LIMIT,
+  usageAvailabilityTimelineV1,
   usageHourlySeries,
   usageDayDetailV1,
   usageFolderOptionsV1,
@@ -10,12 +11,14 @@ import {
   usageSummary,
   usageSummaryV2,
   normalizeUsageDayDetailInput,
+  normalizeUsageAvailabilityInput,
   normalizeUsageHourlySeriesDays,
   normalizeUsageLeaderboardV2Limit,
   normalizeUsageProviderCacheRateTrendLimit,
   normalizeUsageQueryInputV2,
   normalizeUsageSummaryInput,
   type NormalizedUsageDayDetailInput,
+  type UsageAvailabilityInput,
   type UsageDayDetailInput,
   type UsagePeriod,
   type UsageQueryInputV2,
@@ -62,6 +65,21 @@ export function useUsageSummaryQuery(
   return useQuery({
     queryKey: usageKeys.summary(range, normalizedInput),
     queryFn: () => usageSummary(range, normalizedInput),
+    enabled: options?.enabled ?? true,
+    placeholderData: keepPreviousData,
+    refetchInterval: options?.refetchIntervalMs ?? false,
+  });
+}
+
+export function useUsageAvailabilityTimelineV1Query(
+  input: UsageAvailabilityInput,
+  options?: UsageQueryOptions
+) {
+  const normalizedInput = normalizeUsageAvailabilityInput(input);
+
+  return useQuery({
+    queryKey: usageKeys.availabilityTimelineV1(normalizedInput),
+    queryFn: () => usageAvailabilityTimelineV1(normalizedInput),
     enabled: options?.enabled ?? true,
     placeholderData: keepPreviousData,
     refetchInterval: options?.refetchIntervalMs ?? false,

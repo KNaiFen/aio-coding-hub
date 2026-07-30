@@ -22,28 +22,19 @@ pub fn hourly_series(
     	  CAST(strftime('%H', created_at, 'unixepoch', 'localtime') AS INTEGER) AS hour,
     	  COUNT(*) AS requests_total,
     	  SUM(
-    	    CASE WHEN (
-    	      total_tokens IS NOT NULL OR
-    	      input_tokens IS NOT NULL OR
-    	      output_tokens IS NOT NULL OR
-    	      cache_read_input_tokens IS NOT NULL OR
-    	      cache_creation_input_tokens IS NOT NULL OR
-    	      cache_creation_5m_input_tokens IS NOT NULL OR
-    	      cache_creation_1h_input_tokens IS NOT NULL OR
-    	      usage_json IS NOT NULL
-    	    ) THEN 1 ELSE 0 END
+        CASE WHEN usage_present = 1 THEN 1 ELSE 0 END
     	  ) AS requests_with_usage,
-    	  SUM(CASE WHEN status >= 200 AND status < 300 AND error_code IS NULL THEN 1 ELSE 0 END) AS requests_success,
+      SUM(CASE WHEN status >= 200 AND status < 300 AND error_present = 0 THEN 1 ELSE 0 END) AS requests_success,
     	  SUM(
     	    CASE WHEN (
     	      status IS NULL OR
     	      status < 200 OR
     	      status >= 300 OR
-    	      error_code IS NOT NULL
+          error_present != 0
     	    ) THEN 1 ELSE 0 END
     	  ) AS requests_failed,
     	  SUM({effective_total_expr}) AS total_tokens
-    	FROM request_logs
+    FROM usage_events
     	WHERE excluded_from_stats = 0
     	AND created_at >= ?1
         {cx2cc_filter_clause}

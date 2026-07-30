@@ -1,5 +1,8 @@
 import {
   commands,
+  type UsageAvailabilityBucketV1 as GeneratedUsageAvailabilityBucketV1,
+  type UsageAvailabilityParams as GeneratedUsageAvailabilityParams,
+  type UsageAvailabilityTimelineV1 as GeneratedUsageAvailabilityTimelineV1,
   type UsageDayDetailParams as GeneratedUsageDayDetailParams,
   type UsageDayDetailV1,
   type UsageDayFolderRow,
@@ -41,6 +44,28 @@ export const USAGE_PROVIDER_CACHE_RATE_TREND_MAX_LIMIT = 200;
 export type UsageRange = "today" | "last7" | "last30" | "month" | "all";
 export type UsageScope = "cli" | "provider" | "model" | "day";
 export type UsagePeriod = "daily" | "weekly" | "monthly" | "allTime" | "custom";
+
+export type UsageAvailabilityBucketV1 = Override<
+  GeneratedUsageAvailabilityBucketV1,
+  {
+    cli_key: CliKey;
+  }
+>;
+export type UsageAvailabilityTimelineV1 = Override<
+  GeneratedUsageAvailabilityTimelineV1,
+  {
+    buckets: UsageAvailabilityBucketV1[];
+  }
+>;
+export type UsageAvailabilityInput =
+  OptionalNullableGeneratedFields<GeneratedUsageAvailabilityParams>;
+export type NormalizedUsageAvailabilityInput = {
+  lookbackMs: number | null;
+  startMs: number | null;
+  endMs: number | null;
+  cliKey: CliKey | null;
+  providerId: number | null;
+};
 
 export type UsageProviderRow = Override<
   GeneratedUsageProviderRow,
@@ -182,6 +207,44 @@ function normalizeUsageProviderId(providerId?: number | null): number | null {
   return providerId;
 }
 
+function normalizeAvailabilityMilliseconds(
+  label: string,
+  value: number | null | undefined
+): number | null {
+  if (value == null) return null;
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`SEC_INVALID_INPUT: invalid ${label}=${value}`);
+  }
+  return value;
+}
+
+export function normalizeUsageAvailabilityInput(
+  input: UsageAvailabilityInput
+): NormalizedUsageAvailabilityInput {
+  const normalized = {
+    lookbackMs: normalizeAvailabilityMilliseconds("lookbackMs", input.lookbackMs),
+    startMs: normalizeAvailabilityMilliseconds("startMs", input.startMs),
+    endMs: normalizeAvailabilityMilliseconds("endMs", input.endMs),
+    cliKey: validateUsageCliKey(input.cliKey),
+    providerId: normalizeUsageProviderId(input.providerId),
+  };
+
+  const rolling =
+    normalized.lookbackMs != null &&
+    normalized.lookbackMs > 0 &&
+    normalized.startMs == null &&
+    normalized.endMs == null;
+  const custom =
+    normalized.lookbackMs == null &&
+    normalized.startMs != null &&
+    normalized.endMs != null &&
+    normalized.startMs < normalized.endMs;
+  if (!rolling && !custom) {
+    throw new Error("SEC_INVALID_INPUT: availability requires lookbackMs or valid startMs/endMs");
+  }
+  return normalized;
+}
+
 function normalizeUsageDayStartHour(value?: number | null): number | null {
   if (value == null) return null;
   if (!Number.isSafeInteger(value) || value < 0 || value > 9) {
@@ -321,6 +384,22 @@ function toUsageProviderRow(value: GeneratedUsageProviderRow): UsageProviderRow 
   };
 }
 
+function toUsageAvailabilityTimeline(
+  value: GeneratedUsageAvailabilityTimelineV1
+): UsageAvailabilityTimelineV1 {
+  return {
+    ...value,
+    buckets: value.buckets.map((bucket) => ({
+      ...bucket,
+      cli_key: narrowGeneratedStringUnion(
+        bucket.cli_key,
+        CLI_KEY_VALUES,
+        "usage_availability_timeline_v1.cli_key"
+      ),
+    })),
+  };
+}
+
 export async function usageSummary(range: UsageRange, input?: { cliKey?: CliKey | null }) {
   const normalizedInput = normalizeUsageSummaryInput(input);
   return invokeGeneratedIpc<UsageSummary>({
@@ -396,6 +475,20 @@ export async function usageSummaryV2(period: UsagePeriod, input?: UsageQueryInpu
       params,
     },
     invoke: () => commands.usageSummaryV2(params),
+  });
+}
+
+export async function usageAvailabilityTimelineV1(input: UsageAvailabilityInput) {
+  const params = normalizeUsageAvailabilityInput(input);
+  return invokeGeneratedIpc<UsageAvailabilityTimelineV1>({
+    title: "读取可用性时间线失败",
+    cmd: "usage_availability_timeline_v1",
+    args: { params },
+    invoke: async () =>
+      mapGeneratedCommandResponse(
+        await commands.usageAvailabilityTimelineV1(params),
+        toUsageAvailabilityTimeline
+      ),
   });
 }
 

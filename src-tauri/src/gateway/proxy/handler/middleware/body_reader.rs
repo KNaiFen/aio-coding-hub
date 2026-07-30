@@ -5,12 +5,13 @@
 //! in `ModelInferenceMiddleware` and only affects requests whose `model` field
 //! cannot be inferred. See `model_inference.rs` for that heuristic.
 
+use super::codex_request_classifier::classify_codex_context_compaction;
 use super::{MiddlewareAction, ProxyContext};
 use crate::gateway::plugins::context::{GatewayPluginHookName, GatewayRequestHookInput};
 use crate::gateway::proxy::compute_observe_request;
 use crate::gateway::proxy::handler::early_error::{
-    build_early_error_log_ctx, early_error_contract, respond_early_error_with_enqueue,
-    EarlyErrorKind,
+    build_early_error_log_ctx, early_error_contract, push_special_setting,
+    respond_early_error_with_enqueue, EarlyErrorKind,
 };
 use crate::gateway::proxy::request_body::{
     normalize_codex_request_body, CodexRequestNormalizationError, GatewayRequestBody,
@@ -104,6 +105,18 @@ impl BodyReaderMiddleware {
         ctx.body_bytes = request_body_state.decoded_clone();
         ctx.introspection_json =
             serde_json::from_slice::<serde_json::Value>(request_body_state.decoded().as_ref()).ok();
+
+        if let Some(marker) = classify_codex_context_compaction(
+            &ctx.cli_key,
+            &ctx.req_method,
+            &ctx.forwarded_path,
+            &ctx.headers,
+            ctx.introspection_json.as_ref(),
+        ) {
+            if let Ok(setting) = serde_json::to_value(marker) {
+                push_special_setting(&ctx.special_settings, setting);
+            }
+        }
 
         let hook_input = GatewayRequestHookInput {
             hook_name: GatewayPluginHookName::RequestAfterBodyRead,

@@ -14,6 +14,7 @@ import {
   type DbDiskUsage,
 } from "../services/app/dataManagement";
 import type { GatewayStatus } from "../services/gateway/gateway";
+import type { RequestLogPage } from "../services/gateway/requestLogs";
 import {
   cliProxyKeys,
   codexManagedProfilesKeys,
@@ -111,6 +112,10 @@ export async function resetAppDataQueryCaches(queryClient: QueryClient) {
   queryClient.setQueriesData<unknown[]>({ queryKey: gatewayKeys.sessions(), type: "active" }, []);
   queryClient.setQueriesData<unknown[]>({ queryKey: gatewayKeys.circuits(), type: "active" }, []);
   queryClient.setQueriesData<unknown[]>({ queryKey: requestLogsKeys.lists(), type: "active" }, []);
+  queryClient.setQueriesData<RequestLogPage>(
+    { queryKey: requestLogsKeys.pages(), type: "active" },
+    () => ({ items: [], nextCursor: null })
+  );
   queryClient.setQueriesData<DbDiskUsage>(
     { queryKey: dataManagementKeys.dbDiskUsage(), type: "active" },
     () => ({ ...APP_DATA_RESET_EMPTY_DB_DISK_USAGE })

@@ -20,6 +20,7 @@ import {
   type ActiveRequestSnapshotItem,
   type ProjectedRealtimeCard,
   type ProjectedRequestLogRow,
+  type RequestLogProjectionOrder,
 } from "../../services/gateway/requestActivityProjection";
 import { countActiveInferenceSessions } from "../../services/gateway/activeRequests";
 import type { RequestLogSummary } from "../../services/gateway/requestLogs";
@@ -56,7 +57,7 @@ import {
 } from "./requestLogSpecialSettings";
 import { getErrorCodeLabel } from "./requestLogErrorLabels";
 import { Clock, CheckCircle2, XCircle, Server, RefreshCw, ArrowUpRight } from "lucide-react";
-import { RealtimeTraceCards } from "./RealtimeTraceCards";
+import { CodexContextCompactionBadge, RealtimeTraceCards } from "./RealtimeTraceCards";
 import { CliBrandIcon } from "./CliBrandIcon";
 import {
   buildPreviewRequestLogs,
@@ -266,6 +267,12 @@ const RequestLogCard = memo(function RequestLogCard({
                   {modelText}
                 </span>
               </span>
+
+              <CodexContextCompactionBadge
+                cliKey={log.cli_key}
+                specialSettingsJson={log.special_settings_json}
+                showCustomTooltip={showCustomTooltip}
+              />
 
               {isCodexSystemRequest ? (
                 <span className="shrink-0 whitespace-nowrap rounded-md border border-border/60 bg-muted px-2 py-0.5 text-[11px] font-semibold text-foreground">
@@ -517,6 +524,7 @@ export type HomeRequestLogsPanelProps = {
   requestLogsLoading: boolean;
   requestLogsRefreshing: boolean;
   requestLogsAvailable: boolean | null;
+  requestLogOrder?: RequestLogProjectionOrder;
   onRefreshRequestLogs: () => void;
 
   selectedLogId: number | null;
@@ -538,6 +546,7 @@ export function HomeRequestLogsPanel({
   requestLogsLoading,
   requestLogsRefreshing,
   requestLogsAvailable,
+  requestLogOrder = "activity",
   onRefreshRequestLogs,
   selectedLogId,
   onSelectLogId,
@@ -586,6 +595,7 @@ export function HomeRequestLogsPanel({
         path: trace.path,
         query: trace.query,
         requested_model: trace.requested_model ?? null,
+        special_settings_json: trace.special_settings_json ?? null,
         created_at_ms: trace.first_seen_ms,
         last_activity_ms: trace.last_seen_ms,
         current_attempt: null,
@@ -608,6 +618,7 @@ export function HomeRequestLogsPanel({
     activeRequests: displayedActiveRequests,
     traces: displayedTraces,
     nowMs: wallClockNowMs,
+    requestLogOrder,
   });
   const tickingNowMs = useNowMs(clockEnabled, 250);
   const nowMs = clockEnabled ? tickingNowMs : wallClockNowMs;
@@ -619,8 +630,9 @@ export function HomeRequestLogsPanel({
         traces: displayedTraces,
         nowMs,
         realtimeCardLimit: 5,
+        requestLogOrder,
       }),
-    [displayedActiveRequests, displayedRequestLogs, displayedTraces, nowMs]
+    [displayedActiveRequests, displayedRequestLogs, displayedTraces, nowMs, requestLogOrder]
   );
   const summaryText =
     summaryTextOverride ??

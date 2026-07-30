@@ -39,6 +39,30 @@ describe("query/keys", () => {
     expect(requestLogsKeys.all).toEqual(["requestLogs"]);
     expect(requestLogsKeys.lists()).toEqual(["requestLogs", "list"]);
     expect(requestLogsKeys.listAll(10)).toEqual(["requestLogs", "list", "all", 10]);
+    expect(requestLogsKeys.pages()).toEqual(["requestLogs", "page"]);
+    expect(
+      requestLogsKeys.pageAll(
+        {
+          cliKey: "codex",
+          status: { op: "gte", value: 400 },
+          errorCodeContains: "timeout",
+          methodPathContains: "POST /v1/responses",
+        },
+        "opaque-cursor",
+        100
+      )
+    ).toEqual([
+      "requestLogs",
+      "page",
+      "all",
+      "codex",
+      "gte",
+      400,
+      "timeout",
+      "POST /v1/responses",
+      "opaque-cursor",
+      100,
+    ]);
     expect(requestLogsKeys.activeSnapshot()).toEqual(["requestLogs", "activeSnapshot"]);
     expect(requestLogsKeys.detail(1)).toEqual(["requestLogs", "detail", 1]);
     expect(requestLogsKeys.attemptsByTrace("trace-1", 10)).toEqual([
@@ -58,6 +82,15 @@ describe("query/keys", () => {
   it("builds usage keys", () => {
     expect(usageKeys.all).toEqual(["usage"]);
     expect(usageKeys.hourlySeries(7)).toEqual(["usage", "hourlySeries", 7]);
+    expect(
+      usageKeys.availabilityTimelineV1({
+        lookbackMs: 86_400_000,
+        startMs: null,
+        endMs: null,
+        cliKey: "claude",
+        providerId: 3,
+      })
+    ).toEqual(["usage", "availabilityTimelineV1", 86_400_000, null, null, "claude", 3]);
     expect(
       usageKeys.summaryV2("daily", { startTs: 1, endTs: 2, cliKey: "claude", providerId: 3 })
     ).toEqual(["usage", "summaryV2", "daily", 1, 2, "claude", 3, [], null, null]);

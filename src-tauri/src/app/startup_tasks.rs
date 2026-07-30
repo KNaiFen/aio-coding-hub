@@ -79,6 +79,8 @@ async fn run(app_handle: tauri::AppHandle) {
         }
     };
 
+    crate::usage_ledger::spawn_backfill(app_handle.clone(), db.clone());
+
     set_startup_stage(&app_handle, AppStartupStage::SyncingCliProxy);
     crate::app::startup_gateway::sync_cli_proxy_after_autostart(&app_handle, &status).await;
 

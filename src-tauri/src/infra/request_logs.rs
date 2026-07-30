@@ -2,7 +2,7 @@
 
 use crate::shared::error::{db_err, AppResult};
 use crate::shared::time::now_unix_seconds;
-use crate::{cost, db, model_price_aliases};
+use crate::{cost, db, model_price_aliases, usage_ledger};
 use rusqlite::{params, params_from_iter, ErrorCode, OptionalExtension, TransactionBehavior};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -13,7 +13,7 @@ use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
 
 mod types;
 pub use types::{
-    RequestLogDetail, RequestLogInsert, RequestLogRouteHop, RequestLogSummary,
+    RequestLogDetail, RequestLogInsert, RequestLogPage, RequestLogPageFilters, RequestLogSummary,
     SessionStatsAggregate,
 };
 
@@ -26,7 +26,7 @@ mod queries;
 use queries::{final_provider_from_attempts, parse_attempts, validate_cli_key};
 pub use queries::{
     get_by_id, get_by_trace_id, list_after_id, list_after_id_all, list_recent, list_recent_all,
-    terminal_trace_ids,
+    page_all_excluding_traces, terminal_trace_ids,
 };
 
 const WRITE_BUFFER_CAPACITY: usize = 512;
@@ -298,7 +298,6 @@ pub(crate) fn parse_cx2cc_cost_basis(
     Some((basis.source_cli_key, basis.priced_model?))
 }
 
-#[cfg(test)]
 pub(crate) fn cx2cc_openai_input_semantics_override(
     special_settings_json: Option<&str>,
     final_provider_id: Option<i64>,
@@ -400,22 +399,61 @@ pub fn purge_expired(db: &db::Db, retention_days: u32, now_unix: i64) -> AppResu
     let cutoff = now_unix.saturating_sub(i64::from(retention_days).saturating_mul(24 * 60 * 60));
     let mut total: u64 = 0;
     loop {
-        let conn = db.open_connection()?;
-        let affected = conn
-            .execute(
-                r#"
-DELETE FROM request_logs
-WHERE id IN (
-  SELECT id
-  FROM request_logs
-  WHERE created_at > 0 AND created_at < ?1
-  ORDER BY created_at ASC, id ASC
-  LIMIT ?2
-)
-"#,
-                params![cutoff, RETENTION_PURGE_BATCH_SIZE as i64],
-            )
-            .map_err(|e| db_err!("failed to purge expired request_logs: {e}"))?;
+        let mut conn = db.open_connection()?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|e| db_err!("failed to start request-log retention transaction: {e}"))?;
+        let backfill_complete = match usage_ledger::is_backfill_complete(&tx) {
+            Ok(complete) => complete,
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    "request-log retention paused: usage ledger state is unreadable"
+                );
+                return Ok(total);
+            }
+        };
+        if !backfill_complete {
+            tracing::debug!("request-log retention paused: usage ledger backfill is incomplete");
+            return Ok(total);
+        }
+
+        let request_log_ids =
+            match usage_ledger::project_expired_batch(&tx, cutoff, RETENTION_PURGE_BATCH_SIZE) {
+                Ok(request_log_ids) => request_log_ids,
+                Err(error) => {
+                    tracing::warn!(
+                        error = %error,
+                        "request-log retention paused: failed to ensure usage ledger coverage"
+                    );
+                    return Ok(total);
+                }
+            };
+        if request_log_ids.is_empty() {
+            tx.commit()
+                .map_err(|e| db_err!("failed to close request-log retention transaction: {e}"))?;
+            break;
+        }
+        let affected = match usage_ledger::delete_ids_with_coverage(&tx, &request_log_ids) {
+            Ok(affected) => affected,
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    "request-log retention paused: covered deletion failed"
+                );
+                return Ok(total);
+            }
+        };
+        if affected != request_log_ids.len() {
+            tracing::warn!(
+                expected = request_log_ids.len(),
+                deleted = affected,
+                "request-log retention paused: usage ledger coverage mismatch"
+            );
+            return Ok(total);
+        }
+        tx.commit()
+            .map_err(|e| db_err!("failed to commit request-log retention transaction: {e}"))?;
         total = total.saturating_add(affected as u64);
         if affected < RETENTION_PURGE_BATCH_SIZE {
             break;
@@ -443,6 +481,12 @@ pub(crate) fn spawn_retention_task(app: tauri::AppHandle, db: db::Db) {
             interval.tick().await;
             run_retention_once(&app, &db).await;
         }
+    });
+}
+
+pub(crate) fn spawn_retention_once(app: tauri::AppHandle, db: db::Db) {
+    tauri::async_runtime::spawn(async move {
+        run_retention_once(&app, &db).await;
     });
 }
 
@@ -505,7 +549,32 @@ pub(crate) fn reconcile_unresolved_pending(
     now_ms: i64,
 ) -> AppResult<usize> {
     let now_ms = now_ms.max(0);
-    let conn = db.open_connection()?;
+    let mut conn = db.open_connection()?;
+    let tx = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|e| db_err!("failed to start pending reconciliation transaction: {e}"))?;
+    let trace_ids = {
+        let mut statement = tx
+            .prepare(
+                r#"
+SELECT trace_id
+FROM request_logs
+WHERE status IS NULL AND error_code IS NULL
+ORDER BY id ASC
+"#,
+            )
+            .map_err(|e| db_err!("failed to prepare pending request-log scan: {e}"))?;
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| db_err!("failed to scan pending request logs: {e}"))?;
+        let mut trace_ids = Vec::new();
+        for row in rows {
+            trace_ids.push(
+                row.map_err(|e| db_err!("failed to read pending request-log trace id: {e}"))?,
+            );
+        }
+        trace_ids
+    };
     let pending_age_expr =
         "CASE WHEN created_at_ms > 0 AND ?1 > created_at_ms THEN ?1 - created_at_ms ELSE 0 END";
     let sql = format!(
@@ -528,9 +597,15 @@ WHERE status IS NULL
   AND error_code IS NULL
 "#
     );
-    let affected = conn
+    let affected = tx
         .execute(&sql, params![now_ms, reason.error_code(), reason.as_str()])
         .map_err(|e| db_err!("failed to reconcile pending request_logs: {e}"))?;
+    for trace_id in trace_ids {
+        usage_ledger::project_trace(&tx, &trace_id)
+            .map_err(|e| db_err!("failed to reconcile pending usage ledger row: {e}"))?;
+    }
+    tx.commit()
+        .map_err(|e| db_err!("failed to commit pending reconciliation: {e}"))?;
     Ok(affected)
 }
 
@@ -844,6 +919,9 @@ fn insert_batch_once(
                 item.error_details_json,
             ])
             .map_err(|e| DbWriteError::from_rusqlite("failed to insert request_log", e))?;
+            usage_ledger::project_trace(&tx, &item.trace_id).map_err(|e| {
+                DbWriteError::from_rusqlite("failed to project usage ledger row", e)
+            })?;
         }
     }
 
@@ -880,9 +958,9 @@ SELECT
   COUNT(1) AS request_count,
   SUM(COALESCE(input_tokens, 0)) AS total_input_tokens,
   SUM(COALESCE(output_tokens, 0)) AS total_output_tokens,
-  SUM(COALESCE(cost_usd_femto, 0)) AS total_cost_usd_femto,
+  TOTAL(COALESCE(cost_usd_femto, 0)) AS total_cost_usd_femto,
   SUM(duration_ms) AS total_duration_ms
-FROM request_logs
+FROM usage_events
 WHERE session_id IN ({placeholders})
   AND excluded_from_stats = 0
 GROUP BY cli_key, session_id
@@ -918,7 +996,7 @@ GROUP BY cli_key, session_id
         let total_output_tokens: i64 = row
             .get("total_output_tokens")
             .map_err(|e| db_err!("invalid session aggregate total_output_tokens: {e}"))?;
-        let total_cost_usd_femto: i64 = row
+        let total_cost_usd_femto: f64 = row
             .get("total_cost_usd_femto")
             .map_err(|e| db_err!("invalid session aggregate total_cost_usd_femto: {e}"))?;
         let total_duration_ms: i64 = row
@@ -931,7 +1009,7 @@ GROUP BY cli_key, session_id
                 request_count: request_count.max(0),
                 total_input_tokens: total_input_tokens.max(0),
                 total_output_tokens: total_output_tokens.max(0),
-                total_cost_usd_femto: total_cost_usd_femto.max(0),
+                total_cost_usd_femto: total_cost_usd_femto.max(0.0),
                 total_duration_ms: total_duration_ms.max(0),
             },
         );
@@ -943,11 +1021,11 @@ GROUP BY cli_key, session_id
 #[cfg(test)]
 mod tests {
     use super::{
-        insert_batch_once, parse_cx2cc_cost_basis, purge_expired, reconcile_unresolved_pending,
-        touch_activity, try_acquire_write_through_permit, writer_loop, InsertBatchCache,
-        RequestLogInsert, RequestLogReconcileReason, COST_MULTIPLIER_CACHE_MAX_ENTRIES,
-        EFFECTIVE_COST_MULTIPLIER_SQL, MODEL_PRICE_CACHE_MAX_ENTRIES, RETENTION_PURGE_BATCH_SIZE,
-        WRITE_BATCH_MAX,
+        aggregate_by_session_ids, insert_batch_once, parse_cx2cc_cost_basis, purge_expired,
+        reconcile_unresolved_pending, touch_activity, try_acquire_write_through_permit,
+        writer_loop, InsertBatchCache, RequestLogInsert, RequestLogReconcileReason,
+        COST_MULTIPLIER_CACHE_MAX_ENTRIES, EFFECTIVE_COST_MULTIPLIER_SQL,
+        MODEL_PRICE_CACHE_MAX_ENTRIES, RETENTION_PURGE_BATCH_SIZE, WRITE_BATCH_MAX,
     };
     use rusqlite::{params, Connection};
     use std::sync::Arc;
@@ -1000,6 +1078,22 @@ mod tests {
         let conn = db.open_connection().expect("open connection");
         conn.query_row("SELECT COUNT(1) FROM request_logs", [], |row| row.get(0))
             .expect("count request logs")
+    }
+
+    fn count_usage_ledger(db: &crate::db::Db) -> i64 {
+        let conn = db.open_connection().expect("open connection");
+        conn.query_row("SELECT COUNT(1) FROM usage_ledger", [], |row| row.get(0))
+            .expect("count usage ledger")
+    }
+
+    fn usage_ledger_exists(db: &crate::db::Db, trace_id: &str) -> bool {
+        let conn = db.open_connection().expect("open connection");
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM usage_ledger WHERE trace_id = ?1)",
+            params![trace_id],
+            |row| row.get::<_, bool>(0),
+        )
+        .expect("check usage ledger row")
     }
 
     fn request_log_exists(db: &crate::db::Db, trace_id: &str) -> bool {
@@ -1085,6 +1179,7 @@ WHERE trace_id = ?1
         writer.join().expect("writer joins");
 
         assert_eq!(count_request_logs(&db), 3);
+        assert_eq!(count_usage_ledger(&db), 3);
     }
 
     #[test]
@@ -1108,6 +1203,48 @@ WHERE trace_id = ?1
         writer.join().expect("writer joins");
 
         assert_eq!(count_request_logs(&db), total as i64);
+        assert_eq!(count_usage_ledger(&db), total as i64);
+    }
+
+    #[test]
+    fn session_cost_aggregate_uses_real_total_beyond_i64() {
+        let (_app, db, _dir) = init_test_db();
+        let conn = db.open_connection().expect("open connection");
+        conn.execute(
+            "UPDATE usage_ledger_backfill_state SET status = 'complete' WHERE id = 1",
+            [],
+        )
+        .expect("complete backfill");
+        for request_log_id in [1i64, 2i64] {
+            conn.execute(
+                r#"
+INSERT INTO usage_ledger (
+  request_log_id, trace_id, cli_key, session_id, created_at, created_at_ms,
+  status, error_present, excluded_from_stats, duration_ms, input_tokens,
+  output_tokens, cost_usd_femto
+) VALUES (?1, ?2, 'codex', 'session-overflow', 100, ?3, 200, 0, 0, 10, 1, 2, ?4)
+"#,
+                params![
+                    request_log_id,
+                    format!("session-overflow-{request_log_id}"),
+                    100_000 + request_log_id,
+                    i64::MAX
+                ],
+            )
+            .expect("insert session ledger event");
+        }
+        drop(conn);
+
+        let rows = aggregate_by_session_ids(&db, &["session-overflow".to_string()])
+            .expect("aggregate session");
+        let stats = rows
+            .get(&("codex".to_string(), "session-overflow".to_string()))
+            .expect("session aggregate");
+        assert_eq!(stats.request_count, 2);
+        assert_eq!(stats.total_input_tokens, 2);
+        assert_eq!(stats.total_output_tokens, 4);
+        assert!(stats.total_cost_usd_femto > i64::MAX as f64);
+        assert!((stats.total_cost_usd_femto - i64::MAX as f64 * 2.0).abs() < 4096.0);
     }
 
     #[test]
@@ -1157,6 +1294,7 @@ WHERE trace_id = ?1
         assert_eq!(deleted, 1);
         assert_eq!(count_request_logs(&db), 3);
         assert!(!request_log_exists(&db, "trace-expired"));
+        assert!(usage_ledger_exists(&db, "trace-expired"));
         assert!(request_log_exists(&db, "trace-unknown-time"));
         assert!(request_log_exists(&db, "trace-at-cutoff"));
         assert!(request_log_exists(&db, "trace-new"));
@@ -1186,7 +1324,68 @@ WHERE trace_id = ?1
 
         assert_eq!(deleted, expired_count as u64);
         assert_eq!(count_request_logs(&db), 1);
+        assert_eq!(count_usage_ledger(&db), expired_count as i64);
         assert!(request_log_exists(&db, "trace-new"));
+    }
+
+    #[test]
+    fn purge_expired_pauses_when_usage_ledger_state_is_incomplete_or_missing() {
+        let (_app, db, _dir) = init_test_db();
+        let day = 24 * 60 * 60;
+        let now = 200_000;
+        let cutoff = now - day;
+        insert_request_log_row(
+            &db,
+            "trace-retention-paused",
+            Some(200),
+            None,
+            10,
+            (cutoff - 1) * 1000,
+        );
+
+        let conn = db.open_connection().expect("open connection");
+        let target: i64 = conn
+            .query_row("SELECT MAX(id) FROM request_logs", [], |row| row.get(0))
+            .expect("read retention target");
+        conn.execute(
+            r#"
+UPDATE usage_ledger_backfill_state
+SET status = 'incomplete',
+    target_request_log_id = ?1,
+    last_request_log_id = 0,
+    completed_at = NULL
+WHERE id = 1
+"#,
+            [target],
+        )
+        .expect("mark ledger incomplete");
+        drop(conn);
+
+        assert_eq!(
+            purge_expired(&db, 1, now).expect("incomplete retention gate"),
+            0
+        );
+        assert!(request_log_exists(&db, "trace-retention-paused"));
+
+        let conn = db.open_connection().expect("open connection");
+        conn.execute("DELETE FROM usage_ledger_backfill_state", [])
+            .expect("remove ledger state");
+        drop(conn);
+        assert_eq!(
+            purge_expired(&db, 1, now).expect("missing retention gate"),
+            0
+        );
+        assert!(request_log_exists(&db, "trace-retention-paused"));
+
+        let conn = db.open_connection().expect("open connection");
+        conn.execute_batch("DROP TABLE usage_ledger_backfill_state;")
+            .expect("break ledger state table");
+        drop(conn);
+        assert_eq!(
+            purge_expired(&db, 1, now).expect("unreadable retention gate"),
+            0
+        );
+        assert!(request_log_exists(&db, "trace-retention-paused"));
     }
 
     #[test]
@@ -1215,6 +1414,18 @@ WHERE trace_id = ?1
             )
             .expect("read last activity");
         assert_eq!(value, 1_770_000_000_000);
+        let pending_ledger: (Option<i64>, bool, bool) = conn
+            .query_row(
+                r#"
+SELECT status, error_present, usage_present
+FROM usage_ledger
+WHERE trace_id = ?1
+"#,
+                ["trace-activity-init"],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("read pending usage ledger row");
+        assert_eq!(pending_ledger, (None, false, false));
     }
 
     #[test]
@@ -1430,6 +1641,36 @@ WHERE trace_id = ?1
             row.provider_chain_json.as_deref(),
             Some(r#"[{"provider":"anthropic"}]"#)
         );
+
+        let ledger_row: (Option<i64>, bool, Option<i64>, Option<i64>, Option<String>) = conn
+            .query_row(
+                r#"
+SELECT status, usage_present, input_tokens, output_tokens, requested_model
+FROM usage_ledger
+WHERE trace_id = ?1
+"#,
+                ["trace-late-placeholder"],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .expect("read usage ledger terminal row");
+        assert_eq!(
+            ledger_row,
+            (
+                Some(200),
+                true,
+                Some(12),
+                Some(34),
+                Some("claude-sonnet-4".to_string())
+            )
+        );
     }
 
     #[test]
@@ -1472,6 +1713,20 @@ WHERE trace_id = ?1
             fetch_lifecycle_row(&db, "trace-failed"),
             (None, Some("GW_UPSTREAM_TIMEOUT".to_string()), 30, 0, None)
         );
+
+        let conn = db.open_connection().expect("open connection");
+        let ledger_row: (Option<i64>, bool, bool, i64) = conn
+            .query_row(
+                r#"
+SELECT status, error_present, excluded_from_stats, duration_ms
+FROM usage_ledger
+WHERE trace_id = 'trace-pending'
+"#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("read reconciled usage ledger row");
+        assert_eq!(ledger_row, (Some(499), true, true, 10_000));
     }
 
     #[test]

@@ -1,15 +1,19 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { QueryClient } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   REQUEST_ATTEMPT_LOGS_DEFAULT_LIMIT,
   REQUEST_ATTEMPT_LOGS_MAX_LIMIT,
   REQUEST_LOGS_DEFAULT_LIMIT,
   REQUEST_LOGS_MAX_LIMIT,
+  REQUEST_LOGS_PAGE_DEFAULT_LIMIT,
   REQUEST_LOG_TRACE_ID_MAX_LENGTH,
   requestAttemptLogsByTraceId,
   requestLogGet,
+  requestLogsPageAll,
   requestLogsListAfterIdAll,
   requestLogsListAll,
+  type RequestLogPageFilters,
   type RequestLogSummary,
 } from "../../services/gateway/requestLogs";
 import { activeRequestLogsSnapshot } from "../../services/gateway/activeRequests";
@@ -28,6 +32,7 @@ import {
   useRequestLogDetailQuery,
   useRequestLogsIncrementalRefreshMutation,
   useRequestLogsListAllQuery,
+  useRequestLogsPageAllQuery,
 } from "../requestLogs";
 
 vi.mock("../../services/gateway/requestLogs", async () => {
@@ -37,6 +42,7 @@ vi.mock("../../services/gateway/requestLogs", async () => {
   return {
     ...actual,
     requestLogsListAll: vi.fn(),
+    requestLogsPageAll: vi.fn(),
     requestLogsListAfterIdAll: vi.fn(),
     requestLogGet: vi.fn(),
     requestAttemptLogsByTraceId: vi.fn(),
@@ -56,6 +62,13 @@ function makeRequestLogSummary(
     ...overrides,
   });
 }
+
+const PAGE_FILTERS: RequestLogPageFilters = {
+  cliKey: "codex",
+  status: { op: "gte", value: 400 },
+  errorCodeContains: "timeout",
+  methodPathContains: "POST /v1/responses",
+};
 
 describe("query/requestLogs", () => {
   afterEach(() => {
@@ -110,6 +123,120 @@ describe("query/requestLogs", () => {
       expect(requestLogsListAll).toHaveBeenCalledWith(REQUEST_LOGS_DEFAULT_LIMIT);
     });
     expect(client.getQueryState(requestLogsKeys.listAll(REQUEST_LOGS_DEFAULT_LIMIT))).toBeTruthy();
+  });
+
+  it("loads a filtered cursor page into an object-shaped cache bucket", async () => {
+    setTauriRuntime();
+    vi.mocked(requestLogsPageAll).mockResolvedValue({
+      items: [makeRequestLogSummary({ id: 8 }), makeRequestLogSummary({ id: 5 })],
+      nextCursor: "opaque-next",
+    });
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+    const { result } = renderHook(
+      () => useRequestLogsPageAllQuery(PAGE_FILTERS, "opaque-current", 100),
+      { wrapper }
+    );
+
+    await waitFor(() => {
+      expect(result.current.data?.items.map((row) => row.id)).toEqual([8, 5]);
+    });
+
+    expect(requestLogsPageAll).toHaveBeenCalledWith(PAGE_FILTERS, "opaque-current", 100);
+    expect(
+      client.getQueryData(requestLogsKeys.pageAll(PAGE_FILTERS, "opaque-current", 100))
+    ).toEqual({
+      items: [expect.objectContaining({ id: 8 }), expect.objectContaining({ id: 5 })],
+      nextCursor: "opaque-next",
+    });
+  });
+
+  it("uses the page default and preserves service order without client sorting", async () => {
+    setTauriRuntime();
+    vi.mocked(requestLogsPageAll).mockResolvedValue({
+      items: [
+        makeRequestLogSummary({ id: 1, created_at_ms: 1_000 }),
+        makeRequestLogSummary({ id: 2, created_at_ms: 2_000 }),
+      ],
+      nextCursor: null,
+    });
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+    const { result } = renderHook(() => useRequestLogsPageAllQuery(PAGE_FILTERS, null), {
+      wrapper,
+    });
+
+    await waitFor(() => {
+      expect(result.current.data?.items.map((row) => row.id)).toEqual([1, 2]);
+    });
+    expect(requestLogsPageAll).toHaveBeenCalledWith(
+      PAGE_FILTERS,
+      null,
+      REQUEST_LOGS_PAGE_DEFAULT_LIMIT
+    );
+  });
+
+  it("refetches the latest page after a completion arrives while history is active", async () => {
+    setTauriRuntime();
+    let latestItems = [makeRequestLogSummary({ id: 1 })];
+    vi.mocked(requestLogsPageAll).mockImplementation(async (_filters, cursor) => ({
+      items:
+        cursor == null ? latestItems : [makeRequestLogSummary({ id: 50, trace_id: "history-row" })],
+      nextCursor: cursor == null ? "opaque-history" : null,
+    }));
+
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false,
+          staleTime: 5 * 60 * 1000,
+        },
+      },
+    });
+    const wrapper = createQueryWrapper(client);
+    const { result, rerender } = renderHook(
+      ({ cursor }: { cursor: string | null }) =>
+        useRequestLogsPageAllQuery(PAGE_FILTERS, cursor, 50),
+      {
+        wrapper,
+        initialProps: { cursor: null as string | null },
+      }
+    );
+
+    await waitFor(() => {
+      expect(result.current.data?.items.map((row) => row.id)).toEqual([1]);
+    });
+
+    rerender({ cursor: "opaque-history" });
+    await waitFor(() => {
+      expect(result.current.data?.items.map((row) => row.id)).toEqual([50]);
+    });
+
+    latestItems = [
+      makeRequestLogSummary({ id: 2, trace_id: "completed-while-in-history" }),
+      makeRequestLogSummary({ id: 1 }),
+    ];
+    expect(
+      vi.mocked(requestLogsPageAll).mock.calls.filter(([, cursor]) => cursor == null)
+    ).toHaveLength(1);
+
+    rerender({ cursor: null });
+    await waitFor(() => {
+      expect(result.current.data?.items.map((row) => row.id)).toEqual([2, 1]);
+    });
+    expect(
+      vi.mocked(requestLogsPageAll).mock.calls.filter(([, cursor]) => cursor == null)
+    ).toHaveLength(2);
+
+    rerender({ cursor: "opaque-history" });
+    await waitFor(() => {
+      expect(result.current.data?.items.map((row) => row.id)).toEqual([50]);
+    });
+    expect(
+      vi.mocked(requestLogsPageAll).mock.calls.filter(([, cursor]) => cursor != null)
+    ).toHaveLength(1);
   });
 
   it("sorts rows from the backend list-all query", async () => {
@@ -193,6 +320,7 @@ describe("query/requestLogs", () => {
         query: null,
         session_id: "sess-1",
         requested_model: "gpt-5",
+        special_settings_json: null,
         created_at_ms: 1_000,
         last_activity_ms: 2_000,
         current_attempt: null,

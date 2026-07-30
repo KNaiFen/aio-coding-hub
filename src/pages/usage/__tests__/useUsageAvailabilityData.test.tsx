@@ -1,14 +1,14 @@
 import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useGatewayCircuitByProviderId } from "../../../query/gateway";
-import { useRequestLogsListAllQuery } from "../../../query/requestLogs";
-import { buildAvailabilityTimeline } from "../../../components/usage/usageAvailabilityTimeline";
+import { useUsageAvailabilityTimelineV1Query } from "../../../query/usage";
+import { buildAvailabilityTimelineFromBuckets } from "../../../components/usage/usageAvailabilityTimeline";
 import type { CustomDateRangeApplied } from "../../../hooks/useCustomDateRange";
-import type { UsagePeriod } from "../../../services/usage/usage";
+import type { UsagePeriod, UsageAvailabilityTimelineV1 } from "../../../services/usage/usage";
 import { useUsageAvailabilityData } from "../useUsageAvailabilityData";
 
-vi.mock("../../../query/requestLogs", () => ({
-  useRequestLogsListAllQuery: vi.fn(),
+vi.mock("../../../query/usage", () => ({
+  useUsageAvailabilityTimelineV1Query: vi.fn(),
 }));
 
 vi.mock("../../../query/gateway", () => ({
@@ -16,17 +16,26 @@ vi.mock("../../../query/gateway", () => ({
 }));
 
 vi.mock("../../../components/usage/usageAvailabilityTimeline", () => ({
-  buildAvailabilityTimeline: vi.fn(() => ({ providers: [] })),
+  buildAvailabilityTimelineFromBuckets: vi.fn(() => ({ providers: [] })),
 }));
 
-function makeLog(partial: Record<string, unknown>) {
+function makeTimeline(): UsageAvailabilityTimelineV1 {
   return {
-    id: partial.id ?? 1,
-    cli_key: partial.cli_key ?? "claude",
-    created_at_ms: partial.created_at_ms ?? Date.now(),
-    final_provider_id: partial.final_provider_id ?? 1,
-    ...partial,
-  } as any;
+    start_ms: 100_000,
+    end_ms: 200_000,
+    bucket_size_ms: 300_000,
+    buckets: [
+      {
+        cli_key: "claude",
+        provider_id: 9,
+        provider_name: "P9",
+        bucket_start_ms: 100_000,
+        requests_total: 2,
+        requests_success: 1,
+        total_duration_ms: 400,
+      },
+    ],
+  };
 }
 
 function mockCircuit(cli: string, circuitByProviderId: Record<number, unknown> = {}) {
@@ -42,19 +51,17 @@ type RangeHookProps = {
   customApplied: CustomDateRangeApplied | null;
 };
 
-function lastTimelineRange() {
-  const calls = vi.mocked(buildAvailabilityTimeline).mock.calls;
-  return calls[calls.length - 1]?.slice(2);
+function lastAvailabilityInput() {
+  const calls = vi.mocked(useUsageAvailabilityTimelineV1Query).mock.calls;
+  return calls[calls.length - 1]?.[0];
 }
 
 describe("pages/usage/useUsageAvailabilityData", () => {
   beforeEach(() => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-04-16T12:00:00Z"));
     vi.clearAllMocks();
 
-    vi.mocked(useRequestLogsListAllQuery).mockReturnValue({
-      data: null,
+    vi.mocked(useUsageAvailabilityTimelineV1Query).mockReturnValue({
+      data: undefined,
       isLoading: false,
       isFetching: false,
       refetch: vi.fn(),
@@ -64,9 +71,9 @@ describe("pages/usage/useUsageAvailabilityData", () => {
     );
   });
 
-  it("passes disabled state to query options and returns null data before logs load", () => {
-    vi.mocked(useRequestLogsListAllQuery).mockReturnValue({
-      data: null,
+  it("passes disabled state and a stable rolling range to the availability query", () => {
+    vi.mocked(useUsageAvailabilityTimelineV1Query).mockReturnValue({
+      data: undefined,
       isLoading: true,
       isFetching: true,
       refetch: vi.fn(),
@@ -82,30 +89,29 @@ describe("pages/usage/useUsageAvailabilityData", () => {
       })
     );
 
-    expect(useRequestLogsListAllQuery).toHaveBeenCalledWith(2000, {
-      enabled: false,
-      refetchIntervalMs: false,
-    });
+    expect(useUsageAvailabilityTimelineV1Query).toHaveBeenCalledWith(
+      {
+        lookbackMs: 24 * 60 * 60 * 1000,
+        startMs: null,
+        endMs: null,
+        cliKey: null,
+        providerId: null,
+      },
+      {
+        enabled: false,
+        refetchIntervalMs: false,
+      }
+    );
     expect(result.current.data).toBeNull();
     expect(result.current.loading).toBe(false);
     expect(result.current.refreshing).toBe(false);
-    expect(buildAvailabilityTimeline).not.toHaveBeenCalled();
+    expect(buildAvailabilityTimelineFromBuckets).not.toHaveBeenCalled();
   });
 
-  it("filters logs by daily range, cli, provider, and merged circuit map", () => {
-    const now = Date.now();
-    vi.mocked(useRequestLogsListAllQuery).mockReturnValue({
-      data: [
-        makeLog({ id: 1, cli_key: "claude", final_provider_id: 9, created_at_ms: now - 1_000 }),
-        makeLog({ id: 2, cli_key: "codex", final_provider_id: 9, created_at_ms: now - 1_000 }),
-        makeLog({ id: 3, cli_key: "claude", final_provider_id: 10, created_at_ms: now - 1_000 }),
-        makeLog({
-          id: 4,
-          cli_key: "claude",
-          final_provider_id: 9,
-          created_at_ms: now - 90_000_000,
-        }),
-      ],
+  it("pushes cli/provider filters down and merges circuit state into server buckets", () => {
+    const timeline = makeTimeline();
+    vi.mocked(useUsageAvailabilityTimelineV1Query).mockReturnValue({
+      data: timeline,
       isLoading: false,
       isFetching: true,
       refetch: vi.fn(),
@@ -128,33 +134,23 @@ describe("pages/usage/useUsageAvailabilityData", () => {
       })
     );
 
-    expect(useRequestLogsListAllQuery).toHaveBeenCalledWith(2000, {
-      enabled: true,
-      refetchIntervalMs: 15000,
+    expect(lastAvailabilityInput()).toEqual({
+      lookbackMs: 24 * 60 * 60 * 1000,
+      startMs: null,
+      endMs: null,
+      cliKey: "claude",
+      providerId: 9,
     });
-    expect(buildAvailabilityTimeline).toHaveBeenCalledWith(
-      [expect.objectContaining({ id: 1 })],
-      {
-        9: { provider_id: 9, state: "OPEN" },
-        10: { provider_id: 10, state: "CLOSED" },
-        11: { provider_id: 11, state: "HALF_OPEN" },
-      },
-      now - 24 * 60 * 60 * 1000,
-      now
-    );
+    expect(buildAvailabilityTimelineFromBuckets).toHaveBeenCalledWith(timeline, {
+      9: { provider_id: 9, state: "OPEN" },
+      10: { provider_id: 10, state: "CLOSED" },
+      11: { provider_id: 11, state: "HALF_OPEN" },
+    });
     expect(result.current.loading).toBe(false);
     expect(result.current.refreshing).toBe(true);
   });
 
-  it("builds weekly, monthly, all-time, and custom ranges", () => {
-    const now = Date.now();
-    vi.mocked(useRequestLogsListAllQuery).mockReturnValue({
-      data: [makeLog({ id: 1, created_at_ms: now })],
-      isLoading: false,
-      isFetching: false,
-      refetch: vi.fn(),
-    } as any);
-
+  it("builds weekly, monthly, all-time, and custom query ranges", () => {
     const initialRangeProps: RangeHookProps = { period: "weekly", customApplied: null };
     const { rerender } = renderHook(
       ({ period, customApplied }: RangeHookProps) =>
@@ -168,39 +164,50 @@ describe("pages/usage/useUsageAvailabilityData", () => {
       { initialProps: initialRangeProps }
     );
 
-    expect(lastTimelineRange()).toEqual([now - 7 * 24 * 60 * 60 * 1000, now]);
+    expect(lastAvailabilityInput()).toMatchObject({ lookbackMs: 7 * 24 * 60 * 60 * 1000 });
 
     rerender({ period: "monthly", customApplied: null });
-    expect(lastTimelineRange()).toEqual([now - 30 * 24 * 60 * 60 * 1000, now]);
+    expect(lastAvailabilityInput()).toMatchObject({ lookbackMs: 30 * 24 * 60 * 60 * 1000 });
 
     rerender({ period: "allTime", customApplied: null });
-    expect(lastTimelineRange()).toEqual([now - 90 * 24 * 60 * 60 * 1000, now]);
+    expect(lastAvailabilityInput()).toMatchObject({ lookbackMs: 90 * 24 * 60 * 60 * 1000 });
 
     rerender({
       period: "custom",
-      customApplied: { startTs: 100, endTs: 200, startDate: "2026-01-01", endDate: "2026-01-02" },
+      customApplied: {
+        startTs: 100,
+        endTs: 200,
+        startDate: "2026-01-01",
+        endDate: "2026-01-02",
+      },
     });
-    expect(lastTimelineRange()).toEqual([100_000, 200_000]);
+    expect(lastAvailabilityInput()).toMatchObject({
+      lookbackMs: null,
+      startMs: 100_000,
+      endMs: 200_000,
+    });
 
     rerender({ period: "custom", customApplied: null });
-    expect(lastTimelineRange()).toEqual([now - 24 * 60 * 60 * 1000, now]);
+    expect(lastAvailabilityInput()).toMatchObject({ lookbackMs: 24 * 60 * 60 * 1000 });
   });
 
-  it("refetches request logs and all cli circuit maps", () => {
-    const logsRefetch = vi.fn();
+  it("refetches availability and all four cli circuit maps", () => {
+    const availabilityRefetch = vi.fn();
     const claudeCircuit = mockCircuit("claude");
     const codexCircuit = mockCircuit("codex");
     const geminiCircuit = mockCircuit("gemini");
-    vi.mocked(useRequestLogsListAllQuery).mockReturnValue({
-      data: [],
+    const grokCircuit = mockCircuit("grok");
+    vi.mocked(useUsageAvailabilityTimelineV1Query).mockReturnValue({
+      data: makeTimeline(),
       isLoading: true,
       isFetching: true,
-      refetch: logsRefetch,
+      refetch: availabilityRefetch,
     } as any);
     vi.mocked(useGatewayCircuitByProviderId)
       .mockReturnValueOnce(claudeCircuit as any)
       .mockReturnValueOnce(codexCircuit as any)
-      .mockReturnValueOnce(geminiCircuit as any);
+      .mockReturnValueOnce(geminiCircuit as any)
+      .mockReturnValueOnce(grokCircuit as any);
 
     const { result } = renderHook(() =>
       useUsageAvailabilityData({
@@ -217,9 +224,10 @@ describe("pages/usage/useUsageAvailabilityData", () => {
 
     result.current.refetch();
 
-    expect(logsRefetch).toHaveBeenCalledTimes(1);
+    expect(availabilityRefetch).toHaveBeenCalledTimes(1);
     expect(claudeCircuit.refetch).toHaveBeenCalledTimes(1);
     expect(codexCircuit.refetch).toHaveBeenCalledTimes(1);
     expect(geminiCircuit.refetch).toHaveBeenCalledTimes(1);
+    expect(grokCircuit.refetch).toHaveBeenCalledTimes(1);
   });
 });

@@ -30,7 +30,7 @@ export type ProjectedRealtimeCard =
   | {
       kind: "active";
       trace: ActiveTraceSession;
-      activeRequest: ActiveRequest;
+      activeRequest: ActiveRequestSnapshotItem;
     }
   | {
       kind: "settling";
@@ -53,19 +53,24 @@ export type RequestActivityProjection = {
   summaryCount: number;
 };
 
+export type RequestLogProjectionOrder = "activity" | "source";
+
 export type BuildRequestActivityProjectionInput = {
   requestLogs: RequestLogSummary[];
-  activeRequests?: ActiveRequest[];
+  activeRequests?: ActiveRequestSnapshotItem[];
   traces: TraceSession[];
   nowMs: number;
   realtimeCardLimit: number;
+  requestLogOrder?: RequestLogProjectionOrder;
 };
 
-export type ActiveRequestSnapshotItem = ActiveRequest;
+export type ActiveRequestSnapshotItem = ActiveRequest & {
+  special_settings_json?: string | null;
+};
 
 type RequestActivitySourceIndex = {
-  activeByTraceId: Map<string, ActiveRequest>;
-  requestRowsSorted: RequestLogSummary[];
+  activeByTraceId: Map<string, ActiveRequestSnapshotItem>;
+  orderedRequestLogs: RequestLogSummary[];
   mergedTraceMap: Map<string, TraceSession>;
 };
 
@@ -88,7 +93,15 @@ function sortRequestLogsForActivity(a: RequestLogSummary, b: RequestLogSummary) 
   return b.id - a.id;
 }
 
-function traceFromActiveRequest(activeRequest: ActiveRequest): ActiveTraceSession {
+function activeRequestSpecialSettingsJson(activeRequest: ActiveRequestSnapshotItem): string | null {
+  return (
+    activeRequest.special_settings_json ??
+    activeRequest.current_attempt?.special_settings_json ??
+    null
+  );
+}
+
+function traceFromActiveRequest(activeRequest: ActiveRequestSnapshotItem): ActiveTraceSession {
   const createdAtMs = Number.isFinite(activeRequest.created_at_ms)
     ? Math.max(0, activeRequest.created_at_ms)
     : 0;
@@ -101,7 +114,7 @@ function traceFromActiveRequest(activeRequest: ActiveRequest): ActiveTraceSessio
     path: activeRequest.path,
     query: activeRequest.query ?? null,
     requested_model: currentAttempt?.requested_model ?? activeRequest.requested_model ?? null,
-    special_settings_json: currentAttempt?.special_settings_json ?? null,
+    special_settings_json: activeRequestSpecialSettingsJson(activeRequest),
     claude_model_mapping: currentAttempt?.claude_model_mapping ?? null,
     first_seen_ms: createdAtMs,
     last_seen_ms: Math.max(createdAtMs, activeRequest.last_activity_ms ?? 0),
@@ -111,7 +124,7 @@ function traceFromActiveRequest(activeRequest: ActiveRequest): ActiveTraceSessio
 
 function mergeTraceWithActiveRequestProgress(
   trace: TraceSession,
-  activeRequest: ActiveRequest
+  activeRequest: ActiveRequestSnapshotItem
 ): TraceSession {
   if (trace.summary) return trace;
 
@@ -140,7 +153,7 @@ function mergeTraceWithActiveRequestProgress(
       activeRequest.requested_model ??
       null,
     special_settings_json:
-      trace.special_settings_json ?? currentAttempt?.special_settings_json ?? null,
+      activeRequestSpecialSettingsJson(activeRequest) ?? trace.special_settings_json ?? null,
     claude_model_mapping:
       trace.claude_model_mapping ?? currentAttempt?.claude_model_mapping ?? null,
     last_seen_ms: Math.max(trace.last_seen_ms, activeRequest.last_activity_ms ?? 0),
@@ -150,19 +163,23 @@ function mergeTraceWithActiveRequestProgress(
 
 function buildRequestActivitySourceIndex(input: {
   requestLogs: RequestLogSummary[];
-  activeRequests: ActiveRequest[];
+  activeRequests: ActiveRequestSnapshotItem[];
   traces: TraceSession[];
+  requestLogOrder?: RequestLogProjectionOrder;
 }): RequestActivitySourceIndex {
-  const activeByTraceId = new Map<string, ActiveRequest>();
+  const activeByTraceId = new Map<string, ActiveRequestSnapshotItem>();
   for (const activeRequest of input.activeRequests) {
     const traceId = normalizeTraceId(activeRequest.trace_id);
     if (!traceId || activeByTraceId.has(traceId)) continue;
     activeByTraceId.set(traceId, activeRequest);
   }
 
-  const requestRowsSorted = input.requestLogs.slice().sort(sortRequestLogsForActivity);
+  const orderedRequestLogs =
+    input.requestLogOrder === "source"
+      ? input.requestLogs.slice()
+      : input.requestLogs.slice().sort(sortRequestLogsForActivity);
   const logsByTraceId = new Map<string, RequestLogSummary>();
-  for (const log of requestRowsSorted) {
+  for (const log of orderedRequestLogs) {
     const traceId = normalizeTraceId(log.trace_id);
     if (!traceId || logsByTraceId.has(traceId)) continue;
     logsByTraceId.set(traceId, log);
@@ -203,7 +220,7 @@ function buildRequestActivitySourceIndex(input: {
 
   return {
     activeByTraceId,
-    requestRowsSorted,
+    orderedRequestLogs,
     mergedTraceMap,
   };
 }
@@ -211,7 +228,7 @@ function buildRequestActivitySourceIndex(input: {
 function projectRealtimeCard(
   traceId: string,
   trace: TraceSession,
-  activeByTraceId: Map<string, ActiveRequest>,
+  activeByTraceId: Map<string, ActiveRequestSnapshotItem>,
   nowMs: number
 ): ProjectedRealtimeCard | null {
   if (trace.summary) {
@@ -265,11 +282,17 @@ export function shouldTickRequestActivityClock({
   activeRequests = [],
   traces,
   nowMs,
+  requestLogOrder,
 }: Pick<
   BuildRequestActivityProjectionInput,
-  "requestLogs" | "activeRequests" | "traces" | "nowMs"
+  "requestLogs" | "activeRequests" | "traces" | "nowMs" | "requestLogOrder"
 >) {
-  const index = buildRequestActivitySourceIndex({ requestLogs, activeRequests, traces });
+  const index = buildRequestActivitySourceIndex({
+    requestLogs,
+    activeRequests,
+    traces,
+    requestLogOrder,
+  });
   for (const [traceId, trace] of index.mergedTraceMap) {
     if (projectRealtimeCard(traceId, trace, index.activeByTraceId, nowMs)) return true;
   }
@@ -282,8 +305,14 @@ export function buildRequestActivityProjection({
   traces,
   nowMs,
   realtimeCardLimit,
+  requestLogOrder,
 }: BuildRequestActivityProjectionInput): RequestActivityProjection {
-  const index = buildRequestActivitySourceIndex({ requestLogs, activeRequests, traces });
+  const index = buildRequestActivitySourceIndex({
+    requestLogs,
+    activeRequests,
+    traces,
+    requestLogOrder,
+  });
   const realtimeCards = selectRealtimeCards(index, nowMs, realtimeCardLimit);
   const visibleRealtimeTraceIds = new Set(
     realtimeCards
@@ -292,7 +321,7 @@ export function buildRequestActivityProjection({
   );
 
   const requestRows: ProjectedRequestLogRow[] = [];
-  for (const log of index.requestRowsSorted) {
+  for (const log of index.orderedRequestLogs) {
     const traceId = normalizeTraceId(log.trace_id);
     if (traceId && visibleRealtimeTraceIds.has(traceId)) continue;
     requestRows.push({
@@ -303,7 +332,7 @@ export function buildRequestActivityProjection({
   }
 
   const summaryTraceIds = new Set<string>();
-  for (const log of index.requestRowsSorted) {
+  for (const log of index.orderedRequestLogs) {
     const traceId = normalizeTraceId(log.trace_id);
     if (traceId) summaryTraceIds.add(traceId);
   }

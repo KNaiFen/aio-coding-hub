@@ -1,4 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { ProjectedRealtimeCard } from "../../../services/gateway/requestActivityProjection";
 import { RealtimeTraceCards } from "../RealtimeTraceCards";
@@ -33,6 +34,7 @@ function cards(traces: any[]): ProjectedRealtimeCard[] {
             path: trace.path,
             query: trace.query ?? null,
             requested_model: trace.requested_model ?? null,
+            special_settings_json: trace.special_settings_json ?? null,
             created_at_ms: trace.first_seen_ms,
             last_activity_ms: trace.last_seen_ms,
             current_attempt: null,
@@ -42,6 +44,51 @@ function cards(traces: any[]): ProjectedRealtimeCard[] {
 }
 
 describe("components/home/RealtimeTraceCards", () => {
+  it("keeps the live Codex model visible beside a context compaction tooltip", async () => {
+    const user = userEvent.setup();
+    const baseTime = 1_700_000_000_000;
+
+    render(
+      <RealtimeTraceCards
+        folderLookupBySessionKey={new Map()}
+        cards={cards([
+          traceBase({
+            trace_id: "codex-compaction-live",
+            cli_key: "codex",
+            path: "/v1/responses",
+            requested_model: "gpt-5.5",
+            special_settings_json: JSON.stringify([
+              {
+                type: "codex_context_compaction",
+                mode: "remote",
+                implementation: "responses_compaction_v2",
+                trigger: "auto",
+                reason: "model_downshift",
+                phase: "mid_turn",
+                strategy: "prefix_compaction",
+              },
+            ]),
+            first_seen_ms: baseTime - 1_000,
+            last_seen_ms: baseTime - 100,
+          }),
+        ])}
+        nowMs={baseTime}
+        formatUnixSeconds={(ts) => String(ts)}
+        showCustomTooltip
+      />
+    );
+
+    expect(screen.getByTitle("Codex / gpt-5.5-medium")).toBeInTheDocument();
+    const badge = screen.getByText("上下文压缩 · 远程");
+    await user.hover(badge);
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("实现：远程 v2（responses_compaction_v2）");
+    expect(tooltip).toHaveTextContent("触发：自动（auto）");
+    expect(tooltip).toHaveTextContent("原因：模型降级（model_downshift）");
+    expect(tooltip).toHaveTextContent("阶段：轮次中（mid_turn）");
+    expect(tooltip).toHaveTextContent("策略：前缀压缩（prefix_compaction）");
+  });
+
   it("does not start its own timer when cards list is empty", () => {
     const setIntervalSpy = vi.spyOn(window, "setInterval");
     render(

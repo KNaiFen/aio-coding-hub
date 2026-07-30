@@ -70,6 +70,7 @@ describe("generated/bindings.ts contract", () => {
     expect(bindingsSource).toContain("sort_modes_list");
     expect(bindingsSource).toContain("provider_limit_usage_v1");
     expect(bindingsSource).toContain("usage_summary_v2");
+    expect(bindingsSource).toContain("usage_availability_timeline_v1");
     for (const removedCostCommand of [
       "cost_summary_v1",
       "cost_trend_v1",
@@ -95,6 +96,21 @@ describe("generated/bindings.ts contract", () => {
     expect(bindingsSource).toContain("config_export");
     expect(bindingsSource).toContain("cli_update");
     expect(bindingsSource).toContain("providers_reorder");
+  });
+
+  it("exports the compact usage availability timeline contract", () => {
+    expect(extractTypeBody(bindingsSource, "UsageAvailabilityBucketV1")).toContain(
+      "requests_success: number"
+    );
+    expect(extractTypeBody(bindingsSource, "UsageAvailabilityBucketV1")).toContain(
+      "total_duration_ms: number"
+    );
+    expect(extractTypeBody(bindingsSource, "UsageAvailabilityTimelineV1")).toContain(
+      "buckets: UsageAvailabilityBucketV1[]"
+    );
+    expect(extractGeneratedCommand(bindingsSource, "usageAvailabilityTimelineV1")).toContain(
+      'TAURI_INVOKE("usage_availability_timeline_v1", { params })'
+    );
   });
 
   it("exports the home usage period literals used by runtime settings", () => {

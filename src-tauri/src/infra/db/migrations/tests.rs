@@ -2359,6 +2359,338 @@ fn fresh_baseline_includes_route_session_reuse_priorities() {
 }
 
 #[test]
+fn fresh_baseline_creates_complete_usage_ledger_schema() {
+    let mut conn = Connection::open_in_memory().expect("open fresh migration db");
+
+    apply_migrations(&mut conn).expect("initialize fresh database");
+
+    let user_version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("read fresh user version");
+    assert_eq!(user_version, 43);
+    for object in [
+        ("table", "usage_ledger"),
+        ("table", "usage_ledger_backfill_state"),
+        ("view", "usage_events"),
+        ("index", "idx_usage_ledger_created_at"),
+    ] {
+        let exists: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = ?1 AND name = ?2)",
+                [object.0, object.1],
+                |row| row.get(0),
+            )
+            .expect("inspect fresh usage ledger object");
+        assert!(exists, "fresh schema is missing {} {}", object.0, object.1);
+    }
+
+    let view_sql: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'view' AND name = 'usage_events'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read usage events view definition");
+    let normalized_view_sql = view_sql.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        normalized_view_sql.contains(
+            "FROM backfill_mode mode CROSS JOIN request_logs r WHERE mode.is_complete = 0"
+        ),
+        "usage_events must gate request_logs before scanning the detail source"
+    );
+
+    let state: (String, i64, i64, Option<i64>) = conn
+        .query_row(
+            r#"
+SELECT status, target_request_log_id, last_request_log_id, completed_at
+FROM usage_ledger_backfill_state
+WHERE id = 1
+"#,
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .expect("read fresh usage ledger state");
+    assert_eq!(state.0, "complete");
+    assert_eq!((state.1, state.2), (0, 0));
+    assert!(state.3.is_some());
+
+    let ledger_columns: std::collections::HashSet<String> = {
+        let mut statement = conn
+            .prepare("PRAGMA table_info(usage_ledger)")
+            .expect("prepare usage ledger columns");
+        statement
+            .query_map([], |row| row.get(1))
+            .expect("query usage ledger columns")
+            .collect::<Result<_, _>>()
+            .expect("read usage ledger columns")
+    };
+    for forbidden in [
+        "attempts_json",
+        "special_settings_json",
+        "usage_json",
+        "error_code",
+    ] {
+        assert!(
+            !ledger_columns.contains(forbidden),
+            "usage ledger must not persist {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn usage_events_normalizes_incomplete_rows_and_matches_completed_ledger() {
+    let mut conn = Connection::open_in_memory().expect("open usage-events migration db");
+    apply_migrations(&mut conn).expect("create current schema");
+    conn.execute(
+        r#"
+INSERT INTO request_logs(
+  trace_id,
+  cli_key,
+  session_id,
+  method,
+  path,
+  status,
+  duration_ms,
+  ttfb_ms,
+  visible_ttfb_ms,
+  attempts_json,
+  created_at,
+  created_at_ms,
+  input_tokens,
+  output_tokens,
+  usage_json,
+  requested_model,
+  special_settings_json,
+  excluded_from_stats
+) VALUES (
+  'normalized-usage-event',
+  'claude',
+  'session-normalized',
+  'POST',
+  '/v1/messages',
+  200,
+  25,
+  5,
+  5,
+  '[
+    {"provider_id":77,"provider_name":" \t\n","outcome":"success"},
+    {"provider_id":"broken","provider_name":"Malformed","outcome":"success"},
+    {"provider_id":9223372036854775808,"provider_name":"Overflow","outcome":"success"}
+  ]',
+  10,
+  10000,
+  100,
+  20,
+  '{"input_tokens":100,"output_tokens":20}',
+  'client-model',
+  '[
+    {
+      "type":"cx2cc_cost_basis",
+      "bridge_provider_id":77,
+      "source_cli_key":"codex",
+      "priced_model":"gpt-priced"
+    },
+    {
+      "type":"codex_service_tier_result",
+      "effectivePriority":true
+    }
+  ]',
+  0
+)
+"#,
+        [],
+    )
+    .expect("insert normalized usage event fixture");
+    let request_log_id: i64 = conn
+        .query_row(
+            "SELECT id FROM request_logs WHERE trace_id = 'normalized-usage-event'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read normalized request id");
+    conn.execute(
+        r#"
+UPDATE usage_ledger_backfill_state
+SET status = 'incomplete',
+    target_request_log_id = ?1,
+    last_request_log_id = 0,
+    completed_at = NULL
+WHERE id = 1
+"#,
+        [request_log_id],
+    )
+    .expect("mark normalized fixture incomplete");
+
+    let read_normalized = |conn: &Connection| {
+        conn.query_row(
+            r#"
+SELECT
+  final_provider_id,
+  provider_name_snapshot,
+  usage_present,
+  persisted_openai_input_semantics,
+  cost_basis_cli_key,
+  cost_basis_model,
+  priority_service_tier_applied,
+  error_present
+FROM usage_events
+WHERE trace_id = 'normalized-usage-event'
+"#,
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, Option<i64>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, bool>(2)?,
+                    row.get::<_, bool>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, bool>(6)?,
+                    row.get::<_, bool>(7)?,
+                ))
+            },
+        )
+        .expect("read normalized usage event")
+    };
+    let expected = (
+        Some(77),
+        None,
+        true,
+        true,
+        Some("codex".to_string()),
+        Some("gpt-priced".to_string()),
+        true,
+        false,
+    );
+    assert_eq!(read_normalized(&conn), expected);
+
+    crate::usage_ledger::project_trace(&conn, "normalized-usage-event")
+        .expect("project normalized usage event");
+    conn.execute(
+        r#"
+UPDATE usage_ledger_backfill_state
+SET status = 'complete',
+    last_request_log_id = target_request_log_id,
+    completed_at = 11,
+    updated_at = 11
+WHERE id = 1
+"#,
+        [],
+    )
+    .expect("complete normalized fixture");
+    assert_eq!(read_normalized(&conn), expected);
+}
+
+#[test]
+fn migrate_v42_to_v43_records_fixed_high_water_without_sync_backfill() {
+    let mut conn = Connection::open_in_memory().expect("open v42 migration db");
+    baseline_v25::create_baseline_v25(&mut conn).expect("create current fixture schema");
+    conn.execute_batch(
+        r#"
+DROP VIEW usage_events;
+DROP TABLE usage_ledger_backfill_state;
+DROP TABLE usage_ledger;
+INSERT INTO request_logs(
+  id, trace_id, cli_key, method, path, attempts_json, created_at, created_at_ms
+) VALUES
+  (4, 'upgrade-trace-4', 'claude', 'POST', '/v1/messages', '[]', 4, 4000),
+  (9, 'upgrade-trace-9', 'codex', 'POST', '/v1/responses', '[]', 9, 9000);
+PRAGMA user_version = 42;
+"#,
+    )
+    .expect("create v42 usage fixture");
+
+    v42_to_v43::migrate_v42_to_v43(&mut conn).expect("migrate v42->v43");
+
+    let state: (String, i64, i64, Option<i64>) = conn
+        .query_row(
+            r#"
+SELECT status, target_request_log_id, last_request_log_id, completed_at
+FROM usage_ledger_backfill_state
+WHERE id = 1
+"#,
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .expect("read upgraded usage ledger state");
+    assert_eq!(state, ("incomplete".to_string(), 9, 0, None));
+    let ledger_count: i64 = conn
+        .query_row("SELECT COUNT(1) FROM usage_ledger", [], |row| row.get(0))
+        .expect("count migration-time usage rows");
+    assert_eq!(ledger_count, 0, "v43 migration must remain DDL-only");
+}
+
+#[test]
+fn ensure_repairs_missing_usage_ledger_as_incomplete() {
+    let mut conn = Connection::open_in_memory().expect("open current migration db");
+    apply_migrations(&mut conn).expect("create current schema");
+    conn.execute(
+        r#"
+INSERT INTO request_logs(
+  trace_id, cli_key, method, path, attempts_json, created_at, created_at_ms
+) VALUES ('ensure-ledger-trace', 'claude', 'POST', '/v1/messages', '[]', 7, 7000)
+"#,
+        [],
+    )
+    .expect("seed request log before schema drift");
+    let target_id: i64 = conn
+        .query_row(
+            "SELECT id FROM request_logs WHERE trace_id = 'ensure-ledger-trace'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read schema drift target");
+    conn.execute_batch(
+        r#"
+DROP VIEW usage_events;
+DROP TABLE usage_ledger_backfill_state;
+DROP TABLE usage_ledger;
+"#,
+    )
+    .expect("create usage ledger schema drift");
+
+    apply_migrations(&mut conn).expect("repair usage ledger schema");
+
+    let state: (String, i64, i64) = conn
+        .query_row(
+            r#"
+SELECT status, target_request_log_id, last_request_log_id
+FROM usage_ledger_backfill_state
+WHERE id = 1
+"#,
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("read repaired usage ledger state");
+    assert_eq!(state, ("incomplete".to_string(), target_id, 0));
+}
+
+#[test]
+fn ensure_restores_usage_ledger_created_at_index() {
+    let mut conn = Connection::open_in_memory().expect("open current migration db");
+    apply_migrations(&mut conn).expect("create current schema");
+    conn.execute_batch("DROP INDEX idx_usage_ledger_created_at;")
+        .expect("drop standalone usage ledger time index");
+
+    apply_migrations(&mut conn).expect("repair usage ledger indexes");
+
+    let exists: bool = conn
+        .query_row(
+            r#"
+SELECT EXISTS(
+  SELECT 1
+  FROM sqlite_master
+  WHERE type = 'index' AND name = 'idx_usage_ledger_created_at'
+)
+"#,
+            [],
+            |row| row.get(0),
+        )
+        .expect("inspect repaired usage ledger time index");
+    assert!(exists);
+}
+
+#[test]
 fn ensure_patches_restore_route_session_reuse_priorities_on_schema_drift() {
     let mut conn = Connection::open_in_memory().expect("open current-schema migration db");
     baseline_v25::create_baseline_v25(&mut conn).expect("create current baseline");

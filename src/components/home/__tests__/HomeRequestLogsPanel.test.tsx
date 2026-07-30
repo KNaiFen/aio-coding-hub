@@ -4,7 +4,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import type { CliSessionsFolderLookupEntry } from "../../../services/cli/cliSessions";
 import type { RequestLogSummary } from "../../../services/gateway/requestLogs";
-import type { ActiveRequestSnapshotItem } from "../../../services/gateway/requestActivityProjection";
+import type {
+  ActiveRequestSnapshotItem,
+  RequestLogProjectionOrder,
+} from "../../../services/gateway/requestActivityProjection";
 import {
   createRequestLogRouteHop,
   createRequestLogSummary,
@@ -41,6 +44,7 @@ function activeRequest(
     path: "/v1/messages",
     query: null,
     requested_model: "claude-3-opus",
+    special_settings_json: null,
     created_at_ms: Date.now(),
     last_activity_ms: Date.now(),
     ...overrides,
@@ -50,7 +54,7 @@ function activeRequest(
 
 describe("components/home/HomeRequestLogsPanel", () => {
   afterEach(() => {
-    localStorage.removeItem("home_request_logs_compact");
+    window.localStorage?.removeItem("home_request_logs_compact");
     vi.useRealTimers();
     useCliSessionsFolderLookupByIdsQueryMock.mockReset();
     useCliSessionsFolderLookupByIdsQueryMock.mockReturnValue({ data: [], isLoading: false });
@@ -161,6 +165,125 @@ describe("components/home/HomeRequestLogsPanel", () => {
 
     fireEvent.click(screen.getByRole("switch", { name: "最近使用记录简洁模式" }));
     expect(screen.getAllByText("Codex 系统请求")).toHaveLength(1);
+  });
+
+  it("keeps Codex model names and renders validated context compaction badges", () => {
+    const compactionMarker = (
+      mode: "local" | "remote" | "unknown",
+      implementation: "responses" | "responses_compact" | "responses_compaction_v2" | "unknown"
+    ) => ({
+      type: "codex_context_compaction",
+      mode,
+      implementation,
+      trigger: implementation === "responses" ? "manual" : "auto",
+      reason: implementation === "responses" ? "user_requested" : "context_limit",
+      phase: implementation === "responses" ? "standalone_turn" : "pre_turn",
+      strategy: implementation === "responses" ? "memento" : "prefix_compaction",
+    });
+
+    render(
+      <MemoryRouter>
+        <HomeRequestLogsPanel
+          displayOptions={{ customTooltip: false }}
+          compactModeOverride={false}
+          traces={[]}
+          requestLogs={makeRequestLogs([
+            {
+              id: 11,
+              trace_id: "codex-local-compaction",
+              cli_key: "codex",
+              path: "/v1/responses",
+              requested_model: "gpt-local-marker",
+              special_settings_json: JSON.stringify([compactionMarker("local", "responses")]),
+            },
+            {
+              id: 12,
+              trace_id: "codex-remote-v1-compaction",
+              cli_key: "codex",
+              path: "/v1/responses/compact",
+              requested_model: "gpt-remote-v1-marker",
+              special_settings_json: JSON.stringify([
+                compactionMarker("remote", "responses_compact"),
+              ]),
+            },
+            {
+              id: 13,
+              trace_id: "codex-remote-v2-compaction",
+              cli_key: "codex",
+              path: "/v1/responses",
+              requested_model: "gpt-remote-v2-marker",
+              special_settings_json: JSON.stringify([
+                compactionMarker("remote", "responses_compaction_v2"),
+              ]),
+            },
+            {
+              id: 14,
+              trace_id: "codex-unknown-compaction",
+              cli_key: "codex",
+              path: "/v1/responses",
+              requested_model: "gpt-unknown-marker",
+              special_settings_json: JSON.stringify([
+                {
+                  ...compactionMarker("unknown", "unknown"),
+                  trigger: "unknown",
+                  reason: "unknown",
+                  phase: "unknown",
+                  strategy: "unknown",
+                },
+              ]),
+            },
+            {
+              id: 15,
+              trace_id: "codex-future-compaction",
+              cli_key: "codex",
+              path: "/v1/responses",
+              requested_model: "gpt-future-marker",
+              special_settings_json: JSON.stringify([
+                {
+                  ...compactionMarker("remote", "responses_compact"),
+                  strategy: "future_strategy",
+                },
+              ]),
+            },
+            {
+              id: 16,
+              trace_id: "claude-spoofed-compaction",
+              cli_key: "claude",
+              requested_model: "claude-marker",
+              special_settings_json: JSON.stringify([compactionMarker("local", "responses")]),
+            },
+          ])}
+          requestLogsLoading={false}
+          requestLogsRefreshing={false}
+          requestLogsAvailable={true}
+          onRefreshRequestLogs={vi.fn()}
+          selectedLogId={null}
+          onSelectLogId={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText("gpt-local-marker-unknown")).toBeInTheDocument();
+    expect(screen.getByText("gpt-remote-v1-marker-unknown")).toBeInTheDocument();
+    expect(screen.getByText("gpt-remote-v2-marker-unknown")).toBeInTheDocument();
+
+    const localBadge = screen.getByText("上下文压缩 · 本地");
+    expect(localBadge).toHaveAttribute("title", expect.stringContaining("实现：本地（responses）"));
+
+    const remoteTitles = screen
+      .getAllByText("上下文压缩 · 远程")
+      .map((badge) => badge.getAttribute("title"));
+    expect(remoteTitles).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("实现：远程 v1（responses_compact）"),
+        expect.stringContaining("实现：远程 v2（responses_compaction_v2）"),
+      ])
+    );
+    expect(screen.getByText("上下文压缩 · 未知")).toHaveAttribute(
+      "title",
+      expect.stringContaining("实现：未知")
+    );
+    expect(screen.queryAllByText(/上下文压缩 ·/)).toHaveLength(4);
   });
 
   it("renders traces + logs and supports refresh/select", () => {
@@ -1087,7 +1210,7 @@ describe("components/home/HomeRequestLogsPanel", () => {
     expect(screen.queryByText("当前没有最近使用记录")).not.toBeInTheDocument();
   });
 
-  it("places interrupted audit rows after terminal history even when they are newer", () => {
+  it("keeps Home activity order by default and supports preserving source order", () => {
     const nowMs = Date.now();
     const requestLogs = makeRequestLogs([
       {
@@ -1116,7 +1239,7 @@ describe("components/home/HomeRequestLogsPanel", () => {
       },
     ]);
 
-    render(
+    const renderPanel = (requestLogOrder?: RequestLogProjectionOrder) => (
       <MemoryRouter>
         <HomeRequestLogsPanel
           displayOptions={{ customTooltip: false }}
@@ -1126,18 +1249,29 @@ describe("components/home/HomeRequestLogsPanel", () => {
           requestLogsLoading={false}
           requestLogsRefreshing={false}
           requestLogsAvailable={true}
+          requestLogOrder={requestLogOrder}
           onRefreshRequestLogs={vi.fn()}
           selectedLogId={null}
           onSelectLogId={vi.fn()}
         />
       </MemoryRouter>
     );
+    const view = render(renderPanel());
 
     const completedButton = screen.getByRole("button", { name: /completed-older-model/ });
     const interruptedButton = screen.getByRole("button", { name: /interrupted-newer-model/ });
     expect(screen.queryByText("进行中")).not.toBeInTheDocument();
     expect(screen.getByText("未完成")).toBeInTheDocument();
     expect(completedButton.compareDocumentPosition(interruptedButton)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    );
+
+    view.rerender(renderPanel("source"));
+    const sourceCompletedButton = screen.getByRole("button", { name: /completed-older-model/ });
+    const sourceInterruptedButton = screen.getByRole("button", {
+      name: /interrupted-newer-model/,
+    });
+    expect(sourceInterruptedButton.compareDocumentPosition(sourceCompletedButton)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING
     );
   });

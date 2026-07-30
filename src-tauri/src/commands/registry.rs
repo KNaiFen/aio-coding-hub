@@ -217,6 +217,7 @@ macro_rules! generated_command_registry {
             // ── request_logs ──
             request_logs_list => crate::commands::request_logs::request_logs_list,
             request_logs_list_all => crate::commands::request_logs::request_logs_list_all,
+            request_logs_page_all => crate::commands::request_logs::request_logs_page_all,
             request_logs_list_after_id => crate::commands::request_logs::request_logs_list_after_id,
             request_logs_list_after_id_all => crate::commands::request_logs::request_logs_list_after_id_all,
             request_log_get => crate::commands::request_logs::request_log_get,
@@ -232,6 +233,7 @@ macro_rules! generated_command_registry {
             // ── usage ──
             usage_summary => crate::commands::usage::usage_summary,
             usage_summary_v2 => crate::commands::usage::usage_summary_v2,
+            usage_availability_timeline_v1 => crate::commands::usage::usage_availability_timeline_v1,
             usage_leaderboard_provider => crate::commands::usage::usage_leaderboard_provider,
             usage_leaderboard_day => crate::commands::usage::usage_leaderboard_day,
             usage_leaderboard_v2 => crate::commands::usage::usage_leaderboard_v2,
@@ -372,6 +374,22 @@ mod tests {
         assert!(
             generated_command_names().contains(&"model_price_upsert"),
             "model_price_upsert should stay in the shared generated command registry"
+        );
+    }
+
+    #[test]
+    fn includes_request_logs_page_all_in_generated_command_registry() {
+        assert!(
+            generated_command_names().contains(&"request_logs_page_all"),
+            "request_logs_page_all should stay in the shared generated command registry"
+        );
+    }
+
+    #[test]
+    fn includes_usage_availability_timeline_in_generated_command_registry() {
+        assert!(
+            generated_command_names().contains(&"usage_availability_timeline_v1"),
+            "usage availability should stay in the shared generated command registry"
         );
     }
 

@@ -3,10 +3,13 @@
 use crate::app_paths;
 use crate::db;
 use crate::shared::error::db_err;
+use crate::usage_ledger;
 use rusqlite::TransactionBehavior;
 use serde::Serialize;
 use std::io;
 use std::path::{Path, PathBuf};
+
+const USAGE_LEDGER_COVERAGE_INCOMPLETE_ERROR_CODE: &str = "USAGE_LEDGER_COVERAGE_INCOMPLETE";
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct DbDiskUsage {
@@ -112,6 +115,25 @@ fn db_compact_at(db_path: &Path, db: &db::Db) -> crate::shared::error::AppResult
     })
 }
 
+fn request_logs_have_usage_ledger_coverage(conn: &rusqlite::Connection) -> rusqlite::Result<bool> {
+    conn.query_row(
+        r#"
+SELECT NOT EXISTS (
+  SELECT 1
+  FROM request_logs request
+  WHERE NOT EXISTS (
+    SELECT 1
+    FROM usage_ledger ledger
+    WHERE ledger.request_log_id = request.id
+      AND ledger.trace_id = request.trace_id
+  )
+)
+"#,
+        [],
+        |row| row.get(0),
+    )
+}
+
 pub fn request_logs_clear_all(
     db: &db::Db,
 ) -> crate::shared::error::AppResult<ClearRequestLogsResult> {
@@ -122,6 +144,23 @@ pub fn request_logs_clear_all(
     let tx = conn
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|e| db_err!("failed to start transaction: {e}"))?;
+
+    let backfill_complete = usage_ledger::is_backfill_complete(&tx)
+        .map_err(|e| db_err!("failed to read usage ledger backfill state: {e}"))?;
+    if !backfill_complete {
+        return Err(crate::shared::error::AppError::new(
+            usage_ledger::USAGE_LEDGER_BACKFILL_INCOMPLETE_ERROR_CODE,
+            "usage ledger backfill is incomplete; request logs were not cleared",
+        ));
+    }
+    let has_full_coverage = request_logs_have_usage_ledger_coverage(&tx)
+        .map_err(|e| db_err!("failed to verify usage ledger coverage: {e}"))?;
+    if !has_full_coverage {
+        return Err(crate::shared::error::AppError::new(
+            USAGE_LEDGER_COVERAGE_INCOMPLETE_ERROR_CODE,
+            "usage ledger coverage is incomplete; request logs were not cleared",
+        ));
+    }
 
     let request_logs_deleted = tx
         .execute("DELETE FROM request_logs", [])
@@ -175,7 +214,9 @@ pub fn app_data_reset<R: tauri::Runtime>(
 
 #[cfg(test)]
 mod tests {
-    use super::db_compact_at;
+    use super::{
+        db_compact_at, request_logs_clear_all, USAGE_LEDGER_COVERAGE_INCOMPLETE_ERROR_CODE,
+    };
     use rusqlite::params;
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -209,6 +250,21 @@ INSERT INTO request_logs (
         let conn = db.open_connection().expect("open connection");
         conn.query_row("SELECT COUNT(1) FROM request_logs", [], |row| row.get(0))
             .expect("count request logs")
+    }
+
+    fn count_usage_ledger(db: &crate::db::Db) -> i64 {
+        let conn = db.open_connection().expect("open connection");
+        conn.query_row("SELECT COUNT(1) FROM usage_ledger", [], |row| row.get(0))
+            .expect("count usage ledger")
+    }
+
+    fn project_request_log_to_ledger(db: &crate::db::Db, trace_id: &str) {
+        let conn = db.open_connection().expect("open connection");
+        assert_eq!(
+            crate::usage_ledger::project_trace(&conn, trace_id)
+                .expect("project request log to usage ledger"),
+            1
+        );
     }
 
     #[test]
@@ -262,5 +318,60 @@ INSERT INTO request_logs (
             4,
             "rows must survive failed compact"
         );
+    }
+
+    #[test]
+    fn request_logs_clear_all_rejects_incomplete_backfill_without_deleting() {
+        let (db, _db_path, _dir) = init_test_db();
+        insert_request_log_rows(&db, 1);
+        {
+            let conn = db.open_connection().expect("open connection");
+            conn.execute(
+                r#"
+UPDATE usage_ledger_backfill_state
+SET
+  status = 'incomplete',
+  target_request_log_id = (SELECT MAX(id) FROM request_logs),
+  last_request_log_id = 0,
+  completed_at = NULL
+WHERE id = 1
+"#,
+                [],
+            )
+            .expect("mark usage ledger backfill incomplete");
+        }
+
+        let error = request_logs_clear_all(&db).expect_err("incomplete backfill must block clear");
+        assert_eq!(
+            error.code(),
+            crate::usage_ledger::USAGE_LEDGER_BACKFILL_INCOMPLETE_ERROR_CODE
+        );
+        assert_eq!(count_request_logs(&db), 1);
+        assert_eq!(count_usage_ledger(&db), 0);
+    }
+
+    #[test]
+    fn request_logs_clear_all_rejects_missing_ledger_coverage_without_deleting() {
+        let (db, _db_path, _dir) = init_test_db();
+        insert_request_log_rows(&db, 1);
+
+        let error =
+            request_logs_clear_all(&db).expect_err("missing ledger coverage must block clear");
+        assert_eq!(error.code(), USAGE_LEDGER_COVERAGE_INCOMPLETE_ERROR_CODE);
+        assert_eq!(count_request_logs(&db), 1);
+        assert_eq!(count_usage_ledger(&db), 0);
+    }
+
+    #[test]
+    fn request_logs_clear_all_preserves_usage_ledger_after_backfill() {
+        let (db, _db_path, _dir) = init_test_db();
+        insert_request_log_rows(&db, 1);
+        project_request_log_to_ledger(&db, "trace-compact-0");
+
+        let result = request_logs_clear_all(&db).expect("clear request logs");
+
+        assert_eq!(result.request_logs_deleted, 1);
+        assert_eq!(count_request_logs(&db), 0);
+        assert_eq!(count_usage_ledger(&db), 1);
     }
 }

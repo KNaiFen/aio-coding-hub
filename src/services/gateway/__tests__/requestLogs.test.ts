@@ -6,12 +6,15 @@ import {
   REQUEST_ATTEMPT_LOGS_MAX_LIMIT,
   REQUEST_LOGS_MAX_LIMIT,
   REQUEST_LOGS_MIN_LIMIT,
+  REQUEST_LOGS_PAGE_MAX_LIMIT,
   REQUEST_LOG_TRACE_ID_MAX_LENGTH,
+  type RequestLogPageFilters,
   type RequestAttemptLog,
   normalizeRequestAttemptLogsLimit,
   normalizeRequestLogCursorId,
   normalizeRequestLogId,
   normalizeRequestLogTraceId,
+  normalizeRequestLogsPageLimit,
   normalizeRequestLogsLimit,
   requestAttemptLogsByTraceId,
   requestLogGet,
@@ -20,6 +23,7 @@ import {
   requestLogsListAfterId,
   requestLogsListAfterIdAll,
   requestLogsListAll,
+  requestLogsPageAll,
 } from "../requestLogs";
 
 vi.mock("../../../generated/bindings", async () => {
@@ -32,6 +36,7 @@ vi.mock("../../../generated/bindings", async () => {
       ...actual.commands,
       requestLogsList: vi.fn(),
       requestLogsListAll: vi.fn(),
+      requestLogsPageAll: vi.fn(),
       requestLogsListAfterId: vi.fn(),
       requestLogsListAfterIdAll: vi.fn(),
       requestLogGet: vi.fn(),
@@ -148,6 +153,56 @@ describe("services/gateway/requestLogs", () => {
     expect(commands.requestLogGet).toHaveBeenCalledWith(1);
     expect(commands.requestLogGetByTraceId).toHaveBeenCalledWith("t1");
     expect(commands.requestAttemptLogsByTraceId).toHaveBeenCalledWith("t1", 99);
+  });
+
+  it("passes page filters and preserves backend page order", async () => {
+    const filters: RequestLogPageFilters = {
+      cliKey: "codex",
+      status: { op: "gte", value: 400 },
+      errorCodeContains: "timeout",
+      methodPathContains: "POST /v1/responses",
+    };
+    vi.mocked(commands.requestLogsPageAll).mockResolvedValueOnce({
+      status: "ok",
+      data: {
+        items: [
+          createRequestLogSummary({ id: 9, cli_key: "codex" }),
+          createRequestLogSummary({ id: 7, cli_key: "codex" }),
+        ],
+        nextCursor: "opaque-next",
+      },
+    });
+
+    await expect(requestLogsPageAll(filters, "opaque-current", 100)).resolves.toEqual({
+      items: [
+        expect.objectContaining({ id: 9, cli_key: "codex" }),
+        expect.objectContaining({ id: 7, cli_key: "codex" }),
+      ],
+      nextCursor: "opaque-next",
+    });
+    expect(commands.requestLogsPageAll).toHaveBeenCalledWith(filters, "opaque-current", 100);
+  });
+
+  it("strictly validates request log page limits before ipc", async () => {
+    const filters: RequestLogPageFilters = {
+      cliKey: null,
+      status: null,
+      errorCodeContains: null,
+      methodPathContains: null,
+    };
+    vi.mocked(commands.requestLogsPageAll).mockClear();
+
+    expect(normalizeRequestLogsPageLimit(undefined)).toBeNull();
+    expect(normalizeRequestLogsPageLimit(1)).toBe(1);
+    expect(normalizeRequestLogsPageLimit(REQUEST_LOGS_PAGE_MAX_LIMIT)).toBe(
+      REQUEST_LOGS_PAGE_MAX_LIMIT
+    );
+    await expect(requestLogsPageAll(filters, null, 0)).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(
+      requestLogsPageAll(filters, null, REQUEST_LOGS_PAGE_MAX_LIMIT + 1)
+    ).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(requestLogsPageAll(filters, null, 1.5)).rejects.toThrow("SEC_INVALID_INPUT");
+    expect(commands.requestLogsPageAll).not.toHaveBeenCalled();
   });
 
   it("normalizes request log list limits before ipc", async () => {

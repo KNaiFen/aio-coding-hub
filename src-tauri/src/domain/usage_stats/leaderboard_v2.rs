@@ -1,21 +1,20 @@
 use crate::db;
 use crate::shared::error::db_err;
-use rusqlite::{params_from_iter, Connection, OptionalExtension, Row};
+use rusqlite::{params_from_iter, Connection, Row};
 use std::collections::HashMap;
 
 use super::filters::{
-    build_optional_range_cli_provider_filters, build_optional_range_filters_with_offset,
-    sql_exclude_cx2cc_gateway_bridge_clause, SqlValues,
+    build_optional_range_cli_provider_filters, sql_exclude_cx2cc_gateway_bridge_clause,
 };
 use super::folders::{
     filter_rows_by_folder_keys, resolved_folder_map, session_lookup_keys, usage_event_rows,
     UsageEventAgg,
 };
 use super::{
-    effective_total_from_buckets, extract_final_provider, has_valid_provider_key, parse_scope_v2,
-    resolve_query_params, sql_effective_input_tokens_expr,
-    sql_effective_input_tokens_expr_with_alias, ProviderAgg, ProviderKey, UsageLeaderboardRow,
-    UsageQueryParams, UsageResolvedFolder, UsageScopeV2, UsageSessionLookupKey,
+    effective_total_from_buckets, has_valid_provider_key, parse_scope_v2, resolve_query_params,
+    sql_effective_input_tokens_expr, sql_effective_input_tokens_expr_with_alias, ProviderAgg,
+    ProviderKey, UsageLeaderboardRow, UsageQueryParams, UsageResolvedFolder, UsageScopeV2,
+    UsageSessionLookupKey,
 };
 
 fn aggregated_total_tokens(row: &Row<'_>) -> rusqlite::Result<i64> {
@@ -95,8 +94,6 @@ pub(super) fn leaderboard_v2_with_conn_day_start(
         cli_key,
         provider_id,
     );
-    let (provider_fallback_where_clause, provider_fallback_range_params) =
-        build_optional_range_filters_with_offset("r.created_at", start_ts, end_ts, 2);
     let cx2cc_filter_clause =
         sql_exclude_cx2cc_gateway_bridge_clause(None, exclude_cx2cc_gateway_bridge);
     let provider_cx2cc_filter_clause =
@@ -109,13 +106,13 @@ pub(super) fn leaderboard_v2_with_conn_day_start(
 SELECT
   cli_key AS key,
   COUNT(*) AS requests_total,
-  SUM(CASE WHEN status >= 200 AND status < 300 AND error_code IS NULL THEN 1 ELSE 0 END) AS requests_success,
+  SUM(CASE WHEN status >= 200 AND status < 300 AND error_present = 0 THEN 1 ELSE 0 END) AS requests_success,
   SUM(
     CASE WHEN (
       status IS NULL OR
       status < 200 OR
       status >= 300 OR
-      error_code IS NOT NULL
+      error_present != 0
     ) THEN 1 ELSE 0 END
   ) AS requests_failed,
 		  SUM({effective_input_expr}) AS input_tokens,
@@ -124,35 +121,35 @@ SELECT
 	  SUM(COALESCE(cache_read_input_tokens, 0)) AS cache_read_input_tokens,
 	  SUM(
 	    CASE WHEN (
-	      status >= 200 AND status < 300 AND error_code IS NULL AND
+	      status >= 200 AND status < 300 AND error_present = 0 AND
 	      cost_usd_femto IS NOT NULL AND cost_usd_femto > 0
 	    ) THEN 1 ELSE 0 END
 	  ) AS cost_covered_success,
-	  SUM(
+	  TOTAL(
 	    CASE WHEN (
-	      status >= 200 AND status < 300 AND error_code IS NULL AND
+	      status >= 200 AND status < 300 AND error_present = 0 AND
 	      cost_usd_femto IS NOT NULL AND cost_usd_femto > 0
 	    ) THEN cost_usd_femto ELSE 0 END
 	  ) AS total_cost_usd_femto,
 	  SUM(duration_ms) AS total_duration_ms,
-	  SUM(CASE WHEN status >= 200 AND status < 300 AND error_code IS NULL THEN duration_ms ELSE 0 END) AS success_duration_ms_sum,
+	  SUM(CASE WHEN status >= 200 AND status < 300 AND error_present = 0 THEN duration_ms ELSE 0 END) AS success_duration_ms_sum,
 	  SUM(
 	    CASE WHEN (
-	      status >= 200 AND status < 300 AND error_code IS NULL AND
+	      status >= 200 AND status < 300 AND error_present = 0 AND
       ttfb_ms IS NOT NULL AND
       ttfb_ms < duration_ms
     ) THEN ttfb_ms ELSE 0 END
   ) AS success_ttfb_ms_sum,
   SUM(
     CASE WHEN (
-      status >= 200 AND status < 300 AND error_code IS NULL AND
+      status >= 200 AND status < 300 AND error_present = 0 AND
       ttfb_ms IS NOT NULL AND
       ttfb_ms < duration_ms
     ) THEN 1 ELSE 0 END
   ) AS success_ttfb_ms_count,
   SUM(
     CASE WHEN (
-      status >= 200 AND status < 300 AND error_code IS NULL AND
+      status >= 200 AND status < 300 AND error_present = 0 AND
       output_tokens IS NOT NULL AND
       ttfb_ms IS NOT NULL AND
       ttfb_ms < duration_ms
@@ -160,13 +157,13 @@ SELECT
   ) AS success_generation_ms_sum,
   SUM(
     CASE WHEN (
-      status >= 200 AND status < 300 AND error_code IS NULL AND
+      status >= 200 AND status < 300 AND error_present = 0 AND
       output_tokens IS NOT NULL AND
       ttfb_ms IS NOT NULL AND
       ttfb_ms < duration_ms
     ) THEN output_tokens ELSE 0 END
   ) AS success_output_tokens_for_rate_sum
-FROM request_logs
+FROM usage_events
 WHERE excluded_from_stats = 0
 {where_clause}
 {cx2cc_filter_clause}
@@ -224,8 +221,8 @@ GROUP BY cli_key
                             .get::<_, Option<i64>>("cost_covered_success")?
                             .unwrap_or(0),
                         total_cost_usd_femto: row
-                            .get::<_, Option<i64>>("total_cost_usd_femto")?
-                            .unwrap_or(0),
+                            .get::<_, Option<f64>>("total_cost_usd_femto")?
+                            .unwrap_or(0.0),
                     };
 
                     Ok(agg.into_leaderboard_row(key.clone(), key))
@@ -244,13 +241,13 @@ GROUP BY cli_key
 SELECT
   COALESCE(NULLIF(requested_model, ''), 'Unknown') AS key,
   COUNT(*) AS requests_total,
-  SUM(CASE WHEN status >= 200 AND status < 300 AND error_code IS NULL THEN 1 ELSE 0 END) AS requests_success,
+  SUM(CASE WHEN status >= 200 AND status < 300 AND error_present = 0 THEN 1 ELSE 0 END) AS requests_success,
   SUM(
     CASE WHEN (
       status IS NULL OR
       status < 200 OR
       status >= 300 OR
-      error_code IS NOT NULL
+      error_present != 0
     ) THEN 1 ELSE 0 END
   ) AS requests_failed,
 		  SUM({effective_input_expr}) AS input_tokens,
@@ -259,35 +256,35 @@ SELECT
 	  SUM(COALESCE(cache_read_input_tokens, 0)) AS cache_read_input_tokens,
 	  SUM(
 	    CASE WHEN (
-	      status >= 200 AND status < 300 AND error_code IS NULL AND
+	      status >= 200 AND status < 300 AND error_present = 0 AND
 	      cost_usd_femto IS NOT NULL AND cost_usd_femto > 0
 	    ) THEN 1 ELSE 0 END
 	  ) AS cost_covered_success,
-	  SUM(
+	  TOTAL(
 	    CASE WHEN (
-	      status >= 200 AND status < 300 AND error_code IS NULL AND
+	      status >= 200 AND status < 300 AND error_present = 0 AND
 	      cost_usd_femto IS NOT NULL AND cost_usd_femto > 0
 	    ) THEN cost_usd_femto ELSE 0 END
 	  ) AS total_cost_usd_femto,
 	  SUM(duration_ms) AS total_duration_ms,
-	  SUM(CASE WHEN status >= 200 AND status < 300 AND error_code IS NULL THEN duration_ms ELSE 0 END) AS success_duration_ms_sum,
+	  SUM(CASE WHEN status >= 200 AND status < 300 AND error_present = 0 THEN duration_ms ELSE 0 END) AS success_duration_ms_sum,
 	  SUM(
 	    CASE WHEN (
-	      status >= 200 AND status < 300 AND error_code IS NULL AND
+	      status >= 200 AND status < 300 AND error_present = 0 AND
       ttfb_ms IS NOT NULL AND
       ttfb_ms < duration_ms
     ) THEN ttfb_ms ELSE 0 END
   ) AS success_ttfb_ms_sum,
   SUM(
     CASE WHEN (
-      status >= 200 AND status < 300 AND error_code IS NULL AND
+      status >= 200 AND status < 300 AND error_present = 0 AND
       ttfb_ms IS NOT NULL AND
       ttfb_ms < duration_ms
     ) THEN 1 ELSE 0 END
   ) AS success_ttfb_ms_count,
   SUM(
     CASE WHEN (
-      status >= 200 AND status < 300 AND error_code IS NULL AND
+      status >= 200 AND status < 300 AND error_present = 0 AND
       output_tokens IS NOT NULL AND
       ttfb_ms IS NOT NULL AND
       ttfb_ms < duration_ms
@@ -295,13 +292,13 @@ SELECT
   ) AS success_generation_ms_sum,
   SUM(
     CASE WHEN (
-      status >= 200 AND status < 300 AND error_code IS NULL AND
+      status >= 200 AND status < 300 AND error_present = 0 AND
       output_tokens IS NOT NULL AND
       ttfb_ms IS NOT NULL AND
       ttfb_ms < duration_ms
     ) THEN output_tokens ELSE 0 END
   ) AS success_output_tokens_for_rate_sum
-FROM request_logs
+FROM usage_events
 WHERE excluded_from_stats = 0
 {where_clause}
 {cx2cc_filter_clause}
@@ -359,8 +356,8 @@ GROUP BY COALESCE(NULLIF(requested_model, ''), 'Unknown')
                             .get::<_, Option<i64>>("cost_covered_success")?
                             .unwrap_or(0),
                         total_cost_usd_femto: row
-                            .get::<_, Option<i64>>("total_cost_usd_femto")?
-                            .unwrap_or(0),
+                            .get::<_, Option<f64>>("total_cost_usd_femto")?
+                            .unwrap_or(0.0),
                     };
 
                     Ok(agg.into_leaderboard_row(key.clone(), key))
@@ -379,13 +376,13 @@ GROUP BY COALESCE(NULLIF(requested_model, ''), 'Unknown')
 SELECT
   {day_bucket_sql} AS key,
   COUNT(*) AS requests_total,
-  SUM(CASE WHEN status >= 200 AND status < 300 AND error_code IS NULL THEN 1 ELSE 0 END) AS requests_success,
+  SUM(CASE WHEN status >= 200 AND status < 300 AND error_present = 0 THEN 1 ELSE 0 END) AS requests_success,
   SUM(
     CASE WHEN (
       status IS NULL OR
       status < 200 OR
       status >= 300 OR
-      error_code IS NOT NULL
+      error_present != 0
     ) THEN 1 ELSE 0 END
   ) AS requests_failed,
   SUM({effective_input_expr}) AS input_tokens,
@@ -394,37 +391,37 @@ SELECT
   SUM(COALESCE(cache_read_input_tokens, 0)) AS cache_read_input_tokens,
   SUM(
     CASE WHEN (
-      status >= 200 AND status < 300 AND error_code IS NULL AND
+      status >= 200 AND status < 300 AND error_present = 0 AND
       cost_usd_femto IS NOT NULL AND cost_usd_femto > 0
     ) THEN 1 ELSE 0 END
   ) AS cost_covered_success,
-  SUM(
+  TOTAL(
     CASE WHEN (
-      status >= 200 AND status < 300 AND error_code IS NULL AND
+      status >= 200 AND status < 300 AND error_present = 0 AND
       cost_usd_femto IS NOT NULL AND cost_usd_femto > 0
     ) THEN cost_usd_femto ELSE 0 END
   ) AS total_cost_usd_femto,
   SUM(duration_ms) AS total_duration_ms,
   MIN(CASE WHEN created_at_ms > 0 THEN created_at_ms ELSE created_at * 1000 END) AS first_request_created_at_ms,
   MAX(CASE WHEN created_at_ms > 0 THEN created_at_ms ELSE created_at * 1000 END) AS last_request_created_at_ms,
-  SUM(CASE WHEN status >= 200 AND status < 300 AND error_code IS NULL THEN duration_ms ELSE 0 END) AS success_duration_ms_sum,
+  SUM(CASE WHEN status >= 200 AND status < 300 AND error_present = 0 THEN duration_ms ELSE 0 END) AS success_duration_ms_sum,
   SUM(
     CASE WHEN (
-      status >= 200 AND status < 300 AND error_code IS NULL AND
+      status >= 200 AND status < 300 AND error_present = 0 AND
       ttfb_ms IS NOT NULL AND
       ttfb_ms < duration_ms
     ) THEN ttfb_ms ELSE 0 END
   ) AS success_ttfb_ms_sum,
   SUM(
     CASE WHEN (
-      status >= 200 AND status < 300 AND error_code IS NULL AND
+      status >= 200 AND status < 300 AND error_present = 0 AND
       ttfb_ms IS NOT NULL AND
       ttfb_ms < duration_ms
     ) THEN 1 ELSE 0 END
   ) AS success_ttfb_ms_count,
   SUM(
     CASE WHEN (
-      status >= 200 AND status < 300 AND error_code IS NULL AND
+      status >= 200 AND status < 300 AND error_present = 0 AND
       output_tokens IS NOT NULL AND
       ttfb_ms IS NOT NULL AND
       ttfb_ms < duration_ms
@@ -432,13 +429,13 @@ SELECT
   ) AS success_generation_ms_sum,
   SUM(
     CASE WHEN (
-      status >= 200 AND status < 300 AND error_code IS NULL AND
+      status >= 200 AND status < 300 AND error_present = 0 AND
       output_tokens IS NOT NULL AND
       ttfb_ms IS NOT NULL AND
       ttfb_ms < duration_ms
     ) THEN output_tokens ELSE 0 END
   ) AS success_output_tokens_for_rate_sum
-FROM request_logs
+FROM usage_events
 WHERE excluded_from_stats = 0
 {where_clause}
 {cx2cc_filter_clause}
@@ -497,8 +494,8 @@ GROUP BY key
                             .get::<_, Option<i64>>("cost_covered_success")?
                             .unwrap_or(0),
                         total_cost_usd_femto: row
-                            .get::<_, Option<i64>>("total_cost_usd_femto")?
-                            .unwrap_or(0),
+                            .get::<_, Option<f64>>("total_cost_usd_femto")?
+                            .unwrap_or(0.0),
                     };
 
                     Ok(agg.into_leaderboard_row(key.clone(), key))
@@ -518,15 +515,15 @@ GROUP BY key
 SELECT
   r.cli_key AS cli_key,
   r.final_provider_id AS provider_id,
-  MAX(p.name) AS provider_name,
+  MAX(NULLIF(TRIM(r.provider_name_snapshot), '')) AS provider_name,
   COUNT(*) AS requests_total,
-  SUM(CASE WHEN r.status >= 200 AND r.status < 300 AND r.error_code IS NULL THEN 1 ELSE 0 END) AS requests_success,
+  SUM(CASE WHEN r.status >= 200 AND r.status < 300 AND r.error_present = 0 THEN 1 ELSE 0 END) AS requests_success,
   SUM(
     CASE WHEN (
       r.status IS NULL OR
       r.status < 200 OR
       r.status >= 300 OR
-      r.error_code IS NOT NULL
+      r.error_present != 0
     ) THEN 1 ELSE 0 END
   ) AS requests_failed,
   SUM({effective_input_expr}) AS input_tokens,
@@ -537,35 +534,35 @@ SELECT
   SUM(COALESCE(r.cache_creation_1h_input_tokens, 0)) AS cache_creation_1h_input_tokens,
   SUM(
     CASE WHEN (
-      r.status >= 200 AND r.status < 300 AND r.error_code IS NULL AND
+      r.status >= 200 AND r.status < 300 AND r.error_present = 0 AND
       r.cost_usd_femto IS NOT NULL AND r.cost_usd_femto > 0
     ) THEN 1 ELSE 0 END
   ) AS cost_covered_success,
-  SUM(
+  TOTAL(
     CASE WHEN (
-      r.status >= 200 AND r.status < 300 AND r.error_code IS NULL AND
+      r.status >= 200 AND r.status < 300 AND r.error_present = 0 AND
       r.cost_usd_femto IS NOT NULL AND r.cost_usd_femto > 0
     ) THEN r.cost_usd_femto ELSE 0 END
   ) AS total_cost_usd_femto,
   SUM(r.duration_ms) AS total_duration_ms,
-  SUM(CASE WHEN r.status >= 200 AND r.status < 300 AND r.error_code IS NULL THEN r.duration_ms ELSE 0 END) AS success_duration_ms_sum,
+  SUM(CASE WHEN r.status >= 200 AND r.status < 300 AND r.error_present = 0 THEN r.duration_ms ELSE 0 END) AS success_duration_ms_sum,
   SUM(
     CASE WHEN (
-      r.status >= 200 AND r.status < 300 AND r.error_code IS NULL AND
+      r.status >= 200 AND r.status < 300 AND r.error_present = 0 AND
       r.ttfb_ms IS NOT NULL AND
       r.ttfb_ms < r.duration_ms
     ) THEN r.ttfb_ms ELSE 0 END
   ) AS success_ttfb_ms_sum,
   SUM(
     CASE WHEN (
-      r.status >= 200 AND r.status < 300 AND r.error_code IS NULL AND
+      r.status >= 200 AND r.status < 300 AND r.error_present = 0 AND
       r.ttfb_ms IS NOT NULL AND
       r.ttfb_ms < r.duration_ms
     ) THEN 1 ELSE 0 END
   ) AS success_ttfb_ms_count,
   SUM(
     CASE WHEN (
-      r.status >= 200 AND r.status < 300 AND r.error_code IS NULL AND
+      r.status >= 200 AND r.status < 300 AND r.error_present = 0 AND
       r.output_tokens IS NOT NULL AND
       r.ttfb_ms IS NOT NULL AND
       r.ttfb_ms < r.duration_ms
@@ -573,14 +570,13 @@ SELECT
   ) AS success_generation_ms_sum,
   SUM(
     CASE WHEN (
-      r.status >= 200 AND r.status < 300 AND r.error_code IS NULL AND
+      r.status >= 200 AND r.status < 300 AND r.error_present = 0 AND
       r.output_tokens IS NOT NULL AND
       r.ttfb_ms IS NOT NULL AND
       r.ttfb_ms < r.duration_ms
     ) THEN r.output_tokens ELSE 0 END
   ) AS success_output_tokens_for_rate_sum
-FROM request_logs r
-LEFT JOIN providers p ON p.id = r.final_provider_id
+FROM usage_events r
 WHERE r.excluded_from_stats = 0
 AND r.final_provider_id IS NOT NULL
 AND r.final_provider_id > 0
@@ -648,31 +644,13 @@ GROUP BY r.cli_key, r.final_provider_id
                             .get::<_, Option<i64>>("cost_covered_success")?
                             .unwrap_or(0),
                         total_cost_usd_femto: row
-                            .get::<_, Option<i64>>("total_cost_usd_femto")?
-                            .unwrap_or(0),
+                            .get::<_, Option<f64>>("total_cost_usd_femto")?
+                            .unwrap_or(0.0),
                     };
 
                     Ok((cli_key, provider_id, provider_name, agg))
                 })
                 .map_err(|e| db_err!("failed to run provider leaderboard query: {e}"))?;
-
-            let fallback_name_sql = format!(
-                r#"
-SELECT attempts_json
-FROM request_logs r
-WHERE r.excluded_from_stats = 0
-AND r.final_provider_id = ?1
-AND r.cli_key = ?2
-{provider_fallback_where_clause}
-{provider_cx2cc_filter_clause}
-LIMIT 1
-"#,
-                provider_fallback_where_clause = provider_fallback_where_clause,
-                provider_cx2cc_filter_clause = provider_cx2cc_filter_clause
-            );
-            let mut stmt_fallback_name = conn
-                .prepare(&fallback_name_sql)
-                .map_err(|e| db_err!("failed to prepare provider name fallback query: {e}"))?;
 
             let mut items = Vec::new();
             for row in rows {
@@ -683,29 +661,11 @@ LIMIT 1
 
             let mut out = Vec::new();
             for (cli_key, provider_id, provider_name_db, agg) in items {
-                let mut provider_name = provider_name_db
+                let provider_name = provider_name_db
                     .as_deref()
                     .map(str::trim)
                     .filter(|v| !v.is_empty() && *v != "Unknown")
                     .map(str::to_string);
-
-                if provider_name.is_none() {
-                    let mut fallback_params: SqlValues =
-                        vec![provider_id.into(), cli_key.clone().into()];
-                    fallback_params.extend(provider_fallback_range_params.clone());
-                    let attempts_json: Option<String> = stmt_fallback_name
-                        .query_row(params_from_iter(fallback_params), |row| row.get(0))
-                        .optional()
-                        .map_err(|e| db_err!("failed to query provider name fallback: {e}"))?;
-
-                    if let Some(attempts_json) = attempts_json {
-                        let extracted = extract_final_provider(&cli_key, &attempts_json);
-                        let extracted_name = extracted.provider_name.trim();
-                        if !extracted_name.is_empty() && extracted_name != "Unknown" {
-                            provider_name = Some(extracted_name.to_string());
-                        }
-                    }
-                }
 
                 let Some(provider_name) = provider_name else {
                     continue;
@@ -755,25 +715,12 @@ fn provider_name_from_event(row: &UsageEventAgg) -> Option<String> {
         return None;
     }
 
-    let mut provider_name = row
+    let provider_name = row
         .bucket_provider_name
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty() && *value != "Unknown")
         .map(str::to_string);
-
-    if provider_name.is_none() {
-        if let Some(attempts_json) = row.bucket_provider_attempts_json.as_deref() {
-            let extracted = extract_final_provider(&row.cli_key, attempts_json);
-            let extracted_name = extracted.provider_name.trim();
-            if extracted.provider_id == provider_id
-                && !extracted_name.is_empty()
-                && extracted_name != "Unknown"
-            {
-                provider_name = Some(extracted_name.to_string());
-            }
-        }
-    }
 
     let provider_name = provider_name?;
     let provider_key = ProviderKey {

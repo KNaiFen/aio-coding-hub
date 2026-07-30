@@ -9,8 +9,14 @@ import type { CliSessionsFolderLookupEntry } from "../../services/cli/cliSession
 import type { CliKey } from "../../services/providers/providers";
 import type { ProjectedRealtimeCard } from "../../services/gateway/requestActivityProjection";
 import { REALTIME_TRACE_EXIT_START_MS } from "../../services/gateway/requestActivityProjection";
+import {
+  formatCodexContextCompactionBadgeLabel,
+  formatCodexContextCompactionTooltip,
+  resolveCodexContextCompactionMarker,
+} from "../../services/gateway/requestLogSpecialSettings";
 import { requestLogActiveActivityState } from "../../services/gateway/requestLogState";
 import { hasFailoverFromSegments } from "../../services/gateway/traceRoute";
+import { Tooltip } from "../../ui/Tooltip";
 import { cn } from "../../utils/cn";
 import {
   computeOutputTokensPerSecond,
@@ -38,6 +44,50 @@ export type RealtimeTraceCardsProps = {
   formatUnixSeconds: (ts: number) => string;
   showCustomTooltip: boolean;
 };
+
+export function CodexContextCompactionBadge({
+  cliKey,
+  specialSettingsJson,
+  showCustomTooltip,
+}: {
+  cliKey: string;
+  specialSettingsJson: string | null | undefined;
+  showCustomTooltip: boolean;
+}) {
+  if (cliKey.trim().toLowerCase() !== "codex") return null;
+
+  const marker = resolveCodexContextCompactionMarker(specialSettingsJson);
+  if (!marker) return null;
+
+  const label = formatCodexContextCompactionBadgeLabel(marker);
+  const tooltip = formatCodexContextCompactionTooltip(marker);
+  const badge = (
+    <span
+      className={cn(
+        "inline-flex shrink-0 cursor-help items-center whitespace-nowrap rounded-md border px-1.5 py-0.5 text-[10px] font-semibold leading-4 shadow-pill-subtle",
+        marker.mode === "local"
+          ? "border-emerald-500/20 bg-emerald-50/80 text-emerald-700 dark:border-emerald-400/20 dark:bg-emerald-500/15 dark:text-emerald-300"
+          : marker.mode === "remote"
+            ? "border-cyan-500/20 bg-cyan-50/80 text-cyan-700 dark:border-cyan-400/20 dark:bg-cyan-500/15 dark:text-cyan-300"
+            : "border-border/50 bg-muted/65 text-muted-foreground dark:border-border/30 dark:bg-muted/40"
+      )}
+      title={showCustomTooltip ? undefined : tooltip}
+    >
+      {label}
+    </span>
+  );
+
+  return showCustomTooltip ? (
+    <Tooltip
+      content={tooltip}
+      contentClassName="max-w-[320px] whitespace-pre-line text-left leading-5"
+    >
+      {badge}
+    </Tooltip>
+  ) : (
+    badge
+  );
+}
 
 function sessionFolderLookupKey(cliKey: string, sessionId: string | null | undefined) {
   const normalized = sessionId?.trim();
@@ -198,10 +248,12 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
         })();
 
         const cliLabel = cliShortLabel(trace.cli_key);
+        const specialSettingsJson =
+          trace.special_settings_json ?? summary?.special_settings_json ?? null;
         const modelDisplayMeta = resolveRequestLogModelDisplayMeta(
           trace.cli_key,
           trace.requested_model,
-          trace.special_settings_json ?? summary?.special_settings_json ?? null,
+          specialSettingsJson,
           trace.claude_model_mapping,
           routeProviderId
         );
@@ -362,6 +414,12 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                       {modelText}
                     </span>
                   </span>
+
+                  <CodexContextCompactionBadge
+                    cliKey={trace.cli_key}
+                    specialSettingsJson={specialSettingsJson}
+                    showCustomTooltip={showCustomTooltip}
+                  />
 
                   {sessionFolder && (
                     <FolderBadge

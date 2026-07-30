@@ -89,37 +89,13 @@ fn sql_column(alias: Option<&str>, column: &str) -> String {
 
 fn build_sql_effective_input_tokens_expr(alias: Option<&str>) -> String {
     let cli_key = sql_column(alias, "cli_key");
-    let final_provider_id = sql_column(alias, "final_provider_id");
-    let special_settings_json = sql_column(alias, "special_settings_json");
+    let persisted_openai_semantics = sql_column(alias, "persisted_openai_input_semantics");
     let input_tokens = sql_column(alias, "input_tokens");
     let cache_read_input_tokens = sql_column(alias, "cache_read_input_tokens");
     let cache_creation_input_tokens = sql_column(alias, "cache_creation_input_tokens");
 
-    let safe_settings_json = format!(
-        "CASE WHEN json_valid({special_settings_json}) THEN CASE WHEN json_type({special_settings_json}) = 'array' THEN {special_settings_json} ELSE '[]' END ELSE '[]' END"
-    );
-    let trimmed_source_cli_key = "TRIM(json_extract(marker.value, '$.source_cli_key'), char(32) || char(9) || char(10) || char(13))";
-    let valid_marker_fields = format!(
-        "json_extract(marker.value, '$.type') = 'cx2cc_cost_basis' AND json_type(marker.value, '$.source_cli_key') = 'text' AND {trimmed_source_cli_key} != ''"
-    );
-    let scoped_marker_condition = format!(
-        "CASE WHEN marker.type = 'object' THEN {valid_marker_fields} AND json_type(marker.value, '$.bridge_provider_id') = 'integer' AND typeof(json_extract(marker.value, '$.bridge_provider_id')) = 'integer' AND json_extract(marker.value, '$.bridge_provider_id') > 0 ELSE 0 END"
-    );
-    let legacy_marker_condition = format!(
-        "CASE WHEN marker.type = 'object' THEN {valid_marker_fields} AND json_type(marker.value, '$.bridge_provider_id') IS NULL ELSE 0 END"
-    );
-    let marker_semantics =
-        format!("CASE WHEN {trimmed_source_cli_key} = 'codex' THEN 1 ELSE 0 END");
-    let packed_marker_semantics = format!("(CAST(marker.key AS INTEGER) * 2 + {marker_semantics})");
-    let persisted_marker_semantics = format!(
-        "(SELECT CASE WHEN resolved.exact_match IS NOT NULL THEN resolved.exact_match % 2 WHEN resolved.has_scoped = 1 THEN 0 WHEN resolved.legacy_match IS NOT NULL THEN resolved.legacy_match % 2 ELSE NULL END FROM (SELECT MAX(CASE WHEN {scoped_marker_condition} AND json_extract(marker.value, '$.bridge_provider_id') = {final_provider_id} THEN {packed_marker_semantics} END) AS exact_match, MAX(CASE WHEN {scoped_marker_condition} THEN 1 ELSE 0 END) AS has_scoped, MAX(CASE WHEN {legacy_marker_condition} THEN {packed_marker_semantics} END) AS legacy_match FROM json_each({safe_settings_json}) marker) resolved)"
-    );
-    let legacy_provider_semantics = format!(
-        "CASE WHEN EXISTS (SELECT 1 FROM providers p WHERE p.id = {final_provider_id} AND (p.source_provider_id IS NOT NULL OR p.bridge_type = 'cx2cc')) THEN 1 ELSE 0 END"
-    );
-    let openai_semantics = format!(
-        "({cli_key} IN ('codex', 'grok') OR COALESCE({persisted_marker_semantics}, {legacy_provider_semantics}) = 1)"
-    );
+    let openai_semantics =
+        format!("({cli_key} IN ('codex', 'grok') OR {persisted_openai_semantics} = 1)");
 
     format!(
         "CASE WHEN {openai_semantics} THEN MAX(COALESCE({input_tokens}, 0) - COALESCE({cache_read_input_tokens}, 0) - COALESCE({cache_creation_input_tokens}, 0), 0) WHEN {cli_key} = 'gemini' THEN MAX(COALESCE({input_tokens}, 0) - COALESCE({cache_read_input_tokens}, 0), 0) ELSE COALESCE({input_tokens}, 0) END"
@@ -205,15 +181,10 @@ mod tests {
         let conn = rusqlite::Connection::open_in_memory().expect("open in-memory db");
         conn.execute_batch(
             r#"
-CREATE TABLE providers (id INTEGER PRIMARY KEY, source_provider_id INTEGER, bridge_type TEXT);
-INSERT INTO providers VALUES (1, NULL, NULL);
-INSERT INTO providers VALUES (2, 99, NULL);
-INSERT INTO providers VALUES (3, NULL, 'cx2cc');
-INSERT INTO providers VALUES (4, 99, 'cx2cc');
 CREATE TABLE r (
   cli_key TEXT,
   final_provider_id INTEGER,
-  special_settings_json TEXT,
+  persisted_openai_input_semantics INTEGER,
   input_tokens INTEGER,
   output_tokens INTEGER,
   cache_read_input_tokens INTEGER,
@@ -223,40 +194,7 @@ CREATE TABLE r (
         )
         .expect("create schema");
 
-        let provider_cases: [(i64, Option<i64>, Option<&str>); 5] = [
-            (1, None, None),
-            (2, Some(99), None),
-            (3, None, Some("cx2cc")),
-            (4, Some(99), Some("cx2cc")),
-            // provider id 5 does not exist in the providers table at all
-            (5, None, None),
-        ];
-        let marker_cases: [Option<&str>; 14] = [
-            None,
-            Some(r#"[{"type":"cx2cc_cost_basis","source_cli_key":"codex"}]"#),
-            Some(r#"[{"type":"cx2cc_cost_basis","source_cli_key":"claude"}]"#),
-            Some(r#"[{"type":"cx2cc_cost_basis","source_cli_key":"\tcodex\t"}]"#),
-            Some(r#"[{"type":"cx2cc_cost_basis","source_cli_key":"\r\ncodex\n"}]"#),
-            Some(
-                r#"[{"type":"cx2cc_cost_basis","bridge_provider_id":2,"source_cli_key":"codex"}]"#,
-            ),
-            Some(
-                r#"[{"type":"cx2cc_cost_basis","bridge_provider_id":99,"source_cli_key":"codex"}]"#,
-            ),
-            Some("not-json"),
-            Some(r#"[1,"text",false,null]"#),
-            Some(r#"[{"type":"cx2cc_cost_basis"}]"#),
-            Some(r#"[1,"text",{"type":"cx2cc_cost_basis","source_cli_key":"codex"},false]"#),
-            Some(
-                r#"[{"type":"cx2cc_cost_basis","source_cli_key":"codex"},{"type":"cx2cc_cost_basis","source_cli_key":""}]"#,
-            ),
-            Some(
-                r#"[{"type":"cx2cc_cost_basis","bridge_provider_id":null,"source_cli_key":"codex"}]"#,
-            ),
-            Some(
-                r#"[{"type":"cx2cc_cost_basis","bridge_provider_id":9223372036854775808,"source_cli_key":"codex"}]"#,
-            ),
-        ];
+        let persisted_semantics_cases: [Option<bool>; 3] = [None, Some(false), Some(true)];
         let token_cases: [(Option<i64>, Option<i64>, Option<i64>); 5] = [
             (None, None, None),
             (Some(1200), None, None),
@@ -271,47 +209,38 @@ CREATE TABLE r (
             sql_effective_input_tokens_expr_with_alias("r")
         );
         for cli_key in ["claude", "codex", "gemini", "grok"] {
-            for (provider_id, source_provider_id, bridge_type) in provider_cases {
-                for special_settings_json in marker_cases {
-                    for (input, cache_read, cache_creation) in token_cases {
-                        conn.execute("DELETE FROM r", []).expect("clear r");
-                        conn.execute(
-                            "INSERT INTO r VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6)",
-                            rusqlite::params![
-                                cli_key,
-                                provider_id,
-                                special_settings_json,
-                                input,
-                                cache_read,
-                                cache_creation
-                            ],
-                        )
-                        .expect("insert row");
-
-                        let plain_value: i64 = conn
-                            .query_row(&plain_sql, [], |row| row.get(0))
-                            .expect("evaluate plain SQL expression");
-                        let aliased_value: i64 = conn
-                            .query_row(&aliased_sql, [], |row| row.get(0))
-                            .expect("evaluate aliased SQL expression");
-                        let bridged = is_bridged_input_semantics(source_provider_id, bridge_type);
-                        let persisted_openai_semantics =
-                            crate::request_logs::cx2cc_openai_input_semantics_override(
-                                special_settings_json,
-                                Some(provider_id),
-                            );
-                        let rust_value = effective_input_tokens(
+            for persisted_openai_semantics in persisted_semantics_cases {
+                for (input, cache_read, cache_creation) in token_cases {
+                    conn.execute("DELETE FROM r", []).expect("clear r");
+                    conn.execute(
+                        "INSERT INTO r VALUES (?1, 1, ?2, ?3, 0, ?4, ?5)",
+                        rusqlite::params![
                             cli_key,
                             persisted_openai_semantics,
-                            bridged,
                             input,
                             cache_read,
-                            cache_creation,
-                        );
+                            cache_creation
+                        ],
+                    )
+                    .expect("insert row");
 
-                        assert_eq!(plain_value, rust_value, "plain SQL: cli_key={cli_key} provider={provider_id} marker={special_settings_json:?} input={input:?} read={cache_read:?} creation={cache_creation:?}");
-                        assert_eq!(aliased_value, rust_value, "aliased SQL: cli_key={cli_key} provider={provider_id} marker={special_settings_json:?} input={input:?} read={cache_read:?} creation={cache_creation:?}");
-                    }
+                    let plain_value: i64 = conn
+                        .query_row(&plain_sql, [], |row| row.get(0))
+                        .expect("evaluate plain SQL expression");
+                    let aliased_value: i64 = conn
+                        .query_row(&aliased_sql, [], |row| row.get(0))
+                        .expect("evaluate aliased SQL expression");
+                    let rust_value = effective_input_tokens(
+                        cli_key,
+                        persisted_openai_semantics,
+                        false,
+                        input,
+                        cache_read,
+                        cache_creation,
+                    );
+
+                    assert_eq!(plain_value, rust_value, "plain SQL: cli_key={cli_key} persisted={persisted_openai_semantics:?} input={input:?} read={cache_read:?} creation={cache_creation:?}");
+                    assert_eq!(aliased_value, rust_value, "aliased SQL: cli_key={cli_key} persisted={persisted_openai_semantics:?} input={input:?} read={cache_read:?} creation={cache_creation:?}");
                 }
             }
         }
@@ -322,11 +251,10 @@ CREATE TABLE r (
         let conn = rusqlite::Connection::open_in_memory().expect("open in-memory db");
         conn.execute_batch(
             r#"
-CREATE TABLE providers (id INTEGER PRIMARY KEY, source_provider_id INTEGER, bridge_type TEXT);
 CREATE TABLE r (
   cli_key TEXT,
   final_provider_id INTEGER,
-  special_settings_json TEXT,
+  persisted_openai_input_semantics INTEGER,
   input_tokens INTEGER,
   output_tokens INTEGER,
   cache_read_input_tokens INTEGER,
@@ -345,15 +273,14 @@ INSERT INTO r VALUES ('codex', 1, NULL, 1000, 50, 100, 200);
     }
 
     #[test]
-    fn effective_input_sql_uses_one_unsorted_marker_scan() {
+    fn effective_input_sql_uses_persisted_semantics_without_json_scans() {
         let conn = rusqlite::Connection::open_in_memory().expect("open in-memory db");
         conn.execute_batch(
             r#"
-CREATE TABLE providers (id INTEGER PRIMARY KEY, source_provider_id INTEGER, bridge_type TEXT);
 CREATE TABLE r (
   cli_key TEXT,
   final_provider_id INTEGER,
-  special_settings_json TEXT,
+  persisted_openai_input_semantics INTEGER,
   input_tokens INTEGER,
   output_tokens INTEGER,
   cache_read_input_tokens INTEGER,
@@ -374,12 +301,12 @@ CREATE TABLE r (
                 .expect("query plan")
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .expect("read query plan");
-            let marker_scans = details
-                .iter()
-                .filter(|detail| detail.contains("SCAN marker VIRTUAL TABLE"))
-                .count();
-
-            assert_eq!(marker_scans, 1, "query plan: {details:?}");
+            assert!(
+                details
+                    .iter()
+                    .all(|detail| !detail.contains("VIRTUAL TABLE")),
+                "query plan: {details:?}"
+            );
             assert!(
                 details
                     .iter()

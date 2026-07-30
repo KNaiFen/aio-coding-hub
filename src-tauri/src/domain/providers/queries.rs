@@ -6,8 +6,12 @@ use crate::db;
 use crate::shared::error::db_err;
 use crate::shared::sqlite::enabled_to_int;
 use crate::shared::time::now_unix_seconds;
-use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension, TransactionBehavior};
 use std::collections::{HashMap, HashSet};
+use std::time::Duration;
+
+const PROVIDER_USAGE_PROJECTION_BATCH_SIZE: usize = 100;
+const PROVIDER_USAGE_PROJECTION_BATCH_PAUSE: Duration = Duration::from_millis(10);
 
 fn mark_provider_discovery_stale(
     conn: &Connection,
@@ -2033,19 +2037,57 @@ pub fn set_enabled(
     get_by_id(&conn, provider_id)
 }
 
-pub fn delete(
+fn preserve_provider_usage_before_delete(
     db: &db::Db,
     provider_id: i64,
-    clear_usage_stats: bool,
 ) -> crate::shared::error::AppResult<()> {
-    let mut conn = db.open_connection()?;
-    let tx = conn
-        .transaction()
-        .map_err(|e| db_err!("failed to start transaction: {e}"))?;
-    let profile_names = {
-        let mut statement = tx
-            .prepare_cached(
-                r#"
+    // The high-water is fixed. Later inserts and terminal updates are already
+    // covered by the request-log writer's transactional dual-write.
+    let mut cursor = 0_i64;
+    let mut scanned_rows = 0_u64;
+    let mut projected_rows = 0_u64;
+    loop {
+        let mut conn = db.open_connection()?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|e| db_err!("failed to start provider usage projection transaction: {e}"))?;
+        let batch = crate::usage_ledger::project_provider_usage_batch(
+            &tx,
+            provider_id,
+            cursor,
+            PROVIDER_USAGE_PROJECTION_BATCH_SIZE,
+        )
+        .map_err(|e| db_err!("failed to preserve provider usage ledger batch: {e}"))?;
+        tx.commit()
+            .map_err(|e| db_err!("failed to commit provider usage projection batch: {e}"))?;
+        scanned_rows = scanned_rows.saturating_add(batch.scanned_rows as u64);
+        projected_rows = projected_rows.saturating_add(batch.projected_rows as u64);
+        if batch.done {
+            tracing::debug!(
+                provider_id,
+                scanned_rows,
+                projected_rows,
+                "provider usage projection finished before provider deletion"
+            );
+            return Ok(());
+        }
+        if batch.last_request_log_id <= cursor {
+            return Err(db_err!(
+                "provider usage projection cursor did not advance for provider_id={provider_id}"
+            ));
+        }
+        cursor = batch.last_request_log_id;
+        std::thread::sleep(PROVIDER_USAGE_PROJECTION_BATCH_PAUSE);
+    }
+}
+
+fn managed_profile_reference_names(
+    conn: &Connection,
+    provider_id: i64,
+) -> crate::shared::error::AppResult<Vec<String>> {
+    let mut statement = conn
+        .prepare_cached(
+            r#"
 SELECT profile.profile_name
 FROM codex_managed_profiles profile
 JOIN provider_models model ON model.model_uuid = profile.model_uuid
@@ -2053,32 +2095,69 @@ WHERE model.provider_id = ?1
 ORDER BY profile.profile_name_key ASC
 LIMIT 21
 "#,
-            )
-            .map_err(|e| db_err!("failed to prepare managed profile reference query: {e}"))?;
-        let rows = statement
-            .query_map(params![provider_id], |row| row.get::<_, String>(0))
-            .map_err(|e| db_err!("failed to query managed profile references: {e}"))?;
-        let mut names = Vec::new();
-        for row in rows {
-            names.push(row.map_err(|e| db_err!("failed to read managed profile reference: {e}"))?);
-        }
-        names
-    };
-    if !profile_names.is_empty() {
-        let truncated = profile_names.len() > 20;
-        let mut visible = profile_names
-            .into_iter()
-            .take(20)
-            .collect::<Vec<_>>()
-            .join(", ");
-        if truncated {
-            visible.push_str(", ...");
-        }
-        return Err(crate::shared::error::AppError::new(
-            "PROVIDER_MANAGED_PROFILE_REFERENCED",
-            format!("provider is referenced by managed profiles: {visible}"),
-        ));
+        )
+        .map_err(|e| db_err!("failed to prepare managed profile reference query: {e}"))?;
+    let rows = statement
+        .query_map(params![provider_id], |row| row.get::<_, String>(0))
+        .map_err(|e| db_err!("failed to query managed profile references: {e}"))?;
+    let mut names = Vec::new();
+    for row in rows {
+        names.push(row.map_err(|e| db_err!("failed to read managed profile reference: {e}"))?);
     }
+    Ok(names)
+}
+
+fn ensure_provider_has_no_managed_profile_references(
+    conn: &Connection,
+    provider_id: i64,
+) -> crate::shared::error::AppResult<()> {
+    let profile_names = managed_profile_reference_names(conn, provider_id)?;
+    if profile_names.is_empty() {
+        return Ok(());
+    }
+
+    let truncated = profile_names.len() > 20;
+    let mut visible = profile_names
+        .into_iter()
+        .take(20)
+        .collect::<Vec<_>>()
+        .join(", ");
+    if truncated {
+        visible.push_str(", ...");
+    }
+    Err(crate::shared::error::AppError::new(
+        "PROVIDER_MANAGED_PROFILE_REFERENCED",
+        format!("provider is referenced by managed profiles: {visible}"),
+    ))
+}
+
+pub fn delete(
+    db: &db::Db,
+    provider_id: i64,
+    clear_usage_stats: bool,
+) -> crate::shared::error::AppResult<()> {
+    if !clear_usage_stats {
+        let conn = db.open_connection()?;
+        let provider_exists = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM providers WHERE id = ?1)",
+                [provider_id],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(|e| db_err!("failed to check provider before usage projection: {e}"))?;
+        if !provider_exists {
+            return Err("DB_NOT_FOUND: provider not found".to_string().into());
+        }
+        ensure_provider_has_no_managed_profile_references(&conn, provider_id)?;
+        drop(conn);
+        preserve_provider_usage_before_delete(db, provider_id)?;
+    }
+
+    let mut conn = db.open_connection()?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| db_err!("failed to start transaction: {e}"))?;
+    ensure_provider_has_no_managed_profile_references(&tx, provider_id)?;
     tx.execute(
         "DELETE FROM provider_model_catalogs WHERE provider_id = ?1",
         params![provider_id],
@@ -2089,20 +2168,33 @@ LIMIT 21
         params![provider_id],
     )
     .map_err(|e| db_err!("failed to delete provider models: {e}"))?;
+    if clear_usage_stats {
+        tx.execute(
+            r#"
+DELETE FROM request_logs
+WHERE final_provider_id = ?1
+   OR trace_id IN (
+  SELECT trace_id
+  FROM usage_events
+  WHERE final_provider_id = ?1
+)
+"#,
+            params![provider_id],
+        )
+        .map_err(|e| db_err!("failed to delete provider request logs: {e}"))?;
+        tx.execute(
+            "DELETE FROM usage_ledger WHERE final_provider_id = ?1",
+            params![provider_id],
+        )
+        .map_err(|e| db_err!("failed to delete provider usage ledger: {e}"))?;
+    }
+
     let changed = tx
         .execute("DELETE FROM providers WHERE id = ?1", params![provider_id])
         .map_err(|e| db_err!("failed to delete provider: {e}"))?;
 
     if changed == 0 {
         return Err("DB_NOT_FOUND: provider not found".to_string().into());
-    }
-
-    if clear_usage_stats {
-        tx.execute(
-            "DELETE FROM request_logs WHERE final_provider_id = ?1",
-            params![provider_id],
-        )
-        .map_err(|e| db_err!("failed to delete provider request logs: {e}"))?;
     }
 
     tx.commit().map_err(|e| db_err!("failed to commit: {e}"))?;

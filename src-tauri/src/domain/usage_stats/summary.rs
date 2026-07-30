@@ -57,51 +57,42 @@ pub(super) fn summary_query(
 	SELECT
 	  COUNT(*) AS requests_total,
 	  SUM(
-	    CASE WHEN (
-      total_tokens IS NOT NULL OR
-      input_tokens IS NOT NULL OR
-      output_tokens IS NOT NULL OR
-      cache_read_input_tokens IS NOT NULL OR
-      cache_creation_input_tokens IS NOT NULL OR
-      cache_creation_5m_input_tokens IS NOT NULL OR
-      cache_creation_1h_input_tokens IS NOT NULL OR
-      usage_json IS NOT NULL
-    ) THEN 1 ELSE 0 END
+	    CASE WHEN usage_present = 1 THEN 1 ELSE 0 END
   ) AS requests_with_usage,
-  SUM(CASE WHEN status >= 200 AND status < 300 AND error_code IS NULL THEN 1 ELSE 0 END) AS requests_success,
+  SUM(CASE WHEN status >= 200 AND status < 300 AND error_present = 0 THEN 1 ELSE 0 END) AS requests_success,
   SUM(
     CASE WHEN (
       status IS NULL OR
       status < 200 OR
       status >= 300 OR
-      error_code IS NOT NULL
+      error_present != 0
     ) THEN 1 ELSE 0 END
 	  ) AS requests_failed,
 	  SUM(
 	    CASE WHEN (
-	      status >= 200 AND status < 300 AND error_code IS NULL AND
+	      status >= 200 AND status < 300 AND error_present = 0 AND
 	      cost_usd_femto IS NOT NULL
 	    ) THEN 1 ELSE 0 END
 	  ) AS cost_covered_success,
 	  SUM(duration_ms) AS total_duration_ms,
-	  SUM(CASE WHEN status >= 200 AND status < 300 AND error_code IS NULL THEN duration_ms ELSE 0 END) AS success_duration_ms_sum,
+	  SUM(CASE WHEN status >= 200 AND status < 300 AND error_present = 0 THEN duration_ms ELSE 0 END) AS success_duration_ms_sum,
 	  SUM(
 	    CASE WHEN (
-	      status >= 200 AND status < 300 AND error_code IS NULL AND
+	      status >= 200 AND status < 300 AND error_present = 0 AND
         ttfb_ms IS NOT NULL AND
 	      ttfb_ms < duration_ms
 	    ) THEN ttfb_ms ELSE 0 END
 	  ) AS success_ttfb_ms_sum,
 	  SUM(
 	    CASE WHEN (
-	      status >= 200 AND status < 300 AND error_code IS NULL AND
+	      status >= 200 AND status < 300 AND error_present = 0 AND
         ttfb_ms IS NOT NULL AND
 	      ttfb_ms < duration_ms
 	    ) THEN 1 ELSE 0 END
 	  ) AS success_ttfb_ms_count,
 	  SUM(
 	    CASE WHEN (
-	      status >= 200 AND status < 300 AND error_code IS NULL AND
+	      status >= 200 AND status < 300 AND error_present = 0 AND
 	      output_tokens IS NOT NULL AND
         ttfb_ms IS NOT NULL AND
 	      ttfb_ms < duration_ms
@@ -109,7 +100,7 @@ pub(super) fn summary_query(
 	  ) AS success_generation_ms_sum,
 	  SUM(
 	    CASE WHEN (
-	      status >= 200 AND status < 300 AND error_code IS NULL AND
+	      status >= 200 AND status < 300 AND error_present = 0 AND
 	      output_tokens IS NOT NULL AND
         ttfb_ms IS NOT NULL AND
 	      ttfb_ms < duration_ms
@@ -121,7 +112,7 @@ pub(super) fn summary_query(
   SUM(COALESCE(cache_creation_input_tokens, 0)) AS cache_creation_input_tokens,
   SUM(COALESCE(cache_creation_5m_input_tokens, 0)) AS cache_creation_5m_input_tokens,
   SUM(COALESCE(cache_creation_1h_input_tokens, 0)) AS cache_creation_1h_input_tokens
-	FROM request_logs
+	FROM usage_events
 	WHERE {where_sql}
 	"#,
         effective_input_expr = effective_input_expr,

@@ -1111,6 +1111,7 @@ mod tests {
             query: None,
             session_id: Some("session-active".to_string()),
             requested_model: Some("claude-sonnet-4".to_string()),
+            special_settings_json: None,
             created_at_ms: 1_700_000_000_000,
         }
     }

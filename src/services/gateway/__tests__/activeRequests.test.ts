@@ -15,6 +15,7 @@ function activeRequest(overrides: Partial<ActiveRequest> = {}): ActiveRequest {
     last_activity_ms: 2_000,
     current_attempt: null,
     ...overrides,
+    special_settings_json: overrides.special_settings_json ?? null,
   };
 }
 

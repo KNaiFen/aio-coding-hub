@@ -50,8 +50,8 @@ fn normalize_cli_filter(cli_key: Option<&str>) -> crate::shared::error::AppResul
     Ok(None)
 }
 
-fn cost_usd_from_femto(v: i64) -> f64 {
-    (v.max(0) as f64) / USD_FEMTO_DENOM
+fn cost_usd_from_femto(v: f64) -> f64 {
+    v.max(0.0) / USD_FEMTO_DENOM
 }
 
 fn current_unix_seconds(conn: &Connection) -> crate::shared::error::AppResult<i64> {
@@ -102,11 +102,11 @@ SELECT
   c.provider_id,
   MIN(r.created_at) AS first_request_ts
 FROM candidates c
-LEFT JOIN request_logs r
+LEFT JOIN usage_events r
   ON r.final_provider_id = c.provider_id
  AND r.excluded_from_stats = 0
  AND r.status >= 200 AND r.status < 300
- AND r.error_code IS NULL
+ AND r.error_present = 0
  AND r.created_at >= ?
 GROUP BY c.provider_id
 "#
@@ -213,11 +213,11 @@ struct ProviderLimitCandidate {
 
 #[derive(Debug, Clone, Copy, Default)]
 struct ProviderUsageSums {
-    usage_5h_femto: i64,
-    usage_daily_femto: i64,
-    usage_weekly_femto: i64,
-    usage_monthly_femto: i64,
-    usage_total_femto: i64,
+    usage_5h_femto: f64,
+    usage_daily_femto: f64,
+    usage_weekly_femto: f64,
+    usage_monthly_femto: f64,
+    usage_total_femto: f64,
 }
 
 fn aggregate_costs_for_providers(
@@ -238,17 +238,17 @@ fn aggregate_costs_for_providers(
 WITH provider_windows(provider_id, ts_5h, ts_daily) AS (VALUES {values})
 SELECT
   w.provider_id,
-  COALESCE(SUM(CASE WHEN r.created_at >= w.ts_5h THEN r.cost_usd_femto ELSE 0 END), 0) AS usage_5h_femto,
-  COALESCE(SUM(CASE WHEN r.created_at >= w.ts_daily THEN r.cost_usd_femto ELSE 0 END), 0) AS usage_daily_femto,
-  COALESCE(SUM(CASE WHEN r.created_at >= ? THEN r.cost_usd_femto ELSE 0 END), 0) AS usage_weekly_femto,
-  COALESCE(SUM(CASE WHEN r.created_at >= ? THEN r.cost_usd_femto ELSE 0 END), 0) AS usage_monthly_femto,
-  COALESCE(SUM(r.cost_usd_femto), 0) AS usage_total_femto
+  TOTAL(CASE WHEN r.created_at >= w.ts_5h THEN r.cost_usd_femto ELSE 0 END) AS usage_5h_femto,
+  TOTAL(CASE WHEN r.created_at >= w.ts_daily THEN r.cost_usd_femto ELSE 0 END) AS usage_daily_femto,
+  TOTAL(CASE WHEN r.created_at >= ? THEN r.cost_usd_femto ELSE 0 END) AS usage_weekly_femto,
+  TOTAL(CASE WHEN r.created_at >= ? THEN r.cost_usd_femto ELSE 0 END) AS usage_monthly_femto,
+  TOTAL(r.cost_usd_femto) AS usage_total_femto
 FROM provider_windows w
-LEFT JOIN request_logs r
+LEFT JOIN usage_events r
   ON r.final_provider_id = w.provider_id
  AND r.excluded_from_stats = 0
  AND r.status >= 200 AND r.status < 300
- AND r.error_code IS NULL
+ AND r.error_present = 0
  AND r.cost_usd_femto IS NOT NULL
 GROUP BY w.provider_id
 "#
@@ -271,11 +271,11 @@ GROUP BY w.provider_id
                 Ok((
                     row.get::<_, i64>(0)?,
                     ProviderUsageSums {
-                        usage_5h_femto: row.get::<_, Option<i64>>(1)?.unwrap_or(0).max(0),
-                        usage_daily_femto: row.get::<_, Option<i64>>(2)?.unwrap_or(0).max(0),
-                        usage_weekly_femto: row.get::<_, Option<i64>>(3)?.unwrap_or(0).max(0),
-                        usage_monthly_femto: row.get::<_, Option<i64>>(4)?.unwrap_or(0).max(0),
-                        usage_total_femto: row.get::<_, Option<i64>>(5)?.unwrap_or(0).max(0),
+                        usage_5h_femto: row.get::<_, f64>(1)?.max(0.0),
+                        usage_daily_femto: row.get::<_, f64>(2)?.max(0.0),
+                        usage_weekly_femto: row.get::<_, f64>(3)?.max(0.0),
+                        usage_monthly_femto: row.get::<_, f64>(4)?.max(0.0),
+                        usage_total_femto: row.get::<_, f64>(5)?.max(0.0),
                     },
                 ))
             })
@@ -593,6 +593,23 @@ INSERT INTO request_logs(
             ],
         )
         .expect("insert request log");
+        conn.execute(
+            r#"
+INSERT INTO usage_ledger (
+  request_log_id, trace_id, cli_key, created_at, created_at_ms, status,
+  error_present, excluded_from_stats, duration_ms, final_provider_id,
+  cost_usd_femto
+)
+SELECT
+  id, trace_id, cli_key, created_at, created_at_ms, status,
+  CASE WHEN error_code IS NULL THEN 0 ELSE 1 END,
+  excluded_from_stats, duration_ms, final_provider_id, cost_usd_femto
+FROM request_logs
+WHERE id = last_insert_rowid()
+"#,
+            [],
+        )
+        .expect("insert usage ledger row");
     }
 
     fn insert_log(conn: &Connection, provider_id: i64, created_at: i64, cost_femto: i64) {
@@ -622,6 +639,8 @@ INSERT INTO request_logs(
             2 * FEMTO,
         );
         insert_log(&conn, provider_id, now.saturating_sub(15 * 60), -2 * FEMTO);
+        conn.execute("DELETE FROM request_logs", [])
+            .expect("remove request details");
         drop(conn);
 
         let rows = list_v1(&db, Some("codex")).expect("list usage");
@@ -653,5 +672,57 @@ INSERT INTO request_logs(
         assert!((row.usage_5h_usd - 1.0).abs() < f64::EPSILON);
         assert!((row.usage_daily_usd - 1.0).abs() < f64::EPSILON);
         assert!((row.usage_total_usd - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn list_v1_cost_totals_do_not_overflow_i64_and_require_error_present_zero() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = db::init_for_tests(&dir.path().join("overflow.db")).expect("init db");
+        let provider_id = create_limited_provider(&db, "large-spend");
+        let conn = db.open_connection().expect("open db");
+        let now = current_unix_seconds(&conn).expect("now");
+
+        insert_log(&conn, provider_id, now.saturating_sub(3), i64::MAX);
+        insert_log(&conn, provider_id, now.saturating_sub(2), i64::MAX);
+        insert_log(&conn, provider_id, now.saturating_sub(1), i64::MAX);
+        conn.execute(
+            "UPDATE usage_ledger SET error_present = 1 WHERE created_at = ?1",
+            [now.saturating_sub(1)],
+        )
+        .expect("mark ledger event failed");
+        conn.execute(
+            "UPDATE usage_ledger_backfill_state SET status = 'complete' WHERE id = 1",
+            [],
+        )
+        .expect("complete backfill");
+        conn.execute("DELETE FROM request_logs", [])
+            .expect("remove request details");
+        drop(conn);
+
+        let rows = list_v1(&db, Some("codex")).expect("list usage");
+        let row = rows
+            .iter()
+            .find(|row| row.provider_id == provider_id)
+            .expect("provider usage");
+        let expected = (i64::MAX as f64 * 2.0) / USD_FEMTO_DENOM;
+        assert!((row.usage_total_usd - expected).abs() < 0.000_001);
+        assert!(
+            row.usage_total_usd > i64::MAX as f64 / USD_FEMTO_DENOM,
+            "aggregate must exceed the SQLite integer SUM ceiling"
+        );
+    }
+
+    #[test]
+    fn list_v1_surfaces_usage_source_failures_instead_of_zero_usage() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = db::init_for_tests(&dir.path().join("test.db")).expect("init db");
+        create_limited_provider(&db, "limited");
+        let conn = db.open_connection().expect("open db");
+        conn.execute_batch("DROP VIEW usage_events")
+            .expect("drop usage view");
+        drop(conn);
+
+        let error = list_v1(&db, Some("codex")).expect_err("missing usage source must fail");
+        assert_eq!(error.code(), "DB_ERROR");
     }
 }

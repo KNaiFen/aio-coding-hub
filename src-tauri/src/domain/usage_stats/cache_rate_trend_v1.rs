@@ -1,16 +1,13 @@
 use crate::db;
 use crate::shared::error::db_err;
-use rusqlite::{params_from_iter, Connection, OptionalExtension};
-use std::collections::HashMap;
+use rusqlite::{params_from_iter, Connection};
 
 use super::filters::{
-    build_optional_range_cli_provider_filters, build_optional_range_filters_with_offset,
-    sql_exclude_cx2cc_gateway_bridge_clause, SqlValues,
+    build_optional_range_cli_provider_filters, sql_exclude_cx2cc_gateway_bridge_clause,
 };
 use super::{
-    extract_final_provider, has_valid_provider_key, resolve_query_params,
-    sql_effective_input_tokens_expr_with_alias, ProviderKey, UsagePeriodV2,
-    UsageProviderCacheRateTrendRowV1, UsageQueryParams,
+    has_valid_provider_key, resolve_query_params, sql_effective_input_tokens_expr_with_alias,
+    ProviderKey, UsagePeriodV2, UsageProviderCacheRateTrendRowV1, UsageQueryParams,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -84,8 +81,6 @@ pub(super) fn provider_cache_rate_trend_v1_with_conn(
         query.cli_key,
         query.provider_id,
     );
-    let (fallback_where_clause, fallback_range_params) =
-        build_optional_range_filters_with_offset("r.created_at", query.start_ts, query.end_ts, 2);
     let cx2cc_filter_clause =
         sql_exclude_cx2cc_gateway_bridge_clause(Some("r"), query.exclude_cx2cc_gateway_bridge);
 
@@ -96,14 +91,13 @@ WITH bucketed AS (
     {select_fields},
     r.cli_key AS cli_key,
     r.final_provider_id AS provider_id,
-    MAX(p.name) AS provider_name,
+    MAX(NULLIF(TRIM(r.provider_name_snapshot), '')) AS provider_name,
     SUM({denom_expr}) AS denom_tokens,
     SUM(COALESCE(r.cache_read_input_tokens, 0)) AS cache_read_input_tokens,
     COUNT(*) AS requests_success
-  FROM request_logs r
-  LEFT JOIN providers p ON p.id = r.final_provider_id
+  FROM usage_events r
   WHERE r.excluded_from_stats = 0
-  AND r.status >= 200 AND r.status < 300 AND r.error_code IS NULL
+  AND r.status >= 200 AND r.status < 300 AND r.error_present = 0
   AND r.final_provider_id IS NOT NULL
   AND r.final_provider_id > 0
   {where_clause}
@@ -196,76 +190,25 @@ ORDER BY {order_by_fields}, b.denom_tokens DESC
         items.push(row.map_err(|e| db_err!("failed to read cache trend row: {e}"))?);
     }
 
-    let fallback_sql = format!(
-        r#"
-SELECT attempts_json
-FROM request_logs r
-WHERE r.excluded_from_stats = 0
-AND r.final_provider_id = ?1
-AND r.cli_key = ?2
-{fallback_where_clause}
-{cx2cc_filter_clause}
-LIMIT 1
-"#,
-        fallback_where_clause = fallback_where_clause,
-        cx2cc_filter_clause = cx2cc_filter_clause
-    );
-    let mut stmt_fallback_name = conn
-        .prepare(&fallback_sql)
-        .map_err(|e| db_err!("failed to prepare provider name fallback query: {e}"))?;
-
-    let mut name_cache: HashMap<(String, i64), Option<String>> = HashMap::new();
-
     let mut out = Vec::new();
     for row in items {
-        let name_key = (row.cli_key.clone(), row.provider_id);
-        let provider_name = match name_cache.get(&name_key) {
-            Some(v) => v.clone(),
-            None => {
-                let mut provider_name = row
-                    .provider_name
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|v| !v.is_empty() && *v != "Unknown")
-                    .map(str::to_string);
-
-                if provider_name.is_none() {
-                    let mut fallback_params: SqlValues =
-                        vec![row.provider_id.into(), row.cli_key.clone().into()];
-                    fallback_params.extend(fallback_range_params.clone());
-                    let attempts_json: Option<String> = stmt_fallback_name
-                        .query_row(params_from_iter(fallback_params), |r| r.get(0))
-                        .optional()
-                        .map_err(|e| db_err!("failed to query provider name fallback: {e}"))?;
-
-                    if let Some(attempts_json) = attempts_json {
-                        let extracted = extract_final_provider(&row.cli_key, &attempts_json);
-                        let extracted_name = extracted.provider_name.trim();
-                        if !extracted_name.is_empty() && extracted_name != "Unknown" {
-                            provider_name = Some(extracted_name.to_string());
-                        }
-                    }
-                }
-
-                if let Some(provider_name_str) = provider_name.as_deref() {
-                    let key = ProviderKey {
-                        cli_key: row.cli_key.clone(),
-                        provider_id: row.provider_id,
-                        provider_name: provider_name_str.to_string(),
-                    };
-                    if !has_valid_provider_key(&key) {
-                        provider_name = None;
-                    }
-                }
-
-                name_cache.insert(name_key.clone(), provider_name.clone());
-                provider_name
-            }
-        };
-
-        let Some(provider_name) = provider_name else {
+        let Some(provider_name) = row
+            .provider_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty() && *value != "Unknown")
+            .map(str::to_string)
+        else {
             continue;
         };
+        let key = ProviderKey {
+            cli_key: row.cli_key.clone(),
+            provider_id: row.provider_id,
+            provider_name: provider_name.clone(),
+        };
+        if !has_valid_provider_key(&key) {
+            continue;
+        }
 
         out.push(UsageProviderCacheRateTrendRowV1 {
             day: row.day,

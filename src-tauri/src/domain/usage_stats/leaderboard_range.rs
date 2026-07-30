@@ -1,12 +1,10 @@
 use crate::db;
 use crate::shared::error::db_err;
 use rusqlite::{params, Connection};
-use serde::Deserialize;
-use std::collections::HashMap;
 
 use super::{
-    compute_start_ts, effective_total_from_buckets, normalize_cli_filter, parse_range,
-    sql_effective_input_tokens_expr, UsageDayRow, UsageProviderRow,
+    compute_start_ts, normalize_cli_filter, parse_range, sql_effective_input_tokens_expr,
+    UsageDayRow, UsageProviderRow,
 };
 
 const USD_FEMTO_DENOM: f64 = 1_000_000_000_000_000.0;
@@ -43,7 +41,7 @@ pub(super) struct ProviderAgg {
     pub(super) cache_creation_5m_input_tokens: i64,
     pub(super) cache_creation_1h_input_tokens: i64,
     pub(super) cost_covered_success: i64,
-    pub(super) total_cost_usd_femto: i64,
+    pub(super) total_cost_usd_femto: f64,
 }
 
 impl ProviderAgg {
@@ -101,9 +99,7 @@ impl ProviderAgg {
         self.cost_covered_success = self
             .cost_covered_success
             .saturating_add(add.cost_covered_success);
-        self.total_cost_usd_femto = self
-            .total_cost_usd_femto
-            .saturating_add(add.total_cost_usd_femto);
+        self.total_cost_usd_femto += add.total_cost_usd_femto;
     }
 
     pub(super) fn into_leaderboard_row(
@@ -130,9 +126,9 @@ impl ProviderAgg {
             None
         };
 
-        let total_cost_usd_femto = self.total_cost_usd_femto.max(0);
-        let cost_usd = if self.cost_covered_success > 0 && total_cost_usd_femto > 0 {
-            Some(total_cost_usd_femto as f64 / USD_FEMTO_DENOM)
+        let total_cost_usd_femto = self.total_cost_usd_femto.max(0.0);
+        let cost_usd = if self.cost_covered_success > 0 && total_cost_usd_femto > 0.0 {
+            Some(total_cost_usd_femto / USD_FEMTO_DENOM)
         } else {
             None
         };
@@ -160,36 +156,6 @@ impl ProviderAgg {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct AttemptRow {
-    provider_id: i64,
-    provider_name: String,
-    outcome: String,
-}
-
-pub(super) fn extract_final_provider(cli_key: &str, attempts_json: &str) -> ProviderKey {
-    let attempts: Vec<AttemptRow> = serde_json::from_str(attempts_json).unwrap_or_default();
-
-    let picked = attempts
-        .iter()
-        .rev()
-        .find(|a| a.outcome == "success")
-        .or_else(|| attempts.last());
-
-    match picked {
-        Some(a) => ProviderKey {
-            cli_key: cli_key.to_string(),
-            provider_id: a.provider_id,
-            provider_name: a.provider_name.clone(),
-        },
-        None => ProviderKey {
-            cli_key: cli_key.to_string(),
-            provider_id: 0,
-            provider_name: "Unknown".to_string(),
-        },
-    }
-}
-
 pub(super) fn has_valid_provider_key(key: &ProviderKey) -> bool {
     if key.provider_id <= 0 {
         return false;
@@ -204,10 +170,6 @@ pub(super) fn has_valid_provider_key(key: &ProviderKey) -> bool {
     true
 }
 
-pub(super) fn is_success(status: Option<i64>, error_code: Option<&str>) -> bool {
-    status.is_some_and(|v| (200..300).contains(&v)) && error_code.is_none()
-}
-
 fn resolve_range_filters<'a>(
     conn: &Connection,
     range: &str,
@@ -219,6 +181,92 @@ fn resolve_range_filters<'a>(
     Ok((start_ts, cli_key))
 }
 
+fn provider_leaderboard_query() -> String {
+    let effective_input_expr = sql_effective_input_tokens_expr();
+    let canonical_buckets_missing_expr = SQL_CANONICAL_BUCKETS_MISSING;
+
+    format!(
+        r#"
+SELECT
+  cli_key,
+  provider_id,
+  provider_name,
+  requests_total,
+  requests_success,
+  requests_failed,
+  success_duration_ms_sum,
+  success_ttfb_ms_sum,
+  success_ttfb_ms_count,
+  success_generation_ms_sum,
+  success_output_tokens_for_rate_sum,
+  input_tokens,
+  output_tokens,
+  input_tokens + output_tokens + cache_read_input_tokens + cache_creation_input_tokens + legacy_total_tokens AS total_tokens,
+  cache_read_input_tokens,
+  cache_creation_input_tokens,
+  cache_creation_5m_input_tokens,
+  cache_creation_1h_input_tokens
+FROM (
+  SELECT
+    cli_key,
+    final_provider_id AS provider_id,
+    NULLIF(TRIM(provider_name_snapshot), '') AS provider_name,
+    COUNT(*) AS requests_total,
+    SUM(CASE WHEN status >= 200 AND status < 300 AND error_present = 0 THEN 1 ELSE 0 END) AS requests_success,
+    SUM(CASE WHEN status >= 200 AND status < 300 AND error_present = 0 THEN 0 ELSE 1 END) AS requests_failed,
+    SUM(CASE WHEN status >= 200 AND status < 300 AND error_present = 0 THEN COALESCE(duration_ms, 0) ELSE 0 END) AS success_duration_ms_sum,
+    SUM(
+      CASE WHEN (
+        status >= 200 AND status < 300 AND error_present = 0 AND
+        ttfb_ms IS NOT NULL AND ttfb_ms < COALESCE(duration_ms, 0)
+      ) THEN ttfb_ms ELSE 0 END
+    ) AS success_ttfb_ms_sum,
+    SUM(
+      CASE WHEN (
+        status >= 200 AND status < 300 AND error_present = 0 AND
+        ttfb_ms IS NOT NULL AND ttfb_ms < COALESCE(duration_ms, 0)
+      ) THEN 1 ELSE 0 END
+    ) AS success_ttfb_ms_count,
+    SUM(
+      CASE WHEN (
+        status >= 200 AND status < 300 AND error_present = 0 AND
+        output_tokens IS NOT NULL AND
+        ttfb_ms IS NOT NULL AND ttfb_ms < COALESCE(duration_ms, 0)
+      ) THEN COALESCE(duration_ms, 0) - ttfb_ms ELSE 0 END
+    ) AS success_generation_ms_sum,
+    SUM(
+      CASE WHEN (
+        status >= 200 AND status < 300 AND error_present = 0 AND
+        output_tokens IS NOT NULL AND
+        ttfb_ms IS NOT NULL AND ttfb_ms < COALESCE(duration_ms, 0)
+      ) THEN output_tokens ELSE 0 END
+    ) AS success_output_tokens_for_rate_sum,
+    SUM({effective_input_expr}) AS input_tokens,
+    SUM(COALESCE(output_tokens, 0)) AS output_tokens,
+    SUM(COALESCE(cache_read_input_tokens, 0)) AS cache_read_input_tokens,
+    SUM(COALESCE(cache_creation_input_tokens, 0)) AS cache_creation_input_tokens,
+    SUM(COALESCE(cache_creation_5m_input_tokens, 0)) AS cache_creation_5m_input_tokens,
+    SUM(COALESCE(cache_creation_1h_input_tokens, 0)) AS cache_creation_1h_input_tokens,
+    SUM(
+      CASE WHEN {canonical_buckets_missing_expr}
+      THEN COALESCE(total_tokens, 0) ELSE 0 END
+    ) AS legacy_total_tokens
+  FROM usage_events
+  WHERE excluded_from_stats = 0
+    AND (?1 IS NULL OR created_at >= ?1)
+    AND (?2 IS NULL OR cli_key = ?2)
+    AND final_provider_id IS NOT NULL
+    AND final_provider_id > 0
+    AND NULLIF(TRIM(provider_name_snapshot), '') IS NOT NULL
+    AND TRIM(provider_name_snapshot) != 'Unknown'
+  GROUP BY cli_key, final_provider_id, NULLIF(TRIM(provider_name_snapshot), '')
+) aggregated
+ORDER BY total_tokens DESC, requests_total DESC, cli_key ASC, provider_name ASC
+LIMIT ?3
+"#
+    )
+}
+
 pub fn leaderboard_provider(
     db: &db::Db,
     range: &str,
@@ -228,172 +276,79 @@ pub fn leaderboard_provider(
     let conn = db.open_connection()?;
     let (start_ts, cli_key) = resolve_range_filters(&conn, range, cli_key)?;
 
-    let effective_input_expr = sql_effective_input_tokens_expr();
-    let canonical_buckets_missing_expr = SQL_CANONICAL_BUCKETS_MISSING;
-    let query = format!(
-        r#"
-    	SELECT
-    	  cli_key,
-    	  attempts_json,
-    	  status,
-    	  error_code,
-    	  duration_ms,
-    	  ttfb_ms,
-      {effective_input_expr} AS input_tokens,
-	      output_tokens,
-	      total_tokens,
-	      cache_read_input_tokens,
-    	  cache_creation_input_tokens,
-      cache_creation_5m_input_tokens,
-      cache_creation_1h_input_tokens,
-      CASE WHEN {canonical_buckets_missing_expr}
-      THEN 1 ELSE 0 END AS canonical_buckets_missing
-    FROM request_logs
-    WHERE excluded_from_stats = 0
-    AND (?1 IS NULL OR created_at >= ?1)
-    AND (?2 IS NULL OR cli_key = ?2)
-	    "#,
-    );
+    let query = provider_leaderboard_query();
 
     let mut stmt = conn
         .prepare_cached(&query)
         .map_err(|e| db_err!("failed to prepare provider leaderboard query: {e}"))?;
 
     let rows = stmt
-        .query_map(params![start_ts, cli_key], |row| {
-            let row_cli_key: String = row.get("cli_key")?;
-            let attempts_json: String = row.get("attempts_json")?;
-            let status: Option<i64> = row.get("status")?;
-            let error_code: Option<String> = row.get("error_code")?;
-            let duration_ms: i64 = row.get("duration_ms")?;
-            let ttfb_ms: Option<i64> = row.get("ttfb_ms")?;
+        .query_map(
+            params![
+                start_ts,
+                cli_key,
+                i64::try_from(limit.max(1)).unwrap_or(i64::MAX)
+            ],
+            |row| {
+                let requests_success: i64 = row.get("requests_success")?;
+                let success_duration_ms_sum: i64 = row.get("success_duration_ms_sum")?;
+                let success_ttfb_ms_count: i64 = row.get("success_ttfb_ms_count")?;
+                let success_ttfb_ms_sum: i64 = row.get("success_ttfb_ms_sum")?;
+                let success_generation_ms_sum: i64 = row.get("success_generation_ms_sum")?;
+                let success_output_tokens_for_rate_sum: i64 =
+                    row.get("success_output_tokens_for_rate_sum")?;
 
-            let input_tokens: Option<i64> = row.get("input_tokens")?;
-            let output_tokens: Option<i64> = row.get("output_tokens")?;
-            let persisted_total_tokens: Option<i64> = row.get("total_tokens")?;
-            let cache_read_input_tokens: Option<i64> = row.get("cache_read_input_tokens")?;
-            let cache_creation_input_tokens: Option<i64> =
-                row.get("cache_creation_input_tokens")?;
-            let cache_creation_5m_input_tokens: Option<i64> =
-                row.get("cache_creation_5m_input_tokens")?;
-            let cache_creation_1h_input_tokens: Option<i64> =
-                row.get("cache_creation_1h_input_tokens")?;
-            let canonical_buckets_missing: bool =
-                row.get::<_, i64>("canonical_buckets_missing")? != 0;
-
-            let key = extract_final_provider(&row_cli_key, &attempts_json);
-            let success = is_success(status, error_code.as_deref());
-
-            let ttfb_ms = match ttfb_ms {
-                Some(v) if v < duration_ms => Some(v),
-                _ => None,
-            };
-            let ttfb_ms_for_rate = ttfb_ms.unwrap_or(duration_ms);
-            let generation_ms = duration_ms.saturating_sub(ttfb_ms_for_rate);
-            let (rate_generation_ms, rate_output_tokens) =
-                if success && generation_ms > 0 && output_tokens.is_some() {
-                    (generation_ms, output_tokens.unwrap_or(0))
-                } else {
-                    (0, 0)
-                };
-
-            Ok((
-                key,
-                ProviderAgg {
-                    requests_total: 1,
-                    requests_success: if success { 1 } else { 0 },
-                    requests_failed: if success { 0 } else { 1 },
-                    total_duration_ms: duration_ms,
-                    first_request_created_at_ms: None,
-                    last_request_created_at_ms: None,
-                    success_duration_ms_sum: if success { duration_ms } else { 0 },
-                    success_ttfb_ms_sum: if success { ttfb_ms.unwrap_or(0) } else { 0 },
-                    success_ttfb_ms_count: if success && ttfb_ms.is_some() { 1 } else { 0 },
-                    success_generation_ms_sum: rate_generation_ms,
-                    success_output_tokens_for_rate_sum: rate_output_tokens,
-                    input_tokens: input_tokens.unwrap_or(0),
-                    output_tokens: output_tokens.unwrap_or(0),
-                    total_tokens: if canonical_buckets_missing {
-                        persisted_total_tokens.unwrap_or(0)
-                    } else {
-                        effective_total_from_buckets(
-                            input_tokens.unwrap_or(0),
-                            output_tokens.unwrap_or(0),
-                            cache_creation_input_tokens.unwrap_or(0),
-                            cache_read_input_tokens.unwrap_or(0),
-                        )
-                    },
-                    cache_read_input_tokens: cache_read_input_tokens.unwrap_or(0),
-                    cache_creation_input_tokens: cache_creation_input_tokens.unwrap_or(0),
-                    cache_creation_5m_input_tokens: cache_creation_5m_input_tokens.unwrap_or(0),
-                    cache_creation_1h_input_tokens: cache_creation_1h_input_tokens.unwrap_or(0),
-                    cost_covered_success: 0,
-                    total_cost_usd_femto: 0,
-                },
-            ))
-        })
+                Ok(UsageProviderRow {
+                    cli_key: row.get("cli_key")?,
+                    provider_id: row.get("provider_id")?,
+                    provider_name: row.get("provider_name")?,
+                    requests_total: row.get("requests_total")?,
+                    requests_success,
+                    requests_failed: row.get("requests_failed")?,
+                    avg_duration_ms: (requests_success > 0)
+                        .then(|| success_duration_ms_sum / requests_success),
+                    avg_ttfb_ms: (success_ttfb_ms_count > 0)
+                        .then(|| success_ttfb_ms_sum / success_ttfb_ms_count),
+                    avg_output_tokens_per_second: (success_generation_ms_sum > 0).then(|| {
+                        success_output_tokens_for_rate_sum as f64
+                            / (success_generation_ms_sum as f64 / 1000.0)
+                    }),
+                    input_tokens: row.get("input_tokens")?,
+                    output_tokens: row.get("output_tokens")?,
+                    total_tokens: row.get("total_tokens")?,
+                    cache_read_input_tokens: row.get("cache_read_input_tokens")?,
+                    cache_creation_input_tokens: row.get("cache_creation_input_tokens")?,
+                    cache_creation_5m_input_tokens: row.get("cache_creation_5m_input_tokens")?,
+                    cache_creation_1h_input_tokens: row.get("cache_creation_1h_input_tokens")?,
+                })
+            },
+        )
         .map_err(|e| db_err!("failed to run provider leaderboard query: {e}"))?;
 
-    let mut agg: HashMap<ProviderKey, ProviderAgg> = HashMap::new();
+    let mut out = Vec::new();
     for row in rows {
-        let (key, add) =
-            row.map_err(|e| db_err!("failed to read provider leaderboard row: {e}"))?;
-
-        if !has_valid_provider_key(&key) {
-            continue;
-        }
-
-        let entry = agg.entry(key).or_default();
-        entry.merge(add);
+        out.push(row.map_err(|e| db_err!("failed to read provider leaderboard row: {e}"))?);
     }
-
-    let mut out: Vec<UsageProviderRow> = agg
-        .into_iter()
-        .map(|(k, v)| UsageProviderRow {
-            cli_key: k.cli_key,
-            provider_id: k.provider_id,
-            provider_name: k.provider_name,
-            requests_total: v.requests_total,
-            requests_success: v.requests_success,
-            requests_failed: v.requests_failed,
-            avg_duration_ms: if v.requests_success > 0 {
-                Some(v.success_duration_ms_sum / v.requests_success)
-            } else {
-                None
-            },
-            avg_ttfb_ms: if v.success_ttfb_ms_count > 0 {
-                Some(v.success_ttfb_ms_sum / v.success_ttfb_ms_count)
-            } else {
-                None
-            },
-            avg_output_tokens_per_second: if v.success_generation_ms_sum > 0 {
-                Some(
-                    v.success_output_tokens_for_rate_sum as f64
-                        / (v.success_generation_ms_sum as f64 / 1000.0),
-                )
-            } else {
-                None
-            },
-            input_tokens: v.input_tokens,
-            output_tokens: v.output_tokens,
-            total_tokens: v.total_tokens,
-            cache_read_input_tokens: v.cache_read_input_tokens,
-            cache_creation_input_tokens: v.cache_creation_input_tokens,
-            cache_creation_5m_input_tokens: v.cache_creation_5m_input_tokens,
-            cache_creation_1h_input_tokens: v.cache_creation_1h_input_tokens,
-        })
-        .collect();
-
-    out.sort_by(|a, b| {
-        b.total_tokens
-            .cmp(&a.total_tokens)
-            .then_with(|| b.requests_total.cmp(&a.requests_total))
-            .then_with(|| a.cli_key.cmp(&b.cli_key))
-            .then_with(|| a.provider_name.cmp(&b.provider_name))
-    });
-
-    out.truncate(limit.max(1));
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_leaderboard_aggregates_orders_and_limits_in_sql() {
+        let query = provider_leaderboard_query();
+
+        assert!(query.contains("COUNT(*) AS requests_total"));
+        assert!(query.contains(
+            "GROUP BY cli_key, final_provider_id, NULLIF(TRIM(provider_name_snapshot), '')"
+        ));
+        assert!(query.contains(
+            "ORDER BY total_tokens DESC, requests_total DESC, cli_key ASC, provider_name ASC"
+        ));
+        assert!(query.contains("LIMIT ?3"));
+    }
 }
 
 pub fn leaderboard_day(
@@ -431,7 +386,7 @@ pub fn leaderboard_day(
       SUM(COALESCE(cache_creation_1h_input_tokens, 0)) AS cache_creation_1h_input_tokens,
       SUM(CASE WHEN {canonical_buckets_missing_expr}
       THEN COALESCE(total_tokens, 0) ELSE 0 END) AS legacy_total_tokens
-    FROM request_logs
+    FROM usage_events
     WHERE excluded_from_stats = 0
     AND (?1 IS NULL OR created_at >= ?1)
     AND (?2 IS NULL OR cli_key = ?2)

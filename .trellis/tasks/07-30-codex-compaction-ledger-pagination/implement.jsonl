@@ -1,0 +1,6 @@
+{"file":".trellis/spec/aio-coding-hub/backend/index.md","reason":"Gateway and Rust backend development contract."}
+{"file":".trellis/spec/aio-coding-hub/backend/codex-context-compaction-observation-contract.md","reason":"Fail-open semantic context-compaction classification and gateway isolation contract."}
+{"file":".trellis/spec/aio-coding-hub/backend/codex-request-content-encoding-contract.md","reason":"Keep HTTP request encoding separate from semantic compaction and preserve the decode boundary."}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/index.md","reason":"Generated bindings, frontend adapters and UI quality contract."}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/request-log-usage-ledger-pagination-contract.md","reason":"Cursor pagination, permanent usage ledger and cross-layer display contract."}
+{"file":".trellis/tasks/07-30-codex-compaction-ledger-pagination/research/codex-compaction-signatures.md","reason":"Canonical Codex metadata and fallback evidence."}

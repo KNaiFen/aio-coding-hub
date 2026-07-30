@@ -100,6 +100,21 @@ pub(crate) async fn usage_summary_v2(
 
 #[tauri::command]
 #[specta::specta]
+pub(crate) async fn usage_availability_timeline_v1(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    params: usage_stats::UsageAvailabilityParams,
+) -> Result<usage_stats::UsageAvailabilityTimelineV1, String> {
+    let db = ensure_db_ready(app, db_state.inner()).await?;
+    blocking::run("usage_availability_timeline_v1", move || {
+        usage_stats::availability_timeline_v1(&db, &params)
+    })
+    .await
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
 pub(crate) async fn usage_leaderboard_provider(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,

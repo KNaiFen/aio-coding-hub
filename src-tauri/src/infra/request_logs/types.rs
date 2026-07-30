@@ -1,6 +1,6 @@
 //! Usage: Request log DTOs and insertion payloads.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone)]
 pub struct RequestLogInsert {
@@ -109,6 +109,38 @@ pub struct RequestLogSummary {
     pub created_at: i64,
 }
 
+#[derive(Debug, Clone, Default, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RequestLogPageFilters {
+    pub cli_key: Option<String>,
+    pub status: Option<RequestLogStatusFilter>,
+    pub error_code_contains: Option<String>,
+    pub method_path_contains: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RequestLogStatusFilter {
+    pub op: RequestLogStatusFilterOp,
+    pub value: i64,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum RequestLogStatusFilterOp {
+    Eq,
+    Neq,
+    Gte,
+    Lte,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestLogPage {
+    pub items: Vec<RequestLogSummary>,
+    pub next_cursor: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct RequestLogDetail {
     pub id: i64,
@@ -158,6 +190,44 @@ pub struct SessionStatsAggregate {
     pub request_count: i64,
     pub total_input_tokens: i64,
     pub total_output_tokens: i64,
-    pub total_cost_usd_femto: i64,
+    pub total_cost_usd_femto: f64,
     pub total_duration_ms: i64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        RequestLogPage, RequestLogPageFilters, RequestLogStatusFilter, RequestLogStatusFilterOp,
+    };
+
+    #[test]
+    fn request_log_page_types_use_camel_case_fields_and_typed_status_ops() {
+        let filters = RequestLogPageFilters {
+            cli_key: Some("codex".to_string()),
+            status: Some(RequestLogStatusFilter {
+                op: RequestLogStatusFilterOp::Gte,
+                value: 500,
+            }),
+            error_code_contains: Some("timeout".to_string()),
+            method_path_contains: Some("post /responses".to_string()),
+        };
+
+        assert_eq!(
+            serde_json::to_value(filters).unwrap(),
+            serde_json::json!({
+                "cliKey": "codex",
+                "status": {"op": "gte", "value": 500},
+                "errorCodeContains": "timeout",
+                "methodPathContains": "post /responses"
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(RequestLogPage {
+                items: Vec::new(),
+                next_cursor: Some("cursor".to_string()),
+            })
+            .unwrap(),
+            serde_json::json!({"items": [], "nextCursor": "cursor"})
+        );
+    }
 }
