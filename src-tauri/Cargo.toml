@@ -45,6 +45,7 @@ reqwest = { version = "0.12.28", default-features = false, features = ["rustls-t
 if-addrs = "0.13"
 hostname = "0.4"
 futures-core = "0.3"
+brotli = "8.0.2"
 flate2 = "1.1.5"
 zstd = "0.13"
 zip = { version = "4.6", default-features = false, features = ["deflate"] }

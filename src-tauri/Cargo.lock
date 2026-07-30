@@ -41,6 +41,7 @@ version = "0.60.34"
 dependencies = [
  "axum",
  "base64 0.22.1",
+ "brotli",
  "bytes",
  "chrono",
  "ed25519-dalek",

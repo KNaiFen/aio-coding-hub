@@ -9,6 +9,42 @@ use std::io::{Read, Write};
 
 use super::GatewayErrorCode;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum BoundedDecodeError {
+    InvalidData,
+    OutputTooLarge,
+}
+
+impl std::fmt::Display for BoundedDecodeError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidData => formatter.write_str("invalid compressed body"),
+            Self::OutputTooLarge => formatter.write_str("decoded body exceeded configured limit"),
+        }
+    }
+}
+
+fn read_decoded_bytes_with_limit(
+    mut decoder: impl Read,
+    max_output_bytes: usize,
+) -> Result<Bytes, BoundedDecodeError> {
+    let mut out = Vec::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = decoder
+            .read(&mut buf)
+            .map_err(|_| BoundedDecodeError::InvalidData)?;
+        if n == 0 {
+            break;
+        }
+        if out.len().saturating_add(n) > max_output_bytes {
+            return Err(BoundedDecodeError::OutputTooLarge);
+        }
+        out.extend_from_slice(&buf[..n]);
+    }
+    Ok(Bytes::from(out))
+}
+
 pub(super) fn is_event_stream(headers: &HeaderMap) -> bool {
     headers
         .get(header::CONTENT_TYPE)
@@ -106,25 +142,28 @@ pub(super) fn maybe_gunzip_response_body_bytes_with_limit(
 pub(super) fn gunzip_bytes_with_limit(
     input: &[u8],
     max_output_bytes: usize,
-) -> Result<Bytes, String> {
-    let mut decoder = flate2::read::GzDecoder::new(input);
-    let mut out: Vec<u8> = Vec::new();
-    let mut buf = [0u8; 8192];
-    loop {
-        let n = decoder
-            .read(&mut buf)
-            .map_err(|err| format!("failed to decode gzip body: {err}"))?;
-        if n == 0 {
-            break;
-        }
-        if out.len().saturating_add(n) > max_output_bytes {
-            return Err(format!(
-                "gzip decoded body exceeded limit: limit={max_output_bytes} bytes"
-            ));
-        }
-        out.extend_from_slice(&buf[..n]);
+) -> Result<Bytes, BoundedDecodeError> {
+    read_decoded_bytes_with_limit(flate2::read::GzDecoder::new(input), max_output_bytes)
+}
+
+pub(super) fn inflate_bytes_with_limit(
+    input: &[u8],
+    max_output_bytes: usize,
+) -> Result<Bytes, BoundedDecodeError> {
+    match read_decoded_bytes_with_limit(flate2::read::ZlibDecoder::new(input), max_output_bytes) {
+        Err(BoundedDecodeError::InvalidData) => read_decoded_bytes_with_limit(
+            flate2::read::DeflateDecoder::new(input),
+            max_output_bytes,
+        ),
+        result => result,
     }
-    Ok(Bytes::from(out))
+}
+
+pub(super) fn unbrotli_bytes_with_limit(
+    input: &[u8],
+    max_output_bytes: usize,
+) -> Result<Bytes, BoundedDecodeError> {
+    read_decoded_bytes_with_limit(brotli::Decompressor::new(input, 4096), max_output_bytes)
 }
 
 pub(super) fn gunzip_bytes_prefix(input: &[u8], max_output_bytes: usize) -> Option<Bytes> {
@@ -162,26 +201,10 @@ pub(super) fn gzip_bytes_with_limit(
 pub(super) fn unzstd_bytes_with_limit(
     input: &[u8],
     max_output_bytes: usize,
-) -> Result<Bytes, String> {
-    let mut decoder = zstd::stream::read::Decoder::new(input)
-        .map_err(|err| format!("failed to decode zstd body: {err}"))?;
-    let mut out: Vec<u8> = Vec::new();
-    let mut buf = [0u8; 8192];
-    loop {
-        let n = decoder
-            .read(&mut buf)
-            .map_err(|err| format!("failed to decode zstd body: {err}"))?;
-        if n == 0 {
-            break;
-        }
-        if out.len().saturating_add(n) > max_output_bytes {
-            return Err(format!(
-                "zstd decoded body exceeded limit: limit={max_output_bytes} bytes"
-            ));
-        }
-        out.extend_from_slice(&buf[..n]);
-    }
-    Ok(Bytes::from(out))
+) -> Result<Bytes, BoundedDecodeError> {
+    let decoder =
+        zstd::stream::read::Decoder::new(input).map_err(|_| BoundedDecodeError::InvalidData)?;
+    read_decoded_bytes_with_limit(decoder, max_output_bytes)
 }
 
 pub(super) fn zstd_bytes_with_limit(
@@ -322,7 +345,7 @@ mod tests {
         let err = super::gunzip_bytes_with_limit(encoded.as_ref(), 1024)
             .expect_err("should exceed output limit");
 
-        assert!(err.contains("gzip decoded body exceeded limit"));
+        assert_eq!(err, super::BoundedDecodeError::OutputTooLarge);
     }
 
     #[test]
@@ -352,7 +375,7 @@ mod tests {
         let err = super::unzstd_bytes_with_limit(encoded.as_ref(), 1024)
             .expect_err("should exceed output limit");
 
-        assert!(err.contains("zstd decoded body exceeded limit"));
+        assert_eq!(err, super::BoundedDecodeError::OutputTooLarge);
     }
 
     #[test]
