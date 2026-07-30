@@ -449,18 +449,38 @@ FROM request_normalized request;
     .map_err(|error| format!("failed to create usage_events view: {error}"))
 }
 
+fn table_exists(conn: &Connection, table: &str) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+        [table],
+        |row| row.get(0),
+    )
+    .map_err(|error| format!("failed to inspect table {table}: {error}"))
+}
+
 pub(super) fn migrate_v42_to_v43(conn: &mut Connection) -> Result<(), String> {
     let tx = conn
         .transaction()
         .map_err(|error| format!("failed to start v42->v43: {error}"))?;
 
     create_usage_ledger_schema(&tx)?;
+    // `usage_events` joins these provider columns. Add them in this
+    // transaction before creating the view so direct v42 upgrades cannot
+    // commit a view that references missing columns.
+    super::ensure::ensure_provider_bridge_columns(&tx)?;
 
-    let target_request_log_id: i64 = tx
-        .query_row("SELECT COALESCE(MAX(id), 0) FROM request_logs", [], |row| {
-            row.get(0)
-        })
-        .map_err(|error| format!("failed to capture usage ledger high-water mark: {error}"))?;
+    // Historical development schemas can be partial. A missing request_logs
+    // table means there is no usage history to backfill.
+    let target_request_log_id: i64 = if table_exists(&tx, "request_logs")? {
+        tx.query_row(
+            "SELECT COALESCE(MAX(id), 0) FROM request_logs",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("failed to capture usage ledger high-water mark: {error}"))?
+    } else {
+        0
+    };
     let now: i64 = tx
         .query_row("SELECT CAST(strftime('%s', 'now') AS INTEGER)", [], |row| {
             row.get(0)

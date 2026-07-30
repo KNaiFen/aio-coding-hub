@@ -13,8 +13,7 @@ const MAX_SESSION_REUSE_PRIORITY: i64 = 1000;
 pub(super) fn apply_ensure_patches(conn: &mut Connection) -> crate::shared::error::AppResult<()> {
     // `usage_events` references these provider columns. Ensure them before
     // workspace repairs can execute SQL that forces SQLite to validate views.
-    ensure_provider_source_provider_id(conn)?;
-    ensure_provider_bridge_type(conn)?;
+    ensure_provider_bridge_columns(conn)?;
     ensure_workspace_cluster(conn)?;
     ensure_provider_limits(conn)?;
     ensure_provider_oauth_columns(conn)?;
@@ -926,16 +925,14 @@ fn ensure_provider_note(conn: &mut Connection) -> Result<(), String> {
 // ensure_provider_source_provider_id (CX2CC translation provider)
 // ---------------------------------------------------------------------------
 
-fn ensure_provider_source_provider_id(conn: &mut Connection) -> Result<(), String> {
-    let has_providers_table: bool = conn
-        .query_row(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'providers' LIMIT 1",
-            [],
-            |_| Ok(true),
-        )
-        .optional()
-        .map_err(|e| format!("failed to query sqlite_master: {e}"))?
-        .unwrap_or(false);
+pub(super) fn ensure_provider_bridge_columns(conn: &Connection) -> Result<(), String> {
+    ensure_provider_source_provider_id(conn)?;
+    ensure_provider_bridge_type(conn)?;
+    Ok(())
+}
+
+fn ensure_provider_source_provider_id(conn: &Connection) -> Result<(), String> {
+    let has_providers_table = table_exists(conn, "providers")?;
 
     if !has_providers_table {
         return Ok(());
@@ -954,14 +951,8 @@ fn ensure_provider_source_provider_id(conn: &mut Connection) -> Result<(), Strin
 // ensure_provider_bridge_type (protocol bridge type identifier)
 // ---------------------------------------------------------------------------
 
-fn ensure_provider_bridge_type(conn: &mut Connection) -> Result<(), String> {
-    let has_providers_table: bool = conn
-        .query_row(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'providers' LIMIT 1",
-            [],
-            |_| Ok(true),
-        )
-        .unwrap_or(false);
+fn ensure_provider_bridge_type(conn: &Connection) -> Result<(), String> {
+    let has_providers_table = table_exists(conn, "providers")?;
 
     if !has_providers_table {
         return Ok(());

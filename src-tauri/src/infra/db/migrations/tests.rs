@@ -2590,6 +2590,12 @@ fn migrate_v42_to_v43_records_fixed_high_water_without_sync_backfill() {
     conn.execute_batch(
         r#"
 DROP VIEW usage_events;
+DROP TABLE providers;
+CREATE TABLE providers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  cli_key TEXT NOT NULL,
+  name TEXT NOT NULL
+);
 DROP TABLE usage_ledger_backfill_state;
 DROP TABLE usage_ledger;
 INSERT INTO request_logs(
@@ -2602,7 +2608,16 @@ PRAGMA user_version = 42;
     )
     .expect("create v42 usage fixture");
 
+    assert!(!test_has_column(&conn, "providers", "source_provider_id"));
+    assert!(!test_has_column(&conn, "providers", "bridge_type"));
     v42_to_v43::migrate_v42_to_v43(&mut conn).expect("migrate v42->v43");
+
+    assert!(test_has_column(&conn, "providers", "source_provider_id"));
+    assert!(test_has_column(&conn, "providers", "bridge_type"));
+    let usage_event_count: i64 = conn
+        .query_row("SELECT COUNT(1) FROM usage_events", [], |row| row.get(0))
+        .expect("query usage events after v42->v43 upgrade");
+    assert_eq!(usage_event_count, 2);
 
     let state: (String, i64, i64, Option<i64>) = conn
         .query_row(
@@ -2620,6 +2635,44 @@ WHERE id = 1
         .query_row("SELECT COUNT(1) FROM usage_ledger", [], |row| row.get(0))
         .expect("count migration-time usage rows");
     assert_eq!(ledger_count, 0, "v43 migration must remain DDL-only");
+}
+
+#[test]
+fn migrate_v42_to_v43_treats_missing_request_logs_as_empty() {
+    let mut conn = Connection::open_in_memory().expect("open reduced v42 migration db");
+    conn.execute_batch(
+        r#"
+CREATE TABLE providers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  cli_key TEXT NOT NULL,
+  name TEXT NOT NULL
+);
+PRAGMA user_version = 42;
+"#,
+    )
+    .expect("create reduced v42 fixture without request_logs");
+
+    v42_to_v43::migrate_v42_to_v43(&mut conn).expect("migrate reduced v42->v43");
+
+    let state: (String, i64, i64, Option<i64>) = conn
+        .query_row(
+            r#"
+SELECT status, target_request_log_id, last_request_log_id, completed_at
+FROM usage_ledger_backfill_state
+WHERE id = 1
+"#,
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .expect("read reduced upgraded usage ledger state");
+    assert_eq!(state.0, "complete");
+    assert_eq!((state.1, state.2), (0, 0));
+    assert!(state.3.is_some());
+
+    let user_version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("read reduced upgraded user version");
+    assert_eq!(user_version, 43);
 }
 
 #[test]
