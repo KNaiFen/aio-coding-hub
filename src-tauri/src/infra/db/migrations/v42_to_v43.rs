@@ -458,6 +458,15 @@ fn table_exists(conn: &Connection, table: &str) -> Result<bool, String> {
     .map_err(|error| format!("failed to inspect table {table}: {error}"))
 }
 
+pub(super) fn refresh_usage_events_view(conn: &Connection) -> Result<(), String> {
+    if table_exists(conn, "request_logs")? {
+        recreate_usage_events_view(conn)
+    } else {
+        conn.execute_batch("DROP VIEW IF EXISTS usage_events;")
+            .map_err(|error| format!("failed to remove unsupported usage_events view: {error}"))
+    }
+}
+
 pub(super) fn migrate_v42_to_v43(conn: &mut Connection) -> Result<(), String> {
     let tx = conn
         .transaction()
@@ -471,7 +480,8 @@ pub(super) fn migrate_v42_to_v43(conn: &mut Connection) -> Result<(), String> {
 
     // Historical development schemas can be partial. A missing request_logs
     // table means there is no usage history to backfill.
-    let target_request_log_id: i64 = if table_exists(&tx, "request_logs")? {
+    let has_request_logs = table_exists(&tx, "request_logs")?;
+    let target_request_log_id: i64 = if has_request_logs {
         tx.query_row("SELECT COALESCE(MAX(id), 0) FROM request_logs", [], |row| {
             row.get(0)
         })
@@ -512,7 +522,7 @@ ON CONFLICT(id) DO UPDATE SET
     )
     .map_err(|error| format!("failed to initialize usage ledger backfill state: {error}"))?;
 
-    recreate_usage_events_view(&tx)?;
+    refresh_usage_events_view(&tx)?;
     super::set_user_version(&tx, 43)?;
     tx.commit()
         .map_err(|error| format!("failed to commit v42->v43: {error}"))?;

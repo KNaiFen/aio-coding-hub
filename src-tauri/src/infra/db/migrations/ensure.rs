@@ -1162,7 +1162,7 @@ ON CONFLICT(id) DO UPDATE SET
         .map_err(|error| format!("failed to repair usage ledger backfill state: {error}"))?;
     }
 
-    super::v42_to_v43::recreate_usage_events_view(&tx)?;
+    super::v42_to_v43::refresh_usage_events_view(&tx)?;
     tx.commit()
         .map_err(|error| format!("failed to commit usage ledger ensure transaction: {error}"))?;
     Ok(())

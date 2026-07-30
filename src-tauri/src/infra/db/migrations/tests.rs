@@ -859,6 +859,15 @@ fn test_has_table(conn: &Connection, table: &str) -> bool {
     .unwrap_or(false)
 }
 
+fn test_has_view(conn: &Connection, view: &str) -> bool {
+    conn.query_row(
+        "SELECT 1 FROM sqlite_master WHERE type = 'view' AND name = ?1 LIMIT 1",
+        [view],
+        |_| Ok(true),
+    )
+    .unwrap_or(false)
+}
+
 fn test_has_index(conn: &Connection, index: &str) -> bool {
     conn.query_row(
         "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?1 LIMIT 1",
@@ -2590,6 +2599,7 @@ fn migrate_v42_to_v43_records_fixed_high_water_without_sync_backfill() {
     conn.execute_batch(
         r#"
 DROP VIEW usage_events;
+DROP TABLE provider_extension_values;
 DROP TABLE providers;
 CREATE TABLE providers (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2673,6 +2683,7 @@ WHERE id = 1
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("read reduced upgraded user version");
     assert_eq!(user_version, 43);
+    assert!(!test_has_view(&conn, "usage_events"));
 }
 
 #[test]
