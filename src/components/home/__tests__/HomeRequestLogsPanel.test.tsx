@@ -60,7 +60,7 @@ describe("components/home/HomeRequestLogsPanel", () => {
     useCliSessionsFolderLookupByIdsQueryMock.mockReturnValue({ data: [], isLoading: false });
   });
 
-  it("renders unique live inference Session concurrency when explicitly enabled", () => {
+  it("renders each live inference request as concurrency when explicitly enabled", () => {
     const renderPanel = (
       activeRequests: ActiveRequestSnapshotItem[],
       activeRequestsAvailable: boolean | null,
@@ -82,23 +82,36 @@ describe("components/home/HomeRequestLogsPanel", () => {
         />
       </MemoryRouter>
     );
-    const view = render(
-      renderPanel(
-        [
-          activeRequest({ trace_id: "main-1", session_id: "main-session" }),
-          activeRequest({ trace_id: "main-2", session_id: "main-session" }),
-          activeRequest({ trace_id: "subagent-1", session_id: "subagent-session" }),
-          activeRequest({ trace_id: "search", path: "/v1/alpha/search", session_id: "search" }),
-        ],
-        true
-      )
+    const parents = Array.from({ length: 3 }, (_, index) =>
+      activeRequest({
+        trace_id: `parent-${index + 1}`,
+        session_id: `parent-session-${index + 1}`,
+      })
     );
+    const subagents = Array.from({ length: 10 }, (_, index) =>
+      activeRequest({
+        trace_id: `subagent-${index + 1}`,
+        session_id: `subagent-session-${index + 1}`,
+      })
+    );
+    const auxiliary = activeRequest({
+      trace_id: "search",
+      path: "/v1/alpha/search",
+      session_id: "search",
+    });
+    const view = render(renderPanel([...parents, ...subagents, auxiliary], true));
 
-    const exactCount = screen.getByLabelText("当前并发 2");
-    expect(within(exactCount).getByText("2")).toHaveClass(
+    const exactCount = screen.getByLabelText("当前并发 13");
+    expect(exactCount).toHaveAccessibleDescription(
+      "按活跃模型推理请求统计；同一会话与子代理的每个请求均计 1"
+    );
+    expect(within(exactCount).getByText("13")).toHaveClass(
       "text-indigo-600",
       "dark:text-indigo-400"
     );
+
+    view.rerender(renderPanel([...parents, ...subagents.slice(0, -2), auxiliary], true));
+    expect(within(screen.getByLabelText("当前并发 11")).getByText("11")).toBeInTheDocument();
 
     view.rerender(renderPanel([], true));
     expect(screen.getByLabelText("当前并发 0")).toBeInTheDocument();

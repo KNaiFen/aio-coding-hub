@@ -67,6 +67,21 @@ bounded list/after-id realtime feed.
 Array realtime-feed caches and page-object caches have distinct query-key
 branches and reset shapes.
 
+## Home Realtime Concurrency
+
+The Home current-concurrency value counts active model inference requests, not
+distinct Sessions. Every active snapshot entry that matches the existing
+inference endpoint classifier counts as one, including parallel requests in
+the same Session and subagent requests.
+
+Auxiliary requests such as model lists, search, token counting, probes, and
+non-POST traffic remain excluded. An available empty snapshot displays `0`;
+an unavailable snapshot displays `--`.
+
+This is a frontend-only observation over the existing per-trace active-request
+registry. It must not change gateway forwarding, retries, provider health,
+request logging, historical pagination, or IPC contracts.
+
 ## Tests
 
 Verify migration, resumable backfill, concurrent dual-write, pending

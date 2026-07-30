@@ -1,0 +1,3 @@
+{"file":".trellis/spec/aio-coding-hub/cross-layer/index.md","reason":"Verify cross-layer UI and test quality."}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/request-log-usage-ledger-pagination-contract.md","reason":"Verify Home realtime count semantics remain distinct from log pagination."}
+{"file":".trellis/tasks/07-30-count-live-inference-requests/research/concurrency-source-map.md","reason":"Review implementation against the mapped one-request-per-trace data flow."}

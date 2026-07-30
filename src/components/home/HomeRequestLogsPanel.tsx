@@ -2,7 +2,7 @@
 // - Render as the right side column in `HomeOverviewPanel` to show realtime traces + request logs list.
 // - Selection state is controlled by parent; the detail dialog is rendered outside the grid layout.
 
-import { memo, useRef, useMemo, useState } from "react";
+import { memo, useId, useRef, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { cliBadgeToneStatic, cliShortLabel } from "../../constants/clis";
@@ -22,7 +22,7 @@ import {
   type ProjectedRequestLogRow,
   type RequestLogProjectionOrder,
 } from "../../services/gateway/requestActivityProjection";
-import { countActiveInferenceSessions } from "../../services/gateway/activeRequests";
+import { countActiveInferenceRequests } from "../../services/gateway/activeRequests";
 import type { RequestLogSummary } from "../../services/gateway/requestLogs";
 import { hasCodexSystemRequestSpecialSetting } from "../../services/gateway/requestLogSpecialSettings";
 import type { TraceSession } from "../../services/gateway/traceStore";
@@ -507,6 +507,8 @@ const DEFAULT_HOME_REQUEST_LOGS_DISPLAY_OPTIONS: HomeRequestLogsDisplayOptions =
   compactModeToggle: true,
 };
 
+const CURRENT_CONCURRENCY_DESCRIPTION = "按活跃模型推理请求统计；同一会话与子代理的每个请求均计 1";
+
 export type HomeRequestLogsPanelProps = {
   displayOptions?: Partial<HomeRequestLogsDisplayOptions>;
   title?: string;
@@ -552,6 +554,7 @@ export function HomeRequestLogsPanel({
   onSelectLogId,
 }: HomeRequestLogsPanelProps) {
   const navigate = useNavigate();
+  const currentConcurrencyDescriptionId = useId();
   const resolvedDisplayOptions = {
     ...DEFAULT_HOME_REQUEST_LOGS_DISPLAY_OPTIONS,
     ...displayOptions,
@@ -610,7 +613,7 @@ export function HomeRequestLogsPanel({
     devPreviewEnabled && activeRequests.length === 0 ? true : activeRequestsAvailable;
   const currentConcurrency =
     displayedActiveRequestsAvailable === true
-      ? countActiveInferenceSessions(displayedActiveRequests)
+      ? countActiveInferenceRequests(displayedActiveRequests)
       : null;
   const wallClockNowMs = Date.now();
   const clockEnabled = shouldTickRequestActivityClock({
@@ -691,11 +694,15 @@ export function HomeRequestLogsPanel({
             <div
               className="inline-flex items-baseline gap-1 text-xs text-muted-foreground"
               aria-label={`当前并发 ${currentConcurrency ?? "不可用"}`}
-              title="按当前正在执行的推理会话统计；同一会话的并行请求只计一次"
+              aria-describedby={currentConcurrencyDescriptionId}
+              title={CURRENT_CONCURRENCY_DESCRIPTION}
             >
               <span>当前并发</span>
               <span className="font-mono font-semibold tabular-nums text-indigo-600 dark:text-indigo-400">
                 {currentConcurrency ?? "--"}
+              </span>
+              <span id={currentConcurrencyDescriptionId} className="sr-only">
+                {CURRENT_CONCURRENCY_DESCRIPTION}
               </span>
             </div>
           ) : null}
