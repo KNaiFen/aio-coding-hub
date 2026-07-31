@@ -1,11 +1,30 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import { evaluateLocalNativeBoundary } from "./check-local-native-boundary.mjs";
+
+const SAFE_PNPM_WORKSPACE = `packages:
+  - .
+
+allowBuilds:
+  es5-ext: false
+  esbuild: true
+  msw: false
+
+onlyBuiltDependencies:
+  - esbuild
+`;
+const processFixtures = JSON.parse(
+  readFileSync(
+    new URL("./fixtures/local-native-boundary-process-cases.json", import.meta.url),
+    "utf8"
+  )
+);
 
 function snapshot(overrides = {}) {
   return {
     collectionErrors: [],
-    trackedPaths: ["package.json", "scripts/run-checks.mjs"],
+    trackedPaths: ["package.json", "pnpm-workspace.yaml", "scripts/run-checks.mjs"],
     hooksPaths: [],
     manifests: [
       {
@@ -18,7 +37,10 @@ function snapshot(overrides = {}) {
         },
       },
     ],
-    files: { "scripts/run-checks.mjs": 'const checks = ["lint", "typecheck"];\n' },
+    files: {
+      "pnpm-workspace.yaml": SAFE_PNPM_WORKSPACE,
+      "scripts/run-checks.mjs": 'const checks = ["lint", "typecheck"];\n',
+    },
     ...overrides,
   };
 }
@@ -168,8 +190,7 @@ for (const command of [
 expectFailure(
   snapshot({
     files: {
-      "scripts/check-spec-links.mjs":
-        'import { spawnSync } from "node:child_process";\nspawnSync("cargo", ["test"]);\n',
+      "scripts/check-spec-links.mjs": processFixtures.directCargo,
     },
   }),
   "scripts/check-spec-links.mjs: process execution is not approved"
@@ -177,8 +198,7 @@ expectFailure(
 expectFailure(
   snapshot({
     files: {
-      "scripts/run-checks.mjs":
-        'import { spawnSync } from "node:child_process";\nspawnSync("cargo", ["test"]);\n',
+      "scripts/run-checks.mjs": processFixtures.directCargo,
     },
   }),
   'scripts/run-checks.mjs: spawnSync command "cargo" is outside its process contract'
@@ -186,18 +206,37 @@ expectFailure(
 expectFailure(
   snapshot({
     files: {
-      "scripts/run-checks.mjs":
-        'import { spawnSync } from "node:child_process";\nspawnSync(invocation.command, invocation.args, { shell: true });\n',
+      "scripts/run-checks.mjs": processFixtures.shellEnabled,
     },
   }),
   "scripts/run-checks.mjs: shell-enabled process execution is forbidden"
 );
 expectFailure(
   snapshot({
+    files: {
+      "scripts/check-local-native-boundary.selftest.mjs": processFixtures.directCargo,
+    },
+  }),
+  "scripts/check-local-native-boundary.selftest.mjs: process execution is not approved"
+);
+expectFailure(
+  snapshot({ files: { "scripts/run-checks.mjs": processFixtures.namespaceCargo } }),
+  "scripts/run-checks.mjs: process execution cannot be statically audited"
+);
+expectFailure(
+  snapshot({ files: { "scripts/run-checks.mjs": processFixtures.reflectApplyCargo } }),
+  "scripts/run-checks.mjs: indirect process dispatch is forbidden"
+);
+expectFailure(
+  snapshot({ files: { "vite.config.ts": processFixtures.dynamicNamespaceCargo } }),
+  "vite.config.ts: process execution is not approved"
+);
+expectFailure(
+  snapshot({
     trackedPaths: ["package.json", ".vscode/tasks.json"],
     files: { ".vscode/tasks.json": '{"command":"cargo test"}' },
   }),
-  ".vscode/tasks.json: local automation invokes Cargo"
+  ".vscode/tasks.json: repository-controlled local automation file is forbidden"
 );
 for (const path of [
   "packages/desktop/Makefile",
@@ -210,9 +249,19 @@ for (const path of [
       trackedPaths: ["package.json", path],
       files: { [path]: "cargo test\n" },
     }),
-    `${path}: local automation invokes Cargo`
+    `${path}: repository-controlled local automation file is forbidden`
   );
 }
+expectFailure(
+  snapshot({
+    trackedPaths: ["package.json", "Makefile", "scripts/native.sh"],
+    files: {
+      Makefile: "check:\n\tscripts/native.sh\n",
+      "scripts/native.sh": "cargo test\n",
+    },
+  }),
+  "Makefile: repository-controlled local automation file is forbidden"
+);
 expectFailure(
   snapshot({ trackedPaths: ["package.json", ".pnpmfile.cjs"] }),
   ".pnpmfile.cjs: executable pnpm install hook is forbidden"
@@ -224,6 +273,51 @@ for (const [path, contents] of [
   expectFailure(
     snapshot({ trackedPaths: ["package.json", path], files: { [path]: contents } }),
     `${path}: custom pnpmfile install hook is forbidden`
+  );
+}
+expectFailure(
+  snapshot({
+    trackedPaths: ["package.json", "pnpm-workspace.yaml", ".npmrc"],
+    files: {
+      "pnpm-workspace.yaml": SAFE_PNPM_WORKSPACE,
+      ".npmrc": "only-built-dependencies=esbuild,native-builder\n",
+    },
+  }),
+  ".npmrc: pnpm dependency build policy override is forbidden"
+);
+for (const contents of [
+  SAFE_PNPM_WORKSPACE.replace("  msw: false", "  msw: false\n  native-builder: true"),
+  SAFE_PNPM_WORKSPACE.replace("  - esbuild", "  - esbuild\n  - native-builder"),
+]) {
+  expectFailure(
+    snapshot({ files: { "pnpm-workspace.yaml": contents } }),
+    "pnpm-workspace.yaml: dependency build allowlist may only enable esbuild"
+  );
+}
+expectFailure(
+  snapshot({
+    manifests: [{ path: "package.json", scripts: { check: "vite" }, pnpm: {} }],
+  }),
+  "package-level pnpm lifecycle policy is forbidden"
+);
+for (const key of ["husky", "simple-git-hooks", "lefthook"]) {
+  expectFailure(
+    snapshot({
+      manifests: [
+        {
+          path: "package.json",
+          scripts: { check: "vite" },
+          hookConfigKeys: [key],
+        },
+      ],
+    }),
+    `${key} hook configuration is forbidden`
+  );
+}
+for (const path of [".pre-commit-config.yaml", "lefthook.yml", "packages/app/.husky/pre-commit"]) {
+  expectFailure(
+    snapshot({ trackedPaths: ["package.json", "pnpm-workspace.yaml", path] }),
+    `${path}: tracked repository hook is forbidden`
   );
 }
 expectFailure(

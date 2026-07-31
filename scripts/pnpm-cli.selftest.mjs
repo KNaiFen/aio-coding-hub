@@ -31,6 +31,7 @@ for (const invalid of [
   { platform: "linux", execPath: "/usr/bin/node", npmExecPath: "pnpm.cjs" },
   { platform: "linux", execPath: "/usr/bin/node", npmExecPath: "/usr/local/bin/pnpm" },
   { platform: "win32", execPath: "C:\\node.exe", npmExecPath: "C:\\pnpm\\pnpm.cmd" },
+  { platform: "win32", execPath: "C:\\node.exe", npmExecPath: "C:\\pnpm\\pnpm.exe" },
 ]) {
   assert.throws(() => createPnpmInvocation([], invalid));
 }

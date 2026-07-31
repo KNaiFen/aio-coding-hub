@@ -22,7 +22,7 @@
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "audit:deps": "node scripts/check-pnpm-audit.selftest.mjs && node scripts/check-pnpm-audit.mjs",
-    "check:local-native-boundary": "node scripts/pnpm-cli.selftest.mjs && node scripts/check-local-native-boundary.selftest.mjs && node scripts/check-local-native-boundary.mjs",
+    "check:local-native-boundary": "node scripts/check-local-native-boundary.mjs && node scripts/pnpm-cli.selftest.mjs && node scripts/check-local-native-boundary.selftest.mjs",
     "check:no-instant-now-sub": "node scripts/check-no-instant-now-sub.mjs",
     "check:spec-links": "node scripts/check-spec-links.mjs",
     "check:plugin-api-contract": "node scripts/check-plugin-api-contract.mjs",

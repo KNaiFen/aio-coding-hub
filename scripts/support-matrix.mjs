@@ -1334,9 +1334,9 @@ export function checkWorkflowContractContents({ ciWorkflow, devBuildWorkflow, re
       "drift artifact identity",
     ],
     ["node scripts/cloud-native-drift.mjs classify", "native drift classifier"],
+    ["node scripts/check-local-native-boundary.mjs", "local native boundary enforcement"],
     ["node scripts/pnpm-cli.selftest.mjs", "cross-platform pnpm invocation self-test"],
     ["node scripts/check-local-native-boundary.selftest.mjs", "local native boundary self-test"],
-    ["node scripts/check-local-native-boundary.mjs", "local native boundary enforcement"],
     ["environment: release-signing", "protected signing environment"],
     ["printf 'TAURI_SIGNING_PRIVATE_KEY=%s\\n' \"$normalized_key\"", "normalized signing key"],
     ['-p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD_SECRET"', "Tauri 2.9 signing probe password"],
@@ -1355,6 +1355,21 @@ export function checkWorkflowContractContents({ ciWorkflow, devBuildWorkflow, re
     ["--trusted-control-sha", "trusted control manifest field"],
   ]) {
     assertWorkflowContains(ciWorkflow, snippet, label);
+  }
+  const localBoundaryOrder = [
+    "node scripts/check-local-native-boundary.mjs",
+    "node scripts/pnpm-cli.selftest.mjs",
+    "node scripts/check-local-native-boundary.selftest.mjs",
+  ].map((snippet) => ciWorkflow.indexOf(snippet));
+  if (
+    localBoundaryOrder.some((index) => index < 0) ||
+    localBoundaryOrder.some(
+      (index, position) => position > 0 && index <= localBoundaryOrder[position - 1]
+    )
+  ) {
+    throw new Error(
+      "CI must enforce the live local-native boundary before executing its self-tests."
+    );
   }
   const ciGateBlock = /\n  ci-gate:\n([\s\S]*)$/.exec(ciWorkflow)?.[1] ?? "";
   for (const [snippet, label] of [

@@ -63,9 +63,9 @@ jobs:
 
       - name: Validate local native-build boundary
         run: |
+          node scripts/check-local-native-boundary.mjs
           node scripts/pnpm-cli.selftest.mjs
           node scripts/check-local-native-boundary.selftest.mjs
-          node scripts/check-local-native-boundary.mjs
 
       - id: matrix
         name: Load cloud support matrices

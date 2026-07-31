@@ -26,6 +26,15 @@ expectMutationRejected("ciWorkflow", "retention-days: 30", "retention-days: 29")
 expectMutationRejected("ciWorkflow", "-- --locked", "-- --offline");
 expectMutationRejected(
   "ciWorkflow",
+  `          node scripts/check-local-native-boundary.mjs
+          node scripts/pnpm-cli.selftest.mjs
+          node scripts/check-local-native-boundary.selftest.mjs`,
+  `          node scripts/check-local-native-boundary.selftest.mjs
+          node scripts/pnpm-cli.selftest.mjs
+          node scripts/check-local-native-boundary.mjs`
+);
+expectMutationRejected(
+  "ciWorkflow",
   "printf 'TAURI_SIGNING_PRIVATE_KEY=%s\\n' \"$normalized_key\"",
   "printf 'TAURI_SIGNING_PRIVATE_KEY=%s\\n' \"$TAURI_SIGNING_PRIVATE_KEY_SECRET\""
 );

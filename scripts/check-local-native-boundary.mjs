@@ -49,6 +49,7 @@ const FORBIDDEN_SCRIPT_NAMES = new Set([
   "check:precommit:tauri",
   "tauri",
 ]);
+const FORBIDDEN_MANIFEST_CONFIG_KEYS = new Set(["husky", "simple-git-hooks", "lefthook"]);
 
 const NATIVE_COMMAND_PATTERNS = [
   ["Cargo", /(?:^|[\s;&|()"'/\\])cargo(?:\.exe)?(?=$|[\s;&|()"'/\\])/i],
@@ -75,14 +76,30 @@ const AUTOMATION_PATH_PATTERNS = [
   /(?:^|\/)(?:\.fleet|\.idea)\//,
   /(?:^|\/)(?:GNUmakefile|Makefile|makefile|Justfile|justfile|\.justfile|Taskfile\.(?:yml|yaml))$/,
 ];
+const REPOSITORY_HOOK_PATH_PATTERNS = [
+  /(?:^|\/)(?:\.githooks|\.git-hooks|\.husky)\//,
+  /(?:^|\/)\.pre-commit-config\.ya?ml$/i,
+  /(?:^|\/)(?:\.?lefthook|lefthook-local)\.ya?ml$/i,
+];
 const PNPMFILE_PATH_PATTERN = /(?:^|\/)\.pnpmfile\.(?:cjs|mjs|js)$/i;
 const PACKAGE_MANAGER_CONFIG_PATH_PATTERN = /(?:^|\/)(?:\.npmrc|pnpm-workspace\.ya?ml)$/i;
 const PNPMFILE_CONFIG_PATTERN = /(?:^|\r?\n)\s*pnpmfile\s*[:=]/i;
+const PNPM_BUILD_OVERRIDE_PATTERN =
+  /(?:^|\r?\n)\s*(?:allowBuilds|allow-builds|onlyBuiltDependencies|only-built-dependencies|neverBuiltDependencies|never-built-dependencies|ignoredBuiltDependencies|ignored-built-dependencies|dangerouslyAllowAllBuilds|dangerously-allow-all-builds)\s*=/i;
+const PNPM_WORKSPACE_PATH = "pnpm-workspace.yaml";
+const EXPECTED_ALLOW_BUILDS = new Map([
+  ["es5-ext", false],
+  ["esbuild", true],
+  ["msw", false],
+]);
+const EXPECTED_ONLY_BUILT_DEPENDENCIES = new Set(["esbuild"]);
 const JAVASCRIPT_SOURCE_PATTERN = /\.(?:cjs|mjs|js|cts|mts|ts|tsx)$/;
 const PROCESS_MODULE_PATTERN =
-  /(?:node:)?child_process|process\.getBuiltinModule\s*\(\s*["'`]child_process["'`]|Bun\.spawn|Deno\.Command/;
+  /(?:node:)?child_process|child_["'`+\s]*process|process\.getBuiltinModule|Bun\.spawn|Deno\.Command/;
 const PROCESS_CALL_PATTERN =
   /(?:^|[^\w.$])(spawnSync|spawn|execFileSync|execFile|execSync|exec|fork)\s*\(\s*([^,\r\n)]+)/gm;
+const INDIRECT_PROCESS_CALL_PATTERN =
+  /Reflect\.apply\s*\(\s*(?:(?:[A-Za-z_$][\w$]*)\.)?(?:spawnSync|spawn|execFileSync|execFile|execSync|exec|fork)|(?:spawnSync|spawn|execFileSync|execFile|execSync|exec|fork)\s*\.\s*(?:call|apply)\s*\(|\[\s*["'`](?:spawnSync|spawn|execFileSync|execFile|execSync|exec|fork)["'`]\s*\]\s*\(/m;
 const PROCESS_EXECUTION_CONTRACTS = new Map([
   ["scripts/check-local-native-boundary.mjs", new Set(["git"])],
   ["scripts/check-plugin-api-contract.selftest.mjs", new Set(["process.execPath"])],
@@ -116,6 +133,10 @@ function isAutomationPath(path) {
   return AUTOMATION_PATH_PATTERNS.some((pattern) => pattern.test(path));
 }
 
+function isRepositoryHookPath(path) {
+  return REPOSITORY_HOOK_PATH_PATTERNS.some((pattern) => pattern.test(path));
+}
+
 function normalizeProcessExpression(expression) {
   return expression.replace(/[\s"'`+]/g, "");
 }
@@ -128,15 +149,20 @@ function processLaunches(contents) {
 }
 
 function validateExecutableSource(path, contents, violations) {
-  if (path === "scripts/check-local-native-boundary.selftest.mjs") return;
-  const usesProcessModule = PROCESS_MODULE_PATTERN.test(contents);
-  if (!usesProcessModule) return;
+  const launches = processLaunches(contents);
+  const usesProcessCapability =
+    PROCESS_MODULE_PATTERN.test(contents) ||
+    launches.length > 0 ||
+    INDIRECT_PROCESS_CALL_PATTERN.test(contents);
+  if (!usesProcessCapability) return;
 
   const contract = PROCESS_EXECUTION_CONTRACTS.get(path);
-  const launches = processLaunches(contents);
   if (!contract) {
     violations.push(`${path}: process execution is not approved for a local source file`);
     return;
+  }
+  if (INDIRECT_PROCESS_CALL_PATTERN.test(contents)) {
+    violations.push(`${path}: indirect process dispatch is forbidden`);
   }
   if (launches.length === 0) {
     violations.push(`${path}: process execution cannot be statically audited`);
@@ -151,6 +177,65 @@ function validateExecutableSource(path, contents, violations) {
   }
   if (/shell\s*:\s*true/.test(contents)) {
     violations.push(`${path}: shell-enabled process execution is forbidden`);
+  }
+}
+
+function readTopLevelYamlSection(contents, sectionName) {
+  const lines = contents.split(/\r?\n/);
+  const starts = lines
+    .map((line, index) =>
+      /^([A-Za-z][A-Za-z0-9]*):\s*(?:#.*)?$/.exec(line)?.[1] === sectionName ? index : -1
+    )
+    .filter((index) => index >= 0);
+  if (starts.length !== 1) return null;
+
+  const section = [];
+  for (const line of lines.slice(starts[0] + 1)) {
+    if (/^[^\s#]/.test(line)) break;
+    const withoutComment = line.replace(/\s+#.*$/, "");
+    if (withoutComment.trim() !== "") section.push(withoutComment);
+  }
+  return section;
+}
+
+function validatePnpmWorkspaceBuildPolicy(contents, violations) {
+  const allowBuildLines = readTopLevelYamlSection(contents, "allowBuilds");
+  const onlyBuiltLines = readTopLevelYamlSection(contents, "onlyBuiltDependencies");
+  if (allowBuildLines === null || onlyBuiltLines === null) {
+    violations.push(`${PNPM_WORKSPACE_PATH}: exact dependency build policy is required`);
+    return;
+  }
+
+  const allowBuilds = new Map();
+  for (const line of allowBuildLines) {
+    const match = /^  ([A-Za-z0-9@/_.+-]+):\s*(true|false)\s*$/.exec(line);
+    if (!match || allowBuilds.has(match[1])) {
+      violations.push(`${PNPM_WORKSPACE_PATH}: allowBuilds must use unique literal booleans`);
+      return;
+    }
+    allowBuilds.set(match[1], match[2] === "true");
+  }
+
+  const onlyBuiltDependencies = new Set();
+  for (const line of onlyBuiltLines) {
+    const match = /^  - ([A-Za-z0-9@/_.+-]+)\s*$/.exec(line);
+    if (!match || onlyBuiltDependencies.has(match[1])) {
+      violations.push(
+        `${PNPM_WORKSPACE_PATH}: onlyBuiltDependencies must be a unique literal list`
+      );
+      return;
+    }
+    onlyBuiltDependencies.add(match[1]);
+  }
+
+  const allowBuildsMatch =
+    allowBuilds.size === EXPECTED_ALLOW_BUILDS.size &&
+    [...EXPECTED_ALLOW_BUILDS].every(([name, allowed]) => allowBuilds.get(name) === allowed);
+  const onlyBuiltMatch =
+    onlyBuiltDependencies.size === EXPECTED_ONLY_BUILT_DEPENDENCIES.size &&
+    [...EXPECTED_ONLY_BUILT_DEPENDENCIES].every((name) => onlyBuiltDependencies.has(name));
+  if (!allowBuildsMatch || !onlyBuiltMatch) {
+    violations.push(`${PNPM_WORKSPACE_PATH}: dependency build allowlist may only enable esbuild`);
   }
 }
 
@@ -213,7 +298,7 @@ export function evaluateLocalNativeBoundary(snapshot) {
     if (PNPMFILE_PATH_PATTERN.test(path)) {
       violations.push(`${path}: executable pnpm install hook is forbidden`);
     }
-    if (path.startsWith(".githooks/") || path.startsWith(".husky/")) {
+    if (isRepositoryHookPath(path)) {
       violations.push(`${path}: tracked repository hook is forbidden`);
     }
   }
@@ -234,6 +319,12 @@ export function evaluateLocalNativeBoundary(snapshot) {
     if (manifest.error) {
       violations.push(`${manifest.path}: ${manifest.error}`);
       continue;
+    }
+    if (manifest.pnpm !== undefined) {
+      violations.push(`${manifest.path}: package-level pnpm lifecycle policy is forbidden`);
+    }
+    for (const key of manifest.hookConfigKeys ?? []) {
+      violations.push(`${manifest.path}: ${key} hook configuration is forbidden`);
     }
     if (manifest.scripts === undefined) continue;
     if (
@@ -280,19 +371,26 @@ export function evaluateLocalNativeBoundary(snapshot) {
   for (const path of trackedPaths.filter((candidate) =>
     PACKAGE_MANAGER_CONFIG_PATH_PATTERN.test(candidate)
   )) {
-    if (PNPMFILE_CONFIG_PATTERN.test(snapshot.files?.[path] ?? "")) {
+    const contents = snapshot.files?.[path] ?? "";
+    if (PNPMFILE_CONFIG_PATTERN.test(contents)) {
       violations.push(`${path}: custom pnpmfile install hook is forbidden`);
+    }
+    if (/(?:^|\/)\.npmrc$/i.test(path) && PNPM_BUILD_OVERRIDE_PATTERN.test(contents)) {
+      violations.push(`${path}: pnpm dependency build policy override is forbidden`);
     }
   }
 
+  const pnpmWorkspacePaths = trackedPaths.filter((path) =>
+    /(?:^|\/)pnpm-workspace\.ya?ml$/i.test(path)
+  );
+  if (pnpmWorkspacePaths.length !== 1 || pnpmWorkspacePaths[0] !== PNPM_WORKSPACE_PATH) {
+    violations.push(`${PNPM_WORKSPACE_PATH}: one canonical root workspace policy is required`);
+  } else {
+    validatePnpmWorkspaceBuildPolicy(snapshot.files?.[PNPM_WORKSPACE_PATH] ?? "", violations);
+  }
+
   for (const path of trackedPaths.filter((candidate) => isAutomationPath(candidate))) {
-    const contents = snapshot.files?.[path] ?? "";
-    for (const nativeKind of findNativeCommands(contents)) {
-      violations.push(`${path}: local automation invokes ${nativeKind}`);
-    }
-    if (HOOK_CONFIGURATION_PATTERN.test(contents)) {
-      violations.push(`${path}: local automation configures repository hooks`);
-    }
+    violations.push(`${path}: repository-controlled local automation file is forbidden`);
   }
 
   return [...new Set(violations)].sort();
@@ -301,7 +399,15 @@ export function evaluateLocalNativeBoundary(snapshot) {
 function readManifest(repoRoot, path) {
   try {
     const value = JSON.parse(readFileSync(resolve(repoRoot, path), "utf8"));
-    return { path, name: value.name, scripts: value.scripts };
+    return {
+      path,
+      name: value.name,
+      scripts: value.scripts,
+      pnpm: value.pnpm,
+      hookConfigKeys: [...FORBIDDEN_MANIFEST_CONFIG_KEYS].filter((key) =>
+        Object.hasOwn(value, key)
+      ),
+    };
   } catch (error) {
     return { path, error: `cannot be read as JSON: ${error.message}` };
   }
