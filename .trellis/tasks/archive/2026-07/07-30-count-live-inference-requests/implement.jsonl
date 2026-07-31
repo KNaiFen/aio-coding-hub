@@ -1,3 +1,3 @@
 {"file":".trellis/spec/aio-coding-hub/cross-layer/index.md","reason":"Cross-layer frontend and quality requirements."}
 {"file":".trellis/spec/aio-coding-hub/cross-layer/request-log-usage-ledger-pagination-contract.md","reason":"Home realtime feed and request-log display contract."}
-{"file":".trellis/tasks/07-30-count-live-inference-requests/research/concurrency-source-map.md","reason":"Exact frontend and backend ownership evidence for per-request counting."}
+{"file": ".trellis/tasks/archive/2026-07/07-30-count-live-inference-requests/research/concurrency-source-map.md", "reason": "Exact frontend and backend ownership evidence for per-request counting."}
