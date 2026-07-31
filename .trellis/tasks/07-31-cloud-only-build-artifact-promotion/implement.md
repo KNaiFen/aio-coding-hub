@@ -88,9 +88,7 @@ Explicit prohibition: do not run Cargo, rustfmt, Clippy, Rust tests, Specta gene
 ## 9. Cloud verification and review gates
 
 - [x] Resolve the recorded `main`/release-tag Ruleset and `release-signing` Environment decisions before task activation; user approved both.
-- [ ] Configure release-tag governance as separate creation and immutable update/deletion Rulesets; never place all three rules behind one maintainer bypass.
 - [ ] If authorized, create the Environment/deployment policy and use a pinned reviewed sealed-box bridge to migrate both existing secrets without plaintext disclosure; retain both repository secrets unless both Environment writes and the cloud probe succeed.
-- [ ] Disable Environment administrator bypass in GitHub's web settings and re-read `can_admins_bypass=false` through the API before uploading either secret.
 - [ ] Run a cloud sign/verify probe through the Environment, delete and re-list repository-level secret names, then remove the migration helper/workflow.
 - [ ] Push an implementation branch to `origin` and run PR CI.
 - [ ] If native canonicalization drifts, download and apply only the emitted patch artifact; do not regenerate locally.
