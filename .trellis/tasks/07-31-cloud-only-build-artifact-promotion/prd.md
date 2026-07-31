@@ -71,6 +71,7 @@
 - [ ] 手动云端构建在无签名 secret 时通过临时 overlay 关闭 updater 产物，正式 `tauri.conf.json` 保持不变。
 - [ ] 精确 `main` 版本提交的成功 CI 产出一个绑定 source/control/validation SHA/run attempt 的 30 天发布候选；同版本后续提交可显式云端恢复，失败 CI 或跨 attempt 临时平台制品不能产生可晋升候选。
 - [ ] 签名 job 只能通过 `release-signing` Environment 获得 secret；该 Environment 只允许当前 `main` workflow 部署，任意 PR、功能分支或标签 ref 均无法部署，仓库级不再保留签名 secret。
+- [ ] `release-signing` 的 API 状态必须同时满足 `can_admins_bypass=false`；在网页关闭管理员绕过前不得写入 Environment secret 或删除仓库级 secret。
 - [ ] Release 对同一 SHA 不再执行任何编译，下载并校验精确 artifact ID 后发布完全相同的二进制文件。
 - [ ] 缺失、过期、重复、错误 SHA/版本/标签/run attempt/目标/大小/哈希的候选均在创建 draft 前失败，且不存在回退构建。
 - [ ] Release 重跑不会保留旧 draft 资产；上传后远端资产名称、大小与 SHA-256 均和本次清单完全一致才发布。
@@ -85,5 +86,5 @@
 
 ## Approved Decisions
 
-- 用户已批准新增两套保护：`main` 必须通过 PR 合入、要求完整 CI 成功、禁止 force push/删除；`aio-coding-hub-v*` 标签仅允许授权维护者创建，并禁止改写/删除。Environment 仍只允许 `main`，标签 Ruleset 用于发布引用完整性而不是 secret 授权。
+- 用户已批准新增保护：`main` 必须通过 PR 合入、要求完整 CI 成功、禁止 force push/删除；`aio-coding-hub-v*` 使用两套独立 Ruleset，创建规则仅对明确授权维护者设置 bypass，更新/删除规则不设任何 bypass。Environment 仍只允许 `main`，标签 Ruleset 用于发布引用完整性而不是 secret 授权。
 - 用户已批准创建 `release-signing` Environment，并通过一次性无明文密文桥接迁移现有 `TAURI_SIGNING_PRIVATE_KEY` 与 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`；未完成迁移、验证和仓库级副本删除前不得启用 main CI 签名构建。
