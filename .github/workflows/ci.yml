@@ -431,7 +431,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD_SECRET: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          [[ -n "${TAURI_SIGNING_PRIVATE_KEY_SECRET//[[:space:]]/}" ]] || {
+          normalized_key="$(printf '%s' "$TAURI_SIGNING_PRIVATE_KEY_SECRET" | tr -d '\r\n\t ')"
+          [[ -n "$normalized_key" ]] || {
             echo "Required updater signing key is unavailable." >&2
             exit 1
           }
@@ -443,12 +444,14 @@ jobs:
           trap 'rm -rf "$temp_dir"' EXIT
           key_path="$temp_dir/tauri-updater.key"
           test_path="$temp_dir/signing-probe.txt"
-          printf '%s' "$TAURI_SIGNING_PRIVATE_KEY_SECRET" | tr -d '\r\n\t ' > "$key_path"
+          printf '::add-mask::%s\n' "$normalized_key"
+          printf 'TAURI_SIGNING_PRIVATE_KEY=%s\n' "$normalized_key" >> "$GITHUB_ENV"
+          printf '%s' "$normalized_key" > "$key_path"
           chmod 600 "$key_path"
           printf '%s\n' 'signing-probe' > "$test_path"
-          if ! pnpm exec tauri signer sign \
+          if ! TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$TAURI_SIGNING_PRIVATE_KEY_PASSWORD_SECRET" \
+            pnpm exec tauri signer sign \
             -f "$key_path" \
-            -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD_SECRET" \
             "$test_path" >/dev/null 2>&1; then
             echo "Updater signing key/password validation failed." >&2
             exit 1
@@ -459,7 +462,6 @@ jobs:
         uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
         env:
           APPLE_SIGNING_IDENTITY: ${{ startsWith(matrix.updater_platform, 'darwin-') && '-' || '' }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: source
@@ -514,10 +516,7 @@ jobs:
           if (Test-Path $resourceDir) {
             Copy-Item -Recurse $resourceDir (Join-Path $portableDir "resources")
           }
-          Compress-Archive \
-            -Path "$portableDir/*" \
-            -DestinationPath "stable-assets/${{ matrix.portable_asset_name }}" \
-            -Force
+          Compress-Archive -Path "$portableDir/*" -DestinationPath "stable-assets/${{ matrix.portable_asset_name }}" -Force
 
       - name: Upload current-attempt platform candidate
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -548,6 +547,8 @@ jobs:
     permissions:
       actions: read
       contents: read
+    outputs:
+      run_attempt: ${{ steps.attempt.outputs.run_attempt }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -630,6 +631,11 @@ jobs:
             --target-ids "$RELEASE_TARGET_IDS" \
             --candidate-dir candidate-assets
 
+      - id: attempt
+        name: Bind candidate assembly to this run attempt
+        shell: bash
+        run: echo "run_attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+
       - name: Upload immutable 30-day release candidate
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -668,6 +674,8 @@ jobs:
           SHOULD_BUILD_CANDIDATE: ${{ needs.candidate-plan.outputs.should_build }}
           CANDIDATE_BUILD_RESULT: ${{ needs.build-release-candidate.result }}
           CANDIDATE_ASSEMBLY_RESULT: ${{ needs.assemble-release-candidate.result }}
+          CANDIDATE_ASSEMBLY_RUN_ATTEMPT: ${{ needs.assemble-release-candidate.outputs.run_attempt }}
+          CURRENT_RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
           require_result() {
@@ -700,6 +708,10 @@ jobs:
           if [[ "$SHOULD_BUILD_CANDIDATE" == "true" ]]; then
             require_result build-release-candidate "$CANDIDATE_BUILD_RESULT" success
             require_result assemble-release-candidate "$CANDIDATE_ASSEMBLY_RESULT" success
+            if [[ "$CANDIDATE_ASSEMBLY_RUN_ATTEMPT" != "$CURRENT_RUN_ATTEMPT" ]]; then
+              echo "Candidate assembly belongs to run attempt $CANDIDATE_ASSEMBLY_RUN_ATTEMPT, not current attempt $CURRENT_RUN_ATTEMPT. Re-run all jobs or start a new recovery run." >&2
+              exit 1
+            fi
           else
             require_result build-release-candidate "$CANDIDATE_BUILD_RESULT" skipped
             require_result assemble-release-candidate "$CANDIDATE_ASSEMBLY_RESULT" skipped

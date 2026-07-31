@@ -1321,8 +1321,17 @@ export function checkWorkflowContractContents({ ciWorkflow, devBuildWorkflow, re
     ],
     ["node scripts/cloud-native-drift.mjs classify", "native drift classifier"],
     ["environment: release-signing", "protected signing environment"],
+    ["printf 'TAURI_SIGNING_PRIVATE_KEY=%s\\n' \"$normalized_key\"", "normalized signing key"],
+    [
+      'TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$TAURI_SIGNING_PRIVATE_KEY_PASSWORD_SECRET"',
+      "signing password process environment",
+    ],
     ["tauriScript: pnpm exec tauri", "explicit Tauri script"],
     ["-- --locked", "locked Cargo build args"],
+    [
+      'Compress-Archive -Path "$portableDir/*" -DestinationPath "stable-assets/${{ matrix.portable_asset_name }}" -Force',
+      "PowerShell portable archive syntax",
+    ],
     [
       "release-candidate-${{ needs.candidate-plan.outputs.source_sha }}-${{ github.run_id }}-${{ github.run_attempt }}",
       "final candidate identity",
@@ -1337,12 +1346,22 @@ export function checkWorkflowContractContents({ ciWorkflow, devBuildWorkflow, re
   for (const [snippet, label] of [
     ["if: always()", "stable gate always evaluation"],
     ["needs.assemble-release-candidate.result", "candidate assembly result binding"],
+    [
+      "needs.assemble-release-candidate.outputs.run_attempt",
+      "current-attempt candidate assembly binding",
+    ],
     ["require_result frontend", "frontend result gate"],
     ["require_result rust", "Rust result gate"],
     ["require_result assemble-release-candidate", "candidate assembly gate"],
   ]) {
     assertWorkflowContains(ciGateBlock, snippet, label);
   }
+  assertWorkflowOccurrenceCount(
+    ciWorkflow,
+    "TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}",
+    0,
+    "raw signing key passed directly to build action"
+  );
   const frontendBlock =
     /\n  frontend:\n([\s\S]*?)(?=\n  [a-zA-Z0-9_-]+:\n)/.exec(ciWorkflow)?.[1] ?? "";
   for (const forbidden of [

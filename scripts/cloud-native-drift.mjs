@@ -9,6 +9,7 @@ export function isAllowedCloudNativeDriftPath(path) {
   if (
     typeof path !== "string" ||
     path.length === 0 ||
+    /[\u0000-\u001f\u007f]/.test(path) ||
     path.startsWith("/") ||
     path.includes("\\") ||
     path.split("/").includes("..") ||
@@ -19,12 +20,16 @@ export function isAllowedCloudNativeDriftPath(path) {
   return ALLOWED_EXACT_PATHS.has(path) || /^src-tauri\/(?:[^/]+\/)*[^/]+\.rs$/.test(path);
 }
 
+export function isAllowedCloudNativeUntrackedPath(path) {
+  return ALLOWED_EXACT_PATHS.has(path);
+}
+
 export function classifyCloudNativeDriftPaths(paths) {
   const normalized = [...new Set(paths)].sort();
   const rejected = normalized.filter((path) => !isAllowedCloudNativeDriftPath(path));
   if (rejected.length > 0) {
     throw new Error(
-      `Native canonicalization changed paths outside the patch boundary: ${rejected.join(", ")}`
+      `Native canonicalization changed paths outside the patch boundary: ${JSON.stringify(rejected)}`
     );
   }
   return normalized;
@@ -39,9 +44,23 @@ function readChangedPaths(repositoryRoot) {
   return output.split("\0").filter(Boolean);
 }
 
+function readUntrackedPaths(repositoryRoot) {
+  const output = execFileSync("git", ["ls-files", "--others", "--exclude-standard", "-z"], {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  return output.split("\0").filter(Boolean);
+}
+
 function appendGithubOutput(path, values) {
   const body = Object.entries(values)
-    .map(([key, value]) => `${key}=${value}`)
+    .map(([key, value]) => {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) || /[\r\n]/.test(value)) {
+        throw new Error("Unsafe GitHub output value.");
+      }
+      return `${key}=${value}`;
+    })
     .join("\n");
   writeFileSync(path, `${body}\n`, { encoding: "utf8", flag: "a" });
 }
@@ -62,23 +81,51 @@ function parseArgs(rawArgs) {
 }
 
 export function classifyWorkingTree({ repositoryRoot, patchPath, githubOutputPath }) {
-  const changedPaths = classifyCloudNativeDriftPaths(readChangedPaths(repositoryRoot));
+  const untrackedPaths = readUntrackedPaths(repositoryRoot);
+  const rejectedUntrackedPaths = untrackedPaths.filter(
+    (path) => !isAllowedCloudNativeUntrackedPath(path)
+  );
+  if (rejectedUntrackedPaths.length > 0) {
+    throw new Error(
+      `Native canonicalization created unexpected untracked paths: ${JSON.stringify(rejectedUntrackedPaths)}`
+    );
+  }
+  const changedPaths = classifyCloudNativeDriftPaths([
+    ...readChangedPaths(repositoryRoot),
+    ...untrackedPaths,
+  ]);
   if (changedPaths.length === 0) {
-    appendGithubOutput(githubOutputPath, { drift: "false", changed_paths: "" });
+    appendGithubOutput(githubOutputPath, { drift: "false", changed_paths: "[]" });
     return Object.freeze({ drift: false, changedPaths });
   }
 
-  const patch = execFileSync("git", ["diff", "--binary", "--no-ext-diff", "--", ...changedPaths], {
-    cwd: repositoryRoot,
-    maxBuffer: 64 * 1024 * 1024,
-  });
+  if (untrackedPaths.length > 0) {
+    execFileSync("git", ["add", "--intent-to-add", "--", ...untrackedPaths], {
+      cwd: repositoryRoot,
+      stdio: "ignore",
+    });
+  }
+  let patch;
+  try {
+    patch = execFileSync("git", ["diff", "--binary", "--no-ext-diff"], {
+      cwd: repositoryRoot,
+      maxBuffer: 64 * 1024 * 1024,
+    });
+  } finally {
+    if (untrackedPaths.length > 0) {
+      execFileSync("git", ["reset", "--quiet", "--", ...untrackedPaths], {
+        cwd: repositoryRoot,
+        stdio: "ignore",
+      });
+    }
+  }
   if (patch.length === 0) {
     throw new Error("Native drift was detected but the bounded patch is empty.");
   }
   writeFileSync(patchPath, patch, { flag: "wx" });
   appendGithubOutput(githubOutputPath, {
     drift: "true",
-    changed_paths: changedPaths.join(","),
+    changed_paths: JSON.stringify(changedPaths),
   });
   return Object.freeze({ drift: true, changedPaths });
 }

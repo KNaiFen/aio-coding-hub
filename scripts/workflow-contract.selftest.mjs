@@ -24,6 +24,21 @@ expectMutationRejected("ciWorkflow", "  ci-gate:\n", "  ci-final:\n");
 expectMutationRejected("ciWorkflow", "  ci-gate:\n", "  renamed-gate:\n");
 expectMutationRejected("ciWorkflow", "retention-days: 30", "retention-days: 29");
 expectMutationRejected("ciWorkflow", "-- --locked", "-- --offline");
+expectMutationRejected(
+  "ciWorkflow",
+  "printf 'TAURI_SIGNING_PRIVATE_KEY=%s\\n' \"$normalized_key\"",
+  "printf 'TAURI_SIGNING_PRIVATE_KEY=%s\\n' \"$TAURI_SIGNING_PRIVATE_KEY_SECRET\""
+);
+expectMutationRejected(
+  "ciWorkflow",
+  "needs.assemble-release-candidate.outputs.run_attempt",
+  "needs.assemble-release-candidate.result"
+);
+expectMutationRejected(
+  "ciWorkflow",
+  'Compress-Archive -Path "$portableDir/*" -DestinationPath "stable-assets/${{ matrix.portable_asset_name }}" -Force',
+  'Compress-Archive \\\n            -Path "$portableDir/*"'
+);
 expectMutationRejected("devBuildWorkflow", "          - windows-arm64\n", "");
 expectMutationRejected("devBuildWorkflow", "retention-days: 7", "retention-days: 1");
 expectMutationRejected("devBuildWorkflow", "createUpdaterArtifacts", "updaterArtifacts");
