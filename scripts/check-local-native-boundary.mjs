@@ -1,6 +1,7 @@
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { dirname, posix, resolve, win32 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import ts from "typescript";
 
 import { readRepositoryPaths, readScopedHooksConfig } from "./lib/git-metadata.mjs";
 
@@ -112,18 +113,10 @@ const EXPECTED_ALLOW_BUILDS = new Map([
   ["msw", false],
 ]);
 const EXPECTED_ONLY_BUILT_DEPENDENCIES = new Set(["esbuild"]);
-const JAVASCRIPT_SOURCE_PATTERN = /\.(?:cjs|mjs|js|cts|mts|ts|tsx)$/i;
+const JAVASCRIPT_SOURCE_PATTERN = /\.(?:cjs|mjs|js|jsx|cts|mts|ts|tsx)$/i;
 const LOCAL_SCRIPT_SOURCE_PATTERN = /\.(?:py|sh|bash|zsh|ps1|cmd|bat)$/i;
 const MAX_AUDITED_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_AUDITED_TOTAL_BYTES = 32 * 1024 * 1024;
-const PROCESS_CAPABILITY_PATTERN =
-  /(?:\bfrom\s*["'](?:node:)?child_process["']|\brequire\s*\(\s*["'](?:node:)?child_process["']|\bimport\s*\(\s*["'](?:node:)?child_process["']|\bprocess\.getBuiltinModule\s*\(|\bBun\.spawn\s*\(|\bnew\s+Deno\.Command\s*\()/m;
-const OBFUSCATED_PROCESS_CAPABILITY_PATTERN =
-  /child_["'`+\s]+process|\bprocess\s*\[\s*["'`]getBuiltinModule["'`]\s*\]|\bBun\s*\[\s*["'`]spawn["'`]\s*\]|\bDeno\s*\[\s*["'`]Command["'`]\s*\]/m;
-const PROCESS_CALL_PATTERN =
-  /(?:^|[^\w.$])(spawnSync|spawn|execFileSync|execFile|execSync|exec|fork)\s*\(\s*([^,\r\n)]+)/gm;
-const PROCESS_IMPORT_PATTERN =
-  /^import\s*\{\s*([^}]+?)\s*\}\s*from\s*["']node:child_process["'];?\s*$/gm;
 const PROCESS_API_NAMES = new Set([
   "spawnSync",
   "spawn",
@@ -170,72 +163,203 @@ function isRepositoryHookPath(path) {
   return REPOSITORY_HOOK_PATH_PATTERNS.some((pattern) => pattern.test(path));
 }
 
-function normalizeProcessExpression(expression) {
-  return expression.replace(/[\s"'`+]/g, "");
+function unwrapExpression(node) {
+  let current = node;
+  while (
+    ts.isParenthesizedExpression(current) ||
+    ts.isAsExpression(current) ||
+    ts.isTypeAssertionExpression(current) ||
+    ts.isNonNullExpression(current)
+  ) {
+    current = current.expression;
+  }
+  return current;
 }
 
-function processLaunches(contents) {
-  return [...contents.matchAll(PROCESS_CALL_PATTERN)].map((match) => ({
-    api: match[1],
-    command: normalizeProcessExpression(match[2]),
-  }));
+function staticStringValue(node) {
+  const value = unwrapExpression(node);
+  if (ts.isStringLiteralLike(value)) return value.text;
+  if (ts.isBinaryExpression(value) && value.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    const left = staticStringValue(value.left);
+    const right = staticStringValue(value.right);
+    return left === null || right === null ? null : left + right;
+  }
+  return null;
 }
 
-function hasIndirectProcessReference(contents) {
-  const importedApis = [];
-  let invalidImport = false;
-  for (const match of contents.matchAll(PROCESS_IMPORT_PATTERN)) {
-    const names = match[1].split(",").map((name) => name.trim());
-    if (names.some((name) => !PROCESS_API_NAMES.has(name))) {
-      invalidImport = true;
-    } else {
-      importedApis.push(...names);
+function canonicalExpression(node) {
+  const value = unwrapExpression(node);
+  const literal = staticStringValue(value);
+  if (literal !== null) return literal;
+  if (ts.isIdentifier(value)) return value.text;
+  if (ts.isPropertyAccessExpression(value) && !value.questionDotToken) {
+    const owner = canonicalExpression(value.expression);
+    return owner === null ? null : `${owner}.${value.name.text}`;
+  }
+  if (ts.isElementAccessExpression(value) && !value.questionDotToken) {
+    const owner = canonicalExpression(value.expression);
+    const member = value.argumentExpression ? staticStringValue(value.argumentExpression) : null;
+    return owner === null || member === null ? null : `${owner}.${member}`;
+  }
+  return null;
+}
+
+function propertyNameText(name) {
+  if (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) return name.text;
+  if (ts.isComputedPropertyName(name)) return staticStringValue(name.expression);
+  return null;
+}
+
+function isChildProcessModule(value) {
+  return value === "child_process" || value === "node:child_process";
+}
+
+function scriptKindForPath(path) {
+  const lower = path.toLowerCase();
+  if (lower.endsWith(".tsx")) return ts.ScriptKind.TSX;
+  if (lower.endsWith(".jsx")) return ts.ScriptKind.JSX;
+  if (lower.endsWith(".ts") || lower.endsWith(".mts") || lower.endsWith(".cts")) {
+    return ts.ScriptKind.TS;
+  }
+  return ts.ScriptKind.JS;
+}
+
+function processCallUsesShell(call) {
+  for (const argument of call.arguments) {
+    const value = unwrapExpression(argument);
+    if (!ts.isObjectLiteralExpression(value)) continue;
+    for (const property of value.properties) {
+      if (ts.isSpreadAssignment(property)) return true;
+      if (propertyNameText(property.name) === "shell") {
+        if (!ts.isPropertyAssignment(property)) return true;
+        if (property.initializer.kind !== ts.SyntaxKind.FalseKeyword) return true;
+      }
     }
   }
-  const withoutImports = contents.replace(PROCESS_IMPORT_PATTERN, "");
-  const withoutDirectCalls = withoutImports.replace(
-    /(^|[^\w.$])(spawnSync|spawn|execFileSync|execFile|execSync|exec|fork)\s*\(/gm,
-    "$1("
+  return false;
+}
+
+function analyzeProcessUsage(path, contents) {
+  const source = ts.createSourceFile(
+    path,
+    contents,
+    ts.ScriptTarget.Latest,
+    true,
+    scriptKindForPath(path)
   );
-  const importedApiReference =
-    importedApis.length > 0 &&
-    new RegExp(`\\b(?:${importedApis.join("|")})\\b`, "m").test(withoutDirectCalls);
-  return (
-    invalidImport ||
-    importedApiReference ||
-    PROCESS_CAPABILITY_PATTERN.test(withoutDirectCalls) ||
-    OBFUSCATED_PROCESS_CAPABILITY_PATTERN.test(withoutDirectCalls)
-  );
+  const importedApis = new Map();
+  const consumedIdentifiers = new Set();
+  const launches = [];
+  let hasCapability = false;
+  let indirect = false;
+  let shellEnabled = false;
+
+  for (const statement of source.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteralLike(statement.moduleSpecifier)) {
+      continue;
+    }
+    if (!isChildProcessModule(statement.moduleSpecifier.text)) continue;
+    if (statement.importClause?.isTypeOnly) continue;
+    hasCapability = true;
+    const bindings = statement.importClause?.namedBindings;
+    if (!bindings || !ts.isNamedImports(bindings)) {
+      indirect = true;
+      continue;
+    }
+    for (const specifier of bindings.elements) {
+      if (specifier.isTypeOnly) continue;
+      const importedName = specifier.propertyName?.text ?? specifier.name.text;
+      if (specifier.propertyName || !PROCESS_API_NAMES.has(importedName)) {
+        indirect = true;
+        continue;
+      }
+      importedApis.set(specifier.name.text, importedName);
+    }
+  }
+
+  const visit = (node) => {
+    if (ts.isImportDeclaration(node)) return;
+
+    if (ts.isCallExpression(node)) {
+      const callee = unwrapExpression(node.expression);
+      const calleeName = canonicalExpression(callee);
+      const moduleName = node.arguments[0] ? staticStringValue(node.arguments[0]) : null;
+      const isDynamicImport = callee.kind === ts.SyntaxKind.ImportKeyword;
+      const isRequire = ts.isIdentifier(callee) && callee.text === "require";
+      const isBuiltinLookup = calleeName === "process.getBuiltinModule";
+      if (
+        (isDynamicImport || isRequire || isBuiltinLookup) &&
+        (isChildProcessModule(moduleName) || (isBuiltinLookup && moduleName === null))
+      ) {
+        hasCapability = true;
+        indirect = true;
+      }
+      if (calleeName === "Bun.spawn") {
+        hasCapability = true;
+        indirect = true;
+      }
+
+      if (ts.isIdentifier(callee) && importedApis.has(callee.text)) {
+        hasCapability = true;
+        consumedIdentifiers.add(callee);
+        if (node.questionDotToken) indirect = true;
+        launches.push({
+          api: importedApis.get(callee.text),
+          command: node.arguments[0] ? canonicalExpression(node.arguments[0]) : null,
+        });
+        if (processCallUsesShell(node)) shellEnabled = true;
+      }
+    }
+
+    if (ts.isNewExpression(node) && canonicalExpression(node.expression) === "Deno.Command") {
+      hasCapability = true;
+      indirect = true;
+    }
+
+    if (ts.isIdentifier(node) && importedApis.has(node.text) && !consumedIdentifiers.has(node)) {
+      indirect = true;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+
+  return {
+    hasCapability,
+    indirect,
+    launches,
+    shellEnabled,
+    parseFailed: (source.parseDiagnostics ?? []).length > 0,
+  };
 }
 
 function validateExecutableSource(path, contents, violations) {
-  const launches = processLaunches(contents);
-  const usesProcessCapability =
-    PROCESS_CAPABILITY_PATTERN.test(contents) ||
-    OBFUSCATED_PROCESS_CAPABILITY_PATTERN.test(contents) ||
-    launches.length > 0;
-  if (!usesProcessCapability) return;
+  const analysis = analyzeProcessUsage(path, contents);
+  if (analysis.parseFailed) {
+    violations.push(`${path}: source cannot be parsed for process auditing`);
+    return;
+  }
+  if (!analysis.hasCapability) return;
 
   const contract = PROCESS_EXECUTION_CONTRACTS.get(path);
   if (!contract) {
     violations.push(`${path}: process execution is not approved for a local source file`);
     return;
   }
-  if (hasIndirectProcessReference(contents)) {
+  if (analysis.indirect) {
     violations.push(`${path}: indirect process dispatch is forbidden`);
   }
-  if (launches.length === 0) {
+  if (analysis.launches.length === 0) {
     violations.push(`${path}: process execution cannot be statically audited`);
     return;
   }
-  for (const launch of launches) {
-    if (!contract.has(launch.command)) {
+  for (const launch of analysis.launches) {
+    if (launch.command === null || !contract.has(launch.command)) {
       violations.push(
-        `${path}: ${launch.api} command ${JSON.stringify(launch.command)} is outside its process contract`
+        `${path}: ${launch.api} command ${JSON.stringify(launch.command ?? "<dynamic>")} is outside its process contract`
       );
     }
   }
-  if (/shell\s*:(?!\s*false\b)/.test(contents)) {
+  if (analysis.shellEnabled) {
     violations.push(`${path}: shell-enabled process execution is forbidden`);
   }
 }

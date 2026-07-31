@@ -26,6 +26,11 @@ expectMutationRejected("ciWorkflow", "retention-days: 30", "retention-days: 29")
 expectMutationRejected("ciWorkflow", "-- --locked", "-- --offline");
 expectMutationRejected(
   "ciWorkflow",
+  "Install Node audit dependencies",
+  "Install unrelated dependencies"
+);
+expectMutationRejected(
+  "ciWorkflow",
   `          node scripts/check-local-native-boundary.mjs
           node scripts/pnpm-cli.selftest.mjs
           node scripts/check-local-native-boundary.selftest.mjs`,

@@ -1335,6 +1335,7 @@ export function checkWorkflowContractContents({ ciWorkflow, devBuildWorkflow, re
     ],
     ["node scripts/cloud-native-drift.mjs classify", "native drift classifier"],
     ["node scripts/check-local-native-boundary.mjs", "local native boundary enforcement"],
+    ["Install Node audit dependencies", "AST audit dependency installation"],
     ["node scripts/pnpm-cli.selftest.mjs", "cross-platform pnpm invocation self-test"],
     ["node scripts/check-local-native-boundary.selftest.mjs", "local native boundary self-test"],
     ["environment: release-signing", "protected signing environment"],
@@ -1361,14 +1362,17 @@ export function checkWorkflowContractContents({ ciWorkflow, devBuildWorkflow, re
     "node scripts/pnpm-cli.selftest.mjs",
     "node scripts/check-local-native-boundary.selftest.mjs",
   ].map((snippet) => ciWorkflow.indexOf(snippet));
+  const auditDependencyInstall = ciWorkflow.indexOf("Install Node audit dependencies");
   if (
+    auditDependencyInstall < 0 ||
+    auditDependencyInstall >= localBoundaryOrder[0] ||
     localBoundaryOrder.some((index) => index < 0) ||
     localBoundaryOrder.some(
       (index, position) => position > 0 && index <= localBoundaryOrder[position - 1]
     )
   ) {
     throw new Error(
-      "CI must enforce the live local-native boundary before executing its self-tests."
+      "CI must install the AST audit dependency, then enforce the live local-native boundary before its self-tests."
     );
   }
   const ciGateBlock = /\n  ci-gate:\n([\s\S]*)$/.exec(ciWorkflow)?.[1] ?? "";
