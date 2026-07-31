@@ -1,7 +1,8 @@
-import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { dirname, posix, resolve, win32 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+
+import { readRepositoryPaths, readScopedHooksConfig } from "./lib/git-metadata.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const defaultRepoRoot = resolve(scriptDir, "..");
@@ -115,19 +116,30 @@ const JAVASCRIPT_SOURCE_PATTERN = /\.(?:cjs|mjs|js|cts|mts|ts|tsx)$/i;
 const LOCAL_SCRIPT_SOURCE_PATTERN = /\.(?:py|sh|bash|zsh|ps1|cmd|bat)$/i;
 const MAX_AUDITED_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_AUDITED_TOTAL_BYTES = 32 * 1024 * 1024;
-const PROCESS_MODULE_PATTERN =
-  /(?:node:)?child_process|child_["'`+\s]*process|process\.getBuiltinModule|Bun\.spawn|Deno\.Command/;
+const PROCESS_CAPABILITY_PATTERN =
+  /(?:\bfrom\s*["'](?:node:)?child_process["']|\brequire\s*\(\s*["'](?:node:)?child_process["']|\bimport\s*\(\s*["'](?:node:)?child_process["']|\bprocess\.getBuiltinModule\s*\(|\bBun\.spawn\s*\(|\bnew\s+Deno\.Command\s*\()/m;
+const OBFUSCATED_PROCESS_CAPABILITY_PATTERN =
+  /child_["'`+\s]+process|\bprocess\s*\[\s*["'`]getBuiltinModule["'`]\s*\]|\bBun\s*\[\s*["'`]spawn["'`]\s*\]|\bDeno\s*\[\s*["'`]Command["'`]\s*\]/m;
 const PROCESS_CALL_PATTERN =
   /(?:^|[^\w.$])(spawnSync|spawn|execFileSync|execFile|execSync|exec|fork)\s*\(\s*([^,\r\n)]+)/gm;
-const INDIRECT_PROCESS_CALL_PATTERN =
-  /Reflect\.apply\s*\(\s*(?:(?:[A-Za-z_$][\w$]*)\.)?(?:spawnSync|spawn|execFileSync|execFile|execSync|exec|fork)|(?:spawnSync|spawn|execFileSync|execFile|execSync|exec|fork)\s*\.\s*(?:call|apply)\s*\(|\[\s*["'`](?:spawnSync|spawn|execFileSync|execFile|execSync|exec|fork)["'`]\s*\]\s*\(/m;
+const PROCESS_IMPORT_PATTERN =
+  /^import\s*\{\s*([^}]+?)\s*\}\s*from\s*["']node:child_process["'];?\s*$/gm;
+const PROCESS_API_NAMES = new Set([
+  "spawnSync",
+  "spawn",
+  "execFileSync",
+  "execFile",
+  "execSync",
+  "exec",
+  "fork",
+]);
 const PROCESS_EXECUTION_CONTRACTS = new Map([
-  ["scripts/check-local-native-boundary.mjs", new Set(["git"])],
   ["scripts/check-plugin-api-contract.selftest.mjs", new Set(["process.execPath"])],
   ["scripts/check-plugin-system-docs.mjs", new Set(["git"])],
   ["scripts/check-pnpm-audit.mjs", new Set(["listCommand.command"])],
   ["scripts/cloud-native-drift.mjs", new Set(["git"])],
   ["scripts/cloud-native-drift.selftest.mjs", new Set(["git"])],
+  ["scripts/lib/git-metadata.mjs", new Set(["git"])],
   ["scripts/run-checks.mjs", new Set(["invocation.command"])],
   ["scripts/run-coverage-shards.mjs", new Set(["invocation.command"])],
   ["scripts/support-matrix.homebrew-cask.selftest.mjs", new Set(["process.execPath"])],
@@ -169,12 +181,39 @@ function processLaunches(contents) {
   }));
 }
 
+function hasIndirectProcessReference(contents) {
+  const importedApis = [];
+  let invalidImport = false;
+  for (const match of contents.matchAll(PROCESS_IMPORT_PATTERN)) {
+    const names = match[1].split(",").map((name) => name.trim());
+    if (names.some((name) => !PROCESS_API_NAMES.has(name))) {
+      invalidImport = true;
+    } else {
+      importedApis.push(...names);
+    }
+  }
+  const withoutImports = contents.replace(PROCESS_IMPORT_PATTERN, "");
+  const withoutDirectCalls = withoutImports.replace(
+    /(^|[^\w.$])(spawnSync|spawn|execFileSync|execFile|execSync|exec|fork)\s*\(/gm,
+    "$1("
+  );
+  const importedApiReference =
+    importedApis.length > 0 &&
+    new RegExp(`\\b(?:${importedApis.join("|")})\\b`, "m").test(withoutDirectCalls);
+  return (
+    invalidImport ||
+    importedApiReference ||
+    PROCESS_CAPABILITY_PATTERN.test(withoutDirectCalls) ||
+    OBFUSCATED_PROCESS_CAPABILITY_PATTERN.test(withoutDirectCalls)
+  );
+}
+
 function validateExecutableSource(path, contents, violations) {
   const launches = processLaunches(contents);
   const usesProcessCapability =
-    PROCESS_MODULE_PATTERN.test(contents) ||
-    launches.length > 0 ||
-    INDIRECT_PROCESS_CALL_PATTERN.test(contents);
+    PROCESS_CAPABILITY_PATTERN.test(contents) ||
+    OBFUSCATED_PROCESS_CAPABILITY_PATTERN.test(contents) ||
+    launches.length > 0;
   if (!usesProcessCapability) return;
 
   const contract = PROCESS_EXECUTION_CONTRACTS.get(path);
@@ -182,7 +221,7 @@ function validateExecutableSource(path, contents, violations) {
     violations.push(`${path}: process execution is not approved for a local source file`);
     return;
   }
-  if (INDIRECT_PROCESS_CALL_PATTERN.test(contents)) {
+  if (hasIndirectProcessReference(contents)) {
     violations.push(`${path}: indirect process dispatch is forbidden`);
   }
   if (launches.length === 0) {
@@ -488,11 +527,7 @@ function readManifest(repoRoot, path) {
 
 function collectGitPaths(repoRoot, collectionErrors) {
   try {
-    const output = execFileSync(
-      "git",
-      ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-      { cwd: repoRoot, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 }
-    );
+    const output = readRepositoryPaths(repoRoot);
     return output
       .split("\0")
       .filter(Boolean)
@@ -516,11 +551,7 @@ export function parseScopedHooksPaths(output) {
 
 function collectHooksPaths(repoRoot, collectionErrors) {
   try {
-    const output = execFileSync(
-      "git",
-      ["config", "--show-scope", "--show-origin", "--get-all", "core.hooksPath"],
-      { cwd: repoRoot, encoding: "utf8" }
-    );
+    const output = readScopedHooksConfig(repoRoot);
     return parseScopedHooksPaths(output);
   } catch (error) {
     if (error.status === 1) return [];

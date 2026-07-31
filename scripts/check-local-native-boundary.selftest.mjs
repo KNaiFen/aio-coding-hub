@@ -308,6 +308,16 @@ expectFailure(
   snapshot({ files: { "scripts/run-checks.mjs": processFixtures.namespaceCargo } }),
   "scripts/run-checks.mjs: process execution cannot be statically audited"
 );
+for (const contents of [
+  processFixtures.aliasedCargo,
+  processFixtures.optionalCargo,
+  processFixtures.renamedImportCargo,
+]) {
+  expectFailure(
+    snapshot({ files: { "scripts/run-checks.mjs": contents } }),
+    "scripts/run-checks.mjs: indirect process dispatch is forbidden"
+  );
+}
 expectFailure(
   snapshot({ files: { "scripts/run-checks.mjs": processFixtures.reflectApplyCargo } }),
   "scripts/run-checks.mjs: indirect process dispatch is forbidden"

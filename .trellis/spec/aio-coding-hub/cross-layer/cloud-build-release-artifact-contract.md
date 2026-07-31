@@ -55,8 +55,10 @@ contract.
   automation files. Repository-controlled local packaging helpers are forbidden.
   The canonical pnpm workspace uses a strict top-level key allowlist so quoted,
   merged, duplicated, or future execution-policy keys fail closed.
-  Allowlisted JavaScript helpers use explicit process contracts; namespace,
-  alias, reflective, shell-enabled, or otherwise unauditable dispatch fails.
+  Git metadata collection is isolated behind a fixed-purpose helper. Allowlisted
+  JavaScript helpers use explicit process contracts; any unconsumed process API
+  reference, namespace, alias, optional/reflective call, shell-enabled, or
+  otherwise unauditable dispatch fails.
   CI and package aggregates scan the real repository before running boundary
   self-tests. The checker only parses files and Git metadata; it never executes
   an audited helper.
