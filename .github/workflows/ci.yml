@@ -639,6 +639,7 @@ jobs:
           retention-days: 30
 
   ci-gate:
+    name: ci-gate
     if: always()
     needs:
       - pr-title
@@ -650,6 +651,7 @@ jobs:
       - build-release-candidate
       - assemble-release-candidate
     runs-on: ubuntu-latest
+    permissions: {}
     steps:
       - name: Require every applicable CI owner to succeed
         shell: bash
@@ -702,41 +704,3 @@ jobs:
             require_result build-release-candidate "$CANDIDATE_BUILD_RESULT" skipped
             require_result assemble-release-candidate "$CANDIDATE_ASSEMBLY_RESULT" skipped
           fi
-
-  ci-gate:
-    name: ci-gate
-    if: always()
-    needs:
-      - pr-title
-      - support-contract
-      - desktop-support-contract
-      - frontend
-      - rust
-    runs-on: ubuntu-latest
-    permissions: {}
-    steps:
-      - name: Require every pull-request quality gate
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          PR_TITLE_RESULT: ${{ needs.pr-title.result }}
-          SUPPORT_CONTRACT_RESULT: ${{ needs.support-contract.result }}
-          DESKTOP_CONTRACT_RESULT: ${{ needs.desktop-support-contract.result }}
-          FRONTEND_RESULT: ${{ needs.frontend.result }}
-          RUST_RESULT: ${{ needs.rust.result }}
-        run: |
-          set -euo pipefail
-          if [[ "$EVENT_NAME" == "pull_request" && "$PR_TITLE_RESULT" != "success" ]]; then
-            echo "PR title gate did not succeed." >&2
-            exit 1
-          fi
-          for result in \
-            "$SUPPORT_CONTRACT_RESULT" \
-            "$DESKTOP_CONTRACT_RESULT" \
-            "$FRONTEND_RESULT" \
-            "$RUST_RESULT"; do
-            if [[ "$result" != "success" ]]; then
-              echo "A required CI quality job did not succeed." >&2
-              exit 1
-            fi
-          done
