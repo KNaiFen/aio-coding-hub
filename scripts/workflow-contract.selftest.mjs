@@ -31,6 +31,11 @@ expectMutationRejected(
 );
 expectMutationRejected(
   "ciWorkflow",
+  '-p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD_SECRET"',
+  "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=unsupported"
+);
+expectMutationRejected(
+  "ciWorkflow",
   "needs.assemble-release-candidate.outputs.run_attempt",
   "needs.assemble-release-candidate.result"
 );

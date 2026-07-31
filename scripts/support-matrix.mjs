@@ -1322,10 +1322,7 @@ export function checkWorkflowContractContents({ ciWorkflow, devBuildWorkflow, re
     ["node scripts/cloud-native-drift.mjs classify", "native drift classifier"],
     ["environment: release-signing", "protected signing environment"],
     ["printf 'TAURI_SIGNING_PRIVATE_KEY=%s\\n' \"$normalized_key\"", "normalized signing key"],
-    [
-      'TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$TAURI_SIGNING_PRIVATE_KEY_PASSWORD_SECRET"',
-      "signing password process environment",
-    ],
+    ['-p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD_SECRET"', "Tauri 2.9 signing probe password"],
     ["tauriScript: pnpm exec tauri", "explicit Tauri script"],
     ["-- --locked", "locked Cargo build args"],
     [

@@ -449,9 +449,9 @@ jobs:
           printf '%s' "$normalized_key" > "$key_path"
           chmod 600 "$key_path"
           printf '%s\n' 'signing-probe' > "$test_path"
-          if ! TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$TAURI_SIGNING_PRIVATE_KEY_PASSWORD_SECRET" \
-            pnpm exec tauri signer sign \
+          if ! pnpm exec tauri signer sign \
             -f "$key_path" \
+            -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD_SECRET" \
             "$test_path" >/dev/null 2>&1; then
             echo "Updater signing key/password validation failed." >&2
             exit 1
