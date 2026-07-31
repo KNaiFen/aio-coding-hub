@@ -137,9 +137,8 @@ async fn read_device_json_value(
   assert persisted console arguments contain neither the value nor marker.
 - Use a random capability containing no special marker in string, JSON and
   nested object errors through the real poll/cancel frontend wrappers.
-- After changing the shared bounded reader, flow ownership, or persistence
-  behavior, require cloud CI to run the focused OAuth command tests and full
-  Rust library suite. Local verification remains Node/frontend-only.
+- Run the focused OAuth command tests and the full Rust library suite after
+  changing the shared bounded reader, flow ownership, or persistence behavior.
 
 ### 7. Wrong vs Correct
 

@@ -270,18 +270,17 @@ Keep focused regressions in
   `export_skill_dir_files` to `write_skill_files_to_dir` byte-for-byte round trip
   containing temporary-like names.
 
-Local verification runs at least:
+Run at least:
 
 ```powershell
-pnpm typecheck
-pnpm lint
+cargo test --manifest-path src-tauri/Cargo.toml config_migrate --lib --locked
+pnpm tauri:fmt
+pnpm tauri:clippy
 git diff --check
 ```
 
-Cloud CI must run the focused config-migration suite, formatting, Clippy, and
-the full Rust library suite when production config-migration code or a shared
-filesystem helper changes. Apply a cloud drift patch instead of running the
-native checks locally.
+Run the full Rust library suite when production config-migration code or a
+shared filesystem helper changes.
 
 ### 7. Wrong vs Correct
 
@@ -468,8 +467,8 @@ same SQLite transaction that inserts the provider and canonical extension.
 - Assert sensitive carrier types do not derive `Debug` and errors/logs do not
   contain synthetic credential values.
 - Keep 64 MiB bundle, Skill payload, import lock, staged filesystem, and all
-  existing v1/v2 rollback regressions green; require the cloud CI full Rust
-  suite after production config-migration changes.
+  existing v1/v2 rollback regressions green; run the full Rust suite after
+  production config-migration changes.
 
 ### 7. Wrong vs Correct
 

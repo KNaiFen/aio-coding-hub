@@ -177,8 +177,6 @@ pnpm dev
 | Development | Actions `dev-build`: `macos-x64` | macOS Intel; Unsigned development artifact from the manual workflow; excluded from Release/updater |
 | Release / development | Actions `dev-build`: `macos-arm64` | macOS Apple Silicon; Signed candidate from `main` CI; unsigned development artifact from the manual workflow |
 | Development | Actions `dev-build`: `linux-x64` | Linux x64; Unsigned development artifact from the manual workflow; excluded from Release/updater |
-| Development | Actions `dev-build`: `macos-universal` | macOS Universal; Unsigned development artifact from the manual workflow; excluded from Release/updater |
-| Development | Actions `dev-build`: `windows-arm64` | Windows ARM64; Unsigned development artifact from the manual workflow; excluded from Release/updater |
 <!-- SUPPORT_MATRIX_SOURCE_BUILD:END -->
 
 Manual cloud artifacts are unsigned and cannot be promoted by Release. Formal releases only promote the signed Windows x64 and macOS Apple Silicon candidates produced by successful `main` CI.

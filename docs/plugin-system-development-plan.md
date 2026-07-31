@@ -1102,25 +1102,25 @@
 
 ### 10.6 任务级测试矩阵
 
-| 任务范围 | 云端 CI 验证选择器 | 必备 fixture | 关键断言 |
+| 任务范围 | 最低验证命令 | 必备 fixture | 关键断言 |
 | --- | --- | --- | --- |
-| manifest/domain/repository | Rust job: `plugins` | 合法 manifest、缺字段 manifest、未知权限 manifest、不兼容版本 manifest | 错误结构化返回，不写入非法插件 |
-| DB migration | Rust job: `db` | 旧版本空库、已有 provider/prompts/logs 的库 | 迁移可重复执行，不破坏既有数据 |
-| Tauri commands | Rust job: `commands` | 插件安装包、非法插件包 | IPC 返回类型稳定，失败错误可被 GUI 展示 |
+| manifest/domain/repository | `cargo test plugins` | 合法 manifest、缺字段 manifest、未知权限 manifest、不兼容版本 manifest | 错误结构化返回，不写入非法插件 |
+| DB migration | `cargo test db` | 旧版本空库、已有 provider/prompts/logs 的库 | 迁移可重复执行，不破坏既有数据 |
+| Tauri commands | `cargo test commands` | 插件安装包、非法插件包 | IPC 返回类型稳定，失败错误可被 GUI 展示 |
 | 前端插件列表 | `pnpm test` | 空列表、已安装、可更新、隔离状态 | loading/error/empty/normal 状态可渲染 |
 | 配置 schema 表单 | `pnpm test` | string、boolean、enum、array、password schema | 前端校验与后端校验结果一致 |
-| 请求 hook | Rust job: `gateway_plugin_request` | OpenAI-compatible body、非 JSON body、大 body | body 修改正确，非 JSON 不破坏，content-length 正确处理 |
-| 响应 hook | Rust job: `gateway_plugin_response` | 非流式 JSON、小 body、大 body | 小响应可 transform，大响应不强制缓冲 |
-| 流式 hook | Rust job: `gateway_plugin_stream` | SSE chunk、跨 chunk token、阻断事件 | chunk 可检查，跨 chunk 可识别，阻断事件格式稳定 |
-| 日志脱敏 | Rust job: `plugin_log_redaction` | Authorization、Bearer token、URL token、数据库连接串 | 敏感值不落库，脱敏插件失败时宿主兜底 |
-| 安装包安全 | Rust job: `plugin_package_security` | zip slip 包、超大包、checksum 错误包、签名错误包 | 安装失败且不留下半成品目录 |
-| WASM runtime | Rust job: `plugin_wasm` | 合法 wasm、死循环 wasm、越权读文件 wasm | 超时终止，越权失败，主进程不崩溃 |
+| 请求 hook | `cargo test gateway_plugin_request` | OpenAI-compatible body、非 JSON body、大 body | body 修改正确，非 JSON 不破坏，content-length 正确处理 |
+| 响应 hook | `cargo test gateway_plugin_response` | 非流式 JSON、小 body、大 body | 小响应可 transform，大响应不强制缓冲 |
+| 流式 hook | `cargo test gateway_plugin_stream` | SSE chunk、跨 chunk token、阻断事件 | chunk 可检查，跨 chunk 可识别，阻断事件格式稳定 |
+| 日志脱敏 | `cargo test plugin_log_redaction` | Authorization、Bearer token、URL token、数据库连接串 | 敏感值不落库，脱敏插件失败时宿主兜底 |
+| 安装包安全 | `cargo test plugin_package_security` | zip slip 包、超大包、checksum 错误包、签名错误包 | 安装失败且不留下半成品目录 |
+| WASM runtime | `cargo test plugin_wasm` | 合法 wasm、死循环 wasm、越权读文件 wasm | 超时终止，越权失败，主进程不崩溃 |
 | GUI E2E | `pnpm test:e2e` 或项目既有 E2E 命令 | 本地插件包、权限授权流程 | 用户能完成安装、配置、启用、请求验证、卸载 |
 
 ### 10.7 测试闭环要求
 
-- 每个 `Mx-Txx` 任务完成前必须在任务说明中写明本地 Node 检查和对应的云端原生测试选择器。
-- 如果任务级测试矩阵中的云端选择器尚不存在，该任务必须先新增测试 target，或明确映射到现有 CI job；不得把选择器作为不可执行占位符保留。
+- 每个 `Mx-Txx` 任务完成前必须在任务说明中写明对应测试命令。
+- 如果任务级测试矩阵中的最低验证命令尚不存在，该任务必须先新增测试 target，或明确映射到项目现有命令；不得把矩阵命令作为不可执行占位符保留。
 - P0/P1 任务完成前必须说明对应测试命令运行在哪个 CI job 中；如暂未接入 CI，必须创建后续 CI 接入任务并标记阻塞发布。
 - 如果某任务暂时无法自动化测试，必须记录手工验证步骤和后续自动化补齐任务。
 - P0 阶段不得只依赖手工测试完成验收。

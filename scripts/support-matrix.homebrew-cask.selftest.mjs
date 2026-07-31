@@ -6,7 +6,7 @@ import { join } from "node:path";
 const command = ["scripts/support-matrix.mjs", "homebrew-cask"];
 
 function runSupportMatrix(args) {
-  return spawnSync(process.execPath, [...command, ...args], {
+  return spawnSync("node", [...command, ...args], {
     cwd: process.cwd(),
     encoding: "utf8",
   });

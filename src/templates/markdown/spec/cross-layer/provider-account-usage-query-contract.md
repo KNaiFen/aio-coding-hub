@@ -269,10 +269,9 @@ and normalization. The existing generated IPC DTO remains the frontend boundary.
 - Keep all sub2api fixtures green and prove its parser and redirect behavior do
   not change. Keep the query-owner, manual-refresh race, display rendering, and
   routing/circuit/availability isolation tests green.
-- Locally run focused frontend tests, typecheck, lint, the secret/PII diff
-  audit, and `git diff --check` in proportion to the change. Require cloud CI
-  for focused Rust tests, generated bindings, and Rust format/check/Clippy;
-  apply its bounded drift patch instead of running native commands locally.
+- Run focused Rust and frontend tests, generated-binding validation, typecheck,
+  lint, Rust format/check/Clippy, secret/PII diff audit, and `git diff --check`
+  in proportion to the change.
 
 ### 7. Wrong vs Correct
 

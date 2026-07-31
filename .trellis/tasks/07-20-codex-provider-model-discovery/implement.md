@@ -1,11 +1,5 @@
 # Codex 供应商模型发现与受管 Profile 实施计划
 
-> **Cloud-only supersession (2026-07-31):** 本任务若继续执行，不得在本地运行
-> Cargo、rustfmt、Clippy、Rust tests、Specta/生成绑定或 Tauri 命令，也不得调用会
-> 间接执行它们的 package script。下文“验证”“最终命令”和最近验证中的原生命令仅作为
-> 当时计划/历史证据保留；未来原生验证与制品全部由 GitHub Actions 完成，规范化漂移只
-> 应用 CI 提供的有界补丁。本地验证仅限 Node/TypeScript/前端命令。
-
 ## 执行原则
 
 - 所有实现只在 `codex-provider-model-discovery` worktree/branch 完成，不修改 `main` 工作区。

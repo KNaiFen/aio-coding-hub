@@ -103,7 +103,7 @@ function makeRoot(name) {
 }
 
 function runCheck(root) {
-  return spawnSync(process.execPath, ["scripts/check-plugin-api-contract.mjs"], {
+  return spawnSync("node", ["scripts/check-plugin-api-contract.mjs"], {
     cwd: process.cwd(),
     env: { ...process.env, AIO_PLUGIN_CONTRACT_TEST_ROOT: root },
     encoding: "utf8",

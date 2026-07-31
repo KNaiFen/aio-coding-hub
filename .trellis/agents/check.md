@@ -34,7 +34,6 @@ Before reviewing, read in this order:
 - `git commit`
 - `git push`
 - `git merge`
-- Local Cargo, rustfmt, Clippy, Rust tests, Specta generation, Tauri CLI, native signing, or desktop packaging. Use the repository's GitHub Actions owners and report cloud-only verification as pending.
 
 The supervising main session owns commits. Report the post-fix state; do not commit on its behalf.
 

@@ -116,6 +116,10 @@ With 3 client protocols and 3 provider protocols:
 
 ## Testing
 
-The GitHub Actions Rust job owns all protocol bridge unit and end-to-end tests.
-Use `protocol_bridge` or `protocol_bridge::e2e_tests` as cloud test filters when
-diagnosing a focused failure; do not compile the Rust suite locally.
+```bash
+# All protocol_bridge tests (unit + e2e)
+cargo test --lib -- protocol_bridge
+
+# E2E integration tests only
+cargo test --lib -- protocol_bridge::e2e_tests
+```

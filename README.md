@@ -179,8 +179,6 @@ pnpm dev
 | 开发制品 | Actions `dev-build`: `macos-x64` | macOS Intel；手动工作流生成无签名开发制品；不进入 Release / updater 矩阵 |
 | 正式发布 / 开发制品 | Actions `dev-build`: `macos-arm64` | macOS Apple Silicon；`main` CI 生成签名候选；手动工作流生成无签名开发制品 |
 | 开发制品 | Actions `dev-build`: `linux-x64` | Linux x64；手动工作流生成无签名开发制品；不进入 Release / updater 矩阵 |
-| 开发制品 | Actions `dev-build`: `macos-universal` | macOS Universal；手动工作流生成无签名开发制品；不进入 Release / updater 矩阵 |
-| 开发制品 | Actions `dev-build`: `windows-arm64` | Windows ARM64；手动工作流生成无签名开发制品；不进入 Release / updater 矩阵 |
 <!-- SUPPORT_MATRIX_SOURCE_BUILD:END -->
 
 手动云端制品均不签名且不会被 Release 晋升。正式 Release 只晋升成功 `main` CI 为 Windows x64 与 macOS Apple Silicon 生成的签名候选。

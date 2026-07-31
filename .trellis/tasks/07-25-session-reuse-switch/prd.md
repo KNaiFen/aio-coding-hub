@@ -1,11 +1,5 @@
 # Add configurable session reuse policy
 
-> **Cloud-only supersession (2026-07-31):** The earlier local native-build
-> requirement is superseded. Any continuation of this unarchived task must use
-> GitHub Actions for Rust/Tauri validation and desktop artifacts; local work is
-> limited to Node/TypeScript/frontend checks. Existing delivery and validation
-> text below remains historical evidence and must not be rerun locally.
-
 ## Goal
 
 Phase 1 adds a default-on global session-reuse switch that fully bypasses

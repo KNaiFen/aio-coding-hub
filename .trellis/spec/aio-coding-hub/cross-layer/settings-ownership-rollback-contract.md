@@ -137,9 +137,7 @@ owns. `settings::write(app, snapshot)` is a whole-snapshot primitive reserved fo
 - Unit-test the Windows adapter without real registry mutation: open/delete success, missing key, missing value,
   and non-`NotFound` open/delete failures.
 - Search production Rust sources for `settings::write(` and allow only test fixtures/seeding.
-- Require cloud CI to run the settings, gateway, Grok, CLI proxy,
-  config-migration focused suites and the full Rust library suite. Local
-  verification remains Node/frontend-only.
+- Run settings, gateway, Grok, CLI proxy, config-migration focused suites and the full Rust library suite.
 
 ### 7. Wrong vs Correct
 

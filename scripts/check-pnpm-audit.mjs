@@ -7,8 +7,6 @@ import { spawnSync } from "node:child_process";
 import { dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { createAuditListInvocation } from "./lib/pnpm-cli.mjs";
-
 const logger = {
   info(message, ...args) {
     console.error(message, ...args);
@@ -30,6 +28,7 @@ const AUDIT_EXCEPTIONS = Object.freeze([
       "This Tauri SPA uses only client-side routers and does not enable React Router RSC mode or Server Actions.",
   }),
 ]);
+const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 const auditRegistry = process.env.PNPM_AUDIT_REGISTRY?.trim() || "https://registry.npmjs.org/";
 const BULK_ADVISORY_ENDPOINT = new URL(
   "-/npm/v1/security/advisories/bulk",
@@ -37,7 +36,15 @@ const BULK_ADVISORY_ENDPOINT = new URL(
 ).toString();
 
 function pnpmListCommand() {
-  return createAuditListInvocation();
+  const args = ["list", "-r", "--prod", "--depth", "Infinity", "--json"];
+  if (process.platform !== "win32") {
+    return { command: pnpmCommand, args };
+  }
+
+  return {
+    command: process.env.ComSpec || "cmd.exe",
+    args: ["/d", "/s", "/c", pnpmCommand, ...args],
+  };
 }
 
 export function collectPackageVersions(projects) {
@@ -240,7 +247,6 @@ async function main() {
     encoding: "utf8",
     env: process.env,
     maxBuffer: 64 * 1024 * 1024,
-    shell: false,
   });
 
   if (result.error) {

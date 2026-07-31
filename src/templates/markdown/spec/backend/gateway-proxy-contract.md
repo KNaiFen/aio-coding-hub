@@ -152,8 +152,7 @@ model discovery, or circuit-breaker thresholds.
   strict model-discovery path.
 - Route-test model discovery across providers and multi-request circuit
   accumulation.
-- Require the cloud Rust job's full suite after changing shared failover
-  preparation.
+- Run the full Rust suite after changing shared failover preparation.
 
 #### 7. Wrong vs Correct
 

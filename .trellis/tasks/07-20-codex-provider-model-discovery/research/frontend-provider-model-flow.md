@@ -1,9 +1,5 @@
 # 前端供应商模型发现与 Codex 配置流调研
 
-> **Cloud-only supersession (2026-07-31):** 本调研中的本地 Rust/Specta/Tauri
-> 生成与验证建议已被云端合同取代。相关命令只保留为历史调研上下文；未来类型生成、
-> Rust 校验与原生集成由 GitHub Actions 执行，本地只应用 CI 漂移补丁并运行前端检查。
-
 ## 结论摘要
 
 当前前端已经有完整的供应商 CRUD、按 CLI 的供应商调用顺序、Codex 根级 `model`

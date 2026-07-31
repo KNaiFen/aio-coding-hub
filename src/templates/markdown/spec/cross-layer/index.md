@@ -101,18 +101,14 @@ When changing Trellis task archive or context validation:
 
 ## Quality Check
 
-- Require cloud native CI to regenerate and verify
-  `src/generated/bindings.ts` from Rust source. Apply its bounded drift patch;
-  do not regenerate the binding locally.
-- Require cloud CI to test Rust parsing, structured patching, and full-file
-  write safety.
+- Regenerate and verify `src/generated/bindings.ts` from Rust source.
+- Test Rust parsing, structured patching, and full-file write safety.
 - Test frontend adapter defaults and the UI's null/unknown-value behavior.
 - Verify unrelated patches preserve fields that they do not own.
 - Run a deterministic barrier through a real production settings writer; prove
   unrelated Image Gen/Grok fields survive and CAS preserves newer owner values.
-- Locally run focused frontend tests, `pnpm typecheck`, `pnpm lint`, and the
-  local native-boundary check. Require cloud CI for Rust formatting, lockfile,
-  generated bindings, Clippy, audit, and Rust tests.
+- Run focused tests, `pnpm typecheck`, `pnpm lint`, `pnpm tauri:fmt`, and
+  `pnpm check:generated-bindings`.
 - When changing gateway selection or failover, verify skipped candidates,
   Ready-provider limits, route projection, and attempt/transition labels together.
 - When changing account-usage refresh, verify forced fetches, late-result

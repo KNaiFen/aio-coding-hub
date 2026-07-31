@@ -89,9 +89,7 @@ owns. `settings::write(app, snapshot)` is a whole-snapshot primitive reserved fo
 - Force runtime sync failure, commit a newer owner value before rollback, and prove the service syncs the
   canonical winner rather than previous runtime. Count autostart calls in the real import CAS-loser path.
 - Search production Rust sources for `settings::write(` and allow only test fixtures/seeding.
-- Require cloud CI to run the settings, gateway, Grok, CLI proxy,
-  config-migration focused suites and the full Rust library suite. Local
-  verification remains Node/frontend-only.
+- Run settings, gateway, Grok, CLI proxy, config-migration focused suites and the full Rust library suite.
 
 ### 7. Wrong vs Correct
 

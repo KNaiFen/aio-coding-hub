@@ -62,7 +62,7 @@ const ci = readText(".github/workflows/ci.yml");
 for (const phrase of [
   "pnpm check:plugin-api-contract",
   "pnpm check:plugin-system-docs",
-  "node scripts/cloud-native-drift.mjs classify",
+  "cargo run --manifest-path src-tauri/Cargo.toml --locked --example export-bindings",
   "pnpm plugin-sdk:typecheck",
   "pnpm --filter create-aio-plugin test",
   "pnpm test:e2e",
