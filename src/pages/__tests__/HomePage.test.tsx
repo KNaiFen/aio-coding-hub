@@ -32,7 +32,6 @@ import { useHomeWorkspaceConfigs } from "../home/hooks/useHomeWorkspaceConfigs";
 import { useWorkspaceApplyMutation } from "../../query/workspaces";
 import { emitBackgroundTaskVisibilityTrigger } from "../../services/backgroundTasks";
 import { backgroundTaskVisibilityTriggers } from "../../constants/backgroundTaskContracts";
-import { writeHomeOverviewLogsPrimaryLayoutToStorage } from "../../services/home/homeOverviewLayout";
 
 const homeOverviewPanelMock = vi.hoisted(() => ({
   latestProps: null as Record<string, unknown> | null,
@@ -52,25 +51,25 @@ vi.mock("../../components/home/HomeOverviewPanel", () => ({
     const {
       sortModesLoading,
       onSetCliActiveMode,
-      onRefreshUsageHeatmap,
       onRefreshRequestLogs,
       onSelectLogId,
       devPreviewEnabled,
       displayOptions,
-      personalizedUsageView,
       switchingWorkspaceKey,
       onSwitchWorkspace,
       openCircuits,
       onResetCircuitProvider,
+      visibleTabKeys,
+      visibleCliKeys,
     } = props;
 
     return (
       <div>
         <div>sort-loading:{String(sortModesLoading)}</div>
         <div>dev-preview:{String(devPreviewEnabled)}</div>
-        <div>show-heatmap:{String(displayOptions?.heatmap)}</div>
         <div>show-usage:{String(displayOptions?.usage)}</div>
-        <div>personalized-usage-view:{String(personalizedUsageView)}</div>
+        <div>visible-tabs:{visibleTabKeys.join(",")}</div>
+        <div>visible-clis:{visibleCliKeys.join(",")}</div>
         <div>
           workspace-config-quick-toggle:{String(displayOptions?.workspaceConfigQuickToggle)}
         </div>
@@ -99,9 +98,6 @@ vi.mock("../../components/home/HomeOverviewPanel", () => ({
         </button>
         <button type="button" onClick={() => onSetCliActiveMode("codex", 1)}>
           request-switch-codex-1
-        </button>
-        <button type="button" onClick={() => onRefreshUsageHeatmap()}>
-          refresh-heatmap
         </button>
         <button type="button" onClick={() => onRefreshRequestLogs()}>
           refresh-logs
@@ -285,7 +281,7 @@ describe("pages/HomePage", () => {
   beforeEach(() => {
     homeOverviewPanelMock.latestProps = null;
     localStorage.removeItem("devPreview.enabled");
-    localStorage.removeItem("aio-home-overview-logs-primary-layout");
+    localStorage.removeItem("aio-home-overview-visibility");
     localStorage.removeItem("aio-home-workspace-config-show-all");
     resetMswState();
     vi.mocked(useProviderLimitUsageV1Query).mockReturnValue({
@@ -404,7 +400,7 @@ describe("pages/HomePage", () => {
       vi.mocked(useRequestLogsListAllQuery).mockReturnValue({
         data: [],
         isLoading: false,
-        isFetching: true,
+        isFetching: false,
         refetch: requestLogsRefetch,
       } as any);
 
@@ -471,19 +467,15 @@ describe("pages/HomePage", () => {
         error: "Error: reset boom",
       });
 
-      // refresh callbacks (toasts on error)
-      await act(async () => {
-        fireEvent.click(screen.getByRole("button", { name: "refresh-heatmap" }));
-        await Promise.resolve();
-        await Promise.resolve();
+      act(() => {
+        vi.advanceTimersByTime(1001);
       });
-      expect(toast).toHaveBeenCalledWith("刷新用量失败：请查看控制台日志");
       await act(async () => {
         fireEvent.click(screen.getByRole("button", { name: "refresh-logs" }));
         await Promise.resolve();
         await Promise.resolve();
       });
-      expect(toast).toHaveBeenCalledWith("读取使用记录失败：请查看控制台日志");
+      expect(requestLogsRefetch).toHaveBeenCalled();
 
       // same switch is ignored
       fireEvent.click(screen.getByRole("button", { name: "request-switch-same" }));
@@ -589,24 +581,26 @@ describe("pages/HomePage", () => {
     expect(screen.queryByRole("tab", { name: "更多" })).not.toBeInTheDocument();
   });
 
-  it("shows only overview and token cost tabs when personalized layout is enabled", () => {
+  it("passes local home visibility preferences to the overview panel", () => {
     setTauriRuntime();
 
     const client = createTestQueryClient();
     mockHomePageBaseQueries();
-
-    window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
+    window.localStorage.setItem(
+      "aio-home-overview-visibility",
+      JSON.stringify({
+        version: 1,
+        hiddenTabs: ["sessions", "oauthQuota"],
+        hiddenCliKeys: ["claude", "grok"],
+      })
+    );
 
     renderWithProviders(client, <HomePage />);
 
-    expect(screen.queryByRole("tab", { name: "花费" })).not.toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "用量" })).toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "更多" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "查看曲线" })).toBeInTheDocument();
-    expect(vi.mocked(useUsageHourlySeriesQuery)).toHaveBeenLastCalledWith(
-      15,
-      expect.objectContaining({ enabled: false })
-    );
+    expect(
+      screen.getByText("visible-tabs:workspaceConfig,circuit,providerLimit")
+    ).toBeInTheDocument();
+    expect(screen.getByText("visible-clis:codex,gemini")).toBeInTheDocument();
   });
 
   it("passes workspace config display preference into overview data and panel", () => {
@@ -631,35 +625,6 @@ describe("pages/HomePage", () => {
       expect.objectContaining({ showAllItems: true })
     );
     expect(screen.getByText("workspace-config-quick-toggle:true")).toBeInTheDocument();
-  });
-
-  it("places the personalized usage toggle in the page header and enables the chart query after switching", async () => {
-    setTauriRuntime();
-
-    const client = createTestQueryClient();
-    mockHomePageBaseQueries();
-
-    window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
-
-    renderWithProviders(client, <HomePage />);
-
-    expect(screen.getByText("personalized-usage-view:summary")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "查看曲线" })).toBeInTheDocument();
-    expect(vi.mocked(useUsageHourlySeriesQuery)).toHaveBeenLastCalledWith(
-      15,
-      expect.objectContaining({ enabled: false })
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "查看曲线" }));
-
-    await waitFor(() => {
-      expect(screen.getByText("personalized-usage-view:usageChart")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "查看总览" })).toBeInTheDocument();
-    });
-    expect(vi.mocked(useUsageHourlySeriesQuery)).toHaveBeenLastCalledWith(
-      15,
-      expect.objectContaining({ enabled: true })
-    );
   });
 
   it("covers null-data branches with the default home tabs", () => {
@@ -702,7 +667,7 @@ describe("pages/HomePage", () => {
     expect(screen.getByRole("tab", { name: "用量" })).toBeInTheDocument();
   });
 
-  it("passes the unified dev preview state to the usage tab across personalized layout", async () => {
+  it("passes the unified dev preview state to the usage tab", () => {
     setTauriRuntime();
 
     const client = createTestQueryClient();
@@ -720,60 +685,20 @@ describe("pages/HomePage", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "用量" }));
     expect(screen.getByText("token-preview:true")).toBeInTheDocument();
-
-    writeHomeOverviewLogsPrimaryLayoutToStorage(true);
-
-    await waitFor(() => {
-      expect(screen.queryByRole("tab", { name: "花费" })).not.toBeInTheDocument();
-      expect(screen.getByRole("tab", { name: "用量" })).toBeInTheDocument();
-      expect(screen.queryByRole("tab", { name: "更多" })).not.toBeInTheDocument();
-    });
-
-    expect(screen.getByText("token-preview:true")).toBeInTheDocument();
   });
 
-  it("keeps token cost tab available after personalized layout is disabled again", async () => {
+  it("passes the homepage usage switch to overview", async () => {
     setTauriRuntime();
 
     const client = createTestQueryClient();
     mockHomePageBaseQueries();
 
-    renderWithProviders(client, <HomePage />);
-
-    writeHomeOverviewLogsPrimaryLayoutToStorage(true);
-
-    await waitFor(() => {
-      expect(screen.queryByRole("tab", { name: "花费" })).not.toBeInTheDocument();
-      expect(screen.getByRole("tab", { name: "用量" })).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByRole("tab", { name: "用量" }));
-    expect(screen.getByText("token-cost-panel")).toBeInTheDocument();
-
-    writeHomeOverviewLogsPrimaryLayoutToStorage(false);
-
-    await waitFor(() => {
-      expect(screen.queryByRole("tab", { name: "花费" })).not.toBeInTheDocument();
-      expect(screen.getByRole("tab", { name: "用量" })).toBeInTheDocument();
-      expect(screen.queryByRole("tab", { name: "更多" })).not.toBeInTheDocument();
-    });
-
-    expect(screen.getByText("token-cost-panel")).toBeInTheDocument();
-  });
-
-  it("passes homepage heatmap and usage switches to overview", async () => {
-    setTauriRuntime();
-
-    const client = createTestQueryClient();
-    mockHomePageBaseQueries();
-
-    mergeSettingsState({ show_home_heatmap: false, show_home_usage: true });
+    mergeSettingsState({ show_home_usage: false });
 
     renderWithProviders(client, <HomePage />);
 
     await waitFor(() => {
-      expect(screen.getByText("show-heatmap:false")).toBeInTheDocument();
-      expect(screen.getByText("show-usage:true")).toBeInTheDocument();
+      expect(screen.getByText("show-usage:false")).toBeInTheDocument();
     });
   });
 

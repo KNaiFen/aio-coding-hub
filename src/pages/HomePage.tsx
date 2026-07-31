@@ -7,7 +7,6 @@ import { CLIS } from "../constants/clis";
 import {
   HomeOverviewPanel,
   type HomeOverviewPanelProps,
-  type HomeOverviewUsageView,
 } from "../components/home/HomeOverviewPanel";
 import type { HomeWorkspaceConfigItem } from "../components/home/homeWorkspaceConfigTypes";
 import { useDevPreviewData } from "../hooks/useDevPreviewData";
@@ -25,13 +24,15 @@ import { TabList } from "../ui/TabList";
 import { normalizeCliPriorityOrder } from "../services/cli/cliPriorityOrder";
 import { useTraceStore } from "../services/gateway/traceStore";
 import {
-  readHomeOverviewLogsPrimaryLayoutFromStorage,
-  subscribeHomeOverviewLogsPrimaryLayout,
-} from "../services/home/homeOverviewLayout";
-import {
   readHomeWorkspaceConfigShowAllFromStorage,
   subscribeHomeWorkspaceConfigShowAll,
 } from "../services/home/homeWorkspaceConfigDisplay";
+import {
+  readHomeOverviewVisibilityFromStorage,
+  subscribeHomeOverviewVisibility,
+  visibleHomeOverviewCliKeys,
+  visibleHomeOverviewTabs,
+} from "../services/home/homeOverviewVisibility";
 import { promptSetEnabled } from "../services/workspace/prompts";
 import { mcpServerSetEnabled } from "../services/workspace/mcp";
 import { skillSetEnabled } from "../services/workspace/skills";
@@ -62,22 +63,19 @@ type HomeUiState = {
   selectedLogId: number | null;
   togglingWorkspaceConfigItemId: string | null;
   switchingWorkspaceKey: string | null;
-  personalizedUsageView: HomeOverviewUsageView;
 };
 
 type HomeUiAction =
   | { type: "setTab"; tab: HomeTabKey }
   | { type: "setSelectedLogId"; selectedLogId: number | null }
   | { type: "setTogglingWorkspaceConfigItemId"; itemId: string | null }
-  | { type: "setSwitchingWorkspaceKey"; key: string | null }
-  | { type: "togglePersonalizedUsageView" };
+  | { type: "setSwitchingWorkspaceKey"; key: string | null };
 
 const initialHomeUiState: HomeUiState = {
   tab: "overview",
   selectedLogId: null,
   togglingWorkspaceConfigItemId: null,
   switchingWorkspaceKey: null,
-  personalizedUsageView: "summary",
 };
 
 function homeUiReducer(state: HomeUiState, action: HomeUiAction): HomeUiState {
@@ -90,11 +88,6 @@ function homeUiReducer(state: HomeUiState, action: HomeUiAction): HomeUiState {
       return { ...state, togglingWorkspaceConfigItemId: action.itemId };
     case "setSwitchingWorkspaceKey":
       return { ...state, switchingWorkspaceKey: action.key };
-    case "togglePersonalizedUsageView":
-      return {
-        ...state,
-        personalizedUsageView: state.personalizedUsageView === "summary" ? "usageChart" : "summary",
-      };
   }
 }
 
@@ -115,23 +108,17 @@ type PendingSortModeSwitch = ReturnType<typeof useHomeSortMode>["pendingSortMode
 function HomePageHeaderActions({
   devPreviewEnabled,
   isDevMode,
-  personalizedLayoutEnabled,
-  personalizedUsageView,
   tab,
   tabs,
   onTabChange,
   onToggleDevPreview,
-  onTogglePersonalizedUsageView,
 }: {
   devPreviewEnabled: boolean;
   isDevMode: boolean;
-  personalizedLayoutEnabled: boolean;
-  personalizedUsageView: HomeOverviewUsageView;
   tab: HomeTabKey;
   tabs: HomeTabItem[];
   onTabChange: (tab: HomeTabKey) => void;
   onToggleDevPreview: () => void;
-  onTogglePersonalizedUsageView: () => void;
 }) {
   return (
     <>
@@ -142,11 +129,6 @@ function HomePageHeaderActions({
           onClick={onToggleDevPreview}
         >
           {devPreviewEnabled ? "Dev关闭预览数据" : "Dev开启预览数据"}
-        </Button>
-      ) : null}
-      {personalizedLayoutEnabled && tab === "overview" ? (
-        <Button variant="secondary" size="md" onClick={onTogglePersonalizedUsageView}>
-          {personalizedUsageView === "summary" ? "查看曲线" : "查看总览"}
         </Button>
       ) : null}
       <TabList ariaLabel="首页视图切换" items={tabs} value={tab} onChange={onTabChange} />
@@ -297,18 +279,24 @@ export function HomePage() {
   const showCustomTooltip = true;
   const foregroundActive = useDocumentVisibility();
   const settingsQuery = useSettingsQuery();
-  const showHomeHeatmap = settingsQuery.data?.show_home_heatmap ?? true;
   const showHomeUsage = settingsQuery.data?.show_home_usage ?? true;
-  const showOverviewUsageSection = showHomeHeatmap || showHomeUsage;
   const homeUsagePeriod = settingsQuery.data?.home_usage_period ?? DEFAULT_HOME_USAGE_PERIOD;
   const homeUsageWindowDays = resolveHomeUsageWindowDays(homeUsagePeriod);
   const cliPriorityOrder = normalizeCliPriorityOrder(settingsQuery.data?.cli_priority_order);
   const isDevMode = import.meta.env.DEV;
   const devPreview = useDevPreviewData();
-  const personalizedLayoutEnabled = useSyncExternalStore(
-    subscribeHomeOverviewLogsPrimaryLayout,
-    readHomeOverviewLogsPrimaryLayoutFromStorage,
-    () => false
+  const homeOverviewVisibility = useSyncExternalStore(
+    subscribeHomeOverviewVisibility,
+    readHomeOverviewVisibilityFromStorage,
+    readHomeOverviewVisibilityFromStorage
+  );
+  const visibleTabKeys = useMemo(
+    () => visibleHomeOverviewTabs(homeOverviewVisibility),
+    [homeOverviewVisibility]
+  );
+  const visibleCliKeys = useMemo(
+    () => visibleHomeOverviewCliKeys(homeOverviewVisibility),
+    [homeOverviewVisibility]
   );
   const showAllWorkspaceConfigItems = useSyncExternalStore(
     subscribeHomeWorkspaceConfigShowAll,
@@ -317,21 +305,11 @@ export function HomePage() {
   );
   const [homeUiState, dispatchHomeUi] = useReducer(homeUiReducer, initialHomeUiState);
   const tab = homeUiState.tab;
-  const {
-    selectedLogId,
-    togglingWorkspaceConfigItemId,
-    switchingWorkspaceKey,
-    personalizedUsageView,
-  } = homeUiState;
+  const { selectedLogId, togglingWorkspaceConfigItemId, switchingWorkspaceKey } = homeUiState;
   const setSelectedLogId = (selectedLogId: number | null) =>
     dispatchHomeUi({ type: "setSelectedLogId", selectedLogId });
-  const personalizedUsageChartVisible =
-    personalizedLayoutEnabled && personalizedUsageView === "usageChart";
-  const overviewUsageSeriesEnabled =
-    tab === "overview" &&
-    (personalizedUsageChartVisible || (!personalizedLayoutEnabled && showOverviewUsageSection));
-  const shouldRefetchOverviewUsageSeries =
-    personalizedUsageChartVisible || (!personalizedLayoutEnabled && showOverviewUsageSection);
+  const overviewUsageSeriesEnabled = tab === "overview" && showHomeUsage;
+  const shouldRefetchOverviewUsageSeries = showHomeUsage;
 
   // --- Delegated state hooks ---
   const circuit = useHomeCircuitState();
@@ -360,7 +338,6 @@ export function HomePage() {
     requestLogsLoading,
     requestLogsRefreshing,
     requestLogsAvailable,
-    refreshUsageHeatmap,
     refreshProviderLimit,
     refreshRequestLogs,
   } = useHomeOverviewFeed({
@@ -369,7 +346,7 @@ export function HomePage() {
     overviewUsageSeriesEnabled,
     shouldRefetchOverviewUsageSeries,
     homeUsageWindowDays,
-    providerLimitEnabled: !personalizedLayoutEnabled,
+    providerLimitEnabled: true,
   });
   const sortMode = useHomeSortMode(activeSessions);
   const workspaceConfigs = useHomeWorkspaceConfigs({
@@ -467,16 +444,16 @@ export function HomePage() {
   const overviewPanelProps: HomeOverviewPanelProps = {
     displayOptions: {
       customTooltip: showCustomTooltip,
-      heatmap: showHomeHeatmap,
       usage: showHomeUsage,
       workspaceConfigQuickToggle: showAllWorkspaceConfigItems,
     },
     devPreviewEnabled: devPreview.enabled,
     cliPriorityOrder,
+    visibleTabKeys,
+    visibleCliKeys,
     usageWindowDays: homeUsageWindowDays,
     usageHeatmapRows,
     usageHeatmapLoading,
-    onRefreshUsageHeatmap: refreshUsageHeatmap,
     sortModes: sortMode.sortModes,
     sortModesLoading: sortMode.sortModesLoading,
     sortModesAvailable: sortMode.sortModesAvailable,
@@ -518,19 +495,15 @@ export function HomePage() {
     onRefreshRequestLogs: refreshRequestLogs,
     selectedLogId,
     onSelectLogId: setSelectedLogId,
-    personalizedUsageView,
   };
   const headerActions = (
     <HomePageHeaderActions
       devPreviewEnabled={devPreview.enabled}
       isDevMode={isDevMode}
-      personalizedLayoutEnabled={personalizedLayoutEnabled}
-      personalizedUsageView={personalizedUsageView}
       tab={tab}
       tabs={HOME_TABS}
       onTabChange={(tab) => dispatchHomeUi({ type: "setTab", tab })}
       onToggleDevPreview={() => devPreview.toggle()}
-      onTogglePersonalizedUsageView={() => dispatchHomeUi({ type: "togglePersonalizedUsageView" })}
     />
   );
   const tabContent = (

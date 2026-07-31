@@ -1,22 +1,18 @@
 // Usage:
-// - Render in `HomeOverviewPanel` as the top row showing usage heatmap + token chart.
+// - Render in `HomeOverviewPanel` as the compact usage chart above the information panel.
 
 import { useMemo } from "react";
 import type { UsageHourlyRow } from "../../services/usage/usage";
 import { Card } from "../../ui/Card";
 import { formatTokensMillions } from "../../utils/chartHelpers";
 import { buildRecentDayKeys, dayKeyFromLocalDate } from "../../utils/dateKeys";
-import { UsageHeatmap15d } from "../UsageHeatmap15d";
 import { UsageTokensChart } from "../UsageTokensChart";
 
 export type HomeUsageSectionProps = {
   devPreviewEnabled?: boolean;
-  showHeatmap: boolean;
-  showUsageChart?: boolean;
   usageWindowDays?: number;
   usageHeatmapRows: UsageHourlyRow[];
   usageHeatmapLoading: boolean;
-  onRefreshUsageHeatmap: () => void;
 };
 
 function buildPreviewUsageRows(days = 15): UsageHourlyRow[] {
@@ -74,12 +70,9 @@ function buildPreviewUsageRows(days = 15): UsageHourlyRow[] {
 
 export function HomeUsageSection({
   devPreviewEnabled = false,
-  showHeatmap,
-  showUsageChart = true,
   usageWindowDays = 15,
   usageHeatmapRows,
   usageHeatmapLoading,
-  onRefreshUsageHeatmap,
 }: HomeUsageSectionProps) {
   const displayedUsageHeatmapRows = useMemo(
     () =>
@@ -97,57 +90,27 @@ export function HomeUsageSection({
   }, [displayedUsageHeatmapRows]);
 
   return (
-    <div className="grid h-full flex-1 grid-cols-1 gap-4 md:grid-cols-12 md:items-stretch md:gap-5">
-      {showHeatmap ? (
-        <Card
-          className={`min-w-0 h-full flex flex-col ${showUsageChart ? "md:col-span-7" : "md:col-span-12"}`}
-          padding="sm"
-        >
-          <div className="mb-2 text-sm font-semibold text-foreground">热力图</div>
-          {usageHeatmapLoading && displayedUsageHeatmapRows.length === 0 ? (
-            <div className="text-sm text-muted-foreground">加载中…</div>
-          ) : (
-            <div className="flex-1">
-              <UsageHeatmap15d
-                rows={displayedUsageHeatmapRows}
-                days={usageWindowDays}
-                onRefresh={onRefreshUsageHeatmap}
-                refreshing={usageHeatmapLoading}
-              />
-            </div>
-          )}
-        </Card>
-      ) : null}
-
-      {showUsageChart ? (
-        <Card
-          className={`flex h-full min-h-[200px] flex-col ${showHeatmap ? "md:col-span-5" : "md:col-span-12"}`}
-          padding="sm"
-        >
-          <div className="mb-2 flex items-start justify-between gap-3">
-            <div className="text-sm font-semibold text-foreground">用量统计</div>
-            <div className="shrink-0 text-right text-sm text-muted-foreground">
-              <span className="mr-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                今日用量
-              </span>
-              <span className="font-semibold text-secondary-foreground dark:text-foreground">
-                {formatTokensMillions(todayTokens)}
-              </span>
-            </div>
-          </div>
-          {usageHeatmapLoading && displayedUsageHeatmapRows.length === 0 ? (
-            <div className="text-sm text-muted-foreground">加载中…</div>
-          ) : (
-            <div className="h-[160px] flex-1">
-              <UsageTokensChart
-                rows={displayedUsageHeatmapRows}
-                days={usageWindowDays}
-                className="h-full"
-              />
-            </div>
-          )}
-        </Card>
-      ) : null}
-    </div>
+    <Card className="flex h-48 min-h-48 flex-col" padding="sm">
+      <div className="mb-2 flex items-start justify-between gap-3">
+        <div className="text-sm font-semibold text-foreground">用量统计</div>
+        <div className="shrink-0 text-right text-sm text-muted-foreground">
+          <span className="mr-1.5 text-[11px] font-medium text-muted-foreground">今日用量</span>
+          <span className="font-semibold text-secondary-foreground dark:text-foreground">
+            {formatTokensMillions(todayTokens)}
+          </span>
+        </div>
+      </div>
+      {usageHeatmapLoading && displayedUsageHeatmapRows.length === 0 ? (
+        <div className="flex flex-1 items-center text-sm text-muted-foreground">加载中…</div>
+      ) : (
+        <div className="min-h-0 flex-1">
+          <UsageTokensChart
+            rows={displayedUsageHeatmapRows}
+            days={usageWindowDays}
+            className="h-full"
+          />
+        </div>
+      )}
+    </Card>
   );
 }

@@ -70,8 +70,6 @@ describe("pages/settings/SettingsPage", () => {
       settingsSaving: false,
       port: "1234",
       setPort: vi.fn(),
-      showHomeHeatmap: true,
-      setShowHomeHeatmap: vi.fn(),
       showHomeUsage: true,
       setShowHomeUsage: vi.fn(),
       homeUsagePeriod: "last15",

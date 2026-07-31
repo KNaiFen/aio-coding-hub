@@ -5,16 +5,18 @@
 import {
   lazy,
   Suspense,
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type Dispatch,
   type ReactNode,
   type SetStateAction,
 } from "react";
 import { useNowUnix } from "../../hooks/useNowUnix";
+import { CLI_KEYS } from "../../constants/clis";
 import { CIRCUIT_ROW_STATUS, type OpenCircuitRow } from "../ProviderCircuitBadge";
 import type { GatewayActiveSession } from "../../services/gateway/gateway";
-import { readHomeOverviewLogsPrimaryLayoutFromStorage } from "../../services/home/homeOverviewLayout";
 import {
   HOME_OVERVIEW_TABS,
   readHomeOverviewTabOrderFromStorage,
@@ -38,11 +40,8 @@ import { CliBrandIcon } from "./CliBrandIcon";
 import { HomeCliRouteStrategyControl } from "./HomeCliRouteStrategyControl";
 import type { HomeOAuthQuotaRow } from "./homeOAuthQuotaTypes";
 import { HomeRequestLogsPanel } from "./HomeRequestLogsPanel";
-import { HomeTodayProviderUsageOverview } from "./HomeTodayProviderUsageOverview";
 import { HomeUsageSection } from "./HomeUsageSection";
 import type { HomeCliWorkspaceConfig, HomeWorkspaceConfigItem } from "./homeWorkspaceConfigTypes";
-
-export type HomeOverviewUsageView = "summary" | "usageChart";
 
 const LazyHomeActiveSessionsCardContent = lazy(() =>
   import("./HomeActiveSessionsCard").then((m) => ({ default: m.HomeActiveSessionsCardContent }))
@@ -59,6 +58,9 @@ const LazyHomeOAuthQuotaPanelContent = lazy(() =>
 const LazyHomeWorkspaceConfigPanel = lazy(() =>
   import("./HomeWorkspaceConfigPanel").then((m) => ({ default: m.HomeWorkspaceConfigPanel }))
 );
+
+const DEFAULT_VISIBLE_HOME_OVERVIEW_TAB_KEYS = HOME_OVERVIEW_TABS.map((item) => item.key);
+const DEFAULT_VISIBLE_HOME_OVERVIEW_CLI_KEYS = [...CLI_KEYS];
 
 const PREVIEW_CIRCUITS: OpenCircuitRow[] = [
   {
@@ -257,17 +259,6 @@ const PREVIEW_OAUTH_QUOTA_ROWS: HomeOAuthQuotaRow[] = [
   },
 ];
 
-function didKeysChange(current: string[], previous: string[]) {
-  return (
-    current.length !== previous.length || current.some((key, index) => key !== previous[index])
-  );
-}
-
-type SessionsTabState = {
-  tab: HomeOverviewTabKey;
-  openCircuitKeys: string[] | null;
-};
-
 type HomeOverviewTabItem = {
   key: HomeOverviewTabKey;
   label: string;
@@ -432,7 +423,9 @@ function OverviewInfoPanel({
   oauthQuotaPanelContent: ReactNode;
   circuit: CircuitPanelState;
 }) {
-  const tabValue = tabs.some((item) => item.key === tab) ? tab : "workspaceConfig";
+  const tabValue = tabs.some((item) => item.key === tab)
+    ? tab
+    : (tabs[0]?.key ?? "workspaceConfig");
 
   return (
     <Card padding="sm" className="flex h-full min-h-0 flex-1 flex-col">
@@ -446,7 +439,7 @@ function OverviewInfoPanel({
       />
 
       <div className="flex-1 min-h-0 mt-2">
-        {tab === "sessions" ? (
+        {tabValue === "sessions" ? (
           <Suspense fallback={<OverviewPanelFallback />}>
             <LazyHomeActiveSessionsCardContent
               activeSessions={activeSessions.sessions}
@@ -454,9 +447,9 @@ function OverviewInfoPanel({
               activeSessionsAvailable={activeSessions.available}
             />
           </Suspense>
-        ) : tab === "workspaceConfig" ? (
+        ) : tabValue === "workspaceConfig" ? (
           <WorkspaceConfigPanelSlot workspace={workspace} />
-        ) : tab === "providerLimit" ? (
+        ) : tabValue === "providerLimit" ? (
           <Suspense fallback={<OverviewPanelFallback />}>
             <LazyHomeProviderLimitPanelContent
               rows={providerLimit.rows}
@@ -466,7 +459,7 @@ function OverviewInfoPanel({
               refreshing={providerLimit.refreshing}
             />
           </Suspense>
-        ) : tab === "oauthQuota" ? (
+        ) : tabValue === "oauthQuota" ? (
           oauthQuotaPanelContent
         ) : (
           <CircuitProvidersPanel
@@ -476,53 +469,6 @@ function OverviewInfoPanel({
             resettingProviderIds={circuit.resettingProviderIds}
             onResetProvider={circuit.onResetProvider}
           />
-        )}
-      </div>
-    </Card>
-  );
-}
-
-function LogsPrimaryInfoPanel({
-  tabs,
-  tab,
-  onTabChange,
-  workspace,
-  oauthQuotaPanelContent,
-  circuit,
-}: {
-  tabs: HomeOverviewTabItem[];
-  tab: HomeOverviewTabKey;
-  onTabChange: (tab: HomeOverviewTabKey) => void;
-  workspace: WorkspaceConfigPanelState;
-  oauthQuotaPanelContent: ReactNode;
-  circuit: CircuitPanelState;
-}) {
-  const tabValue = tabs.some((item) => item.key === tab) ? tab : "workspaceConfig";
-
-  return (
-    <Card padding="sm" className="flex h-full min-h-0 flex-1 flex-col">
-      <TabList
-        ariaLabel="新布局信息切换"
-        items={tabs}
-        value={tabValue}
-        onChange={onTabChange}
-        variant="compact"
-        className="shrink-0 -mt-1"
-      />
-
-      <div className="mt-2 min-h-0 flex-1">
-        {tab === "circuit" ? (
-          <CircuitProvidersPanel
-            rows={circuit.rows}
-            nowUnix={circuit.nowUnix}
-            previewActive={circuit.previewActive}
-            resettingProviderIds={circuit.resettingProviderIds}
-            onResetProvider={circuit.onResetProvider}
-          />
-        ) : tab === "oauthQuota" ? (
-          oauthQuotaPanelContent
-        ) : (
-          <WorkspaceConfigPanelSlot workspace={workspace} />
         )}
       </div>
     </Card>
@@ -532,10 +478,12 @@ function LogsPrimaryInfoPanel({
 function useDisplayedWorkspaceConfigs({
   cliPriorityOrder,
   devPreviewEnabled,
+  visibleCliKeys,
   workspaceConfigs,
 }: {
   cliPriorityOrder?: CliKey[];
   devPreviewEnabled: boolean;
+  visibleCliKeys: CliKey[];
   workspaceConfigs: HomeCliWorkspaceConfig[];
 }) {
   return useMemo(() => {
@@ -572,10 +520,12 @@ function useDisplayedWorkspaceConfigs({
     ).map((cli) => cli.key);
     const configByCli = new Map(nextConfigs.map((config) => [config.cliKey, config]));
 
+    const visibleCliKeySet = new Set(visibleCliKeys);
     return orderedCliKeys
+      .filter((cliKey) => visibleCliKeySet.has(cliKey))
       .map((cliKey) => configByCli.get(cliKey))
       .filter((config): config is HomeCliWorkspaceConfig => config != null);
-  }, [cliPriorityOrder, devPreviewEnabled, workspaceConfigs]);
+  }, [cliPriorityOrder, devPreviewEnabled, visibleCliKeys, workspaceConfigs]);
 }
 
 function useWorkspaceConfigPanelState({
@@ -613,15 +563,16 @@ function useWorkspaceConfigPanelState({
     enabled: boolean
   ) => void;
 }): WorkspaceConfigPanelState {
-  let effectiveSelectedCliKey =
+  const effectiveSelectedCliKey =
     selectedWorkspaceConfigCliKey ?? displayedWorkspaceConfigs[0]?.cliKey ?? null;
-  if (
-    effectiveSelectedCliKey != null &&
-    !displayedWorkspaceConfigs.some((config) => config.cliKey === effectiveSelectedCliKey)
-  ) {
-    effectiveSelectedCliKey = displayedWorkspaceConfigs[0]?.cliKey ?? null;
-    setSelectedWorkspaceConfigCliKey(effectiveSelectedCliKey);
-  }
+  const selectedCliStillVisible =
+    effectiveSelectedCliKey == null ||
+    displayedWorkspaceConfigs.some((config) => config.cliKey === effectiveSelectedCliKey);
+
+  useEffect(() => {
+    if (selectedCliStillVisible) return;
+    setSelectedWorkspaceConfigCliKey(displayedWorkspaceConfigs[0]?.cliKey ?? null);
+  }, [displayedWorkspaceConfigs, selectedCliStillVisible, setSelectedWorkspaceConfigCliKey]);
 
   const effectiveConfig = useMemo(
     () =>
@@ -675,209 +626,104 @@ function useWorkspaceConfigPanelState({
 }
 
 function useHomeOverviewTabs({
-  displayedOAuthQuotaVisible,
-  logsPrimaryLayout,
   openCircuits,
-  sessionsTabState,
   sessionsTabsOrder,
-  setSessionsTabState,
+  visibleTabKeys,
 }: {
-  displayedOAuthQuotaVisible: boolean;
-  logsPrimaryLayout: boolean;
   openCircuits: OpenCircuitRow[];
-  sessionsTabState: SessionsTabState;
   sessionsTabsOrder: HomeOverviewTabKey[];
-  setSessionsTabState: Dispatch<SetStateAction<SessionsTabState>>;
+  visibleTabKeys: HomeOverviewTabKey[];
 }) {
-  const legacySessionsTabs = useMemo(() => {
+  const tabs = useMemo(() => {
     const labelByKey = new Map(HOME_OVERVIEW_TABS.map((item) => [item.key, item.label]));
-    return sessionsTabsOrder.map((key) => ({ key, label: labelByKey.get(key) ?? key }));
-  }, [sessionsTabsOrder]);
-  const logsPrimaryTabs = useMemo(
-    () =>
-      legacySessionsTabs.filter(
-        (item) =>
-          item.key === "workspaceConfig" ||
-          item.key === "circuit" ||
-          (item.key === "oauthQuota" && displayedOAuthQuotaVisible)
-      ),
-    [displayedOAuthQuotaVisible, legacySessionsTabs]
-  );
-  const openCircuitKeys = useMemo(
-    () =>
-      openCircuits
-        .map((row) => `${row.cli_key}:${row.provider_id}`)
-        .sort((a, b) => a.localeCompare(b)),
-    [openCircuits]
-  );
+    const visible = new Set(visibleTabKeys);
+    const ordered = sessionsTabsOrder
+      .filter((key) => visible.has(key))
+      .map((key) => ({ key, label: labelByKey.get(key) ?? key }));
 
-  const visibleTabs = logsPrimaryLayout ? logsPrimaryTabs : legacySessionsTabs;
-  let effectiveSessionsTabState = sessionsTabState;
-  const openCircuitChanged =
-    sessionsTabState.openCircuitKeys != null &&
-    didKeysChange(openCircuitKeys, sessionsTabState.openCircuitKeys);
+    return ordered.length > 0
+      ? ordered
+      : HOME_OVERVIEW_TABS.map((item) => ({ key: item.key, label: item.label }));
+  }, [sessionsTabsOrder, visibleTabKeys]);
+  const [sessionsTab, setSessionsTab] = useState<HomeOverviewTabKey>(
+    () => tabs[0]?.key ?? "workspaceConfig"
+  );
+  const previousCircuitSignature = useRef<string | null>(null);
+  const visibleTabSignature = tabs.map((item) => item.key).join(",");
+  const circuitSignature = openCircuits
+    .map((row) => `${row.cli_key}:${row.provider_id}`)
+    .sort((left, right) => left.localeCompare(right))
+    .join(",");
 
-  if (openCircuitChanged) {
-    let nextTab = sessionsTabState.tab;
-    if (openCircuitKeys.length > 0) {
-      nextTab = "circuit";
-    } else if (sessionsTabState.tab === "circuit") {
-      nextTab = "workspaceConfig";
+  useEffect(() => {
+    setSessionsTab((current) =>
+      tabs.some((item) => item.key === current) ? current : (tabs[0]?.key ?? current)
+    );
+  }, [tabs, visibleTabSignature]);
+
+  useEffect(() => {
+    const previous = previousCircuitSignature.current;
+    previousCircuitSignature.current = circuitSignature;
+    if (
+      previous == null ||
+      previous === circuitSignature ||
+      !tabs.some((item) => item.key === "circuit")
+    ) {
+      return;
     }
-    effectiveSessionsTabState = {
-      tab: nextTab,
-      openCircuitKeys,
-    };
-    setSessionsTabState(effectiveSessionsTabState);
-  } else if (!visibleTabs.some((tab) => tab.key === sessionsTabState.tab)) {
-    effectiveSessionsTabState = {
-      tab: "workspaceConfig",
-      openCircuitKeys,
-    };
-    setSessionsTabState(effectiveSessionsTabState);
-  } else if (sessionsTabState.openCircuitKeys !== openCircuitKeys) {
-    effectiveSessionsTabState = {
-      ...sessionsTabState,
-      openCircuitKeys,
-    };
-    setSessionsTabState(effectiveSessionsTabState);
-  }
 
-  const sessionsTab = effectiveSessionsTabState.tab;
+    setSessionsTab((current) => {
+      if (openCircuits.length > 0) return "circuit";
+      return current === "circuit" ? (tabs[0]?.key ?? current) : current;
+    });
+  }, [circuitSignature, openCircuits.length, tabs]);
+
   return {
-    legacySessionsTabs,
-    logsPrimaryTabs,
+    tabs,
     sessionsTab,
-    setSessionsTab: (tab: HomeOverviewTabKey) => {
-      setSessionsTabState((current) => ({ ...current, tab }));
-    },
+    setSessionsTab,
   };
 }
 
-function HomeOverviewUsageStrip({
-  devPreviewEnabled,
-  showHeatmap,
-  showUsageChart,
-  usageWindowDays,
-  usageHeatmapRows,
-  usageHeatmapLoading,
-  onRefreshUsageHeatmap,
-}: {
-  devPreviewEnabled: boolean;
-  showHeatmap: boolean;
-  showUsageChart: boolean;
-  usageWindowDays: number;
-  usageHeatmapRows: UsageHourlyRow[];
-  usageHeatmapLoading: boolean;
-  onRefreshUsageHeatmap: () => void;
-}) {
-  if (!showHeatmap && !showUsageChart) return null;
-
-  const usageSection = (
-    <HomeUsageSection
-      devPreviewEnabled={devPreviewEnabled}
-      showHeatmap={showHeatmap}
-      showUsageChart={showUsageChart}
-      usageWindowDays={usageWindowDays}
-      usageHeatmapRows={usageHeatmapRows}
-      usageHeatmapLoading={usageHeatmapLoading}
-      onRefreshUsageHeatmap={onRefreshUsageHeatmap}
-    />
-  );
-
-  if (showHeatmap && showUsageChart) {
-    return (
-      <div className="shrink-0">
-        <div className="space-y-4">
-          <div className="flex">{usageSection}</div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="shrink-0">
-      <div className="flex">{usageSection}</div>
-    </div>
-  );
-}
-
 function HomeOverviewContentLayout({
-  activeSessions,
   devPreviewEnabled,
-  logsPrimaryInfoPanel,
-  logsPrimaryLayout,
-  overviewInfoPanel,
-  personalizedUsageView,
-  requestLogs,
-  activeRequests,
-  requestLogsPanel,
-  traces,
   usageWindowDays,
   usageHeatmapRows,
   usageHeatmapLoading,
-  onRefreshUsageHeatmap,
+  showUsage,
+  overviewInfoPanel,
+  requestLogsPanel,
 }: {
-  activeSessions: GatewayActiveSession[];
   devPreviewEnabled: boolean;
-  logsPrimaryInfoPanel: ReactNode;
-  logsPrimaryLayout: boolean;
-  overviewInfoPanel: ReactNode;
-  personalizedUsageView: HomeOverviewUsageView;
-  requestLogs: RequestLogSummary[];
-  activeRequests: ActiveRequestSnapshotItem[];
-  requestLogsPanel: ReactNode;
-  traces: TraceSession[];
   usageWindowDays: number;
   usageHeatmapRows: UsageHourlyRow[];
   usageHeatmapLoading: boolean;
-  onRefreshUsageHeatmap: () => void;
+  showUsage: boolean;
+  overviewInfoPanel: ReactNode;
+  requestLogsPanel: ReactNode;
 }) {
-  if (logsPrimaryLayout) {
-    return (
-      <div className="grid flex-1 min-h-0 gap-4 lg:grid-cols-12">
-        <div className="flex min-h-0 lg:col-span-4">{logsPrimaryInfoPanel}</div>
-        <div className="flex min-h-0 flex-col gap-4 lg:col-span-8">
-          <div className="shrink-0">
-            {personalizedUsageView === "summary" ? (
-              <div className="space-y-4">
-                <HomeTodayProviderUsageOverview
-                  devPreviewEnabled={devPreviewEnabled}
-                  activeSessions={activeSessions}
-                  requestLogs={requestLogs}
-                  activeRequests={activeRequests}
-                  traces={traces}
-                />
-              </div>
-            ) : (
-              <HomeUsageSection
-                devPreviewEnabled={devPreviewEnabled}
-                showHeatmap={false}
-                showUsageChart={true}
-                usageWindowDays={usageWindowDays}
-                usageHeatmapRows={usageHeatmapRows}
-                usageHeatmapLoading={usageHeatmapLoading}
-                onRefreshUsageHeatmap={onRefreshUsageHeatmap}
-              />
-            )}
-          </div>
-          <div className="min-h-0 flex-1">{requestLogsPanel}</div>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="grid gap-4 lg:grid-cols-12 flex-1 min-h-0">
-      <div className="flex min-h-0 lg:col-span-5">{overviewInfoPanel}</div>
-      <div className="lg:col-span-7 min-h-0">{requestLogsPanel}</div>
+    <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto pr-1 scrollbar-overlay xl:grid-cols-12 xl:overflow-hidden xl:pr-0">
+      <div
+        className={`flex flex-col gap-4 xl:col-span-5 xl:min-h-0 ${showUsage ? "min-h-[568px]" : "min-h-[360px]"}`}
+      >
+        {showUsage ? (
+          <HomeUsageSection
+            devPreviewEnabled={devPreviewEnabled}
+            usageWindowDays={usageWindowDays}
+            usageHeatmapRows={usageHeatmapRows}
+            usageHeatmapLoading={usageHeatmapLoading}
+          />
+        ) : null}
+        <div className="flex min-h-[360px] flex-1 xl:min-h-0">{overviewInfoPanel}</div>
+      </div>
+      <div className="min-h-[520px] xl:col-span-7 xl:min-h-0">{requestLogsPanel}</div>
     </div>
   );
 }
 
 export type HomeOverviewDisplayOptions = {
   customTooltip: boolean;
-  heatmap: boolean;
   usage: boolean;
   workspaceConfigQuickToggle: boolean;
 };
@@ -886,11 +732,12 @@ export type HomeOverviewPanelProps = {
   displayOptions: HomeOverviewDisplayOptions;
   devPreviewEnabled?: boolean;
   cliPriorityOrder?: CliKey[];
+  visibleTabKeys?: HomeOverviewTabKey[];
+  visibleCliKeys?: CliKey[];
 
   usageWindowDays: number;
   usageHeatmapRows: UsageHourlyRow[];
   usageHeatmapLoading: boolean;
-  onRefreshUsageHeatmap: () => void;
 
   sortModes: SortModeSummary[];
   sortModesLoading: boolean;
@@ -942,7 +789,6 @@ export type HomeOverviewPanelProps = {
 
   selectedLogId: number | null;
   onSelectLogId: (id: number | null) => void;
-  personalizedUsageView: HomeOverviewUsageView;
 };
 
 const PREVIEW_WORKSPACE_CONFIGS: HomeCliWorkspaceConfig[] = [
@@ -1094,10 +940,11 @@ export function HomeOverviewPanel({
   displayOptions,
   devPreviewEnabled = false,
   cliPriorityOrder,
+  visibleTabKeys = DEFAULT_VISIBLE_HOME_OVERVIEW_TAB_KEYS,
+  visibleCliKeys = DEFAULT_VISIBLE_HOME_OVERVIEW_CLI_KEYS,
   usageWindowDays,
   usageHeatmapRows,
   usageHeatmapLoading,
-  onRefreshUsageHeatmap,
   sortModes,
   sortModesLoading,
   sortModesAvailable,
@@ -1137,20 +984,13 @@ export function HomeOverviewPanel({
   onRefreshRequestLogs,
   selectedLogId,
   onSelectLogId,
-  personalizedUsageView,
 }: HomeOverviewPanelProps) {
   const showCustomTooltip = displayOptions.customTooltip;
-  const showHomeHeatmap = displayOptions.heatmap;
   const showHomeUsage = displayOptions.usage;
   const showWorkspaceConfigQuickToggle = displayOptions.workspaceConfigQuickToggle;
   const [sessionsTabsOrder] = useState<HomeOverviewTabKey[]>(() =>
     readHomeOverviewTabOrderFromStorage()
   );
-  const [logsPrimaryLayout] = useState(() => readHomeOverviewLogsPrimaryLayoutFromStorage());
-  const [sessionsTabState, setSessionsTabState] = useState<SessionsTabState>(() => ({
-    tab: sessionsTabsOrder[0] ?? "workspaceConfig",
-    openCircuitKeys: null,
-  }));
   const [selectedWorkspaceConfigCliKey, setSelectedWorkspaceConfigCliKey] = useState<CliKey | null>(
     null
   );
@@ -1172,15 +1012,13 @@ export function HomeOverviewPanel({
   const displayedWorkspaceConfigs = useDisplayedWorkspaceConfigs({
     cliPriorityOrder,
     devPreviewEnabled,
+    visibleCliKeys,
     workspaceConfigs,
   });
-  const { legacySessionsTabs, logsPrimaryTabs, sessionsTab, setSessionsTab } = useHomeOverviewTabs({
-    displayedOAuthQuotaVisible,
-    logsPrimaryLayout,
+  const { tabs, sessionsTab, setSessionsTab } = useHomeOverviewTabs({
     openCircuits,
-    sessionsTabState,
     sessionsTabsOrder,
-    setSessionsTabState,
+    visibleTabKeys,
   });
   const workspacePanelState = useWorkspaceConfigPanelState({
     activeModeByCli,
@@ -1206,11 +1044,10 @@ export function HomeOverviewPanel({
         customTooltip: showCustomTooltip,
         summaryText: false,
         openLogsPageButton: false,
-        refreshButton: !logsPrimaryLayout,
-        compactModeToggle: !logsPrimaryLayout,
+        refreshButton: true,
+        compactModeToggle: true,
       }}
       devPreviewEnabled={devPreviewEnabled}
-      compactModeOverride={logsPrimaryLayout ? true : undefined}
       traces={traces}
       requestLogs={requestLogs}
       activeRequests={activeRequests}
@@ -1271,7 +1108,7 @@ export function HomeOverviewPanel({
 
   const overviewInfoPanel = (
     <OverviewInfoPanel
-      tabs={legacySessionsTabs}
+      tabs={tabs}
       tab={sessionsTab}
       onTabChange={setSessionsTab}
       activeSessions={activeSessionsPanelState}
@@ -1282,46 +1119,16 @@ export function HomeOverviewPanel({
     />
   );
 
-  const logsPrimaryInfoPanel = (
-    <LogsPrimaryInfoPanel
-      tabs={logsPrimaryTabs}
-      tab={sessionsTab}
-      onTabChange={setSessionsTab}
-      workspace={workspacePanelState}
-      oauthQuotaPanelContent={oauthQuotaPanelContent}
-      circuit={circuitPanelState}
-    />
-  );
-
   return (
-    <div className="flex flex-col h-full gap-4">
-      {!logsPrimaryLayout ? (
-        <HomeOverviewUsageStrip
-          devPreviewEnabled={devPreviewEnabled}
-          showHeatmap={showHomeHeatmap}
-          showUsageChart={showHomeUsage}
-          usageWindowDays={usageWindowDays}
-          usageHeatmapRows={usageHeatmapRows}
-          usageHeatmapLoading={usageHeatmapLoading}
-          onRefreshUsageHeatmap={onRefreshUsageHeatmap}
-        />
-      ) : null}
-
+    <div className="flex h-full min-h-0 flex-col">
       <HomeOverviewContentLayout
-        activeSessions={displayedActiveSessions}
         devPreviewEnabled={devPreviewEnabled}
-        logsPrimaryInfoPanel={logsPrimaryInfoPanel}
-        logsPrimaryLayout={logsPrimaryLayout}
         overviewInfoPanel={overviewInfoPanel}
-        personalizedUsageView={personalizedUsageView}
-        requestLogs={requestLogs}
-        activeRequests={activeRequests}
         requestLogsPanel={requestLogsPanel}
-        traces={traces}
+        showUsage={showHomeUsage}
         usageWindowDays={usageWindowDays}
         usageHeatmapRows={usageHeatmapRows}
         usageHeatmapLoading={usageHeatmapLoading}
-        onRefreshUsageHeatmap={onRefreshUsageHeatmap}
       />
     </div>
   );
