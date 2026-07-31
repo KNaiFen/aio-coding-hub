@@ -184,6 +184,7 @@ const README_LOCALES = Object.freeze([
   { fileName: "README_EN.md", locale: "en" },
 ]);
 
+const WORKFLOW_DIRECTORY = join(repoRoot, ".github/workflows");
 const WORKFLOW_PATHS = Object.freeze({
   ci: join(repoRoot, ".github/workflows/ci.yml"),
   devBuild: join(repoRoot, ".github/workflows/dev-build.yml"),
@@ -1311,6 +1312,19 @@ function checkPinnedGithubActions(workflowPath) {
   }
 }
 
+function listWorkflowPaths() {
+  const paths = [];
+  for (const entry of readdirSync(WORKFLOW_DIRECTORY, { withFileTypes: true })) {
+    if (!/\.ya?ml$/i.test(entry.name)) continue;
+    if (!entry.isFile()) {
+      throw new Error(`Workflow must be a regular file: ${entry.name}`);
+    }
+    paths.push(join(WORKFLOW_DIRECTORY, entry.name));
+  }
+  if (paths.length === 0) throw new Error("No GitHub Actions workflows were found.");
+  return paths.sort();
+}
+
 export function checkWorkflowContractContents({ ciWorkflow, devBuildWorkflow, releaseWorkflow }) {
   for (const [snippet, label] of [
     ["ci-gate:", "stable required status gate"],
@@ -1320,6 +1334,9 @@ export function checkWorkflowContractContents({ ciWorkflow, devBuildWorkflow, re
       "drift artifact identity",
     ],
     ["node scripts/cloud-native-drift.mjs classify", "native drift classifier"],
+    ["node scripts/pnpm-cli.selftest.mjs", "cross-platform pnpm invocation self-test"],
+    ["node scripts/check-local-native-boundary.selftest.mjs", "local native boundary self-test"],
+    ["node scripts/check-local-native-boundary.mjs", "local native boundary enforcement"],
     ["environment: release-signing", "protected signing environment"],
     ["printf 'TAURI_SIGNING_PRIVATE_KEY=%s\\n' \"$normalized_key\"", "normalized signing key"],
     ['-p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD_SECRET"', "Tauri 2.9 signing probe password"],
@@ -1451,14 +1468,15 @@ function checkWorkflowContracts() {
     releaseWorkflow: readFileSync(WORKFLOW_PATHS.release, "utf8"),
   };
   checkWorkflowContractContents(contents);
-  checkPinnedGithubActions(WORKFLOW_PATHS.ci);
-  checkPinnedGithubActions(WORKFLOW_PATHS.devBuild);
-  checkPinnedGithubActions(WORKFLOW_PATHS.release);
+  for (const workflowPath of listWorkflowPaths()) {
+    checkPinnedGithubActions(workflowPath);
+  }
 }
 
 function runSupportMatrixCheck({ workflowsOnly = false } = {}) {
   checkWorkflowContracts();
   if (workflowsOnly) return;
+  checkReadmes();
   assertUniqueTargets(CLOUD_BUILD_TARGETS, (item) => item.id, "cloud target id");
   assertUniqueTargets(CLOUD_BUILD_TARGETS, (item) => item.tauriTarget, "Tauri target");
   assertUniqueTargets(

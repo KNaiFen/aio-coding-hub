@@ -2,7 +2,7 @@
  * Single source of truth for aggregate check stages.
  *
  * Usage:
- *   node scripts/run-checks.mjs <stage>
+ *   pnpm check:precommit | pnpm check:precommit:full | pnpm check:prepush
  *   node scripts/run-checks.mjs --list
  *
  * Adding a check: define its command in CHECKS, then add its id to the
@@ -13,9 +13,9 @@ import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+import { createPnpmInvocation } from "./lib/pnpm-cli.mjs";
 
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const CHECKS = {
   "format-check": "format:check",
   lint: "lint",
@@ -93,9 +93,11 @@ function main() {
   for (const [index, id] of ids.entries()) {
     const script = CHECKS[id];
     console.log(`[checks] (${index + 1}/${ids.length}) ${id}: pnpm ${script}`);
-    const result = spawnSync(pnpmCommand, [script], {
+    const invocation = createPnpmInvocation([script]);
+    const result = spawnSync(invocation.command, invocation.args, {
       cwd: repoRoot,
       stdio: "inherit",
+      shell: false,
     });
     if (result.status !== 0) {
       console.error(`[checks] ${id} failed (exit ${result.status ?? "signal"})`);

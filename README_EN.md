@@ -176,14 +176,14 @@ pnpm dev
 `pnpm dev` starts the Vite frontend only. Native integration, Rust validation, and desktop packaging run in GitHub Actions. To obtain a desktop artifact, manually run `dev-build` from the repository Actions page and select a target.
 
 <!-- SUPPORT_MATRIX_SOURCE_BUILD:START -->
-| Platform | Cloud development build target | Release scope |
+| Scope | Cloud workflow target | Notes |
 | --- | --- | --- |
-| Windows x64 | `dev-build` / `windows-x64` | Signed main-CI candidate + manual unsigned development artifact |
-| macOS Intel | `dev-build` / `macos-x64` | Manual unsigned development artifact only; excluded from Release/updater |
-| macOS Apple Silicon | `dev-build` / `macos-arm64` | Signed main-CI candidate + manual unsigned development artifact |
-| Linux x64 | `dev-build` / `linux-x64` | Manual unsigned development artifact only; excluded from Release/updater |
-| macOS Universal | `dev-build` / `macos-universal` | Manual unsigned development artifact only; excluded from Release/updater |
-| Windows ARM64 | `dev-build` / `windows-arm64` | Manual unsigned development artifact only; excluded from Release/updater |
+| Release / development | Actions `dev-build`: `windows-x64` | Windows x64; Signed candidate from `main` CI; unsigned development artifact from the manual workflow |
+| Development | Actions `dev-build`: `macos-x64` | macOS Intel; Unsigned development artifact from the manual workflow; excluded from Release/updater |
+| Release / development | Actions `dev-build`: `macos-arm64` | macOS Apple Silicon; Signed candidate from `main` CI; unsigned development artifact from the manual workflow |
+| Development | Actions `dev-build`: `linux-x64` | Linux x64; Unsigned development artifact from the manual workflow; excluded from Release/updater |
+| Development | Actions `dev-build`: `macos-universal` | macOS Universal; Unsigned development artifact from the manual workflow; excluded from Release/updater |
+| Development | Actions `dev-build`: `windows-arm64` | Windows ARM64; Unsigned development artifact from the manual workflow; excluded from Release/updater |
 <!-- SUPPORT_MATRIX_SOURCE_BUILD:END -->
 
 Manual cloud artifacts are unsigned and cannot be promoted by Release. Formal releases only promote the signed Windows x64 and macOS Apple Silicon candidates produced by successful `main` CI.

@@ -179,14 +179,14 @@ pnpm dev
 `pnpm dev` 只启动 Vite 前端。原生集成、Rust 校验和桌面打包均在 GitHub Actions 中完成；需要桌面制品时，在仓库 Actions 页面手动运行 `dev-build` 并选择目标。
 
 <!-- SUPPORT_MATRIX_SOURCE_BUILD:START -->
-| 平台 | 云端开发构建目标 | 发布范围 |
+| 分类 | 云端工作流目标 | 说明 |
 | --- | --- | --- |
-| Windows x64 | `dev-build` / `windows-x64` | main CI 签名候选 + 手动无签名开发制品 |
-| macOS Intel | `dev-build` / `macos-x64` | 仅手动无签名开发制品；不进入 Release/updater |
-| macOS Apple Silicon | `dev-build` / `macos-arm64` | main CI 签名候选 + 手动无签名开发制品 |
-| Linux x64 | `dev-build` / `linux-x64` | 仅手动无签名开发制品；不进入 Release/updater |
-| macOS Universal | `dev-build` / `macos-universal` | 仅手动无签名开发制品；不进入 Release/updater |
-| Windows ARM64 | `dev-build` / `windows-arm64` | 仅手动无签名开发制品；不进入 Release/updater |
+| 正式发布 / 开发制品 | Actions `dev-build`: `windows-x64` | Windows x64；`main` CI 生成签名候选；手动工作流生成无签名开发制品 |
+| 开发制品 | Actions `dev-build`: `macos-x64` | macOS Intel；手动工作流生成无签名开发制品；不进入 Release / updater 矩阵 |
+| 正式发布 / 开发制品 | Actions `dev-build`: `macos-arm64` | macOS Apple Silicon；`main` CI 生成签名候选；手动工作流生成无签名开发制品 |
+| 开发制品 | Actions `dev-build`: `linux-x64` | Linux x64；手动工作流生成无签名开发制品；不进入 Release / updater 矩阵 |
+| 开发制品 | Actions `dev-build`: `macos-universal` | macOS Universal；手动工作流生成无签名开发制品；不进入 Release / updater 矩阵 |
+| 开发制品 | Actions `dev-build`: `windows-arm64` | Windows ARM64；手动工作流生成无签名开发制品；不进入 Release / updater 矩阵 |
 <!-- SUPPORT_MATRIX_SOURCE_BUILD:END -->
 
 手动云端制品均不签名且不会被 Release 晋升。正式 Release 只晋升成功 `main` CI 为 Windows x64 与 macOS Apple Silicon 生成的签名候选。

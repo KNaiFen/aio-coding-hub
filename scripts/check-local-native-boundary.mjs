@@ -25,6 +25,7 @@ const ALLOWED_HELPER_PATHS = new Set([
   "scripts/check-plugin-system-docs.mjs",
   "scripts/check-pnpm-audit.mjs",
   "scripts/check-pnpm-audit.selftest.mjs",
+  "scripts/pnpm-cli.selftest.mjs",
   "scripts/check-spec-links.mjs",
   "scripts/run-checks.mjs",
   "scripts/run-coverage-shards.mjs",
@@ -34,24 +35,19 @@ const ALLOWED_HELPER_PATHS = new Set([
 ]);
 
 const FORBIDDEN_SCRIPT_NAMES = new Set([
+  "preinstall",
+  "install",
   "postinstall",
+  "prepare",
+  "prepublish",
+  "prepublishOnly",
+  "prepack",
+  "postpack",
   "hooks:install",
   "plugin:perf-smoke",
   "check:generated-bindings",
   "check:precommit:tauri",
   "tauri",
-]);
-
-const ALLOWED_SCRIPT_EXECUTABLES = new Set([
-  "eslint",
-  "node",
-  "npm",
-  "pnpm",
-  "prettier",
-  "tsc",
-  "tsx",
-  "vite",
-  "vitest",
 ]);
 
 const NATIVE_COMMAND_PATTERNS = [
@@ -74,10 +70,41 @@ const NATIVE_COMMAND_PATTERNS = [
 
 const HOOK_CONFIGURATION_PATTERN =
   /(?:install-git-hooks|core\.hooksPath|\.githooks|husky\s+install|simple-git-hooks|lefthook\s+install)/i;
-const INLINE_NODE_PATTERN = /(?:^|[\s;&|()])node(?:\.exe)?\s+(?:-e|--eval)(?=$|\s)/i;
-const SHELL_HELPER_PATTERN = /(?:^|[\s;&|()])(?:bash|sh|pwsh|powershell)(?:\.exe)?\s+/i;
-const AUTOMATION_PATH_PATTERN =
-  /^(?:\.vscode\/tasks\.json|\.fleet\/|\.idea\/|Makefile$|Justfile$|justfile$|Taskfile\.(?:yml|yaml)$)/;
+const AUTOMATION_PATH_PATTERNS = [
+  /(?:^|\/)\.vscode\/tasks\.json$/,
+  /(?:^|\/)(?:\.fleet|\.idea)\//,
+  /(?:^|\/)(?:GNUmakefile|Makefile|makefile|Justfile|justfile|\.justfile|Taskfile\.(?:yml|yaml))$/,
+];
+const PNPMFILE_PATH_PATTERN = /(?:^|\/)\.pnpmfile\.(?:cjs|mjs|js)$/i;
+const PACKAGE_MANAGER_CONFIG_PATH_PATTERN = /(?:^|\/)(?:\.npmrc|pnpm-workspace\.ya?ml)$/i;
+const PNPMFILE_CONFIG_PATTERN = /(?:^|\r?\n)\s*pnpmfile\s*[:=]/i;
+const JAVASCRIPT_SOURCE_PATTERN = /\.(?:cjs|mjs|js|cts|mts|ts|tsx)$/;
+const PROCESS_MODULE_PATTERN =
+  /(?:node:)?child_process|process\.getBuiltinModule\s*\(\s*["'`]child_process["'`]|Bun\.spawn|Deno\.Command/;
+const PROCESS_CALL_PATTERN =
+  /(?:^|[^\w.$])(spawnSync|spawn|execFileSync|execFile|execSync|exec|fork)\s*\(\s*([^,\r\n)]+)/gm;
+const PROCESS_EXECUTION_CONTRACTS = new Map([
+  ["scripts/check-local-native-boundary.mjs", new Set(["git"])],
+  ["scripts/check-plugin-api-contract.selftest.mjs", new Set(["process.execPath"])],
+  ["scripts/check-plugin-system-docs.mjs", new Set(["git"])],
+  ["scripts/check-pnpm-audit.mjs", new Set(["listCommand.command"])],
+  ["scripts/cloud-native-drift.mjs", new Set(["git"])],
+  ["scripts/cloud-native-drift.selftest.mjs", new Set(["git"])],
+  ["scripts/run-checks.mjs", new Set(["invocation.command"])],
+  ["scripts/run-coverage-shards.mjs", new Set(["invocation.command"])],
+  ["scripts/support-matrix.homebrew-cask.selftest.mjs", new Set(["process.execPath"])],
+  ["scripts/support-matrix.mjs", new Set(["git"])],
+]);
+const FRONTEND_COMMAND_PATTERNS = [
+  /^vite(?: build| preview)?$/,
+  /^tsc(?: -p tsconfig\.json(?: --noEmit)?)?$/,
+  /^prettier --(?:write|check) \.$/,
+  /^vitest watch$/,
+  /^vitest run(?: --coverage| --shard=[1-9]\d*\/[1-9]\d*| src\/e2e)?$/,
+  /^eslint src\/(?: --fix)?$/,
+];
+const SAFE_SCRIPT_TOKEN_PATTERN = /^[A-Za-z0-9@_./:=,+-]+$/;
+const SHELL_META_PATTERN = /["'`$\\\r\n<>|;&]/;
 
 function findNativeCommands(command) {
   return NATIVE_COMMAND_PATTERNS.filter(([, pattern]) => pattern.test(command)).map(
@@ -85,39 +112,95 @@ function findNativeCommands(command) {
   );
 }
 
-function runtimeHelperInvocations(command) {
-  const invocations = [];
-  const helperPattern = /(?:^|[\s;&|()])(?:node|tsx)\s+["']?([^"'\s;&|()]+)["']?/gi;
-  for (const match of command.matchAll(helperPattern)) {
-    invocations.push(match[1]);
-  }
-  return invocations;
+function isAutomationPath(path) {
+  return AUTOMATION_PATH_PATTERNS.some((pattern) => pattern.test(path));
 }
 
-function referencedHelpers(manifestPath, command) {
-  const helpers = [];
-  for (const candidate of runtimeHelperInvocations(command)) {
-    if (!/\.(?:[cm]?js|ts)$/.test(candidate)) continue;
-    const normalized = posix.normalize(posix.join(posix.dirname(manifestPath), candidate));
-    helpers.push(normalized);
-  }
-  return helpers;
+function normalizeProcessExpression(expression) {
+  return expression.replace(/[\s"'`+]/g, "");
 }
 
-function referencedExecutables(command) {
-  const executables = [];
-  for (const rawSegment of command.split(/&&|\|\||[;|]/)) {
-    const tokens = rawSegment.trim().split(/\s+/).filter(Boolean);
-    const executable = tokens.find((token) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(token));
-    if (executable) executables.push(executable.replace(/^['"]|['"]$/g, ""));
+function processLaunches(contents) {
+  return [...contents.matchAll(PROCESS_CALL_PATTERN)].map((match) => ({
+    api: match[1],
+    command: normalizeProcessExpression(match[2]),
+  }));
+}
+
+function validateExecutableSource(path, contents, violations) {
+  if (path === "scripts/check-local-native-boundary.selftest.mjs") return;
+  const usesProcessModule = PROCESS_MODULE_PATTERN.test(contents);
+  if (!usesProcessModule) return;
+
+  const contract = PROCESS_EXECUTION_CONTRACTS.get(path);
+  const launches = processLaunches(contents);
+  if (!contract) {
+    violations.push(`${path}: process execution is not approved for a local source file`);
+    return;
   }
-  return executables;
+  if (launches.length === 0) {
+    violations.push(`${path}: process execution cannot be statically audited`);
+    return;
+  }
+  for (const launch of launches) {
+    if (!contract.has(launch.command)) {
+      violations.push(
+        `${path}: ${launch.api} command ${JSON.stringify(launch.command)} is outside its process contract`
+      );
+    }
+  }
+  if (/shell\s*:\s*true/.test(contents)) {
+    violations.push(`${path}: shell-enabled process execution is forbidden`);
+  }
+}
+
+function scriptSegments(command) {
+  const withoutAnd = command.replaceAll("&&", "");
+  if (SHELL_META_PATTERN.test(withoutAnd)) return null;
+  const segments = command.split(/\s*&&\s*/);
+  if (segments.some((segment) => segment.trim() === "")) return null;
+  return segments.map((segment) => segment.trim());
+}
+
+function validatePnpmSegment(tokens, manifest, packagesByName) {
+  if (tokens.length === 2) {
+    return Object.hasOwn(manifest.scripts, tokens[1]);
+  }
+  if (tokens.length === 4 && tokens[1] === "--filter") {
+    const target = packagesByName.get(tokens[2]);
+    return target != null && Object.hasOwn(target.scripts ?? {}, tokens[3]);
+  }
+  return false;
+}
+
+function validateScriptCommand(manifest, command, packagesByName) {
+  const segments = scriptSegments(command);
+  if (!segments) return false;
+
+  for (const segment of segments) {
+    const tokens = segment.split(/\s+/);
+    if (tokens.some((token) => !SAFE_SCRIPT_TOKEN_PATTERN.test(token))) return false;
+    if (FRONTEND_COMMAND_PATTERNS.some((pattern) => pattern.test(segment))) continue;
+
+    if (tokens[0] === "node" || tokens[0] === "tsx") {
+      if (tokens.length < 2 || !/\.(?:[cm]?js|ts)$/.test(tokens[1])) return false;
+      const helper = posix.normalize(posix.join(posix.dirname(manifest.path), tokens[1]));
+      if (!ALLOWED_HELPER_PATHS.has(helper)) return false;
+      continue;
+    }
+
+    if (tokens[0] === "pnpm" && validatePnpmSegment(tokens, manifest, packagesByName)) {
+      continue;
+    }
+    return false;
+  }
+  return true;
 }
 
 function hasActiveTrellisHooks(contents) {
   return contents.split(/\r?\n/).some((line) => {
     const withoutComment = line.replace(/\s+#.*$/, "");
-    return /^hooks\s*:/.test(withoutComment);
+    return /^\s*hooks\s*:/.test(withoutComment);
   });
 }
 
@@ -127,6 +210,9 @@ export function evaluateLocalNativeBoundary(snapshot) {
 
   for (const path of trackedPaths) {
     if (FORBIDDEN_PATHS.has(path)) violations.push(`${path}: forbidden local native helper`);
+    if (PNPMFILE_PATH_PATTERN.test(path)) {
+      violations.push(`${path}: executable pnpm install hook is forbidden`);
+    }
     if (path.startsWith(".githooks/") || path.startsWith(".husky/")) {
       violations.push(`${path}: tracked repository hook is forbidden`);
     }
@@ -137,6 +223,12 @@ export function evaluateLocalNativeBoundary(snapshot) {
       `git config core.hooksPath: repository-local override is forbidden (${JSON.stringify(hooksPath)})`
     );
   }
+
+  const packagesByName = new Map(
+    (snapshot.manifests ?? [])
+      .filter((manifest) => typeof manifest.name === "string" && manifest.name !== "")
+      .map((manifest) => [manifest.name, manifest])
+  );
 
   for (const manifest of snapshot.manifests ?? []) {
     if (manifest.error) {
@@ -168,39 +260,15 @@ export function evaluateLocalNativeBoundary(snapshot) {
       if (HOOK_CONFIGURATION_PATTERN.test(command)) {
         violations.push(`${owner}: configures repository hooks`);
       }
-      if (INLINE_NODE_PATTERN.test(command)) {
-        violations.push(`${owner}: inline Node execution is not an approved local helper`);
-      }
-      if (SHELL_HELPER_PATTERN.test(command)) {
-        violations.push(`${owner}: shell helper execution is not approved`);
-      }
-      for (const target of runtimeHelperInvocations(command)) {
-        if (!/\.(?:[cm]?js|ts)$/.test(target)) {
-          violations.push(`${owner}: Node/tsx must directly invoke an approved helper file`);
-        }
-      }
-      for (const executable of referencedExecutables(command)) {
-        if (!ALLOWED_SCRIPT_EXECUTABLES.has(executable)) {
-          violations.push(
-            `${owner}: executable ${executable} is not in the Node/frontend allowlist`
-          );
-        }
-      }
-      for (const helper of referencedHelpers(manifest.path, command)) {
-        if (!ALLOWED_HELPER_PATHS.has(helper)) {
-          violations.push(`${owner}: helper ${helper} is not in the Node/frontend allowlist`);
-        }
+      if (!validateScriptCommand(manifest, command, packagesByName)) {
+        violations.push(`${owner}: command is outside the exact Node/frontend grammar`);
       }
     }
   }
 
-  const aggregate = snapshot.files?.["scripts/run-checks.mjs"];
-  if (aggregate !== undefined) {
-    for (const nativeKind of findNativeCommands(aggregate)) {
-      violations.push(`scripts/run-checks.mjs: invokes ${nativeKind}`);
-    }
-    if (HOOK_CONFIGURATION_PATTERN.test(aggregate)) {
-      violations.push("scripts/run-checks.mjs: configures repository hooks");
+  for (const [path, contents] of Object.entries(snapshot.files ?? {})) {
+    if (JAVASCRIPT_SOURCE_PATTERN.test(path)) {
+      validateExecutableSource(path, contents, violations);
     }
   }
 
@@ -209,7 +277,15 @@ export function evaluateLocalNativeBoundary(snapshot) {
     violations.push(".trellis/config.yaml: active lifecycle hooks are forbidden");
   }
 
-  for (const path of trackedPaths.filter((candidate) => AUTOMATION_PATH_PATTERN.test(candidate))) {
+  for (const path of trackedPaths.filter((candidate) =>
+    PACKAGE_MANAGER_CONFIG_PATH_PATTERN.test(candidate)
+  )) {
+    if (PNPMFILE_CONFIG_PATTERN.test(snapshot.files?.[path] ?? "")) {
+      violations.push(`${path}: custom pnpmfile install hook is forbidden`);
+    }
+  }
+
+  for (const path of trackedPaths.filter((candidate) => isAutomationPath(candidate))) {
     const contents = snapshot.files?.[path] ?? "";
     for (const nativeKind of findNativeCommands(contents)) {
       violations.push(`${path}: local automation invokes ${nativeKind}`);
@@ -225,7 +301,7 @@ export function evaluateLocalNativeBoundary(snapshot) {
 function readManifest(repoRoot, path) {
   try {
     const value = JSON.parse(readFileSync(resolve(repoRoot, path), "utf8"));
-    return { path, scripts: value.scripts };
+    return { path, name: value.name, scripts: value.scripts };
   } catch (error) {
     return { path, error: `cannot be read as JSON: ${error.message}` };
   }
@@ -273,9 +349,10 @@ export function collectLocalNativeBoundarySnapshot(repoRoot = defaultRepoRoot) {
 
   for (const path of trackedPaths) {
     if (
-      path === "scripts/run-checks.mjs" ||
       path === ".trellis/config.yaml" ||
-      AUTOMATION_PATH_PATTERN.test(path)
+      isAutomationPath(path) ||
+      PACKAGE_MANAGER_CONFIG_PATH_PATTERN.test(path) ||
+      JAVASCRIPT_SOURCE_PATTERN.test(path)
     ) {
       try {
         files[path] = readFileSync(resolve(root, path), "utf8");
