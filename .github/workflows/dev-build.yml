@@ -4,16 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       target_id:
-        description: Unsigned development artifact target
+        description: Desktop target
         required: true
         type: choice
         default: windows-x64
         options:
           - windows-x64
-          - windows-arm64
           - macos-x64
           - macos-arm64
-          - macos-universal
           - linux-x64
 
 permissions:
@@ -27,44 +25,50 @@ jobs:
   plan:
     runs-on: ubuntu-latest
     outputs:
-      build_matrix: ${{ steps.matrix.outputs.build_matrix }}
+      runner: ${{ steps.target.outputs.runner }}
+      target: ${{ steps.target.outputs.target }}
+      bundles: ${{ steps.target.outputs.bundles }}
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          ref: ${{ github.sha }}
-
-      - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: 22
-
-      - id: matrix
-        name: Resolve selected cloud target
+      - id: target
+        name: Resolve target
         shell: bash
         env:
           TARGET_ID: ${{ inputs.target_id }}
         run: |
           set -euo pipefail
-          matrix="$(node scripts/support-matrix.mjs manual-build-matrix --target-id "$TARGET_ID")"
-          echo "build_matrix=$matrix" >> "$GITHUB_OUTPUT"
+          case "$TARGET_ID" in
+            windows-x64)
+              echo "runner=windows-latest" >> "$GITHUB_OUTPUT"
+              echo "target=x86_64-pc-windows-msvc" >> "$GITHUB_OUTPUT"
+              echo "bundles=msi" >> "$GITHUB_OUTPUT"
+              ;;
+            macos-x64)
+              echo "runner=macos-latest" >> "$GITHUB_OUTPUT"
+              echo "target=x86_64-apple-darwin" >> "$GITHUB_OUTPUT"
+              echo "bundles=app" >> "$GITHUB_OUTPUT"
+              ;;
+            macos-arm64)
+              echo "runner=macos-latest" >> "$GITHUB_OUTPUT"
+              echo "target=aarch64-apple-darwin" >> "$GITHUB_OUTPUT"
+              echo "bundles=app" >> "$GITHUB_OUTPUT"
+              ;;
+            linux-x64)
+              echo "runner=ubuntu-22.04" >> "$GITHUB_OUTPUT"
+              echo "target=x86_64-unknown-linux-gnu" >> "$GITHUB_OUTPUT"
+              echo "bundles=deb,appimage" >> "$GITHUB_OUTPUT"
+              ;;
+            *) exit 1 ;;
+          esac
 
   build:
     needs: plan
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJson(needs.plan.outputs.build_matrix) }}
-    runs-on: ${{ startsWith(matrix.target_id, 'windows-') && 'windows-latest' || startsWith(matrix.target_id, 'macos-') && 'macos-latest' || 'ubuntu-22.04' }}
+    runs-on: ${{ needs.plan.outputs.runner }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          ref: ${{ github.sha }}
 
-      - name: Install Linux desktop dependencies
-        if: runner.os == 'Linux'
-        shell: bash
+      - name: Install Linux system dependencies
+        if: inputs.target_id == 'linux-x64'
         run: |
-          set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y libasound2-dev librsvg2-dev patchelf
           if ! sudo apt-get install -y libayatana-appindicator3-dev; then
@@ -87,7 +91,7 @@ jobs:
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: 1.90.0
-          targets: ${{ matrix.rustup_targets }}
+          targets: ${{ needs.plan.outputs.target }}
 
       - name: Rust cache
         uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
@@ -97,38 +101,26 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - id: overlay
-        name: Create temporary bundle.createUpdaterArtifacts=false overlay
+      - name: Disable updater artifacts for unsigned development builds
         shell: bash
         run: |
-          set -euo pipefail
-          overlay="$RUNNER_TEMP/tauri-cloud-dev.json"
-          node scripts/support-matrix.mjs write-dev-overlay --output "$overlay" >/dev/null
-          echo "path=$overlay" >> "$GITHUB_OUTPUT"
+          node -e "require('fs').writeFileSync('dev-build-overlay.json', JSON.stringify({bundle:{createUpdaterArtifacts:false}}))"
 
-      - id: tauri
-        name: Build unsigned development bundle
-        uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
-        with:
-          tauriScript: pnpm exec tauri
-          args: --target ${{ matrix.tauri_target }} --bundles ${{ matrix.bundles }} --config "${{ steps.overlay.outputs.path }}" -- --locked
-          includeUpdaterJson: false
-
-      - name: Stage unsigned development assets
+      - name: Build desktop artifact in the cloud
         shell: bash
-        env:
-          ARTIFACT_PATHS_JSON: ${{ steps.tauri.outputs.artifactPaths }}
-        run: |
-          set -euo pipefail
-          node scripts/support-matrix.mjs prepare-development-assets \
-            --artifact-paths "$ARTIFACT_PATHS_JSON" \
-            --target-id "${{ matrix.target_id }}" \
-            --output-dir dev-assets
+        run: >-
+          pnpm exec tauri build
+          --config dev-build-overlay.json
+          --target ${{ needs.plan.outputs.target }}
+          --bundles ${{ needs.plan.outputs.bundles }}
+          -- --locked
 
-      - name: Upload unsigned development artifact
+      - name: Upload development artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: dev-build-unsigned-${{ matrix.target_id }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: dev-assets/*
+          name: dev-build-${{ inputs.target_id }}-${{ github.sha }}
+          path: |
+            src-tauri/target/${{ needs.plan.outputs.target }}/release/bundle/**
+            src-tauri/target/${{ needs.plan.outputs.target }}/release/*.exe
           if-no-files-found: error
           retention-days: 7

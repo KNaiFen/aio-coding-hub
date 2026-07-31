@@ -6,106 +6,67 @@ on:
       - "aio-coding-hub-v*"
 
 permissions:
-  contents: read
+  actions: read
+  contents: write
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
-env:
-  RELEASE_TARGET_IDS: windows-x64,macos-arm64
-  RELEASE_OWNERSHIP_MARKER: "<!-- AIO_CODING_HUB_RELEASE_WORKFLOW_V1 -->"
-
 jobs:
-  resolve-and-verify:
+  publish:
     runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      contents: read
-    outputs:
-      source_sha: ${{ steps.tag.outputs.source_sha }}
-      version: ${{ steps.tag.outputs.version }}
-      tag: ${{ steps.tag.outputs.tag }}
-      candidate_run_id: ${{ steps.candidate.outputs.run_id }}
-      candidate_run_attempt: ${{ steps.candidate.outputs.run_attempt }}
-      candidate_event: ${{ steps.candidate.outputs.event }}
-      candidate_head_sha: ${{ steps.candidate.outputs.head_sha }}
-      artifact_id: ${{ steps.candidate.outputs.artifact_id }}
-      artifact_name: ${{ steps.candidate.outputs.artifact_name }}
-      artifact_digest: ${{ steps.candidate.outputs.artifact_digest }}
-      trusted_control_sha: ${{ steps.verify.outputs.trusted_control_sha }}
-      source_validation_run_id: ${{ steps.verify.outputs.source_validation_run_id }}
-      source_validation_run_attempt: ${{ steps.verify.outputs.source_validation_run_attempt }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: ${{ github.sha }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
 
-      - id: tag
-        name: Resolve and verify immutable release tag
+      - id: source
+        name: Validate release source
         shell: bash
         env:
-          EVENT_SHA: ${{ github.sha }}
           TAG_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          full_sha='^[0-9a-f]{40}$'
-          [[ "$EVENT_SHA" =~ $full_sha ]] || { echo "Tag event SHA is not full-length." >&2; exit 1; }
-          git check-ref-format "refs/tags/$TAG_NAME" >/dev/null
-          git fetch --no-tags --force origin '+refs/heads/main:refs/remotes/origin/main'
-          git fetch --no-tags --force origin "+refs/tags/$TAG_NAME:refs/tags/release-input"
-          tag_object="$(git rev-parse refs/tags/release-input)"
-          source_sha="$(git rev-parse 'refs/tags/release-input^{commit}')"
-          [[ "$source_sha" =~ $full_sha ]] || { echo "Release tag does not peel to a commit." >&2; exit 1; }
-          [[ "$EVENT_SHA" == "$source_sha" || "$EVENT_SHA" == "$tag_object" ]] || {
-            echo "Fetched release tag moved away from the event object." >&2
-            exit 1
-          }
-          [[ "$(git rev-parse 'HEAD^{commit}')" == "$source_sha" ]] || {
-            echo "Workflow checkout is not the recursively peeled release commit." >&2
-            exit 1
-          }
-          git merge-base --is-ancestor "$source_sha" refs/remotes/origin/main
+          source_sha="$(git rev-parse "$GITHUB_SHA^{commit}")"
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$source_sha" origin/main
+          git checkout --detach "$source_sha"
           node scripts/support-matrix.mjs validate-release-version --tag "$TAG_NAME"
-          version="${TAG_NAME#aio-coding-hub-v}"
-          echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG_NAME" >> "$GITHUB_OUTPUT"
 
       - id: candidate
-        name: Resolve one exact non-expired candidate artifact
+        name: Find the successful main CI candidate
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
-          SOURCE_SHA: ${{ steps.tag.outputs.source_sha }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
         with:
           github-token: ${{ github.token }}
           script: |
-            const cutoff = Date.now() - 31 * 24 * 60 * 60 * 1000;
-            const created = `>=${new Date(cutoff).toISOString()}`;
             const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
               owner: context.repo.owner,
               repo: context.repo.repo,
               workflow_id: 'ci.yml',
-              branch: 'main',
-              status: 'success',
-              created,
+              head_sha: process.env.SOURCE_SHA,
               per_page: 100,
             });
-            const eligibleRuns = runs.filter((run) =>
-              run.conclusion === 'success' &&
-              run.head_branch === 'main' &&
-              run.head_repository?.full_name === 'KNaiFen/aio-coding-hub' &&
-              ['push', 'workflow_dispatch'].includes(run.event) &&
-              new Date(run.created_at).getTime() >= cutoff);
-            const candidates = [];
-            for (const run of eligibleRuns) {
-              const expectedName = `release-candidate-${process.env.SOURCE_SHA}-${run.id}-${run.run_attempt}`;
+            const eligible = runs
+              .filter((run) =>
+                run.head_sha === process.env.SOURCE_SHA &&
+                run.head_branch === 'main' &&
+                run.head_repository?.full_name === 'KNaiFen/aio-coding-hub' &&
+                ['push', 'workflow_dispatch'].includes(run.event) &&
+                run.conclusion === 'success')
+              .sort((left, right) => new Date(right.updated_at) - new Date(left.updated_at));
+
+            for (const run of eligible) {
               const artifacts = await github.paginate(
                 github.rest.actions.listWorkflowRunArtifacts,
                 {
@@ -115,551 +76,57 @@ jobs:
                   per_page: 100,
                 },
               );
-              for (const artifact of artifacts) {
-                if (artifact.name === expectedName && !artifact.expired) {
-                  candidates.push({ run, artifact });
-                }
+              const expected = `release-candidate-${process.env.SOURCE_SHA}-${run.id}-${run.run_attempt}`;
+              const matches = artifacts.filter(
+                (artifact) => artifact.name === expected && !artifact.expired,
+              );
+              if (matches.length === 1) {
+                core.setOutput('run_id', String(run.id));
+                core.setOutput('artifact_id', String(matches[0].id));
+                core.setOutput('artifact_name', expected);
+                return;
               }
             }
-            if (candidates.length !== 1) {
-              core.setFailed(`Expected exactly one non-expired candidate for ${process.env.SOURCE_SHA}; found ${candidates.length}.`);
-              return;
-            }
-            const { run, artifact } = candidates[0];
-            if (!/^sha256:[0-9a-f]{64}$/.test(artifact.digest || '')) {
-              core.setFailed(`Candidate artifact ${artifact.id} has no canonical remote SHA-256 digest.`);
-              return;
-            }
-            core.setOutput('run_id', String(run.id));
-            core.setOutput('run_attempt', String(run.run_attempt));
-            core.setOutput('event', run.event);
-            core.setOutput('head_sha', run.head_sha);
-            core.setOutput('artifact_id', String(artifact.id));
-            core.setOutput('artifact_name', artifact.name);
-            core.setOutput('artifact_digest', artifact.digest);
+            core.setFailed(`No unexpired release candidate exists for ${process.env.SOURCE_SHA}.`);
 
-      - name: Download candidate by exact artifact ID
+      - name: Download the exact CI candidate
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           artifact-ids: ${{ steps.candidate.outputs.artifact_id }}
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
           run-id: ${{ steps.candidate.outputs.run_id }}
-          merge-multiple: true
-          path: candidate
+          path: release-assets
 
-      - id: verify
-        name: Verify candidate manifest and every file
+      - name: Verify candidate files
         shell: bash
-        env:
-          EXPECTED_TRUSTED_CONTROL_SHA: ${{ steps.candidate.outputs.event == 'push' && steps.tag.outputs.source_sha || steps.candidate.outputs.head_sha }}
         run: |
           set -euo pipefail
-          node scripts/support-matrix.mjs verify-candidate-manifest \
-            --repository "$GITHUB_REPOSITORY" \
-            --source-sha "${{ steps.tag.outputs.source_sha }}" \
-            --trusted-control-sha "$EXPECTED_TRUSTED_CONTROL_SHA" \
-            --version "${{ steps.tag.outputs.version }}" \
-            --tag "${{ steps.tag.outputs.tag }}" \
-            --workflow-run-id "${{ steps.candidate.outputs.run_id }}" \
-            --workflow-run-attempt "${{ steps.candidate.outputs.run_attempt }}" \
-            --target-ids "$RELEASE_TARGET_IDS" \
-            --candidate-dir candidate \
-            --github-output "$GITHUB_OUTPUT"
+          for file in \
+            aio-coding-hub-win64.msi \
+            aio-coding-hub-win64.msi.sig \
+            aio-coding-hub-win64-portable.zip \
+            aio-coding-hub-macos-arm.tar.gz \
+            aio-coding-hub-macos-arm.tar.gz.sig \
+            aio-coding-hub-macos-arm.zip \
+            latest.json \
+            SHA256SUMS.txt; do
+            [[ -s "release-assets/$file" ]] || {
+              echo "Missing release candidate file: $file" >&2
+              exit 1
+            }
+          done
+          (cd release-assets && sha256sum --check SHA256SUMS.txt)
+          node -e "JSON.parse(require('fs').readFileSync('release-assets/latest.json', 'utf8'))"
 
-      - name: Verify candidate and source-validation run provenance
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+      - name: Publish release without rebuilding
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         env:
-          SOURCE_SHA: ${{ steps.tag.outputs.source_sha }}
-          CANDIDATE_EVENT: ${{ steps.candidate.outputs.event }}
-          CANDIDATE_RUN_ID: ${{ steps.candidate.outputs.run_id }}
-          CANDIDATE_RUN_ATTEMPT: ${{ steps.candidate.outputs.run_attempt }}
-          CANDIDATE_HEAD_SHA: ${{ steps.candidate.outputs.head_sha }}
-          TRUSTED_CONTROL_SHA: ${{ steps.verify.outputs.trusted_control_sha }}
-          VALIDATION_RUN_ID: ${{ steps.verify.outputs.source_validation_run_id }}
-          VALIDATION_RUN_ATTEMPT: ${{ steps.verify.outputs.source_validation_run_attempt }}
+          GITHUB_TOKEN: ${{ github.token }}
         with:
-          github-token: ${{ github.token }}
-          script: |
-            const getAttempt = async (runId, attempt) => {
-              const response = await github.request(
-                'GET /repos/{owner}/{repo}/actions/runs/{run_id}/attempts/{attempt_number}',
-                {
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  run_id: Number(runId),
-                  attempt_number: Number(attempt),
-                },
-              );
-              return response.data;
-            };
-            const candidateRun = await getAttempt(
-              process.env.CANDIDATE_RUN_ID,
-              process.env.CANDIDATE_RUN_ATTEMPT,
-            );
-            if (
-              candidateRun.conclusion !== 'success' ||
-              candidateRun.head_branch !== 'main' ||
-              candidateRun.event !== process.env.CANDIDATE_EVENT ||
-              candidateRun.head_sha !== process.env.CANDIDATE_HEAD_SHA ||
-              candidateRun.head_repository?.full_name !== 'KNaiFen/aio-coding-hub' ||
-              candidateRun.path !== '.github/workflows/ci.yml'
-            ) {
-              core.setFailed('Candidate workflow attempt provenance mismatch.');
-              return;
-            }
-            if (process.env.CANDIDATE_EVENT === 'push') {
-              if (
-                process.env.CANDIDATE_HEAD_SHA !== process.env.SOURCE_SHA ||
-                process.env.TRUSTED_CONTROL_SHA !== process.env.SOURCE_SHA ||
-                process.env.VALIDATION_RUN_ID !== process.env.CANDIDATE_RUN_ID ||
-                process.env.VALIDATION_RUN_ATTEMPT !== process.env.CANDIDATE_RUN_ATTEMPT
-              ) {
-                core.setFailed('Main-push candidate provenance mismatch.');
-                return;
-              }
-              return;
-            }
-            if (
-              process.env.CANDIDATE_EVENT !== 'workflow_dispatch' ||
-              process.env.TRUSTED_CONTROL_SHA !== process.env.CANDIDATE_HEAD_SHA
-            ) {
-              core.setFailed('Recovery candidate control provenance mismatch.');
-              return;
-            }
-            const validationRun = await getAttempt(
-              process.env.VALIDATION_RUN_ID,
-              process.env.VALIDATION_RUN_ATTEMPT,
-            );
-            if (
-              validationRun.conclusion !== 'success' ||
-              validationRun.head_sha !== process.env.SOURCE_SHA ||
-              validationRun.head_branch !== 'main' ||
-              validationRun.head_repository?.full_name !== 'KNaiFen/aio-coding-hub' ||
-              validationRun.path !== '.github/workflows/ci.yml' ||
-              !['push', 'workflow_dispatch'].includes(validationRun.event)
-            ) {
-              core.setFailed('Recovery source-validation attempt mismatch.');
-            }
-
-      - name: Verify source/control ancestry from immutable Git objects
-        shell: bash
-        env:
-          SOURCE_SHA: ${{ steps.tag.outputs.source_sha }}
-          TRUSTED_CONTROL_SHA: ${{ steps.verify.outputs.trusted_control_sha }}
-        run: |
-          set -euo pipefail
-          git fetch --no-tags --force origin '+refs/heads/main:refs/remotes/origin/main'
-          [[ "$(git rev-parse "$SOURCE_SHA^{commit}")" == "$SOURCE_SHA" ]]
-          [[ "$(git rev-parse "$TRUSTED_CONTROL_SHA^{commit}")" == "$TRUSTED_CONTROL_SHA" ]]
-          git merge-base --is-ancestor "$SOURCE_SHA" "$TRUSTED_CONTROL_SHA"
-          git merge-base --is-ancestor "$TRUSTED_CONTROL_SHA" refs/remotes/origin/main
-
-  publish:
-    needs: resolve-and-verify
-    runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      contents: write
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
-
-      - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: 22
-
-      - name: Re-resolve exact artifact ID and remote digest
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
-        env:
-          ARTIFACT_ID: ${{ needs.resolve-and-verify.outputs.artifact_id }}
-          ARTIFACT_NAME: ${{ needs.resolve-and-verify.outputs.artifact_name }}
-          ARTIFACT_DIGEST: ${{ needs.resolve-and-verify.outputs.artifact_digest }}
-          CANDIDATE_RUN_ID: ${{ needs.resolve-and-verify.outputs.candidate_run_id }}
-        with:
-          github-token: ${{ github.token }}
-          script: |
-            const { data: artifact } = await github.rest.actions.getArtifact({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              artifact_id: Number(process.env.ARTIFACT_ID),
-            });
-            if (
-              String(artifact.id) !== process.env.ARTIFACT_ID ||
-              artifact.name !== process.env.ARTIFACT_NAME ||
-              artifact.expired ||
-              artifact.digest !== process.env.ARTIFACT_DIGEST ||
-              String(artifact.workflow_run?.id) !== process.env.CANDIDATE_RUN_ID
-            ) {
-              core.setFailed('Exact candidate artifact identity/digest changed before publication.');
-            }
-
-      - name: Independently download the same exact artifact ID
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          artifact-ids: ${{ needs.resolve-and-verify.outputs.artifact_id }}
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ needs.resolve-and-verify.outputs.candidate_run_id }}
-          merge-multiple: true
-          path: candidate
-
-      - name: Independently verify candidate manifest and every file
-        shell: bash
-        run: |
-          set -euo pipefail
-          node scripts/support-matrix.mjs verify-candidate-manifest \
-            --repository "$GITHUB_REPOSITORY" \
-            --source-sha "${{ needs.resolve-and-verify.outputs.source_sha }}" \
-            --trusted-control-sha "${{ needs.resolve-and-verify.outputs.trusted_control_sha }}" \
-            --source-validation-run-id "${{ needs.resolve-and-verify.outputs.source_validation_run_id }}" \
-            --source-validation-run-attempt "${{ needs.resolve-and-verify.outputs.source_validation_run_attempt }}" \
-            --version "${{ needs.resolve-and-verify.outputs.version }}" \
-            --tag "${{ needs.resolve-and-verify.outputs.tag }}" \
-            --workflow-run-id "${{ needs.resolve-and-verify.outputs.candidate_run_id }}" \
-            --workflow-run-attempt "${{ needs.resolve-and-verify.outputs.candidate_run_attempt }}" \
-            --target-ids "$RELEASE_TARGET_IDS" \
-            --candidate-dir candidate
-
-      - name: Independently verify candidate provenance and ancestry
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
-        env:
-          SOURCE_SHA: ${{ needs.resolve-and-verify.outputs.source_sha }}
-          CANDIDATE_EVENT: ${{ needs.resolve-and-verify.outputs.candidate_event }}
-          CANDIDATE_RUN_ID: ${{ needs.resolve-and-verify.outputs.candidate_run_id }}
-          CANDIDATE_RUN_ATTEMPT: ${{ needs.resolve-and-verify.outputs.candidate_run_attempt }}
-          CANDIDATE_HEAD_SHA: ${{ needs.resolve-and-verify.outputs.candidate_head_sha }}
-          TRUSTED_CONTROL_SHA: ${{ needs.resolve-and-verify.outputs.trusted_control_sha }}
-          VALIDATION_RUN_ID: ${{ needs.resolve-and-verify.outputs.source_validation_run_id }}
-          VALIDATION_RUN_ATTEMPT: ${{ needs.resolve-and-verify.outputs.source_validation_run_attempt }}
-        with:
-          github-token: ${{ github.token }}
-          script: |
-            const getAttempt = async (runId, attempt) => (await github.request(
-              'GET /repos/{owner}/{repo}/actions/runs/{run_id}/attempts/{attempt_number}',
-              {
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                run_id: Number(runId),
-                attempt_number: Number(attempt),
-              },
-            )).data;
-            const candidate = await getAttempt(
-              process.env.CANDIDATE_RUN_ID,
-              process.env.CANDIDATE_RUN_ATTEMPT,
-            );
-            if (
-              candidate.conclusion !== 'success' ||
-              candidate.head_branch !== 'main' ||
-              candidate.head_sha !== process.env.CANDIDATE_HEAD_SHA ||
-              candidate.event !== process.env.CANDIDATE_EVENT ||
-              candidate.head_repository?.full_name !== 'KNaiFen/aio-coding-hub' ||
-              candidate.path !== '.github/workflows/ci.yml'
-            ) {
-              core.setFailed('Candidate attempt failed independent provenance verification.');
-              return;
-            }
-            if (process.env.CANDIDATE_EVENT === 'push') {
-              if (
-                process.env.CANDIDATE_HEAD_SHA !== process.env.SOURCE_SHA ||
-                process.env.TRUSTED_CONTROL_SHA !== process.env.SOURCE_SHA ||
-                process.env.VALIDATION_RUN_ID !== process.env.CANDIDATE_RUN_ID ||
-                process.env.VALIDATION_RUN_ATTEMPT !== process.env.CANDIDATE_RUN_ATTEMPT
-              ) {
-                core.setFailed('Main-push provenance changed before publication.');
-              }
-              return;
-            }
-            const validation = await getAttempt(
-              process.env.VALIDATION_RUN_ID,
-              process.env.VALIDATION_RUN_ATTEMPT,
-            );
-            if (
-              process.env.CANDIDATE_EVENT !== 'workflow_dispatch' ||
-              process.env.TRUSTED_CONTROL_SHA !== process.env.CANDIDATE_HEAD_SHA ||
-              validation.conclusion !== 'success' ||
-              validation.head_sha !== process.env.SOURCE_SHA ||
-              validation.head_branch !== 'main' ||
-              validation.head_repository?.full_name !== 'KNaiFen/aio-coding-hub' ||
-              validation.path !== '.github/workflows/ci.yml' ||
-              !['push', 'workflow_dispatch'].includes(validation.event)
-            ) {
-              core.setFailed('Recovery provenance changed before publication.');
-            }
-
-      - name: Verify source/control ancestry against current main
-        shell: bash
-        env:
-          SOURCE_SHA: ${{ needs.resolve-and-verify.outputs.source_sha }}
-          TRUSTED_CONTROL_SHA: ${{ needs.resolve-and-verify.outputs.trusted_control_sha }}
-        run: |
-          set -euo pipefail
-          git fetch --no-tags --force origin '+refs/heads/main:refs/remotes/origin/main'
-          [[ "$(git rev-parse "$SOURCE_SHA^{commit}")" == "$SOURCE_SHA" ]]
-          [[ "$(git rev-parse "$TRUSTED_CONTROL_SHA^{commit}")" == "$TRUSTED_CONTROL_SHA" ]]
-          git merge-base --is-ancestor "$SOURCE_SHA" "$TRUSTED_CONTROL_SHA"
-          git merge-base --is-ancestor "$TRUSTED_CONTROL_SHA" refs/remotes/origin/main
-
-      - name: Re-verify immutable tag immediately before draft mutation
-        shell: bash
-        env:
-          EVENT_SHA: ${{ github.sha }}
-          SOURCE_SHA: ${{ needs.resolve-and-verify.outputs.source_sha }}
-          TAG_NAME: ${{ needs.resolve-and-verify.outputs.tag }}
-        run: |
-          set -euo pipefail
-          git fetch --no-tags --force origin "+refs/tags/$TAG_NAME:refs/tags/release-publish-input"
-          tag_object="$(git rev-parse refs/tags/release-publish-input)"
-          peeled="$(git rev-parse 'refs/tags/release-publish-input^{commit}')"
-          [[ "$peeled" == "$SOURCE_SHA" ]]
-          [[ "$EVENT_SHA" == "$peeled" || "$EVENT_SHA" == "$tag_object" ]]
-
-      - id: draft
-        name: Create or reuse marked draft release
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
-        env:
-          TAG_NAME: ${{ needs.resolve-and-verify.outputs.tag }}
-          SOURCE_SHA: ${{ needs.resolve-and-verify.outputs.source_sha }}
-          VERSION: ${{ needs.resolve-and-verify.outputs.version }}
-          OWNERSHIP_MARKER: ${{ env.RELEASE_OWNERSHIP_MARKER }}
-        with:
-          github-token: ${{ github.token }}
-          script: |
-            const fs = require('fs');
-            let release;
-            try {
-              release = (await github.rest.repos.getReleaseByTag({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                tag: process.env.TAG_NAME,
-              })).data;
-            } catch (error) {
-              if (error.status !== 404) throw error;
-              release = (await github.rest.repos.createRelease({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                tag_name: process.env.TAG_NAME,
-                target_commitish: process.env.SOURCE_SHA,
-                name: `AIO Coding Hub v${process.env.VERSION}`,
-                body: process.env.OWNERSHIP_MARKER,
-                draft: true,
-                generate_release_notes: true,
-              })).data;
-            }
-            if (
-              release.draft !== true ||
-              release.tag_name !== process.env.TAG_NAME ||
-              release.target_commitish !== process.env.SOURCE_SHA ||
-              !(release.body || '').includes(process.env.OWNERSHIP_MARKER)
-            ) {
-              core.setFailed('Existing release is published, mismatched, or not owned by this workflow.');
-              return;
-            }
-            if (!release.created_at) {
-              core.setFailed('Managed draft has no stable creation timestamp.');
-              return;
-            }
-            fs.writeFileSync('release-body.md', release.body || '', 'utf8');
-            core.setOutput('release_id', String(release.id));
-            core.setOutput('created_at', release.created_at);
-
-      - name: Stage verified candidate files
-        run: >-
-          node scripts/support-matrix.mjs stage-candidate-files
-          --candidate-dir candidate
-          --output-dir release-assets
-
-      - name: Generate stable latest.json
-        shell: bash
-        run: |
-          set -euo pipefail
-          node scripts/support-matrix.mjs generate-latest-json \
-            --tag "${{ needs.resolve-and-verify.outputs.tag }}" \
-            --repo "$GITHUB_REPOSITORY" \
-            --pub-date "${{ steps.draft.outputs.created_at }}" \
-            --stable-assets-dir release-assets \
-            --target-ids "$RELEASE_TARGET_IDS" \
-            --release-body-file release-body.md \
-            --fallback-notes "See release ${{ needs.resolve-and-verify.outputs.tag }}" \
-            --output release-assets/latest.json
-
-      - name: Generate SHA-256 checksums
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd release-assets
-          find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%f\n' \
-            | sort \
-            | xargs sha256sum > SHA256SUMS.txt
-
-      - name: Re-verify tag before clearing marked draft assets
-        shell: bash
-        env:
-          SOURCE_SHA: ${{ needs.resolve-and-verify.outputs.source_sha }}
-          TAG_NAME: ${{ needs.resolve-and-verify.outputs.tag }}
-        run: |
-          set -euo pipefail
-          git fetch --no-tags --force origin "+refs/tags/$TAG_NAME:refs/tags/release-clear-input"
-          [[ "$(git rev-parse 'refs/tags/release-clear-input^{commit}')" == "$SOURCE_SHA" ]]
-
-      - name: Clear every asset from the marked draft
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
-        env:
-          RELEASE_ID: ${{ steps.draft.outputs.release_id }}
-          TAG_NAME: ${{ needs.resolve-and-verify.outputs.tag }}
-          SOURCE_SHA: ${{ needs.resolve-and-verify.outputs.source_sha }}
-          OWNERSHIP_MARKER: ${{ env.RELEASE_OWNERSHIP_MARKER }}
-        with:
-          github-token: ${{ github.token }}
-          script: |
-            const { data: release } = await github.rest.repos.getRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: Number(process.env.RELEASE_ID),
-            });
-            if (
-              release.draft !== true ||
-              release.tag_name !== process.env.TAG_NAME ||
-              release.target_commitish !== process.env.SOURCE_SHA ||
-              !(release.body || '').includes(process.env.OWNERSHIP_MARKER)
-            ) {
-              core.setFailed('Managed draft ownership changed before asset deletion.');
-              return;
-            }
-            const assets = await github.paginate(github.rest.repos.listReleaseAssets, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: release.id,
-              per_page: 100,
-            });
-            for (const asset of assets) {
-              await github.rest.repos.deleteReleaseAsset({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                asset_id: asset.id,
-              });
-            }
-
-      - name: Upload complete verified release asset set
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG_NAME: ${{ needs.resolve-and-verify.outputs.tag }}
-        run: |
-          set -euo pipefail
-          gh release upload "$TAG_NAME" release-assets/* --repo "$GITHUB_REPOSITORY"
-
-      - name: Re-verify immutable tag immediately before publication
-        shell: bash
-        env:
-          EVENT_SHA: ${{ github.sha }}
-          SOURCE_SHA: ${{ needs.resolve-and-verify.outputs.source_sha }}
-          TAG_NAME: ${{ needs.resolve-and-verify.outputs.tag }}
-        run: |
-          set -euo pipefail
-          git fetch --no-tags --force origin "+refs/tags/$TAG_NAME:refs/tags/release-final-input"
-          tag_object="$(git rev-parse refs/tags/release-final-input)"
-          peeled="$(git rev-parse 'refs/tags/release-final-input^{commit}')"
-          [[ "$peeled" == "$SOURCE_SHA" ]]
-          [[ "$EVENT_SHA" == "$peeled" || "$EVENT_SHA" == "$tag_object" ]]
-
-      - name: Verify exact remote assets and publish
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
-        env:
-          RELEASE_ID: ${{ steps.draft.outputs.release_id }}
-          TAG_NAME: ${{ needs.resolve-and-verify.outputs.tag }}
-          SOURCE_SHA: ${{ needs.resolve-and-verify.outputs.source_sha }}
-          OWNERSHIP_MARKER: ${{ env.RELEASE_OWNERSHIP_MARKER }}
-        with:
-          github-token: ${{ github.token }}
-          script: |
-            const crypto = require('crypto');
-            const fs = require('fs');
-            const path = require('path');
-            const { data: release } = await github.rest.repos.getRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: Number(process.env.RELEASE_ID),
-            });
-            if (
-              release.draft !== true ||
-              release.tag_name !== process.env.TAG_NAME ||
-              release.target_commitish !== process.env.SOURCE_SHA ||
-              !(release.body || '').includes(process.env.OWNERSHIP_MARKER)
-            ) {
-              core.setFailed('Managed draft ownership changed before publication.');
-              return;
-            }
-            const localNames = fs.readdirSync('release-assets').sort();
-            const local = new Map();
-            for (const name of localNames) {
-              const filePath = path.join('release-assets', name);
-              const stat = fs.lstatSync(filePath);
-              if (!stat.isFile() || stat.isSymbolicLink()) {
-                core.setFailed(`Release asset is not a regular file: ${name}`);
-                return;
-              }
-              local.set(name, {
-                size: stat.size,
-                digest: `sha256:${crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex')}`,
-              });
-            }
-            const remote = await github.paginate(github.rest.repos.listReleaseAssets, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: release.id,
-              per_page: 100,
-            });
-            const remoteNames = remote.map((asset) => asset.name).sort();
-            if (
-              remoteNames.length !== localNames.length ||
-              remoteNames.some((name, index) => name !== localNames[index])
-            ) {
-              core.setFailed(`Remote release asset names differ. Local=${localNames.join(',')} remote=${remoteNames.join(',')}`);
-              return;
-            }
-            for (const asset of remote) {
-              const expected = local.get(asset.name);
-              if (asset.size !== expected.size) {
-                core.setFailed(`Remote size mismatch for ${asset.name}.`);
-                return;
-              }
-              let remoteDigest = asset.digest || '';
-              if (!remoteDigest) {
-                const response = await github.request(
-                  'GET /repos/{owner}/{repo}/releases/assets/{asset_id}',
-                  {
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    asset_id: asset.id,
-                    headers: { accept: 'application/octet-stream' },
-                  },
-                );
-                let bytes;
-                if (Buffer.isBuffer(response.data)) {
-                  bytes = response.data;
-                } else if (response.data instanceof ArrayBuffer) {
-                  bytes = Buffer.from(response.data);
-                } else if (ArrayBuffer.isView(response.data)) {
-                  bytes = Buffer.from(response.data.buffer, response.data.byteOffset, response.data.byteLength);
-                } else {
-                  core.setFailed(`Remote digest unavailable and ${asset.name} could not be hashed.`);
-                  return;
-                }
-                remoteDigest = `sha256:${crypto.createHash('sha256').update(bytes).digest('hex')}`;
-              }
-              if (!/^sha256:[0-9a-f]{64}$/.test(remoteDigest) || remoteDigest !== expected.digest) {
-                core.setFailed(`Remote SHA-256 digest mismatch for ${asset.name}.`);
-                return;
-              }
-            }
-            await github.rest.repos.updateRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: release.id,
-              draft: false,
-              make_latest: 'true',
-            });
+          tag_name: ${{ steps.source.outputs.tag }}
+          draft: false
+          generate_release_notes: true
+          files: release-assets/*
+          fail_on_unmatched_files: true
+          overwrite_files: true

@@ -8,24 +8,13 @@ on:
   workflow_dispatch:
     inputs:
       build_release_candidate:
-        description: Build a signed release candidate for an existing main commit
+        description: Build a signed candidate for the current main commit
         required: true
         type: boolean
         default: false
-      candidate_sha:
-        description: Full 40-hex source commit for release-candidate recovery
-        required: false
-        type: string
-      expected_tag:
-        description: Source-derived aio-coding-hub-v* tag for recovery
-        required: false
-        type: string
 
 permissions:
   contents: read
-
-env:
-  RELEASE_TARGET_IDS: windows-x64,macos-arm64
 
 concurrency:
   group: ${{ github.ref == 'refs/heads/main' && format('ci-main-{0}', github.run_id) || format('ci-{0}', github.event.pull_request.number || github.ref) }}
@@ -36,23 +25,20 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - name: Check PR title (Conventional Commits)
+      - name: Check PR title
         shell: bash
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           set -euo pipefail
-          pattern='^(feat|fix|docs|chore|style|refactor|perf|test|ci|build|chore|revert)(\([^)]+\))?: .+'
-          if [[ ! "$PR_TITLE" =~ $pattern ]]; then
-            echo "::error::Invalid PR title. Expected Conventional Commits, e.g. 'feat(ui): add updater dialog'."
+          pattern='^(feat|fix|docs|chore|style|refactor|perf|test|ci|build|revert)(\([^)]+\))?: .+'
+          [[ "$PR_TITLE" =~ $pattern ]] || {
+            echo "::error::PR title must use Conventional Commits."
             exit 1
-          fi
+          }
 
   support-contract:
     runs-on: ubuntu-latest
-    outputs:
-      desktop_matrix: ${{ steps.matrix.outputs.desktop_matrix }}
-      release_matrix: ${{ steps.matrix.outputs.release_matrix }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
@@ -61,49 +47,11 @@ jobs:
         with:
           node-version: 22
 
-      - id: matrix
-        name: Load cloud support matrices
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "desktop_matrix=$(node scripts/support-matrix.mjs ci-matrix)" >> "$GITHUB_OUTPUT"
-          echo "release_matrix=$(node scripts/support-matrix.mjs build-matrix --target-ids "$RELEASE_TARGET_IDS")" >> "$GITHUB_OUTPUT"
-
-      - name: Validate support and workflow contracts
-        run: node scripts/support-matrix.mjs check
-
-      - name: Validate release-candidate contract
-        run: node scripts/support-matrix.candidate.selftest.mjs
-
-      - name: Validate workflow mutation contract
-        run: node scripts/workflow-contract.selftest.mjs
-
-      - name: Validate native drift boundary
-        run: node scripts/cloud-native-drift.selftest.mjs
+      - name: Reject local native-build entry points
+        run: node scripts/check-local-build-entrypoints.mjs
 
       - name: Validate Homebrew Cask generator
         run: node scripts/support-matrix.homebrew-cask.selftest.mjs
-
-  desktop-support-contract:
-    needs: support-contract
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJson(needs.support-contract.outputs.desktop_matrix) }}
-    runs-on: ${{ matrix.os_family == 'windows' && 'windows-latest' || matrix.os_family == 'macos' && 'macos-latest' || 'ubuntu-22.04' }}
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4.2.0
-
-      - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: 22
-
-      - name: Validate support matrix on ${{ matrix.os_family }}
-        run: pnpm check:support-matrix
 
   frontend:
     needs: support-contract
@@ -120,19 +68,16 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      - name: Install deps
+      - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Support matrix drift check
-        run: pnpm check:support-matrix
-
-      - name: Dependency audit (high+ severity)
+      - name: Dependency audit
         run: pnpm audit:deps
 
-      - name: Lint (ESLint)
+      - name: Lint
         run: pnpm lint
 
-      - name: Gateway error codes sync check
+      - name: Gateway error codes
         run: pnpm check:gateway-error-codes
 
       - name: Plugin docs contract
@@ -153,7 +98,7 @@ jobs:
       - name: Plugin GUI E2E smoke
         run: pnpm test:e2e
 
-      - name: Unit tests (Vitest + coverage gate)
+      - name: Unit tests
         run: pnpm test:unit:coverage
 
       - name: Build frontend
@@ -165,7 +110,7 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Install system deps (Tauri/Linux)
+      - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y libasound2-dev librsvg2-dev patchelf
@@ -196,11 +141,11 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - name: Install deps
-        run: pnpm install --frozen-lockfile
+      - name: Install JavaScript formatting dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - id: canonicalize
-        name: Canonicalize Rust, lockfile, and generated bindings
+        name: Format Rust and generate bindings in the cloud
         shell: bash
         run: |
           set -euo pipefail
@@ -208,38 +153,33 @@ jobs:
           cargo update --manifest-path src-tauri/Cargo.toml --workspace
           cargo run --manifest-path src-tauri/Cargo.toml --locked --example export-bindings
           pnpm exec prettier --write src/generated/bindings.ts
+          if git diff --quiet -- src-tauri src/generated/bindings.ts; then
+            echo "drift=false" >> "$GITHUB_OUTPUT"
+          else
+            git diff --binary -- src-tauri src/generated/bindings.ts > cloud-native-fixes.patch
+            echo "drift=true" >> "$GITHUB_OUTPUT"
+          fi
 
-      - id: native-drift
-        name: Classify bounded cloud-native drift
-        shell: bash
-        run: |
-          set -euo pipefail
-          node scripts/cloud-native-drift.mjs classify \
-            --repo "$GITHUB_WORKSPACE" \
-            --patch "$GITHUB_WORKSPACE/cloud-native-fixes.patch" \
-            --github-output "$GITHUB_OUTPUT"
-
-      - name: Upload cloud-native fixes
-        if: ${{ always() && steps.canonicalize.outcome == 'success' && steps.native-drift.outputs.drift == 'true' }}
+      - name: Upload generated-file fixes
+        if: steps.canonicalize.outputs.drift == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: cloud-native-fixes-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: cloud-native-fixes-${{ github.sha }}-${{ github.run_attempt }}
           path: cloud-native-fixes.patch
           if-no-files-found: error
           retention-days: 7
 
-      - name: Fail when canonical cloud files drift
-        if: ${{ steps.native-drift.outputs.drift == 'true' }}
-        shell: bash
+      - name: Fail on generated-file drift
+        if: steps.canonicalize.outputs.drift == 'true'
         run: |
-          echo "Cloud-native files drifted. Apply the uploaded patch artifact with git apply." >&2
+          echo "Cloud formatting or generated bindings changed; apply the uploaded patch." >&2
           exit 1
 
       - name: Rust clippy
         working-directory: src-tauri
         run: cargo clippy --all-targets --locked -- -D warnings
 
-      - name: Rust test
+      - name: Rust tests
         working-directory: src-tauri
         env:
           CARGO_BUILD_JOBS: "1"
@@ -248,7 +188,7 @@ jobs:
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
 
-      - name: Dependency audit (cargo)
+      - name: Dependency audit
         working-directory: src-tauri
         run: cargo audit --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195
 
@@ -258,145 +198,76 @@ jobs:
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      contents: read
     outputs:
       should_build: ${{ steps.plan.outputs.should_build }}
-      mode: ${{ steps.plan.outputs.mode }}
-      source_sha: ${{ steps.plan.outputs.source_sha }}
-      trusted_control_sha: ${{ steps.plan.outputs.trusted_control_sha }}
-      source_validation_run_id: ${{ steps.recovery-validation.outputs.run_id || github.run_id }}
-      source_validation_run_attempt: ${{ steps.recovery-validation.outputs.run_attempt || github.run_attempt }}
       version: ${{ steps.plan.outputs.version }}
       tag: ${{ steps.plan.outputs.tag }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
+          fetch-depth: 2
 
       - name: Setup Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
 
-      - name: Verify immutable current-main Git objects
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          EVENT_SHA: ${{ github.sha }}
-          EVENT_AFTER: ${{ github.event.after }}
-          BEFORE_SHA: ${{ github.event.before }}
-          RECOVERY_REQUESTED: ${{ inputs.build_release_candidate == true }}
-          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
-        run: |
-          set -euo pipefail
-          full_sha='^[0-9a-f]{40}$'
-          [[ "$EVENT_SHA" =~ $full_sha ]] || { echo "Invalid event SHA." >&2; exit 1; }
-          git fetch --no-tags --force origin '+refs/heads/main:refs/remotes/origin/main'
-          resolved_event="$(git rev-parse "$EVENT_SHA^{commit}")"
-          [[ "$resolved_event" == "$EVENT_SHA" ]] || { echo "Event SHA is not an immutable commit." >&2; exit 1; }
-          current_main="$(git rev-parse 'refs/remotes/origin/main^{commit}')"
-
-          if [[ "$EVENT_NAME" == "push" ]]; then
-            [[ "$EVENT_AFTER" == "$EVENT_SHA" ]] || { echo "Push after SHA moved." >&2; exit 1; }
-            [[ "$BEFORE_SHA" =~ $full_sha && ! "$BEFORE_SHA" =~ ^0{40}$ ]] || {
-              echo "Push before SHA is unavailable or all zeroes." >&2
-              exit 1
-            }
-            git fetch --no-tags origin "$BEFORE_SHA"
-            resolved_before="$(git rev-parse "$BEFORE_SHA^{commit}")"
-            [[ "$resolved_before" == "$BEFORE_SHA" ]] || { echo "Before SHA is not a commit." >&2; exit 1; }
-            git merge-base --is-ancestor "$BEFORE_SHA" "$EVENT_SHA"
-            git merge-base --is-ancestor "$EVENT_SHA" "$current_main"
-          elif [[ "$RECOVERY_REQUESTED" == "true" ]]; then
-            [[ "$current_main" == "$EVENT_SHA" ]] || { echo "Trusted main control moved after dispatch." >&2; exit 1; }
-            [[ "$CANDIDATE_SHA" =~ $full_sha ]] || { echo "Recovery candidate must be a full SHA." >&2; exit 1; }
-            git fetch --no-tags origin "$CANDIDATE_SHA"
-            resolved_candidate="$(git rev-parse "$CANDIDATE_SHA^{commit}")"
-            [[ "$resolved_candidate" == "$CANDIDATE_SHA" ]] || { echo "Candidate SHA is not a commit." >&2; exit 1; }
-            git merge-base --is-ancestor "$CANDIDATE_SHA" "$EVENT_SHA"
-          fi
-
       - id: plan
-        name: Plan first candidate or explicit recovery
+        name: Detect a version change
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
           EVENT_REF: ${{ github.ref }}
-          EVENT_SHA: ${{ github.sha }}
           BEFORE_SHA: ${{ github.event.before }}
-          RECOVERY_REQUESTED: ${{ inputs.build_release_candidate == true }}
-          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
-          EXPECTED_TAG: ${{ inputs.expected_tag }}
+          MANUAL_BUILD: ${{ inputs.build_release_candidate == true }}
         run: |
           set -euo pipefail
-          node scripts/support-matrix.mjs plan-release-candidate \
-            --event-name "$EVENT_NAME" \
-            --event-ref "$EVENT_REF" \
-            --event-sha "$EVENT_SHA" \
-            --before-sha "${BEFORE_SHA:-}" \
-            --repository "$GITHUB_REPOSITORY" \
-            --recovery-requested "$RECOVERY_REQUESTED" \
-            --candidate-sha "${CANDIDATE_SHA:-}" \
-            --expected-tag "${EXPECTED_TAG:-}" \
-            --github-output "$GITHUB_OUTPUT"
+          version="$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")"
+          tag="aio-coding-hub-v$version"
+          should_build=false
 
-      - id: recovery-validation
-        name: Bind recovery to a successful exact-SHA main CI
-        if: steps.plan.outputs.mode == 'recovery'
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
-        env:
-          SOURCE_SHA: ${{ steps.plan.outputs.source_sha }}
-        with:
-          github-token: ${{ github.token }}
-          script: |
-            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'ci.yml',
-              head_sha: process.env.SOURCE_SHA,
-              per_page: 100,
-            });
-            const eligible = runs
-              .filter((run) =>
-                run.head_sha === process.env.SOURCE_SHA &&
-                run.head_branch === 'main' &&
-                run.head_repository?.full_name === 'KNaiFen/aio-coding-hub' &&
-                ['push', 'workflow_dispatch'].includes(run.event) &&
-                run.conclusion === 'success')
-              .sort((left, right) => new Date(right.created_at) - new Date(left.created_at));
-            if (eligible.length === 0) {
-              core.setFailed(`No successful exact-SHA main CI validates ${process.env.SOURCE_SHA}.`);
-              return;
-            }
-            core.setOutput('run_id', String(eligible[0].id));
-            core.setOutput('run_attempt', String(eligible[0].run_attempt));
+          if [[ "$EVENT_NAME" == "workflow_dispatch" && "$MANUAL_BUILD" == "true" ]]; then
+            should_build=true
+          elif [[ "$EVENT_NAME" == "push" && "$BEFORE_SHA" =~ ^[0-9a-f]{40}$ && ! "$BEFORE_SHA" =~ ^0{40}$ ]]; then
+            if ! git cat-file -e "$BEFORE_SHA:package.json" 2>/dev/null; then
+              git fetch --no-tags --depth=1 origin "$BEFORE_SHA"
+            fi
+            previous_version="$(git show "$BEFORE_SHA:package.json" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(JSON.parse(s).version))")"
+            [[ "$version" == "$previous_version" ]] || should_build=true
+          fi
+
+          node scripts/support-matrix.mjs validate-release-version --tag "$tag"
+          echo "should_build=$should_build" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
   build-release-candidate:
-    needs: [support-contract, candidate-plan]
+    needs: [support-contract, frontend, rust, candidate-plan]
     if: needs.candidate-plan.outputs.should_build == 'true'
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJson(needs.support-contract.outputs.release_matrix) }}
+        include:
+          - target_id: windows-x64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: msi
+            updater_platform: windows-x86_64
+            stable_label: win64
+            portable_asset_name: aio-coding-hub-win64-portable.zip
+          - target_id: macos-arm64
+            runner: macos-latest
+            target: aarch64-apple-darwin
+            bundles: app
+            updater_platform: darwin-aarch64
+            stable_label: macos-arm
+            portable_asset_name: aio-coding-hub-macos-arm.zip
     runs-on: ${{ matrix.runner }}
     environment: release-signing
     permissions:
       contents: read
     steps:
-      - name: Checkout trusted workflow control
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          ref: ${{ needs.candidate-plan.outputs.trusted_control_sha }}
-          path: control
-
-      - name: Checkout immutable candidate source
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          ref: ${{ needs.candidate-plan.outputs.source_sha }}
-          path: source
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Install pnpm
         uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4.2.0
@@ -406,26 +277,23 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: source/pnpm-lock.yaml
 
       - name: Install Rust 1.90.0
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: 1.90.0
-          targets: ${{ matrix.rustup_targets }}
+          targets: ${{ matrix.target }}
 
       - name: Rust cache
         uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
-          workspaces: source/src-tauri
+          workspaces: src-tauri
 
       - name: Install dependencies
-        working-directory: source
         run: pnpm install --frozen-lockfile
 
       - name: Validate updater signing secrets
         shell: bash
-        working-directory: source
         env:
           TAURI_SIGNING_PRIVATE_KEY_SECRET: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD_SECRET: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -449,33 +317,29 @@ jobs:
           printf '%s' "$normalized_key" > "$key_path"
           chmod 600 "$key_path"
           printf '%s\n' 'signing-probe' > "$test_path"
-          if ! pnpm exec tauri signer sign \
+          pnpm exec tauri signer sign \
             -f "$key_path" \
             -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD_SECRET" \
-            "$test_path" >/dev/null 2>&1; then
-            echo "Updater signing key/password validation failed." >&2
-            exit 1
-          fi
+            "$test_path" >/dev/null 2>&1
 
       - id: tauri
-        name: Build signed Tauri release candidate
+        name: Build signed Tauri candidate
         uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
         env:
           APPLE_SIGNING_IDENTITY: ${{ startsWith(matrix.updater_platform, 'darwin-') && '-' || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          projectPath: source
           tauriScript: pnpm exec tauri
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} -- --locked
           includeUpdaterJson: false
 
-      - name: Prepare stable updater assets
+      - name: Prepare updater assets
         shell: bash
         env:
           ARTIFACT_PATHS_JSON: ${{ steps.tauri.outputs.artifactPaths }}
         run: |
           set -euo pipefail
-          node control/scripts/support-matrix.mjs prepare-stable-assets \
+          node scripts/support-matrix.mjs prepare-stable-assets \
             --artifact-paths "$ARTIFACT_PATHS_JSON" \
             --updater-platform "${{ matrix.updater_platform }}" \
             --stable-label "${{ matrix.stable_label }}" \
@@ -491,9 +355,8 @@ jobs:
           trap 'rm -rf "$temp_dir"' EXIT
           tar -xzf "$tarball" -C "$temp_dir"
           app_path="$(find "$temp_dir" -maxdepth 2 -name '*.app' -type d -print -quit)"
-          [[ -n "$app_path" ]] || { echo "No .app found in $tarball." >&2; exit 1; }
-          ditto -c -k --sequesterRsrc --keepParent \
-            "$app_path" \
+          [[ -n "$app_path" ]]
+          ditto -c -k --sequesterRsrc --keepParent "$app_path" \
             "stable-assets/${{ matrix.portable_asset_name }}"
 
       - name: Build Windows portable ZIP
@@ -501,7 +364,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $targetDir = "source/src-tauri/target/${{ matrix.target }}/release"
+          $targetDir = "src-tauri/target/${{ matrix.target }}/release"
           $exePath = Join-Path $targetDir "AIO Coding Hub.exe"
           if (-not (Test-Path $exePath)) {
             $exePath = Join-Path $targetDir "aio-coding-hub.exe"
@@ -518,129 +381,61 @@ jobs:
           }
           Compress-Archive -Path "$portableDir/*" -DestinationPath "stable-assets/${{ matrix.portable_asset_name }}" -Force
 
-      - name: Upload current-attempt platform candidate
+      - name: Upload platform candidate
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: release-platform-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.target_id }}
+          name: release-platform-${{ github.sha }}-${{ github.run_attempt }}-${{ matrix.target_id }}
           path: stable-assets/*
           if-no-files-found: error
           retention-days: 1
 
   assemble-release-candidate:
-    needs:
-      - support-contract
-      - desktop-support-contract
-      - frontend
-      - rust
-      - candidate-plan
-      - build-release-candidate
+    needs: [frontend, rust, candidate-plan, build-release-candidate]
     if: >-
       always() &&
       needs.candidate-plan.outputs.should_build == 'true' &&
-      needs.support-contract.result == 'success' &&
-      needs.desktop-support-contract.result == 'success' &&
       needs.frontend.result == 'success' &&
       needs.rust.result == 'success' &&
-      needs.candidate-plan.result == 'success' &&
       needs.build-release-candidate.result == 'success'
     runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      contents: read
-    outputs:
-      run_attempt: ${{ steps.attempt.outputs.run_attempt }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          ref: ${{ needs.candidate-plan.outputs.trusted_control_sha }}
 
       - name: Setup Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
 
-      - id: platform-artifacts
-        name: Resolve exact current-attempt platform artifact IDs
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
-        env:
-          TARGET_IDS: ${{ env.RELEASE_TARGET_IDS }}
-          RUN_ATTEMPT: ${{ github.run_attempt }}
-        with:
-          github-token: ${{ github.token }}
-          script: |
-            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              run_id: context.runId,
-              per_page: 100,
-            });
-            const ids = [];
-            for (const targetId of process.env.TARGET_IDS.split(',')) {
-              const expectedName = `release-platform-${context.runId}-${process.env.RUN_ATTEMPT}-${targetId}`;
-              const matches = artifacts.filter((artifact) => artifact.name === expectedName && !artifact.expired);
-              if (matches.length !== 1) {
-                core.setFailed(`Expected one current-attempt artifact ${expectedName}; found ${matches.length}. Re-run all jobs or start a new recovery run.`);
-                return;
-              }
-              ids.push(String(matches[0].id));
-            }
-            core.setOutput('artifact_ids', ids.join(','));
-
-      - name: Download exact current-attempt platform artifacts
+      - name: Download platform candidates
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          artifact-ids: ${{ steps.platform-artifacts.outputs.artifact_ids }}
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ github.run_id }}
+          pattern: release-platform-${{ github.sha }}-${{ github.run_attempt }}-*
           merge-multiple: true
-          path: candidate-assets
+          path: release-assets
 
-      - name: Create immutable release-candidate manifest
+      - name: Generate updater metadata and checksums
         shell: bash
+        env:
+          FALLBACK_NOTES: See release ${{ needs.candidate-plan.outputs.tag }}
         run: |
           set -euo pipefail
-          node scripts/support-matrix.mjs create-candidate-manifest \
-            --repository "$GITHUB_REPOSITORY" \
-            --source-sha "${{ needs.candidate-plan.outputs.source_sha }}" \
-            --trusted-control-sha "${{ needs.candidate-plan.outputs.trusted_control_sha }}" \
-            --source-validation-run-id "${{ needs.candidate-plan.outputs.source_validation_run_id }}" \
-            --source-validation-run-attempt "${{ needs.candidate-plan.outputs.source_validation_run_attempt }}" \
-            --version "${{ needs.candidate-plan.outputs.version }}" \
+          node scripts/support-matrix.mjs generate-latest-json \
             --tag "${{ needs.candidate-plan.outputs.tag }}" \
-            --workflow-run-id "$GITHUB_RUN_ID" \
-            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
-            --target-ids "$RELEASE_TARGET_IDS" \
-            --assets-dir candidate-assets \
-            --output candidate-assets/release-candidate-manifest.json
+            --repo "$GITHUB_REPOSITORY" \
+            --pub-date "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+            --stable-assets-dir release-assets \
+            --target-ids windows-x64,macos-arm64 \
+            --output release-assets/latest.json
+          cd release-assets
+          find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%f\n' \
+            | sort \
+            | xargs sha256sum > SHA256SUMS.txt
 
-      - name: Re-verify assembled candidate
-        shell: bash
-        run: |
-          set -euo pipefail
-          node scripts/support-matrix.mjs verify-candidate-manifest \
-            --repository "$GITHUB_REPOSITORY" \
-            --source-sha "${{ needs.candidate-plan.outputs.source_sha }}" \
-            --trusted-control-sha "${{ needs.candidate-plan.outputs.trusted_control_sha }}" \
-            --source-validation-run-id "${{ needs.candidate-plan.outputs.source_validation_run_id }}" \
-            --source-validation-run-attempt "${{ needs.candidate-plan.outputs.source_validation_run_attempt }}" \
-            --version "${{ needs.candidate-plan.outputs.version }}" \
-            --tag "${{ needs.candidate-plan.outputs.tag }}" \
-            --workflow-run-id "$GITHUB_RUN_ID" \
-            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
-            --target-ids "$RELEASE_TARGET_IDS" \
-            --candidate-dir candidate-assets
-
-      - id: attempt
-        name: Bind candidate assembly to this run attempt
-        shell: bash
-        run: echo "run_attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
-
-      - name: Upload immutable 30-day release candidate
+      - name: Upload release candidate
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: release-candidate-${{ needs.candidate-plan.outputs.source_sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: candidate-assets/*
+          name: release-candidate-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release-assets/*
           if-no-files-found: error
           retention-days: 30
 
@@ -650,69 +445,45 @@ jobs:
     needs:
       - pr-title
       - support-contract
-      - desktop-support-contract
       - frontend
       - rust
       - candidate-plan
       - build-release-candidate
       - assemble-release-candidate
     runs-on: ubuntu-latest
-    permissions: {}
     steps:
-      - name: Require every applicable CI owner to succeed
+      - name: Require expected jobs
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
           EVENT_REF: ${{ github.ref }}
-          REPOSITORY: ${{ github.repository }}
           PR_TITLE_RESULT: ${{ needs.pr-title.result }}
           SUPPORT_RESULT: ${{ needs.support-contract.result }}
-          DESKTOP_RESULT: ${{ needs.desktop-support-contract.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           RUST_RESULT: ${{ needs.rust.result }}
-          CANDIDATE_PLAN_RESULT: ${{ needs.candidate-plan.result }}
-          SHOULD_BUILD_CANDIDATE: ${{ needs.candidate-plan.outputs.should_build }}
-          CANDIDATE_BUILD_RESULT: ${{ needs.build-release-candidate.result }}
-          CANDIDATE_ASSEMBLY_RESULT: ${{ needs.assemble-release-candidate.result }}
-          CANDIDATE_ASSEMBLY_RUN_ATTEMPT: ${{ needs.assemble-release-candidate.outputs.run_attempt }}
-          CURRENT_RUN_ATTEMPT: ${{ github.run_attempt }}
+          PLAN_RESULT: ${{ needs.candidate-plan.result }}
+          SHOULD_BUILD: ${{ needs.candidate-plan.outputs.should_build }}
+          BUILD_RESULT: ${{ needs.build-release-candidate.result }}
+          ASSEMBLE_RESULT: ${{ needs.assemble-release-candidate.result }}
         run: |
           set -euo pipefail
-          require_result() {
-            local label="$1"
-            local actual="$2"
-            local expected="$3"
-            if [[ "$actual" != "$expected" ]]; then
-              echo "$label must be $expected, got $actual." >&2
-              exit 1
-            fi
-          }
-
-          require_result support-contract "$SUPPORT_RESULT" success
-          require_result desktop-support-contract "$DESKTOP_RESULT" success
-          require_result frontend "$FRONTEND_RESULT" success
-          require_result rust "$RUST_RESULT" success
-
+          [[ "$SUPPORT_RESULT" == "success" ]]
+          [[ "$FRONTEND_RESULT" == "success" ]]
+          [[ "$RUST_RESULT" == "success" ]]
           if [[ "$EVENT_NAME" == "pull_request" ]]; then
-            require_result pr-title "$PR_TITLE_RESULT" success
-          else
-            require_result pr-title "$PR_TITLE_RESULT" skipped
+            [[ "$PR_TITLE_RESULT" == "success" ]]
           fi
-
-          if [[ "$REPOSITORY" == "KNaiFen/aio-coding-hub" && "$EVENT_REF" == "refs/heads/main" && ( "$EVENT_NAME" == "push" || "$EVENT_NAME" == "workflow_dispatch" ) ]]; then
-            require_result candidate-plan "$CANDIDATE_PLAN_RESULT" success
-          else
-            require_result candidate-plan "$CANDIDATE_PLAN_RESULT" skipped
-          fi
-
-          if [[ "$SHOULD_BUILD_CANDIDATE" == "true" ]]; then
-            require_result build-release-candidate "$CANDIDATE_BUILD_RESULT" success
-            require_result assemble-release-candidate "$CANDIDATE_ASSEMBLY_RESULT" success
-            if [[ "$CANDIDATE_ASSEMBLY_RUN_ATTEMPT" != "$CURRENT_RUN_ATTEMPT" ]]; then
-              echo "Candidate assembly belongs to run attempt $CANDIDATE_ASSEMBLY_RUN_ATTEMPT, not current attempt $CURRENT_RUN_ATTEMPT. Re-run all jobs or start a new recovery run." >&2
-              exit 1
+          if [[ "$EVENT_REF" == "refs/heads/main" && ( "$EVENT_NAME" == "push" || "$EVENT_NAME" == "workflow_dispatch" ) ]]; then
+            [[ "$PLAN_RESULT" == "success" ]]
+            if [[ "$SHOULD_BUILD" == "true" ]]; then
+              [[ "$BUILD_RESULT" == "success" ]]
+              [[ "$ASSEMBLE_RESULT" == "success" ]]
+            else
+              [[ "$BUILD_RESULT" == "skipped" ]]
+              [[ "$ASSEMBLE_RESULT" == "skipped" ]]
             fi
           else
-            require_result build-release-candidate "$CANDIDATE_BUILD_RESULT" skipped
-            require_result assemble-release-candidate "$CANDIDATE_ASSEMBLY_RESULT" skipped
+            [[ "$PLAN_RESULT" == "skipped" ]]
+            [[ "$BUILD_RESULT" == "skipped" ]]
+            [[ "$ASSEMBLE_RESULT" == "skipped" ]]
           fi
