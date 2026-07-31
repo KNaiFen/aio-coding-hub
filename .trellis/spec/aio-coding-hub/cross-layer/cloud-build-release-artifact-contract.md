@@ -40,14 +40,22 @@ contract.
   must not expose direct or aggregate aliases for Cargo, rustfmt, Clippy, Rust
   tests, Specta generation, or the Tauri CLI.
 - `pnpm install`, ordinary commit/push operations, and Trellis lifecycle work
-  must not compile native code or write generated Rust-owned files.
+  must not compile application-native/Rust/Tauri code or write generated
+  Rust-owned files. The one canonical root pnpm policy may enable only the
+  pinned frontend `esbuild` dependency install step; package-level or `.npmrc`
+  overrides fail closed.
 - `pnpm dev` is the local frontend-only Vite server. Native integration and
   desktop packages come from cloud artifacts; interactive native hot reload
   has no repository-supported local replacement.
-- `scripts/check-local-native-boundary.mjs` fails closed on tracked hooks,
-  hook installation, native package aliases, native aggregate stages, active
-  Trellis lifecycle hooks, and native editor/task automation. It only parses
-  files and Git metadata; it never executes an audited helper.
+- `scripts/check-local-native-boundary.mjs` fails closed on tracked hooks and
+  equivalent hook-manager configuration, hook installation, native package
+  aliases, native aggregate stages, active Trellis lifecycle hooks, executable
+  pnpmfiles, and repository-controlled editor/Make/Just/Task automation files.
+  Allowlisted JavaScript helpers use explicit process contracts; namespace,
+  alias, reflective, shell-enabled, or otherwise unauditable dispatch fails.
+  CI and package aggregates scan the real repository before running boundary
+  self-tests. The checker only parses files and Git metadata; it never executes
+  an audited helper.
 - A system-installed native tool remains outside repository control. The
   enforceable boundary is the absence of repository-managed triggers,
   aliases, and instructions.
@@ -161,8 +169,9 @@ weaken a known schema; a future format receives a new explicit version.
 ### 9. Tests Required
 
 - Keep the local-boundary pure-function self-test exhaustive for root/workspace
-  scripts, indirect aliases, hooks, Git hook configuration, Trellis hooks,
-  editor/task automation, and allowlisted Node/frontend helpers.
+  scripts, dependency-build policy drift, indirect/reflective process aliases,
+  hooks and equivalent hook-manager configuration, Trellis hooks, nested
+  editor/Make/Just/Task automation, and allowlisted Node/frontend helpers.
 - Keep support-matrix self-tests for all six manual targets, the two formal
   targets, synchronized versions, manifest success, and every schema/path/
   provenance/size/digest negative.
