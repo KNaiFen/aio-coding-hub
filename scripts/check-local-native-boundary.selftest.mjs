@@ -34,6 +34,8 @@ function snapshot(overrides = {}) {
           dev: "vite",
           typecheck: "tsc -p tsconfig.json",
           check: "node scripts/check-local-native-boundary.mjs",
+          "check:local-native-boundary":
+            "node scripts/check-local-native-boundary.mjs && node scripts/pnpm-cli.selftest.mjs && node scripts/check-local-native-boundary.selftest.mjs",
         },
       },
     ],
@@ -54,6 +56,21 @@ function expectFailure(value, phrase) {
 }
 
 assert.deepEqual(evaluateLocalNativeBoundary(snapshot()), []);
+expectFailure(
+  snapshot({
+    manifests: [
+      {
+        path: "package.json",
+        name: "test-root",
+        scripts: {
+          "check:local-native-boundary":
+            "node scripts/check-local-native-boundary.selftest.mjs && node scripts/check-local-native-boundary.mjs",
+        },
+      },
+    ],
+  }),
+  "live boundary scan must run before boundary self-tests"
+);
 assert.deepEqual(
   evaluateLocalNativeBoundary(
     snapshot({

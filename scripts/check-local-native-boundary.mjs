@@ -50,6 +50,8 @@ const FORBIDDEN_SCRIPT_NAMES = new Set([
   "tauri",
 ]);
 const FORBIDDEN_MANIFEST_CONFIG_KEYS = new Set(["husky", "simple-git-hooks", "lefthook"]);
+const REQUIRED_LOCAL_BOUNDARY_COMMAND =
+  "node scripts/check-local-native-boundary.mjs && node scripts/pnpm-cli.selftest.mjs && node scripts/check-local-native-boundary.selftest.mjs";
 
 const NATIVE_COMMAND_PATTERNS = [
   ["Cargo", /(?:^|[\s;&|()"'/\\])cargo(?:\.exe)?(?=$|[\s;&|()"'/\\])/i],
@@ -344,6 +346,9 @@ export function evaluateLocalNativeBoundary(snapshot) {
       if (typeof command !== "string") {
         violations.push(`${owner}: command must be a string`);
         continue;
+      }
+      if (name === "check:local-native-boundary" && command !== REQUIRED_LOCAL_BOUNDARY_COMMAND) {
+        violations.push(`${owner}: live boundary scan must run before boundary self-tests`);
       }
       for (const nativeKind of findNativeCommands(command)) {
         violations.push(`${owner}: invokes ${nativeKind}`);
