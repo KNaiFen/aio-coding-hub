@@ -115,7 +115,7 @@
 ### Download from Releases (Recommended)
 
 Go to [Releases](https://github.com/KNaiFen/aio-coding-hub/releases) and download for your platform.
-This fork currently publishes tagged builds only for Windows x64 and macOS Apple Silicon; build other targets from source or use the upstream releases:
+This fork currently publishes tagged builds only for Windows x64 and macOS Apple Silicon; use manual cloud development builds for other targets or use the upstream releases:
 
 <!-- SUPPORT_MATRIX_RELEASE_DOWNLOAD:START -->
 | Platform | Official release packages |
@@ -124,7 +124,7 @@ This fork currently publishes tagged builds only for Windows x64 and macOS Apple
 | macOS Apple Silicon | `.zip` |
 <!-- SUPPORT_MATRIX_RELEASE_DOWNLOAD:END -->
 
-This fork's release matrix only covers the two targets above. macOS Intel and Linux x64 remain source-build targets; `mac:universal` and `win:arm64` also remain local build scripts and do not ship in Release assets or `latest.json`.
+This fork's release matrix only covers the two targets above. Development artifacts for other platforms come from the `dev-build` GitHub Actions workflow and never enter Release assets or `latest.json`.
 
 <details>
 <summary>Linux Arch / Wayland users</summary>
@@ -141,13 +141,8 @@ yay -S aio-coding-hub-bin
 
 The app automatically detects Wayland sessions and sets `WEBKIT_DISABLE_COMPOSITING_MODE=1`
 to prevent EGL display initialisation crashes (see [issue #93](https://github.com/FingerCaster/aio-coding-hub/issues/93)).
-If you still see a blank white window, use the `*-wayland.AppImage` artifact from the Release page
-(bundled EGL/Mesa libraries stripped; system versions are used instead):
-
-```bash
-# Or manually repack an existing AppImage
-./scripts/repack-linux-appimage-wayland.sh aio-coding-hub-linux-amd64.AppImage
-```
+The repository provides no local native repackaging entry point; use the cloud `dev-build`
+workflow when a desktop artifact is required.
 
 </details>
 
@@ -162,51 +157,29 @@ sudo xattr -cr /Applications/"AIO Coding Hub.app"
 
 </details>
 
-### Build from Source
+### Local Frontend Development and Cloud Desktop Builds
 
-<details>
-<summary>Prerequisites</summary>
-
-**General:** Node.js 18+, pnpm, Rust 1.90+
-
-**Windows:** [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) (select "Desktop development with C++")
-
-**macOS:** `xcode-select --install`
-
-**Linux (Ubuntu/Debian):**
-```bash
-sudo apt-get update
-sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-```
-
-</details>
+Local frontend work requires Node.js 22 and pnpm; no Rust/Tauri toolchain is required.
 
 ```bash
 git clone https://github.com/KNaiFen/aio-coding-hub.git
 cd aio-coding-hub
 pnpm install
-
-# Development
-pnpm tauri:dev
-
-# Build (current platform)
-pnpm tauri:build
-
-# Platform-specific
+pnpm dev
 ```
 
+`pnpm dev` starts the Vite frontend only. Native integration, Rust validation, and desktop packaging run in GitHub Actions. To obtain a desktop artifact, manually run `dev-build` from the repository Actions page and select a target.
+
 <!-- SUPPORT_MATRIX_SOURCE_BUILD:START -->
-| Scope | Command | Notes |
+| Scope | Cloud workflow target | Notes |
 | --- | --- | --- |
-| Official | `pnpm tauri:build:win:x64` | Windows x64; Official; included in Release / updater matrix |
-| Official | `pnpm tauri:build:mac:x64` | macOS Intel; Source-supported; excluded from this fork's Release / updater matrix |
-| Official | `pnpm tauri:build:mac:arm64` | macOS Apple Silicon; Official; included in Release / updater matrix |
-| Official | `pnpm tauri:build:linux:x64` | Linux x64; Source-supported; excluded from this fork's Release / updater matrix |
-| Local only | `pnpm tauri:build:mac:universal` | macOS Universal; Local build only; excluded from the official release / updater matrix |
-| Local only | `pnpm tauri:build:win:arm64` | Windows ARM64; Local build only; excluded from the official release / updater matrix |
+| Release / development | Actions `dev-build`: `windows-x64` | Windows x64; Signed candidate from `main` CI; unsigned development artifact from the manual workflow |
+| Development | Actions `dev-build`: `macos-x64` | macOS Intel; Unsigned development artifact from the manual workflow; excluded from Release/updater |
+| Release / development | Actions `dev-build`: `macos-arm64` | macOS Apple Silicon; Signed candidate from `main` CI; unsigned development artifact from the manual workflow |
+| Development | Actions `dev-build`: `linux-x64` | Linux x64; Unsigned development artifact from the manual workflow; excluded from Release/updater |
 <!-- SUPPORT_MATRIX_SOURCE_BUILD:END -->
 
-Only the "Official" rows above feed GitHub Releases and auto-update. The "Local only" rows keep local build flexibility without claiming shipped support.
+Manual cloud artifacts are unsigned and cannot be promoted by Release. Formal releases only promote the signed Windows x64 and macOS Apple Silicon candidates produced by successful `main` CI.
 
 ---
 
@@ -243,12 +216,14 @@ curl http://127.0.0.1:37123/health
 ## Quality Assurance
 
 ```bash
-pnpm check:precommit       # Quick pre-commit (frontend + Rust check)
-pnpm check:precommit:full  # Full check (formatting + clippy)
-pnpm check:prepush         # Coverage + backend tests + clippy
-pnpm test:unit              # Frontend unit tests
-pnpm tauri:test             # Backend tests
+pnpm check:precommit       # Quick Node/TypeScript checks
+pnpm check:precommit:full  # Full local static checks (still Node/frontend only)
+pnpm check:prepush         # Frontend coverage, plugin SDK, and static contracts
+pnpm test:unit             # Frontend unit tests
+pnpm build                 # TypeScript + Vite frontend build
 ```
+
+GitHub Actions owns Rust formatting, `Cargo.lock`, generated bindings, Clippy, Rust tests, audit, and Tauri packaging. When CI reports canonicalization drift, download and apply its patch instead of regenerating files locally.
 
 ---
 

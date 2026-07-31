@@ -6,9 +6,7 @@
  *   node scripts/run-checks.mjs --list
  *
  * Adding a check: define its command in CHECKS, then add its id to the
- * stages that should run it. Hooks (.githooks/*) and package.json aggregate
- * scripts all resolve stages through this file, so there is exactly one
- * list to edit.
+ * stages that should run it. These aggregate stages are Node/frontend-only.
  */
 import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
@@ -18,12 +16,11 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const CHECKS = {
   "format-check": "pnpm format:check",
+  "local-build-entrypoints": "pnpm check:local-build-entrypoints",
   lint: "pnpm lint",
   typecheck: "pnpm typecheck",
   "no-instant-now-sub": "pnpm check:no-instant-now-sub",
-  "release-pr-changelog": "pnpm check:release-pr-changelog",
   "spec-links": "pnpm check:spec-links",
-  "support-matrix": "pnpm check:support-matrix",
   "homebrew-cask": "pnpm check:homebrew-cask",
   "gateway-error-codes": "pnpm check:gateway-error-codes",
   "plugin-system-docs": "pnpm check:plugin-system-docs",
@@ -32,61 +29,31 @@ const CHECKS = {
   "plugin-sdk-test": "pnpm plugin-sdk:test",
   "create-aio-plugin-test": "pnpm create-aio-plugin:test",
   "unit-coverage-shards": "pnpm test:unit:coverage:shards",
-  "generated-bindings": "pnpm check:generated-bindings",
-  "tauri-fmt": "pnpm tauri:fmt",
-  "tauri-check": "pnpm tauri:check",
-  "tauri-test": "pnpm tauri:test",
-  "tauri-lib-test": "cd src-tauri && cargo test --lib",
-  "tauri-clippy": "pnpm tauri:clippy",
 };
 
-const PRECOMMIT_SRC = ["lint", "typecheck", "no-instant-now-sub"];
-const PRECOMMIT_TAURI = ["tauri-check"];
+const PRECOMMIT_SRC = ["local-build-entrypoints", "lint", "typecheck", "no-instant-now-sub"];
 const PREPUSH_STATIC = [
+  "local-build-entrypoints",
   "lint",
   "typecheck",
-  "support-matrix",
   "homebrew-cask",
   "gateway-error-codes",
   "plugin-system-docs",
   "plugin-api-contract",
   "plugin-sdk-typecheck",
-  "tauri-fmt",
 ];
 
 const STAGES = {
-  // pre-commit hook picks the sub-stage based on which files are staged.
-  "precommit-src": PRECOMMIT_SRC,
-  "precommit-tauri": PRECOMMIT_TAURI,
-  precommit: [...PRECOMMIT_SRC, ...PRECOMMIT_TAURI],
+  precommit: PRECOMMIT_SRC,
   "precommit-full": [
     "format-check",
     ...PRECOMMIT_SRC,
-    "release-pr-changelog",
     "spec-links",
-    "support-matrix",
     "homebrew-cask",
     "gateway-error-codes",
-    "tauri-fmt",
-    "tauri-check",
-    "generated-bindings",
-    "tauri-clippy",
   ],
-  prepush: [
-    ...PREPUSH_STATIC,
-    "unit-coverage-shards",
-    "plugin-sdk-test",
-    "create-aio-plugin-test",
-    "generated-bindings",
-    "tauri-test",
-    "tauri-clippy",
-  ],
-  "plugin-hardening": [
-    "plugin-api-contract",
-    "plugin-sdk-test",
-    "plugin-sdk-typecheck",
-    "tauri-lib-test",
-  ],
+  prepush: [...PREPUSH_STATIC, "unit-coverage-shards", "plugin-sdk-test", "create-aio-plugin-test"],
+  "plugin-hardening": ["plugin-api-contract", "plugin-sdk-test", "plugin-sdk-typecheck"],
 };
 
 function listStages() {

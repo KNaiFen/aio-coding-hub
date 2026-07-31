@@ -6,405 +6,127 @@ on:
       - "aio-coding-hub-v*"
 
 permissions:
-  contents: read
+  actions: read
+  contents: write
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
-env:
-  RELEASE_TARGET_IDS: windows-x64,macos-arm64
-
 jobs:
-  validate:
+  publish:
     runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      contents: write
-    outputs:
-      build_matrix: ${{ steps.matrix.outputs.build_matrix }}
-      checkout_ref: ${{ steps.source.outputs.checkout_ref }}
-      release_id: ${{ steps.release.outputs.release_id }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
 
-      - name: Validate tag and application versions
-        run: node scripts/support-matrix.mjs validate-release-version --tag "$GITHUB_REF_NAME"
-
       - id: source
-        name: Resolve immutable release commit
+        name: Validate release source
         shell: bash
+        env:
+          TAG_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          checkout_ref="$(git rev-parse HEAD^{commit})"
-          echo "release commit: $checkout_ref"
-          echo "checkout_ref=$checkout_ref" >> "$GITHUB_OUTPUT"
+          source_sha="$(git rev-parse "$GITHUB_SHA^{commit}")"
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$source_sha" origin/main
+          git checkout --detach "$source_sha"
+          node scripts/support-matrix.mjs validate-release-version --tag "$TAG_NAME"
+          echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG_NAME" >> "$GITHUB_OUTPUT"
 
-      # Main already runs the complete CI suite. Reuse that result for the
-      # exact release commit instead of spending a second runner set on it.
-      - name: Reuse successful main CI validation
+      - id: candidate
+        name: Find the successful main CI candidate
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
-        timeout-minutes: 45
         env:
-          CHECKOUT_REF: ${{ steps.source.outputs.checkout_ref }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
         with:
           github-token: ${{ github.token }}
           script: |
-            const sha = process.env.CHECKOUT_REF;
-            const discoveryDeadline = Date.now() + 2 * 60 * 1000;
-            const completionDeadline = Date.now() + 40 * 60 * 1000;
-            const sleep = (milliseconds) =>
-              new Promise((resolve) => setTimeout(resolve, milliseconds));
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'ci.yml',
+              head_sha: process.env.SOURCE_SHA,
+              per_page: 100,
+            });
+            const eligible = runs
+              .filter((run) =>
+                run.head_sha === process.env.SOURCE_SHA &&
+                run.head_branch === 'main' &&
+                run.head_repository?.full_name === 'KNaiFen/aio-coding-hub' &&
+                ['push', 'workflow_dispatch'].includes(run.event) &&
+                run.conclusion === 'success')
+              .sort((left, right) => new Date(right.updated_at) - new Date(left.updated_at));
 
-            for (;;) {
-              const runs = await github.paginate(
-                github.rest.actions.listWorkflowRuns,
+            for (const run of eligible) {
+              const artifacts = await github.paginate(
+                github.rest.actions.listWorkflowRunArtifacts,
                 {
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  workflow_id: 'ci.yml',
-                  head_sha: sha,
+                  run_id: run.id,
                   per_page: 100,
                 },
               );
-              const eligibleRuns = runs
-                .filter(
-                  (run) =>
-                    run.head_sha === sha &&
-                    run.head_branch === 'main' &&
-                    ['push', 'workflow_dispatch'].includes(run.event),
-                )
-                .sort(
-                  (left, right) =>
-                    new Date(right.created_at) - new Date(left.created_at),
-                );
-              const successfulRun = eligibleRuns.find(
-                (run) => run.conclusion === 'success',
+              const expected = `release-candidate-${process.env.SOURCE_SHA}-${run.id}-${run.run_attempt}`;
+              const matches = artifacts.filter(
+                (artifact) => artifact.name === expected && !artifact.expired,
               );
-
-              if (successfulRun) {
-                core.notice(`Reusing successful CI run: ${successfulRun.html_url}`);
+              if (matches.length === 1) {
+                core.setOutput('run_id', String(run.id));
+                core.setOutput('artifact_id', String(matches[0].id));
+                core.setOutput('artifact_name', expected);
                 return;
               }
-
-              const activeRun = eligibleRuns.find(
-                (run) => run.status !== 'completed',
-              );
-              if (activeRun) {
-                if (Date.now() >= completionDeadline) {
-                  core.setFailed(
-                    `Timed out waiting for CI run ${activeRun.html_url}`,
-                  );
-                  return;
-                }
-                core.info(
-                  `CI run ${activeRun.html_url} is ${activeRun.status}; waiting...`,
-                );
-                await sleep(15_000);
-                continue;
-              }
-
-              if (eligibleRuns.length > 0) {
-                const results = eligibleRuns
-                  .map(
-                    (run) =>
-                      `${run.html_url} (${run.conclusion || run.status})`,
-                  )
-                  .join(', ');
-                core.setFailed(
-                  `Commit ${sha} has no successful main CI run: ${results}`,
-                );
-                return;
-              }
-
-              if (Date.now() >= discoveryDeadline) {
-                core.setFailed(
-                  `No main CI run was found for release commit ${sha}`,
-                );
-                return;
-              }
-              core.info(`No CI run for ${sha} is visible yet; waiting...`);
-              await sleep(10_000);
             }
+            core.setFailed(`No unexpired release candidate exists for ${process.env.SOURCE_SHA}.`);
 
-      - id: matrix
-        name: Load release build matrix
-        shell: bash
-        run: |
-          set -euo pipefail
-          matrix="$(node scripts/support-matrix.mjs build-matrix --target-ids "$RELEASE_TARGET_IDS")"
-          echo "build_matrix=$matrix" >> "$GITHUB_OUTPUT"
-
-      - id: release
-        name: Create or reuse draft release
-        shell: bash
-        env:
-          CHECKOUT_REF: ${{ steps.source.outputs.checkout_ref }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-
-          tag="$GITHUB_REF_NAME"
-          checkout_ref="$CHECKOUT_REF"
-          version="${tag#aio-coding-hub-v}"
-
-          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            is_draft="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)"
-            if [[ "$is_draft" != "true" ]]; then
-              echo "Release $tag is already published; refusing to overwrite it." >&2
-              exit 1
-            fi
-          else
-            gh release create "$tag" \
-              --repo "$GITHUB_REPOSITORY" \
-              --target "$checkout_ref" \
-              --title "AIO Coding Hub v$version" \
-              --generate-notes \
-              --draft
-          fi
-
-          release_id="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json databaseId --jq .databaseId)"
-          echo "build commit: $checkout_ref"
-          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
-          echo "tag_name=$tag" >> "$GITHUB_OUTPUT"
-
-  build:
-    needs: validate
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJson(needs.validate.outputs.build_matrix) }}
-    runs-on: ${{ matrix.platform }}
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          ref: ${{ needs.validate.outputs.checkout_ref }}
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4.2.0
-
-      - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install Rust 1.90.0
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
-        with:
-          toolchain: 1.90.0
-          targets: ${{ matrix.target }}
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
-        with:
-          workspaces: src-tauri
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Prepare updater signing key
-        shell: bash
-        env:
-          TAURI_SIGNING_PRIVATE_KEY_SECRET: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD_SECRET: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: |
-          set -euo pipefail
-
-          raw_key="${TAURI_SIGNING_PRIVATE_KEY_SECRET:-}"
-          raw_password="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD_SECRET:-}"
-          if [[ -z "${raw_key//[[:space:]]/}" ]]; then
-            echo "Missing required secret: TAURI_SIGNING_PRIVATE_KEY" >&2
-            exit 1
-          fi
-          if [[ -z "$raw_password" ]]; then
-            echo "Missing required secret: TAURI_SIGNING_PRIVATE_KEY_PASSWORD" >&2
-            exit 1
-          fi
-
-          key_b64="$(printf '%s' "$raw_key" | tr -d '\r\n\t ')"
-          printf '%s' "$key_b64" > tauri-updater.key
-          chmod 600 tauri-updater.key
-          echo "::add-mask::$raw_password"
-          echo "sign-test" > sign-test.txt
-
-          if ! pnpm tauri signer sign -f tauri-updater.key -p "$raw_password" sign-test.txt >/dev/null 2>sign-check.err; then
-            cat sign-check.err
-            echo "Signing key/password check failed." >&2
-            exit 1
-          fi
-
-          rm -f sign-test.txt sign-test.txt.sig sign-check.err
-          echo "TAURI_SIGNING_PRIVATE_KEY=$key_b64" >> "$GITHUB_ENV"
-          echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$raw_password" >> "$GITHUB_ENV"
-
-      - id: tauri
-        name: Build Tauri application
-        uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
-        env:
-          APPLE_SIGNING_IDENTITY: ${{ startsWith(matrix.updater_platform, 'darwin-') && '-' || '' }}
-        with:
-          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
-          includeUpdaterJson: false
-
-      - name: Prepare stable updater assets
-        shell: bash
-        env:
-          ARTIFACT_PATHS_JSON: ${{ steps.tauri.outputs.artifactPaths }}
-        run: |
-          set -euo pipefail
-          node scripts/support-matrix.mjs prepare-stable-assets \
-            --artifact-paths "$ARTIFACT_PATHS_JSON" \
-            --updater-platform "${{ matrix.updater_platform }}" \
-            --stable-label "${{ matrix.stable_label }}" \
-            --output-dir stable-assets
-
-      - name: Build macOS portable ZIP
-        if: startsWith(matrix.updater_platform, 'darwin-')
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          tarball="stable-assets/aio-coding-hub-${{ matrix.stable_label }}.tar.gz"
-          temp_dir="$(mktemp -d)"
-          tar -xzf "$tarball" -C "$temp_dir"
-          app_path="$(find "$temp_dir" -maxdepth 2 -name '*.app' -type d | head -n 1)"
-          if [[ -z "$app_path" ]]; then
-            echo "No .app found inside $tarball" >&2
-            exit 1
-          fi
-
-          ditto -c -k --sequesterRsrc --keepParent \
-            "$app_path" \
-            "stable-assets/aio-coding-hub-${{ matrix.stable_label }}.zip"
-
-      - name: Build Windows portable ZIP
-        if: startsWith(matrix.updater_platform, 'windows-')
-        shell: pwsh
-        run: |
-          $targetDir = "src-tauri/target/${{ matrix.target }}/release"
-          $exePath = Join-Path $targetDir "AIO Coding Hub.exe"
-          if (-not (Test-Path $exePath)) {
-            $exePath = Join-Path $targetDir "aio-coding-hub.exe"
-          }
-          if (-not (Test-Path $exePath)) {
-            Write-Error "Cannot find built application executable in $targetDir"
-            exit 1
-          }
-
-          $portableDir = "portable-build/AIO Coding Hub"
-          New-Item -ItemType Directory -Path $portableDir -Force | Out-Null
-          Copy-Item $exePath $portableDir
-          $resourceDir = Join-Path $targetDir "resources"
-          if (Test-Path $resourceDir) {
-            Copy-Item -Recurse $resourceDir (Join-Path $portableDir "resources")
-          }
-
-          Compress-Archive -Path "$portableDir/*" -DestinationPath "stable-assets/aio-coding-hub-${{ matrix.stable_label }}-portable.zip" -Force
-
-      - name: Upload temporary build assets
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: stable-assets-${{ matrix.updater_platform }}
-          path: stable-assets/*
-          if-no-files-found: error
-          retention-days: 1
-
-  assemble:
-    needs: [validate, build]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          ref: ${{ needs.validate.outputs.checkout_ref }}
-
-      - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: 22
-
-      - name: Download temporary build assets
+      - name: Download the exact CI candidate
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          pattern: stable-assets-*
-          merge-multiple: true
-          path: stable-assets
-
-      - id: release_body
-        name: Read draft release notes
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
-        with:
+          artifact-ids: ${{ steps.candidate.outputs.artifact_id }}
           github-token: ${{ github.token }}
-          script: |
-            const { data: release } = await github.rest.repos.getRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: Number('${{ needs.validate.outputs.release_id }}'),
-            });
-            core.setOutput('body', release.body || '');
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.candidate.outputs.run_id }}
+          path: release-assets
 
-      - name: Generate latest.json
-        shell: bash
-        env:
-          RELEASE_BODY: ${{ steps.release_body.outputs.body }}
-          FALLBACK_NOTES: See release ${{ needs.validate.outputs.tag_name }}
-        run: |
-          set -euo pipefail
-          node scripts/support-matrix.mjs generate-latest-json \
-            --tag "${{ needs.validate.outputs.tag_name }}" \
-            --repo "$GITHUB_REPOSITORY" \
-            --pub-date "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
-            --stable-assets-dir stable-assets \
-            --target-ids "$RELEASE_TARGET_IDS" \
-            --output stable-assets/latest.json
-
-      - name: Generate SHA-256 checksums
+      - name: Verify candidate files
         shell: bash
         run: |
           set -euo pipefail
-          cd stable-assets
-          find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%f\n' \
-            | sort \
-            | xargs sha256sum > SHA256SUMS.txt
+          for file in \
+            aio-coding-hub-win64.msi \
+            aio-coding-hub-win64.msi.sig \
+            aio-coding-hub-win64-portable.zip \
+            aio-coding-hub-macos-arm.tar.gz \
+            aio-coding-hub-macos-arm.tar.gz.sig \
+            aio-coding-hub-macos-arm.zip \
+            latest.json \
+            SHA256SUMS.txt; do
+            [[ -s "release-assets/$file" ]] || {
+              echo "Missing release candidate file: $file" >&2
+              exit 1
+            }
+          done
+          (cd release-assets && sha256sum --check SHA256SUMS.txt)
+          node -e "JSON.parse(require('fs').readFileSync('release-assets/latest.json', 'utf8'))"
 
-      - name: Upload release assets
+      - name: Publish release without rebuilding
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
-          tag_name: ${{ needs.validate.outputs.tag_name }}
-          draft: true
-          files: stable-assets/*
+          tag_name: ${{ steps.source.outputs.tag }}
+          draft: false
+          generate_release_notes: true
+          files: release-assets/*
           fail_on_unmatched_files: true
           overwrite_files: true
-
-  publish:
-    needs: [validate, build, assemble]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Publish completed release
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
-        with:
-          github-token: ${{ github.token }}
-          script: |
-            await github.rest.repos.updateRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: Number('${{ needs.validate.outputs.release_id }}'),
-              draft: false,
-              make_latest: 'true',
-            });

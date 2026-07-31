@@ -2,200 +2,26 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const logger = {
-  info(message, ...args) {
-    console.error(message, ...args);
-  },
-  error(message, ...args) {
-    console.error(message, ...args);
-  },
-};
+const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
-const scriptDir = dirname(fileURLToPath(import.meta.url));
-const repoRoot = dirname(scriptDir);
-
-/*
- * ============================================================================
- * 步骤1：集中定义支持矩阵
- * ============================================================================
- * 目标：
- *   1) 用一份定义覆盖 release workflow、latest.json 和 README 文案
- *   2) 明确区分官方支持目标与仅本地构建目标
- * 数据源：
- *   1) 当前 release workflow 实际产物
- *   2) 当前 package scripts 中存在的跨平台构建命令
- * 操作要点：
- *   1) 进入官方矩阵的目标必须同时具备 release 产物与 updater 合约
- *   2) 仅本地构建目标保留脚本，但不进入 release / latest.json
- */
-const OFFICIAL_RELEASE_TARGETS = Object.freeze([
+const RELEASE_TARGETS = Object.freeze([
   {
     id: "windows-x64",
-    osFamily: "windows",
-    runner: "windows-latest",
-    target: "x86_64-pc-windows-msvc",
-    bundles: "msi",
     updaterPlatform: "windows-x86_64",
     stableLabel: "win64",
-    stableAssetKind: "msi",
-    packageScript: "tauri:build:win:x64",
-    packageCommand: "node scripts/tauri-build.mjs --target x86_64-pc-windows-msvc",
-    releaseDownloadLabel: {
-      zh: "Windows x64",
-      en: "Windows x64",
-    },
-    releaseDownloadPackages: {
-      zh: "`.msi` / `-portable.zip`",
-      en: "`.msi` / `-portable.zip`",
-    },
-    sourceBuildNote: {
-      zh: "官方支持；进入 Release / updater 矩阵",
-      en: "Official; included in Release / updater matrix",
-    },
-    latestAssetName: "aio-coding-hub-win64.msi",
-    latestSignatureName: "aio-coding-hub-win64.msi.sig",
-  },
-  {
-    id: "macos-x64",
-    osFamily: "macos",
-    runner: "macos-latest",
-    target: "x86_64-apple-darwin",
-    bundles: "app",
-    updaterPlatform: "darwin-x86_64",
-    stableLabel: "macos-intel",
-    stableAssetKind: "tarball",
-    packageScript: "tauri:build:mac:x64",
-    packageCommand: "node scripts/tauri-build.mjs --target x86_64-apple-darwin",
-    releaseDownloadLabel: {
-      zh: "macOS Intel",
-      en: "macOS Intel",
-    },
-    releaseDownloadPackages: {
-      zh: "`.zip`",
-      en: "`.zip`",
-    },
-    sourceBuildNote: {
-      zh: "源码支持；不进入本 Fork 的 Release / updater 矩阵",
-      en: "Source-supported; excluded from this fork's Release / updater matrix",
-    },
-    latestAssetName: "aio-coding-hub-macos-intel.tar.gz",
-    latestSignatureName: "aio-coding-hub-macos-intel.tar.gz.sig",
+    kind: "msi",
+    assetName: "aio-coding-hub-win64.msi",
+    signatureName: "aio-coding-hub-win64.msi.sig",
   },
   {
     id: "macos-arm64",
-    osFamily: "macos",
-    runner: "macos-latest",
-    target: "aarch64-apple-darwin",
-    bundles: "app",
     updaterPlatform: "darwin-aarch64",
     stableLabel: "macos-arm",
-    stableAssetKind: "tarball",
-    packageScript: "tauri:build:mac:arm64",
-    packageCommand: "node scripts/tauri-build.mjs --target aarch64-apple-darwin",
-    releaseDownloadLabel: {
-      zh: "macOS Apple Silicon",
-      en: "macOS Apple Silicon",
-    },
-    releaseDownloadPackages: {
-      zh: "`.zip`",
-      en: "`.zip`",
-    },
-    sourceBuildNote: {
-      zh: "官方支持；进入 Release / updater 矩阵",
-      en: "Official; included in Release / updater matrix",
-    },
-    latestAssetName: "aio-coding-hub-macos-arm.tar.gz",
-    latestSignatureName: "aio-coding-hub-macos-arm.tar.gz.sig",
-  },
-  {
-    id: "linux-x64",
-    osFamily: "linux",
-    runner: "ubuntu-22.04",
-    target: "x86_64-unknown-linux-gnu",
-    bundles: "deb,appimage",
-    updaterPlatform: "linux-x86_64",
-    stableLabel: "linux-amd64",
-    stableAssetKind: "appimage",
-    packageScript: "tauri:build:linux:x64",
-    packageCommand: "node scripts/tauri-build.mjs --target x86_64-unknown-linux-gnu",
-    releaseDownloadLabel: {
-      zh: "Linux x64",
-      en: "Linux x64",
-    },
-    releaseDownloadPackages: {
-      zh: "`.deb` / `.AppImage` / `-wayland.AppImage`",
-      en: "`.deb` / `.AppImage` / `-wayland.AppImage`",
-    },
-    sourceBuildNote: {
-      zh: "源码支持；不进入本 Fork 的 Release / updater 矩阵",
-      en: "Source-supported; excluded from this fork's Release / updater matrix",
-    },
-    latestAssetName: "aio-coding-hub-linux-amd64.AppImage",
-    latestSignatureName: "aio-coding-hub-linux-amd64.AppImage.sig",
+    kind: "tarball",
+    assetName: "aio-coding-hub-macos-arm.tar.gz",
+    signatureName: "aio-coding-hub-macos-arm.tar.gz.sig",
   },
 ]);
-
-const FORK_RELEASE_TARGET_IDS = Object.freeze(["windows-x64", "macos-arm64"]);
-
-const LOCAL_BUILD_ONLY_TARGETS = Object.freeze([
-  {
-    id: "macos-universal",
-    packageScript: "tauri:build:mac:universal",
-    packageCommand: "node scripts/tauri-build.mjs --target universal-apple-darwin",
-    buildLabel: {
-      zh: "macOS Universal",
-      en: "macOS Universal",
-    },
-    sourceBuildNote: {
-      zh: "仅本地构建；不进入官方发布 / updater 矩阵",
-      en: "Local build only; excluded from the official release / updater matrix",
-    },
-  },
-  {
-    id: "windows-arm64",
-    packageScript: "tauri:build:win:arm64",
-    packageCommand: "node scripts/tauri-build.mjs --target aarch64-pc-windows-msvc",
-    buildLabel: {
-      zh: "Windows ARM64",
-      en: "Windows ARM64",
-    },
-    sourceBuildNote: {
-      zh: "仅本地构建；不进入官方发布 / updater 矩阵",
-      en: "Local build only; excluded from the official release / updater matrix",
-    },
-  },
-]);
-
-const README_MARKERS = Object.freeze({
-  releaseDownload: {
-    start: "<!-- SUPPORT_MATRIX_RELEASE_DOWNLOAD:START -->",
-    end: "<!-- SUPPORT_MATRIX_RELEASE_DOWNLOAD:END -->",
-  },
-  sourceBuild: {
-    start: "<!-- SUPPORT_MATRIX_SOURCE_BUILD:START -->",
-    end: "<!-- SUPPORT_MATRIX_SOURCE_BUILD:END -->",
-  },
-});
-
-const README_LOCALES = Object.freeze([
-  {
-    fileName: "README.md",
-    locale: "zh",
-  },
-  {
-    fileName: "README_EN.md",
-    locale: "en",
-  },
-]);
-
-const EXPECTED_DESKTOP_OS_FAMILIES = Object.freeze(["windows", "macos", "linux"]);
-
-const WORKFLOW_PATHS = Object.freeze({
-  ci: join(repoRoot, ".github/workflows/ci.yml"),
-  devBuild: join(repoRoot, ".github/workflows/dev-build.yml"),
-  release: join(repoRoot, ".github/workflows/release.yml"),
-  releasePrSyncCargoLock: join(repoRoot, ".github/workflows/release-pr-sync-cargo-lock.yml"),
-});
 
 const HOMEBREW_CASK = Object.freeze({
   token: "aio-coding-hub",
@@ -206,300 +32,171 @@ const HOMEBREW_CASK = Object.freeze({
   bundleIdentifier: "io.aio.codinghub",
 });
 
-function getAllBuildTargets() {
-  return [
-    ...OFFICIAL_RELEASE_TARGETS.map((item) => ({
-      packageScript: item.packageScript,
-      packageCommand: item.packageCommand,
-      buildLabel: item.releaseDownloadLabel,
-      sourceBuildNote: item.sourceBuildNote,
-      official: true,
-    })),
-    ...LOCAL_BUILD_ONLY_TARGETS.map((item) => ({
-      packageScript: item.packageScript,
-      packageCommand: item.packageCommand,
-      buildLabel: item.buildLabel,
-      sourceBuildNote: item.sourceBuildNote,
-      official: false,
-    })),
-  ];
-}
-
-function renderMarkdownTable(headers, rows) {
-  const headerLine = `| ${headers.join(" | ")} |`;
-  const separatorLine = `| ${headers.map(() => "---").join(" | ")} |`;
-  const bodyLines = rows.map((row) => `| ${row.join(" | ")} |`);
-  return [headerLine, separatorLine, ...bodyLines].join("\n");
-}
-
-function renderReadmeReleaseDownloadTable(locale) {
-  const headers =
-    locale === "zh" ? ["平台", "官方发布安装包"] : ["Platform", "Official release packages"];
-  const publishedTargets = FORK_RELEASE_TARGET_IDS.map((targetId) => {
-    const target = OFFICIAL_RELEASE_TARGETS.find((item) => item.id === targetId);
-    if (!target) {
-      throw new Error(`Unknown fork release target id: ${targetId}`);
-    }
-    return target;
-  });
-  const rows = publishedTargets.map((item) => [
-    item.releaseDownloadLabel[locale],
-    item.releaseDownloadPackages[locale],
-  ]);
-  return renderMarkdownTable(headers, rows);
-}
-
-function renderReadmeSourceBuildTable(locale) {
-  const headers = locale === "zh" ? ["分类", "命令", "说明"] : ["Scope", "Command", "Notes"];
-  const separator = locale === "zh" ? "；" : "; ";
-  const rows = getAllBuildTargets().map((item) => [
-    item.official
-      ? locale === "zh"
-        ? "官方支持"
-        : "Official"
-      : locale === "zh"
-        ? "本地构建"
-        : "Local only",
-    `\`pnpm ${item.packageScript}\``,
-    `${item.buildLabel[locale]}${separator}${item.sourceBuildNote[locale]}`,
-  ]);
-  return renderMarkdownTable(headers, rows);
-}
-
-function renderReadmeBlock(section, locale) {
-  const markers = README_MARKERS[section];
-  const table =
-    section === "releaseDownload"
-      ? renderReadmeReleaseDownloadTable(locale)
-      : renderReadmeSourceBuildTable(locale);
-  return `${markers.start}\n${table}\n${markers.end}`;
-}
-
-function buildWorkflowMatrix(targets = OFFICIAL_RELEASE_TARGETS) {
-  return targets.map((item) => ({
-    platform: item.runner,
-    target: item.target,
-    bundles: item.bundles,
-    updater_platform: item.updaterPlatform,
-    stable_label: item.stableLabel,
-  }));
-}
-
-function buildDesktopCiMatrix() {
-  const seenFamilies = new Set();
-
-  return OFFICIAL_RELEASE_TARGETS.filter((item) => {
-    if (seenFamilies.has(item.osFamily)) {
-      return false;
-    }
-    seenFamilies.add(item.osFamily);
-    return true;
-  }).map((item) => ({
-    os_family: item.osFamily,
-    runner: item.runner,
-  }));
-}
-
 function parseArgs(rawArgs) {
   const args = new Map();
-
-  for (let index = 0; index < rawArgs.length; index += 1) {
+  for (let index = 0; index < rawArgs.length; index += 2) {
     const token = rawArgs[index];
-    if (!token.startsWith("--")) {
-      throw new Error(`Unexpected argument: ${token}`);
-    }
-
-    const key = token.slice(2);
     const value = rawArgs[index + 1];
-    if (value == null || value.startsWith("--")) {
-      throw new Error(`Missing value for argument: ${token}`);
+    if (!token?.startsWith("--") || value == null || value.startsWith("--")) {
+      throw new Error(`Invalid argument near ${token ?? "<end>"}`);
     }
-
-    args.set(key, value);
-    index += 1;
+    const name = token.slice(2);
+    if (args.has(name)) throw new Error(`Duplicate argument: ${token}`);
+    args.set(name, value);
   }
-
   return args;
 }
 
-function requireArg(args, key) {
-  const value = args.get(key);
-  if (typeof value !== "string" || value.length === 0) {
-    throw new Error(`Missing required argument: --${key}`);
-  }
+function requireArg(args, name) {
+  const value = args.get(name);
+  if (!value) throw new Error(`Missing required argument: --${name}`);
   return value;
 }
 
-function selectOfficialTargets(args) {
-  const rawTargetIds = args.get("target-ids");
-  if (rawTargetIds == null) {
-    return [...OFFICIAL_RELEASE_TARGETS];
-  }
-
-  const targetIds = rawTargetIds
+function selectedTargets(args) {
+  const ids = (args.get("target-ids") ?? RELEASE_TARGETS.map((target) => target.id).join(","))
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
-  if (targetIds.length === 0) {
-    throw new Error("--target-ids must contain at least one target id.");
+  if (ids.length === 0 || new Set(ids).size !== ids.length) {
+    throw new Error("--target-ids must contain unique release targets");
   }
-
-  const uniqueIds = new Set(targetIds);
-  if (uniqueIds.size !== targetIds.length) {
-    throw new Error(`Duplicate target id in --target-ids: ${rawTargetIds}`);
-  }
-
-  const targetsById = new Map(OFFICIAL_RELEASE_TARGETS.map((target) => [target.id, target]));
-  return targetIds.map((targetId) => {
-    const target = targetsById.get(targetId);
-    if (!target) {
-      throw new Error(
-        `Unsupported target id: ${targetId}. Expected one of: ${[...targetsById.keys()].join(", ")}`
-      );
-    }
+  return ids.map((id) => {
+    const target = RELEASE_TARGETS.find((candidate) => candidate.id === id);
+    if (!target) throw new Error(`Unsupported release target: ${id}`);
     return target;
   });
 }
 
-function normalizeReleaseVersion(tag, repo) {
-  const repoName = repo.split("/").at(-1) ?? "";
-  if (repoName.length > 0 && tag.startsWith(`${repoName}-v`)) {
-    return tag.slice(repoName.length + 2);
-  }
-  if (tag.startsWith("v")) {
-    return tag.slice(1);
-  }
-  return tag;
-}
-
-function loadSignature(stableAssetsDir, signatureName) {
-  const signaturePath = join(stableAssetsDir, signatureName);
-  if (!existsSync(signaturePath)) {
-    throw new Error(`Missing signature file: ${signaturePath}`);
-  }
-  return readFileSync(signaturePath, "utf8").replace(/[\r\n]+/g, "");
-}
-
-function findOfficialTargetByUpdaterPlatform(updaterPlatform) {
-  return OFFICIAL_RELEASE_TARGETS.find((item) => item.updaterPlatform === updaterPlatform) ?? null;
-}
-
-function assertExpectedOsFamilies() {
-  const actualFamilies = [...new Set(OFFICIAL_RELEASE_TARGETS.map((item) => item.osFamily))].sort();
-  const expectedFamilies = [...EXPECTED_DESKTOP_OS_FAMILIES].sort();
-
-  if (actualFamilies.length !== expectedFamilies.length) {
-    throw new Error(
-      `Desktop OS family drifted. Expected: ${expectedFamilies.join(", ")}. Actual: ${actualFamilies.join(", ")}.`
-    );
-  }
-
-  for (let index = 0; index < expectedFamilies.length; index += 1) {
-    if (actualFamilies[index] !== expectedFamilies[index]) {
-      throw new Error(
-        `Desktop OS family drifted. Expected: ${expectedFamilies.join(", ")}. Actual: ${actualFamilies.join(", ")}.`
-      );
-    }
-  }
-}
-
-function pickArtifact(artifactPaths, predicate, label) {
-  const picked = artifactPaths.find((item) => typeof item === "string" && predicate(item));
-  if (!picked) {
-    throw new Error(
-      `Missing required artifact: ${label}\nAvailable artifacts:\n${artifactPaths.map((item) => `- ${item}`).join("\n")}`
-    );
-  }
-  return picked;
-}
-
-function copyArtifact(sourcePath, outputDir, outputName) {
-  const destinationPath = join(outputDir, outputName);
-  copyFileSync(sourcePath, destinationPath);
-  logger.info("[support-matrix] 复制产物：%s -> %s", sourcePath, destinationPath);
-}
-
-function buildLatestJson({
-  tag,
-  repo,
-  pubDate,
-  stableAssetsDir,
-  releaseBody,
-  fallbackNotes,
-  targets = OFFICIAL_RELEASE_TARGETS,
-}) {
-  const platforms = {};
-
-  for (const target of targets) {
-    platforms[target.updaterPlatform] = {
-      signature: loadSignature(stableAssetsDir, target.latestSignatureName),
-      url: `https://github.com/${repo}/releases/download/${tag}/${target.latestAssetName}`,
-    };
-  }
-
-  const notes =
-    typeof releaseBody === "string" && releaseBody.trim().length > 0 ? releaseBody : fallbackNotes;
-
-  return {
-    version: normalizeReleaseVersion(tag, repo),
-    notes,
-    pub_date: pubDate,
-    platforms,
-  };
+function readJson(path) {
+  return JSON.parse(readFileSync(join(repoRoot, path), "utf8"));
 }
 
 function validateReleaseVersion(args) {
   const tag = requireArg(args, "tag");
-  const tagMatch =
-    /^aio-coding-hub-v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(
-      tag
-    );
-  if (!tagMatch) {
-    throw new Error(`Invalid release tag: ${tag}. Expected aio-coding-hub-v<semver>.`);
-  }
-
-  const tagVersion = tag.slice("aio-coding-hub-v".length);
-  const packageVersion = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")).version;
-  const tauriVersion = JSON.parse(
-    readFileSync(join(repoRoot, "src-tauri/tauri.conf.json"), "utf8")
-  ).version;
+  const match = /^aio-coding-hub-v((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))$/.exec(tag);
+  if (!match) throw new Error(`Invalid release tag: ${tag}`);
+  const expected = match[1];
   const cargoToml = readFileSync(join(repoRoot, "src-tauri/Cargo.toml"), "utf8");
-  const cargoVersion = /^version\s*=\s*"([^"]+)"/m.exec(cargoToml)?.[1];
+  const cargoLock = readFileSync(join(repoRoot, "src-tauri/Cargo.lock"), "utf8");
   const versions = new Map([
-    ["package.json", packageVersion],
-    ["src-tauri/Cargo.toml", cargoVersion],
-    ["src-tauri/tauri.conf.json", tauriVersion],
+    ["package.json", readJson("package.json").version],
+    ["src-tauri/tauri.conf.json", readJson("src-tauri/tauri.conf.json").version],
+    ["src-tauri/Cargo.toml", /^version\s*=\s*"([^"]+)"/m.exec(cargoToml)?.[1]],
+    [
+      "src-tauri/Cargo.lock",
+      /\[\[package\]\]\s+name\s*=\s*"aio-coding-hub"\s+version\s*=\s*"([^"]+)"/m.exec(
+        cargoLock
+      )?.[1],
+    ],
   ]);
-
-  for (const [fileName, version] of versions) {
-    if (version !== tagVersion) {
-      throw new Error(
-        `Release version mismatch: tag=${tagVersion}, ${fileName}=${version ?? "<missing>"}`
-      );
+  for (const [path, version] of versions) {
+    if (version !== expected) {
+      throw new Error(`Release version mismatch: tag=${expected}, ${path}=${version ?? "missing"}`);
     }
   }
+  console.error(`[support-matrix] release version ${expected} is consistent`);
+}
 
-  logger.info("[support-matrix] 发布版本校验通过：%s", tagVersion);
+function parseArtifactPaths(args) {
+  const raw = requireArg(args, "artifact-paths");
+  const paths = JSON.parse(raw);
+  if (
+    !Array.isArray(paths) ||
+    paths.length === 0 ||
+    paths.some((path) => typeof path !== "string")
+  ) {
+    throw new Error("--artifact-paths must be a non-empty JSON string array");
+  }
+  return paths;
+}
+
+function pickArtifact(paths, predicate, label) {
+  const path = paths.find((candidate) => predicate(candidate.toLowerCase()));
+  if (!path) throw new Error(`Missing ${label} in Tauri artifact paths`);
+  return path;
+}
+
+function prepareStableAssets(args) {
+  const updaterPlatform = requireArg(args, "updater-platform");
+  const stableLabel = requireArg(args, "stable-label");
+  const outputDir = requireArg(args, "output-dir");
+  const target = RELEASE_TARGETS.find((candidate) => candidate.updaterPlatform === updaterPlatform);
+  if (!target || target.stableLabel !== stableLabel) {
+    throw new Error(`Unsupported release asset target: ${updaterPlatform}/${stableLabel}`);
+  }
+
+  const paths = parseArtifactPaths(args);
+  let artifact;
+  let signature;
+  if (target.kind === "msi") {
+    artifact = pickArtifact(paths, (path) => path.endsWith(".msi"), "MSI");
+    signature = pickArtifact(paths, (path) => path.endsWith(".msi.sig"), "MSI signature");
+  } else {
+    artifact = pickArtifact(
+      paths,
+      (path) =>
+        path.endsWith(".app.tar.gz") || (path.endsWith(".tar.gz") && !path.endsWith(".tar.gz.sig")),
+      "macOS updater tarball"
+    );
+    signature = pickArtifact(
+      paths,
+      (path) => path.endsWith(".app.tar.gz.sig") || path.endsWith(".tar.gz.sig"),
+      "macOS updater signature"
+    );
+  }
+
+  mkdirSync(outputDir, { recursive: true });
+  copyFileSync(artifact, join(outputDir, target.assetName));
+  copyFileSync(signature, join(outputDir, target.signatureName));
+}
+
+function normalizedVersion(tag, repo) {
+  const prefix = `${repo.split("/").at(-1)}-v`;
+  return tag.startsWith(prefix) ? tag.slice(prefix.length) : tag.replace(/^v/, "");
+}
+
+function readSignature(directory, name) {
+  const path = join(directory, name);
+  if (!existsSync(path)) throw new Error(`Missing signature file: ${path}`);
+  return readFileSync(path, "utf8").replace(/[\r\n]+/g, "");
+}
+
+function generateLatestJson(args) {
+  const tag = requireArg(args, "tag");
+  const repo = requireArg(args, "repo");
+  const pubDate = requireArg(args, "pub-date");
+  const assetsDirectory = requireArg(args, "stable-assets-dir");
+  const output = requireArg(args, "output");
+  const platforms = {};
+  for (const target of selectedTargets(args)) {
+    platforms[target.updaterPlatform] = {
+      signature: readSignature(assetsDirectory, target.signatureName),
+      url: `https://github.com/${repo}/releases/download/${tag}/${target.assetName}`,
+    };
+  }
+  const releaseBody = process.env.RELEASE_BODY?.trim();
+  const document = {
+    version: normalizedVersion(tag, repo),
+    notes: releaseBody || process.env.FALLBACK_NOTES || "",
+    pub_date: pubDate,
+    platforms,
+  };
+  writeFileSync(output, `${JSON.stringify(document, null, 2)}\n`, "utf8");
 }
 
 function normalizeSha256(value, label) {
   const normalized = value.replace(/^sha256:/, "").toLowerCase();
   if (!/^[0-9a-f]{64}$/.test(normalized)) {
-    throw new Error(`Invalid SHA-256 for ${label}: ${value}`);
+    throw new Error(`Invalid SHA-256 for ${label}`);
   }
   return normalized;
 }
 
-function buildVersionedTagTemplate(tag, version) {
-  if (!tag.includes(version)) {
-    throw new Error(`Release tag must contain normalized version ${version}: ${tag}`);
-  }
-  return tag.replace(version, "#{version}");
-}
-
 function buildHomebrewCask({ tag, repo, macosArmSha256, macosIntelSha256 }) {
-  const version = normalizeReleaseVersion(tag, repo);
-  const tagTemplate = buildVersionedTagTemplate(tag, version);
+  const version = normalizedVersion(tag, repo);
+  if (!tag.includes(version)) throw new Error(`Release tag does not contain ${version}`);
+  const tagTemplate = tag.replace(version, "#{version}");
   const armSha256 = normalizeSha256(macosArmSha256, "macOS Apple Silicon zip");
   const intelSha256 = normalizeSha256(macosIntelSha256, "macOS Intel zip");
 
@@ -534,554 +231,26 @@ function buildHomebrewCask({ tag, repo, macosArmSha256, macosIntelSha256 }) {
   ].join("\n");
 }
 
-function extractMarkedBlock(content, markerName) {
-  const { start, end } = README_MARKERS[markerName];
-  const startIndex = content.indexOf(start);
-  const endIndex = content.indexOf(end);
-
-  if (startIndex === -1 || endIndex === -1 || endIndex < startIndex) {
-    throw new Error(`Missing README markers: ${start} ... ${end}`);
-  }
-
-  const blockEnd = endIndex + end.length;
-  return content.slice(startIndex, blockEnd);
-}
-
-function assertUniqueTargets(items, getValue, label) {
-  const seen = new Set();
-
-  for (const item of items) {
-    const value = getValue(item);
-    if (seen.has(value)) {
-      throw new Error(`Duplicate ${label}: ${value}`);
-    }
-    seen.add(value);
-  }
-}
-
-function checkPackageScripts() {
-  const packageJsonPath = join(repoRoot, "package.json");
-  const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
-  const scripts = packageJson.scripts ?? {};
-  const expectedBuildTargets = getAllBuildTargets();
-  const allowedBuildScripts = new Set(expectedBuildTargets.map((item) => item.packageScript));
-
-  for (const item of expectedBuildTargets) {
-    if (scripts[item.packageScript] !== item.packageCommand) {
-      throw new Error(
-        `package.json script drifted: ${item.packageScript}\nExpected: ${item.packageCommand}\nActual: ${scripts[item.packageScript] ?? "<missing>"}`
-      );
-    }
-  }
-
-  const unexpectedBuildScripts = Object.keys(scripts)
-    .filter((name) => name.startsWith("tauri:build:"))
-    .filter((name) => !allowedBuildScripts.has(name));
-
-  if (unexpectedBuildScripts.length > 0) {
-    throw new Error(
-      `Unexpected tauri build scripts outside support matrix: ${unexpectedBuildScripts.join(", ")}`
-    );
-  }
-
-  if (scripts["check:support-matrix"] !== "node scripts/support-matrix.mjs check") {
-    throw new Error("package.json must expose check:support-matrix.");
-  }
-
-  if (
-    scripts["audit:deps"] !==
-    "node scripts/check-pnpm-audit.selftest.mjs && node scripts/check-pnpm-audit.mjs"
-  ) {
-    throw new Error("package.json must expose a fail-close audit:deps script.");
-  }
-}
-
-function checkReadmes() {
-  for (const item of README_LOCALES) {
-    const readmePath = join(repoRoot, item.fileName);
-    const content = readFileSync(readmePath, "utf8");
-
-    for (const markerName of Object.keys(README_MARKERS)) {
-      const actualBlock = extractMarkedBlock(content, markerName).trim();
-      const expectedBlock = renderReadmeBlock(markerName, item.locale).trim();
-      if (actualBlock !== expectedBlock) {
-        throw new Error(
-          `${item.fileName} drifted in ${markerName}. Update the support matrix block.`
-        );
-      }
-    }
-  }
-}
-
-function assertWorkflowContains(content, snippet, label) {
-  if (!content.includes(snippet)) {
-    throw new Error(`Workflow contract drifted: missing ${label}`);
-  }
-}
-
-function checkPinnedGithubActions(workflowPath) {
-  const content = readFileSync(workflowPath, "utf8");
-  const usesMatches = content.matchAll(/^\s*(?:-\s+)?uses:\s+([^@\s]+)@([^\s#]+)/gm);
-
-  for (const match of usesMatches) {
-    const actionRef = match[1];
-    const versionRef = match[2];
-
-    if (actionRef.startsWith("./") || actionRef.startsWith("docker://")) {
-      continue;
-    }
-
-    if (!/^[0-9a-f]{40}$/.test(versionRef)) {
-      throw new Error(
-        `Workflow action must pin to a full commit SHA: ${workflowPath} -> ${actionRef}@${versionRef}`
-      );
-    }
-  }
-}
-
-function checkWorkflowContracts() {
-  const ciWorkflow = readFileSync(WORKFLOW_PATHS.ci, "utf8");
-  const devBuildWorkflow = readFileSync(WORKFLOW_PATHS.devBuild, "utf8");
-  const releaseWorkflow = readFileSync(WORKFLOW_PATHS.release, "utf8");
-
-  assertWorkflowContains(
-    ciWorkflow,
-    "desktop_matrix=$(node scripts/support-matrix.mjs ci-matrix)",
-    "ci desktop matrix loader"
-  );
-  assertWorkflowContains(ciWorkflow, "  workflow_dispatch:", "manual CI trigger");
-  if (/^  workflow_call:/m.test(ciWorkflow)) {
-    throw new Error("Workflow contract drifted: CI must not expose a reusable trigger.");
-  }
-  assertWorkflowContains(
-    ciWorkflow,
-    "include: ${{ fromJson(needs.support-contract.outputs.desktop_matrix) }}",
-    "ci desktop matrix usage"
-  );
-  assertWorkflowContains(ciWorkflow, "run: pnpm check:support-matrix", "ci support matrix check");
-  assertWorkflowContains(
-    ciWorkflow,
-    "run: node scripts/support-matrix.homebrew-cask.selftest.mjs",
-    "ci Homebrew Cask generator check"
-  );
-  assertWorkflowContains(ciWorkflow, "run: pnpm audit:deps", "ci fail-close dependency audit");
-
-  assertWorkflowContains(
-    devBuildWorkflow,
-    "workflow_dispatch:",
-    "manual development build trigger"
-  );
-  if (/^  push:/m.test(devBuildWorkflow)) {
-    throw new Error("Workflow contract drifted: development packaging must not run on push.");
-  }
-  assertWorkflowContains(devBuildWorkflow, "retention-days: 1", "development artifact retention");
-
-  assertWorkflowContains(releaseWorkflow, '      - "aio-coding-hub-v*"', "release tag trigger");
-  assertWorkflowContains(
-    releaseWorkflow,
-    `RELEASE_TARGET_IDS: ${FORK_RELEASE_TARGET_IDS.join(",")}`,
-    "fork release target set"
-  );
-  if (/^  workflow_dispatch:/m.test(releaseWorkflow)) {
-    throw new Error("Workflow contract drifted: release packaging must be version-tag-only.");
-  }
-  if (releaseWorkflow.includes("run: node scripts/support-matrix.mjs check")) {
-    throw new Error("Workflow contract drifted: release must reuse the main CI matrix check.");
-  }
-  assertWorkflowContains(
-    releaseWorkflow,
-    'node scripts/support-matrix.mjs validate-release-version --tag "$GITHUB_REF_NAME"',
-    "release version validation"
-  );
-  assertWorkflowContains(
-    releaseWorkflow,
-    'node scripts/support-matrix.mjs build-matrix --target-ids "$RELEASE_TARGET_IDS"',
-    "filtered release matrix output"
-  );
-  assertWorkflowContains(
-    releaseWorkflow,
-    "include: ${{ fromJson(needs.validate.outputs.build_matrix) }}",
-    "release matrix usage"
-  );
-  if (releaseWorkflow.includes("uses: ./.github/workflows/ci.yml")) {
-    throw new Error("Workflow contract drifted: release must not rerun the full CI workflow.");
-  }
-  assertWorkflowContains(releaseWorkflow, "actions: read", "CI result read permission");
-  assertWorkflowContains(
-    releaseWorkflow,
-    "name: Reuse successful main CI validation",
-    "successful CI reuse gate"
-  );
-  assertWorkflowContains(releaseWorkflow, "workflow_id: 'ci.yml'", "CI workflow lookup");
-  assertWorkflowContains(releaseWorkflow, "head_sha: sha", "exact CI commit lookup");
-  assertWorkflowContains(releaseWorkflow, "run.head_branch === 'main'", "main CI restriction");
-  assertWorkflowContains(
-    releaseWorkflow,
-    "run.conclusion === 'success'",
-    "successful CI conclusion requirement"
-  );
-  assertWorkflowContains(releaseWorkflow, "needs: validate", "build dependency on release gate");
-  assertWorkflowContains(
-    releaseWorkflow,
-    "node scripts/support-matrix.mjs prepare-stable-assets \\",
-    "stable asset preparation delegation"
-  );
-  assertWorkflowContains(
-    releaseWorkflow,
-    "node scripts/support-matrix.mjs generate-latest-json \\",
-    "latest.json generation delegation"
-  );
-  assertWorkflowContains(
-    releaseWorkflow,
-    '--target-ids "$RELEASE_TARGET_IDS"',
-    "latest.json target filter"
-  );
-  assertWorkflowContains(
-    releaseWorkflow,
-    "retention-days: 1",
-    "one-day temporary artifact retention"
-  );
-  assertWorkflowContains(
-    releaseWorkflow,
-    'Compress-Archive -Path "$portableDir/*" -DestinationPath "stable-assets/aio-coding-hub-${{ matrix.stable_label }}-portable.zip" -Force',
-    "Windows portable ZIP packaging"
-  );
-  assertWorkflowContains(
-    releaseWorkflow,
-    "APPLE_SIGNING_IDENTITY:",
-    "macOS ad-hoc signing identity"
-  );
-  assertWorkflowContains(
-    releaseWorkflow,
-    "secrets.TAURI_SIGNING_PRIVATE_KEY",
-    "updater signing private key secret"
-  );
-  assertWorkflowContains(
-    releaseWorkflow,
-    "secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD",
-    "updater signing password secret"
-  );
-  assertWorkflowContains(releaseWorkflow, "draft: true", "draft-preserving asset upload");
-  assertWorkflowContains(releaseWorkflow, "draft: false", "publish gate after assembly");
-
-  for (const forbidden of [
-    "RELEASE_PLEASE_TOKEN",
-    "HOMEBREW_TAP_TOKEN",
-    "publish-homebrew-cask:",
-  ]) {
-    if (releaseWorkflow.includes(forbidden)) {
-      throw new Error(`Fork release workflow must not depend on ${forbidden}`);
-    }
-  }
-}
-
-function checkTargetSelection() {
-  const selected = selectOfficialTargets(
-    new Map([["target-ids", FORK_RELEASE_TARGET_IDS.join(",")]])
-  );
-  const selectedIds = selected.map((target) => target.id).join(",");
-  if (selectedIds !== FORK_RELEASE_TARGET_IDS.join(",")) {
-    throw new Error(`Filtered release target order drifted: ${selectedIds}`);
-  }
-
-  for (const invalidValue of ["", "windows-x64,windows-x64", "unknown-target"]) {
-    let rejected = false;
-    try {
-      selectOfficialTargets(new Map([["target-ids", invalidValue]]));
-    } catch {
-      rejected = true;
-    }
-    if (!rejected) {
-      throw new Error(`Invalid --target-ids value was accepted: ${invalidValue}`);
-    }
-  }
-}
-
-function checkReleaseVersionContract() {
-  const packageVersion = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")).version;
-  validateReleaseVersion(new Map([["tag", `aio-coding-hub-v${packageVersion}`]]));
-
-  for (const invalidTag of ["v1.2.3", "aio-coding-hub-v01.2.3", "aio-coding-hub-v1.2"]) {
-    let rejected = false;
-    try {
-      validateReleaseVersion(new Map([["tag", invalidTag]]));
-    } catch {
-      rejected = true;
-    }
-    if (!rejected) {
-      throw new Error(`Invalid release tag was accepted: ${invalidTag}`);
-    }
-  }
-}
-
-function runSupportMatrixCheck() {
-  /*
-   * ============================================================================
-   * 步骤2：校验单一矩阵与外部引用是否一致
-   * ============================================================================
-   * 目标：
-   *   1) 防止 package scripts、workflow 与 README 再次各写一份
-   *   2) 在 CI / release 中提前拦截支持矩阵和 action pin 漂移
-   * 数据源：
-   *   1) package.json
-   *   2) README.md / README_EN.md
-   *   3) .github/workflows/*.yml
-   * 操作要点：
-   *   1) 只允许矩阵中登记过的 tauri:build:* 脚本
-   *   2) README 标记块必须与矩阵渲染结果完全一致
-   *   3) release 关键 workflow 只能消费 support-matrix 导出的契约
-   */
-  logger.info("[support-matrix] 开始校验支持矩阵...");
-
-  // 2.1 先校验内部定义没有重复键
-  assertUniqueTargets(OFFICIAL_RELEASE_TARGETS, (item) => item.id, "official target id");
-  assertUniqueTargets(OFFICIAL_RELEASE_TARGETS, (item) => item.target, "rust target");
-  assertUniqueTargets(OFFICIAL_RELEASE_TARGETS, (item) => item.updaterPlatform, "updater platform");
-  assertUniqueTargets(OFFICIAL_RELEASE_TARGETS, (item) => item.stableLabel, "stable label");
-  assertUniqueTargets(getAllBuildTargets(), (item) => item.packageScript, "package script");
-  assertUniqueTargets(buildDesktopCiMatrix(), (item) => item.os_family, "desktop os family");
-  assertExpectedOsFamilies();
-  checkTargetSelection();
-  checkReleaseVersionContract();
-
-  // 2.2 再校验 package.json 的构建脚本
-  checkPackageScripts();
-
-  // 2.3 校验 workflow 契约和 action pin
-  checkWorkflowContracts();
-  checkPinnedGithubActions(WORKFLOW_PATHS.ci);
-  checkPinnedGithubActions(WORKFLOW_PATHS.devBuild);
-  checkPinnedGithubActions(WORKFLOW_PATHS.release);
-  checkPinnedGithubActions(WORKFLOW_PATHS.releasePrSyncCargoLock);
-
-  // 2.4 最后校验 README 中的支持矩阵文案
-  checkReadmes();
-
-  logger.info("[support-matrix] 支持矩阵校验通过。");
-}
-
-function prepareStableAssets(args) {
-  /*
-   * ============================================================================
-   * 步骤3：按矩阵整理稳定发布产物
-   * ============================================================================
-   * 目标：
-   *   1) 让 release workflow 不再内联维护一份资产挑选规则
-   *   2) 让 stable asset 命名与 latest.json 平台条目共用同一矩阵
-   * 数据源：
-   *   1) tauri-action 返回的 artifactPaths
-   *   2) OFFICIAL_RELEASE_TARGETS 中的 stable asset 定义
-   * 操作要点：
-   *   1) updater platform 必须能反查到唯一官方目标
-   *   2) 资产复制失败直接中断 release，禁止静默降级
-   */
-  logger.info("[support-matrix] 开始整理稳定发布产物...");
-
-  // 3.1 读取 CLI 参数并反查目标定义
-  const rawArtifactPaths = requireArg(args, "artifact-paths");
-  const updaterPlatform = requireArg(args, "updater-platform");
-  const stableLabel = requireArg(args, "stable-label");
-  const outputDir = requireArg(args, "output-dir");
-  const target = findOfficialTargetByUpdaterPlatform(updaterPlatform);
-
-  if (!target) {
-    throw new Error(`Unsupported updater platform: ${updaterPlatform}`);
-  }
-  if (target.stableLabel !== stableLabel) {
-    throw new Error(
-      `Stable label drifted for ${updaterPlatform}. Expected: ${target.stableLabel}. Actual: ${stableLabel}.`
-    );
-  }
-
-  let artifactPaths;
-  try {
-    artifactPaths = JSON.parse(rawArtifactPaths);
-  } catch (error) {
-    throw new Error(
-      `Failed to parse --artifact-paths as JSON: ${error instanceof Error ? error.message : error}`
-    );
-  }
-
-  if (!Array.isArray(artifactPaths) || artifactPaths.length === 0) {
-    throw new Error("No artifacts found (artifactPaths is empty).");
-  }
-
-  // 3.2 创建输出目录，并按目标类型挑选主产物与签名
-  mkdirSync(outputDir, { recursive: true });
-
-  if (target.stableAssetKind === "msi") {
-    const msi = pickArtifact(
-      artifactPaths,
-      (item) => item.toLowerCase().endsWith(".msi") && !item.toLowerCase().endsWith(".msi.sig"),
-      "*.msi"
-    );
-    const msiSig = pickArtifact(
-      artifactPaths,
-      (item) => item.toLowerCase().endsWith(".msi.sig"),
-      "*.msi.sig"
-    );
-    copyArtifact(msi, outputDir, target.latestAssetName);
-    copyArtifact(msiSig, outputDir, target.latestSignatureName);
-    logger.info("[support-matrix] 稳定发布产物整理完成：%s", updaterPlatform);
-    return;
-  }
-
-  if (target.stableAssetKind === "appimage") {
-    const appImage = pickArtifact(
-      artifactPaths,
-      (item) =>
-        item.toLowerCase().endsWith(".appimage") && !item.toLowerCase().endsWith(".appimage.sig"),
-      "*.AppImage"
-    );
-    const appImageSig = pickArtifact(
-      artifactPaths,
-      (item) => item.toLowerCase().endsWith(".appimage.sig"),
-      "*.AppImage.sig"
-    );
-    copyArtifact(appImage, outputDir, target.latestAssetName);
-    copyArtifact(appImageSig, outputDir, target.latestSignatureName);
-
-    const deb = artifactPaths.find(
-      (item) => typeof item === "string" && item.toLowerCase().endsWith(".deb")
-    );
-    if (deb) {
-      copyArtifact(deb, outputDir, `aio-coding-hub-${target.stableLabel}.deb`);
-    }
-
-    logger.info("[support-matrix] 稳定发布产物整理完成：%s", updaterPlatform);
-    return;
-  }
-
-  const tarball = pickArtifact(
-    artifactPaths,
-    (item) =>
-      item.toLowerCase().endsWith(".app.tar.gz") ||
-      (item.toLowerCase().endsWith(".tar.gz") && !item.toLowerCase().endsWith(".tar.gz.sig")),
-    "*.app.tar.gz / *.tar.gz"
-  );
-  const tarballSignature = pickArtifact(
-    artifactPaths,
-    (item) =>
-      item.toLowerCase().endsWith(".app.tar.gz.sig") || item.toLowerCase().endsWith(".tar.gz.sig"),
-    "*.app.tar.gz.sig / *.tar.gz.sig"
-  );
-  copyArtifact(tarball, outputDir, target.latestAssetName);
-  copyArtifact(tarballSignature, outputDir, target.latestSignatureName);
-
-  logger.info("[support-matrix] 稳定发布产物整理完成：%s", updaterPlatform);
-}
-
-function writeLatestJsonFile(args) {
-  /*
-   * ============================================================================
-   * 步骤4：按矩阵生成 latest.json
-   * ============================================================================
-   * 目标：
-   *   1) 只为官方支持目标生成 updater 平台条目
-   *   2) 复用同一份 stable asset 命名规则
-   * 数据源：
-   *   1) release tag / repo
-   *   2) stable-assets 目录中的签名文件
-   * 操作要点：
-   *   1) 任一官方目标缺签名文件时直接失败
-   *   2) latest.json 结构写入后再次解析，避免生成坏 JSON
-   */
-  logger.info("[support-matrix] 开始生成 latest.json...");
-
-  // 4.1 读取 CLI 参数与 release 文案环境变量
-  const tag = requireArg(args, "tag");
-  const repo = requireArg(args, "repo");
-  const pubDate = requireArg(args, "pub-date");
-  const stableAssetsDir = requireArg(args, "stable-assets-dir");
-  const outputPath = requireArg(args, "output");
-  const releaseBody = process.env.RELEASE_BODY ?? "";
-  const fallbackNotes = process.env.FALLBACK_NOTES ?? "";
-  const targets = selectOfficialTargets(args);
-
-  // 4.2 按支持矩阵组装 latest.json 内容
-  const latestJson = buildLatestJson({
-    tag,
-    repo,
-    pubDate,
-    stableAssetsDir,
-    releaseBody,
-    fallbackNotes,
-    targets,
-  });
-
-  // 4.3 写盘并回读校验 JSON 结构
-  writeFileSync(outputPath, `${JSON.stringify(latestJson, null, 2)}\n`, "utf8");
-  JSON.parse(readFileSync(outputPath, "utf8"));
-
-  logger.info("[support-matrix] latest.json 生成完成：%s", outputPath);
-}
-
-function writeHomebrewCaskFile(args) {
-  const tag = requireArg(args, "tag");
-  const repo = requireArg(args, "repo");
-  const macosArmSha256 = requireArg(args, "macos-arm-sha256");
-  const macosIntelSha256 = requireArg(args, "macos-intel-sha256");
-  const outputPath = args.get("output") ?? "";
-
+function writeHomebrewCask(args) {
   const cask = buildHomebrewCask({
-    tag,
-    repo,
-    macosArmSha256,
-    macosIntelSha256,
+    tag: requireArg(args, "tag"),
+    repo: requireArg(args, "repo"),
+    macosArmSha256: requireArg(args, "macos-arm-sha256"),
+    macosIntelSha256: requireArg(args, "macos-intel-sha256"),
   });
-
-  if (outputPath.length === 0) {
+  const output = args.get("output");
+  if (!output) {
     process.stdout.write(cask);
     return;
   }
-
-  mkdirSync(dirname(outputPath), { recursive: true });
-  writeFileSync(outputPath, cask, "utf8");
-  logger.info("[support-matrix] Homebrew Cask 生成完成：%s", outputPath);
-}
-
-function printBuildMatrix(args) {
-  process.stdout.write(JSON.stringify(buildWorkflowMatrix(selectOfficialTargets(args))));
-}
-
-function printDesktopCiMatrix() {
-  process.stdout.write(JSON.stringify(buildDesktopCiMatrix()));
-}
-
-function printReadmeBlock(args) {
-  const locale = requireArg(args, "locale");
-  const section = requireArg(args, "section");
-  if (!README_MARKERS[section]) {
-    throw new Error(`Unsupported README section: ${section}`);
-  }
-  process.stdout.write(`${renderReadmeBlock(section, locale)}\n`);
-}
-
-function printUsageAndExit() {
-  logger.error(
-    "Usage: node scripts/support-matrix.mjs <build-matrix|ci-matrix|check|validate-release-version|prepare-stable-assets|generate-latest-json|homebrew-cask|readme-block> [--key value]"
-  );
-  process.exit(1);
+  mkdirSync(dirname(output), { recursive: true });
+  writeFileSync(output, cask, "utf8");
 }
 
 function main() {
-  const [command, ...restArgs] = process.argv.slice(2);
-  if (!command) {
-    printUsageAndExit();
-  }
-
-  const args = parseArgs(restArgs);
-
+  const [command, ...rawArgs] = process.argv.slice(2);
+  const args = parseArgs(rawArgs);
   switch (command) {
-    case "build-matrix":
-      printBuildMatrix(args);
-      return;
-    case "ci-matrix":
-      printDesktopCiMatrix();
-      return;
-    case "check":
-      runSupportMatrixCheck();
-      return;
     case "validate-release-version":
       validateReleaseVersion(args);
       return;
@@ -1089,16 +258,15 @@ function main() {
       prepareStableAssets(args);
       return;
     case "generate-latest-json":
-      writeLatestJsonFile(args);
+      generateLatestJson(args);
       return;
     case "homebrew-cask":
-      writeHomebrewCaskFile(args);
-      return;
-    case "readme-block":
-      printReadmeBlock(args);
+      writeHomebrewCask(args);
       return;
     default:
-      throw new Error(`Unsupported command: ${command}`);
+      throw new Error(
+        "Usage: node scripts/support-matrix.mjs <validate-release-version|prepare-stable-assets|generate-latest-json|homebrew-cask> [--key value]"
+      );
   }
 }
 
