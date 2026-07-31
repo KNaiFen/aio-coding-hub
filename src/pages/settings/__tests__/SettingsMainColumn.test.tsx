@@ -82,8 +82,6 @@ function renderSettingsMainColumn(
     settingsSaving: false,
     port: 37123,
     setPort: vi.fn(),
-    showHomeHeatmap: true,
-    setShowHomeHeatmap: vi.fn(),
     showHomeUsage: true,
     setShowHomeUsage: vi.fn(),
     homeUsagePeriod: "last15",
@@ -153,26 +151,19 @@ describe("pages/settings/SettingsMainColumn", () => {
     expect(setTheme).toHaveBeenCalledWith("system");
   });
 
-  it("toggles homepage heatmap visibility setting", () => {
-    const setShowHomeHeatmap = vi.fn();
-    const requestPersist = vi.fn();
+  it("renders local visibility controls for home information tabs and CLI buttons", () => {
     vi.mocked(useTheme).mockReturnValue({
       theme: "system",
       resolvedTheme: "light",
       setTheme: vi.fn(),
     } as any);
 
-    renderSettingsMainColumn({
-      showHomeHeatmap: true,
-      setShowHomeHeatmap,
-      requestPersist,
-    });
+    renderSettingsMainColumn();
 
-    const row = screen.getByText("显示首页热力图").parentElement?.parentElement;
-    expect(row).toBeTruthy();
-    fireEvent.click(within(row as HTMLElement).getByRole("switch"));
-    expect(setShowHomeHeatmap).toHaveBeenCalledWith(false);
-    expect(requestPersist).toHaveBeenCalledWith({ show_home_heatmap: false });
+    expect(screen.getByText("首页信息面板")).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "首页信息面板：配置信息" })).toBeEnabled();
+    expect(screen.getByText("配置信息中显示的 CLI")).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "配置信息中显示的 CLI：Codex" })).toBeEnabled();
   });
 
   it("shows readonly protection and disables config writes after settings read failure", () => {
@@ -322,22 +313,6 @@ describe("pages/settings/SettingsMainColumn", () => {
     );
   });
 
-  it("toggles homepage overview layout preference in localStorage", () => {
-    vi.mocked(useTheme).mockReturnValue({
-      theme: "system",
-      resolvedTheme: "light",
-      setTheme: vi.fn(),
-    } as any);
-
-    renderSettingsMainColumn();
-
-    const row = screen.getByText("首页个性化布局").closest(".min-w-0")?.parentElement;
-    expect(row).toBeTruthy();
-    expect(screen.getByText("测试")).toBeInTheDocument();
-    fireEvent.click(within(row as HTMLElement).getByRole("switch"));
-    expect(window.localStorage.getItem("aio-home-overview-logs-primary-layout")).toBe("true");
-  });
-
   it("toggles homepage workspace config display preference in localStorage", () => {
     vi.mocked(useTheme).mockReturnValue({
       theme: "system",
@@ -354,26 +329,6 @@ describe("pages/settings/SettingsMainColumn", () => {
     fireEvent.click(within(row as HTMLElement).getByRole("switch"));
 
     expect(window.localStorage.getItem("aio-home-workspace-config-show-all")).toBe("true");
-  });
-
-  it("keeps heatmap and usage toggles enabled when personalized layout is enabled", () => {
-    vi.mocked(useTheme).mockReturnValue({
-      theme: "system",
-      resolvedTheme: "light",
-      setTheme: vi.fn(),
-    } as any);
-    window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
-
-    renderSettingsMainColumn();
-
-    const heatmapRow = screen.getByText("显示首页热力图").parentElement?.parentElement;
-    const usageRow = screen.getByText("显示首页用量统计").parentElement?.parentElement;
-    expect(heatmapRow).toBeTruthy();
-    expect(usageRow).toBeTruthy();
-
-    expect(within(heatmapRow as HTMLElement).getByRole("switch")).toBeEnabled();
-    expect(within(usageRow as HTMLElement).getByRole("switch")).toBeEnabled();
-    expect(screen.queryByText("开启首页个性化布局后，此项仅旧布局生效")).not.toBeInTheDocument();
   });
 
   it("reorders CLI priority from settings", () => {

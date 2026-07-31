@@ -1,0 +1,3 @@
+{"file": "src/components/home/HomeOverviewPanel.tsx", "reason": "首页网格和信息面板组合入口"}
+{"file": "src/pages/HomePage.tsx", "reason": "首页偏好和数据查询入口"}
+{"file": "src/pages/settings/SettingsMainColumn.tsx", "reason": "UI 偏好设置入口"}

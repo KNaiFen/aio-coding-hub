@@ -5,10 +5,6 @@ import { useTheme } from "../../hooks/useTheme";
 import { logToConsole } from "../../services/consoleLog";
 import type { GatewayStatus } from "../../services/gateway/gateway";
 import {
-  readHomeOverviewLogsPrimaryLayoutFromStorage,
-  writeHomeOverviewLogsPrimaryLayoutToStorage,
-} from "../../services/home/homeOverviewLayout";
-import {
   readHomeWorkspaceConfigShowAllFromStorage,
   writeHomeWorkspaceConfigShowAllToStorage,
 } from "../../services/home/homeWorkspaceConfigDisplay";
@@ -22,19 +18,14 @@ import { Switch } from "../../ui/Switch";
 import { cn } from "../../utils/cn";
 import { CliPriorityOrderEditor } from "./CliPriorityOrderEditor";
 import { HomeOverviewTabOrderEditor } from "./HomeOverviewTabOrderEditor";
+import { HomeOverviewVisibilityEditor } from "./HomeOverviewVisibilityEditor";
 import type { NoticePermissionStatus } from "./useSystemNotification";
 import type { CliKey } from "../../services/providers/providers";
 import { ContributionSlot } from "../../plugins/contributions/ContributionSlot";
 
 type PersistKey = "preferred_port" | "log_retention_days" | "request_log_retention_days";
-type BooleanPersistKey =
-  | "show_home_heatmap"
-  | "show_home_usage"
-  | "auto_start"
-  | "start_minimized"
-  | "tray_enabled";
+type BooleanPersistKey = "show_home_usage" | "auto_start" | "start_minimized" | "tray_enabled";
 type SettingsPersistPatch = Partial<{
-  show_home_heatmap: boolean;
   show_home_usage: boolean;
   home_usage_period: HomeUsagePeriod;
   cli_priority_order: CliKey[];
@@ -72,8 +63,6 @@ export type SettingsMainColumnProps = {
     invalidMessage: string;
   }) => void;
 
-  showHomeHeatmap: boolean;
-  setShowHomeHeatmap: (next: boolean) => void;
   showHomeUsage: boolean;
   setShowHomeUsage: (next: boolean) => void;
   homeUsagePeriod: HomeUsagePeriod;
@@ -536,24 +525,18 @@ function HomeUsagePeriodSelector({
 function UiPreferencesPanel({
   theme,
   setTheme,
-  showHomeHeatmap,
-  setShowHomeHeatmap,
   showHomeUsage,
   setShowHomeUsage,
   homeUsagePeriod,
   setHomeUsagePeriod,
   cliPriorityOrder,
   setCliPriorityOrder,
-  homeOverviewLogsPrimaryLayout,
-  setHomeOverviewLogsPrimaryLayout,
   homeWorkspaceConfigShowAll,
   setHomeWorkspaceConfigShowAll,
   settingsInputsDisabled,
   requestPersist,
 }: Pick<
   SettingsMainColumnProps,
-  | "showHomeHeatmap"
-  | "setShowHomeHeatmap"
   | "showHomeUsage"
   | "setShowHomeUsage"
   | "homeUsagePeriod"
@@ -564,8 +547,6 @@ function UiPreferencesPanel({
 > & {
   theme: (typeof THEME_OPTIONS)[number];
   setTheme: (value: (typeof THEME_OPTIONS)[number]) => void;
-  homeOverviewLogsPrimaryLayout: boolean;
-  setHomeOverviewLogsPrimaryLayout: (next: boolean) => void;
   homeWorkspaceConfigShowAll: boolean;
   setHomeWorkspaceConfigShowAll: (next: boolean) => void;
   settingsInputsDisabled: boolean;
@@ -599,14 +580,12 @@ function UiPreferencesPanel({
             />
           </div>
         </SettingsRow>
-        <BooleanSettingsSwitchRow
-          label="显示首页热力图"
-          persistKey="show_home_heatmap"
-          checked={showHomeHeatmap}
-          setter={setShowHomeHeatmap}
-          disabled={settingsInputsDisabled}
-          requestPersist={requestPersist}
-        />
+        <SettingsRow label="首页信息面板">
+          <HomeOverviewVisibilityEditor kind="tabs" />
+        </SettingsRow>
+        <SettingsRow label="配置信息中显示的 CLI">
+          <HomeOverviewVisibilityEditor kind="clis" />
+        </SettingsRow>
         <BooleanSettingsSwitchRow
           label="显示首页用量统计"
           persistKey="show_home_usage"
@@ -615,24 +594,6 @@ function UiPreferencesPanel({
           disabled={settingsInputsDisabled}
           requestPersist={requestPersist}
         />
-        <SettingsRow
-          label={
-            <span className="inline-flex items-center gap-2">
-              <span>首页个性化布局</span>
-              <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">
-                测试
-              </span>
-            </span>
-          }
-        >
-          <Switch
-            checked={homeOverviewLogsPrimaryLayout}
-            onCheckedChange={(next) => {
-              setHomeOverviewLogsPrimaryLayout(next);
-              writeHomeOverviewLogsPrimaryLayoutToStorage(next);
-            }}
-          />
-        </SettingsRow>
         <SettingsRow
           label="配置信息显示全部"
           subtitle="关闭后只显示已启用配置；开启后显示全部并提供快捷开关"
@@ -685,8 +646,6 @@ export function SettingsMainColumn({
   settingsSaving,
   port,
   setPort,
-  showHomeHeatmap,
-  setShowHomeHeatmap,
   showHomeUsage,
   setShowHomeUsage,
   homeUsagePeriod,
@@ -716,9 +675,6 @@ export function SettingsMainColumn({
   const { theme, setTheme } = useTheme();
   const gatewayStartMutation = useGatewayStartMutation();
   const gatewayStopMutation = useGatewayStopMutation();
-  const [homeOverviewLogsPrimaryLayout, setHomeOverviewLogsPrimaryLayout] = useState(() =>
-    readHomeOverviewLogsPrimaryLayoutFromStorage()
-  );
   const [homeWorkspaceConfigShowAll, setHomeWorkspaceConfigShowAll] = useState(() =>
     readHomeWorkspaceConfigShowAllFromStorage()
   );
@@ -781,16 +737,12 @@ export function SettingsMainColumn({
         uiPreferencesProps={{
           theme,
           setTheme,
-          showHomeHeatmap,
-          setShowHomeHeatmap,
           showHomeUsage,
           setShowHomeUsage,
           homeUsagePeriod,
           setHomeUsagePeriod,
           cliPriorityOrder,
           setCliPriorityOrder,
-          homeOverviewLogsPrimaryLayout,
-          setHomeOverviewLogsPrimaryLayout,
           homeWorkspaceConfigShowAll,
           setHomeWorkspaceConfigShowAll,
           settingsInputsDisabled,

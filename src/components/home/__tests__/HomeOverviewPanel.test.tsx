@@ -1,6 +1,7 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { useState, type ComponentProps, type ReactNode } from "react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { type ComponentProps, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { CliKey } from "../../../constants/clis";
 import { HomeOverviewPanel } from "../HomeOverviewPanel";
 import type { HomeRequestLogsPanelProps } from "../HomeRequestLogsPanel";
 import type {
@@ -10,26 +11,12 @@ import type {
 } from "../homeWorkspaceConfigTypes";
 
 const { homeRequestLogsPanelMock } = vi.hoisted(() => ({
-  homeRequestLogsPanelMock: vi.fn((_props: HomeRequestLogsPanelProps) => (
-    <div>request-logs</div>
-  )),
+  homeRequestLogsPanelMock: vi.fn((_props: HomeRequestLogsPanelProps) => <div>request-logs</div>),
 }));
-
-const TEST_NOW_SECONDS = 1_764_000_000;
 
 vi.mock("../HomeUsageSection", () => ({
-  HomeUsageSection: ({
-    showHeatmap,
-    showUsageChart = true,
-  }: {
-    showHeatmap: boolean;
-    showUsageChart?: boolean;
-  }) => <div>{`usage-section:${String(showHeatmap)}:${String(showUsageChart)}`}</div>,
-}));
-
-vi.mock("../HomeTodayProviderUsageOverview", () => ({
-  HomeTodayProviderUsageOverview: ({ devPreviewEnabled }: { devPreviewEnabled?: boolean }) => (
-    <div>{`today-provider-usage:${String(Boolean(devPreviewEnabled))}`}</div>
+  HomeUsageSection: ({ usageWindowDays }: { usageWindowDays?: number }) => (
+    <div>{`usage-section:${String(usageWindowDays)}`}</div>
   ),
 }));
 
@@ -82,24 +69,15 @@ vi.mock("../HomeWorkspaceConfigPanel", () => ({
     onSelectCliKey,
     headerAddon,
   }: {
-    configs: Array<{
-      cliKey: "claude" | "codex" | "gemini";
-      cliLabel: string;
-      workspaceName: string | null;
-      workspaceId: number | null;
-      workspaces: Array<{ id: number; name: string; isActive: boolean }>;
-      items: Array<{ id: string; name: string }>;
-    }>;
-    selectedCliKey: "claude" | "codex" | "gemini" | null;
-    onSelectCliKey: (cliKey: "claude" | "codex" | "gemini") => void;
+    configs: HomeCliWorkspaceConfig[];
+    selectedCliKey: CliKey | null;
+    onSelectCliKey: (cliKey: CliKey) => void;
     headerAddon?: ReactNode;
   }) => {
     const selectedConfig =
       configs.find((config) => config.cliKey === selectedCliKey) ?? configs[0] ?? null;
 
-    if (!selectedConfig) {
-      return <div>workspace-config:empty</div>;
-    }
+    if (!selectedConfig) return <div>workspace-config:empty</div>;
 
     return (
       <div>
@@ -110,16 +88,11 @@ vi.mock("../HomeWorkspaceConfigPanel", () => ({
             </button>
           ))}
         </div>
-        <div>
-          <span>工作区：</span>
-          <span>{selectedConfig.workspaceName?.trim() || "默认"}</span>
-        </div>
+        <div>{`selected-workspace:${selectedConfig.workspaceName?.trim() || "默认"}`}</div>
         {headerAddon}
-        <div>
-          {selectedConfig.items.map((item) => (
-            <div key={item.id}>{item.name}</div>
-          ))}
-        </div>
+        {selectedConfig.items.map((item) => (
+          <div key={item.id}>{item.name}</div>
+        ))}
       </div>
     );
   },
@@ -147,113 +120,91 @@ function makeWorkspaceItem(
   };
 }
 
-function makeWorkspaceConfig(input: {
-  cliKey: "claude" | "codex" | "gemini";
-  cliLabel: string;
-  workspaceId: number | null;
-  workspaceName: string | null;
-  items?: HomeWorkspaceConfigItem[];
-}): HomeCliWorkspaceConfig {
+function makeWorkspaceConfig(
+  cliKey: CliKey,
+  cliLabel: string,
+  workspaceId: number,
+  workspaceName: string
+): HomeCliWorkspaceConfig {
   return {
-    ...input,
-    workspaces:
-      input.workspaceId == null
-        ? []
-        : [
-            {
-              id: input.workspaceId,
-              name: input.workspaceName?.trim() || "默认",
-              isActive: true,
-            },
-          ],
+    cliKey,
+    cliLabel,
+    workspaceId,
+    workspaceName,
+    workspaces: [{ id: workspaceId, name: workspaceName, isActive: true }],
     loading: false,
-    items: input.items ?? [],
+    items: [makeWorkspaceItem(workspaceId, "prompts", "Prompt", `${cliLabel} Prompt`)],
   };
 }
 
-type HomeOverviewPanelTestOverrides = Omit<
-  Partial<ComponentProps<typeof HomeOverviewPanel>>,
-  "displayOptions"
-> & {
-  displayOptions?: Partial<ComponentProps<typeof HomeOverviewPanel>["displayOptions"]>;
+type PanelProps = ComponentProps<typeof HomeOverviewPanel>;
+type PanelOverrides = Omit<Partial<PanelProps>, "displayOptions"> & {
+  displayOptions?: Partial<PanelProps["displayOptions"]>;
 };
 
-function renderPanel(overrides: HomeOverviewPanelTestOverrides = {}) {
-  const onResetCircuitProvider = vi.fn();
-  const onSetCliActiveMode = vi.fn();
-  const { displayOptions, ...panelOverrides } = overrides;
-  const view = render(
-    <HomeOverviewPanel
-      displayOptions={{
-        customTooltip: false,
-        heatmap: true,
-        usage: true,
-        workspaceConfigQuickToggle: false,
-        ...displayOptions,
-      }}
-      cliPriorityOrder={["claude", "codex", "gemini"]}
-      usageWindowDays={15}
-      usageHeatmapRows={[]}
-      usageHeatmapLoading={false}
-      onRefreshUsageHeatmap={vi.fn()}
-      sortModes={[]}
-      sortModesLoading={false}
-      sortModesAvailable={true}
-      activeModeByCli={{ claude: null, codex: null, gemini: null, grok: null }}
-      activeModeToggling={{ claude: false, codex: false, gemini: false, grok: false }}
-      onSetCliActiveMode={onSetCliActiveMode}
-      activeSessions={[]}
-      activeRequestsAvailable={true}
-      activeSessionsLoading={false}
-      activeSessionsAvailable={true}
-      workspaceConfigs={[
-        makeWorkspaceConfig({
-          cliKey: "claude",
-          cliLabel: "Claude",
-          workspaceId: 1,
-          workspaceName: "默认",
-        }),
-        makeWorkspaceConfig({
-          cliKey: "codex",
-          cliLabel: "Codex",
-          workspaceId: 2,
-          workspaceName: "Default",
-        }),
-        makeWorkspaceConfig({
-          cliKey: "gemini",
-          cliLabel: "Gemini",
-          workspaceId: 3,
-          workspaceName: "工作区 2",
-        }),
-      ]}
-      providerLimitRows={[]}
-      providerLimitLoading={false}
-      providerLimitAvailable={true}
-      providerLimitRefreshing={false}
-      onRefreshProviderLimit={vi.fn()}
-      oauthQuotaRows={[]}
-      oauthQuotaVisible={false}
-      oauthQuotaRefreshing={false}
-      oauthQuotaHasRefreshed={false}
-      onRefreshOAuthQuota={vi.fn()}
-      onRefreshOAuthQuotaRow={vi.fn()}
-      openCircuits={[]}
-      onResetCircuitProvider={onResetCircuitProvider}
-      resettingCircuitProviderIds={new Set()}
-      traces={[]}
-      requestLogs={[]}
-      requestLogsLoading={false}
-      requestLogsRefreshing={false}
-      requestLogsAvailable={true}
-      onRefreshRequestLogs={vi.fn()}
-      selectedLogId={null}
-      onSelectLogId={vi.fn()}
-      personalizedUsageView="summary"
-      {...panelOverrides}
-    />
-  );
+function makePanelProps(overrides: PanelOverrides = {}): PanelProps {
+  const { displayOptions, ...rest } = overrides;
+  return {
+    displayOptions: {
+      customTooltip: false,
+      usage: true,
+      workspaceConfigQuickToggle: false,
+      ...displayOptions,
+    },
+    devPreviewEnabled: false,
+    cliPriorityOrder: ["claude", "codex", "gemini", "grok"],
+    visibleTabKeys: ["workspaceConfig", "circuit", "sessions", "providerLimit", "oauthQuota"],
+    visibleCliKeys: ["claude", "codex", "gemini", "grok"],
+    usageWindowDays: 15,
+    usageHeatmapRows: [],
+    usageHeatmapLoading: false,
+    sortModes: [],
+    sortModesLoading: false,
+    sortModesAvailable: true,
+    activeModeByCli: { claude: null, codex: null, gemini: null, grok: null },
+    activeModeToggling: { claude: false, codex: false, gemini: false, grok: false },
+    onSetCliActiveMode: vi.fn(),
+    activeSessions: [],
+    activeSessionsLoading: false,
+    activeSessionsAvailable: true,
+    workspaceConfigs: [
+      makeWorkspaceConfig("claude", "Claude", 1, "Claude Workspace"),
+      makeWorkspaceConfig("codex", "Codex", 2, "Codex Workspace"),
+      makeWorkspaceConfig("gemini", "Gemini", 3, "Gemini Workspace"),
+    ],
+    providerLimitRows: [],
+    providerLimitLoading: false,
+    providerLimitAvailable: true,
+    providerLimitRefreshing: false,
+    onRefreshProviderLimit: vi.fn(),
+    oauthQuotaRows: [],
+    oauthQuotaVisible: false,
+    oauthQuotaRefreshing: false,
+    oauthQuotaHasRefreshed: false,
+    onRefreshOAuthQuota: vi.fn().mockResolvedValue(undefined),
+    onRefreshOAuthQuotaRow: vi.fn().mockResolvedValue(undefined),
+    openCircuits: [],
+    onResetCircuitProvider: vi.fn(),
+    resettingCircuitProviderIds: new Set(),
+    traces: [],
+    requestLogs: [],
+    activeRequestsAvailable: true,
+    requestLogsLoading: false,
+    requestLogsRefreshing: false,
+    requestLogsAvailable: true,
+    onRefreshRequestLogs: vi.fn(),
+    selectedLogId: null,
+    onSelectLogId: vi.fn(),
+    ...rest,
+  };
+}
 
-  return { ...view, onResetCircuitProvider, onSetCliActiveMode };
+function renderPanel(overrides: PanelOverrides = {}) {
+  const props = makePanelProps(overrides);
+  return {
+    props,
+    ...render(<HomeOverviewPanel {...props} />),
+  };
 }
 
 describe("components/home/HomeOverviewPanel", () => {
@@ -262,833 +213,240 @@ describe("components/home/HomeOverviewPanel", () => {
     homeRequestLogsPanelMock.mockClear();
   });
 
-  it("passes live request availability and enables current concurrency on the home panel", () => {
+  it("renders the compact usage and information column beside full-height request logs", () => {
+    renderPanel();
+
+    const usage = screen.getByText("usage-section:15");
+    const requestLogs = screen.getByText("request-logs");
+    expect(usage.parentElement).toHaveClass("xl:col-span-5");
+    expect(requestLogs.parentElement).toHaveClass("xl:col-span-7");
+    expect(screen.getByRole("tab", { name: "配置信息" })).toBeInTheDocument();
+  });
+
+  it("keeps request log controls available in the unified layout", () => {
     renderPanel({ activeRequestsAvailable: false });
 
-    const latestCall = (homeRequestLogsPanelMock as any).mock.calls[
-      (homeRequestLogsPanelMock as any).mock.calls.length - 1
-    ];
-    expect(latestCall?.[0]).toMatchObject({
+    const latestCall =
+      homeRequestLogsPanelMock.mock.calls[homeRequestLogsPanelMock.mock.calls.length - 1]?.[0];
+    expect(latestCall).toMatchObject({
       activeRequestsAvailable: false,
       showCurrentConcurrency: true,
+      displayOptions: {
+        compactModeToggle: true,
+        refreshButton: true,
+      },
+    });
+    expect(latestCall).not.toHaveProperty("compactModeOverride");
+  });
+
+  it("hides the usage card without affecting information tabs or request logs", () => {
+    renderPanel({ displayOptions: { usage: false } });
+
+    expect(screen.queryByText(/usage-section:/)).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "配置信息" })).toBeInTheDocument();
+    expect(screen.getByText("request-logs")).toBeInTheDocument();
+  });
+
+  it("renders only the configured information tabs", () => {
+    renderPanel({ visibleTabKeys: ["workspaceConfig", "sessions"] });
+
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+      "配置信息",
+      "活跃 Session",
+    ]);
+    expect(screen.queryByRole("tab", { name: "熔断信息" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "供应商限额" })).not.toBeInTheDocument();
+  });
+
+  it("falls back to all information tabs when an invalid caller hides every tab", () => {
+    renderPanel({ visibleTabKeys: [] });
+
+    expect(screen.getAllByRole("tab")).toHaveLength(5);
+  });
+
+  it("filters workspace CLI buttons while preserving CLI priority order", async () => {
+    renderPanel({
+      cliPriorityOrder: ["gemini", "codex", "claude", "grok"],
+      visibleCliKeys: ["codex", "gemini"],
+    });
+
+    expect(
+      (await screen.findAllByRole("button", { name: /Codex|Gemini/ })).map(
+        (button) => button.textContent
+      )
+    ).toEqual(["Gemini", "Codex"]);
+    expect(screen.queryByRole("button", { name: "Claude" })).not.toBeInTheDocument();
+    expect(screen.getByText("selected-workspace:Gemini Workspace")).toBeInTheDocument();
+  });
+
+  it("moves workspace selection to the first visible CLI after preferences change", async () => {
+    const props = makePanelProps({ visibleCliKeys: ["codex", "gemini"] });
+    const view = render(<HomeOverviewPanel {...props} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Gemini" }));
+    expect(screen.getByText("selected-workspace:Gemini Workspace")).toBeInTheDocument();
+
+    view.rerender(<HomeOverviewPanel {...props} visibleCliKeys={["codex"]} />);
+    await waitFor(() => {
+      expect(screen.getByText("selected-workspace:Codex Workspace")).toBeInTheDocument();
     });
   });
 
-  it("renders preview circuit rows when dev preview is enabled and there are no real open circuits", () => {
-    const { onResetCircuitProvider } = renderPanel({ devPreviewEnabled: true });
+  it("moves tab selection to the first visible tab after preferences change", async () => {
+    const props = makePanelProps({ visibleTabKeys: ["workspaceConfig", "sessions"] });
+    const view = render(<HomeOverviewPanel {...props} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "活跃 Session" }));
+    expect(await screen.findByText("active-sessions:0")).toBeInTheDocument();
+
+    view.rerender(<HomeOverviewPanel {...props} visibleTabKeys={["workspaceConfig"]} />);
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "配置信息" })).toHaveAttribute(
+        "aria-selected",
+        "true"
+      );
+    });
+  });
+
+  it("renders route strategy for the selected visible CLI", async () => {
+    const onSetCliActiveMode = vi.fn();
+    renderPanel({
+      visibleCliKeys: ["codex"],
+      sortModes: [{ id: 1, name: "工作策略", created_at: 1, updated_at: 1 }],
+      onSetCliActiveMode,
+    });
+
+    const strategy = await screen.findByRole("combobox", { name: "Codex 路由策略" });
+    fireEvent.change(strategy, { target: { value: "1" } });
+    expect(onSetCliActiveMode).toHaveBeenCalledWith("codex", 1);
+  });
+
+  it("renders preview circuits without forwarding reset actions", () => {
+    const onResetCircuitProvider = vi.fn();
+    renderPanel({ devPreviewEnabled: true, onResetCircuitProvider });
 
     fireEvent.click(screen.getByRole("tab", { name: "熔断信息" }));
     expect(screen.getByText("Claude Main")).toBeInTheDocument();
-    expect(screen.getByText("Codex Fallback")).toBeInTheDocument();
-    expect(screen.getByText("Gemini Mirror")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "预览熔断样式" })).not.toBeInTheDocument();
-
-    expect(screen.getAllByRole("button", { name: "解除熔断" })[0]).toBeDisabled();
-    fireEvent.click(screen.getAllByRole("button", { name: "解除熔断" })[0]);
-    expect(screen.getByText("Claude Main")).toBeInTheDocument();
+    const reset = screen.getAllByRole("button", { name: "解除熔断" })[0];
+    expect(reset).toBeDisabled();
+    fireEvent.click(reset);
     expect(onResetCircuitProvider).not.toHaveBeenCalled();
   });
 
-  it("uses real circuit rows when provided and forwards reset actions", () => {
-    const { onResetCircuitProvider } = renderPanel({
+  it("uses real circuit rows and forwards reset actions", () => {
+    const onResetCircuitProvider = vi.fn();
+    renderPanel({
       openCircuits: [
         {
           cli_key: "claude",
           provider_id: 7,
           provider_name: "Real Claude Provider",
-          displayState: "open" as const,
+          displayState: "open",
           open_until: Math.floor(Date.now() / 1000) + 60,
         },
       ],
+      onResetCircuitProvider,
     });
 
     fireEvent.click(screen.getByRole("tab", { name: "熔断信息" }));
-    expect(screen.getByText("Real Claude Provider")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "预览熔断样式" })).not.toBeInTheDocument();
-
     fireEvent.click(screen.getByRole("button", { name: "解除熔断" }));
     expect(onResetCircuitProvider).toHaveBeenCalledWith(7);
   });
 
-  it("does not render preview circuit rows when dev preview is disabled", () => {
-    renderPanel({ devPreviewEnabled: false });
+  it("auto-switches to visible circuit information when a circuit opens", async () => {
+    const props = makePanelProps();
+    const view = render(<HomeOverviewPanel {...props} />);
+    fireEvent.click(screen.getByRole("tab", { name: "供应商限额" }));
 
-    fireEvent.click(screen.getByRole("tab", { name: "熔断信息" }));
-    expect(screen.getByText("当前没有熔断中的 Provider")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "预览熔断样式" })).not.toBeInTheDocument();
-  });
-
-  it("shows workspace config pills and allows switching sort mode for the selected cli", async () => {
-    const { onSetCliActiveMode } = renderPanel({
-      sortModes: [{ id: 1, name: "工作策略", created_at: 1, updated_at: 1 }],
-      activeModeByCli: { claude: 1, codex: null, gemini: null, grok: null },
-      workspaceConfigs: [
-        makeWorkspaceConfig({
-          cliKey: "claude",
-          cliLabel: "Claude",
-          workspaceId: 1,
-          workspaceName: "工作区 A",
-          items: [
-            makeWorkspaceItem(1, "prompts", "Prompt", "默认提示词"),
-            makeWorkspaceItem(1, "mcp", "MCP", "filesystem"),
-          ],
-        }),
-        makeWorkspaceConfig({
-          cliKey: "codex",
-          cliLabel: "Codex",
-          workspaceId: 2,
-          workspaceName: "Default",
-          items: [makeWorkspaceItem(1, "skills", "Skill", "code-review")],
-        }),
-        makeWorkspaceConfig({
-          cliKey: "gemini",
-          cliLabel: "Gemini",
-          workspaceId: 3,
-          workspaceName: "工作区 B",
-          items: [],
-        }),
-      ],
-    });
-
-    fireEvent.click(screen.getByRole("tab", { name: "配置信息" }));
-    expect(await screen.findByRole("button", { name: "Claude" })).toBeInTheDocument();
-    expect(screen.getByText("工作区 A")).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Claude 路由策略" })).toHaveValue("1");
-    expect(screen.getByRole("option", { name: "工作策略" })).toBeInTheDocument();
-    expect(screen.getByText("默认提示词")).toBeInTheDocument();
-    expect(screen.getByText("filesystem")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Codex" }));
-    expect(screen.getByRole("combobox", { name: "Codex 路由策略" })).toHaveValue("");
-    expect(screen.getByText("code-review")).toBeInTheDocument();
-
-    fireEvent.change(screen.getByRole("combobox", { name: "Codex 路由策略" }), {
-      target: { value: "1" },
-    });
-    expect(onSetCliActiveMode).toHaveBeenCalledWith("codex", 1);
-  });
-
-  it("renders route strategy in the workspace header in logs-primary layout", async () => {
-    window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
-
-    const { onSetCliActiveMode } = renderPanel({
-      sortModes: [{ id: 1, name: "工作策略", created_at: 1, updated_at: 1 }],
-      activeModeByCli: { claude: 1, codex: null, gemini: null, grok: null },
-    });
-
-    fireEvent.click(screen.getByRole("tab", { name: "配置信息" }));
-    expect(await screen.findByText("工作区：")).toBeInTheDocument();
-    expect(screen.getByText("路由策略：")).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Claude 路由策略" })).toHaveValue("1");
-
-    fireEvent.click(screen.getByRole("button", { name: "Codex" }));
-    expect(screen.getByRole("combobox", { name: "Codex 路由策略" })).toHaveValue("");
-
-    fireEvent.change(screen.getByRole("combobox", { name: "Codex 路由策略" }), {
-      target: { value: "1" },
-    });
-    expect(onSetCliActiveMode).toHaveBeenCalledWith("codex", 1);
-  });
-
-  it("uses CLI priority order for workspace config button order and default selection", async () => {
-    renderPanel({
-      cliPriorityOrder: ["gemini", "codex", "claude"],
-      workspaceConfigs: [
-        makeWorkspaceConfig({
-          cliKey: "claude",
-          cliLabel: "Claude",
-          workspaceId: 1,
-          workspaceName: "工作区 A",
-          items: [makeWorkspaceItem(1, "prompts", "Prompt", "Claude Prompt")],
-        }),
-        makeWorkspaceConfig({
-          cliKey: "codex",
-          cliLabel: "Codex",
-          workspaceId: 2,
-          workspaceName: "工作区 B",
-          items: [makeWorkspaceItem(2, "prompts", "Prompt", "Codex Prompt")],
-        }),
-        makeWorkspaceConfig({
-          cliKey: "gemini",
-          cliLabel: "Gemini",
-          workspaceId: 3,
-          workspaceName: "工作区 C",
-          items: [makeWorkspaceItem(3, "prompts", "Prompt", "Gemini Prompt")],
-        }),
-      ],
-    });
-
-    fireEvent.click(screen.getByRole("tab", { name: "配置信息" }));
-    expect(
-      screen
-        .getAllByRole("button", { name: /Claude|Codex|Gemini/ })
-        .map((button) => button.textContent)
-    ).toEqual(["Gemini", "Codex", "Claude"]);
-    expect(await screen.findByText("工作区 C")).toBeInTheDocument();
-    expect(screen.getByText("Gemini Prompt")).toBeInTheDocument();
-  });
-
-  it("renders preview workspace config rows when dev preview is enabled and there is no real config data", async () => {
-    renderPanel({ workspaceConfigs: [], devPreviewEnabled: true });
-
-    fireEvent.click(screen.getByRole("tab", { name: "配置信息" }));
-    expect(await screen.findByRole("button", { name: "Claude" })).toBeInTheDocument();
-    expect(screen.getByText("工作区 Alpha")).toBeInTheDocument();
-    expect(screen.getByText("PR Review")).toBeInTheDocument();
-    expect(screen.getByText("filesystem")).toBeInTheDocument();
-  });
-
-  it("fills preview workspace items for the selected empty cli when dev preview is enabled", async () => {
-    renderPanel({
-      devPreviewEnabled: true,
-      workspaceConfigs: [
-        makeWorkspaceConfig({
-          cliKey: "claude",
-          cliLabel: "Claude",
-          workspaceId: 1,
-          workspaceName: "工作区 A",
-          items: [makeWorkspaceItem(1, "prompts", "Prompt", "默认提示词")],
-        }),
-        makeWorkspaceConfig({
-          cliKey: "codex",
-          cliLabel: "Codex",
-          workspaceId: 2,
-          workspaceName: "Default",
-          items: [],
-        }),
-        makeWorkspaceConfig({
-          cliKey: "gemini",
-          cliLabel: "Gemini",
-          workspaceId: 3,
-          workspaceName: "工作区 B",
-          items: [],
-        }),
-      ],
-    });
-
-    fireEvent.click(screen.getByRole("tab", { name: "配置信息" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Codex" }));
-
-    expect(screen.getAllByText("Default")).toHaveLength(2);
-    expect(screen.getByText("Fix First")).toBeInTheDocument();
-    expect(screen.getByText("code-review")).toBeInTheDocument();
-  });
-
-  it("omits the legacy top metrics row when both heatmap and usage are hidden", () => {
-    renderPanel({ displayOptions: { heatmap: false, usage: false } });
-
-    expect(screen.queryByText(/usage-section:/)).not.toBeInTheDocument();
-  });
-
-  it("renders usage statistics when heatmap is hidden", () => {
-    renderPanel({ displayOptions: { heatmap: false, usage: true } });
-
-    expect(screen.getByText("usage-section:false:true")).toBeInTheDocument();
-  });
-
-  it("renders the heatmap when usage statistics are hidden", () => {
-    renderPanel({ displayOptions: { heatmap: true, usage: false } });
-
-    expect(screen.getByText("usage-section:true:false")).toBeInTheDocument();
-  });
-
-  it("uses the legacy overview layout by default", () => {
-    renderPanel();
-
-    const requestLogs = screen.getByText("request-logs");
-    const overviewTab = screen.getByRole("tab", { name: "配置信息" });
-
-    expect(
-      overviewTab.compareDocumentPosition(requestLogs) & Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy();
-  });
-
-  it("uses the logs-primary layout when the local preference is enabled", () => {
-    window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
-
-    renderPanel();
-
-    const requestLogs = screen.getByText("request-logs");
-    const usageSection = screen.getByText("today-provider-usage:false");
-
-    expect(
-      usageSection.compareDocumentPosition(requestLogs) & Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "配置信息" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "熔断信息" })).toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "供应商限额" })).not.toBeInTheDocument();
-    expect(homeRequestLogsPanelMock).toHaveBeenCalled();
-    const latestCall = (homeRequestLogsPanelMock as any).mock.calls[
-      (homeRequestLogsPanelMock as any).mock.calls.length - 1
-    ];
-    const latestProps = latestCall?.[0];
-    expect(latestProps?.compactModeOverride).toBe(true);
-    expect(latestProps?.displayOptions?.compactModeToggle).toBe(false);
-    expect(latestProps?.displayOptions?.refreshButton).toBe(false);
-  });
-
-  it("does not render proxy controls in logs-primary layout", () => {
-    window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
-
-    renderPanel({ displayOptions: { heatmap: true, usage: false } });
-
-    const usageSummary = screen.getByText("today-provider-usage:false");
-    expect(usageSummary).toBeInTheDocument();
-    expect(screen.queryByText("代理状态")).not.toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "配置信息" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "熔断信息" })).toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "供应商限额" })).not.toBeInTheDocument();
-  });
-
-  it("does not render the provider limit tab in logs-primary layout", () => {
-    window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
-
-    renderPanel({
-      providerLimitRows: [{ provider_id: 1 } as any],
-      providerLimitAvailable: true,
-      providerLimitLoading: false,
-    });
-
-    expect(screen.queryByRole("tab", { name: "供应商限额" })).not.toBeInTheDocument();
-  });
-
-  it("renders the OAuth quota tab in logs-primary layout and forwards refresh actions", async () => {
-    window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
-    const onRefreshOAuthQuota = vi.fn().mockResolvedValue(undefined);
-    const onRefreshOAuthQuotaRow = vi.fn().mockResolvedValue(undefined);
-
-    renderPanel({
-      oauthQuotaVisible: true,
-      oauthQuotaRows: [{ providerId: 9 } as any],
-      oauthQuotaHasRefreshed: true,
-      onRefreshOAuthQuota,
-      onRefreshOAuthQuotaRow,
-    });
-
-    fireEvent.click(screen.getByRole("tab", { name: "OAuth 配额" }));
-    expect(await screen.findByText("oauth-quota:1:true:true:false")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "refresh-oauth-quota" }));
-    expect(onRefreshOAuthQuota).toHaveBeenCalledTimes(1);
-
-    fireEvent.click(screen.getByRole("button", { name: "refresh-oauth-quota-row" }));
-    expect(onRefreshOAuthQuotaRow).toHaveBeenCalledWith(9);
-  });
-
-  it("renders preview OAuth quota rows when dev preview is enabled", async () => {
-    window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
-    const onRefreshOAuthQuota = vi.fn().mockResolvedValue(undefined);
-    const onRefreshOAuthQuotaRow = vi.fn().mockResolvedValue(undefined);
-
-    renderPanel({
-      devPreviewEnabled: true,
-      oauthQuotaVisible: true,
-      oauthQuotaRows: [{ providerId: 9 } as any],
-      oauthQuotaHasRefreshed: true,
-      onRefreshOAuthQuota,
-      onRefreshOAuthQuotaRow,
-    });
-
-    fireEvent.click(screen.getByRole("tab", { name: "OAuth 配额" }));
-    expect(await screen.findByText("oauth-quota:5:true:true:false")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "refresh-oauth-quota" }));
-    fireEvent.click(screen.getByRole("button", { name: "refresh-oauth-quota-row" }));
-    expect(onRefreshOAuthQuota).not.toHaveBeenCalled();
-    expect(onRefreshOAuthQuotaRow).not.toHaveBeenCalled();
-  });
-
-  it("renders the OAuth quota tab in the legacy layout and forwards refresh actions", async () => {
-    const onRefreshOAuthQuota = vi.fn().mockResolvedValue(undefined);
-    const onRefreshOAuthQuotaRow = vi.fn().mockResolvedValue(undefined);
-
-    renderPanel({
-      oauthQuotaVisible: true,
-      oauthQuotaRows: [{ providerId: 9 } as any],
-      oauthQuotaHasRefreshed: true,
-      onRefreshOAuthQuota,
-      onRefreshOAuthQuotaRow,
-    });
-
-    fireEvent.click(screen.getByRole("tab", { name: "OAuth 配额" }));
-    expect(await screen.findByText("oauth-quota:1:true:true:false")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "refresh-oauth-quota" }));
-    expect(onRefreshOAuthQuota).toHaveBeenCalledTimes(1);
-
-    fireEvent.click(screen.getByRole("button", { name: "refresh-oauth-quota-row" }));
-    expect(onRefreshOAuthQuotaRow).toHaveBeenCalledWith(9);
-  });
-
-  it("switches back to 配置信息 when OAuth providers disappear in logs-primary layout", async () => {
-    window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
-
-    const { rerender } = renderPanel({
-      oauthQuotaVisible: true,
-      oauthQuotaRows: [{ providerId: 9 } as any],
-      workspaceConfigs: [
-        makeWorkspaceConfig({
-          cliKey: "claude",
-          cliLabel: "Claude",
-          workspaceId: 1,
-          workspaceName: "工作区 A",
-          items: [makeWorkspaceItem(1, "prompts", "Prompt", "Claude Prompt")],
-        }),
-      ],
-    });
-
-    fireEvent.click(screen.getByRole("tab", { name: "OAuth 配额" }));
-    expect(screen.getByText("oauth-quota:1:true:false:false")).toBeInTheDocument();
-
-    rerender(
+    view.rerender(
       <HomeOverviewPanel
-        displayOptions={{
-          customTooltip: false,
-          heatmap: true,
-          usage: true,
-          workspaceConfigQuickToggle: false,
-        }}
-        cliPriorityOrder={["claude", "codex", "gemini"]}
-        usageWindowDays={15}
-        usageHeatmapRows={[]}
-        usageHeatmapLoading={false}
-        onRefreshUsageHeatmap={vi.fn()}
-        sortModes={[]}
-        sortModesLoading={false}
-        sortModesAvailable={true}
-        activeModeByCli={{ claude: null, codex: null, gemini: null, grok: null }}
-        activeModeToggling={{ claude: false, codex: false, gemini: false, grok: false }}
-        onSetCliActiveMode={vi.fn()}
-        activeSessions={[]}
-        activeRequestsAvailable={true}
-        activeSessionsLoading={false}
-        activeSessionsAvailable={true}
-        workspaceConfigs={[
-          makeWorkspaceConfig({
-            cliKey: "claude",
-            cliLabel: "Claude",
-            workspaceId: 1,
-            workspaceName: "工作区 A",
-            items: [makeWorkspaceItem(1, "prompts", "Prompt", "Claude Prompt")],
-          }),
+        {...props}
+        openCircuits={[
+          {
+            cli_key: "codex",
+            provider_id: 9,
+            provider_name: "Codex Circuit",
+            displayState: "open",
+            open_until: Math.floor(Date.now() / 1000) + 60,
+          },
         ]}
-        providerLimitRows={[]}
-        providerLimitLoading={false}
-        providerLimitAvailable={true}
-        providerLimitRefreshing={false}
-        onRefreshProviderLimit={vi.fn()}
-        oauthQuotaRows={[]}
-        oauthQuotaVisible={false}
-        oauthQuotaRefreshing={false}
-        oauthQuotaHasRefreshed={false}
-        onRefreshOAuthQuota={vi.fn()}
-        onRefreshOAuthQuotaRow={vi.fn()}
-        openCircuits={[]}
-        onResetCircuitProvider={vi.fn()}
-        resettingCircuitProviderIds={new Set()}
-        traces={[]}
-        requestLogs={[]}
-        requestLogsLoading={false}
-        requestLogsRefreshing={false}
-        requestLogsAvailable={true}
-        onRefreshRequestLogs={vi.fn()}
-        selectedLogId={null}
-        onSelectLogId={vi.fn()}
-        personalizedUsageView="summary"
       />
     );
 
-    expect(await screen.findByText("工作区：")).toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "OAuth 配额" })).not.toBeInTheDocument();
+    expect(await screen.findByText("Codex Circuit")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "熔断信息" })).toHaveAttribute("aria-selected", "true");
   });
 
-  it("falls back to 配置信息 when stored tab order starts with provider limit in logs-primary layout", async () => {
-    window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
-    window.localStorage.setItem(
-      "aio-home-overview-tab-order",
-      JSON.stringify(["providerLimit", "circuit", "workspaceConfig", "sessions", "oauthQuota"])
+  it("does not auto-switch to circuit information when that tab is hidden", async () => {
+    const props = makePanelProps({ visibleTabKeys: ["workspaceConfig", "providerLimit"] });
+    const view = render(<HomeOverviewPanel {...props} />);
+    fireEvent.click(screen.getByRole("tab", { name: "供应商限额" }));
+
+    view.rerender(
+      <HomeOverviewPanel
+        {...props}
+        openCircuits={[
+          {
+            cli_key: "codex",
+            provider_id: 9,
+            provider_name: "Hidden Circuit",
+            displayState: "open",
+            open_until: Math.floor(Date.now() / 1000) + 60,
+          },
+        ]}
+      />
     );
 
-    renderPanel({
-      workspaceConfigs: [
-        makeWorkspaceConfig({
-          cliKey: "claude",
-          cliLabel: "Claude",
-          workspaceId: 1,
-          workspaceName: "工作区 A",
-          items: [makeWorkspaceItem(1, "prompts", "Prompt", "Claude Prompt")],
-        }),
-      ],
-    });
-
-    expect(await screen.findByText("工作区：")).toBeInTheDocument();
-    expect(screen.getByText("工作区 A")).toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "供应商限额" })).not.toBeInTheDocument();
-  });
-
-  it("renders the usage chart branch when the personalized usage view switches", () => {
-    window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
-
-    function Wrapper() {
-      const [view, setView] = useState<"summary" | "usageChart">("summary");
-
-      return (
-        <>
-          <button type="button" onClick={() => setView("usageChart")}>
-            switch-to-usage-chart
-          </button>
-          <HomeOverviewPanel
-            displayOptions={{
-              customTooltip: false,
-              heatmap: true,
-              usage: true,
-              workspaceConfigQuickToggle: false,
-            }}
-            cliPriorityOrder={["claude", "codex", "gemini"]}
-            usageWindowDays={15}
-            usageHeatmapRows={[]}
-            usageHeatmapLoading={false}
-            onRefreshUsageHeatmap={vi.fn()}
-            sortModes={[]}
-            sortModesLoading={false}
-            sortModesAvailable={true}
-            activeModeByCli={{ claude: null, codex: null, gemini: null, grok: null }}
-            activeModeToggling={{ claude: false, codex: false, gemini: false, grok: false }}
-            onSetCliActiveMode={vi.fn()}
-            activeSessions={[]}
-            activeRequestsAvailable={true}
-            activeSessionsLoading={false}
-            activeSessionsAvailable={true}
-            workspaceConfigs={[
-              makeWorkspaceConfig({
-                cliKey: "claude",
-                cliLabel: "Claude",
-                workspaceId: 1,
-                workspaceName: "默认",
-                items: [],
-              }),
-              makeWorkspaceConfig({
-                cliKey: "codex",
-                cliLabel: "Codex",
-                workspaceId: 2,
-                workspaceName: "Default",
-                items: [],
-              }),
-              makeWorkspaceConfig({
-                cliKey: "gemini",
-                cliLabel: "Gemini",
-                workspaceId: 3,
-                workspaceName: "工作区 2",
-                items: [],
-              }),
-            ]}
-            providerLimitRows={[]}
-            providerLimitLoading={false}
-            providerLimitAvailable={true}
-            providerLimitRefreshing={false}
-            onRefreshProviderLimit={vi.fn()}
-            oauthQuotaRows={[]}
-            oauthQuotaVisible={false}
-            oauthQuotaRefreshing={false}
-            oauthQuotaHasRefreshed={false}
-            onRefreshOAuthQuota={vi.fn()}
-            onRefreshOAuthQuotaRow={vi.fn()}
-            openCircuits={[]}
-            onResetCircuitProvider={vi.fn()}
-            resettingCircuitProviderIds={new Set()}
-            traces={[]}
-            requestLogs={[]}
-            requestLogsLoading={false}
-            requestLogsRefreshing={false}
-            requestLogsAvailable={true}
-            onRefreshRequestLogs={vi.fn()}
-            selectedLogId={null}
-            onSelectLogId={vi.fn()}
-            personalizedUsageView={view}
-          />
-        </>
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "供应商限额" })).toHaveAttribute(
+        "aria-selected",
+        "true"
       );
-    }
-
-    render(<Wrapper />);
-
-    expect(screen.getByText("today-provider-usage:false")).toBeInTheDocument();
-    expect(screen.queryByText("usage-section:false:true")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "switch-to-usage-chart" }));
-
-    expect(screen.getByText("usage-section:false:true")).toBeInTheDocument();
-    expect(screen.queryByText("today-provider-usage:false")).not.toBeInTheDocument();
+    });
+    expect(screen.queryByText("Hidden Circuit")).not.toBeInTheDocument();
   });
 
-  it("renders preview active sessions when dev preview is enabled and there are no real sessions", async () => {
-    renderPanel({ devPreviewEnabled: true, activeSessions: [] });
+  it("renders preview active sessions and provider limits", async () => {
+    renderPanel({ devPreviewEnabled: true });
 
     fireEvent.click(screen.getByRole("tab", { name: "活跃 Session" }));
     expect(await screen.findByText("active-sessions:3")).toBeInTheDocument();
-  });
-
-  it("renders preview provider limits when dev preview is enabled and there are no real rows", async () => {
-    renderPanel({ devPreviewEnabled: true, providerLimitRows: [] });
 
     fireEvent.click(screen.getByRole("tab", { name: "供应商限额" }));
     expect(await screen.findByText("provider-limit:3")).toBeInTheDocument();
   });
 
-  it("restores a persisted tab order from localStorage", () => {
+  it("forwards OAuth quota refresh actions for real data", async () => {
+    const onRefreshOAuthQuota = vi.fn().mockResolvedValue(undefined);
+    const onRefreshOAuthQuotaRow = vi.fn().mockResolvedValue(undefined);
+    renderPanel({
+      oauthQuotaVisible: true,
+      oauthQuotaRows: [{ providerId: 9 } as never],
+      oauthQuotaHasRefreshed: true,
+      onRefreshOAuthQuota,
+      onRefreshOAuthQuotaRow,
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: "OAuth 配额" }));
+    expect(await screen.findByText("oauth-quota:1:true:true:false")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "refresh-oauth-quota" }));
+    fireEvent.click(screen.getByRole("button", { name: "refresh-oauth-quota-row" }));
+    expect(onRefreshOAuthQuota).toHaveBeenCalledTimes(1);
+    expect(onRefreshOAuthQuotaRow).toHaveBeenCalledWith(9);
+  });
+
+  it("restores persisted tab order before applying visibility", () => {
     window.localStorage.setItem(
       "aio-home-overview-tab-order",
-      JSON.stringify(["providerLimit", "sessions", "circuit", "workspaceConfig"])
+      JSON.stringify(["providerLimit", "sessions", "circuit", "workspaceConfig", "oauthQuota"])
     );
 
-    renderPanel();
+    renderPanel({ visibleTabKeys: ["workspaceConfig", "sessions", "providerLimit"] });
 
     expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
       "供应商限额",
       "活跃 Session",
-      "熔断信息",
       "配置信息",
-      "OAuth 配额",
     ]);
-  });
-
-  it("uses the first sorted tab as the default selection", async () => {
-    window.localStorage.setItem(
-      "aio-home-overview-tab-order",
-      JSON.stringify(["providerLimit", "sessions", "circuit", "workspaceConfig"])
-    );
-
-    renderPanel({ devPreviewEnabled: true, providerLimitRows: [] });
-
-    expect(await screen.findByText("provider-limit:3")).toBeInTheDocument();
-  });
-
-  it("auto-switches to 熔断信息 when new open circuits arrive", () => {
-    const { rerender } = renderPanel();
-
-    fireEvent.click(screen.getByRole("tab", { name: "供应商限额" }));
-    expect(screen.getByText("provider-limit:0")).toBeInTheDocument();
-
-    rerender(
-      <HomeOverviewPanel
-        displayOptions={{
-          customTooltip: false,
-          heatmap: true,
-          usage: true,
-          workspaceConfigQuickToggle: false,
-        }}
-        cliPriorityOrder={["claude", "codex", "gemini"]}
-        usageWindowDays={15}
-        usageHeatmapRows={[]}
-        usageHeatmapLoading={false}
-        onRefreshUsageHeatmap={vi.fn()}
-        sortModes={[]}
-        sortModesLoading={false}
-        sortModesAvailable={true}
-        activeModeByCli={{ claude: null, codex: null, gemini: null, grok: null }}
-        activeModeToggling={{ claude: false, codex: false, gemini: false, grok: false }}
-        onSetCliActiveMode={vi.fn()}
-        activeSessions={[]}
-        activeRequestsAvailable={true}
-        activeSessionsLoading={false}
-        activeSessionsAvailable={true}
-        workspaceConfigs={[]}
-        providerLimitRows={[]}
-        providerLimitLoading={false}
-        providerLimitAvailable={true}
-        providerLimitRefreshing={false}
-        onRefreshProviderLimit={vi.fn()}
-        oauthQuotaRows={[]}
-        oauthQuotaVisible={false}
-        oauthQuotaRefreshing={false}
-        oauthQuotaHasRefreshed={false}
-        onRefreshOAuthQuota={vi.fn()}
-        onRefreshOAuthQuotaRow={vi.fn()}
-        openCircuits={[
-          {
-            cli_key: "claude",
-            provider_id: 9,
-            provider_name: "Claude New Circuit",
-            displayState: "open" as const,
-            open_until: TEST_NOW_SECONDS + 60,
-          },
-        ]}
-        onResetCircuitProvider={vi.fn()}
-        resettingCircuitProviderIds={new Set()}
-        traces={[]}
-        requestLogs={[]}
-        requestLogsLoading={false}
-        requestLogsRefreshing={false}
-        requestLogsAvailable={true}
-        onRefreshRequestLogs={vi.fn()}
-        selectedLogId={null}
-        onSelectLogId={vi.fn()}
-        personalizedUsageView="summary"
-      />
-    );
-
-    expect(screen.getByText("Claude New Circuit")).toBeInTheDocument();
-  });
-
-  it("keeps 活跃 Session selected when open circuits are removed", async () => {
-    const { rerender } = renderPanel({
-      openCircuits: [
-        {
-          cli_key: "claude",
-          provider_id: 9,
-          provider_name: "Claude New Circuit",
-          displayState: "open" as const,
-          open_until: Math.floor(Date.now() / 1000) + 60,
-        },
-      ],
-    });
-
-    fireEvent.click(screen.getByRole("tab", { name: "活跃 Session" }));
-    expect(await screen.findByText("active-sessions:0")).toBeInTheDocument();
-
-    rerender(
-      <HomeOverviewPanel
-        displayOptions={{
-          customTooltip: false,
-          heatmap: true,
-          usage: true,
-          workspaceConfigQuickToggle: false,
-        }}
-        cliPriorityOrder={["claude", "codex", "gemini"]}
-        usageWindowDays={15}
-        usageHeatmapRows={[]}
-        usageHeatmapLoading={false}
-        onRefreshUsageHeatmap={vi.fn()}
-        sortModes={[]}
-        sortModesLoading={false}
-        sortModesAvailable={true}
-        activeModeByCli={{ claude: null, codex: null, gemini: null, grok: null }}
-        activeModeToggling={{ claude: false, codex: false, gemini: false, grok: false }}
-        onSetCliActiveMode={vi.fn()}
-        activeSessions={[]}
-        activeRequestsAvailable={true}
-        activeSessionsLoading={false}
-        activeSessionsAvailable={true}
-        workspaceConfigs={[]}
-        providerLimitRows={[]}
-        providerLimitLoading={false}
-        providerLimitAvailable={true}
-        providerLimitRefreshing={false}
-        onRefreshProviderLimit={vi.fn()}
-        oauthQuotaRows={[]}
-        oauthQuotaVisible={false}
-        oauthQuotaRefreshing={false}
-        oauthQuotaHasRefreshed={false}
-        onRefreshOAuthQuota={vi.fn()}
-        onRefreshOAuthQuotaRow={vi.fn()}
-        openCircuits={[]}
-        onResetCircuitProvider={vi.fn()}
-        resettingCircuitProviderIds={new Set()}
-        traces={[]}
-        requestLogs={[]}
-        requestLogsLoading={false}
-        requestLogsRefreshing={false}
-        requestLogsAvailable={true}
-        onRefreshRequestLogs={vi.fn()}
-        selectedLogId={null}
-        onSelectLogId={vi.fn()}
-        personalizedUsageView="summary"
-      />
-    );
-
-    expect(screen.getByRole("tab", { name: "活跃 Session" })).toHaveAttribute(
-      "aria-selected",
-      "true"
-    );
-    expect(await screen.findByText("active-sessions:0")).toBeInTheDocument();
-  });
-
-  it("switches back to 配置信息 when circuits become empty in logs-primary layout", async () => {
-    window.localStorage.setItem("aio-home-overview-logs-primary-layout", "true");
-
-    const { rerender } = renderPanel({
-      openCircuits: [
-        {
-          cli_key: "claude",
-          provider_id: 9,
-          provider_name: "Claude New Circuit",
-          displayState: "open" as const,
-          open_until: Math.floor(Date.now() / 1000) + 60,
-        },
-      ],
-      workspaceConfigs: [
-        makeWorkspaceConfig({
-          cliKey: "claude",
-          cliLabel: "Claude",
-          workspaceId: 1,
-          workspaceName: "工作区 A",
-          items: [makeWorkspaceItem(1, "prompts", "Prompt", "Claude Prompt")],
-        }),
-      ],
-    });
-
-    fireEvent.click(screen.getByRole("tab", { name: "熔断信息" }));
-    expect(screen.getByText("Claude New Circuit")).toBeInTheDocument();
-
-    rerender(
-      <HomeOverviewPanel
-        displayOptions={{
-          customTooltip: false,
-          heatmap: true,
-          usage: true,
-          workspaceConfigQuickToggle: false,
-        }}
-        cliPriorityOrder={["claude", "codex", "gemini"]}
-        usageWindowDays={15}
-        usageHeatmapRows={[]}
-        usageHeatmapLoading={false}
-        onRefreshUsageHeatmap={vi.fn()}
-        sortModes={[]}
-        sortModesLoading={false}
-        sortModesAvailable={true}
-        activeModeByCli={{ claude: null, codex: null, gemini: null, grok: null }}
-        activeModeToggling={{ claude: false, codex: false, gemini: false, grok: false }}
-        onSetCliActiveMode={vi.fn()}
-        activeSessions={[]}
-        activeRequestsAvailable={true}
-        activeSessionsLoading={false}
-        activeSessionsAvailable={true}
-        workspaceConfigs={[
-          makeWorkspaceConfig({
-            cliKey: "claude",
-            cliLabel: "Claude",
-            workspaceId: 1,
-            workspaceName: "工作区 A",
-            items: [makeWorkspaceItem(1, "prompts", "Prompt", "Claude Prompt")],
-          }),
-        ]}
-        providerLimitRows={[]}
-        providerLimitLoading={false}
-        providerLimitAvailable={true}
-        providerLimitRefreshing={false}
-        onRefreshProviderLimit={vi.fn()}
-        oauthQuotaRows={[]}
-        oauthQuotaVisible={false}
-        oauthQuotaRefreshing={false}
-        oauthQuotaHasRefreshed={false}
-        onRefreshOAuthQuota={vi.fn()}
-        onRefreshOAuthQuotaRow={vi.fn()}
-        openCircuits={[]}
-        onResetCircuitProvider={vi.fn()}
-        resettingCircuitProviderIds={new Set()}
-        traces={[]}
-        requestLogs={[]}
-        requestLogsLoading={false}
-        requestLogsRefreshing={false}
-        requestLogsAvailable={true}
-        onRefreshRequestLogs={vi.fn()}
-        selectedLogId={null}
-        onSelectLogId={vi.fn()}
-        personalizedUsageView="summary"
-      />
-    );
-
-    expect(await screen.findByText("工作区：")).toBeInTheDocument();
-    expect(screen.getByText("工作区 A")).toBeInTheDocument();
   });
 });

@@ -30,8 +30,6 @@ export function SettingsPage() {
             settingsSaving={persistence.settingsSaving}
             port={persistence.port}
             setPort={persistence.setPort}
-            showHomeHeatmap={persistence.showHomeHeatmap}
-            setShowHomeHeatmap={persistence.setShowHomeHeatmap}
             showHomeUsage={persistence.showHomeUsage}
             setShowHomeUsage={persistence.setShowHomeUsage}
             homeUsagePeriod={persistence.homeUsagePeriod}
