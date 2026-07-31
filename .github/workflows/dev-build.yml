@@ -2,19 +2,77 @@ name: dev-build
 
 on:
   workflow_dispatch:
+    inputs:
+      target_id:
+        description: Unsigned development artifact target
+        required: true
+        type: choice
+        default: windows-x64
+        options:
+          - windows-x64
+          - windows-arm64
+          - macos-x64
+          - macos-arm64
+          - macos-universal
+          - linux-x64
 
 permissions:
   contents: read
 
 concurrency:
-  group: dev-build-${{ github.ref }}
+  group: dev-build-${{ github.sha }}-${{ inputs.target_id }}
   cancel-in-progress: true
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      build_matrix: ${{ steps.matrix.outputs.build_matrix }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - id: matrix
+        name: Resolve selected cloud target
+        shell: bash
+        env:
+          TARGET_ID: ${{ inputs.target_id }}
+        run: |
+          set -euo pipefail
+          matrix="$(node scripts/support-matrix.mjs manual-build-matrix --target-id "$TARGET_ID")"
+          echo "build_matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.plan.outputs.build_matrix) }}
+    runs-on: ${{ startsWith(matrix.target_id, 'windows-') && 'windows-latest' || startsWith(matrix.target_id, 'macos-') && 'macos-latest' || 'ubuntu-22.04' }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev librsvg2-dev patchelf
+          if ! sudo apt-get install -y libayatana-appindicator3-dev; then
+            sudo apt-get install -y libappindicator3-dev
+          fi
+          if ! sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev; then
+            sudo apt-get install -y libwebkit2gtk-4.0-dev libsoup2.4-dev
+          fi
 
       - name: Install pnpm
         uses: pnpm/action-setup@41ff72655975bd51cab0327fa583b6e92b6d3061 # v4.2.0
@@ -29,50 +87,48 @@ jobs:
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: 1.90.0
-          targets: x86_64-pc-windows-msvc
+          targets: ${{ matrix.rustup_targets }}
 
       - name: Rust cache
         uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           workspaces: src-tauri
 
-      - name: Install deps
+      - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build Tauri (Windows, portable)
-        run: pnpm tauri build --target x86_64-pc-windows-msvc --no-bundle
-
-      - name: Package portable ZIP
-        shell: pwsh
+      - id: overlay
+        name: Create temporary bundle.createUpdaterArtifacts=false overlay
+        shell: bash
         run: |
-          $targetDir = "src-tauri/target/x86_64-pc-windows-msvc/release"
-          $exePath = Join-Path $targetDir "AIO Coding Hub.exe"
-          if (-not (Test-Path $exePath)) {
-            $exePath = Join-Path $targetDir "aio-coding-hub.exe"
-          }
-          if (-not (Test-Path $exePath)) {
-            Write-Error "Cannot find built exe"
-            Get-ChildItem $targetDir -Filter "*.exe" | ForEach-Object { Write-Host $_.FullName }
-            exit 1
-          }
+          set -euo pipefail
+          overlay="$RUNNER_TEMP/tauri-cloud-dev.json"
+          node scripts/support-matrix.mjs write-dev-overlay --output "$overlay" >/dev/null
+          echo "path=$overlay" >> "$GITHUB_OUTPUT"
 
-          $portableDir = "dev-build/AIO Coding Hub"
-          New-Item -ItemType Directory -Path $portableDir -Force | Out-Null
-          Copy-Item $exePath $portableDir
+      - id: tauri
+        name: Build unsigned development bundle
+        uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
+        with:
+          tauriScript: pnpm exec tauri
+          args: --target ${{ matrix.tauri_target }} --bundles ${{ matrix.bundles }} --config "${{ steps.overlay.outputs.path }}" -- --locked
+          includeUpdaterJson: false
 
-          $resourceDir = Join-Path $targetDir "resources"
-          if (Test-Path $resourceDir) {
-            Copy-Item -Recurse $resourceDir (Join-Path $portableDir "resources")
-          }
+      - name: Stage unsigned development assets
+        shell: bash
+        env:
+          ARTIFACT_PATHS_JSON: ${{ steps.tauri.outputs.artifactPaths }}
+        run: |
+          set -euo pipefail
+          node scripts/support-matrix.mjs prepare-development-assets \
+            --artifact-paths "$ARTIFACT_PATHS_JSON" \
+            --target-id "${{ matrix.target_id }}" \
+            --output-dir dev-assets
 
-          $sha = "${{ github.sha }}".Substring(0, 7)
-          $zipName = "aio-coding-hub-dev-win64-${sha}.zip"
-          Compress-Archive -Path "$portableDir/*" -DestinationPath "dev-build/$zipName" -Force
-          Write-Host "Created: dev-build/$zipName"
-
-      - name: Upload artifact
+      - name: Upload unsigned development artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: dev-build-win64
-          path: dev-build/*.zip
-          retention-days: 1
+          name: dev-build-unsigned-${{ matrix.target_id }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dev-assets/*
+          if-no-files-found: error
+          retention-days: 7
