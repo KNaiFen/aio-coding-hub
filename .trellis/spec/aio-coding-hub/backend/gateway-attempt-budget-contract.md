@@ -131,7 +131,7 @@ fn provider_max_attempts_for_request(
   non-SSE boundary.
 - Persistence and frontend cross-layer tests must keep the attempt range
   `1..=20`, circuit range `1..=50`, and total-attempt cap `100` aligned.
-- Run the full Rust suite after changing failover preparation. Focused budget
+- Require the cloud Rust job's full suite after changing failover preparation. Focused budget
   tests do not expose every route helper's runtime settings or multi-request
   circuit behavior.
 

@@ -6,86 +6,64 @@
  *   node scripts/run-checks.mjs --list
  *
  * Adding a check: define its command in CHECKS, then add its id to the
- * stages that should run it. Hooks (.githooks/*) and package.json aggregate
- * scripts all resolve stages through this file, so there is exactly one
- * list to edit.
+ * stages that should run it. These stages are intentionally local-only and
+ * may execute Node, TypeScript, frontend tests, or frontend builds only.
  */
 import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 
-const CHECKS = {
-  "format-check": "pnpm format:check",
-  lint: "pnpm lint",
-  typecheck: "pnpm typecheck",
-  "no-instant-now-sub": "pnpm check:no-instant-now-sub",
-  "release-pr-changelog": "pnpm check:release-pr-changelog",
-  "spec-links": "pnpm check:spec-links",
-  "support-matrix": "pnpm check:support-matrix",
-  "homebrew-cask": "pnpm check:homebrew-cask",
-  "gateway-error-codes": "pnpm check:gateway-error-codes",
-  "plugin-system-docs": "pnpm check:plugin-system-docs",
-  "plugin-api-contract": "pnpm check:plugin-api-contract",
-  "plugin-sdk-typecheck": "pnpm plugin-sdk:typecheck",
-  "plugin-sdk-test": "pnpm plugin-sdk:test",
-  "create-aio-plugin-test": "pnpm create-aio-plugin:test",
-  "unit-coverage-shards": "pnpm test:unit:coverage:shards",
-  "generated-bindings": "pnpm check:generated-bindings",
-  "tauri-fmt": "pnpm tauri:fmt",
-  "tauri-check": "pnpm tauri:check",
-  "tauri-test": "pnpm tauri:test",
-  "tauri-lib-test": "cd src-tauri && cargo test --lib",
-  "tauri-clippy": "pnpm tauri:clippy",
+export const CHECKS = {
+  "format-check": "format:check",
+  lint: "lint",
+  typecheck: "typecheck",
+  "local-native-boundary": "check:local-native-boundary",
+  "no-instant-now-sub": "check:no-instant-now-sub",
+  "spec-links": "check:spec-links",
+  "support-matrix": "check:support-matrix",
+  "homebrew-cask": "check:homebrew-cask",
+  "gateway-error-codes": "check:gateway-error-codes",
+  "plugin-system-docs": "check:plugin-system-docs",
+  "plugin-api-contract": "check:plugin-api-contract",
+  "plugin-sdk-typecheck": "plugin-sdk:typecheck",
+  "plugin-sdk-test": "plugin-sdk:test",
+  "create-aio-plugin-test": "create-aio-plugin:test",
+  "unit-coverage-shards": "test:unit:coverage:shards",
 };
 
-const PRECOMMIT_SRC = ["lint", "typecheck", "no-instant-now-sub"];
-const PRECOMMIT_TAURI = ["tauri-check"];
+const PRECOMMIT_LOCAL = ["local-native-boundary", "lint", "typecheck", "no-instant-now-sub"];
 const PREPUSH_STATIC = [
+  "local-native-boundary",
   "lint",
   "typecheck",
+  "spec-links",
   "support-matrix",
   "homebrew-cask",
   "gateway-error-codes",
   "plugin-system-docs",
   "plugin-api-contract",
   "plugin-sdk-typecheck",
-  "tauri-fmt",
 ];
 
-const STAGES = {
-  // pre-commit hook picks the sub-stage based on which files are staged.
-  "precommit-src": PRECOMMIT_SRC,
-  "precommit-tauri": PRECOMMIT_TAURI,
-  precommit: [...PRECOMMIT_SRC, ...PRECOMMIT_TAURI],
+export const STAGES = {
+  precommit: PRECOMMIT_LOCAL,
   "precommit-full": [
     "format-check",
-    ...PRECOMMIT_SRC,
-    "release-pr-changelog",
+    ...PRECOMMIT_LOCAL,
     "spec-links",
     "support-matrix",
     "homebrew-cask",
     "gateway-error-codes",
-    "tauri-fmt",
-    "tauri-check",
-    "generated-bindings",
-    "tauri-clippy",
   ],
-  prepush: [
-    ...PREPUSH_STATIC,
-    "unit-coverage-shards",
-    "plugin-sdk-test",
-    "create-aio-plugin-test",
-    "generated-bindings",
-    "tauri-test",
-    "tauri-clippy",
-  ],
+  prepush: [...PREPUSH_STATIC, "unit-coverage-shards", "plugin-sdk-test", "create-aio-plugin-test"],
   "plugin-hardening": [
+    "local-native-boundary",
     "plugin-api-contract",
     "plugin-sdk-test",
     "plugin-sdk-typecheck",
-    "tauri-lib-test",
   ],
 };
 
@@ -93,7 +71,7 @@ function listStages() {
   for (const [stage, ids] of Object.entries(STAGES)) {
     console.log(`${stage}:`);
     for (const id of ids) {
-      console.log(`  ${id}: ${CHECKS[id]}`);
+      console.log(`  ${id}: pnpm ${CHECKS[id]}`);
     }
   }
 }
@@ -113,12 +91,11 @@ function main() {
   }
 
   for (const [index, id] of ids.entries()) {
-    const command = CHECKS[id];
-    console.log(`[checks] (${index + 1}/${ids.length}) ${id}: ${command}`);
-    const result = spawnSync(command, {
+    const script = CHECKS[id];
+    console.log(`[checks] (${index + 1}/${ids.length}) ${id}: pnpm ${script}`);
+    const result = spawnSync(pnpmCommand, [script], {
       cwd: repoRoot,
       stdio: "inherit",
-      shell: true,
     });
     if (result.status !== 0) {
       console.error(`[checks] ${id} failed (exit ${result.status ?? "signal"})`);
@@ -128,4 +105,5 @@ function main() {
   console.log(`[checks] stage "${arg}" passed (${ids.length} checks)`);
 }
 
-main();
+const invokedPath = process.argv[1] ? pathToFileURL(resolve(process.argv[1])).href : null;
+if (invokedPath === import.meta.url) main();

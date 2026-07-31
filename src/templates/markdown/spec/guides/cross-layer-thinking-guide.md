@@ -82,8 +82,8 @@ Use this checklist whenever a Tauri command is added or changed.
   command registration and TypeScript export. Runtime-only commands must be
   rare, named, and tested as exceptions.
 - `src/generated/bindings.ts` is generated transport code. Do not edit it by
-  hand; regenerate through `pnpm tauri:gen-types` and verify with
-  `pnpm check:generated-bindings`.
+  hand. Cloud native CI regenerates and verifies it; apply the emitted bounded
+  drift patch instead of running the native generator locally.
 - `src/services/generatedIpc.ts` owns generated-result unwrapping, null-result
   policy, sensitive argument redaction, and logging. Feature services should
   call generated commands through this layer instead of duplicating envelope
@@ -123,7 +123,7 @@ Use this map before adding or changing a desktop boundary:
 
 | Boundary kind | Owner files | Verification |
 |---|---|---|
-| Generated Tauri commands | `src-tauri/src/commands/registry.rs`, `src/generated/bindings.ts` | `pnpm check:generated-bindings`, `src/generated/__tests__/bindings.contract.test.ts` |
+| Generated Tauri commands | `src-tauri/src/commands/registry.rs`, `src/generated/bindings.ts` | cloud generated-binding CI, `src/generated/__tests__/bindings.contract.test.ts` |
 | Generated command wrappers | `src/services/generatedIpc.ts`, domain files under `src/services/*/` | service tests next to the wrapper |
 | Raw Tauri/plugin imports | `src/services/desktop/*`, `src/services/tauriInvoke.ts`, generated bindings | `src/services/__tests__/desktopBridge.contract.test.ts` |
 | Runtime-only handwritten command | `src/services/desktop/updater.ts` for `desktop_updater_download_and_install` only | desktop bridge contract test |
@@ -616,9 +616,9 @@ Test-env checklist:
   similar process-wide env vars must hold one shared env lock.
 - In structs, declare restore guards before lock guards. Do not rely on field
   names; Rust drops struct fields in declaration order.
-- When a full test run unexpectedly changes real user config, compare the file
-  mtime with session logs for `cargo test` / `pnpm tauri:test` and search for
-  temp fixture names before assuming the user edited the file.
+- When investigating an existing report that a native test run changed real
+  user config, compare the file mtime with the recorded native-test logs and
+  search for temp fixture names before assuming the user edited the file.
 
 ### Mistake 22: Editing Third-Party Configs Through a Narrow Projection
 

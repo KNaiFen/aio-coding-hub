@@ -120,7 +120,7 @@
 ### 从 Release 下载（推荐）
 
 前往 [Releases](https://github.com/KNaiFen/aio-coding-hub/releases) 下载对应平台安装包。
-本 Fork 的标签发布当前只提供 Windows x64 与 macOS Apple Silicon；其他平台请从源码构建或使用 upstream 发布：
+本 Fork 的标签发布当前只提供 Windows x64 与 macOS Apple Silicon；其他目标通过手动云端开发构建提供，或使用 upstream 发布：
 
 <!-- SUPPORT_MATRIX_RELEASE_DOWNLOAD:START -->
 | 平台 | 官方发布安装包 |
@@ -129,7 +129,7 @@
 | macOS Apple Silicon | `.zip` |
 <!-- SUPPORT_MATRIX_RELEASE_DOWNLOAD:END -->
 
-本 Fork 的发布矩阵只覆盖上表 2 个目标。macOS Intel 与 Linux x64 仍可从源码构建；`mac:universal` 和 `win:arm64` 也只保留本地构建命令，不进入 Release 产物和 `latest.json`。
+本 Fork 的发布矩阵只覆盖上表 2 个目标。其他平台的开发制品由 `dev-build` GitHub Actions 工作流生成，不进入 Release 产物或 `latest.json`。
 
 <details>
 <summary>Linux Arch / Wayland 用户</summary>
@@ -165,51 +165,31 @@ sudo xattr -cr /Applications/"AIO Coding Hub.app"
 
 </details>
 
-### 从源码构建
+### 本地前端开发与云端桌面构建
 
-<details>
-<summary>前置条件</summary>
-
-**通用要求：** Node.js 18+、pnpm、Rust 1.90+
-
-**Windows：** [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)（勾选"使用 C++ 的桌面开发"）
-
-**macOS：** `xcode-select --install`
-
-**Linux (Ubuntu/Debian)：**
-```bash
-sudo apt-get update
-sudo apt-get install -y libasound2-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-```
-
-</details>
+本地前端需要 Node.js 22 与 pnpm；无需安装 Rust/Tauri 工具链。
 
 ```bash
 git clone https://github.com/KNaiFen/aio-coding-hub.git
 cd aio-coding-hub
 pnpm install
-
-# 开发模式
-pnpm tauri:dev
-
-# 构建（当前平台）
-pnpm tauri:build
-
-# 指定平台
+pnpm dev
 ```
 
+`pnpm dev` 只启动 Vite 前端。原生集成、Rust 校验和桌面打包均在 GitHub Actions 中完成；需要桌面制品时，在仓库 Actions 页面手动运行 `dev-build` 并选择目标。
+
 <!-- SUPPORT_MATRIX_SOURCE_BUILD:START -->
-| 分类 | 命令 | 说明 |
+| 平台 | 云端开发构建目标 | 发布范围 |
 | --- | --- | --- |
-| 官方支持 | `pnpm tauri:build:win:x64` | Windows x64；官方支持；进入 Release / updater 矩阵 |
-| 官方支持 | `pnpm tauri:build:mac:x64` | macOS Intel；源码支持；不进入本 Fork 的 Release / updater 矩阵 |
-| 官方支持 | `pnpm tauri:build:mac:arm64` | macOS Apple Silicon；官方支持；进入 Release / updater 矩阵 |
-| 官方支持 | `pnpm tauri:build:linux:x64` | Linux x64；源码支持；不进入本 Fork 的 Release / updater 矩阵 |
-| 本地构建 | `pnpm tauri:build:mac:universal` | macOS Universal；仅本地构建；不进入官方发布 / updater 矩阵 |
-| 本地构建 | `pnpm tauri:build:win:arm64` | Windows ARM64；仅本地构建；不进入官方发布 / updater 矩阵 |
+| Windows x64 | `dev-build` / `windows-x64` | main CI 签名候选 + 手动无签名开发制品 |
+| macOS Intel | `dev-build` / `macos-x64` | 仅手动无签名开发制品；不进入 Release/updater |
+| macOS Apple Silicon | `dev-build` / `macos-arm64` | main CI 签名候选 + 手动无签名开发制品 |
+| Linux x64 | `dev-build` / `linux-x64` | 仅手动无签名开发制品；不进入 Release/updater |
+| macOS Universal | `dev-build` / `macos-universal` | 仅手动无签名开发制品；不进入 Release/updater |
+| Windows ARM64 | `dev-build` / `windows-arm64` | 仅手动无签名开发制品；不进入 Release/updater |
 <!-- SUPPORT_MATRIX_SOURCE_BUILD:END -->
 
-上表中的“官方支持”会进入 GitHub Release 和自动更新；“本地构建”只保留脚本，不承诺发布和更新。
+手动云端制品均不签名且不会被 Release 晋升。正式 Release 只晋升成功 `main` CI 为 Windows x64 与 macOS Apple Silicon 生成的签名候选。
 
 ---
 
@@ -257,12 +237,14 @@ curl http://127.0.0.1:37123/health
 ## 质量保证
 
 ```bash
-pnpm check:precommit       # 快速预提交检查（前端 + Rust check）
-pnpm check:precommit:full  # 完整检查（格式 + clippy）
-pnpm check:prepush         # 覆盖率 + 后端测试 + clippy
-pnpm test:unit              # 前端单元测试
-pnpm tauri:test             # 后端测试
+pnpm check:precommit       # 快速 Node/TypeScript 检查
+pnpm check:precommit:full  # 完整本地静态检查（仍为 Node/前端）
+pnpm check:prepush         # 前端覆盖率、插件 SDK 与静态合同
+pnpm test:unit             # 前端单元测试
+pnpm build                 # TypeScript + Vite 前端构建
 ```
+
+Rust 格式、`Cargo.lock`、生成绑定、Clippy、Rust 测试、audit 与 Tauri 打包全部由 GitHub Actions 负责。CI 检测到规范化漂移时，下载并应用它提供的补丁，不要在本地重新生成。
 
 ---
 

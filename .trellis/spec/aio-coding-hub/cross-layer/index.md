@@ -5,6 +5,10 @@ TypeScript bindings, frontend adapters, and React UI.
 
 ## Topics
 
+- [Cloud build and release artifact contract](./cloud-build-release-artifact-contract.md):
+  Node/frontend-only local execution, cloud native canonicalization and drift
+  patches, signed candidates, manual development builds, and byte-identical
+  release promotion.
 - [Codex config contract](./codex-config-contract.md): typed config fields,
   patch semantics, raw TOML validation, generated bindings, and UI behavior.
 - [Codex managed model route contract](./codex-managed-model-route-contract.md):
@@ -41,6 +45,16 @@ TypeScript bindings, frontend adapters, and React UI.
   opaque cursor pagination without changing the Home realtime feed.
 
 ## Pre-Development Checklist
+
+When changing native validation, desktop builds, signing, artifacts, or Release:
+
+1. Read [Cloud build and release artifact contract](./cloud-build-release-artifact-contract.md).
+2. Keep local scripts and aggregate stages Node/frontend-only; native commands
+   belong directly to the appropriate GitHub Actions workflow.
+3. Trace source/control SHA, validation run/attempt, platform artifact,
+   candidate manifest, immutable artifact ID, and remote Release digest.
+4. Preserve failure closure: drift emits a bounded patch, candidates never mix
+   attempts, and Release never falls back to compilation.
 
 When changing a Codex `config.toml` field:
 
@@ -160,19 +174,22 @@ When changing request-log retention, usage statistics, or the Logs page:
 
 ## Quality Check
 
-- Regenerate and verify `src/generated/bindings.ts` from Rust source.
-- Test Rust parsing, structured patching, and full-file write safety.
+- Require cloud native CI to regenerate and verify
+  `src/generated/bindings.ts` from Rust source. Apply its bounded drift patch;
+  do not regenerate the binding locally.
+- Require cloud CI to test Rust parsing, structured patching, and full-file
+  write safety.
 - Test frontend adapter defaults and the UI's null/unknown-value behavior.
-- When Rust changes touch target-gated code, run
-  `cargo clippy --all-targets --locked -- -D warnings` on every affected target
-  family. Host Clippy does not compile another platform's `cfg` branches; use
-  the CI-equivalent Linux environment for Unix-only code before pushing from
-  Windows.
+- When Rust changes touch target-gated code, require the affected cloud target
+  families to run the complete Clippy/test contract. A host check does not
+  compile another platform's `cfg` branches, so target-family CI evidence is
+  required.
 - Verify unrelated patches preserve fields that they do not own.
 - Run a deterministic barrier through a real production settings writer; prove
   unrelated Image Gen/Grok fields survive and CAS preserves newer owner values.
-- Run focused tests, `pnpm typecheck`, `pnpm lint`, `pnpm tauri:fmt`, and
-  `pnpm check:generated-bindings`.
+- Locally run focused frontend tests, `pnpm typecheck`, `pnpm lint`, and the
+  local native-boundary check. Require cloud CI for Rust formatting, lockfile,
+  generated bindings, Clippy, audit, and Rust tests.
 - When changing gateway selection or failover, verify skipped candidates,
   Ready-provider limits, route projection, and attempt/transition labels together.
 - When changing managed Codex models, verify exact UUID lookup, one bound

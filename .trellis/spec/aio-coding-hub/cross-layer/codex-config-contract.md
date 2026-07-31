@@ -49,9 +49,9 @@ Specta generates both TypeScript fields as `string | null` in
 - Structured patch unsupported string: fail before output bytes are produced.
 - Full raw TOML save: validate the complete file before atomic write. Fields
   with exact enums must reject empty, non-string, padded, and unknown values.
-- Generated boundary: edit Rust types, run `pnpm tauri:gen-types`, and format
-  the generated file. Do not hand-maintain generated types as the source of
-  truth.
+- Generated boundary: edit Rust types and let cloud native CI regenerate and
+  format the binding. Apply the emitted bounded drift patch; do not hand-edit
+  generated types or run the generator locally.
 - Frontend adapter: a `null` default must deserialize to Rust `None`; it is not
   the same as the empty-string deletion signal.
 - UI: preserve unknown current values with a synthetic option. Passive render
@@ -115,12 +115,12 @@ Focused verification:
 
 ```powershell
 pnpm exec vitest run src/components/cli-manager/tabs/__tests__/codexApprovalReviewer.test.ts src/components/cli-manager/tabs/__tests__/CodexTab.test.tsx
-Push-Location src-tauri
-cargo test --lib infra::codex_config::tests
-cargo test --test codex_config_toml_raw
-Pop-Location
-pnpm check:generated-bindings
+pnpm typecheck
 ```
+
+The focused Rust suites and generated-binding validation are required cloud CI
+jobs. If canonical Rust/binding output drifts, apply the CI patch and rerun CI;
+do not execute the native generator or Rust tests locally.
 
 ### 7. Wrong vs Correct
 

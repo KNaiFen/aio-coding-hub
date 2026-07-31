@@ -259,8 +259,10 @@ The frontend save adapter accepts only `suggestedFilename`, `mime`, and
 - Test that startup and successful/failed root switches grant no Image Gen
   asset scope, that an old root cannot render after switching, and normal
   history still renders through backend reads.
-- Regenerate bindings, then run Image Gen Rust/frontend suites, full Rust tests,
-  typecheck, lint, format checks, Clippy, and `git diff --check`.
+- Locally run the Image Gen frontend suites, typecheck, lint, and
+  `git diff --check`. Require cloud CI to regenerate bindings and run focused
+  and full Rust suites, formatting, and Clippy; apply its drift patch rather
+  than running native commands locally.
 - Frontend-test that hydration does not read full output/reference bytes,
   detail loading reads them on demand, and concurrency/aggregate byte limits
   are enforced. Rust tests count production read starts and prove an

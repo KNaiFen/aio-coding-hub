@@ -1,5 +1,12 @@
 # Implementation Plan
 
+> **Cloud-only supersession (2026-07-31):** Do not locally run Cargo,
+> rustfmt, Clippy, Rust tests, Specta/generated-binding commands, Tauri, or any
+> package script that invokes them. Future native checks and desktop packaging
+> belong to GitHub Actions; apply CI drift patches and keep local verification
+> Node/TypeScript/frontend-only. The verification results below are retained as
+> historical evidence, not future execution instructions.
+
 1. Add the default-on setting, view projection, dedicated command, generated
    binding contract, frontend service, and query mutation.
 2. Add an all-session-binding runtime clear operation and invoke it after a

@@ -308,9 +308,10 @@ extension values.
   warning/confirmation flows, file and content modes, late preview suppression,
   discard on edit/mode switch/close/unmount, target-CLI invalidation, and CLI
   switch after success.
-- Final gate: regenerate bindings, then run focused tests, `pnpm typecheck`,
-  `pnpm lint`, `pnpm tauri:fmt`, `pnpm tauri:check`, and full
-  `pnpm tauri:test`.
+- Final gate: run focused frontend tests, `pnpm typecheck`, and `pnpm lint`
+  locally. Require cloud CI to regenerate bindings and run Rust formatting,
+  checks, and the full Rust test suite; apply its bounded drift patch instead
+  of running native commands locally.
 
 ### 7. Wrong vs Correct
 

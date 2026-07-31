@@ -50,7 +50,7 @@ Record the exact upstream merge baseline and fork-preservation checks from the 2
 3. Confirm whether the recorded upstream baseline is behind upstream: `git log --oneline bcc3a5b24c1b0da77c7645bb57548b89bf95f59b..upstream/main`.
 4. Confirm fork/upstream drift: `git rev-list --left-right --count main...upstream/main`.
 5. If `upstream/main` has new commits, create a fresh reconcile branch from `main`, merge `upstream/main`, then resolve conflicts while preserving the fork behavior above.
-6. After resolving, run `pnpm check:prepush`, targeted tests for conflict areas, and a release rule check before publishing.
+6. After resolving, run the Node/frontend checks locally, then require the PR's cloud Rust, desktop, and release-contract gates before publishing.
 7. If an existing release tag already exists for the current version, bump to the next patch version before release.
 
 ## Verification from this sync

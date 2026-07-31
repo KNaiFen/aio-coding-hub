@@ -114,8 +114,10 @@ buildRequestRouteMeta({
 - Keep model-discovery strict-attempt and health-neutral circuit tests passing;
   shared gate changes must not broaden those requests.
 - Frontend-test provider, transition, and attempt counts with skips and retries.
-- Run the full Rust library suite after shared failover selection or gate
-  changes, then generated bindings, typecheck, lint, and Rust format checks.
+- After shared failover selection or gate changes, require cloud CI to run the
+  full Rust library suite, generated bindings, and Rust formatting. Run
+  typecheck, lint, and focused frontend tests locally; apply any CI drift patch
+  rather than regenerating native output locally.
 
 ### 7. Wrong vs Correct
 

@@ -56,7 +56,7 @@ When changing Codex context-compaction observation:
 - Unit-test the attempt-budget calculation at its boundary values.
 - Run route-level tests that exercise real provider retries and failover.
 - Verify circuit failure counts across multiple requests.
-- Run the full Rust suite after changing shared failover-loop inputs.
+- Require the cloud Rust job's full suite after changing shared failover-loop inputs.
 - Route-test managed and ordinary Codex requests together after changing
   provider selection, final wire-model tracking, or response observation.
 - Verify supported Codex encodings arrive upstream as identity JSON, while

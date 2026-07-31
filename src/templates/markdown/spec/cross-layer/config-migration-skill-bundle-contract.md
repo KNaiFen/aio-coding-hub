@@ -254,17 +254,18 @@ Keep focused regressions in
   `export_skill_dir_files` to `write_skill_files_to_dir` byte-for-byte round trip
   containing temporary-like names.
 
-Run at least:
+Local verification runs at least:
 
 ```powershell
-cargo test --manifest-path src-tauri/Cargo.toml config_migrate --lib --locked
-pnpm tauri:fmt
-pnpm tauri:clippy
+pnpm typecheck
+pnpm lint
 git diff --check
 ```
 
-Run the full Rust library suite when production config-migration code or a
-shared filesystem helper changes.
+Cloud CI must run the focused config-migration suite, formatting, Clippy, and
+the full Rust library suite when production config-migration code or a shared
+filesystem helper changes. Apply a cloud drift patch instead of running the
+native checks locally.
 
 ### 7. Wrong vs Correct
 
