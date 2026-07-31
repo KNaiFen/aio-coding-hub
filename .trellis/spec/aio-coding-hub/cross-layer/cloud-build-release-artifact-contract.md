@@ -50,7 +50,11 @@ contract.
 - `scripts/check-local-native-boundary.mjs` fails closed on tracked hooks and
   equivalent hook-manager configuration, hook installation, native package
   aliases, native aggregate stages, active Trellis lifecycle hooks, executable
-  pnpmfiles, and repository-controlled editor/Make/Just/Task automation files.
+  pnpmfiles, implicit `binding.gyp`, custom pnpm execution shells/options,
+  native Trellis/shell helpers, and repository-controlled editor/Make/Just/Task
+  automation files. Repository-controlled local packaging helpers are forbidden.
+  The canonical pnpm workspace uses a strict top-level key allowlist so quoted,
+  merged, duplicated, or future execution-policy keys fail closed.
   Allowlisted JavaScript helpers use explicit process contracts; namespace,
   alias, reflective, shell-enabled, or otherwise unauditable dispatch fails.
   CI and package aggregates scan the real repository before running boundary
@@ -170,8 +174,9 @@ weaken a known schema; a future format receives a new explicit version.
 
 - Keep the local-boundary pure-function self-test exhaustive for root/workspace
   scripts, dependency-build policy drift, indirect/reflective process aliases,
-  hooks and equivalent hook-manager configuration, Trellis hooks, nested
-  editor/Make/Just/Task automation, and allowlisted Node/frontend helpers.
+  local/worktree hook configuration, Trellis hooks/helpers, implicit node-gyp,
+  pnpm execution overrides, nested editor/Make/Just/Task automation, and
+  allowlisted Node/frontend helpers.
 - Keep support-matrix self-tests for all six manual targets, the two formal
   targets, synchronized versions, manifest success, and every schema/path/
   provenance/size/digest negative.

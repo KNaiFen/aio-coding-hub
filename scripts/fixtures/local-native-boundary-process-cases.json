@@ -1,6 +1,8 @@
 {
   "directCargo": "import { spawnSync } from \"node:child_process\";\nspawnSync(\"cargo\", [\"test\"]);\n",
+  "shellDisabled": "import { spawnSync } from \"node:child_process\";\nspawnSync(invocation.command, invocation.args, { shell: false });\n",
   "shellEnabled": "import { spawnSync } from \"node:child_process\";\nspawnSync(invocation.command, invocation.args, { shell: true });\n",
+  "customShell": "import { spawnSync } from \"node:child_process\";\nspawnSync(invocation.command, invocation.args, { shell: \"/bin/sh\" });\n",
   "namespaceCargo": "import * as cp from \"node:child_process\";\ncp.spawnSync(\"cargo\", [\"test\"]);\n",
   "reflectApplyCargo": "import { spawnSync } from \"node:child_process\";\nReflect.apply(spawnSync, null, [\"cargo\", [\"test\"]]);\n",
   "dynamicNamespaceCargo": "const cp = await import(\"node:\" + \"child_\" + \"process\");\ncp.spawnSync([\"car\", \"go\"].join(\"\"), [\"test\"]);\n"

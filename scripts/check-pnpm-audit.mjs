@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 import { dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { createPnpmInvocation } from "./lib/pnpm-cli.mjs";
+import { createAuditListInvocation } from "./lib/pnpm-cli.mjs";
 
 const logger = {
   info(message, ...args) {
@@ -37,8 +37,7 @@ const BULK_ADVISORY_ENDPOINT = new URL(
 ).toString();
 
 function pnpmListCommand() {
-  const args = ["list", "-r", "--prod", "--depth", "Infinity", "--json"];
-  return createPnpmInvocation(args);
+  return createAuditListInvocation();
 }
 
 export function collectPackageVersions(projects) {
@@ -241,6 +240,7 @@ async function main() {
     encoding: "utf8",
     env: process.env,
     maxBuffer: 64 * 1024 * 1024,
+    shell: false,
   });
 
   if (result.error) {

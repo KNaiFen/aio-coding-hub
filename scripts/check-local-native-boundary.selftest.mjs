@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { evaluateLocalNativeBoundary } from "./check-local-native-boundary.mjs";
+import {
+  evaluateLocalNativeBoundary,
+  parseScopedHooksPaths,
+} from "./check-local-native-boundary.mjs";
 
 const SAFE_PNPM_WORKSPACE = `packages:
   - .
@@ -99,11 +102,42 @@ expectFailure(
   snapshot({ trackedPaths: ["package.json", "scripts/install-git-hooks.mjs"] }),
   "forbidden local native helper"
 );
-expectFailure(snapshot({ hooksPaths: [".githooks"] }), "repository-local override is forbidden");
 expectFailure(
-  snapshot({ hooksPaths: [".custom-hooks"] }),
-  "repository-local override is forbidden"
+  snapshot({ trackedPaths: ["package.json", "scripts/repack-linux-appimage-wayland.sh"] }),
+  "forbidden local native helper"
 );
+expectFailure(
+  snapshot({
+    hooksPaths: [{ scope: "local", origin: "file:.git/config", value: ".githooks" }],
+  }),
+  "repository-owned override is forbidden"
+);
+expectFailure(
+  snapshot({
+    hooksPaths: [
+      { scope: "worktree", origin: "file:.git/config.worktree", value: ".custom-hooks" },
+    ],
+  }),
+  "repository-owned override is forbidden"
+);
+assert.deepEqual(
+  evaluateLocalNativeBoundary(
+    snapshot({
+      hooksPaths: [{ scope: "global", origin: "file:/tmp/global.gitconfig", value: "/hooks" }],
+    })
+  ),
+  []
+);
+assert.deepEqual(
+  parseScopedHooksPaths(
+    "global\tfile:/tmp/global.gitconfig\t/hooks\nworktree\tfile:.git/config.worktree\t.local-hooks\n"
+  ),
+  [
+    { scope: "global", origin: "file:/tmp/global.gitconfig", value: "/hooks" },
+    { scope: "worktree", origin: "file:.git/config.worktree", value: ".local-hooks" },
+  ]
+);
+assert.throws(() => parseScopedHooksPaths("malformed"));
 
 expectFailure(
   snapshot({
@@ -111,7 +145,14 @@ expectFailure(
   }),
   "postinstall: forbidden"
 );
-for (const lifecycle of ["preinstall", "install", "prepare", "prepack", "postpack"]) {
+for (const lifecycle of [
+  "preinstall",
+  "install",
+  "prepare",
+  "prepack",
+  "postpack",
+  "pnpm:devPreinstall",
+]) {
   expectFailure(
     snapshot({
       manifests: [
@@ -157,11 +198,17 @@ for (const command of [
 expectFailure(
   snapshot({
     manifests: [
-      { path: "package.json", scripts: { check: "pnpm --filter native-package test" } },
+      { path: "package.json", scripts: { check: "pnpm --filter native-package run test" } },
       { path: "packages/native-package/package.json", scripts: { test: "cargo test" } },
     ],
   }),
   "packages/native-package/package.json script test: invokes Cargo"
+);
+expectFailure(
+  snapshot({
+    manifests: [{ path: "package.json", scripts: { rebuild: "vite", check: "pnpm rebuild" } }],
+  }),
+  "command is outside the exact Node/frontend grammar"
 );
 expectFailure(
   snapshot({
@@ -179,6 +226,8 @@ for (const command of [
   "node --import scripts/desktop-check.mjs scripts/check-local-native-boundary.mjs",
   "node -r scripts/desktop-check.cjs scripts/check-local-native-boundary.mjs",
   "tsx --require scripts/desktop-check.cjs scripts/check-local-native-boundary.mjs",
+  "node /scripts/check-spec-links.mjs",
+  "node C:\\scripts\\check-spec-links.mjs",
 ]) {
   expectFailure(
     snapshot({ manifests: [{ path: "package.json", scripts: { check: command } }] }),
@@ -220,10 +269,29 @@ expectFailure(
   }),
   'scripts/run-checks.mjs: spawnSync command "cargo" is outside its process contract'
 );
+assert.deepEqual(
+  evaluateLocalNativeBoundary(
+    snapshot({
+      files: {
+        "pnpm-workspace.yaml": SAFE_PNPM_WORKSPACE,
+        "scripts/run-checks.mjs": processFixtures.shellDisabled,
+      },
+    })
+  ),
+  []
+);
 expectFailure(
   snapshot({
     files: {
       "scripts/run-checks.mjs": processFixtures.shellEnabled,
+    },
+  }),
+  "scripts/run-checks.mjs: shell-enabled process execution is forbidden"
+);
+expectFailure(
+  snapshot({
+    files: {
+      "scripts/run-checks.mjs": processFixtures.customShell,
     },
   }),
   "scripts/run-checks.mjs: shell-enabled process execution is forbidden"
@@ -260,6 +328,10 @@ for (const path of [
   "packages/desktop/GNUmakefile",
   "packages/desktop/.justfile",
   "packages/desktop/.vscode/tasks.json",
+  "packages/desktop/.vscode/settings.json",
+  "packages/desktop/.vscode/launch.json",
+  "packages/desktop/.zed/tasks.json",
+  "packages/desktop/project.code-workspace",
 ]) {
   expectFailure(
     snapshot({
@@ -280,11 +352,25 @@ expectFailure(
   "Makefile: repository-controlled local automation file is forbidden"
 );
 expectFailure(
+  snapshot({
+    trackedPaths: ["package.json", "pnpm-workspace.yaml", "binding.gyp"],
+  }),
+  "binding.gyp: implicit node-gyp install build is forbidden"
+);
+expectFailure(
+  snapshot({
+    trackedPaths: ["package.json", "pnpm-workspace.yaml", ".trellis/scripts/task.py"],
+    files: { ".trellis/scripts/task.py": 'subprocess.run(["cargo", "test"])\n' },
+  }),
+  ".trellis/scripts/task.py: local script invokes Cargo"
+);
+expectFailure(
   snapshot({ trackedPaths: ["package.json", ".pnpmfile.cjs"] }),
   ".pnpmfile.cjs: executable pnpm install hook is forbidden"
 );
 for (const [path, contents] of [
   [".npmrc", "pnpmfile=scripts/install-hook.cjs\n"],
+  [".npmrc", "global-pnpmfile=../native-hook.cjs\n"],
   ["pnpm-workspace.yaml", "pnpmfile: scripts/install-hook.cjs\n"],
 ]) {
   expectFailure(
@@ -301,6 +387,72 @@ expectFailure(
     },
   }),
   ".npmrc: pnpm dependency build policy override is forbidden"
+);
+expectFailure(
+  snapshot({
+    trackedPaths: ["package.json", "pnpm-workspace.yaml", ".npmrc"],
+    files: {
+      "pnpm-workspace.yaml": SAFE_PNPM_WORKSPACE,
+      ".npmrc": "only-built-dependencies-file=./native-builds.json\n",
+    },
+  }),
+  ".npmrc: pnpm dependency build policy override is forbidden"
+);
+for (const [path, contents] of [
+  [".npmrc", "script-shell=/bin/sh\n"],
+  [".npmrc", "node-options=--require=./scripts/preload.cjs\n"],
+  ["pnpm-workspace.yaml", `${SAFE_PNPM_WORKSPACE}\nscriptShell: /bin/sh\n`],
+]) {
+  const trackedPaths =
+    path === "pnpm-workspace.yaml"
+      ? ["package.json", "pnpm-workspace.yaml"]
+      : ["package.json", "pnpm-workspace.yaml", path];
+  expectFailure(
+    snapshot({
+      trackedPaths,
+      files: { "pnpm-workspace.yaml": SAFE_PNPM_WORKSPACE, [path]: contents },
+    }),
+    `${path}: custom pnpm execution override is forbidden`
+  );
+}
+expectFailure(
+  snapshot({
+    files: { "pnpm-workspace.yaml": `${SAFE_PNPM_WORKSPACE}\ndangerouslyAllowAllBuilds: true\n` },
+  }),
+  "pnpm-workspace.yaml: unexpected pnpm dependency build override is forbidden"
+);
+for (const contents of [
+  `${SAFE_PNPM_WORKSPACE}\n"nodeOptions": "--require=./scripts/preload.cjs"\n`,
+  `${SAFE_PNPM_WORKSPACE}\n"scriptShell": ./native-shell\n`,
+  `${SAFE_PNPM_WORKSPACE}\n"dangerouslyAllowAllBuilds": true\n`,
+  `${SAFE_PNPM_WORKSPACE}\n"globalPnpmfile": ./native-hook.cjs\n`,
+  `${SAFE_PNPM_WORKSPACE}\n<<: *nativePolicy\n`,
+  `${SAFE_PNPM_WORKSPACE}\n? scriptShell\n: ./native-shell\n`,
+]) {
+  expectFailure(
+    snapshot({ files: { "pnpm-workspace.yaml": contents } }),
+    "pnpm-workspace.yaml: top-level keys must use plain canonical syntax"
+  );
+}
+expectFailure(
+  snapshot({
+    files: { "pnpm-workspace.yaml": `${SAFE_PNPM_WORKSPACE}\nscriptShell: ./native-shell\n` },
+  }),
+  'pnpm-workspace.yaml: unexpected top-level key "scriptShell"'
+);
+expectFailure(
+  snapshot({
+    files: { "pnpm-workspace.yaml": `${SAFE_PNPM_WORKSPACE}\npackages:\n  - packages/*\n` },
+  }),
+  'pnpm-workspace.yaml: duplicate top-level key "packages"'
+);
+expectFailure(
+  snapshot({
+    files: {
+      "pnpm-workspace.yaml": `${SAFE_PNPM_WORKSPACE}\nonlyBuiltDependenciesFile: ./native-builds.json\n`,
+    },
+  }),
+  "pnpm-workspace.yaml: unexpected pnpm dependency build override is forbidden"
 );
 for (const contents of [
   SAFE_PNPM_WORKSPACE.replace("  msw: false", "  msw: false\n  native-builder: true"),
@@ -355,7 +507,7 @@ for (const indent of ["  ", "\t"]) {
 const multiple = evaluateLocalNativeBoundary(
   snapshot({
     trackedPaths: ["package.json", ".githooks/pre-push"],
-    hooksPaths: [".githooks"],
+    hooksPaths: [{ scope: "local", origin: "file:.git/config", value: ".githooks" }],
     manifests: [{ path: "package.json", scripts: { check: "cargo test" } }],
   })
 );

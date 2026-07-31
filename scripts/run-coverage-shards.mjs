@@ -8,19 +8,12 @@ import { rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { createPnpmInvocation } from "./lib/pnpm-cli.mjs";
+import { createCoverageMergeInvocation, createCoverageShardInvocation } from "./lib/pnpm-cli.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SHARD_COUNT = 4;
-const NO_THRESHOLDS = [
-  "--coverage.thresholds.statements=0",
-  "--coverage.thresholds.branches=0",
-  "--coverage.thresholds.functions=0",
-  "--coverage.thresholds.lines=0",
-];
 
-function runPnpm(args) {
-  const invocation = createPnpmInvocation(args);
+function runPnpm(invocation) {
   const result = spawnSync(invocation.command, invocation.args, {
     cwd: repoRoot,
     stdio: "inherit",
@@ -36,19 +29,11 @@ function main() {
 
   for (let shard = 1; shard <= SHARD_COUNT; shard += 1) {
     console.log(`[coverage-shards] shard ${shard}/${SHARD_COUNT}`);
-    runPnpm([
-      "exec",
-      "vitest",
-      "run",
-      "--reporter=blob",
-      "--coverage",
-      ...NO_THRESHOLDS,
-      `--shard=${shard}/${SHARD_COUNT}`,
-    ]);
+    runPnpm(createCoverageShardInvocation(shard));
   }
 
   console.log("[coverage-shards] merging reports and applying coverage thresholds");
-  runPnpm(["exec", "vitest", "run", "--merge-reports", "--coverage"]);
+  runPnpm(createCoverageMergeInvocation());
 }
 
 const invokedPath = process.argv[1] ? pathToFileURL(resolve(process.argv[1])).href : null;

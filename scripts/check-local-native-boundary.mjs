@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, posix, resolve } from "node:path";
+import { existsSync, lstatSync, readFileSync } from "node:fs";
+import { dirname, posix, resolve, win32 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -13,6 +13,7 @@ const FORBIDDEN_PATHS = new Set([
   "scripts/tauri-dev.mjs",
   "scripts/tauri-test.mjs",
   "scripts/tauri-gen-types.mjs",
+  "scripts/repack-linux-appimage-wayland.sh",
 ]);
 
 const ALLOWED_HELPER_PATHS = new Set([
@@ -43,6 +44,7 @@ const FORBIDDEN_SCRIPT_NAMES = new Set([
   "prepublishOnly",
   "prepack",
   "postpack",
+  "pnpm:devPreinstall",
   "hooks:install",
   "plugin:perf-smoke",
   "check:generated-bindings",
@@ -63,6 +65,7 @@ const NATIVE_COMMAND_PATTERNS = [
   ["wasm-pack", /(?:^|[\s;&|()"'/\\])wasm-pack(?:\.exe)?(?=$|[\s;&|()"'/\\])/i],
   ["Specta generation", /(?:^|[\s;&|()"'/\\])(?:specta|export-bindings)(?=$|[\s;&|()"'/\\])/i],
   ["Tauri CLI", /(?:^|[\s;&|()"'/\\])tauri(?:\.exe)?(?=$|[\s;&|()"'/\\])/i],
+  ["AppImage packaging", /(?:^|[\s;&|()"'/\\])appimagetool(?=$|[\s;&|()"'/\\])/i],
   ["Tauri package alias", /\b(?:pnpm|yarn|bun)\s+(?:run\s+)?tauri(?::|\s|$)/i],
   ["Tauri npm alias", /\bnpm\s+run\s+tauri(?::|\s|$)/i],
   [
@@ -74,28 +77,44 @@ const NATIVE_COMMAND_PATTERNS = [
 const HOOK_CONFIGURATION_PATTERN =
   /(?:install-git-hooks|core\.hooksPath|\.githooks|husky\s+install|simple-git-hooks|lefthook\s+install)/i;
 const AUTOMATION_PATH_PATTERNS = [
-  /(?:^|\/)\.vscode\/tasks\.json$/,
-  /(?:^|\/)(?:\.fleet|\.idea)\//,
-  /(?:^|\/)(?:GNUmakefile|Makefile|makefile|Justfile|justfile|\.justfile|Taskfile\.(?:yml|yaml))$/,
+  /(?:^|\/)(?:\.vscode|\.zed|\.fleet|\.idea|\.devcontainer)\//i,
+  /(?:^|\/)[^/]+\.code-workspace$/i,
+  /(?:^|\/)(?:GNUmakefile|Makefile|Justfile|\.justfile|Taskfile\.(?:yml|yaml))$/i,
 ];
 const REPOSITORY_HOOK_PATH_PATTERNS = [
-  /(?:^|\/)(?:\.githooks|\.git-hooks|\.husky)\//,
+  /(?:^|\/)(?:\.githooks|\.git-hooks|\.husky)\//i,
   /(?:^|\/)\.pre-commit-config\.ya?ml$/i,
   /(?:^|\/)(?:\.?lefthook|lefthook-local)\.ya?ml$/i,
 ];
 const PNPMFILE_PATH_PATTERN = /(?:^|\/)\.pnpmfile\.(?:cjs|mjs|js)$/i;
+const BINDING_GYP_PATH_PATTERN = /(?:^|\/)binding\.gyp$/i;
 const PACKAGE_MANAGER_CONFIG_PATH_PATTERN = /(?:^|\/)(?:\.npmrc|pnpm-workspace\.ya?ml)$/i;
-const PNPMFILE_CONFIG_PATTERN = /(?:^|\r?\n)\s*pnpmfile\s*[:=]/i;
+const PNPMFILE_CONFIG_PATTERN = /(?:^|\r?\n)\s*(?:pnpmfile|globalPnpmfile|global-pnpmfile)\s*[:=]/i;
 const PNPM_BUILD_OVERRIDE_PATTERN =
-  /(?:^|\r?\n)\s*(?:allowBuilds|allow-builds|onlyBuiltDependencies|only-built-dependencies|neverBuiltDependencies|never-built-dependencies|ignoredBuiltDependencies|ignored-built-dependencies|dangerouslyAllowAllBuilds|dangerously-allow-all-builds)\s*=/i;
+  /(?:^|\r?\n)\s*(?:allowBuilds|allow-builds|onlyBuiltDependencies|only-built-dependencies|onlyBuiltDependenciesFile|only-built-dependencies-file|neverBuiltDependencies|never-built-dependencies|ignoredBuiltDependencies|ignored-built-dependencies|dangerouslyAllowAllBuilds|dangerously-allow-all-builds)\s*=/i;
+const PNPM_UNEXPECTED_WORKSPACE_BUILD_OVERRIDE_PATTERN =
+  /(?:^|\r?\n)(?:onlyBuiltDependenciesFile|only-built-dependencies-file|neverBuiltDependencies|never-built-dependencies|ignoredBuiltDependencies|ignored-built-dependencies|dangerouslyAllowAllBuilds|dangerously-allow-all-builds)\s*:/i;
+const PNPM_EXECUTION_OVERRIDE_PATTERN =
+  /(?:^|\r?\n)\s*(?:scriptShell|script-shell|shellEmulator|shell-emulator|nodeOptions|node-options)\s*[:=]/i;
 const PNPM_WORKSPACE_PATH = "pnpm-workspace.yaml";
+const EXPECTED_PNPM_WORKSPACE_TOP_LEVEL_KEYS = new Set([
+  "packages",
+  "minimumReleaseAge",
+  "trustPolicy",
+  "allowBuilds",
+  "onlyBuiltDependencies",
+  "overrides",
+]);
 const EXPECTED_ALLOW_BUILDS = new Map([
   ["es5-ext", false],
   ["esbuild", true],
   ["msw", false],
 ]);
 const EXPECTED_ONLY_BUILT_DEPENDENCIES = new Set(["esbuild"]);
-const JAVASCRIPT_SOURCE_PATTERN = /\.(?:cjs|mjs|js|cts|mts|ts|tsx)$/;
+const JAVASCRIPT_SOURCE_PATTERN = /\.(?:cjs|mjs|js|cts|mts|ts|tsx)$/i;
+const LOCAL_SCRIPT_SOURCE_PATTERN = /\.(?:py|sh|bash|zsh|ps1|cmd|bat)$/i;
+const MAX_AUDITED_FILE_BYTES = 2 * 1024 * 1024;
+const MAX_AUDITED_TOTAL_BYTES = 32 * 1024 * 1024;
 const PROCESS_MODULE_PATTERN =
   /(?:node:)?child_process|child_["'`+\s]*process|process\.getBuiltinModule|Bun\.spawn|Deno\.Command/;
 const PROCESS_CALL_PATTERN =
@@ -177,7 +196,7 @@ function validateExecutableSource(path, contents, violations) {
       );
     }
   }
-  if (/shell\s*:\s*true/.test(contents)) {
+  if (/shell\s*:(?!\s*false\b)/.test(contents)) {
     violations.push(`${path}: shell-enabled process execution is forbidden`);
   }
 }
@@ -198,6 +217,28 @@ function readTopLevelYamlSection(contents, sectionName) {
     if (withoutComment.trim() !== "") section.push(withoutComment);
   }
   return section;
+}
+
+function validatePnpmWorkspaceTopLevelPolicy(contents, violations) {
+  const seen = new Set();
+  for (const line of contents.split(/\r?\n/)) {
+    if (line.trim() === "" || /^\s*#/.test(line) || /^\s/.test(line)) continue;
+    const match = /^([A-Za-z][A-Za-z0-9]*):(?:\s|$)/.exec(line);
+    if (!match) {
+      violations.push(`${PNPM_WORKSPACE_PATH}: top-level keys must use plain canonical syntax`);
+      return;
+    }
+    const key = match[1];
+    if (seen.has(key)) {
+      violations.push(`${PNPM_WORKSPACE_PATH}: duplicate top-level key ${JSON.stringify(key)}`);
+      return;
+    }
+    seen.add(key);
+    if (!EXPECTED_PNPM_WORKSPACE_TOP_LEVEL_KEYS.has(key)) {
+      violations.push(`${PNPM_WORKSPACE_PATH}: unexpected top-level key ${JSON.stringify(key)}`);
+      return;
+    }
+  }
 }
 
 function validatePnpmWorkspaceBuildPolicy(contents, violations) {
@@ -250,12 +291,12 @@ function scriptSegments(command) {
 }
 
 function validatePnpmSegment(tokens, manifest, packagesByName) {
-  if (tokens.length === 2) {
-    return Object.hasOwn(manifest.scripts, tokens[1]);
+  if (tokens.length === 3 && tokens[1] === "run") {
+    return Object.hasOwn(manifest.scripts, tokens[2]);
   }
-  if (tokens.length === 4 && tokens[1] === "--filter") {
+  if (tokens.length === 5 && tokens[1] === "--filter" && tokens[3] === "run") {
     const target = packagesByName.get(tokens[2]);
-    return target != null && Object.hasOwn(target.scripts ?? {}, tokens[3]);
+    return target != null && Object.hasOwn(target.scripts ?? {}, tokens[4]);
   }
   return false;
 }
@@ -271,6 +312,9 @@ function validateScriptCommand(manifest, command, packagesByName) {
 
     if (tokens[0] === "node" || tokens[0] === "tsx") {
       if (tokens.length < 2 || !/\.(?:[cm]?js|ts)$/.test(tokens[1])) return false;
+      if (posix.isAbsolute(tokens[1]) || win32.isAbsolute(tokens[1]) || tokens[1].includes("\\")) {
+        return false;
+      }
       const helper = posix.normalize(posix.join(posix.dirname(manifest.path), tokens[1]));
       if (!ALLOWED_HELPER_PATHS.has(helper)) return false;
       continue;
@@ -300,14 +344,18 @@ export function evaluateLocalNativeBoundary(snapshot) {
     if (PNPMFILE_PATH_PATTERN.test(path)) {
       violations.push(`${path}: executable pnpm install hook is forbidden`);
     }
+    if (BINDING_GYP_PATH_PATTERN.test(path)) {
+      violations.push(`${path}: implicit node-gyp install build is forbidden`);
+    }
     if (isRepositoryHookPath(path)) {
       violations.push(`${path}: tracked repository hook is forbidden`);
     }
   }
 
   for (const hooksPath of snapshot.hooksPaths ?? []) {
+    if (hooksPath.scope !== "local" && hooksPath.scope !== "worktree") continue;
     violations.push(
-      `git config core.hooksPath: repository-local override is forbidden (${JSON.stringify(hooksPath)})`
+      `git config core.hooksPath: repository-owned override is forbidden (${JSON.stringify(hooksPath.value)})`
     );
   }
 
@@ -366,6 +414,11 @@ export function evaluateLocalNativeBoundary(snapshot) {
     if (JAVASCRIPT_SOURCE_PATTERN.test(path)) {
       validateExecutableSource(path, contents, violations);
     }
+    if (LOCAL_SCRIPT_SOURCE_PATTERN.test(path)) {
+      for (const nativeKind of findNativeCommands(contents)) {
+        violations.push(`${path}: local script invokes ${nativeKind}`);
+      }
+    }
   }
 
   const trellisConfig = snapshot.files?.[".trellis/config.yaml"];
@@ -383,6 +436,15 @@ export function evaluateLocalNativeBoundary(snapshot) {
     if (/(?:^|\/)\.npmrc$/i.test(path) && PNPM_BUILD_OVERRIDE_PATTERN.test(contents)) {
       violations.push(`${path}: pnpm dependency build policy override is forbidden`);
     }
+    if (PNPM_EXECUTION_OVERRIDE_PATTERN.test(contents)) {
+      violations.push(`${path}: custom pnpm execution override is forbidden`);
+    }
+    if (
+      /(?:^|\/)pnpm-workspace\.ya?ml$/i.test(path) &&
+      PNPM_UNEXPECTED_WORKSPACE_BUILD_OVERRIDE_PATTERN.test(contents)
+    ) {
+      violations.push(`${path}: unexpected pnpm dependency build override is forbidden`);
+    }
   }
 
   const pnpmWorkspacePaths = trackedPaths.filter((path) =>
@@ -391,7 +453,9 @@ export function evaluateLocalNativeBoundary(snapshot) {
   if (pnpmWorkspacePaths.length !== 1 || pnpmWorkspacePaths[0] !== PNPM_WORKSPACE_PATH) {
     violations.push(`${PNPM_WORKSPACE_PATH}: one canonical root workspace policy is required`);
   } else {
-    validatePnpmWorkspaceBuildPolicy(snapshot.files?.[PNPM_WORKSPACE_PATH] ?? "", violations);
+    const workspaceContents = snapshot.files?.[PNPM_WORKSPACE_PATH] ?? "";
+    validatePnpmWorkspaceTopLevelPolicy(workspaceContents, violations);
+    validatePnpmWorkspaceBuildPolicy(workspaceContents, violations);
   }
 
   for (const path of trackedPaths.filter((candidate) => isAutomationPath(candidate))) {
@@ -403,7 +467,11 @@ export function evaluateLocalNativeBoundary(snapshot) {
 
 function readManifest(repoRoot, path) {
   try {
-    const value = JSON.parse(readFileSync(resolve(repoRoot, path), "utf8"));
+    const absolutePath = resolve(repoRoot, path);
+    const stat = lstatSync(absolutePath);
+    if (!stat.isFile()) throw new Error("manifest must be a regular file");
+    if (stat.size > MAX_AUDITED_FILE_BYTES) throw new Error("manifest exceeds the size limit");
+    const value = JSON.parse(readFileSync(absolutePath, "utf8"));
     return {
       path,
       name: value.name,
@@ -435,13 +503,25 @@ function collectGitPaths(repoRoot, collectionErrors) {
   }
 }
 
+export function parseScopedHooksPaths(output) {
+  return output
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => {
+      const match = /^(\S+)\t([^\t]*)\t(.*)$/.exec(line);
+      if (!match) throw new Error("unexpected scoped Git config output");
+      return { scope: match[1], origin: match[2], value: match[3] };
+    });
+}
+
 function collectHooksPaths(repoRoot, collectionErrors) {
   try {
-    const output = execFileSync("git", ["config", "--local", "--get-all", "core.hooksPath"], {
-      cwd: repoRoot,
-      encoding: "utf8",
-    });
-    return output.split(/\r?\n/).filter(Boolean);
+    const output = execFileSync(
+      "git",
+      ["config", "--show-scope", "--show-origin", "--get-all", "core.hooksPath"],
+      { cwd: repoRoot, encoding: "utf8" }
+    );
+    return parseScopedHooksPaths(output);
   } catch (error) {
     if (error.status === 1) return [];
     collectionErrors.push(`git config core.hooksPath: ${error.message}`);
@@ -457,16 +537,33 @@ export function collectLocalNativeBoundarySnapshot(repoRoot = defaultRepoRoot) {
     .filter((path) => path === "package.json" || path.endsWith("/package.json"))
     .map((path) => readManifest(root, path));
   const files = {};
+  let auditedBytes = 0;
 
   for (const path of trackedPaths) {
     if (
       path === ".trellis/config.yaml" ||
       isAutomationPath(path) ||
       PACKAGE_MANAGER_CONFIG_PATH_PATTERN.test(path) ||
-      JAVASCRIPT_SOURCE_PATTERN.test(path)
+      JAVASCRIPT_SOURCE_PATTERN.test(path) ||
+      LOCAL_SCRIPT_SOURCE_PATTERN.test(path)
     ) {
       try {
-        files[path] = readFileSync(resolve(root, path), "utf8");
+        const absolutePath = resolve(root, path);
+        const stat = lstatSync(absolutePath);
+        if (!stat.isFile()) {
+          collectionErrors.push(`${path}: audited source must be a regular file`);
+          continue;
+        }
+        if (stat.size > MAX_AUDITED_FILE_BYTES) {
+          collectionErrors.push(`${path}: audited source exceeds the per-file size limit`);
+          continue;
+        }
+        auditedBytes += stat.size;
+        if (auditedBytes > MAX_AUDITED_TOTAL_BYTES) {
+          collectionErrors.push("audited sources exceed the total size limit");
+          break;
+        }
+        files[path] = readFileSync(absolutePath, "utf8");
       } catch (error) {
         collectionErrors.push(`${path}: cannot be read: ${error.message}`);
       }

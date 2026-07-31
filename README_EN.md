@@ -141,13 +141,8 @@ yay -S aio-coding-hub-bin
 
 The app automatically detects Wayland sessions and sets `WEBKIT_DISABLE_COMPOSITING_MODE=1`
 to prevent EGL display initialisation crashes (see [issue #93](https://github.com/FingerCaster/aio-coding-hub/issues/93)).
-If you still see a blank white window, use the `*-wayland.AppImage` artifact from the Release page
-(bundled EGL/Mesa libraries stripped; system versions are used instead):
-
-```bash
-# Or manually repack an existing AppImage
-./scripts/repack-linux-appimage-wayland.sh aio-coding-hub-linux-amd64.AppImage
-```
+The repository provides no local native repackaging entry point; use the cloud `dev-build`
+workflow when a desktop artifact is required.
 
 </details>
 

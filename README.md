@@ -144,13 +144,7 @@ yay -S aio-coding-hub-bin
 
 **AppImage 用户**
 
-应用在 Wayland 下启动时会自动检测并注入 `WEBKIT_DISABLE_COMPOSITING_MODE=1` 以避免 EGL 冲突崩溃（见 [issue #93](https://github.com/FingerCaster/aio-coding-hub/issues/93)）。
-若仍遇到白屏，可改用 Release 中附带的 `*-wayland.AppImage`（已剥离内置 EGL/Mesa 库，使用系统版本）：
-
-```bash
-# 或者手动对已有 AppImage 进行重打包
-./scripts/repack-linux-appimage-wayland.sh aio-coding-hub-linux-amd64.AppImage
-```
+应用在 Wayland 下启动时会自动检测并注入 `WEBKIT_DISABLE_COMPOSITING_MODE=1` 以避免 EGL 冲突崩溃（见 [issue #93](https://github.com/FingerCaster/aio-coding-hub/issues/93)）。仓库不提供本地原生重打包入口；需要桌面制品时请使用 `dev-build` 云端工作流。
 
 </details>
 

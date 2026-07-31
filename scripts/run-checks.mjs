@@ -13,7 +13,7 @@ import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { createPnpmInvocation } from "./lib/pnpm-cli.mjs";
+import { createCheckScriptInvocation } from "./lib/pnpm-cli.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const CHECKS = {
@@ -71,7 +71,7 @@ function listStages() {
   for (const [stage, ids] of Object.entries(STAGES)) {
     console.log(`${stage}:`);
     for (const id of ids) {
-      console.log(`  ${id}: pnpm ${CHECKS[id]}`);
+      console.log(`  ${id}: pnpm run ${CHECKS[id]}`);
     }
   }
 }
@@ -92,15 +92,23 @@ function main() {
 
   for (const [index, id] of ids.entries()) {
     const script = CHECKS[id];
-    console.log(`[checks] (${index + 1}/${ids.length}) ${id}: pnpm ${script}`);
-    const invocation = createPnpmInvocation([script]);
+    console.log(`[checks] (${index + 1}/${ids.length}) ${id}: pnpm run ${script}`);
+    const invocation = createCheckScriptInvocation(script);
     const result = spawnSync(invocation.command, invocation.args, {
       cwd: repoRoot,
       stdio: "inherit",
       shell: false,
     });
+    if (result.error) {
+      console.error(`[checks] ${id} failed to start: ${result.error.code ?? "unknown error"}`);
+      process.exit(1);
+    }
+    if (result.signal) {
+      console.error(`[checks] ${id} terminated by signal ${result.signal}`);
+      process.exit(1);
+    }
     if (result.status !== 0) {
-      console.error(`[checks] ${id} failed (exit ${result.status ?? "signal"})`);
+      console.error(`[checks] ${id} failed (exit ${result.status})`);
       process.exit(result.status ?? 1);
     }
   }
