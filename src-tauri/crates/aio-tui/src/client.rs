@@ -39,7 +39,7 @@ pub struct ObserverClient {
 }
 
 enum SnapshotFetch {
-    Ready(ObserverSnapshotV1),
+    Ready(Box<ObserverSnapshotV1>),
     ProviderQueryUnsupported,
 }
 
@@ -61,7 +61,7 @@ impl ObserverClient {
         history_limit: u16,
     ) -> Result<ObserverSnapshotV1, OfflineReason> {
         match self.fetch_snapshot(scope, history_limit, false).await? {
-            SnapshotFetch::Ready(snapshot) => Ok(snapshot),
+            SnapshotFetch::Ready(snapshot) => Ok(*snapshot),
             SnapshotFetch::ProviderQueryUnsupported => Err(OfflineReason::InvalidResponse),
         }
     }
@@ -72,10 +72,10 @@ impl ObserverClient {
         history_limit: u16,
     ) -> Result<ObserverSnapshotV1, OfflineReason> {
         match self.fetch_snapshot(scope, history_limit, true).await? {
-            SnapshotFetch::Ready(snapshot) => Ok(snapshot),
+            SnapshotFetch::Ready(snapshot) => Ok(*snapshot),
             SnapshotFetch::ProviderQueryUnsupported => {
                 match self.fetch_snapshot(scope, history_limit, false).await? {
-                    SnapshotFetch::Ready(snapshot) => Ok(snapshot),
+                    SnapshotFetch::Ready(snapshot) => Ok(*snapshot),
                     SnapshotFetch::ProviderQueryUnsupported => Err(OfflineReason::InvalidResponse),
                 }
             }
@@ -133,7 +133,7 @@ impl ObserverClient {
         if snapshot.protocol_version != OBSERVER_PROTOCOL_VERSION {
             return Err(OfflineReason::ProtocolMismatch);
         }
-        Ok(SnapshotFetch::Ready(snapshot))
+        Ok(SnapshotFetch::Ready(Box::new(snapshot)))
     }
 }
 
