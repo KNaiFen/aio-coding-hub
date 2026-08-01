@@ -726,8 +726,9 @@ fn draw_header(frame: &mut Frame, area: Rect, state: &LiveState, color: bool, vi
         .unwrap_or_else(|| "—".to_string());
     let first = truncate_display(
         &format!(
-            "AIO {} | {} {}/2 | {} | 并发 {}",
+            "AIO {} | 并发 {} | {} {}/2 | {}",
             online,
+            concurrency,
             match view {
                 DashboardView::Requests => "请求",
                 DashboardView::Providers => "供应商",
@@ -736,8 +737,7 @@ fn draw_header(frame: &mut Frame, area: Rect, state: &LiveState, color: bool, vi
                 DashboardView::Requests => 1,
                 DashboardView::Providers => 2,
             },
-            scope_label(state.scope),
-            concurrency
+            scope_label(state.scope)
         ),
         usize::from(area.width),
     );
