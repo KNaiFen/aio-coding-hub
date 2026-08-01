@@ -232,6 +232,9 @@ async fn run_logs(client: ObserverClient, scope: CliScope) -> Result<(), String>
 
     loop {
         let now = Instant::now();
+        if state.expire_inactive_selections(now) {
+            redraw = true;
+        }
         if now >= next_refresh {
             let snapshot = match state.view {
                 DashboardView::Requests => {
@@ -295,6 +298,10 @@ struct KeyAction {
 }
 
 fn handle_logs_key(state: &mut LogsState, key: KeyEvent) -> KeyAction {
+    handle_logs_key_at(state, key, Instant::now())
+}
+
+fn handle_logs_key_at(state: &mut LogsState, key: KeyEvent, now: Instant) -> KeyAction {
     if matches!(key.code, KeyCode::Char('?')) {
         state.help = !state.help;
         return KeyAction {
@@ -326,6 +333,7 @@ fn handle_logs_key(state: &mut LogsState, key: KeyEvent) -> KeyAction {
             KeyCode::Esc => {
                 state.detail = false;
                 state.detail_scroll = 0;
+                state.resume_current_selection_expiry(now);
             }
             KeyCode::Up | KeyCode::Char('k') => {
                 state.detail_scroll = state.detail_scroll.saturating_sub(1)
@@ -352,6 +360,7 @@ fn handle_logs_key(state: &mut LogsState, key: KeyEvent) -> KeyAction {
     match key.code {
         KeyCode::Left => {
             state.switch_view(DashboardView::Requests);
+            state.resume_current_selection_expiry(now);
             return KeyAction {
                 redraw: true,
                 refresh: true,
@@ -359,20 +368,22 @@ fn handle_logs_key(state: &mut LogsState, key: KeyEvent) -> KeyAction {
         }
         KeyCode::Right => {
             state.switch_view(DashboardView::Providers);
+            state.resume_current_selection_expiry(now);
             return KeyAction {
                 redraw: true,
                 refresh: true,
             };
         }
-        KeyCode::Up | KeyCode::Char('k') => state.move_selection(-1),
-        KeyCode::Down | KeyCode::Char('j') => state.move_selection(1),
-        KeyCode::PageUp => state.move_selection(-5),
-        KeyCode::PageDown => state.move_selection(5),
-        KeyCode::Home => state.set_current_selection(0),
-        KeyCode::End => state.set_current_selection(state.current_count().saturating_sub(1)),
+        KeyCode::Up | KeyCode::Char('k') => state.move_selection(-1, now),
+        KeyCode::Down | KeyCode::Char('j') => state.move_selection(1, now),
+        KeyCode::PageUp => state.move_selection(-5, now),
+        KeyCode::PageDown => state.move_selection(5, now),
+        KeyCode::Home => state.select_current(0, now),
+        KeyCode::End => state.select_current(state.current_count().saturating_sub(1), now),
         KeyCode::Enter if state.has_selected_item() => {
             state.detail = true;
             state.detail_scroll = 0;
+            state.suspend_current_selection_expiry();
         }
         KeyCode::Tab => {
             state.set_scope(next_scope(state.live.scope));
