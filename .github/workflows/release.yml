@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "aio-coding-hub-v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish
+        required: true
+        type: string
 
 permissions:
   actions: read
@@ -31,11 +37,17 @@ jobs:
         name: Validate release source
         shell: bash
         env:
-          TAG_NAME: ${{ github.ref_name }}
+          TAG_NAME: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
-          source_sha="$(git rev-parse "$GITHUB_SHA^{commit}")"
-          git fetch --no-tags origin main
+          if [[ ! "$TAG_NAME" =~ ^aio-coding-hub-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Invalid release tag: $TAG_NAME" >&2
+            exit 1
+          fi
+          tag_ref="refs/tags/$TAG_NAME"
+          git fetch --no-tags origin "$tag_ref:$tag_ref"
+          source_sha="$(git rev-parse "$tag_ref^{commit}")"
+          git fetch --no-tags origin "refs/heads/main:refs/remotes/origin/main"
           git merge-base --is-ancestor "$source_sha" origin/main
           git checkout --detach "$source_sha"
           node scripts/support-matrix.mjs validate-release-version --tag "$TAG_NAME"
@@ -97,6 +109,7 @@ jobs:
           repository: ${{ github.repository }}
           run-id: ${{ steps.candidate.outputs.run_id }}
           path: release-assets
+          merge-multiple: true
 
       - name: Verify candidate files
         shell: bash

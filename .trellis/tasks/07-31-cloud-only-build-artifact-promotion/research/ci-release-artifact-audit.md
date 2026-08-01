@@ -61,3 +61,10 @@ Primary references:
 - Locate a successful exact-SHA main CI from Release, choose its exact artifact ID, verify all bytes, then create/publish the draft.
 - Fail closed when the candidate is absent/expired/ambiguous; recovery is an explicit cloud candidate run, never a Release fallback build.
 - After Release upload, compare each remote asset's `sha256:` digest with the local manifest; download-and-hash or fail when the API cannot provide one.
+
+## 2026-08-01 promotion incident
+
+- Main CI run `30693031019` succeeded for source SHA `74e52a6767f40ece15ff94854799cf7a7b88dccc` and uploaded candidate artifact `8816822875` with all desktop and TUI assets at the archive root.
+- Tag-triggered Release run `30694692821` selected that exact artifact but failed before publication because `actions/download-artifact` extracted an `artifact-ids` selection beneath an artifact-name directory while the verifier expected `release-assets/<file>`.
+- The release download must set `merge-multiple: true` so exact-ID promotion and root-level verification use the same layout.
+- Release recovery must execute the repaired workflow from current `main` while treating an existing immutable release tag as validated input; a required `workflow_dispatch` tag input avoids moving or recreating the protected tag.
