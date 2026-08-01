@@ -643,7 +643,25 @@ export function buildRequestRouteMeta(input: {
     );
   const hasRetry = retryCount > 0;
   const providerCount = hops.length;
-  const transitionCount = Math.max(providerCount - 1, 0);
+  let previousSentProvider: string | null = null;
+  const transitionCount = hops.reduce((count, hop) => {
+    if (hop.skipped) return count;
+    const providerId = hop.provider_id;
+    const rawProviderName = typeof hop.provider_name === "string" ? hop.provider_name.trim() : "";
+    const providerIdentity =
+      Number.isSafeInteger(providerId) && providerId > 0
+        ? `id:${providerId}`
+        : rawProviderName
+          ? `name:${rawProviderName}`
+          : null;
+    if (providerIdentity == null) return count;
+    const nextCount =
+      previousSentProvider != null && previousSentProvider !== providerIdentity
+        ? addBoundedCount(count, 1)
+        : count;
+    previousSentProvider = providerIdentity;
+    return nextCount;
+  }, 0);
   const hasProviderTransition = transitionCount > 0;
   const completedSuccessfully = input.status != null && input.status >= 200 && input.status < 400;
 

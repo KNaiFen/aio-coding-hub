@@ -38,6 +38,22 @@ pub struct ProviderLimitUsageRow {
     pub window_monthly_start_ts: i64,
 }
 
+fn usage_reaches_limit(limit: Option<f64>, usage: f64) -> bool {
+    limit.is_some_and(|limit| {
+        limit.is_finite() && limit >= 0.0 && usage.is_finite() && usage.max(0.0) >= limit
+    })
+}
+
+impl ProviderLimitUsageRow {
+    pub(crate) fn is_limit_reached(&self) -> bool {
+        usage_reaches_limit(self.limit_5h_usd, self.usage_5h_usd)
+            || usage_reaches_limit(self.limit_daily_usd, self.usage_daily_usd)
+            || usage_reaches_limit(self.limit_weekly_usd, self.usage_weekly_usd)
+            || usage_reaches_limit(self.limit_monthly_usd, self.usage_monthly_usd)
+            || usage_reaches_limit(self.limit_total_usd, self.usage_total_usd)
+    }
+}
+
 fn validate_cli_key(cli_key: &str) -> crate::shared::error::AppResult<()> {
     crate::shared::cli_key::validate_cli_key(cli_key)
 }
@@ -724,5 +740,16 @@ WHERE id = last_insert_rowid()
 
         let error = list_v1(&db, Some("codex")).expect_err("missing usage source must fail");
         assert_eq!(error.code(), "DB_ERROR");
+    }
+
+    #[test]
+    fn usage_limit_reached_is_inclusive_and_fails_open_for_invalid_values() {
+        assert!(!usage_reaches_limit(Some(10.0), 9.999));
+        assert!(usage_reaches_limit(Some(10.0), 10.0));
+        assert!(usage_reaches_limit(Some(0.0), 0.0));
+        assert!(!usage_reaches_limit(None, 100.0));
+        assert!(!usage_reaches_limit(Some(f64::NAN), 100.0));
+        assert!(!usage_reaches_limit(Some(-1.0), 100.0));
+        assert!(!usage_reaches_limit(Some(10.0), f64::NAN));
     }
 }

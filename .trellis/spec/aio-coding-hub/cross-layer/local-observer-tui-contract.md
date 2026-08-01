@@ -50,8 +50,18 @@ remote administration API.
   cost. Total tokens include input, output, and cache buckets according to the
   existing effective-token expression.
 - The preferred provider is the first enabled provider in the active gateway
-  order whose peeked circuit is not `OPEN` and whose cooldown is not active.
+  order that has not reached a configured spend limit, has no active exhausted
+  OAuth quota snapshot, whose peeked circuit is not `OPEN`, and whose cooldown
+  is not active. Spend state comes from the existing provider-limit read model;
+  OAuth state comes from the same snapshot gate used by forwarding. This is a
+  local eligibility read, not a remote account/model-quota guess. If any
+  eligibility read fails, only `preferred_provider` becomes unavailable.
   `all` selects the CLI from the newest terminal inference record.
+- Terminal route counters retain every skipped audit hop in `route`, but
+  `provider_switch_count` compares only adjacent non-skipped suppliers and
+  `retry_count` sums only extra attempts on non-skipped suppliers. TUI route
+  summaries display both counters whenever both are non-zero; neither counter
+  is inferred from the other.
 - The logs view contains active requests first and up to fifty terminal proxy
   records. Active requests do not consume the fifty-record allowance. Each
   request has a stable opaque key so terminal completion does not move the

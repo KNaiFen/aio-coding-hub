@@ -325,7 +325,7 @@ pub fn request_status_label(request: &ObserverRequest) -> String {
 
 pub fn route_result(request: &ObserverRequest) -> String {
     if request.provider_switch_count > 0 {
-        if request.retry_count > request.provider_switch_count {
+        if request.retry_count > 0 {
             return format!(
                 "切换{}/重试{}",
                 request.provider_switch_count, request.retry_count
@@ -467,6 +467,40 @@ fn display_width(value: &str) -> usize {
 mod tests {
     use super::*;
 
+    fn request_with_route_counts(
+        attempt_count: u32,
+        retry_count: u32,
+        provider_switch_count: u32,
+    ) -> ObserverRequest {
+        ObserverRequest {
+            key: "request-1".to_string(),
+            state: ObserverRequestState::Terminal,
+            cli_key: "codex".to_string(),
+            method: "POST".to_string(),
+            path: "/v1/responses".to_string(),
+            model: Some("gpt-5".to_string()),
+            provider_name: Some("Provider".to_string()),
+            status: Some(200),
+            error_code: None,
+            interrupted: false,
+            created_at_ms: 1,
+            last_activity_ms: 2,
+            duration_ms: Some(1),
+            ttfb_ms: Some(1),
+            attempt_count,
+            retry_count,
+            provider_switch_count,
+            has_failover: provider_switch_count > 0,
+            session_reuse: false,
+            session_id: None,
+            folder_name: None,
+            usage: None,
+            cost_usd: None,
+            route: Vec::new(),
+            context_compaction: None,
+        }
+    }
+
     #[test]
     fn truncation_respects_cjk_display_width() {
         assert_eq!(truncate_display("供应商OpenAI", 8), "供应商O…");
@@ -491,5 +525,13 @@ mod tests {
         assert_eq!(format_tokens(999), "999");
         assert_eq!(format_tokens(1_500), "1.50K");
         assert_eq!(format_tokens(507_900_000), "508M");
+    }
+
+    #[test]
+    fn route_result_keeps_switches_and_retries_independent() {
+        assert_eq!(route_result(&request_with_route_counts(3, 1, 1)), "切换1/重试1");
+        assert_eq!(route_result(&request_with_route_counts(2, 0, 1)), "切换1");
+        assert_eq!(route_result(&request_with_route_counts(3, 2, 0)), "重试2");
+        assert_eq!(route_result(&request_with_route_counts(0, 0, 0)), "未上游");
     }
 }

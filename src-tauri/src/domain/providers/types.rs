@@ -397,6 +397,7 @@ pub(crate) struct GatewayProvidersSelection {
 pub(crate) struct GatewayProviderIdentity {
     pub id: i64,
     pub name: String,
+    pub auth_mode: String,
 }
 
 #[derive(Debug, Clone)]

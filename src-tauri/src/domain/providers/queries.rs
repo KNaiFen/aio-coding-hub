@@ -1069,7 +1069,7 @@ pub(crate) fn list_enabled_gateway_provider_identities_using_active_mode(
     let (sql, mode_id) = if let Some(mode_id) = active_mode_id {
         (
             r#"
-SELECT p.id, p.name
+SELECT p.id, p.name, p.auth_mode
 FROM sort_mode_providers mp
 JOIN providers p ON p.id = mp.provider_id
 WHERE mp.mode_id = ?1
@@ -1083,7 +1083,7 @@ ORDER BY mp.sort_order ASC
     } else {
         (
             r#"
-SELECT p.id, p.name
+SELECT p.id, p.name, p.auth_mode
 FROM default_route_providers drp
 JOIN providers p ON p.id = drp.provider_id
 WHERE drp.cli_key = ?2
@@ -1102,6 +1102,7 @@ ORDER BY drp.sort_order ASC
             Ok(GatewayProviderIdentity {
                 id: row.get(0)?,
                 name: row.get(1)?,
+                auth_mode: row.get(2)?,
             })
         })
         .map_err(|e| db_err!("failed to list observer providers: {e}"))?;

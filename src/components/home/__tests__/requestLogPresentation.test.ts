@@ -779,6 +779,7 @@ describe("components/home/requestLogPresentation", () => {
           attempts: 2,
         }),
         createRequestLogRouteHop({
+          provider_id: 2,
           provider_name: "Provider B",
           ok: false,
           error_code: GatewayErrorCodes.UPSTREAM_TIMEOUT,
@@ -790,10 +791,8 @@ describe("components/home/requestLogPresentation", () => {
       hasFailover: false,
       attemptCount: 5,
     });
-    expect(skippedAndRetry.label).toBe("切1·跳1·请3");
-    expect(skippedAndRetry.summary).toBe(
-      "2 家供应商，切换 1 次，跳过 1 个候选，实际请求 3 次，额外重试 2 次后结束"
-    );
+    expect(skippedAndRetry.label).toBe("跳1·重2·请3");
+    expect(skippedAndRetry.summary).toBe("跳过 1 个候选，实际请求 3 次，其中额外重试 2 次");
     expect(skippedAndRetry).toMatchObject({
       skippedCount: 1,
       requestCount: 3,
@@ -805,7 +804,12 @@ describe("components/home/requestLogPresentation", () => {
     const failover = buildRequestRouteMeta({
       route: [
         createRequestLogRouteHop({ provider_name: "Provider A", ok: false, status: 500 }),
-        createRequestLogRouteHop({ provider_name: "Provider B", ok: true, status: 200 }),
+        createRequestLogRouteHop({
+          provider_id: 2,
+          provider_name: "Provider B",
+          ok: true,
+          status: 200,
+        }),
       ],
       status: 200,
       hasFailover: true,
@@ -824,7 +828,12 @@ describe("components/home/requestLogPresentation", () => {
     const failedFailover = buildRequestRouteMeta({
       route: [
         createRequestLogRouteHop({ provider_name: "Provider A", ok: false, status: 500 }),
-        createRequestLogRouteHop({ provider_name: "Provider B", ok: false, status: 502 }),
+        createRequestLogRouteHop({
+          provider_id: 2,
+          provider_name: "Provider B",
+          ok: false,
+          status: 502,
+        }),
       ],
       status: 502,
       hasFailover: true,
@@ -841,14 +850,19 @@ describe("components/home/requestLogPresentation", () => {
           status: null,
           attempts: 2,
         }),
-        createRequestLogRouteHop({ provider_name: "Provider B", ok: true, status: 200 }),
+        createRequestLogRouteHop({
+          provider_id: 2,
+          provider_name: "Provider B",
+          ok: true,
+          status: 200,
+        }),
       ],
       status: 200,
       hasFailover: false,
       attemptCount: 3,
     });
-    expect(skippedOnly.label).toBe("切1·跳1·请1");
-    expect(skippedOnly.summary).toBe("2 家供应商，切换 1 次，跳过 1 个候选，实际请求 1 次后成功");
+    expect(skippedOnly.label).toBe("跳1·请1");
+    expect(skippedOnly.summary).toBe("跳过 1 个候选，实际请求 1 次");
 
     const threeProvidersWithSkipsAndRetry = buildRequestRouteMeta({
       route: [
@@ -859,12 +873,14 @@ describe("components/home/requestLogPresentation", () => {
           attempts: 1,
         }),
         createRequestLogRouteHop({
+          provider_id: 2,
           provider_name: "Provider B",
           ok: false,
           status: 500,
           attempts: 2,
         }),
         createRequestLogRouteHop({
+          provider_id: 3,
           provider_name: "Provider C",
           ok: true,
           status: 200,
@@ -877,13 +893,13 @@ describe("components/home/requestLogPresentation", () => {
     });
     expect(threeProvidersWithSkipsAndRetry).toMatchObject({
       providerCount: 3,
-      transitionCount: 2,
+      transitionCount: 1,
       attemptCount: 4,
       skippedCount: 1,
       requestCount: 3,
       retryCount: 1,
-      label: "切2·跳1·请3",
-      summary: "3 家供应商，切换 2 次，跳过 1 个候选，实际请求 3 次，额外重试 1 次后成功",
+      label: "切1·跳1·请3",
+      summary: "3 家供应商，切换 1 次，跳过 1 个候选，实际请求 3 次，额外重试 1 次后成功",
     });
 
     const implicitAttempts = buildRequestRouteMeta({
@@ -928,7 +944,70 @@ describe("components/home/requestLogPresentation", () => {
       hasFailover: true,
       attemptCount: 3,
     });
-    expect(twoSkippedThenSent.label).toBe("切2·跳2·请1");
+    expect(twoSkippedThenSent).toMatchObject({
+      transitionCount: 0,
+      label: "跳2·请1",
+      summary: "跳过 2 个候选，实际请求 1 次",
+    });
+
+    const sentAroundLimitedProvider = buildRequestRouteMeta({
+      route: [
+        createRequestLogRouteHop({
+          provider_id: 1,
+          provider_name: "Provider A",
+          ok: false,
+          status: 500,
+        }),
+        createRequestLogRouteHop({
+          provider_id: 2,
+          provider_name: "Provider B",
+          ok: false,
+          skipped: true,
+          status: null,
+          error_code: GatewayErrorCodes.PROVIDER_RATE_LIMITED,
+        }),
+        createRequestLogRouteHop({
+          provider_id: 3,
+          provider_name: "Provider C",
+          ok: true,
+          status: 200,
+        }),
+      ],
+      status: 200,
+      hasFailover: true,
+      attemptCount: 3,
+    });
+    expect(sentAroundLimitedProvider).toMatchObject({
+      transitionCount: 1,
+      skippedCount: 1,
+      requestCount: 2,
+      retryCount: 0,
+      label: "切1·跳1·请2",
+    });
+
+    const malformedProviderIds = buildRequestRouteMeta({
+      route: [
+        createRequestLogRouteHop({
+          provider_id: Number.NaN,
+          provider_name: "Provider A",
+          ok: false,
+          status: 500,
+        }),
+        createRequestLogRouteHop({
+          provider_id: Number.POSITIVE_INFINITY,
+          provider_name: "Provider B",
+          ok: true,
+          status: 200,
+        }),
+      ],
+      status: 200,
+      hasFailover: true,
+      attemptCount: 2,
+    });
+    expect(malformedProviderIds).toMatchObject({
+      transitionCount: 1,
+      label: "切1·请2",
+    });
 
     const threeDigitCounts = buildRequestRouteMeta({
       route: [createRequestLogRouteHop({ ok: true, attempts: 120 })],

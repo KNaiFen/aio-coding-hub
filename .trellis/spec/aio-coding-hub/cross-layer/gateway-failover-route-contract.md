@@ -78,9 +78,12 @@ buildRequestRouteMeta({
 - `attempt_count` is the number of persisted attempt rows. It may include
   retries and skipped rows, so it is not a provider count or switch count.
 - The projected `route` is the source of provider-hop display. Derive
-  `providerCount = route.length` and
-  `transitionCount = max(providerCount - 1, 0)`; keep `attempt_count` as the
-  raw audit-row count and never relabel it as the number of upstream requests.
+  `providerCount = route.length` for the complete audited chain. Derive
+  `transitionCount` only from adjacent provider identity changes in
+  `route.filter(!skipped)`: a gate-only circuit/cooldown/limit hop made no
+  upstream request and is not an effective supplier switch. Keep
+  `attempt_count` as the raw audit-row count and never relabel it as the number
+  of upstream requests.
 - The Home compact route label derives operational counts from the projected
   hops: `skippedCount` counts skipped hops, `requestCount` sums `attempts` only
   for non-skipped hops, and `retryCount` sums `max(attempts - 1, 0)` only for
@@ -125,16 +128,17 @@ buildRequestRouteMeta({
 | Ready-provider cap is reached | Stop before the next Ready provider |
 | Two Ready providers consume cap 2, then a circuit-open candidate follows | Record the third skipped attempt/route; make no third upstream call |
 | Route has 3 hops and 4 attempt rows | 3 providers, 2 transitions, 4 attempts |
-| Two skipped hops followed by one sent request | Compact label `切2·跳2·请1` |
+| Two skipped hops followed by one sent request | Compact label `跳2·请1`; zero effective switches |
+| A sent request, one skipped gate hop, then C sent | One effective A→C switch |
 | One provider is sent 3 times | Compact label `重2·请3` |
 | Upstream 401/403 body contains a credential-like value | Keep status and safe reason, but persist/log none of the body |
 | Gzip body exceeds the decoded scan prefix | Match only decoded bytes within the first 64 KiB; never scan compressed fallback bytes |
 
 ### 5. Good / Base / Bad Cases
 
-- Good: two circuit-open candidates are skipped, then a third Ready candidate
-  succeeds with `failover_max_providers_to_try = 2`; the skips do not consume
-  either Ready slot.
+- Good: two circuit-open or limited candidates are skipped, then a third Ready
+  candidate succeeds with `failover_max_providers_to_try = 2`; the skips do
+  not consume either Ready slot and the effective route has zero switches.
 - Base: one Ready provider and one attempt render as a direct request with zero
   provider transitions.
 - Good: three gate-skipped candidates return 503, produce three route hops and
@@ -142,8 +146,8 @@ buildRequestRouteMeta({
 - Bad: removing a temporarily denied session-bound provider before
   `run_gates`; the request still fails quickly but loses the provider and skip
   reason from its audit trail.
-- Bad: rendering four attempt rows as "switched 4 times" when they represent
-  three providers, two transitions, and one retry.
+- Bad: rendering four attempt rows as "switched 4 times" when they include
+  retries or gate-only candidates that never received an upstream request.
 
 ### 6. Tests Required
 
@@ -173,8 +177,9 @@ buildRequestRouteMeta({
   classification or the recorded status.
 - Keep model-discovery strict-attempt and health-neutral circuit tests passing;
   shared gate changes must not broaden those requests.
-- Frontend-test provider, transition, skipped-hop, sent-request, and extra-retry
-  counts together, including malformed/future values and same-provider retries.
+- Frontend-test provider, effective transition, skipped-hop, sent-request, and
+  extra-retry counts together, including skipped gates between two actual
+  suppliers, malformed/future values, and same-provider retries.
 - Frontend-test the rich route panel in light/dark themes, long wrapped content,
   collision-bounded scrolling, known-reason deduplication, and preservation of
   unknown future reasons without changing the default short-tooltip surface.

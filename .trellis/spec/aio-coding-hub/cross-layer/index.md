@@ -41,7 +41,8 @@ TypeScript bindings, frontend adapters, and React UI.
   opaque cursor pagination without changing the Home realtime feed.
 - [Local observer and TUI contract](./local-observer-tui-contract.md):
   authenticated loopback snapshots, read-only isolation, global inference
-  metrics, offline behavior, and four-platform standalone TUI assets.
+  metrics, quota-aware preferred-provider projection, offline behavior, and
+  four-platform standalone TUI assets.
 
 ## Pre-Development Checklist
 
@@ -170,7 +171,9 @@ When changing the local observer or standalone TUI:
    trace, or sub-agent identity.
 4. Keep status aggregates inference-only while the logs list retains the Home
    proxy-log scope and active requests outside the fifty terminal rows.
-5. Verify stale/offline recovery, protocol mismatch, narrow CJK rendering,
+5. Keep preferred-provider eligibility read-only and aligned with configured
+   spend limits, OAuth quota snapshots, circuit OPEN, and cooldown state.
+6. Verify stale/offline recovery, protocol mismatch, narrow CJK rendering,
    stable selection keys, and all four standalone TUI release archives.
 
 ## Quality Check
@@ -219,6 +222,8 @@ When changing the local observer or standalone TUI:
 - Verify observer failures, read-only DB contention, invalid descriptors,
   malformed snapshot JSON, and circuit peeks leave gateway forwarding,
   retries, provider health, and shutdown behavior unchanged.
+- Verify preferred-provider spend/OAuth eligibility failures mark only that
+  observer section unavailable and never mutate limits, circuit, or routing.
 - When changing config migration payloads, verify export/import boundary
   symmetry, failure before target-directory creation or file writes, v1/v2 and
   installed/local compatibility, and file-count, total-size, Base64, path,
