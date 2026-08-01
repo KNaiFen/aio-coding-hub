@@ -85,10 +85,23 @@ remote administration API.
 ## TUI behavior
 
 - `aio-tui` defaults to a dashboard whose request and provider views switch with
-  Left/Right. Request and provider selections are independent. Provider cards
-  use five fixed semantic lines plus a dim separator, and Enter opens bounded
-  read-only detail. `aio-tui status` is the continuously refreshed status line
-  and `aio-tui status --once` is pipe-friendly output.
+  Left/Right. Request and provider selections are independent. List navigation
+  selects an item for five seconds; inactivity clears the selection and scroll
+  offset so request snapshots resume following the newest rows. Detail view
+  suspends expiry and returning to the list starts a new five-second window.
+  Snapshot refreshes never extend the deadline. A dim rule separates the shared
+  summary header from either list.
+- Provider cards use four semantic base lines plus a dim separator. A fifth
+  OAuth line is present only when locally cached label, five-hour, or weekly
+  quota text is displayable. Labels and values are separate styled spans:
+  available/on/closed is green, limits/cooldown/half-open is yellow, open circuit
+  is red, and disabled/missing/unknown is dim gray. Enter opens bounded read-only
+  detail, where unavailable OAuth placeholders are likewise omitted.
+- `aio-tui status` is the continuously refreshed status line and reserves a
+  two-column left gutter on every wrapped row. Its fallback palette uses ordinary
+  cyan, green, and magenta with dim separators; errors and warnings retain red
+  and yellow. It does not use bright ANSI colors or bold status segments.
+  `aio-tui status --once` remains unindented pipe-friendly output.
 - `--cli` accepts `claude`, `codex`, `grok`, `gemini`, or `all`; the default is
   `codex`. Concurrency and today usage remain global in every scope.
 - The client never starts AIO. When the observer is unavailable it keeps the
