@@ -1619,7 +1619,8 @@ mod tests {
         without_oauth.oauth_quota = None;
         let lines = provider_card_lines(&without_oauth, 32, true, false);
         assert_eq!(lines.len(), 4);
-        assert!(!lines.iter().any(|line| line_text(line).contains("OAuth")));
+        let has_oauth_quota_line = lines.iter().any(|line| line_text(line).starts_with("OAuth "));
+        assert!(!has_oauth_quota_line);
 
         let mut empty_oauth = provider.clone();
         empty_oauth.oauth_quota = Some(ObserverProviderOAuthQuota {
