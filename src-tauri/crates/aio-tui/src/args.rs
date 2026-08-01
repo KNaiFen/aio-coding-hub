@@ -127,7 +127,7 @@ pub fn help() -> &'static str {
   aio-tui statusline [--cli <scope>]\n\n\
 scope：claude | codex | grok | gemini | all（默认 codex）\n\n\
 命令：\n\
-  logs      可滚动的活动请求与最近 50 条记录（默认）\n\
+  logs      请求与供应商状态面板，←/→ 切换（默认）\n\
   status    持续更新的一行状态栏；窄窗口自动换行\n\
   statusline 交互选择、排序并保存状态栏项目\n\n\
 选项：\n\

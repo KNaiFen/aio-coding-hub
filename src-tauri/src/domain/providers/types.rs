@@ -400,6 +400,18 @@ pub(crate) struct GatewayProviderIdentity {
     pub auth_mode: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProviderObserverRow {
+    pub id: i64,
+    pub cli_key: String,
+    pub name: String,
+    pub enabled: bool,
+    pub auth_mode: String,
+    pub route_rank: Option<i64>,
+    pub route_enabled: bool,
+    pub uses_custom_route: bool,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct ClaudeTerminalLaunchContext {
     /// The credential to pass as ANTHROPIC_API_KEY to `claude` CLI.

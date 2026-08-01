@@ -148,7 +148,7 @@ tar -xzf aio-tui-macos-arm.tar.gz   # Intel 使用 aio-tui-macos-intel.tar.gz
 chmod +x aio-tui
 sudo install -m 0755 aio-tui /usr/local/bin/aio-tui
 
-# 默认显示最近代理记录；status 显示状态栏
+# 默认进入请求/供应商面板；status 显示状态栏
 aio-tui
 aio-tui status
 aio-tui status --once --cli codex
@@ -156,7 +156,7 @@ aio-tui status --items preferred-provider,last-request,concurrency,today-cost
 aio-tui statusline
 ```
 
-Windows 解压 `aio-tui-win64.zip` 后，把目录加入 `PATH`。支持 `--cli claude|codex|grok|gemini|all`；`all` 的状态栏会按最近一条终态模型推理请求选择 CLI。`aio-tui statusline` 中使用空格启用项目、`←/→` 调整顺序、`c` 切换颜色并按 Enter 保存；`--items` 只覆盖当前运行。默认显示首选供应商、上次请求、近 10 次主供应商、并发、今日费用和今日 Token，设置 `NO_COLOR` 可强制禁用颜色。状态栏中的并发是全局活跃模型推理请求数，同一会话和子代理的每个请求都计 1。观测服务离线时 TUI 保留最后快照并显示陈旧标记，不会崩溃或自动启动 AIO。
+Windows 解压 `aio-tui-win64.zip` 后，把目录加入 `PATH`。默认面板用 `←/→` 在最近 50 条请求和供应商状态之间切换；供应商按当前路由顺序显示，每张卡固定五行，`Enter` 查看只读详情。支持 `--cli claude|codex|grok|gemini|all`；`all` 的状态栏会按最近一条终态模型推理请求选择 CLI。`aio-tui statusline` 中使用空格启用项目、`←/→` 调整顺序、`c` 切换颜色并按 Enter 保存；`--items` 只覆盖当前运行。默认显示首选供应商、上次请求、近 10 次主供应商、并发、今日费用和今日 Token，设置 `NO_COLOR` 可强制禁用颜色。状态栏中的并发是全局活跃模型推理请求数，同一会话和子代理的每个请求都计 1。观测服务离线或短暂繁忙时 TUI 保留最后快照并显示陈旧标记，不会崩溃或自动启动 AIO。
 
 独立 TUI 资产不会进入桌面 updater 的 `latest.json`，并由发布中的 `SHA256SUMS.txt` 校验。
 

@@ -12,7 +12,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifier
 use std::io::IsTerminal;
 use std::time::{Duration, Instant};
 use terminal::TerminalSession;
-use ui::{LiveState, LogsState, StatuslinePickerState};
+use ui::{DashboardView, LiveState, LogsState, StatuslinePickerState};
 
 const ACTIVE_REFRESH_INTERVAL: Duration = Duration::from_millis(500);
 const IDLE_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
@@ -233,10 +233,19 @@ async fn run_logs(client: ObserverClient, scope: CliScope) -> Result<(), String>
     loop {
         let now = Instant::now();
         if now >= next_refresh {
-            match client
-                .snapshot(state.live.scope, OBSERVER_HISTORY_LIMIT_MAX)
-                .await
-            {
+            let snapshot = match state.view {
+                DashboardView::Requests => {
+                    client
+                        .snapshot(state.live.scope, OBSERVER_HISTORY_LIMIT_MAX)
+                        .await
+                }
+                DashboardView::Providers => {
+                    client
+                        .snapshot_with_providers(state.live.scope, OBSERVER_HISTORY_LIMIT_MAX)
+                        .await
+                }
+            };
+            match snapshot {
                 Ok(snapshot) => {
                     let interval = refresh_interval(&snapshot);
                     state.apply_snapshot(snapshot);
@@ -341,13 +350,27 @@ fn handle_logs_key(state: &mut LogsState, key: KeyEvent) -> KeyAction {
     }
 
     match key.code {
+        KeyCode::Left => {
+            state.switch_view(DashboardView::Requests);
+            return KeyAction {
+                redraw: true,
+                refresh: true,
+            };
+        }
+        KeyCode::Right => {
+            state.switch_view(DashboardView::Providers);
+            return KeyAction {
+                redraw: true,
+                refresh: true,
+            };
+        }
         KeyCode::Up | KeyCode::Char('k') => state.move_selection(-1),
         KeyCode::Down | KeyCode::Char('j') => state.move_selection(1),
         KeyCode::PageUp => state.move_selection(-5),
         KeyCode::PageDown => state.move_selection(5),
-        KeyCode::Home => state.selected = 0,
-        KeyCode::End => state.selected = state.request_count().saturating_sub(1),
-        KeyCode::Enter if state.selected_request().is_some() => {
+        KeyCode::Home => state.set_current_selection(0),
+        KeyCode::End => state.set_current_selection(state.current_count().saturating_sub(1)),
+        KeyCode::Enter if state.has_selected_item() => {
             state.detail = true;
             state.detail_scroll = 0;
         }
@@ -409,5 +432,24 @@ mod tests {
             scope = next_scope(scope);
         }
         assert_eq!(scope, CliScope::Codex);
+    }
+
+    #[test]
+    fn arrow_keys_switch_dashboard_views_and_request_refresh() {
+        let mut state = LogsState::new(CliScope::Codex);
+        let right = handle_logs_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Right, KeyModifiers::NONE),
+        );
+        assert_eq!(state.view, DashboardView::Providers);
+        assert!(right.refresh);
+        assert!(state.providers_pending);
+
+        let left = handle_logs_key(
+            &mut state,
+            KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
+        );
+        assert_eq!(state.view, DashboardView::Requests);
+        assert!(left.refresh);
     }
 }

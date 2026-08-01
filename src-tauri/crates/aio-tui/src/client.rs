@@ -7,7 +7,7 @@ use std::time::Duration;
 
 const DESCRIPTOR_MAX_BYTES: usize = 4 * 1024;
 const DESCRIPTOR_TOKEN_MIN_BYTES: usize = 32;
-const RESPONSE_MAX_BYTES: usize = 1024 * 1024;
+const RESPONSE_MAX_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OfflineReason {
@@ -38,6 +38,11 @@ pub struct ObserverClient {
     http: reqwest::Client,
 }
 
+enum SnapshotFetch {
+    Ready(ObserverSnapshotV1),
+    ProviderQueryUnsupported,
+}
+
 impl ObserverClient {
     pub fn new() -> Result<Self, OfflineReason> {
         let http = reqwest::Client::builder()
@@ -55,13 +60,44 @@ impl ObserverClient {
         scope: CliScope,
         history_limit: u16,
     ) -> Result<ObserverSnapshotV1, OfflineReason> {
+        match self.fetch_snapshot(scope, history_limit, false).await? {
+            SnapshotFetch::Ready(snapshot) => Ok(snapshot),
+            SnapshotFetch::ProviderQueryUnsupported => Err(OfflineReason::InvalidResponse),
+        }
+    }
+
+    pub async fn snapshot_with_providers(
+        &self,
+        scope: CliScope,
+        history_limit: u16,
+    ) -> Result<ObserverSnapshotV1, OfflineReason> {
+        match self.fetch_snapshot(scope, history_limit, true).await? {
+            SnapshotFetch::Ready(snapshot) => Ok(snapshot),
+            SnapshotFetch::ProviderQueryUnsupported => {
+                match self.fetch_snapshot(scope, history_limit, false).await? {
+                    SnapshotFetch::Ready(snapshot) => Ok(snapshot),
+                    SnapshotFetch::ProviderQueryUnsupported => Err(OfflineReason::InvalidResponse),
+                }
+            }
+        }
+    }
+
+    async fn fetch_snapshot(
+        &self,
+        scope: CliScope,
+        history_limit: u16,
+        include_providers: bool,
+    ) -> Result<SnapshotFetch, OfflineReason> {
         let descriptor = read_descriptor()?;
-        let url = format!(
+        let mut url = format!(
             "http://127.0.0.1:{}/api/observer/v1/snapshot?cli={}&history_limit={}",
             descriptor.port,
             scope.as_str(),
             history_limit
         );
+        if include_providers {
+            url.push_str("&include_providers=true");
+        }
         let mut response = self
             .http
             .get(url)
@@ -69,6 +105,9 @@ impl ObserverClient {
             .send()
             .await
             .map_err(|_| OfflineReason::Unreachable)?;
+        if include_providers && response.status() == reqwest::StatusCode::BAD_REQUEST {
+            return Ok(SnapshotFetch::ProviderQueryUnsupported);
+        }
         if let Some(reason) = response_failure_reason(response.status()) {
             return Err(reason);
         }
@@ -94,7 +133,7 @@ impl ObserverClient {
         if snapshot.protocol_version != OBSERVER_PROTOCOL_VERSION {
             return Err(OfflineReason::ProtocolMismatch);
         }
-        Ok(snapshot)
+        Ok(SnapshotFetch::Ready(snapshot))
     }
 }
 

@@ -18,7 +18,9 @@ remote administration API.
   current process.
 - Supported resources are authenticated `GET` requests to
   `/api/observer/v1/health` and
-  `/api/observer/v1/snapshot?cli=<scope>&history_limit=0..50`.
+  `/api/observer/v1/snapshot?cli=<scope>&history_limit=0..50`. The snapshot
+  accepts optional `include_providers=true`; its response field is additive and
+  optional so old clients and old observers can fail open independently.
 - Responses are `no-store` and `nosniff`. Invalid input, authentication, busy,
   and internal failures use fixed structured messages without body, URL,
   credentials, or decoder details.
@@ -70,11 +72,23 @@ remote administration API.
   selected detail unexpectedly.
 - Request projections are bounded and never contain body text, upstream URLs,
   credentials, raw error JSON, or other large configuration blobs.
+- The optional provider projection is capped at 512 rows. It contains only
+  provider/CLI names, route rank and enable flags, authentication kind, fixed
+  eligibility labels, non-mutating circuit snapshots, spend-window totals, and
+  bounded locally cached OAuth quota text/reset times. It excludes endpoints,
+  credentials, tokens, email, notes, tags, extensions, and arbitrary/error JSON.
+- Eligible active-route providers follow actual route order. Disabled or
+  out-of-route rows follow in stable pool order; `all` groups Codex, Claude,
+  Grok, and Gemini. Provider projection failures make only that optional section
+  unavailable and never enter routing or health accounting.
 
 ## TUI behavior
 
-- `aio-tui` defaults to the logs view; `aio-tui status` is the continuously
-  refreshed status line and `aio-tui status --once` is pipe-friendly output.
+- `aio-tui` defaults to a dashboard whose request and provider views switch with
+  Left/Right. Request and provider selections are independent. Provider cards
+  use five fixed semantic lines plus a dim separator, and Enter opens bounded
+  read-only detail. `aio-tui status` is the continuously refreshed status line
+  and `aio-tui status --once` is pipe-friendly output.
 - `--cli` accepts `claude`, `codex`, `grok`, `gemini`, or `all`; the default is
   `codex`. Concurrency and today usage remain global in every scope.
 - The client never starts AIO. When the observer is unavailable it keeps the
@@ -85,6 +99,9 @@ remote administration API.
 - The client disables HTTP proxies and redirects for the loopback request and
   bounds descriptor and snapshot sizes. Protocol or JSON failures hide the
   affected view rather than crashing the process.
+- Status/request polling omits the provider projection. Entering the provider
+  view requests it; if an older observer rejects the additive query, the client
+  retries the legacy snapshot and marks only the provider view unsupported.
 
 ## Release boundary
 

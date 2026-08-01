@@ -48,6 +48,7 @@ struct ObserverRuntime {
 struct CacheKey {
     scope: CliScope,
     history_limit: u16,
+    include_providers: bool,
 }
 
 struct CachedSnapshot {
@@ -76,6 +77,8 @@ struct ObserverDbState {
 struct SnapshotQuery {
     cli: Option<String>,
     history_limit: Option<u16>,
+    #[serde(default)]
+    include_providers: bool,
 }
 
 pub(crate) async fn start_best_effort(app: tauri::AppHandle) {
@@ -268,6 +271,7 @@ async fn snapshot_handler(
     let key = CacheKey {
         scope,
         history_limit,
+        include_providers: query.include_providers,
     };
     if let Some(snapshot) = cached_snapshot(&state, key).await {
         return secured(Json(snapshot).into_response());
@@ -296,6 +300,7 @@ async fn snapshot_handler(
         db_query_permit,
         scope,
         usize::from(history_limit),
+        query.include_providers,
     )
     .await;
     state.cache.lock().await.insert(

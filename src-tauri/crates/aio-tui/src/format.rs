@@ -765,6 +765,7 @@ mod tests {
             }),
             active_requests: ObserverSection::ready(Vec::new()),
             recent_requests: ObserverSection::ready(Vec::new()),
+            providers: None,
         }
     }
 
