@@ -6,6 +6,11 @@ authors = ["dyndynjyxa"]
 edition = "2021"
 default-run = "aio-coding-hub"
 
+[workspace]
+members = [".", "crates/aio-observer-protocol", "crates/aio-tui"]
+default-members = ["."]
+resolver = "2"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
@@ -23,6 +28,7 @@ doctest = false
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+aio-observer-protocol = { path = "crates/aio-observer-protocol" }
 tauri = { version = "2", features = ["tray-icon", "image-png", "protocol-asset"] }
 tauri-plugin-opener = "2"
 tauri-plugin-clipboard-manager = "2"

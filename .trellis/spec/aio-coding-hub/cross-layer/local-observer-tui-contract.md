@@ -1,0 +1,80 @@
+# AIO Local Observer and TUI Contract
+
+## Scope
+
+The desktop application exposes a read-only, authenticated observer for a
+standalone `aio-tui` process running on the same machine. This surface is for
+SSH and narrow-terminal observability; it is not a second gateway and is not a
+remote administration API.
+
+## Endpoint and descriptor
+
+- The observer binds only to `127.0.0.1` on an ephemeral port.
+- The descriptor is `~/.aio-coding-hub/observer-v1.json` (the same home and
+  dot-directory overrides used by AIO).
+- The descriptor is written atomically and contains only protocol/app version,
+  PID, port, start time, and a random bearer token. Unix permissions are
+  `0600`; shutdown removes it only when PID and token still belong to the
+  current process.
+- Supported resources are authenticated `GET` requests to
+  `/api/observer/v1/health` and
+  `/api/observer/v1/snapshot?cli=<scope>&history_limit=0..50`.
+- Responses are `no-store` and `nosniff`. Invalid input, authentication, busy,
+  and internal failures use fixed structured messages without body, URL,
+  credentials, or decoder details.
+
+## Isolation and fail-open behavior
+
+- The observer never listens on the gateway port, calls an upstream provider,
+  mutates request state, or sends IPC commands.
+- Snapshot database reads use a separate single-connection SQLite read-only,
+  `query_only` pool with short timeouts. A missing or slow read marks only the
+  affected sections unavailable.
+- Circuit status is read through a non-mutating peek. It must not reserve a
+  half-open probe, persist state, emit events, or alter provider health.
+- Observer startup, refresh, serialization, authentication, and TUI parsing
+  failures must not change forwarding, retries, provider selection, circuit
+  accounting, request-log writes, or application shutdown.
+
+## Snapshot semantics
+
+- `active_inference_count` is global and counts every active model-inference
+  request individually, including parallel requests in one Session and CLI
+  sub-agents. Auxiliary model-list, search, token-count, probe, and discovery
+  requests are excluded.
+- `last_request` and `dominant_provider` use terminal model-inference records;
+  failures and client interruptions remain eligible. `dominant_provider` samples
+  the newest ten records and resolves ties by recency.
+- `today` is global and uses the existing usage-ledger aggregate semantics:
+  known cost is returned without a partial marker, and `null` means no known
+  cost. Total tokens include input, output, and cache buckets according to the
+  existing effective-token expression.
+- The preferred provider is the first enabled provider in the active gateway
+  order whose peeked circuit is not `OPEN` and whose cooldown is not active.
+  `all` selects the CLI from the newest terminal inference record.
+- The logs view contains active requests first and up to fifty terminal proxy
+  records. Active requests do not consume the fifty-record allowance. Each
+  request has a stable opaque key so terminal completion does not move the
+  selected detail unexpectedly.
+- Request projections are bounded and never contain body text, upstream URLs,
+  credentials, raw error JSON, or other large configuration blobs.
+
+## TUI behavior
+
+- `aio-tui` defaults to the logs view; `aio-tui status` is the continuously
+  refreshed status line and `aio-tui status --once` is pipe-friendly output.
+- `--cli` accepts `claude`, `codex`, `grok`, `gemini`, or `all`; the default is
+  `codex`. Concurrency and today usage remain global in every scope.
+- The client never starts AIO. When the observer is unavailable it keeps the
+  last successful snapshot, shows a stale/offline label, and retries every two
+  seconds. Interactive mode restores raw mode, alternate screen, and cursor on
+  normal exit and panic.
+- The client disables HTTP proxies and redirects for the loopback request and
+  bounds descriptor and snapshot sizes. Protocol or JSON failures hide the
+  affected view rather than crashing the process.
+
+## Release boundary
+
+Standalone TUI archives are published for Windows x64, macOS Intel, macOS
+Apple Silicon, and Linux x64. They share the desktop version and checksums but
+are not included in the desktop updater `latest.json` or desktop installers.

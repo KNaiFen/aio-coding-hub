@@ -39,6 +39,9 @@ TypeScript bindings, frontend adapters, and React UI.
 - [Request-log retention, usage-ledger, and pagination contract](./request-log-usage-ledger-pagination-contract.md):
   independent detail/statistics lifetimes, non-blocking ledger backfill, and
   opaque cursor pagination without changing the Home realtime feed.
+- [Local observer and TUI contract](./local-observer-tui-contract.md):
+  authenticated loopback snapshots, read-only isolation, global inference
+  metrics, offline behavior, and four-platform standalone TUI assets.
 
 ## Pre-Development Checklist
 
@@ -158,6 +161,18 @@ When changing request-log retention, usage statistics, or the Logs page:
 4. Verify manual clear, automatic retention, provider deletion, and cost
    backfill against both lifetimes.
 
+When changing the local observer or standalone TUI:
+
+1. Read [Local observer and TUI contract](./local-observer-tui-contract.md).
+2. Keep the observer loopback-only, bearer-authenticated, bounded, and
+   independent from gateway forwarding and the primary SQLite pool.
+3. Keep concurrency global and per-request; never deduplicate by Session,
+   trace, or sub-agent identity.
+4. Keep status aggregates inference-only while the logs list retains the Home
+   proxy-log scope and active requests outside the fifty terminal rows.
+5. Verify stale/offline recovery, protocol mismatch, narrow CJK rendering,
+   stable selection keys, and all four standalone TUI release archives.
+
 ## Quality Check
 
 - Regenerate and verify `src/generated/bindings.ts` from Rust source.
@@ -201,6 +216,9 @@ When changing request-log retention, usage statistics, or the Logs page:
   limits remain unchanged after request-detail retention deletes old rows.
 - Verify request-log keyset pages have no duplicate or missing rows at equal
   timestamps and that page caches never receive realtime-feed array shapes.
+- Verify observer failures, read-only DB contention, invalid descriptors,
+  malformed snapshot JSON, and circuit peeks leave gateway forwarding,
+  retries, provider health, and shutdown behavior unchanged.
 - When changing config migration payloads, verify export/import boundary
   symmetry, failure before target-directory creation or file writes, v1/v2 and
   installed/local compatibility, and file-count, total-size, Base64, path,

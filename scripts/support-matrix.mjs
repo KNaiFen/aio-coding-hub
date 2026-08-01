@@ -78,16 +78,36 @@ function validateReleaseVersion(args) {
   if (!match) throw new Error(`Invalid release tag: ${tag}`);
   const expected = match[1];
   const cargoToml = readFileSync(join(repoRoot, "src-tauri/Cargo.toml"), "utf8");
+  const observerCargoToml = readFileSync(
+    join(repoRoot, "src-tauri/crates/aio-observer-protocol/Cargo.toml"),
+    "utf8"
+  );
+  const tuiCargoToml = readFileSync(join(repoRoot, "src-tauri/crates/aio-tui/Cargo.toml"), "utf8");
   const cargoLock = readFileSync(join(repoRoot, "src-tauri/Cargo.lock"), "utf8");
   const versions = new Map([
     ["package.json", readJson("package.json").version],
     ["src-tauri/tauri.conf.json", readJson("src-tauri/tauri.conf.json").version],
     ["src-tauri/Cargo.toml", /^version\s*=\s*"([^"]+)"/m.exec(cargoToml)?.[1]],
     [
+      "src-tauri/crates/aio-observer-protocol/Cargo.toml",
+      /^version\s*=\s*"([^"]+)"/m.exec(observerCargoToml)?.[1],
+    ],
+    ["src-tauri/crates/aio-tui/Cargo.toml", /^version\s*=\s*"([^"]+)"/m.exec(tuiCargoToml)?.[1]],
+    [
       "src-tauri/Cargo.lock",
       /\[\[package\]\]\s+name\s*=\s*"aio-coding-hub"\s+version\s*=\s*"([^"]+)"/m.exec(
         cargoLock
       )?.[1],
+    ],
+    [
+      "src-tauri/Cargo.lock (aio-observer-protocol)",
+      /\[\[package\]\]\s+name\s*=\s*"aio-observer-protocol"\s+version\s*=\s*"([^"]+)"/m.exec(
+        cargoLock
+      )?.[1],
+    ],
+    [
+      "src-tauri/Cargo.lock (aio-tui)",
+      /\[\[package\]\]\s+name\s*=\s*"aio-tui"\s+version\s*=\s*"([^"]+)"/m.exec(cargoLock)?.[1],
     ],
   ]);
   for (const [path, version] of versions) {

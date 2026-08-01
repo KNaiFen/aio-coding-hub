@@ -34,6 +34,7 @@
     "create-aio-plugin:test": "pnpm --filter create-aio-plugin test",
     "test:e2e": "vitest run src/e2e",
     "check:homebrew-cask": "node scripts/support-matrix.homebrew-cask.selftest.mjs",
+    "check:tui-release-contract": "node scripts/check-tui-release-contract.mjs",
     "check:precommit": "node scripts/run-checks.mjs precommit",
     "check:prepush": "node scripts/run-checks.mjs prepush",
     "preview": "vite preview",

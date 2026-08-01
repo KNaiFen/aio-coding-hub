@@ -124,7 +124,33 @@ This fork currently publishes tagged builds only for Windows x64 and macOS Apple
 | macOS Apple Silicon | `.zip` |
 <!-- SUPPORT_MATRIX_RELEASE_DOWNLOAD:END -->
 
-This fork's release matrix only covers the two targets above. Development artifacts for other platforms come from the `dev-build` GitHub Actions workflow and never enter Release assets or `latest.json`.
+The desktop updater matrix still covers only the two targets above; every tagged Release also includes standalone `aio-tui` archives for all four targets.
+
+### SSH / Codex CLI terminal panel
+
+When the desktop AIO app is running, it exposes a read-only loopback observer. The observer never changes gateway forwarding and the TUI never starts the desktop app. Download the matching `aio-tui-*` Release asset and put the binary on `PATH`:
+
+| Platform | TUI asset |
+| --- | --- |
+| Windows x64 | `aio-tui-win64.zip` |
+| macOS Intel | `aio-tui-macos-intel.tar.gz` |
+| macOS Apple Silicon | `aio-tui-macos-arm.tar.gz` |
+| Linux x64 | `aio-tui-linux-x64.tar.gz` |
+
+```bash
+# macOS / Linux
+tar -xzf aio-tui-macos-arm.tar.gz   # use aio-tui-macos-intel.tar.gz on Intel
+chmod +x aio-tui
+sudo install -m 0755 aio-tui /usr/local/bin/aio-tui
+
+aio-tui
+aio-tui status
+aio-tui status --once --cli codex
+```
+
+Windows users can unzip `aio-tui-win64.zip` and add its directory to `PATH`. Use `--cli claude|codex|grok|gemini|all`; in `all` scope the status line follows the CLI of the newest terminal inference request. Concurrency is the global count of active model-inference requests, so every request from the same Session or a sub-agent counts as one. Offline mode keeps the last snapshot, shows a stale label, and never starts AIO.
+
+Standalone TUI archives are not included in the desktop updater `latest.json`; verify them with the release `SHA256SUMS.txt`.
 
 <details>
 <summary>Linux Arch / Wayland users</summary>

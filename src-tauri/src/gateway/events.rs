@@ -202,6 +202,24 @@ pub(crate) struct GatewayAttemptEvent {
     pub(super) claude_model_mapping: Option<ClaudeModelMapping>,
 }
 
+impl GatewayAttemptEvent {
+    pub(crate) fn observer_attempt_index(&self) -> u32 {
+        self.attempt_index
+    }
+
+    pub(crate) fn observer_provider_name(&self) -> &str {
+        &self.provider_name
+    }
+
+    pub(crate) fn observer_status(&self) -> Option<u16> {
+        self.status
+    }
+
+    pub(crate) fn observer_session_reuse(&self) -> bool {
+        self.session_reuse == Some(true)
+    }
+}
+
 #[derive(Debug, Serialize, Clone, specta::Type)]
 pub(crate) struct GatewayCircuitEvent {
     pub(super) trace_id: String,

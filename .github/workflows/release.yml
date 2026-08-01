@@ -109,6 +109,10 @@ jobs:
             aio-coding-hub-macos-arm.tar.gz \
             aio-coding-hub-macos-arm.tar.gz.sig \
             aio-coding-hub-macos-arm.zip \
+            aio-tui-win64.zip \
+            aio-tui-macos-intel.tar.gz \
+            aio-tui-macos-arm.tar.gz \
+            aio-tui-linux-x64.tar.gz \
             latest.json \
             SHA256SUMS.txt; do
             [[ -s "release-assets/$file" ]] || {
