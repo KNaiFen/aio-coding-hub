@@ -211,9 +211,11 @@ impl LogsState {
             .map(|provider| provider.provider_id)
             .or(self.provider_key);
         self.live.apply_snapshot(snapshot);
-        self.selected = selected_key
-            .as_deref()
-            .and_then(|key| self.requests().iter().position(|request| request.key == key));
+        self.selected = selected_key.as_deref().and_then(|key| {
+            self.requests()
+                .iter()
+                .position(|request| request.key == key)
+        });
         if self.selected.is_none() {
             self.request_selection_expires_at = None;
         }
@@ -226,12 +228,11 @@ impl LogsState {
             .as_ref()
             .is_some_and(|snapshot| snapshot.providers.is_some())
         {
-            self.provider_selected = selected_provider_id
-                .and_then(|provider_id| {
-                    self.providers()
-                        .iter()
-                        .position(|provider| provider.provider_id == provider_id)
-                });
+            self.provider_selected = selected_provider_id.and_then(|provider_id| {
+                self.providers()
+                    .iter()
+                    .position(|provider| provider.provider_id == provider_id)
+            });
             self.provider_key = self
                 .selected_provider()
                 .map(|provider| provider.provider_id);
@@ -1145,11 +1146,7 @@ fn provider_card_lines(
             vec![
                 provider_span(rank, ProviderTone::Muted, color),
                 provider_span(" ", ProviderTone::Default, color),
-                provider_span(
-                    provider.provider_name.clone(),
-                    ProviderTone::Accent,
-                    color,
-                ),
+                provider_span(provider.provider_name.clone(), ProviderTone::Accent, color),
                 provider_span(
                     if provider.preferred { " [首选]" } else { "" },
                     ProviderTone::Success,
@@ -1315,15 +1312,14 @@ fn truncate_provider_spans(
             output.push(Span::styled(text, span.style));
         }
     }
-    output.push(Span::styled("…", provider_style(ProviderTone::Muted, color)));
+    output.push(Span::styled(
+        "…",
+        provider_style(ProviderTone::Muted, color),
+    ));
     Line::from(output)
 }
 
-fn provider_span(
-    text: impl Into<String>,
-    tone: ProviderTone,
-    color: bool,
-) -> Span<'static> {
+fn provider_span(text: impl Into<String>, tone: ProviderTone, color: bool) -> Span<'static> {
     Span::styled(text.into(), provider_style(tone, color))
 }
 
@@ -1367,9 +1363,7 @@ fn selected_style(style: Style, color: bool) -> Style {
 fn provider_eligibility_tone(eligibility: &str) -> ProviderTone {
     match eligibility {
         "ready" => ProviderTone::Success,
-        "half_open" | "spend_limited" | "oauth_limited" | "cooldown" => {
-            ProviderTone::Warning
-        }
+        "half_open" | "spend_limited" | "oauth_limited" | "cooldown" => ProviderTone::Warning,
         "circuit_open" => ProviderTone::Error,
         _ => ProviderTone::Muted,
     }
@@ -1821,9 +1815,7 @@ mod tests {
 
         let returned_at = selected_at + Duration::from_secs(60);
         state.resume_current_selection_expiry(returned_at);
-        assert!(state.expire_inactive_selections(
-            returned_at + SELECTION_IDLE_TIMEOUT
-        ));
+        assert!(state.expire_inactive_selections(returned_at + SELECTION_IDLE_TIMEOUT));
         assert_eq!(state.selected, None);
     }
 
@@ -1884,13 +1876,22 @@ mod tests {
 
     #[test]
     fn statusline_uses_soft_codex_palette_and_dim_separator() {
-        assert_eq!(status_tone_style(StatusTone::Scope, true).fg, Some(Color::Cyan));
+        assert_eq!(
+            status_tone_style(StatusTone::Scope, true).fg,
+            Some(Color::Cyan)
+        );
         assert_eq!(
             status_tone_style(StatusTone::Provider, true).fg,
             Some(Color::Magenta)
         );
-        assert_eq!(status_tone_style(StatusTone::Tokens, true).fg, Some(Color::Green));
-        assert_eq!(status_tone_style(StatusTone::Error, true).fg, Some(Color::Red));
+        assert_eq!(
+            status_tone_style(StatusTone::Tokens, true).fg,
+            Some(Color::Green)
+        );
+        assert_eq!(
+            status_tone_style(StatusTone::Error, true).fg,
+            Some(Color::Red)
+        );
         let separator = status_tone_style(StatusTone::Separator, true);
         assert_eq!(separator.fg, None);
         assert!(separator.add_modifier.contains(Modifier::DIM));
