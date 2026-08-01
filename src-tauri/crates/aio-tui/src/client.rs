@@ -117,11 +117,13 @@ fn read_descriptor_at(path: &Path) -> Result<ObserverDescriptorV1, OfflineReason
         || descriptor.token.len() < DESCRIPTOR_TOKEN_MIN_BYTES
         || descriptor.token.len() > 256
     {
-        return Err(if descriptor.protocol_version != OBSERVER_PROTOCOL_VERSION {
-            OfflineReason::ProtocolMismatch
-        } else {
-            OfflineReason::InvalidDescriptor
-        });
+        return Err(
+            if descriptor.protocol_version != OBSERVER_PROTOCOL_VERSION {
+                OfflineReason::ProtocolMismatch
+            } else {
+                OfflineReason::InvalidDescriptor
+            },
+        );
     }
     Ok(descriptor)
 }
@@ -153,7 +155,11 @@ fn platform_home_dir() -> Option<PathBuf> {
     primary
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-        .or_else(|| fallback.filter(|value| !value.is_empty()).map(PathBuf::from))
+        .or_else(|| {
+            fallback
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from)
+        })
 }
 
 fn safe_dotdir(value: &str) -> bool {
@@ -186,10 +192,8 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|duration| duration.as_nanos())
             .unwrap_or(0);
-        let dir = std::env::temp_dir().join(format!(
-            "aio-tui-test-{}-{unique}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("aio-tui-test-{}-{unique}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("create temp dir");
         let path = dir.join("descriptor.json");
         let descriptor = ObserverDescriptorV1 {
@@ -207,8 +211,11 @@ mod tests {
 
         let mut weak = descriptor.clone();
         weak.token = "short".to_string();
-        std::fs::write(&path, serde_json::to_vec(&weak).expect("serialize weak descriptor"))
-            .expect("write weak descriptor");
+        std::fs::write(
+            &path,
+            serde_json::to_vec(&weak).expect("serialize weak descriptor"),
+        )
+        .expect("write weak descriptor");
         assert!(matches!(
             read_descriptor_at(&path),
             Err(OfflineReason::InvalidDescriptor)

@@ -32,9 +32,7 @@ pub(crate) fn is_model_inference_request(cli_key: &str, method: &str, path: &str
             path.as_str(),
             "/chat/completions" | "/v1/chat/completions" | "/responses" | "/v1/responses"
         ),
-        "gemini" => {
-            path.ends_with(":generatecontent") || path.ends_with(":streamgeneratecontent")
-        }
+        "gemini" => path.ends_with(":generatecontent") || path.ends_with(":streamgeneratecontent"),
         _ => false,
     }
 }
@@ -55,7 +53,10 @@ mod tests {
             ("gemini", "/v1beta/models/gemini:generateContent"),
             ("gemini", "/v1beta/models/gemini:streamGenerateContent"),
         ] {
-            assert!(is_model_inference_request(cli, "POST", path), "{cli} {path}");
+            assert!(
+                is_model_inference_request(cli, "POST", path),
+                "{cli} {path}"
+            );
         }
     }
 

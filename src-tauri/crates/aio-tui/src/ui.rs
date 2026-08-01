@@ -158,7 +158,9 @@ pub fn draw_status(frame: &mut Frame, state: &LiveState) {
             *last = truncate_display(&format!("{last}…"), usize::from(area.width));
         }
     }
-    let height = u16::try_from(lines.len()).unwrap_or(area.height).min(area.height);
+    let height = u16::try_from(lines.len())
+        .unwrap_or(area.height)
+        .min(area.height);
     let target = Rect {
         x: area.x,
         y: area.y + area.height.saturating_sub(height),
@@ -192,7 +194,11 @@ pub fn draw_logs(frame: &mut Frame, state: &mut LogsState) {
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(2), Constraint::Min(1), Constraint::Length(1)])
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Min(1),
+            Constraint::Length(1),
+        ])
         .split(area);
     draw_header(frame, chunks[0], &state.live, state.color);
 
@@ -223,7 +229,9 @@ pub fn draw_logs(frame: &mut Frame, state: &mut LogsState) {
             })
             .collect::<Vec<_>>();
         let highlight = if state.color {
-            Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD)
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().add_modifier(Modifier::REVERSED)
         };
@@ -237,7 +245,10 @@ pub fn draw_logs(frame: &mut Frame, state: &mut LogsState) {
         "↑↓滚动 Enter详情 Tab切换 ?帮助 q退出",
         usize::from(chunks[2].width),
     );
-    frame.render_widget(Paragraph::new(footer).style(muted_style(state.color)), chunks[2]);
+    frame.render_widget(
+        Paragraph::new(footer).style(muted_style(state.color)),
+        chunks[2],
+    );
 }
 
 fn draw_header(frame: &mut Frame, area: Rect, state: &LiveState, color: bool) {
@@ -287,17 +298,26 @@ fn draw_header(frame: &mut Frame, area: Rect, state: &LiveState, color: bool) {
         })
         .unwrap_or_else(|| "正在读取本地观测接口".to_string());
     let style = if color {
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().add_modifier(Modifier::BOLD)
     };
-    frame.render_widget(Paragraph::new(format!("{first}\n{second}")).style(style), area);
+    frame.render_widget(
+        Paragraph::new(format!("{first}\n{second}")).style(style),
+        area,
+    );
 }
 
 fn draw_detail(frame: &mut Frame, area: Rect, state: &LogsState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(1), Constraint::Length(1)])
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(1),
+            Constraint::Length(1),
+        ])
         .split(area);
     frame.render_widget(
         Paragraph::new("请求详情").style(Style::default().add_modifier(Modifier::BOLD)),
@@ -313,10 +333,7 @@ fn draw_detail(frame: &mut Frame, area: Rect, state: &LogsState) {
             .scroll((state.detail_scroll, 0)),
         chunks[1],
     );
-    let footer = truncate_display(
-        "↑↓滚动 Esc返回 r刷新 q退出",
-        usize::from(chunks[2].width),
-    );
+    let footer = truncate_display("↑↓滚动 Esc返回 r刷新 q退出", usize::from(chunks[2].width));
     frame.render_widget(
         Paragraph::new(footer).style(muted_style(state.color)),
         chunks[2],
@@ -352,7 +369,10 @@ fn draw_help(frame: &mut Frame, area: Rect, color: bool) {
     } else {
         Style::default()
     };
-    frame.render_widget(Paragraph::new(text).style(style).wrap(Wrap { trim: false }), area);
+    frame.render_widget(
+        Paragraph::new(text).style(style).wrap(Wrap { trim: false }),
+        area,
+    );
 }
 
 fn request_style(request: &ObserverRequest, color: bool) -> Style {
@@ -363,7 +383,10 @@ fn request_style(request: &ObserverRequest, color: bool) -> Style {
         Color::Cyan
     } else if request.interrupted {
         Color::Yellow
-    } else if request.status.is_some_and(|status| (200..300).contains(&status)) {
+    } else if request
+        .status
+        .is_some_and(|status| (200..300).contains(&status))
+    {
         Color::Green
     } else {
         Color::Red
@@ -440,7 +463,9 @@ mod tests {
         let mut terminal = Terminal::new(backend).expect("terminal");
         let mut state = LogsState::new(CliScope::Codex);
         state.apply_snapshot(empty_snapshot(CliScope::Codex));
-        terminal.draw(|frame| draw_logs(frame, &mut state)).expect("draw");
+        terminal
+            .draw(|frame| draw_logs(frame, &mut state))
+            .expect("draw");
         let text = terminal
             .backend()
             .buffer()
@@ -458,7 +483,9 @@ mod tests {
         let mut terminal = Terminal::new(backend).expect("terminal");
         let mut state = LiveState::new(CliScope::Codex);
         state.apply_snapshot(empty_snapshot(CliScope::Codex));
-        terminal.draw(|frame| draw_status(frame, &state)).expect("draw");
+        terminal
+            .draw(|frame| draw_status(frame, &state))
+            .expect("draw");
         let text = terminal
             .backend()
             .buffer()
@@ -488,6 +515,9 @@ mod tests {
         ]);
         state.apply_snapshot(refreshed);
 
-        assert_eq!(state.selected_request().map(|request| request.key.as_str()), Some("selected"));
+        assert_eq!(
+            state.selected_request().map(|request| request.key.as_str()),
+            Some("selected")
+        );
     }
 }

@@ -28,10 +28,16 @@ where
     S: Into<String>,
 {
     let values = values.into_iter().map(Into::into).collect::<Vec<_>>();
-    if values.iter().any(|value| matches!(value.as_str(), "-h" | "--help")) {
+    if values
+        .iter()
+        .any(|value| matches!(value.as_str(), "-h" | "--help"))
+    {
         return Ok(ParseOutcome::Help);
     }
-    if values.iter().any(|value| matches!(value.as_str(), "-V" | "--version")) {
+    if values
+        .iter()
+        .any(|value| matches!(value.as_str(), "-V" | "--version"))
+    {
         return Ok(ParseOutcome::Version);
     }
 
@@ -64,9 +70,8 @@ where
                 let value = values
                     .get(index)
                     .ok_or_else(|| "--cli 缺少值".to_string())?;
-                scope = CliScope::parse(value).ok_or_else(|| {
-                    "--cli 必须是 claude、codex、grok、gemini 或 all".to_string()
-                })?;
+                scope = CliScope::parse(value)
+                    .ok_or_else(|| "--cli 必须是 claude、codex、grok、gemini 或 all".to_string())?;
             }
             value if value.starts_with('-') => {
                 return Err(format!("未知选项：{value}"));

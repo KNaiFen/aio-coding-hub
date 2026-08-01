@@ -1472,8 +1472,7 @@ fn observer_provider_identities_follow_active_route_order() {
     let first = upsert(&db, default_provider_params("observer-first")).expect("save first");
     let second = upsert(&db, default_provider_params("observer-second")).expect("save second");
 
-    default_route_set_order(&db, "claude", vec![first.id, second.id])
-        .expect("set default route");
+    default_route_set_order(&db, "claude", vec![first.id, second.id]).expect("set default route");
     let default = list_enabled_gateway_provider_identities_using_active_mode(&db, "claude")
         .expect("list default observer route");
     assert_eq!(
@@ -1485,13 +1484,8 @@ fn observer_provider_identities_follow_active_route_order() {
     );
 
     let mode = crate::sort_modes::create_mode(&db, "Observer Mode").expect("create mode");
-    crate::sort_modes::set_mode_providers_order(
-        &db,
-        mode.id,
-        "claude",
-        vec![second.id, first.id],
-    )
-    .expect("set mode order");
+    crate::sort_modes::set_mode_providers_order(&db, mode.id, "claude", vec![second.id, first.id])
+        .expect("set mode order");
     crate::sort_modes::set_mode_provider_enabled(&db, mode.id, "claude", first.id, false)
         .expect("disable first in mode");
     crate::sort_modes::set_active(&db, "claude", Some(mode.id)).expect("activate mode");

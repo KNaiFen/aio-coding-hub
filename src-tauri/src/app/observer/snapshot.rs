@@ -1,15 +1,13 @@
 //! Build bounded, secret-free observer snapshots from existing read models.
 
+use crate::gateway::active_requests::ActiveRequestSnapshotItem;
+use crate::gateway::observation::is_model_inference_request;
+use crate::{blocking, cli_sessions, gateway_runtime_access, providers, request_logs, usage_stats};
 use aio_observer_protocol::{
     CliScope, ObserverContextCompaction, ObserverDominantProvider, ObserverGatewayStatus,
     ObserverPreferredProvider, ObserverRequest, ObserverRequestState, ObserverRequestUsage,
     ObserverRouteHop, ObserverSection, ObserverSnapshotV1, ObserverTodayUsage,
     OBSERVER_PROTOCOL_VERSION,
-};
-use crate::gateway::active_requests::ActiveRequestSnapshotItem;
-use crate::gateway::observation::is_model_inference_request;
-use crate::{
-    blocking, cli_sessions, gateway_runtime_access, providers, request_logs, usage_stats,
 };
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -75,9 +73,7 @@ pub(super) async fn build_snapshot(
         .collect::<Vec<_>>();
     let active_inference_count = active
         .iter()
-        .filter(|item| {
-            is_model_inference_request(&item.cli_key, &item.method, &item.path)
-        })
+        .filter(|item| is_model_inference_request(&item.cli_key, &item.method, &item.path))
         .count();
     let active_requests = active
         .iter()
@@ -172,9 +168,7 @@ async fn load_db_projection(
         DB_SNAPSHOT_TIMEOUT,
         blocking::run("observer_snapshot", move || {
             let _db_query_permit = db_query_permit;
-            Ok::<_, crate::shared::error::AppError>(build_db_projection(
-                &app, &db, scope, &active,
-            ))
+            Ok::<_, crate::shared::error::AppError>(build_db_projection(&app, &db, scope, &active))
         }),
     )
     .await
@@ -207,21 +201,17 @@ fn build_db_projection(
         providers::list_enabled_gateway_provider_identities_using_active_mode(db, cli_key).map(
             |providers| {
                 providers
-                .into_iter()
-                .map(|provider| ProviderCandidate {
-                    id: provider.id,
-                    name: bounded_text(&provider.name, 128),
-                })
-                .collect::<Vec<_>>()
+                    .into_iter()
+                    .map(|provider| ProviderCandidate {
+                        id: provider.id,
+                        name: bounded_text(&provider.name, 128),
+                    })
+                    .collect::<Vec<_>>()
             },
         )
     });
-    let provider_available = provider_result
-        .as_ref()
-        .is_none_or(|result| result.is_ok());
-    let provider_candidates = provider_result
-        .and_then(Result::ok)
-        .unwrap_or_default();
+    let provider_available = provider_result.as_ref().is_none_or(|result| result.is_ok());
+    let provider_candidates = provider_result.and_then(Result::ok).unwrap_or_default();
 
     let today = today_usage(db);
     DbProjection {
@@ -242,8 +232,7 @@ fn preferred_cli_key(scope: CliScope, rows: &[request_logs::RequestLogSummary]) 
     }
     rows.iter()
         .find(|row| {
-            is_terminal(row)
-                && is_model_inference_request(&row.cli_key, &row.method, &row.path)
+            is_terminal(row) && is_model_inference_request(&row.cli_key, &row.method, &row.path)
         })
         .map(|row| row.cli_key.clone())
 }
@@ -295,11 +284,8 @@ fn preferred_provider(
         .iter()
         .map(|provider| provider.id)
         .collect::<Vec<_>>();
-    let statuses = gateway_runtime_access::app_gateway_circuit_status_peek(
-        app,
-        &provider_ids,
-        now_unix,
-    );
+    let statuses =
+        gateway_runtime_access::app_gateway_circuit_status_peek(app, &provider_ids, now_unix);
     let by_id = statuses
         .into_iter()
         .map(|status| (status.provider_id, status))
@@ -309,9 +295,7 @@ fn preferred_provider(
         .iter()
         .find_map(|provider| {
             let status = by_id.get(&provider.id)?;
-            let cooldown_active = status
-                .cooldown_until
-                .is_some_and(|until| until > now_unix);
+            let cooldown_active = status.cooldown_until.is_some_and(|until| until > now_unix);
             (status.state != "OPEN" && !cooldown_active).then(|| ObserverPreferredProvider {
                 cli_key: cli_key.to_string(),
                 provider_name: provider.name.clone(),
@@ -485,13 +469,17 @@ fn project_terminal(
             cache_read_tokens: non_negative(row.cache_read_input_tokens),
             cache_creation_tokens: non_negative(row.cache_creation_input_tokens),
         }),
-        cost_usd: row.cost_usd.filter(|value| value.is_finite() && *value >= 0.0),
+        cost_usd: row
+            .cost_usd
+            .filter(|value| value.is_finite() && *value >= 0.0),
         route,
         context_compaction: parse_context_compaction(row.special_settings_json.as_deref()),
     }
 }
 
-fn dominant_provider(rows: &[&request_logs::RequestLogSummary]) -> Option<ObserverDominantProvider> {
+fn dominant_provider(
+    rows: &[&request_logs::RequestLogSummary],
+) -> Option<ObserverDominantProvider> {
     let sample = rows.iter().copied().take(10).collect::<Vec<_>>();
     let mut counts = HashMap::<String, u8>::new();
     for row in &sample {
@@ -551,12 +539,23 @@ fn parse_context_compaction(raw: Option<&str>) -> Option<ObserverContextCompacti
             mode: known_value(object.get("mode")?, &["local", "remote", "unknown"])?,
             implementation: known_value(
                 object.get("implementation")?,
-                &["responses", "responses_compact", "responses_compaction_v2", "unknown"],
+                &[
+                    "responses",
+                    "responses_compact",
+                    "responses_compaction_v2",
+                    "unknown",
+                ],
             )?,
             trigger: known_value(object.get("trigger")?, &["manual", "auto", "unknown"])?,
             reason: known_value(
                 object.get("reason")?,
-                &["user_requested", "context_limit", "model_downshift", "comp_hash_changed", "unknown"],
+                &[
+                    "user_requested",
+                    "context_limit",
+                    "model_downshift",
+                    "comp_hash_changed",
+                    "unknown",
+                ],
             )?,
             phase: known_value(
                 object.get("phase")?,
@@ -585,7 +584,9 @@ fn non_empty(value: &str) -> Option<&str> {
 }
 
 fn bounded_optional(value: Option<&str>, max_chars: usize) -> Option<String> {
-    value.and_then(non_empty).map(|value| bounded_text(value, max_chars))
+    value
+        .and_then(non_empty)
+        .map(|value| bounded_text(value, max_chars))
 }
 
 fn bounded_text(value: &str, max_chars: usize) -> String {

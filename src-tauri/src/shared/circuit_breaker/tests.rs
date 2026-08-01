@@ -75,7 +75,10 @@ fn peek_allow_does_not_clear_expired_cooldown() {
     let cb = breaker();
     let pid = 1;
     let now = 1_000;
-    let until = cb.trigger_cooldown(pid, now, 30).cooldown_until.expect("cooldown");
+    let until = cb
+        .trigger_cooldown(pid, now, 30)
+        .cooldown_until
+        .expect("cooldown");
 
     let observed = cb.peek_allow(pid, until);
     assert!(observed.allow);

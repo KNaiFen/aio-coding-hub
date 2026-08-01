@@ -270,8 +270,7 @@ fn handle_logs_key(state: &mut LogsState, key: KeyEvent) -> KeyAction {
 
 fn should_quit(key: KeyEvent) -> bool {
     matches!(key.code, KeyCode::Char('q'))
-        || (matches!(key.code, KeyCode::Char('c'))
-            && key.modifiers.contains(KeyModifiers::CONTROL))
+        || (matches!(key.code, KeyCode::Char('c')) && key.modifiers.contains(KeyModifiers::CONTROL))
 }
 
 fn refresh_interval(snapshot: &ObserverSnapshotV1) -> Duration {

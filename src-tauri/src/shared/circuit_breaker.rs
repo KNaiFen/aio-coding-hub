@@ -299,9 +299,7 @@ impl CircuitBreaker {
             after.state = CircuitState::HalfOpen;
             after.open_until = None;
         }
-        let cooldown_active = after
-            .cooldown_until
-            .is_some_and(|until| now_unix < until);
+        let cooldown_active = after.cooldown_until.is_some_and(|until| now_unix < until);
         let allow = after.state != CircuitState::Open && !cooldown_active;
 
         CircuitCheck {

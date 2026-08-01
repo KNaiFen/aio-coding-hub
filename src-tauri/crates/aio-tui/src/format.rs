@@ -194,7 +194,13 @@ pub fn request_card_lines(request: &ObserverRequest, now_ms: i64, width: usize) 
         truncate_display(&format!("{}  {}", folder, provider), width),
         truncate_display(&format!("{}  {}", route_result(request), duration), width),
         truncate_display(
-            &format!("I {} O {} C {} {}", input, output, format_tokens(cache), cost),
+            &format!(
+                "I {} O {} C {} {}",
+                input,
+                output,
+                format_tokens(cache),
+                cost
+            ),
             width,
         ),
     ]
@@ -207,7 +213,10 @@ pub fn detail_lines(request: &ObserverRequest, now_ms: i64) -> Vec<String> {
         format!("CLI   {}", cli_label(&request.cli_key)),
         format!("模型  {}", request.model.as_deref().unwrap_or("—")),
         format!("目录  {}", request.folder_name.as_deref().unwrap_or("—")),
-        format!("供应商  {}", request.provider_name.as_deref().unwrap_or("—")),
+        format!(
+            "供应商  {}",
+            request.provider_name.as_deref().unwrap_or("—")
+        ),
         format!("路由  {}", route_result(request)),
         format!("方法  {} {}", request.method, request.path),
         format!(
@@ -224,7 +233,10 @@ pub fn detail_lines(request: &ObserverRequest, now_ms: i64) -> Vec<String> {
                 .map(format_duration)
                 .unwrap_or_else(|| "—".to_string())
         ),
-        format!("尝试  {}（重试 {}）", request.attempt_count, request.retry_count),
+        format!(
+            "尝试  {}（重试 {}）",
+            request.attempt_count, request.retry_count
+        ),
         format!("错误码  {}", request.error_code.as_deref().unwrap_or("—")),
         format!("Session  {}", request.session_id.as_deref().unwrap_or("—")),
     ];
@@ -464,7 +476,11 @@ mod tests {
     #[test]
     fn status_segments_wrap_at_boundaries_first() {
         let lines = wrap_status_segments(
-            &["首选 Provider".to_string(), "并发 13".to_string(), "今日 $1.23".to_string()],
+            &[
+                "首选 Provider".to_string(),
+                "并发 13".to_string(),
+                "今日 $1.23".to_string(),
+            ],
             16,
         );
         assert_eq!(lines, vec!["首选 Provider", "并发 13", "今日 $1.23"]);

@@ -1,8 +1,8 @@
 //! Runtime descriptor for the loopback observer service.
 
-use aio_observer_protocol::{ObserverDescriptorV1, OBSERVER_DESCRIPTOR_FILE_NAME};
 use crate::app_paths;
 use crate::shared::error::AppResult;
+use aio_observer_protocol::{ObserverDescriptorV1, OBSERVER_DESCRIPTOR_FILE_NAME};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use rand::RngCore;
@@ -41,9 +41,13 @@ pub fn write(path: &Path, descriptor: &ObserverDescriptorV1) -> AppResult<()> {
     let parent = path
         .parent()
         .ok_or_else(|| "observer descriptor has no parent directory".to_string())?;
-    fs::create_dir_all(parent).map_err(|err| format!("failed to create observer directory: {err}"))?;
+    fs::create_dir_all(parent)
+        .map_err(|err| format!("failed to create observer directory: {err}"))?;
 
-    let temp_path = parent.join(format!(".{}.{}.tmp", OBSERVER_DESCRIPTOR_FILE_NAME, descriptor.pid));
+    let temp_path = parent.join(format!(
+        ".{}.{}.tmp",
+        OBSERVER_DESCRIPTOR_FILE_NAME, descriptor.pid
+    ));
     let _ = fs::remove_file(&temp_path);
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
@@ -114,7 +118,10 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            assert_eq!(fs::metadata(&path).expect("metadata").permissions().mode() & 0o777, 0o600);
+            assert_eq!(
+                fs::metadata(&path).expect("metadata").permissions().mode() & 0o777,
+                0o600
+            );
         }
 
         fs::write(&path, vec![b'x'; DESCRIPTOR_MAX_BYTES + 1]).expect("overwrite descriptor");

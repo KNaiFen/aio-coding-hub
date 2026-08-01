@@ -4,8 +4,8 @@ mod descriptor;
 mod snapshot;
 
 use aio_observer_protocol::{
-    CliScope, ObserverApiError, ObserverApiErrorResponse, ObserverHealthV1,
-    ObserverSnapshotV1, OBSERVER_HISTORY_LIMIT_MAX, OBSERVER_PROTOCOL_VERSION,
+    CliScope, ObserverApiError, ObserverApiErrorResponse, ObserverHealthV1, ObserverSnapshotV1,
+    OBSERVER_HISTORY_LIMIT_MAX, OBSERVER_PROTOCOL_VERSION,
 };
 use axum::extract::rejection::QueryRejection;
 use axum::extract::{Query, State};
@@ -142,11 +142,7 @@ async fn start(app: tauri::AppHandle) -> crate::shared::error::AppResult<()> {
         let _ = crate::blocking::run(
             "observer_descriptor_remove_cancelled_start",
             move || -> crate::shared::error::AppResult<()> {
-                descriptor::remove_if_owned(
-                    &descriptor_path,
-                    descriptor.pid,
-                    &descriptor.token,
-                );
+                descriptor::remove_if_owned(&descriptor_path, descriptor.pid, &descriptor.token);
                 Ok(())
             },
         )
@@ -367,7 +363,9 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
     }
     left.iter()
         .zip(right)
-        .fold(0_u8, |difference, (left, right)| difference | (*left ^ *right))
+        .fold(0_u8, |difference, (left, right)| {
+            difference | (*left ^ *right)
+        })
         == 0
 }
 
@@ -413,9 +411,15 @@ mod tests {
     fn authorization_rejects_missing_and_wrong_schemes() {
         let mut headers = HeaderMap::new();
         assert!(!authorized(&headers, "token"));
-        headers.insert(header::AUTHORIZATION, HeaderValue::from_static("Basic token"));
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Basic token"),
+        );
         assert!(!authorized(&headers, "token"));
-        headers.insert(header::AUTHORIZATION, HeaderValue::from_static("Bearer token"));
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer token"),
+        );
         assert!(authorized(&headers, "token"));
     }
 }
