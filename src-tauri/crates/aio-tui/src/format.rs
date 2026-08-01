@@ -424,7 +424,7 @@ pub fn truncate_display(value: &str, max_width: usize) -> String {
     }
     let target = max_width - 1;
     let mut out = String::new();
-    let mut width = 0;
+    let mut width: usize = 0;
     for grapheme in value.graphemes(true) {
         let next = grapheme.width();
         if width.saturating_add(next) > target {
@@ -443,7 +443,7 @@ fn wrap_display(value: &str, max_width: usize) -> Vec<String> {
     }
     let mut lines = Vec::new();
     let mut current = String::new();
-    let mut width = 0;
+    let mut width: usize = 0;
     for grapheme in value.graphemes(true) {
         let next = grapheme.width();
         if !current.is_empty() && width.saturating_add(next) > max_width {
