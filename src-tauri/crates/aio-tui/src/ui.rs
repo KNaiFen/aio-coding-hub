@@ -7,7 +7,7 @@ use crate::format::{
 use aio_observer_protocol::{CliScope, ObserverRequest, ObserverSnapshotV1};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span, Text};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 use std::time::Instant;
@@ -47,7 +47,11 @@ impl LiveState {
             .map(|instant| instant.elapsed().as_secs())
             .unwrap_or(0);
         Some(if self.snapshot.is_some() {
-            format!("离线 {}s", age)
+            if reason == OfflineReason::Busy {
+                format!("观测繁忙 {}s", age)
+            } else {
+                format!("离线 {}s", age)
+            }
         } else {
             reason.label().to_string()
         })
@@ -500,26 +504,29 @@ pub fn draw_logs(frame: &mut Frame, state: &mut LogsState) {
     } else {
         let items = requests
             .iter()
-            .map(|request| {
-                let lines = request_card_lines(request, now_ms, width)
+            .enumerate()
+            .map(|(index, request)| {
+                let selected = index == state.selected;
+                let mut lines = request_card_lines(request, now_ms, width)
                     .into_iter()
-                    .map(Line::from)
+                    .enumerate()
+                    .map(|(line_index, line)| {
+                        Line::styled(
+                            line,
+                            request_line_style(request, line_index, state.color, selected),
+                        )
+                    })
                     .collect::<Vec<_>>();
-                let style = request_style(request, state.color);
-                ListItem::new(Text::from(lines)).style(style)
+                lines.push(Line::styled(
+                    "─".repeat(width),
+                    request_separator_style(state.color),
+                ));
+                ListItem::new(lines)
             })
             .collect::<Vec<_>>();
-        let highlight = if state.color {
-            Style::default()
-                .bg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().add_modifier(Modifier::REVERSED)
-        };
-        let list = List::new(items).highlight_style(highlight);
         let mut list_state = ListState::default();
         list_state.select(Some(state.selected));
-        frame.render_stateful_widget(list, chunks[1], &mut list_state);
+        frame.render_stateful_widget(List::new(items), chunks[1], &mut list_state);
     }
 
     let footer = truncate_display(
@@ -656,23 +663,55 @@ fn draw_help(frame: &mut Frame, area: Rect, color: bool) {
     );
 }
 
-fn request_style(request: &ObserverRequest, color: bool) -> Style {
-    if !color {
-        return Style::default();
-    }
-    let color = if request.state == aio_observer_protocol::ObserverRequestState::Active {
-        Color::Cyan
-    } else if request.interrupted {
-        Color::Yellow
-    } else if request
-        .status
-        .is_some_and(|status| (200..300).contains(&status))
-    {
-        Color::Green
+fn request_line_style(
+    request: &ObserverRequest,
+    line_index: usize,
+    color: bool,
+    selected: bool,
+) -> Style {
+    let mut style = if color {
+        let foreground = match line_index {
+            0 if request.state == aio_observer_protocol::ObserverRequestState::Active => {
+                Color::Cyan
+            }
+            0 if request.interrupted => Color::Yellow,
+            0 if request
+                .status
+                .is_some_and(|status| (200..300).contains(&status)) =>
+            {
+                Color::Green
+            }
+            0 => Color::Red,
+            1 => Color::LightBlue,
+            2 => Color::Magenta,
+            3 if request.provider_switch_count > 0 || request.retry_count > 0 => Color::Yellow,
+            3 => Color::Green,
+            _ => Color::LightCyan,
+        };
+        Style::default().fg(foreground)
     } else {
-        Color::Red
+        Style::default()
     };
-    Style::default().fg(color)
+    if selected {
+        style = if color {
+            style.bg(Color::DarkGray).add_modifier(Modifier::BOLD)
+        } else {
+            style
+                .add_modifier(Modifier::BOLD)
+                .add_modifier(Modifier::REVERSED)
+        };
+    }
+    style
+}
+
+fn request_separator_style(color: bool) -> Style {
+    if color {
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::DIM)
+    } else {
+        Style::default().add_modifier(Modifier::DIM)
+    }
 }
 
 #[cfg(test)]
@@ -763,6 +802,42 @@ mod tests {
         let text = rendered_non_space_symbols(&terminal);
         assert!(text.contains("并发13"));
         assert!(text.contains("暂无请求"));
+    }
+
+    #[test]
+    fn busy_refresh_keeps_the_last_snapshot_and_labels_it_stale() {
+        let mut state = LiveState::new(CliScope::Codex);
+        state.apply_snapshot(empty_snapshot(CliScope::Codex));
+        state.set_offline(OfflineReason::Busy);
+
+        assert!(state.snapshot.is_some());
+        assert!(state
+            .stale_label()
+            .is_some_and(|label| label.starts_with("观测繁忙 ")));
+    }
+
+    #[test]
+    fn request_cards_use_semantic_lines_and_unselected_separators() {
+        let backend = TestBackend::new(32, 18);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let mut state = LogsState::new(CliScope::Codex);
+        let mut snapshot = empty_snapshot(CliScope::Codex);
+        snapshot.recent_requests = ObserverSection::ready(vec![
+            terminal_request("newest"),
+            terminal_request("older"),
+        ]);
+        state.apply_snapshot(snapshot);
+        terminal
+            .draw(|frame| draw_logs(frame, &mut state))
+            .expect("draw");
+
+        let cells = terminal.backend().buffer().content();
+        assert!(cells
+            .iter()
+            .any(|cell| cell.symbol() == "─" && cell.bg == Color::Reset));
+        assert!(cells.iter().any(|cell| cell.fg == Color::Green));
+        assert!(cells.iter().any(|cell| cell.fg == Color::LightBlue));
+        assert!(cells.iter().any(|cell| cell.fg == Color::Magenta));
     }
 
     #[test]

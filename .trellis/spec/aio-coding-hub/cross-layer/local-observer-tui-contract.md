@@ -28,8 +28,10 @@ remote administration API.
 - The observer never listens on the gateway port, calls an upstream provider,
   mutates request state, or sends IPC commands.
 - Snapshot database reads use a separate single-connection SQLite read-only,
-  `query_only` pool with short timeouts. A missing or slow read marks only the
-  affected sections unavailable.
+  `query_only` pool with short timeouts. Concurrent cache misses wait fairly for
+  that query lane within a bounded deadline; contention timeout returns
+  `OBS_BUSY` and is never cached as an unavailable projection. A genuinely
+  missing or slow database read marks only the affected sections unavailable.
 - Circuit status is read through a non-mutating peek. It must not reserve a
   half-open probe, persist state, emit events, or alter provider health.
 - Observer startup, refresh, serialization, authentication, and TUI parsing
@@ -77,8 +79,9 @@ remote administration API.
   `codex`. Concurrency and today usage remain global in every scope.
 - The client never starts AIO. When the observer is unavailable it keeps the
   last successful snapshot, shows a stale/offline label, and retries every two
-  seconds. Interactive mode restores raw mode, alternate screen, and cursor on
-  normal exit and panic.
+  seconds. `OBS_BUSY` is shown as transient observer contention and likewise
+  retains the last successful snapshot. Interactive mode restores raw mode,
+  alternate screen, and cursor on normal exit and panic.
 - The client disables HTTP proxies and redirects for the loopback request and
   bounds descriptor and snapshot sizes. Protocol or JSON failures hide the
   affected view rather than crashing the process.

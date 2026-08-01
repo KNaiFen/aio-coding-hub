@@ -20,11 +20,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::Manager;
-use tokio::sync::{oneshot, Mutex, Semaphore};
+use tokio::sync::{oneshot, Mutex, OwnedSemaphorePermit, Semaphore};
 
 const OBSERVER_MAX_CONCURRENT_REQUESTS: usize = 2;
 const ACTIVE_CACHE_TTL: Duration = Duration::from_millis(400);
 const IDLE_CACHE_TTL: Duration = Duration::from_millis(1500);
+const DB_QUERY_PERMIT_TIMEOUT: Duration = Duration::from_millis(1600);
 const DB_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 const STOP_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -272,7 +273,23 @@ async fn snapshot_handler(
         return secured(Json(snapshot).into_response());
     }
     let db = read_only_db(&state).await;
-    let db_query_permit = state.db_query_limiter.clone().try_acquire_owned().ok();
+    let db_query_permit = if db.is_some() {
+        match wait_for_db_query_permit(state.db_query_limiter.clone()).await {
+            Some(permit) => Some(permit),
+            None => {
+                return api_error(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "OBS_BUSY",
+                    "observer is busy",
+                )
+            }
+        }
+    } else {
+        None
+    };
+    if let Some(snapshot) = cached_snapshot(&state, key).await {
+        return secured(Json(snapshot).into_response());
+    }
     let snapshot = snapshot::build_snapshot(
         &state.app,
         db.as_ref(),
@@ -289,6 +306,15 @@ async fn snapshot_handler(
         },
     );
     secured(Json(snapshot).into_response())
+}
+
+async fn wait_for_db_query_permit(
+    limiter: Arc<Semaphore>,
+) -> Option<OwnedSemaphorePermit> {
+    tokio::time::timeout(DB_QUERY_PERMIT_TIMEOUT, limiter.acquire_owned())
+        .await
+        .ok()?
+        .ok()
 }
 
 async fn read_only_db(state: &ObserverHttpState) -> Option<crate::db::Db> {
@@ -421,5 +447,18 @@ mod tests {
             HeaderValue::from_static("Bearer token"),
         );
         assert!(authorized(&headers, "token"));
+    }
+
+    #[tokio::test]
+    async fn db_query_permit_waits_for_the_active_reader() {
+        let limiter = Arc::new(Semaphore::new(1));
+        let held = limiter.clone().acquire_owned().await.expect("first permit");
+        let release = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            drop(held);
+        });
+
+        assert!(wait_for_db_query_permit(limiter).await.is_some());
+        release.await.expect("release task");
     }
 }

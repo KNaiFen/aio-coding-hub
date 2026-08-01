@@ -15,6 +15,7 @@ pub enum OfflineReason {
     InvalidDescriptor,
     Unreachable,
     Unauthorized,
+    Busy,
     ProtocolMismatch,
     InvalidResponse,
 }
@@ -26,6 +27,7 @@ impl OfflineReason {
             Self::InvalidDescriptor => "连接信息无效",
             Self::Unreachable => "AIO 暂不可达",
             Self::Unauthorized => "本地认证已失效",
+            Self::Busy => "观测繁忙",
             Self::ProtocolMismatch => "协议版本不兼容",
             Self::InvalidResponse => "观测数据无效",
         }
@@ -40,7 +42,7 @@ impl ObserverClient {
     pub fn new() -> Result<Self, OfflineReason> {
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_millis(500))
-            .timeout(Duration::from_millis(1800))
+            .timeout(Duration::from_millis(3500))
             .redirect(reqwest::redirect::Policy::none())
             .no_proxy()
             .build()
@@ -67,11 +69,8 @@ impl ObserverClient {
             .send()
             .await
             .map_err(|_| OfflineReason::Unreachable)?;
-        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-            return Err(OfflineReason::Unauthorized);
-        }
-        if !response.status().is_success() {
-            return Err(OfflineReason::InvalidResponse);
+        if let Some(reason) = response_failure_reason(response.status()) {
+            return Err(reason);
         }
         if response
             .content_length()
@@ -96,6 +95,15 @@ impl ObserverClient {
             return Err(OfflineReason::ProtocolMismatch);
         }
         Ok(snapshot)
+    }
+}
+
+fn response_failure_reason(status: reqwest::StatusCode) -> Option<OfflineReason> {
+    match status {
+        reqwest::StatusCode::UNAUTHORIZED => Some(OfflineReason::Unauthorized),
+        reqwest::StatusCode::TOO_MANY_REQUESTS => Some(OfflineReason::Busy),
+        status if !status.is_success() => Some(OfflineReason::InvalidResponse),
+        _ => None,
     }
 }
 
@@ -184,6 +192,19 @@ mod tests {
         assert!(!safe_dotdir("../aio"));
         assert!(!safe_dotdir("aio"));
         assert!(!safe_dotdir("."));
+    }
+
+    #[test]
+    fn observer_busy_is_distinct_from_invalid_responses() {
+        assert_eq!(
+            response_failure_reason(reqwest::StatusCode::TOO_MANY_REQUESTS),
+            Some(OfflineReason::Busy)
+        );
+        assert_eq!(
+            response_failure_reason(reqwest::StatusCode::INTERNAL_SERVER_ERROR),
+            Some(OfflineReason::InvalidResponse)
+        );
+        assert_eq!(response_failure_reason(reqwest::StatusCode::OK), None);
     }
 
     #[test]
