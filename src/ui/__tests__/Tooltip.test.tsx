@@ -85,6 +85,34 @@ describe("ui/Tooltip", () => {
     );
   });
 
+  it("keeps the inverse surface by default", async () => {
+    const user = userEvent.setup();
+    render(
+      <Tooltip content="Inverse tip">
+        <span>Inverse anchor</span>
+      </Tooltip>
+    );
+
+    await user.hover(screen.getByText("Inverse anchor"));
+    const content = (await screen.findByRole("tooltip")).closest("[data-side]");
+    expect(content).toHaveClass("bg-foreground", "text-background");
+    expect(content).not.toHaveClass("bg-popover");
+  });
+
+  it("supports a semantic panel surface for rich content", async () => {
+    const user = userEvent.setup();
+    render(
+      <Tooltip content="Panel tip" surface="panel" interactive collisionPadding={12}>
+        <span>Panel anchor</span>
+      </Tooltip>
+    );
+
+    await user.hover(screen.getByText("Panel anchor"));
+    const content = (await screen.findByRole("tooltip")).closest("[data-side]");
+    expect(content).toHaveClass("border-border", "bg-popover", "text-popover-foreground");
+    expect(content).not.toHaveClass("bg-foreground");
+  });
+
   it("wraps plain text children so the tooltip can still open", async () => {
     const user = userEvent.setup();
     render(<Tooltip content="Plain tip">Plain anchor</Tooltip>);

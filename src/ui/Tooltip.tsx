@@ -5,6 +5,7 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
+  type TooltipSurface,
 } from "@/ui/shadcn/tooltip";
 
 export type TooltipProps = {
@@ -13,6 +14,9 @@ export type TooltipProps = {
   className?: string;
   contentClassName?: string;
   placement?: "top" | "bottom";
+  surface?: TooltipSurface;
+  interactive?: boolean;
+  collisionPadding?: number;
 };
 
 export function Tooltip({
@@ -21,6 +25,9 @@ export function Tooltip({
   className,
   contentClassName,
   placement = "top",
+  surface = "inverse",
+  interactive = false,
+  collisionPadding,
 }: TooltipProps) {
   type ClassNameProp = { className?: string };
   const trigger = isValidElement<ClassNameProp>(children) ? (
@@ -34,9 +41,14 @@ export function Tooltip({
 
   return (
     <TooltipProvider delayDuration={0}>
-      <TooltipRoot disableHoverableContent>
+      <TooltipRoot disableHoverableContent={!interactive}>
         <TooltipTrigger asChild>{trigger}</TooltipTrigger>
-        <TooltipContent side={placement} className={contentClassName}>
+        <TooltipContent
+          side={placement}
+          surface={surface}
+          collisionPadding={collisionPadding}
+          className={contentClassName}
+        >
           {content}
         </TooltipContent>
       </TooltipRoot>

@@ -611,7 +611,10 @@ export function buildRequestRouteMeta(input: {
   hasFailover: boolean;
   attemptCount: number;
 }) {
-  const hops = input.route ?? [];
+  const candidateHops = (Array.isArray(input.route) ? input.route : []).filter(
+    (hop): hop is RequestLogRouteHop => hop != null && typeof hop === "object"
+  );
+  const hops = candidateHops.length <= 100 ? candidateHops : [];
   if (hops.length === 0) {
     return {
       hasRoute: false,
@@ -622,23 +625,46 @@ export function buildRequestRouteMeta(input: {
     };
   }
 
-  const skippedCount = hops.filter((h) => h.skipped).reduce((sum, h) => sum + (h.attempts ?? 1), 0);
-  const activeAttemptCount = hops
-    .filter((h) => !h.skipped)
-    .reduce((sum, h) => sum + (h.attempts ?? 1), 0);
-  const hasRetry = hops.some((h) => !h.skipped && (h.attempts ?? 1) > 1);
+  const normalizeHopAttempts = (value: number | null | undefined) =>
+    Number.isSafeInteger(value) && value != null && value > 0 && value <= 9_999 ? value : 1;
+  const addBoundedCount = (sum: number, value: number) => Math.min(sum + value, 9_999);
+  const skippedCount = Math.min(
+    hops.reduce((sum, hop) => sum + (hop.skipped ? 1 : 0), 0),
+    9_999
+  );
+  const requestCount = hops
+    .filter((hop) => !hop.skipped)
+    .reduce((sum, hop) => addBoundedCount(sum, normalizeHopAttempts(hop.attempts)), 0);
+  const retryCount = hops
+    .filter((hop) => !hop.skipped)
+    .reduce(
+      (sum, hop) => addBoundedCount(sum, Math.max(normalizeHopAttempts(hop.attempts) - 1, 0)),
+      0
+    );
+  const hasRetry = retryCount > 0;
   const providerCount = hops.length;
   const transitionCount = Math.max(providerCount - 1, 0);
   const hasProviderTransition = transitionCount > 0;
+  const completedSuccessfully = input.status != null && input.status >= 200 && input.status < 400;
 
   const summary = hasProviderTransition
-    ? `${providerCount} 家供应商，切换 ${transitionCount} 次，共 ${input.attemptCount} 次尝试后${input.status != null && input.status < 400 ? "成功" : "结束"}`
+    ? [
+        `${providerCount} 家供应商`,
+        `切换 ${transitionCount} 次`,
+        skippedCount > 0 ? `跳过 ${skippedCount} 个候选` : null,
+        requestCount > 0 ? `实际请求 ${requestCount} 次` : "未发出上游请求",
+        retryCount > 0 ? `额外重试 ${retryCount} 次` : null,
+      ]
+        .filter(Boolean)
+        .join("，") + `后${completedSuccessfully ? "成功" : "结束"}`
     : skippedCount > 0 && hasRetry
-      ? `跳过 ${skippedCount} 个候选，并重试 ${activeAttemptCount} 次`
+      ? `跳过 ${skippedCount} 个候选，实际请求 ${requestCount} 次，其中额外重试 ${retryCount} 次`
       : skippedCount > 0
-        ? `跳过 ${skippedCount} 个候选`
+        ? requestCount > 0
+          ? `跳过 ${skippedCount} 个候选，实际请求 ${requestCount} 次`
+          : `跳过 ${skippedCount} 个候选，未发出上游请求`
         : hasRetry
-          ? `同一供应商重试 ${input.attemptCount} 次`
+          ? `同一供应商实际请求 ${requestCount} 次，其中额外重试 ${retryCount} 次`
           : "直连完成";
 
   // 纯文本 fallback（用于 title 属性）
@@ -649,24 +675,32 @@ export function buildRequestRouteMeta(input: {
         !rawProviderName || rawProviderName === "Unknown" ? "未知" : rawProviderName;
       const status = hop.status ?? (idx === hops.length - 1 ? input.status : null) ?? null;
       const statusText = status == null ? "状态未知" : String(status);
-      const attemptsSuffix = hop.attempts && hop.attempts > 1 ? `，尝试 ${hop.attempts} 次` : "";
-      if (hop.ok) return `${providerName}（${statusText}，成功${attemptsSuffix}）`;
+      const attempts = normalizeHopAttempts(hop.attempts);
+      const attemptsSuffix = attempts > 1 ? `，尝试 ${attempts} 次` : "";
       if (hop.skipped) return `${providerName}（已跳过${attemptsSuffix}）`;
+      if (hop.ok) return `${providerName}（${statusText}，成功${attemptsSuffix}）`;
       const errorCode = hop.error_code ?? null;
       const errorLabel = errorCode ? getErrorCodeLabel(errorCode) : "失败";
       return `${providerName}（${statusText}，${errorLabel}${attemptsSuffix}）`;
     })
     .join(" → ");
 
-  let label = summary;
+  let label = "直连";
   if (hasProviderTransition) {
-    label = `${providerCount} 家 · 切换 ${transitionCount} 次 · 尝试 ${input.attemptCount} 次`;
+    const tokens = [`切${transitionCount}`];
+    if (skippedCount > 0) {
+      tokens.push(`跳${skippedCount}`);
+    } else if (retryCount > 0) {
+      tokens.push(`重${retryCount}`);
+    }
+    if (requestCount > 0) tokens.push(`请${requestCount}`);
+    label = tokens.join("·");
   } else if (skippedCount > 0 && hasRetry) {
-    label = `跳过 ${skippedCount} 个 + 重试`;
+    label = `跳${skippedCount}·重${retryCount}·请${requestCount}`;
   } else if (skippedCount > 0) {
-    label = `跳过 ${skippedCount} 个`;
+    label = requestCount > 0 ? `跳${skippedCount}·请${requestCount}` : `跳${skippedCount}`;
   } else if (hasRetry) {
-    label = `重试 ${input.attemptCount} 次`;
+    label = `重${retryCount}·请${requestCount}`;
   }
 
   // 无 JSX 约束：此文件为 .ts，等价于 <RouteTooltipContent ... /> 的 createElement 调用
@@ -674,7 +708,6 @@ export function buildRequestRouteMeta(input: {
     hops,
     finalStatus: input.status,
     summary,
-    skippedCount,
   });
 
   return {
@@ -682,6 +715,9 @@ export function buildRequestRouteMeta(input: {
     providerCount,
     transitionCount,
     attemptCount: input.attemptCount,
+    skippedCount,
+    requestCount,
+    retryCount,
     label,
     summary,
     tooltipText,

@@ -744,9 +744,12 @@ describe("components/home/requestLogPresentation", () => {
     });
     expect(direct).toMatchObject({
       hasRoute: true,
-      label: "直连完成",
+      label: "直连",
       summary: "直连完成",
       tooltipText: "Provider A（200，成功）",
+      requestCount: 1,
+      retryCount: 0,
+      skippedCount: 0,
     });
 
     const retry = buildRequestRouteMeta({
@@ -762,7 +765,8 @@ describe("components/home/requestLogPresentation", () => {
       hasFailover: false,
       attemptCount: 2,
     });
-    expect(retry.label).toBe("重试 2 次");
+    expect(retry.label).toBe("重1·请2");
+    expect(retry.summary).toBe("同一供应商实际请求 2 次，其中额外重试 1 次");
     expect(retry.tooltipText).toBe("Provider A（500，失败，尝试 2 次）");
 
     const skippedAndRetry = buildRequestRouteMeta({
@@ -786,8 +790,15 @@ describe("components/home/requestLogPresentation", () => {
       hasFailover: false,
       attemptCount: 5,
     });
-    expect(skippedAndRetry.label).toBe("2 家 · 切换 1 次 · 尝试 5 次");
-    expect(skippedAndRetry.summary).toBe("2 家供应商，切换 1 次，共 5 次尝试后结束");
+    expect(skippedAndRetry.label).toBe("切1·跳1·请3");
+    expect(skippedAndRetry.summary).toBe(
+      "2 家供应商，切换 1 次，跳过 1 个候选，实际请求 3 次，额外重试 2 次后结束"
+    );
+    expect(skippedAndRetry).toMatchObject({
+      skippedCount: 1,
+      requestCount: 3,
+      retryCount: 2,
+    });
     expect(skippedAndRetry.tooltipText).toContain("未知（已跳过，尝试 2 次）");
     expect(skippedAndRetry.tooltipText).toContain("Provider B（504，上游超时，尝试 3 次）");
 
@@ -804,8 +815,10 @@ describe("components/home/requestLogPresentation", () => {
       providerCount: 2,
       transitionCount: 1,
       attemptCount: 2,
-      label: "2 家 · 切换 1 次 · 尝试 2 次",
-      summary: "2 家供应商，切换 1 次，共 2 次尝试后成功",
+      requestCount: 2,
+      retryCount: 0,
+      label: "切1·请2",
+      summary: "2 家供应商，切换 1 次，实际请求 2 次后成功",
     });
 
     const failedFailover = buildRequestRouteMeta({
@@ -817,7 +830,7 @@ describe("components/home/requestLogPresentation", () => {
       hasFailover: true,
       attemptCount: 2,
     });
-    expect(failedFailover.summary).toBe("2 家供应商，切换 1 次，共 2 次尝试后结束");
+    expect(failedFailover.summary).toBe("2 家供应商，切换 1 次，实际请求 2 次后结束");
 
     const skippedOnly = buildRequestRouteMeta({
       route: [
@@ -834,8 +847,8 @@ describe("components/home/requestLogPresentation", () => {
       hasFailover: false,
       attemptCount: 3,
     });
-    expect(skippedOnly.label).toBe("2 家 · 切换 1 次 · 尝试 3 次");
-    expect(skippedOnly.summary).toBe("2 家供应商，切换 1 次，共 3 次尝试后成功");
+    expect(skippedOnly.label).toBe("切1·跳1·请1");
+    expect(skippedOnly.summary).toBe("2 家供应商，切换 1 次，跳过 1 个候选，实际请求 1 次后成功");
 
     const threeProvidersWithSkipsAndRetry = buildRequestRouteMeta({
       route: [
@@ -866,8 +879,11 @@ describe("components/home/requestLogPresentation", () => {
       providerCount: 3,
       transitionCount: 2,
       attemptCount: 4,
-      label: "3 家 · 切换 2 次 · 尝试 4 次",
-      summary: "3 家供应商，切换 2 次，共 4 次尝试后成功",
+      skippedCount: 1,
+      requestCount: 3,
+      retryCount: 1,
+      label: "切2·跳1·请3",
+      summary: "3 家供应商，切换 2 次，跳过 1 个候选，实际请求 3 次，额外重试 1 次后成功",
     });
 
     const implicitAttempts = buildRequestRouteMeta({
@@ -883,7 +899,7 @@ describe("components/home/requestLogPresentation", () => {
       hasFailover: false,
       attemptCount: 1,
     });
-    expect(implicitAttempts.label).toBe("直连完成");
+    expect(implicitAttempts.label).toBe("直连");
     expect(implicitAttempts.tooltipText).toBe("Provider C（200，成功）");
 
     const retryOnly = buildRequestRouteMeta({
@@ -899,7 +915,64 @@ describe("components/home/requestLogPresentation", () => {
       hasFailover: false,
       attemptCount: 3,
     });
-    expect(retryOnly.label).toBe("重试 3 次");
+    expect(retryOnly.label).toBe("重2·请3");
     expect(retryOnly.tooltipText).toBe("Provider A（状态未知，失败，尝试 3 次）");
+
+    const twoSkippedThenSent = buildRequestRouteMeta({
+      route: [
+        createRequestLogRouteHop({ ok: false, skipped: true, attempts: 1 }),
+        createRequestLogRouteHop({ ok: false, skipped: true, attempts: 1 }),
+        createRequestLogRouteHop({ ok: true, skipped: false, attempts: 1 }),
+      ],
+      status: 200,
+      hasFailover: true,
+      attemptCount: 3,
+    });
+    expect(twoSkippedThenSent.label).toBe("切2·跳2·请1");
+
+    const threeDigitCounts = buildRequestRouteMeta({
+      route: [createRequestLogRouteHop({ ok: true, attempts: 120 })],
+      status: 200,
+      hasFailover: false,
+      attemptCount: 120,
+    });
+    expect(threeDigitCounts.label).toBe("重119·请120");
+
+    const malformedCounts = buildRequestRouteMeta({
+      route: [createRequestLogRouteHop({ ok: true, attempts: Number.NaN })],
+      status: 200,
+      hasFailover: false,
+      attemptCount: Number.POSITIVE_INFINITY,
+    });
+    expect(malformedCounts).toMatchObject({
+      label: "直连",
+      requestCount: 1,
+      retryCount: 0,
+    });
+
+    expect(
+      buildRequestRouteMeta({
+        route: { unexpected: true } as unknown as [],
+        status: 200,
+        hasFailover: false,
+        attemptCount: 1,
+      })
+    ).toMatchObject({
+      hasRoute: false,
+      label: "链路",
+      summary: "暂无链路信息",
+    });
+
+    expect(
+      buildRequestRouteMeta({
+        route: Array.from({ length: 101 }, () => createRequestLogRouteHop()),
+        status: 200,
+        hasFailover: true,
+        attemptCount: 101,
+      })
+    ).toMatchObject({
+      hasRoute: false,
+      summary: "暂无链路信息",
+    });
   });
 });

@@ -351,17 +351,25 @@ const RequestLogCard = memo(function RequestLogCard({
                       showCustomTooltip ? (
                         <Tooltip
                           content={routeMeta.tooltipContent}
-                          contentClassName="max-w-[400px] break-words"
+                          className="min-w-0 flex-1"
+                          contentClassName="max-h-[min(32rem,var(--radix-tooltip-content-available-height,calc(100vh-1.5rem)))] w-[min(35rem,calc(100vw-1.5rem))] max-w-none overflow-y-auto overscroll-contain break-words p-3"
                           placement="top"
+                          surface="panel"
+                          interactive
+                          collisionPadding={12}
                         >
-                          <span className="text-[11px] text-muted-foreground hover:text-indigo-600 dark:hover:text-indigo-400 cursor-help">
+                          <span
+                            className="block min-w-0 max-w-full cursor-help truncate whitespace-nowrap text-[11px] tabular-nums text-muted-foreground hover:text-indigo-600 dark:hover:text-indigo-400"
+                            aria-label={routeMeta.summary}
+                          >
                             {routeMeta.label}
                           </span>
                         </Tooltip>
                       ) : (
                         <span
-                          className="text-[11px] text-muted-foreground cursor-help"
-                          title={routeMeta.tooltipText}
+                          className="block min-w-0 flex-1 truncate whitespace-nowrap text-[11px] tabular-nums text-muted-foreground cursor-help"
+                          aria-label={routeMeta.summary}
+                          title={`${routeMeta.summary}；${routeMeta.tooltipText}`}
                         >
                           {routeMeta.label}
                         </span>
