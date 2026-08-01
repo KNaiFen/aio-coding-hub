@@ -24,6 +24,12 @@ function requireText(label, content, expected) {
 requireText("CI", files.ci, "build-tui-release-candidate:");
 requireText("CI", files.ci, "--package aio-tui");
 requireText("CI", files.ci, "--target-ids windows-x64,macos-arm64");
+requireText("release workflow", files.release, "workflow_dispatch:");
+requireText("release workflow", files.release, "TAG_NAME: ${{ inputs.tag || github.ref_name }}");
+requireText("release workflow", files.release, 'tag_ref="refs/tags/$TAG_NAME"');
+requireText("release workflow", files.release, "refs/heads/main:refs/remotes/origin/main");
+requireText("release workflow", files.release, "artifact-ids:");
+requireText("release workflow", files.release, "merge-multiple: true");
 requireText("Cargo workspace", files.cargo, '"crates/aio-observer-protocol"');
 requireText("Cargo workspace", files.cargo, '"crates/aio-tui"');
 
