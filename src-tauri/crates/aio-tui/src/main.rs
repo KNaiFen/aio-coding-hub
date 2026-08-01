@@ -1,5 +1,6 @@
 mod args;
 mod client;
+mod config;
 mod format;
 mod terminal;
 mod ui;
@@ -11,7 +12,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifier
 use std::io::IsTerminal;
 use std::time::{Duration, Instant};
 use terminal::TerminalSession;
-use ui::{LiveState, LogsState};
+use ui::{LiveState, LogsState, StatuslinePickerState};
 
 const ACTIVE_REFRESH_INTERVAL: Duration = Duration::from_millis(500);
 const IDLE_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
@@ -39,15 +40,31 @@ async fn run() -> Result<(), String> {
         ParseOutcome::Run(args) => args,
     };
     let client = ObserverClient::new().map_err(|reason| reason.label().to_string())?;
+    let scope = args.scope;
     match args.mode {
-        Mode::Status { once: true } => status_once(&client, args.scope).await,
-        Mode::Status { once: false } => {
+        Mode::Status { once, items } => {
+            let persisted = config::load();
+            let items = items.unwrap_or(persisted.status_items);
+            if once {
+                status_once(&client, scope, &items).await
+            } else {
+                require_interactive_terminal()?;
+                run_status(
+                    client,
+                    scope,
+                    items,
+                    config::colors_enabled(persisted.use_colors),
+                )
+                .await
+            }
+        }
+        Mode::Statusline => {
             require_interactive_terminal()?;
-            run_status(client, args.scope).await
+            run_statusline(client, scope).await
         }
         Mode::Logs => {
             require_interactive_terminal()?;
-            run_logs(client, args.scope).await
+            run_logs(client, scope).await
         }
     }
 }
@@ -59,16 +76,25 @@ fn require_interactive_terminal() -> Result<(), String> {
     Ok(())
 }
 
-async fn status_once(client: &ObserverClient, scope: CliScope) -> Result<(), String> {
+async fn status_once(
+    client: &ObserverClient,
+    scope: CliScope,
+    items: &[config::StatusItem],
+) -> Result<(), String> {
     let snapshot = client
         .snapshot(scope, 0)
         .await
         .map_err(|reason| reason.label().to_string())?;
-    println!("{}", format::status_plain(&snapshot));
+    println!("{}", format::status_plain(&snapshot, items));
     Ok(())
 }
 
-async fn run_status(client: ObserverClient, scope: CliScope) -> Result<(), String> {
+async fn run_status(
+    client: ObserverClient,
+    scope: CliScope,
+    items: Vec<config::StatusItem>,
+    color: bool,
+) -> Result<(), String> {
     let mut terminal = TerminalSession::enter().map_err(|error| error.to_string())?;
     let mut state = LiveState::new(scope);
     let mut next_refresh = Instant::now();
@@ -98,7 +124,7 @@ async fn run_status(client: ObserverClient, scope: CliScope) -> Result<(), Strin
         if redraw {
             terminal
                 .terminal_mut()
-                .draw(|frame| ui::draw_status(frame, &state))
+                .draw(|frame| ui::draw_status(frame, &state, &items, color))
                 .map_err(|error| error.to_string())?;
             redraw = false;
         }
@@ -116,6 +142,83 @@ async fn run_status(client: ObserverClient, scope: CliScope) -> Result<(), Strin
                 _ => {}
             }
         }
+    }
+    Ok(())
+}
+
+async fn run_statusline(client: ObserverClient, scope: CliScope) -> Result<(), String> {
+    let mut terminal = TerminalSession::enter().map_err(|error| error.to_string())?;
+    let mut picker = StatuslinePickerState::new(config::load());
+    let mut live = LiveState::new(scope);
+    let mut next_refresh = Instant::now();
+    let mut next_clock = Instant::now();
+    let mut redraw = true;
+    let mut saved = false;
+
+    loop {
+        let now = Instant::now();
+        if now >= next_refresh {
+            match client.snapshot(scope, 0).await {
+                Ok(snapshot) => {
+                    let interval = refresh_interval(&snapshot);
+                    live.apply_snapshot(snapshot);
+                    next_refresh = Instant::now() + interval;
+                }
+                Err(reason) => {
+                    live.set_offline(reason);
+                    next_refresh = Instant::now() + IDLE_REFRESH_INTERVAL;
+                }
+            }
+            redraw = true;
+        }
+        if Instant::now() >= next_clock {
+            next_clock = Instant::now() + CLOCK_REFRESH_INTERVAL;
+            redraw = true;
+        }
+        if redraw {
+            terminal
+                .terminal_mut()
+                .draw(|frame| ui::draw_statusline_picker(frame, &mut picker, &live))
+                .map_err(|error| error.to_string())?;
+            redraw = false;
+        }
+        if event::poll(EVENT_POLL_INTERVAL).map_err(|error| error.to_string())? {
+            match event::read().map_err(|error| error.to_string())? {
+                Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    if should_quit(key) || matches!(key.code, KeyCode::Esc) {
+                        break;
+                    }
+                    match key.code {
+                        KeyCode::Up | KeyCode::Char('k') => picker.move_selection(-1),
+                        KeyCode::Down | KeyCode::Char('j') => picker.move_selection(1),
+                        KeyCode::Left => picker.move_selected_item(-1),
+                        KeyCode::Right => picker.move_selected_item(1),
+                        KeyCode::Char(' ') => picker.toggle_selected(),
+                        KeyCode::Char('c') => picker.toggle_colors(),
+                        KeyCode::Char('r') => picker.reset(),
+                        KeyCode::Home => {
+                            picker.selected = 0;
+                        }
+                        KeyCode::End => {
+                            picker.selected = config::StatusItem::ALL.len().saturating_sub(1);
+                        }
+                        KeyCode::Enter => {
+                            config::save(&picker.config())?;
+                            saved = true;
+                            break;
+                        }
+                        _ => continue,
+                    }
+                    redraw = true;
+                }
+                Event::Resize(_, _) => redraw = true,
+                _ => {}
+            }
+        }
+    }
+    drop(terminal);
+    if saved {
+        println!("状态栏配置已保存");
     }
     Ok(())
 }

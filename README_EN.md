@@ -146,9 +146,11 @@ sudo install -m 0755 aio-tui /usr/local/bin/aio-tui
 aio-tui
 aio-tui status
 aio-tui status --once --cli codex
+aio-tui status --items preferred-provider,last-request,concurrency,today-cost
+aio-tui statusline
 ```
 
-Windows users can unzip `aio-tui-win64.zip` and add its directory to `PATH`. Use `--cli claude|codex|grok|gemini|all`; in `all` scope the status line follows the CLI of the newest terminal inference request. Concurrency is the global count of active model-inference requests, so every request from the same Session or a sub-agent counts as one. Offline mode keeps the last snapshot, shows a stale label, and never starts AIO.
+Windows users can unzip `aio-tui-win64.zip` and add its directory to `PATH`. Use `--cli claude|codex|grok|gemini|all`; in `all` scope the status line follows the CLI of the newest terminal inference request. In `aio-tui statusline`, use Space to toggle items, Left/Right to reorder, `c` to toggle colors, and Enter to save; `--items` overrides only the current run. The default fields are preferred provider, last request, dominant provider in the last ten requests, concurrency, today's cost, and today's tokens. Set `NO_COLOR` to force plain output. Concurrency is the global count of active model-inference requests, so every request from the same Session or a sub-agent counts as one. Offline mode keeps the last snapshot, shows a stale label, and never starts AIO.
 
 Standalone TUI archives are not included in the desktop updater `latest.json`; verify them with the release `SHA256SUMS.txt`.
 

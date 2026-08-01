@@ -152,9 +152,11 @@ sudo install -m 0755 aio-tui /usr/local/bin/aio-tui
 aio-tui
 aio-tui status
 aio-tui status --once --cli codex
+aio-tui status --items preferred-provider,last-request,concurrency,today-cost
+aio-tui statusline
 ```
 
-Windows 解压 `aio-tui-win64.zip` 后，把目录加入 `PATH`。支持 `--cli claude|codex|grok|gemini|all`；`all` 的状态栏会按最近一条终态模型推理请求选择 CLI。状态栏中的并发是全局活跃模型推理请求数，同一会话和子代理的每个请求都计 1。观测服务离线时 TUI 保留最后快照并显示陈旧标记，不会崩溃或自动启动 AIO。
+Windows 解压 `aio-tui-win64.zip` 后，把目录加入 `PATH`。支持 `--cli claude|codex|grok|gemini|all`；`all` 的状态栏会按最近一条终态模型推理请求选择 CLI。`aio-tui statusline` 中使用空格启用项目、`←/→` 调整顺序、`c` 切换颜色并按 Enter 保存；`--items` 只覆盖当前运行。默认显示首选供应商、上次请求、近 10 次主供应商、并发、今日费用和今日 Token，设置 `NO_COLOR` 可强制禁用颜色。状态栏中的并发是全局活跃模型推理请求数，同一会话和子代理的每个请求都计 1。观测服务离线时 TUI 保留最后快照并显示陈旧标记，不会崩溃或自动启动 AIO。
 
 独立 TUI 资产不会进入桌面 updater 的 `latest.json`，并由发布中的 `SHA256SUMS.txt` 校验。
 

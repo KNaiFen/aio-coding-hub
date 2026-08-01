@@ -1,12 +1,13 @@
 use crate::client::OfflineReason;
+use crate::config::{colors_enabled, StatusItem, TuiConfig};
 use crate::format::{
     format_cost, format_tokens, now_millis, request_card_lines, scope_label, status_segments,
-    truncate_display, wrap_status_segments,
+    truncate_display, truncate_status_line, wrap_status_segments, StatusSegment, StatusTone,
 };
 use aio_observer_protocol::{CliScope, ObserverRequest, ObserverSnapshotV1};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Text};
+use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 use std::time::Instant;
@@ -50,6 +51,105 @@ impl LiveState {
         } else {
             reason.label().to_string()
         })
+    }
+}
+
+#[derive(Debug, Clone)]
+struct StatuslinePickerRow {
+    item: StatusItem,
+    enabled: bool,
+}
+
+pub struct StatuslinePickerState {
+    rows: Vec<StatuslinePickerRow>,
+    pub selected: usize,
+    pub use_colors: bool,
+    notice: Option<String>,
+}
+
+impl StatuslinePickerState {
+    pub fn new(config: TuiConfig) -> Self {
+        let mut rows = config
+            .status_items
+            .iter()
+            .map(|item| StatuslinePickerRow {
+                item: *item,
+                enabled: true,
+            })
+            .collect::<Vec<_>>();
+        rows.extend(
+            StatusItem::ALL
+                .into_iter()
+                .filter(|item| !config.status_items.contains(item))
+                .map(|item| StatuslinePickerRow {
+                    item,
+                    enabled: false,
+                }),
+        );
+        Self {
+            rows,
+            selected: 0,
+            use_colors: config.use_colors,
+            notice: None,
+        }
+    }
+
+    pub fn selected_items(&self) -> Vec<StatusItem> {
+        self.rows
+            .iter()
+            .filter(|row| row.enabled)
+            .map(|row| row.item)
+            .collect()
+    }
+
+    pub fn config(&self) -> TuiConfig {
+        TuiConfig {
+            status_items: self.selected_items(),
+            use_colors: self.use_colors,
+        }
+    }
+
+    pub fn move_selection(&mut self, delta: isize) {
+        self.selected = self
+            .selected
+            .saturating_add_signed(delta)
+            .min(self.rows.len().saturating_sub(1));
+        self.notice = None;
+    }
+
+    pub fn move_selected_item(&mut self, delta: isize) {
+        let target = self
+            .selected
+            .saturating_add_signed(delta)
+            .min(self.rows.len().saturating_sub(1));
+        if target != self.selected {
+            self.rows.swap(self.selected, target);
+            self.selected = target;
+        }
+        self.notice = None;
+    }
+
+    pub fn toggle_selected(&mut self) {
+        let enabled_count = self.rows.iter().filter(|row| row.enabled).count();
+        let Some(row) = self.rows.get_mut(self.selected) else {
+            return;
+        };
+        if row.enabled && enabled_count == 1 {
+            self.notice = Some("至少保留一个状态栏项目".to_string());
+            return;
+        }
+        row.enabled = !row.enabled;
+        self.notice = None;
+    }
+
+    pub fn toggle_colors(&mut self) {
+        self.use_colors = !self.use_colors;
+        self.notice = None;
+    }
+
+    pub fn reset(&mut self) {
+        *self = Self::new(TuiConfig::default());
+        self.notice = Some("已恢复默认项目，按 Enter 保存".to_string());
     }
 }
 
@@ -138,24 +238,50 @@ impl LogsState {
     }
 }
 
-pub fn draw_status(frame: &mut Frame, state: &LiveState) {
+pub fn draw_status(
+    frame: &mut Frame,
+    state: &LiveState,
+    items: &[StatusItem],
+    color: bool,
+) {
     let area = frame.area();
+    draw_status_in_area(frame, area, state, items, color);
+}
+
+fn draw_status_in_area(
+    frame: &mut Frame,
+    area: Rect,
+    state: &LiveState,
+    items: &[StatusItem],
+    color: bool,
+) {
     if area.width == 0 || area.height == 0 {
         return;
     }
-    let mut segments = state
-        .snapshot
-        .as_ref()
-        .map(status_segments)
-        .unwrap_or_else(|| vec!["AIO 离线".to_string()]);
-    if let Some(label) = state.stale_label() {
-        segments.push(label);
+    let mut segments = if let Some(snapshot) = state.snapshot.as_ref() {
+        status_segments(snapshot, items)
+    } else {
+        vec![StatusSegment::new(
+            state
+                .stale_label()
+                .unwrap_or_else(|| "AIO 连接中".to_string()),
+            if state.offline.is_some() {
+                StatusTone::Warning
+            } else {
+                StatusTone::Default
+            },
+        )]
+    };
+    let stale_label = state.snapshot.as_ref().and_then(|_| state.stale_label());
+    if let Some(label) = stale_label {
+        segments.push(StatusSegment::new(label, StatusTone::Warning));
     }
     let mut lines = wrap_status_segments(&segments, usize::from(area.width));
     if lines.len() > usize::from(area.height) {
         lines.truncate(usize::from(area.height));
         if let Some(last) = lines.last_mut() {
-            *last = truncate_display(&format!("{last}…"), usize::from(area.width));
+            last.push(StatusSegment::new("…", StatusTone::Separator));
+            *last = truncate_status_line(last, usize::from(area.width));
         }
     }
     let height = u16::try_from(lines.len())
@@ -167,15 +293,170 @@ pub fn draw_status(frame: &mut Frame, state: &LiveState) {
         width: area.width,
         height,
     };
-    let color = std::env::var_os("NO_COLOR").is_none();
-    let style = if !color {
-        Style::default()
-    } else if state.offline.is_some() {
-        Style::default().fg(Color::Yellow)
+    let lines = lines
+        .into_iter()
+        .map(|line| {
+            Line::from(
+                line.into_iter()
+                    .map(|segment| {
+                        Span::styled(segment.text, status_tone_style(segment.tone, color))
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect::<Vec<_>>();
+    frame.render_widget(Paragraph::new(lines), target);
+}
+
+pub fn draw_statusline_picker(
+    frame: &mut Frame,
+    state: &mut StatuslinePickerState,
+    live: &LiveState,
+) {
+    let area = frame.area();
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Min(1),
+            Constraint::Length(3),
+            Constraint::Length(1),
+        ])
+        .split(area);
+    let effective_colors = colors_enabled(state.use_colors);
+    let color_label = if std::env::var_os("NO_COLOR").is_some() {
+        "环境禁用"
+    } else if state.use_colors {
+        "开启"
     } else {
-        Style::default().fg(Color::Cyan)
+        "关闭"
     };
-    frame.render_widget(Paragraph::new(lines.join("\n")).style(style), target);
+    let header = [
+        truncate_display(
+            &format!(
+                "状态栏配置 | {} | 已选 {}/{} | 颜色 {}",
+                scope_label(live.scope),
+                state.selected_items().len(),
+                StatusItem::ALL.len(),
+                color_label
+            ),
+            usize::from(chunks[0].width),
+        ),
+        truncate_display(
+            state
+                .notice
+                .as_deref()
+                .unwrap_or("选择项目并查看下方实时预览"),
+            usize::from(chunks[0].width),
+        ),
+    ]
+    .join("\n");
+    frame.render_widget(
+        Paragraph::new(header).style(Style::default().add_modifier(Modifier::BOLD)),
+        chunks[0],
+    );
+
+    let mut enabled_ordinal = 0_usize;
+    let rows = state
+        .rows
+        .iter()
+        .map(|row| {
+            if row.enabled {
+                enabled_ordinal += 1;
+            }
+            let checkbox = if row.enabled { "[x]" } else { "[ ]" };
+            let order = if row.enabled {
+                format!("{enabled_ordinal:02}")
+            } else {
+                "--".to_string()
+            };
+            let checkbox_style = if row.enabled && effective_colors {
+                Style::default().fg(Color::Green)
+            } else {
+                muted_style(effective_colors)
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(checkbox, checkbox_style),
+                Span::raw(format!(" {order} {}  ", row.item.label())),
+                Span::styled(row.item.key(), muted_style(effective_colors)),
+            ]))
+        })
+        .collect::<Vec<_>>();
+    let highlight = if effective_colors {
+        Style::default()
+            .bg(Color::DarkGray)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().add_modifier(Modifier::REVERSED)
+    };
+    let mut list_state = ListState::default();
+    list_state.select(Some(state.selected));
+    frame.render_stateful_widget(
+        List::new(rows).highlight_style(highlight),
+        chunks[1],
+        &mut list_state,
+    );
+
+    let preview_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .split(chunks[2]);
+    frame.render_widget(
+        Paragraph::new("预览").style(muted_style(effective_colors)),
+        preview_chunks[0],
+    );
+    let selected_items = state.selected_items();
+    draw_status_in_area(
+        frame,
+        preview_chunks[1],
+        live,
+        &selected_items,
+        effective_colors,
+    );
+
+    let footer = truncate_display(
+        "↑↓选择 ←→排序 Space启用 c颜色 r默认 Enter保存 Esc取消",
+        usize::from(chunks[3].width),
+    );
+    frame.render_widget(
+        Paragraph::new(footer).style(muted_style(effective_colors)),
+        chunks[3],
+    );
+}
+
+fn status_tone_style(tone: StatusTone, color: bool) -> Style {
+    if tone == StatusTone::Separator {
+        return if color {
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM)
+        } else {
+            Style::default().add_modifier(Modifier::DIM)
+        };
+    }
+    if !color {
+        return Style::default();
+    }
+    let color = match tone {
+        StatusTone::Default => return Style::default(),
+        StatusTone::Success => Color::Green,
+        StatusTone::Warning => Color::Yellow,
+        StatusTone::Error => Color::Red,
+        StatusTone::Scope => Color::LightBlue,
+        StatusTone::Provider => Color::Magenta,
+        StatusTone::Model => Color::Cyan,
+        StatusTone::Folder => Color::LightMagenta,
+        StatusTone::Timing => Color::LightBlue,
+        StatusTone::Cost => Color::Green,
+        StatusTone::Activity => Color::Yellow,
+        StatusTone::Tokens => Color::LightCyan,
+        StatusTone::Version => Color::DarkGray,
+        StatusTone::Separator => unreachable!(),
+    };
+    Style::default().fg(color)
 }
 
 pub fn draw_logs(frame: &mut Frame, state: &mut LogsState) {
@@ -491,10 +772,55 @@ mod tests {
         let mut state = LiveState::new(CliScope::Codex);
         state.apply_snapshot(empty_snapshot(CliScope::Codex));
         terminal
-            .draw(|frame| draw_status(frame, &state))
+            .draw(|frame| {
+                draw_status(
+                    frame,
+                    &state,
+                    &StatusItem::DEFAULT,
+                    true,
+                )
+            })
             .expect("draw");
         let text = rendered_non_space_symbols(&terminal);
         assert!(text.contains("首选"));
+    }
+
+    #[test]
+    fn statusline_picker_reorders_enabled_items_and_keeps_one_selected() {
+        let mut picker = StatuslinePickerState::new(TuiConfig::default());
+        assert_eq!(picker.selected_items(), StatusItem::DEFAULT.to_vec());
+
+        picker.move_selected_item(1);
+        assert_eq!(
+            picker.selected_items()[..2],
+            [StatusItem::LastRequest, StatusItem::PreferredProvider]
+        );
+
+        let mut singleton = StatuslinePickerState::new(TuiConfig {
+            status_items: vec![StatusItem::Gateway],
+            use_colors: true,
+        });
+        singleton.toggle_selected();
+        assert_eq!(singleton.selected_items(), vec![StatusItem::Gateway]);
+        assert_eq!(
+            singleton.notice.as_deref(),
+            Some("至少保留一个状态栏项目")
+        );
+    }
+
+    #[test]
+    fn statusline_picker_renders_in_a_narrow_terminal() {
+        let backend = TestBackend::new(30, 12);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        let mut picker = StatuslinePickerState::new(TuiConfig::default());
+        let mut live = LiveState::new(CliScope::Codex);
+        live.apply_snapshot(empty_snapshot(CliScope::Codex));
+        terminal
+            .draw(|frame| draw_statusline_picker(frame, &mut picker, &live))
+            .expect("draw");
+        let text = rendered_non_space_symbols(&terminal);
+        assert!(text.contains("状态栏配置"));
+        assert!(text.contains("预览"));
     }
 
     #[test]
