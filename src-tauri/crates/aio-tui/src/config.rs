@@ -102,9 +102,7 @@ impl StatusItem {
     }
 
     pub fn parse(raw: &str) -> Option<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|item| item.key() == raw.trim())
+        Self::ALL.into_iter().find(|item| item.key() == raw.trim())
     }
 }
 
@@ -150,8 +148,7 @@ pub fn load() -> TuiConfig {
 }
 
 pub fn save(config: &TuiConfig) -> Result<PathBuf, String> {
-    let path = config_path()
-        .ok_or_else(|| "无法确定用户目录，未保存状态栏配置".to_string())?;
+    let path = config_path().ok_or_else(|| "无法确定用户目录，未保存状态栏配置".to_string())?;
     write_config_at(&path, config).map_err(|_| "状态栏配置保存失败".to_string())?;
     Ok(path)
 }
@@ -373,11 +370,9 @@ fn safe_dotdir(value: &str) -> bool {
         && value.starts_with('.')
         && !value.contains('/')
         && !value.contains('\\')
-        && value
-            .chars()
-            .all(|character| {
-                character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_')
-            })
+        && value.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_')
+        })
 }
 
 #[cfg(test)]
@@ -416,10 +411,10 @@ mod tests {
             br#"{"schemaVersion":1,"statusItems":["future"],"useColors":true}"#
         )
         .is_none());
-        assert!(parse_config_bytes(
-            br#"{"schemaVersion":1,"statusItems":[],"useColors":true}"#
-        )
-        .is_none());
+        assert!(
+            parse_config_bytes(br#"{"schemaVersion":1,"statusItems":[],"useColors":true}"#)
+                .is_none()
+        );
         assert!(parse_config_bytes(b"not-json").is_none());
         assert!(parse_config_bytes(&[b'x'; CONFIG_MAX_BYTES + 1]).is_none());
     }
@@ -442,7 +437,10 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mode = fs::metadata(&path).expect("config metadata").permissions().mode();
+            let mode = fs::metadata(&path)
+                .expect("config metadata")
+                .permissions()
+                .mode();
             assert_eq!(mode & 0o777, 0o600);
         }
         let _ = fs::remove_dir_all(directory);

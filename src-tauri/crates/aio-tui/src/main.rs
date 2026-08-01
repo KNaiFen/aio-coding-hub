@@ -445,10 +445,7 @@ mod tests {
         assert!(right.refresh);
         assert!(state.providers_pending);
 
-        let left = handle_logs_key(
-            &mut state,
-            KeyEvent::new(KeyCode::Left, KeyModifiers::NONE),
-        );
+        let left = handle_logs_key(&mut state, KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
         assert_eq!(state.view, DashboardView::Requests);
         assert!(left.refresh);
     }

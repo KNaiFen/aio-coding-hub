@@ -173,8 +173,7 @@ mod tests {
     #[test]
     fn parses_temporary_status_items_in_order() {
         let ParseOutcome::Run(args) =
-            parse_from(["status", "--items", "gateway,last-model,today-cost"])
-                .expect("parse")
+            parse_from(["status", "--items", "gateway,last-model,today-cost"]).expect("parse")
         else {
             panic!("expected run");
         };
@@ -193,8 +192,7 @@ mod tests {
 
     #[test]
     fn parses_statusline_configurator() {
-        let ParseOutcome::Run(args) = parse_from(["statusline", "--cli", "gemini"])
-            .expect("parse")
+        let ParseOutcome::Run(args) = parse_from(["statusline", "--cli", "gemini"]).expect("parse")
         else {
             panic!("expected run");
         };

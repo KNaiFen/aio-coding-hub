@@ -15,9 +15,10 @@ pub use types::{
 pub(crate) use types::{
     has_bridged_input_semantics, is_supported_bridge_type, ClaudeTerminalLaunchContext,
     GatewayProviderIdentity, GatewayProvidersSelection, ProviderAccountUsageCredentialContext,
-    ProviderAccountUsageFetchContext, ProviderForGateway, ProviderOAuthDetails, ProviderRouteRow,
-    ProviderObserverRow, ProviderTransportContext, CODEX_TO_ANTHROPIC_MESSAGES_BRIDGE_TYPE,
-    CODEX_TO_OPENAI_CHAT_BRIDGE_TYPE, CODEX_TO_OPENAI_RESPONSES_BRIDGE_TYPE, CX2CC_BRIDGE_TYPE,
+    ProviderAccountUsageFetchContext, ProviderForGateway, ProviderOAuthDetails,
+    ProviderObserverRow, ProviderRouteRow, ProviderTransportContext,
+    CODEX_TO_ANTHROPIC_MESSAGES_BRIDGE_TYPE, CODEX_TO_OPENAI_CHAT_BRIDGE_TYPE,
+    CODEX_TO_OPENAI_RESPONSES_BRIDGE_TYPE, CX2CC_BRIDGE_TYPE,
 };
 
 pub use queries::{

@@ -313,9 +313,7 @@ async fn snapshot_handler(
     secured(Json(snapshot).into_response())
 }
 
-async fn wait_for_db_query_permit(
-    limiter: Arc<Semaphore>,
-) -> Option<OwnedSemaphorePermit> {
+async fn wait_for_db_query_permit(limiter: Arc<Semaphore>) -> Option<OwnedSemaphorePermit> {
     tokio::time::timeout(DB_QUERY_PERMIT_TIMEOUT, limiter.acquire_owned())
         .await
         .ok()?

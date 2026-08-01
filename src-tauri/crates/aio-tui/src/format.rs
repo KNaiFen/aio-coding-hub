@@ -58,10 +58,7 @@ impl StatusSegment {
     }
 }
 
-pub fn status_segments(
-    snapshot: &ObserverSnapshotV1,
-    items: &[StatusItem],
-) -> Vec<StatusSegment> {
+pub fn status_segments(snapshot: &ObserverSnapshotV1, items: &[StatusItem]) -> Vec<StatusSegment> {
     items
         .iter()
         .map(|item| status_segment(snapshot, *item))
@@ -273,10 +270,7 @@ pub fn status_plain(snapshot: &ObserverSnapshotV1, items: &[StatusItem]) -> Stri
         .join(" | ")
 }
 
-pub fn wrap_status_segments(
-    segments: &[StatusSegment],
-    width: usize,
-) -> Vec<Vec<StatusSegment>> {
+pub fn wrap_status_segments(segments: &[StatusSegment], width: usize) -> Vec<Vec<StatusSegment>> {
     if width == 0 {
         return Vec::new();
     }
@@ -315,10 +309,7 @@ pub fn wrap_status_segments(
     lines
 }
 
-pub fn truncate_status_line(
-    line: &[StatusSegment],
-    max_width: usize,
-) -> Vec<StatusSegment> {
+pub fn truncate_status_line(line: &[StatusSegment], max_width: usize) -> Vec<StatusSegment> {
     let width = line
         .iter()
         .map(|segment| display_width(&segment.text))
@@ -847,9 +838,10 @@ mod tests {
                 .sum::<usize>()
                 <= 26
         }));
-        assert!(lines.iter().flatten().any(|segment| {
-            segment.text == " · " && segment.tone == StatusTone::Separator
-        }));
+        assert!(lines
+            .iter()
+            .flatten()
+            .any(|segment| { segment.text == " · " && segment.tone == StatusTone::Separator }));
         assert!(lines
             .iter()
             .flatten()
@@ -873,7 +865,10 @@ mod tests {
             .map(|segment| display_width(&segment.text))
             .sum::<usize>();
         assert!(width <= 12);
-        assert_eq!(truncated.last().map(|segment| segment.text.as_str()), Some("…"));
+        assert_eq!(
+            truncated.last().map(|segment| segment.text.as_str()),
+            Some("…")
+        );
         assert_eq!(truncated[0].tone, StatusTone::Model);
     }
 
@@ -886,7 +881,10 @@ mod tests {
 
     #[test]
     fn route_result_keeps_switches_and_retries_independent() {
-        assert_eq!(route_result(&request_with_route_counts(3, 1, 1)), "切换1/重试1");
+        assert_eq!(
+            route_result(&request_with_route_counts(3, 1, 1)),
+            "切换1/重试1"
+        );
         assert_eq!(route_result(&request_with_route_counts(2, 0, 1)), "切换1");
         assert_eq!(route_result(&request_with_route_counts(3, 2, 0)), "重试2");
         assert_eq!(route_result(&request_with_route_counts(0, 0, 0)), "未上游");

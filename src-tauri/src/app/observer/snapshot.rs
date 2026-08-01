@@ -342,15 +342,14 @@ fn load_provider_observations(
         .filter(|row| row.auth_mode == "oauth")
         .map(|row| row.id)
         .collect::<Vec<_>>();
-    let oauth_by_provider =
-        crate::domain::provider_oauth_limits::list_display_snapshots(
-            db,
-            &oauth_provider_ids,
-            now_unix,
-        )?
-        .into_iter()
-        .map(|snapshot| (snapshot.provider_id, snapshot))
-        .collect::<HashMap<_, _>>();
+    let oauth_by_provider = crate::domain::provider_oauth_limits::list_display_snapshots(
+        db,
+        &oauth_provider_ids,
+        now_unix,
+    )?
+    .into_iter()
+    .map(|snapshot| (snapshot.provider_id, snapshot))
+    .collect::<HashMap<_, _>>();
 
     let items = rows
         .into_iter()
@@ -367,9 +366,7 @@ fn load_provider_observations(
                 } else {
                     "api_key".to_string()
                 },
-                route_rank: row
-                    .route_rank
-                    .map(|rank| rank.max(0).saturating_add(1)),
+                route_rank: row.route_rank.map(|rank| rank.max(0).saturating_add(1)),
                 route_enabled: row.route_enabled,
                 uses_custom_route: row.uses_custom_route,
                 spend_limited: spend.is_some_and(|value| value.is_limit_reached()),
@@ -399,7 +396,9 @@ fn load_provider_observations(
     Ok((items, truncated))
 }
 
-fn spend_windows(row: &provider_limit_usage::ProviderLimitUsageRow) -> Vec<ObserverProviderSpendWindow> {
+fn spend_windows(
+    row: &provider_limit_usage::ProviderLimitUsageRow,
+) -> Vec<ObserverProviderSpendWindow> {
     let mut windows = Vec::new();
     push_spend_window(&mut windows, "5h", row.usage_5h_usd, row.limit_5h_usd);
     push_spend_window(
@@ -623,10 +622,7 @@ fn provider_eligibility(
     let Some(circuit) = circuit else {
         return "unknown";
     };
-    if circuit
-        .cooldown_until
-        .is_some_and(|until| until > now_unix)
-    {
+    if circuit.cooldown_until.is_some_and(|until| until > now_unix) {
         return "cooldown";
     }
     match circuit.state.as_str() {
@@ -642,7 +638,10 @@ fn first_eligible_provider<'a>(
     limited_provider_ids: &HashSet<i64>,
     statuses: &'a HashMap<i64, crate::gateway::GatewayProviderCircuitStatus>,
     now_unix: i64,
-) -> Option<(&'a ProviderCandidate, &'a crate::gateway::GatewayProviderCircuitStatus)> {
+) -> Option<(
+    &'a ProviderCandidate,
+    &'a crate::gateway::GatewayProviderCircuitStatus,
+)> {
     providers.iter().find_map(|provider| {
         if limited_provider_ids.contains(&provider.id) {
             return None;
@@ -986,11 +985,7 @@ fn bounded_text(value: &str, max_chars: usize) -> String {
 mod tests {
     use super::*;
 
-    fn insert_observer_provider(
-        db: &crate::db::Db,
-        name: &str,
-        total_limit: Option<f64>,
-    ) -> i64 {
+    fn insert_observer_provider(db: &crate::db::Db, name: &str, total_limit: Option<f64>) -> i64 {
         crate::providers::upsert(
             db,
             crate::providers::ProviderUpsertParams {
@@ -1168,8 +1163,8 @@ mod tests {
     #[test]
     fn provider_projection_marks_spend_and_oauth_limits() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let db = crate::db::init_for_tests(&dir.path().join("observer-limits.db"))
-            .expect("init db");
+        let db =
+            crate::db::init_for_tests(&dir.path().join("observer-limits.db")).expect("init db");
         let spend_limited = insert_observer_provider(&db, "Spend limited", Some(0.0));
         let oauth_limited = insert_observer_provider(&db, "OAuth limited", None);
         let ready = insert_observer_provider(&db, "Ready", None);
@@ -1246,7 +1241,10 @@ mod tests {
             oauth_limited_reset_at: None,
             oauth_quota: None,
         };
-        assert_eq!(provider_eligibility(&provider, None, true, 1_000), "unknown");
+        assert_eq!(
+            provider_eligibility(&provider, None, true, 1_000),
+            "unknown"
+        );
         assert_eq!(
             provider_eligibility(&provider, None, false, 1_000),
             "gateway_stopped"

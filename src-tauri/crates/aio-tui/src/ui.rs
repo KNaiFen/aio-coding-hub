@@ -214,7 +214,12 @@ impl LogsState {
         if self.view == DashboardView::Providers {
             self.providers_pending = false;
         }
-        if self.live.snapshot.as_ref().is_some_and(|snapshot| snapshot.providers.is_some()) {
+        if self
+            .live
+            .snapshot
+            .as_ref()
+            .is_some_and(|snapshot| snapshot.providers.is_some())
+        {
             let provider_count = self.provider_count();
             self.provider_selected = selected_provider_id
                 .and_then(|provider_id| {
@@ -349,12 +354,7 @@ impl LogsState {
     }
 }
 
-pub fn draw_status(
-    frame: &mut Frame,
-    state: &LiveState,
-    items: &[StatusItem],
-    color: bool,
-) {
+pub fn draw_status(frame: &mut Frame, state: &LiveState, items: &[StatusItem], color: bool) {
     let area = frame.area();
     draw_status_in_area(frame, area, state, items, color);
 }
@@ -711,13 +711,7 @@ fn provider_empty_message(state: &LogsState) -> String {
     }
 }
 
-fn draw_header(
-    frame: &mut Frame,
-    area: Rect,
-    state: &LiveState,
-    color: bool,
-    view: DashboardView,
-) {
+fn draw_header(frame: &mut Frame, area: Rect, state: &LiveState, color: bool, view: DashboardView) {
     let online = if state.offline.is_some() {
         state.stale_label().unwrap_or_else(|| "离线".to_string())
     } else if state.snapshot.is_some() {
@@ -877,7 +871,11 @@ fn provider_detail_lines(provider: &ObserverProviderStatus) -> Vec<String> {
         format!(
             "资格：{}{}",
             provider_eligibility_label(&provider.eligibility),
-            if provider.preferred { "（首选）" } else { "" }
+            if provider.preferred {
+                "（首选）"
+            } else {
+                ""
+            }
         ),
         format!("熔断：{circuit}"),
     ];
@@ -1139,10 +1137,9 @@ fn provider_line_style(
             0 => Color::Magenta,
             1 => Color::LightBlue,
             2 if matches!(provider.eligibility.as_str(), "ready" | "half_open") => Color::Green,
-            2 if matches!(
-                provider.eligibility.as_str(),
-                "gateway_stopped" | "unknown"
-            ) => Color::DarkGray,
+            2 if matches!(provider.eligibility.as_str(), "gateway_stopped" | "unknown") => {
+                Color::DarkGray
+            }
             2 => Color::Yellow,
             3 if provider.eligibility == "spend_limited" => Color::Yellow,
             3 => Color::LightGreen,
@@ -1316,10 +1313,8 @@ mod tests {
         let mut terminal = Terminal::new(backend).expect("terminal");
         let mut state = LogsState::new(CliScope::Codex);
         let mut snapshot = empty_snapshot(CliScope::Codex);
-        snapshot.recent_requests = ObserverSection::ready(vec![
-            terminal_request("newest"),
-            terminal_request("older"),
-        ]);
+        snapshot.recent_requests =
+            ObserverSection::ready(vec![terminal_request("newest"), terminal_request("older")]);
         state.apply_snapshot(snapshot);
         terminal
             .draw(|frame| draw_logs(frame, &mut state))
@@ -1385,7 +1380,9 @@ mod tests {
         state.switch_view(DashboardView::Providers);
         assert_eq!(state.provider_selected, 1);
         assert_eq!(
-            state.selected_provider().map(|provider| provider.provider_id),
+            state
+                .selected_provider()
+                .map(|provider| provider.provider_id),
             Some(2)
         );
     }
@@ -1412,14 +1409,7 @@ mod tests {
         let mut state = LiveState::new(CliScope::Codex);
         state.apply_snapshot(empty_snapshot(CliScope::Codex));
         terminal
-            .draw(|frame| {
-                draw_status(
-                    frame,
-                    &state,
-                    &StatusItem::DEFAULT,
-                    true,
-                )
-            })
+            .draw(|frame| draw_status(frame, &state, &StatusItem::DEFAULT, true))
             .expect("draw");
         let text = rendered_non_space_symbols(&terminal);
         assert!(text.contains("首选"));
@@ -1442,10 +1432,7 @@ mod tests {
         });
         singleton.toggle_selected();
         assert_eq!(singleton.selected_items(), vec![StatusItem::Gateway]);
-        assert_eq!(
-            singleton.notice.as_deref(),
-            Some("至少保留一个状态栏项目")
-        );
+        assert_eq!(singleton.notice.as_deref(), Some("至少保留一个状态栏项目"));
     }
 
     #[test]

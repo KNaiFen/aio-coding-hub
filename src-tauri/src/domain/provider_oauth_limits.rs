@@ -389,10 +389,7 @@ WHERE provider_id IN ({})
                     snapshot.limit_short_label.as_deref(),
                     SHORT_LABEL_MAX_CHARS,
                 ),
-                limit_5h_text: normalize_text(
-                    snapshot.limit_5h_text.as_deref(),
-                    TEXT_MAX_CHARS,
-                ),
+                limit_5h_text: normalize_text(snapshot.limit_5h_text.as_deref(), TEXT_MAX_CHARS),
                 limit_weekly_text: normalize_text(
                     snapshot.limit_weekly_text.as_deref(),
                     TEXT_MAX_CHARS,
