@@ -64,6 +64,19 @@ pub(crate) fn app_gateway_circuit_status(
     })
 }
 
+pub(crate) fn app_gateway_circuit_status_peek<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    provider_ids: &[i64],
+    now_unix: i64,
+) -> Vec<gateway::GatewayProviderCircuitStatus> {
+    super::gateway_state::try_with_app_running_gateway(app, |running| {
+        running
+            .map(|runtime| runtime.circuit_status_peek(provider_ids, now_unix))
+            .unwrap_or_default()
+    })
+    .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -53,6 +53,9 @@ jobs:
       - name: Validate Homebrew Cask generator
         run: node scripts/support-matrix.homebrew-cask.selftest.mjs
 
+      - name: Validate standalone TUI release contract
+        run: node scripts/check-tui-release-contract.mjs
+
   frontend:
     needs: support-contract
     runs-on: ubuntu-latest
@@ -177,13 +180,13 @@ jobs:
 
       - name: Rust clippy
         working-directory: src-tauri
-        run: cargo clippy --all-targets --locked -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Rust tests
         working-directory: src-tauri
         env:
           CARGO_BUILD_JOBS: "1"
-        run: cargo test --locked -- --test-threads=1
+        run: cargo test --workspace --locked -- --test-threads=1
 
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
@@ -389,14 +392,94 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  build-tui-release-candidate:
+    needs: [support-contract, frontend, rust, candidate-plan]
+    if: needs.candidate-plan.outputs.should_build == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target_id: windows-x64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset_name: aio-tui-win64.zip
+          - target_id: macos-x64
+            runner: macos-latest
+            target: x86_64-apple-darwin
+            asset_name: aio-tui-macos-intel.tar.gz
+          - target_id: macos-arm64
+            runner: macos-latest
+            target: aarch64-apple-darwin
+            asset_name: aio-tui-macos-arm.tar.gz
+          - target_id: linux-x64
+            runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            asset_name: aio-tui-linux-x64.tar.gz
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install Rust 1.90.0
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: 1.90.0
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+        with:
+          workspaces: src-tauri
+
+      - name: Build standalone TUI
+        shell: bash
+        run: >-
+          cargo build
+          --manifest-path src-tauri/Cargo.toml
+          --package aio-tui
+          --release
+          --locked
+          --target ${{ matrix.target }}
+
+      - name: Package standalone TUI on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p tui-assets
+          tar -czf "tui-assets/${{ matrix.asset_name }}" \
+            -C "src-tauri/target/${{ matrix.target }}/release" aio-tui
+
+      - name: Package standalone TUI on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Path tui-assets -Force | Out-Null
+          $binary = "src-tauri/target/${{ matrix.target }}/release/aio-tui.exe"
+          if (-not (Test-Path $binary)) {
+            throw "Cannot find built TUI executable at $binary"
+          }
+          Compress-Archive -Path $binary -DestinationPath "tui-assets/${{ matrix.asset_name }}" -Force
+
+      - name: Upload TUI candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: tui-platform-${{ github.sha }}-${{ github.run_attempt }}-${{ matrix.target_id }}
+          path: tui-assets/*
+          if-no-files-found: error
+          retention-days: 1
+
   assemble-release-candidate:
-    needs: [frontend, rust, candidate-plan, build-release-candidate]
+    needs: [frontend, rust, candidate-plan, build-release-candidate, build-tui-release-candidate]
     if: >-
       always() &&
       needs.candidate-plan.outputs.should_build == 'true' &&
       needs.frontend.result == 'success' &&
       needs.rust.result == 'success' &&
-      needs.build-release-candidate.result == 'success'
+      needs.build-release-candidate.result == 'success' &&
+      needs.build-tui-release-candidate.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -410,6 +493,13 @@ jobs:
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: release-platform-${{ github.sha }}-${{ github.run_attempt }}-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Download TUI candidates
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: tui-platform-${{ github.sha }}-${{ github.run_attempt }}-*
           merge-multiple: true
           path: release-assets
 
@@ -449,6 +539,7 @@ jobs:
       - rust
       - candidate-plan
       - build-release-candidate
+      - build-tui-release-candidate
       - assemble-release-candidate
     runs-on: ubuntu-latest
     steps:
@@ -464,6 +555,7 @@ jobs:
           PLAN_RESULT: ${{ needs.candidate-plan.result }}
           SHOULD_BUILD: ${{ needs.candidate-plan.outputs.should_build }}
           BUILD_RESULT: ${{ needs.build-release-candidate.result }}
+          TUI_BUILD_RESULT: ${{ needs.build-tui-release-candidate.result }}
           ASSEMBLE_RESULT: ${{ needs.assemble-release-candidate.result }}
         run: |
           set -euo pipefail
@@ -477,13 +569,16 @@ jobs:
             [[ "$PLAN_RESULT" == "success" ]]
             if [[ "$SHOULD_BUILD" == "true" ]]; then
               [[ "$BUILD_RESULT" == "success" ]]
+              [[ "$TUI_BUILD_RESULT" == "success" ]]
               [[ "$ASSEMBLE_RESULT" == "success" ]]
             else
               [[ "$BUILD_RESULT" == "skipped" ]]
+              [[ "$TUI_BUILD_RESULT" == "skipped" ]]
               [[ "$ASSEMBLE_RESULT" == "skipped" ]]
             fi
           else
             [[ "$PLAN_RESULT" == "skipped" ]]
             [[ "$BUILD_RESULT" == "skipped" ]]
+            [[ "$TUI_BUILD_RESULT" == "skipped" ]]
             [[ "$ASSEMBLE_RESULT" == "skipped" ]]
           fi

@@ -129,7 +129,34 @@
 | macOS Apple Silicon | `.zip` |
 <!-- SUPPORT_MATRIX_RELEASE_DOWNLOAD:END -->
 
-本 Fork 的发布矩阵只覆盖上表 2 个目标。其他平台的开发制品由 `dev-build` GitHub Actions 工作流生成，不进入 Release 产物或 `latest.json`。
+桌面安装器的自动更新矩阵仍只覆盖上表 2 个目标；每个正式 Release 还会附带四个平台的独立 `aio-tui` 终端信息面板压缩包。
+
+### SSH / Codex CLI 终端信息面板
+
+桌面 AIO 运行后会在本机回环地址提供只读观测服务。它不会改变网关转发，也不会让 TUI 启动桌面应用。根据 Release 中的 `aio-tui-*` 制品选择平台并加入 `PATH`：
+
+| 平台 | TUI 制品 |
+| --- | --- |
+| Windows x64 | `aio-tui-win64.zip` |
+| macOS Intel | `aio-tui-macos-intel.tar.gz` |
+| macOS Apple Silicon | `aio-tui-macos-arm.tar.gz` |
+| Linux x64 | `aio-tui-linux-x64.tar.gz` |
+
+```bash
+# macOS / Linux
+tar -xzf aio-tui-macos-arm.tar.gz   # Intel 使用 aio-tui-macos-intel.tar.gz
+chmod +x aio-tui
+sudo install -m 0755 aio-tui /usr/local/bin/aio-tui
+
+# 默认显示最近代理记录；status 显示状态栏
+aio-tui
+aio-tui status
+aio-tui status --once --cli codex
+```
+
+Windows 解压 `aio-tui-win64.zip` 后，把目录加入 `PATH`。支持 `--cli claude|codex|grok|gemini|all`；`all` 的状态栏会按最近一条终态模型推理请求选择 CLI。状态栏中的并发是全局活跃模型推理请求数，同一会话和子代理的每个请求都计 1。观测服务离线时 TUI 保留最后快照并显示陈旧标记，不会崩溃或自动启动 AIO。
+
+独立 TUI 资产不会进入桌面 updater 的 `latest.json`，并由发布中的 `SHA256SUMS.txt` 校验。
 
 <details>
 <summary>Linux Arch / Wayland 用户</summary>

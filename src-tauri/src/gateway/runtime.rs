@@ -231,6 +231,29 @@ impl GatewayRuntime {
             .collect()
     }
 
+    pub(crate) fn circuit_status_peek(
+        &self,
+        provider_ids: &[i64],
+        now_unix: i64,
+    ) -> Vec<GatewayProviderCircuitStatus> {
+        provider_ids
+            .iter()
+            .copied()
+            .map(|provider_id| {
+                let check = self.circuit.peek_allow(provider_id, now_unix);
+                let snap = check.after;
+                GatewayProviderCircuitStatus {
+                    provider_id,
+                    state: snap.state.as_str().to_string(),
+                    failure_count: snap.failure_count,
+                    failure_threshold: snap.failure_threshold,
+                    open_until: snap.open_until,
+                    cooldown_until: snap.cooldown_until,
+                }
+            })
+            .collect()
+    }
+
     pub(crate) fn circuit_reset_provider(&self, provider_id: i64, now_unix: i64) {
         self.circuit.reset(provider_id, now_unix);
         self.clear_recent_errors();

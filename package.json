@@ -1,7 +1,7 @@
 {
   "name": "aio-coding-hub",
   "private": true,
-  "version": "0.60.38",
+  "version": "0.60.39",
   "packageManager": "pnpm@10.34.3",
   "type": "module",
   "scripts": {
@@ -34,6 +34,7 @@
     "create-aio-plugin:test": "pnpm --filter create-aio-plugin test",
     "test:e2e": "vitest run src/e2e",
     "check:homebrew-cask": "node scripts/support-matrix.homebrew-cask.selftest.mjs",
+    "check:tui-release-contract": "node scripts/check-tui-release-contract.mjs",
     "check:precommit": "node scripts/run-checks.mjs precommit",
     "check:prepush": "node scripts/run-checks.mjs prepush",
     "preview": "vite preview",

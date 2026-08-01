@@ -13,6 +13,7 @@ mod managed_model_route;
 pub(crate) mod manager;
 mod model_route_mapping;
 pub(crate) mod oauth;
+pub(crate) mod observation;
 pub(crate) mod plugins;
 mod proxy;
 mod response_fixer;

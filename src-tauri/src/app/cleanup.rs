@@ -60,6 +60,7 @@ pub(crate) async fn cleanup_before_exit(app: &tauri::AppHandle) {
         Ordering::Acquire,
     ) {
         Ok(_) => {
+            crate::app::observer::stop_best_effort(app).await;
             dispose_extension_hosts_best_effort(app).await;
             stop_gateway_best_effort(app).await;
             restore_cli_proxy_keep_state_best_effort(

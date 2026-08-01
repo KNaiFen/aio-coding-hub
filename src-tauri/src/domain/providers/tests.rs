@@ -1464,6 +1464,43 @@ fn default_route_gateway_uses_membership_and_global_enabled() {
     assert!(p3_enabled);
 }
 
+#[test]
+fn observer_provider_identities_follow_active_route_order() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("providers_observer_route.db");
+    let db = crate::db::init_for_tests(&db_path).expect("init db");
+    let first = upsert(&db, default_provider_params("observer-first")).expect("save first");
+    let second = upsert(&db, default_provider_params("observer-second")).expect("save second");
+
+    default_route_set_order(&db, "claude", vec![first.id, second.id]).expect("set default route");
+    let default = list_enabled_gateway_provider_identities_using_active_mode(&db, "claude")
+        .expect("list default observer route");
+    assert_eq!(
+        default
+            .iter()
+            .map(|provider| (provider.id, provider.name.as_str()))
+            .collect::<Vec<_>>(),
+        vec![(first.id, "observer-first"), (second.id, "observer-second")]
+    );
+
+    let mode = crate::sort_modes::create_mode(&db, "Observer Mode").expect("create mode");
+    crate::sort_modes::set_mode_providers_order(&db, mode.id, "claude", vec![second.id, first.id])
+        .expect("set mode order");
+    crate::sort_modes::set_mode_provider_enabled(&db, mode.id, "claude", first.id, false)
+        .expect("disable first in mode");
+    crate::sort_modes::set_active(&db, "claude", Some(mode.id)).expect("activate mode");
+
+    let active = list_enabled_gateway_provider_identities_using_active_mode(&db, "claude")
+        .expect("list active observer route");
+    assert_eq!(
+        active
+            .iter()
+            .map(|provider| (provider.id, provider.name.as_str()))
+            .collect::<Vec<_>>(),
+        vec![(second.id, "observer-second")]
+    );
+}
+
 fn seed_usage_request_log(db: &crate::db::Db, trace_id: &str, provider_id: i64) {
     let conn = db.open_connection().expect("open db connection");
     conn.execute(

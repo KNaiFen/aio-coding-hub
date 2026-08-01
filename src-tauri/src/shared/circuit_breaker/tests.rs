@@ -47,6 +47,48 @@ fn open_expires_to_half_open() {
 }
 
 #[test]
+fn peek_allow_projects_expired_open_without_mutating_state() {
+    let cb = breaker();
+    let pid = 1;
+    let now = 1_000;
+    for i in 1..=DEFAULT_FAILURE_THRESHOLD {
+        cb.record_failure(pid, now + i as i64, None);
+    }
+
+    let open_until = cb.snapshot(pid, now + 10).open_until.expect("open_until");
+    let observed = cb.peek_allow(pid, open_until);
+    assert!(observed.allow);
+    assert_eq!(observed.after.state, CircuitState::HalfOpen);
+    assert!(observed.transition.is_none());
+
+    let stored = cb.snapshot(pid, open_until);
+    assert_eq!(stored.state, CircuitState::Open);
+    assert_eq!(stored.open_until, Some(open_until));
+
+    let real = cb.should_allow(pid, open_until);
+    assert_eq!(real.after.state, CircuitState::HalfOpen);
+    assert!(real.transition.is_some());
+}
+
+#[test]
+fn peek_allow_does_not_clear_expired_cooldown() {
+    let cb = breaker();
+    let pid = 1;
+    let now = 1_000;
+    let until = cb
+        .trigger_cooldown(pid, now, 30)
+        .cooldown_until
+        .expect("cooldown");
+
+    let observed = cb.peek_allow(pid, until);
+    assert!(observed.allow);
+    assert_eq!(observed.after.cooldown_until, None);
+
+    let stored = cb.snapshot(pid, until);
+    assert_eq!(stored.cooldown_until, Some(until));
+}
+
+#[test]
 fn half_open_one_success_stays_half_open() {
     let cb = breaker();
     let pid = 1;

@@ -9,7 +9,7 @@ use crate::shared::fs::read_file_with_max_len;
 use crate::shared::time::now_unix_seconds;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 use std::env;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -19,6 +19,7 @@ const BUSY_TIMEOUT_DEFAULT: Duration = Duration::from_millis(2000);
 const POOL_MAX_SIZE_DEFAULT: u32 = 8;
 const POOL_MIN_IDLE_DEFAULT: u32 = 1;
 const POOL_CONNECTION_TIMEOUT_DEFAULT: Duration = Duration::from_secs(5);
+const READ_ONLY_POOL_CONNECTION_TIMEOUT: Duration = Duration::from_millis(500);
 const PRAGMA_SYNCHRONOUS_DEFAULT: &str = "NORMAL";
 const PRAGMA_MMAP_SIZE_DEFAULT: i64 = 268_435_456;
 const DB_OPTIMIZE_STAMP_FILE_NAME: &str = "db_optimize.stamp";
@@ -225,6 +226,33 @@ pub fn init<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult<Db> {
 
     maybe_run_db_optimize(app, &conn);
 
+    Ok(Db { pool })
+}
+
+/// Opens a one-connection, query-only pool for secondary observation reads.
+/// It never applies migrations or write-oriented connection pragmas.
+pub(crate) fn open_read_only<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult<Db> {
+    let path = db_path(app)?;
+    let manager = SqliteConnectionManager::file(&path)
+        .with_flags(OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .with_init(|conn| {
+            conn.busy_timeout(READ_ONLY_POOL_CONNECTION_TIMEOUT)?;
+            conn.execute_batch(
+                r#"
+PRAGMA foreign_keys = ON;
+PRAGMA temp_store = MEMORY;
+PRAGMA query_only = ON;
+"#,
+            )
+        });
+    let pool = Pool::builder()
+        .max_size(1)
+        .min_idle(Some(0))
+        .connection_timeout(READ_ONLY_POOL_CONNECTION_TIMEOUT)
+        .build(manager)
+        .map_err(|e| db_err!("failed to create read-only db pool: {e}"))?;
+    pool.get()
+        .map_err(|e| db_err!("failed to verify read-only db pool: {e}"))?;
     Ok(Db { pool })
 }
 

@@ -266,6 +266,49 @@ impl CircuitBreaker {
         }
     }
 
+    /// Observe the gate result at `now_unix` without changing state, writing
+    /// persistence, or emitting a transition. Monitoring must never reserve a
+    /// half-open probe or advance the provider health state machine.
+    pub fn peek_allow(&self, provider_id: i64, now_unix: i64) -> CircuitCheck {
+        let cfg = self.read_config();
+        if provider_id <= 0 {
+            return CircuitCheck {
+                allow: true,
+                after: Self::closed_snapshot(&cfg),
+                transition: None,
+            };
+        }
+
+        let guard = self.health.lock_or_recover();
+        let Some(entry) = guard.get(&provider_id) else {
+            return CircuitCheck {
+                allow: true,
+                after: Self::closed_snapshot(&cfg),
+                transition: None,
+            };
+        };
+
+        let now_u64 = now_unix.max(0) as u64;
+        let mut after = Self::snapshot_from_health(&cfg, entry, now_u64);
+        if after.cooldown_until.is_some_and(|until| now_unix >= until) {
+            after.cooldown_until = None;
+        }
+        if after.state == CircuitState::Open
+            && after.open_until.is_none_or(|until| now_unix >= until)
+        {
+            after.state = CircuitState::HalfOpen;
+            after.open_until = None;
+        }
+        let cooldown_active = after.cooldown_until.is_some_and(|until| now_unix < until);
+        let allow = after.state != CircuitState::Open && !cooldown_active;
+
+        CircuitCheck {
+            allow,
+            after,
+            transition: None,
+        }
+    }
+
     pub fn record_success(&self, provider_id: i64, now_unix: i64) -> CircuitChange {
         let cfg = self.read_config();
         if provider_id <= 0 {

@@ -393,6 +393,12 @@ pub(crate) struct GatewayProvidersSelection {
     pub providers: Vec<ProviderForGateway>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GatewayProviderIdentity {
+    pub id: i64,
+    pub name: String,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct ClaudeTerminalLaunchContext {
     /// The credential to pass as ANTHROPIC_API_KEY to `claude` CLI.

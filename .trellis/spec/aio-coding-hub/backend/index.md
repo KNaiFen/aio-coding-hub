@@ -17,6 +17,9 @@ Rules for the root application's Rust backend and local gateway runtime.
   readable profile aliases plus legacy UUID lookup, complete picker catalog
   lifecycle, one-provider routing, same-provider retry, and terminal
   wire-vs-observed route evidence.
+- [Local observer and TUI contract](../cross-layer/local-observer-tui-contract.md):
+  loopback-only authenticated snapshots and non-blocking read-only monitoring
+  boundaries.
 
 ## Pre-Development Checklist
 
@@ -50,6 +53,14 @@ When changing Codex context-compaction observation:
 3. Keep every classifier outcome observational; malformed or future input must
    continue forwarding without a marker.
 4. Test local, remote v1, remote v2, unknown, and conflicting metadata.
+
+When changing the local observer runtime:
+
+1. Read [Local observer and TUI contract](../cross-layer/local-observer-tui-contract.md).
+2. Keep observer startup and snapshot reads best-effort; never await them on a
+   request-forwarding path or hold the gateway database pool for observation.
+3. Keep circuit inspection non-mutating and all projections bounded and
+   secret-free.
 
 ## Quality Check
 

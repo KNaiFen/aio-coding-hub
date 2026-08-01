@@ -1050,6 +1050,65 @@ pub(crate) fn list_enabled_for_gateway_using_active_mode(
     })
 }
 
+pub(crate) fn list_enabled_gateway_provider_identities_using_active_mode(
+    db: &db::Db,
+    cli_key: &str,
+) -> crate::shared::error::AppResult<Vec<GatewayProviderIdentity>> {
+    validate_cli_key(cli_key)?;
+    let conn = db.open_connection()?;
+    let active_mode_id: Option<i64> = conn
+        .query_row(
+            "SELECT mode_id FROM sort_mode_active WHERE cli_key = ?1",
+            params![cli_key],
+            |row| row.get::<_, Option<i64>>(0),
+        )
+        .optional()
+        .map_err(|e| db_err!("failed to query sort_mode_active: {e}"))?
+        .flatten();
+
+    let (sql, mode_id) = if let Some(mode_id) = active_mode_id {
+        (
+            r#"
+SELECT p.id, p.name
+FROM sort_mode_providers mp
+JOIN providers p ON p.id = mp.provider_id
+WHERE mp.mode_id = ?1
+  AND mp.cli_key = ?2
+  AND p.cli_key = ?2
+  AND mp.enabled = 1
+ORDER BY mp.sort_order ASC
+"#,
+            Some(mode_id),
+        )
+    } else {
+        (
+            r#"
+SELECT p.id, p.name
+FROM default_route_providers drp
+JOIN providers p ON p.id = drp.provider_id
+WHERE drp.cli_key = ?2
+  AND p.cli_key = ?2
+  AND p.enabled = 1
+ORDER BY drp.sort_order ASC
+"#,
+            None,
+        )
+    };
+    let mut statement = conn
+        .prepare_cached(sql)
+        .map_err(|e| db_err!("failed to prepare observer provider query: {e}"))?;
+    let rows = statement
+        .query_map(params![mode_id, cli_key], |row| {
+            Ok(GatewayProviderIdentity {
+                id: row.get(0)?,
+                name: row.get(1)?,
+            })
+        })
+        .map_err(|e| db_err!("failed to list observer providers: {e}"))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| db_err!("failed to read observer provider row: {e}"))
+}
+
 pub(crate) fn active_sort_mode_id_for_gateway(
     db: &db::Db,
     cli_key: &str,
