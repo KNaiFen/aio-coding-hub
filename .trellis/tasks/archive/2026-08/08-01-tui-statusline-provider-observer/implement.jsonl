@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/aio-coding-hub/cross-layer/local-observer-tui-contract.md", "reason": "Preserve the authenticated, read-only, bounded and fail-open observer/TUI contract."}
+{"file": ".trellis/spec/aio-coding-hub/cross-layer/index.md", "reason": "Apply cross-layer observer, security, compatibility and release guidance."}
+{"file": ".trellis/spec/aio-coding-hub/backend/index.md", "reason": "Respect backend query isolation and cloud-only Rust validation rules."}
+{"file": ".trellis/tasks/archive/2026-08/08-01-aio-observer-tui/design.md", "reason": "Reuse the original standalone TUI architecture and release boundary."}

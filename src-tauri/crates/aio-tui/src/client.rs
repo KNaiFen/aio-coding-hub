@@ -7,7 +7,7 @@ use std::time::Duration;
 
 const DESCRIPTOR_MAX_BYTES: usize = 4 * 1024;
 const DESCRIPTOR_TOKEN_MIN_BYTES: usize = 32;
-const RESPONSE_MAX_BYTES: usize = 1024 * 1024;
+const RESPONSE_MAX_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OfflineReason {
@@ -15,6 +15,7 @@ pub enum OfflineReason {
     InvalidDescriptor,
     Unreachable,
     Unauthorized,
+    Busy,
     ProtocolMismatch,
     InvalidResponse,
 }
@@ -26,6 +27,7 @@ impl OfflineReason {
             Self::InvalidDescriptor => "连接信息无效",
             Self::Unreachable => "AIO 暂不可达",
             Self::Unauthorized => "本地认证已失效",
+            Self::Busy => "观测繁忙",
             Self::ProtocolMismatch => "协议版本不兼容",
             Self::InvalidResponse => "观测数据无效",
         }
@@ -36,11 +38,16 @@ pub struct ObserverClient {
     http: reqwest::Client,
 }
 
+enum SnapshotFetch {
+    Ready(Box<ObserverSnapshotV1>),
+    ProviderQueryUnsupported,
+}
+
 impl ObserverClient {
     pub fn new() -> Result<Self, OfflineReason> {
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_millis(500))
-            .timeout(Duration::from_millis(1800))
+            .timeout(Duration::from_millis(3500))
             .redirect(reqwest::redirect::Policy::none())
             .no_proxy()
             .build()
@@ -53,13 +60,44 @@ impl ObserverClient {
         scope: CliScope,
         history_limit: u16,
     ) -> Result<ObserverSnapshotV1, OfflineReason> {
+        match self.fetch_snapshot(scope, history_limit, false).await? {
+            SnapshotFetch::Ready(snapshot) => Ok(*snapshot),
+            SnapshotFetch::ProviderQueryUnsupported => Err(OfflineReason::InvalidResponse),
+        }
+    }
+
+    pub async fn snapshot_with_providers(
+        &self,
+        scope: CliScope,
+        history_limit: u16,
+    ) -> Result<ObserverSnapshotV1, OfflineReason> {
+        match self.fetch_snapshot(scope, history_limit, true).await? {
+            SnapshotFetch::Ready(snapshot) => Ok(*snapshot),
+            SnapshotFetch::ProviderQueryUnsupported => {
+                match self.fetch_snapshot(scope, history_limit, false).await? {
+                    SnapshotFetch::Ready(snapshot) => Ok(*snapshot),
+                    SnapshotFetch::ProviderQueryUnsupported => Err(OfflineReason::InvalidResponse),
+                }
+            }
+        }
+    }
+
+    async fn fetch_snapshot(
+        &self,
+        scope: CliScope,
+        history_limit: u16,
+        include_providers: bool,
+    ) -> Result<SnapshotFetch, OfflineReason> {
         let descriptor = read_descriptor()?;
-        let url = format!(
+        let mut url = format!(
             "http://127.0.0.1:{}/api/observer/v1/snapshot?cli={}&history_limit={}",
             descriptor.port,
             scope.as_str(),
             history_limit
         );
+        if include_providers {
+            url.push_str("&include_providers=true");
+        }
         let mut response = self
             .http
             .get(url)
@@ -67,11 +105,11 @@ impl ObserverClient {
             .send()
             .await
             .map_err(|_| OfflineReason::Unreachable)?;
-        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-            return Err(OfflineReason::Unauthorized);
+        if include_providers && response.status() == reqwest::StatusCode::BAD_REQUEST {
+            return Ok(SnapshotFetch::ProviderQueryUnsupported);
         }
-        if !response.status().is_success() {
-            return Err(OfflineReason::InvalidResponse);
+        if let Some(reason) = response_failure_reason(response.status()) {
+            return Err(reason);
         }
         if response
             .content_length()
@@ -95,7 +133,16 @@ impl ObserverClient {
         if snapshot.protocol_version != OBSERVER_PROTOCOL_VERSION {
             return Err(OfflineReason::ProtocolMismatch);
         }
-        Ok(snapshot)
+        Ok(SnapshotFetch::Ready(Box::new(snapshot)))
+    }
+}
+
+fn response_failure_reason(status: reqwest::StatusCode) -> Option<OfflineReason> {
+    match status {
+        reqwest::StatusCode::UNAUTHORIZED => Some(OfflineReason::Unauthorized),
+        reqwest::StatusCode::TOO_MANY_REQUESTS => Some(OfflineReason::Busy),
+        status if !status.is_success() => Some(OfflineReason::InvalidResponse),
+        _ => None,
     }
 }
 
@@ -184,6 +231,19 @@ mod tests {
         assert!(!safe_dotdir("../aio"));
         assert!(!safe_dotdir("aio"));
         assert!(!safe_dotdir("."));
+    }
+
+    #[test]
+    fn observer_busy_is_distinct_from_invalid_responses() {
+        assert_eq!(
+            response_failure_reason(reqwest::StatusCode::TOO_MANY_REQUESTS),
+            Some(OfflineReason::Busy)
+        );
+        assert_eq!(
+            response_failure_reason(reqwest::StatusCode::INTERNAL_SERVER_ERROR),
+            Some(OfflineReason::InvalidResponse)
+        );
+        assert_eq!(response_failure_reason(reqwest::StatusCode::OK), None);
     }
 
     #[test]

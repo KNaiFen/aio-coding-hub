@@ -1730,7 +1730,7 @@ describe("components/home/HomeRequestLogsPanel", () => {
 
     // spot-check some conditional text rendering paths
     expect(screen.getAllByText("未知").length).toBeGreaterThan(0);
-    expect(screen.getByText("2 家 · 切换 1 次 · 尝试 2 次")).toBeInTheDocument();
+    expect(screen.getByText("切1·请2")).toBeInTheDocument();
     expect(screen.getByText("会话复用")).toBeInTheDocument();
     expect(screen.getByText("x1.50")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /500 已中断/ })).toBeInTheDocument();
@@ -1867,7 +1867,7 @@ describe("components/home/HomeRequestLogsPanel", () => {
     );
 
     fireEvent.click(screen.getByRole("switch", { name: "最近使用记录简洁模式" }));
-    expect(screen.getByText("直连完成")).toBeInTheDocument();
+    expect(screen.getByText("直连")).toBeInTheDocument();
     expect(screen.queryByText(/切换 \d+ 次/)).not.toBeInTheDocument();
   });
 
@@ -2020,19 +2020,33 @@ describe("components/home/HomeRequestLogsPanel", () => {
     fireEvent.click(screen.getByRole("switch", { name: "最近使用记录简洁模式" }));
 
     // 标签文本应包含切换摘要
-    expect(screen.getByText("2 家 · 切换 1 次 · 尝试 4 次")).toBeInTheDocument();
+    expect(screen.getByText("切1·重2·请4")).toBeInTheDocument();
 
     // 鼠标悬停触发 tooltip 显示富文本内容
-    const routeLabel = screen.getByText("2 家 · 切换 1 次 · 尝试 4 次");
+    const routeLabel = screen.getByText("切1·重2·请4");
+    expect(routeLabel).toHaveClass("whitespace-nowrap", "tabular-nums");
+    expect(routeLabel).toHaveAccessibleName(
+      "2 家供应商，切换 1 次，实际请求 4 次，额外重试 2 次后成功"
+    );
     await user.hover(routeLabel);
+
+    const tooltip = await screen.findByRole("tooltip");
+    const tooltipPanel = tooltip.closest("[data-side]");
+    expect(tooltipPanel).toHaveClass(
+      "bg-popover",
+      "text-popover-foreground",
+      "border-border",
+      "overflow-y-auto",
+      "max-h-[min(32rem,var(--radix-tooltip-content-available-height,calc(100vh-1.5rem)))]"
+    );
 
     // tooltip 路径概览中应显示 provider 名称
     // ProvA 出现在 tooltip 路径概览 + tooltip 详情行（卡片中 final_provider 是 ProvB）
     await waitFor(() => expect(screen.getAllByText("ProvA").length).toBeGreaterThanOrEqual(2));
     // ProvB 同时出现在卡片 provider 区域和 tooltip 中
     await waitFor(() => expect(screen.getAllByText("ProvB").length).toBeGreaterThanOrEqual(2));
-    // 失败3次的标签
-    await waitFor(() => expect(screen.getAllByText("失败 3 次").length).toBeGreaterThan(0));
+    // 同一供应商失败后额外重试 2 次
+    await waitFor(() => expect(screen.getAllByText("失败（重试 2 次）").length).toBeGreaterThan(0));
     // 成功的标签
     await waitFor(() => expect(screen.getAllByText("成功").length).toBeGreaterThan(0));
   });

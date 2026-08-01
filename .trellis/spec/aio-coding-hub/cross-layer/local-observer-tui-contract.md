@@ -18,7 +18,9 @@ remote administration API.
   current process.
 - Supported resources are authenticated `GET` requests to
   `/api/observer/v1/health` and
-  `/api/observer/v1/snapshot?cli=<scope>&history_limit=0..50`.
+  `/api/observer/v1/snapshot?cli=<scope>&history_limit=0..50`. The snapshot
+  accepts optional `include_providers=true`; its response field is additive and
+  optional so old clients and old observers can fail open independently.
 - Responses are `no-store` and `nosniff`. Invalid input, authentication, busy,
   and internal failures use fixed structured messages without body, URL,
   credentials, or decoder details.
@@ -28,8 +30,10 @@ remote administration API.
 - The observer never listens on the gateway port, calls an upstream provider,
   mutates request state, or sends IPC commands.
 - Snapshot database reads use a separate single-connection SQLite read-only,
-  `query_only` pool with short timeouts. A missing or slow read marks only the
-  affected sections unavailable.
+  `query_only` pool with short timeouts. Concurrent cache misses wait fairly for
+  that query lane within a bounded deadline; contention timeout returns
+  `OBS_BUSY` and is never cached as an unavailable projection. A genuinely
+  missing or slow database read marks only the affected sections unavailable.
 - Circuit status is read through a non-mutating peek. It must not reserve a
   half-open probe, persist state, emit events, or alter provider health.
 - Observer startup, refresh, serialization, authentication, and TUI parsing
@@ -50,28 +54,54 @@ remote administration API.
   cost. Total tokens include input, output, and cache buckets according to the
   existing effective-token expression.
 - The preferred provider is the first enabled provider in the active gateway
-  order whose peeked circuit is not `OPEN` and whose cooldown is not active.
+  order that has not reached a configured spend limit, has no active exhausted
+  OAuth quota snapshot, whose peeked circuit is not `OPEN`, and whose cooldown
+  is not active. Spend state comes from the existing provider-limit read model;
+  OAuth state comes from the same snapshot gate used by forwarding. This is a
+  local eligibility read, not a remote account/model-quota guess. If any
+  eligibility read fails, only `preferred_provider` becomes unavailable.
   `all` selects the CLI from the newest terminal inference record.
+- Terminal route counters retain every skipped audit hop in `route`, but
+  `provider_switch_count` compares only adjacent non-skipped suppliers and
+  `retry_count` sums only extra attempts on non-skipped suppliers. TUI route
+  summaries display both counters whenever both are non-zero; neither counter
+  is inferred from the other.
 - The logs view contains active requests first and up to fifty terminal proxy
   records. Active requests do not consume the fifty-record allowance. Each
   request has a stable opaque key so terminal completion does not move the
   selected detail unexpectedly.
 - Request projections are bounded and never contain body text, upstream URLs,
   credentials, raw error JSON, or other large configuration blobs.
+- The optional provider projection is capped at 512 rows. It contains only
+  provider/CLI names, route rank and enable flags, authentication kind, fixed
+  eligibility labels, non-mutating circuit snapshots, spend-window totals, and
+  bounded locally cached OAuth quota text/reset times. It excludes endpoints,
+  credentials, tokens, email, notes, tags, extensions, and arbitrary/error JSON.
+- Eligible active-route providers follow actual route order. Disabled or
+  out-of-route rows follow in stable pool order; `all` groups Codex, Claude,
+  Grok, and Gemini. Provider projection failures make only that optional section
+  unavailable and never enter routing or health accounting.
 
 ## TUI behavior
 
-- `aio-tui` defaults to the logs view; `aio-tui status` is the continuously
-  refreshed status line and `aio-tui status --once` is pipe-friendly output.
+- `aio-tui` defaults to a dashboard whose request and provider views switch with
+  Left/Right. Request and provider selections are independent. Provider cards
+  use five fixed semantic lines plus a dim separator, and Enter opens bounded
+  read-only detail. `aio-tui status` is the continuously refreshed status line
+  and `aio-tui status --once` is pipe-friendly output.
 - `--cli` accepts `claude`, `codex`, `grok`, `gemini`, or `all`; the default is
   `codex`. Concurrency and today usage remain global in every scope.
 - The client never starts AIO. When the observer is unavailable it keeps the
   last successful snapshot, shows a stale/offline label, and retries every two
-  seconds. Interactive mode restores raw mode, alternate screen, and cursor on
-  normal exit and panic.
+  seconds. `OBS_BUSY` is shown as transient observer contention and likewise
+  retains the last successful snapshot. Interactive mode restores raw mode,
+  alternate screen, and cursor on normal exit and panic.
 - The client disables HTTP proxies and redirects for the loopback request and
   bounds descriptor and snapshot sizes. Protocol or JSON failures hide the
   affected view rather than crashing the process.
+- Status/request polling omits the provider projection. Entering the provider
+  view requests it; if an older observer rejects the additive query, the client
+  retries the legacy snapshot and marks only the provider view unsupported.
 
 ## Release boundary
 

@@ -1499,6 +1499,7 @@ fn observer_provider_identities_follow_active_route_order() {
             .collect::<Vec<_>>(),
         vec![(second.id, "observer-second")]
     );
+    assert_eq!(active[0].auth_mode, "api_key");
 }
 
 fn seed_usage_request_log(db: &crate::db::Db, trace_id: &str, provider_id: i64) {

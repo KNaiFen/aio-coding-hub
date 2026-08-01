@@ -3,11 +3,14 @@
 use crate::db;
 use crate::shared::error::{db_err, AppError, AppResult};
 use crate::shared::time::now_unix_seconds;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension};
+use std::collections::HashSet;
 
 const TEXT_MAX_CHARS: usize = 96;
 const SHORT_LABEL_MAX_CHARS: usize = 32;
 const FALLBACK_COOLDOWN_SECS: i64 = 5 * 60;
+const MAX_DISPLAY_PROVIDER_IDS: usize = 512;
+const DISPLAY_QUERY_BATCH_SIZE: usize = 300;
 
 #[derive(Debug, Clone)]
 pub(crate) struct OAuthLimitSnapshotInput<'a> {
@@ -28,12 +31,26 @@ pub(crate) enum OAuthLimitGate {
 
 #[derive(Debug, Clone)]
 struct OAuthLimitSnapshot {
+    limit_short_label: Option<String>,
     limit_5h_text: Option<String>,
     limit_weekly_text: Option<String>,
     limit_5h_reset_at: Option<i64>,
     limit_weekly_reset_at: Option<i64>,
     reset_credit_available_count: Option<i64>,
     checked_at: i64,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct OAuthLimitDisplaySnapshot {
+    pub provider_id: i64,
+    pub limit_short_label: Option<String>,
+    pub limit_5h_text: Option<String>,
+    pub limit_weekly_text: Option<String>,
+    pub limit_5h_reset_at: Option<i64>,
+    pub limit_weekly_reset_at: Option<i64>,
+    pub checked_at: i64,
+    pub limited: bool,
+    pub limited_reset_at: Option<i64>,
 }
 
 fn validate_provider_id(provider_id: i64) -> AppResult<i64> {
@@ -246,6 +263,7 @@ fn read_snapshot(conn: &Connection, provider_id: i64) -> AppResult<Option<OAuthL
     conn.query_row(
         r#"
 SELECT
+  limit_short_label,
   limit_5h_text,
   limit_weekly_text,
   limit_5h_reset_at,
@@ -258,12 +276,13 @@ WHERE provider_id = ?1
         params![provider_id],
         |row| {
             Ok(OAuthLimitSnapshot {
-                limit_5h_text: row.get(0)?,
-                limit_weekly_text: row.get(1)?,
-                limit_5h_reset_at: row.get(2)?,
-                limit_weekly_reset_at: row.get(3)?,
-                reset_credit_available_count: row.get(4)?,
-                checked_at: row.get(5)?,
+                limit_short_label: row.get(0)?,
+                limit_5h_text: row.get(1)?,
+                limit_weekly_text: row.get(2)?,
+                limit_5h_reset_at: row.get(3)?,
+                limit_weekly_reset_at: row.get(4)?,
+                reset_credit_available_count: row.get(5)?,
+                checked_at: row.get(6)?,
             })
         },
     )
@@ -271,15 +290,7 @@ WHERE provider_id = ?1
     .map_err(|e| db_err!("failed to read OAuth limit snapshot: {e}"))
 }
 
-pub(crate) fn gate_snapshot(
-    conn: &Connection,
-    provider_id: i64,
-    now_unix: i64,
-) -> AppResult<OAuthLimitGate> {
-    let Some(snapshot) = read_snapshot(conn, provider_id)? else {
-        return Ok(OAuthLimitGate::Allow);
-    };
-
+fn gate_for_snapshot(snapshot: &OAuthLimitSnapshot, now_unix: i64) -> OAuthLimitGate {
     let mut reset_at = None;
     if let Some(candidate) = active_exhausted_window_reset_at(
         snapshot.limit_5h_text.as_deref(),
@@ -299,11 +310,110 @@ pub(crate) fn gate_snapshot(
     }
 
     match reset_at {
-        Some(reset_at) => Ok(OAuthLimitGate::Limited {
+        Some(reset_at) => OAuthLimitGate::Limited {
             reset_at: Some(reset_at),
-        }),
-        None => Ok(OAuthLimitGate::Allow),
+        },
+        None => OAuthLimitGate::Allow,
     }
+}
+
+pub(crate) fn list_display_snapshots(
+    db: &db::Db,
+    provider_ids: &[i64],
+    now_unix: i64,
+) -> AppResult<Vec<OAuthLimitDisplaySnapshot>> {
+    if provider_ids.len() > MAX_DISPLAY_PROVIDER_IDS || provider_ids.iter().any(|id| *id <= 0) {
+        return Err(AppError::from(
+            "SEC_INVALID_INPUT: invalid OAuth display provider ids",
+        ));
+    }
+    let mut unique_ids = Vec::with_capacity(provider_ids.len());
+    let mut seen = HashSet::with_capacity(provider_ids.len());
+    for provider_id in provider_ids.iter().copied() {
+        if seen.insert(provider_id) {
+            unique_ids.push(provider_id);
+        }
+    }
+    if unique_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let conn = db.open_connection()?;
+    let mut output = Vec::new();
+    for chunk in unique_ids.chunks(DISPLAY_QUERY_BATCH_SIZE) {
+        let sql = format!(
+            r#"
+SELECT
+  provider_id,
+  limit_short_label,
+  limit_5h_text,
+  limit_weekly_text,
+  limit_5h_reset_at,
+  limit_weekly_reset_at,
+  reset_credit_available_count,
+  checked_at
+FROM provider_oauth_limit_snapshots
+WHERE provider_id IN ({})
+"#,
+            crate::db::sql_placeholders(chunk.len())
+        );
+        let mut statement = conn
+            .prepare(&sql)
+            .map_err(|e| db_err!("failed to prepare OAuth display snapshot query: {e}"))?;
+        let rows = statement
+            .query_map(params_from_iter(chunk.iter()), |row| {
+                let provider_id = row.get::<_, i64>(0)?;
+                let snapshot = OAuthLimitSnapshot {
+                    limit_short_label: row.get(1)?,
+                    limit_5h_text: row.get(2)?,
+                    limit_weekly_text: row.get(3)?,
+                    limit_5h_reset_at: row.get(4)?,
+                    limit_weekly_reset_at: row.get(5)?,
+                    reset_credit_available_count: row.get(6)?,
+                    checked_at: row.get(7)?,
+                };
+                Ok((provider_id, snapshot))
+            })
+            .map_err(|e| db_err!("failed to query OAuth display snapshots: {e}"))?;
+        for row in rows {
+            let (provider_id, snapshot) =
+                row.map_err(|e| db_err!("failed to read OAuth display snapshot: {e}"))?;
+            let gate = gate_for_snapshot(&snapshot, now_unix);
+            let (limited, limited_reset_at) = match gate {
+                OAuthLimitGate::Allow => (false, None),
+                OAuthLimitGate::Limited { reset_at } => (true, reset_at),
+            };
+            output.push(OAuthLimitDisplaySnapshot {
+                provider_id,
+                limit_short_label: normalize_text(
+                    snapshot.limit_short_label.as_deref(),
+                    SHORT_LABEL_MAX_CHARS,
+                ),
+                limit_5h_text: normalize_text(snapshot.limit_5h_text.as_deref(), TEXT_MAX_CHARS),
+                limit_weekly_text: normalize_text(
+                    snapshot.limit_weekly_text.as_deref(),
+                    TEXT_MAX_CHARS,
+                ),
+                limit_5h_reset_at: normalize_reset_at(snapshot.limit_5h_reset_at),
+                limit_weekly_reset_at: normalize_reset_at(snapshot.limit_weekly_reset_at),
+                checked_at: snapshot.checked_at.max(0),
+                limited,
+                limited_reset_at,
+            });
+        }
+    }
+    Ok(output)
+}
+
+pub(crate) fn gate_snapshot(
+    conn: &Connection,
+    provider_id: i64,
+    now_unix: i64,
+) -> AppResult<OAuthLimitGate> {
+    let Some(snapshot) = read_snapshot(conn, provider_id)? else {
+        return Ok(OAuthLimitGate::Allow);
+    };
+    Ok(gate_for_snapshot(&snapshot, now_unix))
 }
 
 #[cfg(test)]

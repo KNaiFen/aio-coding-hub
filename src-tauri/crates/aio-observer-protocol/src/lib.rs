@@ -124,6 +124,52 @@ pub struct ObserverTodayUsage {
     pub cost_usd: Option<f64>,
 }
 
+#[derive(Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ObserverProviderSpendWindow {
+    pub window: String,
+    pub usage_usd: f64,
+    pub limit_usd: f64,
+}
+
+#[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ObserverProviderOAuthQuota {
+    pub short_label: Option<String>,
+    pub five_hour_text: Option<String>,
+    pub weekly_text: Option<String>,
+    pub five_hour_reset_at_unix: Option<i64>,
+    pub weekly_reset_at_unix: Option<i64>,
+    pub checked_at_unix: i64,
+}
+
+#[derive(Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ObserverProviderStatus {
+    pub provider_id: i64,
+    pub cli_key: String,
+    pub provider_name: String,
+    pub route_rank: Option<i64>,
+    pub provider_enabled: bool,
+    pub route_enabled: bool,
+    pub auth_kind: String,
+    pub preferred: bool,
+    pub eligibility: String,
+    pub circuit_state: Option<String>,
+    pub circuit_failure_count: Option<u32>,
+    pub circuit_failure_threshold: Option<u32>,
+    pub recover_at_unix: Option<i64>,
+    pub spend_windows: Vec<ObserverProviderSpendWindow>,
+    pub oauth_quota: Option<ObserverProviderOAuthQuota>,
+}
+
+#[derive(Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ObserverProviderCollection {
+    pub items: Vec<ObserverProviderStatus>,
+    pub truncated: bool,
+}
+
 #[derive(Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ObserverRequestState {
@@ -208,6 +254,8 @@ pub struct ObserverSnapshotV1 {
     pub today: ObserverSection<ObserverTodayUsage>,
     pub active_requests: ObserverSection<Vec<ObserverRequest>>,
     pub recent_requests: ObserverSection<Vec<ObserverRequest>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub providers: Option<ObserverSection<ObserverProviderCollection>>,
 }
 
 #[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -257,5 +305,26 @@ mod tests {
         assert_eq!(value["schemaVersion"], 1);
         assert_eq!(value["protocolVersion"], OBSERVER_PROTOCOL_VERSION);
         assert!(value.get("schema_version").is_none());
+    }
+
+    #[test]
+    fn provider_projection_is_optional_for_v1_compatibility() {
+        let value = serde_json::json!({
+            "protocolVersion": 1,
+            "appVersion": "0.60.40",
+            "generatedAtMs": 1,
+            "scope": "codex",
+            "gateway": { "running": true, "port": 37123 },
+            "preferredProvider": { "available": true },
+            "lastRequest": { "available": true },
+            "dominantProvider": { "available": true },
+            "activeInferenceCount": 0,
+            "today": { "available": true },
+            "activeRequests": { "available": true, "value": [] },
+            "recentRequests": { "available": true, "value": [] }
+        });
+        let snapshot = serde_json::from_value::<ObserverSnapshotV1>(value)
+            .expect("deserialize legacy v1 snapshot");
+        assert!(snapshot.providers.is_none());
     }
 }

@@ -15,9 +15,10 @@ pub use types::{
 pub(crate) use types::{
     has_bridged_input_semantics, is_supported_bridge_type, ClaudeTerminalLaunchContext,
     GatewayProviderIdentity, GatewayProvidersSelection, ProviderAccountUsageCredentialContext,
-    ProviderAccountUsageFetchContext, ProviderForGateway, ProviderOAuthDetails, ProviderRouteRow,
-    ProviderTransportContext, CODEX_TO_ANTHROPIC_MESSAGES_BRIDGE_TYPE,
-    CODEX_TO_OPENAI_CHAT_BRIDGE_TYPE, CODEX_TO_OPENAI_RESPONSES_BRIDGE_TYPE, CX2CC_BRIDGE_TYPE,
+    ProviderAccountUsageFetchContext, ProviderForGateway, ProviderOAuthDetails,
+    ProviderObserverRow, ProviderRouteRow, ProviderTransportContext,
+    CODEX_TO_ANTHROPIC_MESSAGES_BRIDGE_TYPE, CODEX_TO_OPENAI_CHAT_BRIDGE_TYPE,
+    CODEX_TO_OPENAI_RESPONSES_BRIDGE_TYPE, CX2CC_BRIDGE_TYPE,
 };
 
 pub use queries::{
@@ -32,9 +33,9 @@ pub(crate) use queries::{
     get_source_provider_for_gateway, list_enabled_for_gateway_in_mode,
     list_enabled_for_gateway_using_active_mode,
     list_enabled_gateway_provider_identities_using_active_mode,
-    list_oauth_providers_needing_refresh, replace_extension_values, resolve_effective_credential,
-    resolve_effective_transport_credential, set_enabled, set_oauth_last_error, update_oauth_tokens,
-    update_oauth_tokens_if_last_refreshed_matches,
+    list_oauth_providers_needing_refresh, list_observer_rows, replace_extension_values,
+    resolve_effective_credential, resolve_effective_transport_credential, set_enabled,
+    set_oauth_last_error, update_oauth_tokens, update_oauth_tokens_if_last_refreshed_matches,
 };
 
 pub(crate) use share::{

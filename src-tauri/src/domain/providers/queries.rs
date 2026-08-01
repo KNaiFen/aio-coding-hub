@@ -12,6 +12,7 @@ use std::time::Duration;
 
 const PROVIDER_USAGE_PROJECTION_BATCH_SIZE: usize = 100;
 const PROVIDER_USAGE_PROJECTION_BATCH_PAUSE: Duration = Duration::from_millis(10);
+const MAX_OBSERVER_PROVIDER_ROWS: usize = 512;
 
 fn mark_provider_discovery_stale(
     conn: &Connection,
@@ -1069,7 +1070,7 @@ pub(crate) fn list_enabled_gateway_provider_identities_using_active_mode(
     let (sql, mode_id) = if let Some(mode_id) = active_mode_id {
         (
             r#"
-SELECT p.id, p.name
+SELECT p.id, p.name, p.auth_mode
 FROM sort_mode_providers mp
 JOIN providers p ON p.id = mp.provider_id
 WHERE mp.mode_id = ?1
@@ -1083,7 +1084,7 @@ ORDER BY mp.sort_order ASC
     } else {
         (
             r#"
-SELECT p.id, p.name
+SELECT p.id, p.name, p.auth_mode
 FROM default_route_providers drp
 JOIN providers p ON p.id = drp.provider_id
 WHERE drp.cli_key = ?2
@@ -1102,11 +1103,118 @@ ORDER BY drp.sort_order ASC
             Ok(GatewayProviderIdentity {
                 id: row.get(0)?,
                 name: row.get(1)?,
+                auth_mode: row.get(2)?,
             })
         })
         .map_err(|e| db_err!("failed to list observer providers: {e}"))?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(|e| db_err!("failed to read observer provider row: {e}"))
+}
+
+pub(crate) fn list_observer_rows(
+    db: &db::Db,
+    cli_key: Option<&str>,
+    limit: usize,
+) -> crate::shared::error::AppResult<(Vec<ProviderObserverRow>, bool)> {
+    if let Some(cli_key) = cli_key {
+        validate_cli_key(cli_key)?;
+    }
+    if limit == 0 || limit > MAX_OBSERVER_PROVIDER_ROWS {
+        return Err("SEC_INVALID_INPUT: invalid observer provider limit".into());
+    }
+    let fetch_limit = i64::try_from(limit.saturating_add(1))
+        .map_err(|_| crate::shared::error::AppError::from("SEC_INVALID_INPUT: invalid limit"))?;
+    let conn = db.open_connection()?;
+    let mut statement = conn
+        .prepare_cached(
+            r#"
+WITH observed AS (
+  SELECT
+    p.id,
+    p.cli_key,
+    p.name,
+    p.enabled,
+    COALESCE(p.auth_mode, 'api_key') AS auth_mode,
+    CASE
+      WHEN active.mode_id IS NULL THEN default_route.sort_order
+      ELSE mode_route.sort_order
+    END AS route_rank,
+    CASE
+      WHEN active.mode_id IS NULL THEN default_route.provider_id IS NOT NULL
+      ELSE COALESCE(mode_route.enabled, 0) = 1
+    END AS route_enabled,
+    active.mode_id IS NOT NULL AS uses_custom_route,
+    pool.sort_order AS pool_order,
+    p.sort_order AS provider_order
+  FROM providers p
+  LEFT JOIN sort_mode_active active
+    ON active.cli_key = p.cli_key
+  LEFT JOIN sort_mode_providers mode_route
+    ON active.mode_id IS NOT NULL
+   AND mode_route.mode_id = active.mode_id
+   AND mode_route.cli_key = p.cli_key
+   AND mode_route.provider_id = p.id
+  LEFT JOIN default_route_providers default_route
+    ON active.mode_id IS NULL
+   AND default_route.cli_key = p.cli_key
+   AND default_route.provider_id = p.id
+  LEFT JOIN provider_pool_order pool
+    ON pool.cli_key = p.cli_key
+   AND pool.provider_id = p.id
+  WHERE (?1 IS NULL OR p.cli_key = ?1)
+)
+SELECT
+  id,
+  cli_key,
+  name,
+  enabled,
+  auth_mode,
+  route_rank,
+  route_enabled,
+  uses_custom_route
+FROM observed
+ORDER BY
+  CASE cli_key
+    WHEN 'codex' THEN 0
+    WHEN 'claude' THEN 1
+    WHEN 'grok' THEN 2
+    WHEN 'gemini' THEN 3
+    ELSE 4
+  END ASC,
+  CASE
+    WHEN (enabled = 1 OR uses_custom_route = 1)
+      AND route_rank IS NOT NULL
+      AND route_enabled = 1 THEN 0
+    ELSE 1
+  END ASC,
+  COALESCE(route_rank, 9223372036854775807) ASC,
+  COALESCE(pool_order, 9223372036854775807) ASC,
+  provider_order ASC,
+  id DESC
+LIMIT ?2
+"#,
+        )
+        .map_err(|e| db_err!("failed to prepare observer provider status query: {e}"))?;
+    let rows = statement
+        .query_map(params![cli_key, fetch_limit], |row| {
+            Ok(ProviderObserverRow {
+                id: row.get(0)?,
+                cli_key: row.get(1)?,
+                name: row.get(2)?,
+                enabled: row.get::<_, i64>(3)? != 0,
+                auth_mode: row.get(4)?,
+                route_rank: row.get(5)?,
+                route_enabled: row.get::<_, i64>(6)? != 0,
+                uses_custom_route: row.get::<_, i64>(7)? != 0,
+            })
+        })
+        .map_err(|e| db_err!("failed to list observer provider statuses: {e}"))?;
+    let mut items = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| db_err!("failed to read observer provider status row: {e}"))?;
+    let truncated = items.len() > limit;
+    items.truncate(limit);
+    Ok((items, truncated))
 }
 
 pub(crate) fn active_sort_mode_id_for_gateway(
