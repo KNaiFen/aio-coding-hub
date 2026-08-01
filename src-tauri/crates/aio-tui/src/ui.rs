@@ -404,6 +404,17 @@ mod tests {
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
+    fn rendered_non_space_symbols(terminal: &Terminal<TestBackend>) -> String {
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .filter(|symbol| !symbol.trim().is_empty())
+            .collect()
+    }
+
     fn empty_snapshot(scope: CliScope) -> ObserverSnapshotV1 {
         ObserverSnapshotV1 {
             protocol_version: OBSERVER_PROTOCOL_VERSION,
@@ -466,14 +477,10 @@ mod tests {
         terminal
             .draw(|frame| draw_logs(frame, &mut state))
             .expect("draw");
-        let text = terminal
-            .backend()
-            .buffer()
-            .content()
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect::<String>();
-        assert!(text.contains("并发 13"));
+        // TestBackend stores a padding cell after each wide glyph. Ignore
+        // whitespace-only cells when checking the rendered CJK text.
+        let text = rendered_non_space_symbols(&terminal);
+        assert!(text.contains("并发13"));
         assert!(text.contains("暂无请求"));
     }
 
@@ -486,13 +493,7 @@ mod tests {
         terminal
             .draw(|frame| draw_status(frame, &state))
             .expect("draw");
-        let text = terminal
-            .backend()
-            .buffer()
-            .content()
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect::<String>();
+        let text = rendered_non_space_symbols(&terminal);
         assert!(text.contains("首选"));
     }
 
