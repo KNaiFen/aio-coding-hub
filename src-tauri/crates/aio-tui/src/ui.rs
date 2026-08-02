@@ -10,6 +10,7 @@ use aio_observer_protocol::{
     CliScope, ObserverProviderAvailabilityTestResult, ObserverProviderStatus, ObserverRequest,
     ObserverSnapshotV1,
 };
+use chrono::{DateTime, Local, Utc};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 #[cfg(test)]
 use ratatui::style::Color;
@@ -707,7 +708,7 @@ pub fn draw_logs(frame: &mut Frame, state: &mut LogsState) {
             Constraint::Length(1),
         ])
         .split(area);
-    draw_header(frame, chunks[0], &state.live, state.color, state.view);
+    draw_header(frame, chunks[0], &state.live, state.color);
     draw_header_separator(frame, chunks[1], state.color);
 
     let width = usize::from(chunks[2].width.saturating_sub(1)).max(1);
@@ -828,58 +829,41 @@ fn provider_empty_message(state: &LogsState) -> String {
     }
 }
 
-fn draw_header(frame: &mut Frame, area: Rect, state: &LiveState, color: bool, view: DashboardView) {
-    let online = if state.offline.is_some() {
-        state.stale_label().unwrap_or_else(|| "离线".to_string())
-    } else if state.snapshot.is_some() {
-        "在线".to_string()
-    } else {
-        "连接中".to_string()
-    };
+fn dashboard_header_lines(state: &LiveState, width: usize) -> [String; 2] {
     let concurrency = state
         .snapshot
         .as_ref()
         .map(|snapshot| snapshot.active_inference_count.to_string())
         .unwrap_or_else(|| "—".to_string());
-    let first = truncate_display(
-        &format!(
-            "AIO {} | 并发 {} | {} | {}",
-            online,
-            concurrency,
-            match view {
-                DashboardView::Requests => "请求",
-                DashboardView::Providers => "供应商",
-            },
-            scope_label(state.scope)
-        ),
-        usize::from(area.width),
-    );
-    let second = state
+    let preferred = state
         .snapshot
         .as_ref()
-        .map(|snapshot| {
-            let preferred = snapshot
-                .preferred_provider
-                .value
-                .as_ref()
-                .map(|provider| provider.provider_name.as_str())
-                .unwrap_or("—");
-            let today = snapshot.today.value.as_ref();
-            let cost = today
-                .and_then(|value| value.cost_usd)
-                .map(format_cost)
-                .unwrap_or_else(|| "—".to_string());
-            let tokens = today
-                .map(|value| format_tokens(value.total_tokens))
-                .unwrap_or_else(|| "—".to_string());
-            let summary = if view == DashboardView::Providers {
-                format!("首选 {preferred} | 今日 {cost}")
-            } else {
-                format!("首选 {preferred} | 今日 {cost} | {tokens}")
-            };
-            truncate_display(&summary, usize::from(area.width))
-        })
-        .unwrap_or_else(|| "正在读取本地观测接口".to_string());
+        .and_then(|snapshot| snapshot.preferred_provider.value.as_ref())
+        .map(|provider| provider.provider_name.as_str())
+        .unwrap_or("—");
+    let today = state
+        .snapshot
+        .as_ref()
+        .and_then(|snapshot| snapshot.today.value.as_ref());
+    let cost = today
+        .and_then(|value| value.cost_usd)
+        .map(format_cost)
+        .unwrap_or_else(|| "—".to_string());
+    let tokens = today
+        .map(|value| format_tokens(value.total_tokens))
+        .unwrap_or_else(|| "—".to_string());
+
+    [
+        truncate_display(&format!("并发 {concurrency} | 首选 {preferred}"), width),
+        truncate_display(
+            &format!("{} | 今日 {cost} | {tokens}", scope_label(state.scope)),
+            width,
+        ),
+    ]
+}
+
+fn draw_header(frame: &mut Frame, area: Rect, state: &LiveState, color: bool) {
+    let [first, second] = dashboard_header_lines(state, usize::from(area.width));
     let style = Palette::detected(color)
         .style(Tone::Accent)
         .add_modifier(Modifier::BOLD);
@@ -1156,9 +1140,9 @@ fn provider_availability_detail_lines(
             aio_observer_protocol::ObserverProviderAvailabilityState::NoData => "无数据",
         };
         format!(
-            "  {}-{} UTC  {state}  成{} 败{}",
-            format_utc_minute(bucket.start_at_ms),
-            format_utc_minute(bucket.end_at_ms),
+            "  {}-{}  {state}  成{} 败{}",
+            format_local_minute(bucket.start_at_ms),
+            format_local_minute(bucket.end_at_ms),
             bucket.success_count,
             bucket.failure_count
         )
@@ -1166,9 +1150,20 @@ fn provider_availability_detail_lines(
     lines
 }
 
-fn format_utc_minute(timestamp_ms: i64) -> String {
-    let minutes = timestamp_ms.div_euclid(60_000).rem_euclid(24 * 60);
+fn format_minute_with_offset(timestamp_ms: i64, offset_seconds: i32) -> String {
+    let local_ms = timestamp_ms.saturating_add(i64::from(offset_seconds).saturating_mul(1_000));
+    let minutes = local_ms.div_euclid(60_000).rem_euclid(24 * 60);
     format!("{:02}:{:02}", minutes / 60, minutes % 60)
+}
+
+fn format_local_minute(timestamp_ms: i64) -> String {
+    let Some(timestamp) = DateTime::<Utc>::from_timestamp_millis(timestamp_ms) else {
+        return "—".to_string();
+    };
+    format_minute_with_offset(
+        timestamp_ms,
+        timestamp.with_timezone(&Local).offset().local_minus_utc(),
+    )
 }
 
 fn format_reset_at(reset_at_unix: i64) -> String {
@@ -1673,10 +1668,11 @@ fn item_separator_style(color: bool) -> Style {
 mod tests {
     use super::*;
     use aio_observer_protocol::{
-        ObserverGatewayStatus, ObserverProviderAccountUsage, ObserverProviderAvailabilityBucket,
-        ObserverProviderAvailabilityState, ObserverProviderAvailabilityTimeline,
-        ObserverProviderCollection, ObserverProviderOAuthQuota, ObserverProviderSpendWindow,
-        ObserverRequestState, ObserverSection, ObserverTodayUsage, OBSERVER_PROTOCOL_VERSION,
+        ObserverGatewayStatus, ObserverPreferredProvider, ObserverProviderAccountUsage,
+        ObserverProviderAvailabilityBucket, ObserverProviderAvailabilityState,
+        ObserverProviderAvailabilityTimeline, ObserverProviderCollection,
+        ObserverProviderOAuthQuota, ObserverProviderSpendWindow, ObserverRequestState,
+        ObserverSection, ObserverTodayUsage, OBSERVER_PROTOCOL_VERSION,
     };
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
@@ -1833,40 +1829,71 @@ mod tests {
     }
 
     #[test]
-    fn dashboard_header_omits_view_pages_and_provider_count() {
+    fn dashboard_header_is_shared_and_keeps_only_the_compact_summary() {
         let mut live = LiveState::new(CliScope::Codex);
         let mut snapshot = empty_snapshot(CliScope::Codex);
-        snapshot.providers = Some(ObserverSection::ready(ObserverProviderCollection {
-            items: vec![
-                provider_status(1, "A", true),
-                provider_status(2, "B", false),
-            ],
-            truncated: false,
-        }));
+        snapshot.active_inference_count = 1;
+        snapshot.preferred_provider = ObserverSection::ready(ObserverPreferredProvider {
+            cli_key: "codex".to_string(),
+            provider_name: "INPUT 大春".to_string(),
+            circuit_state: "closed".to_string(),
+        });
+        snapshot.today = ObserverSection::ready(ObserverTodayUsage {
+            total_tokens: 194_000_000,
+            cost_usd: Some(118.69),
+        });
         live.apply_snapshot(snapshot);
+
+        assert_eq!(
+            dashboard_header_lines(&live, 80),
+            [
+                "并发 1 | 首选 INPUT 大春".to_string(),
+                "Codex | 今日 $118.69 | 194M".to_string(),
+            ]
+        );
 
         let backend = TestBackend::new(80, 2);
         let mut terminal = Terminal::new(backend).expect("terminal");
         terminal
             .draw(|frame| {
                 let area = frame.area();
-                draw_header(frame, area, &live, true, DashboardView::Requests);
+                draw_header(frame, area, &live, true);
             })
-            .expect("request header");
-        let request_header = rendered_non_space_symbols(&terminal);
-        assert!(request_header.contains("请求"));
-        assert!(!request_header.contains("请求1/2"));
+            .expect("shared header");
+        let header = rendered_non_space_symbols(&terminal);
+        assert!(header.contains("并发1|首选INPUT大春Codex|今日$118.69|194M"));
+        assert!(!header.contains("AIO"));
+        assert!(!header.contains("请求"));
+        assert!(!header.contains("供应商"));
+    }
 
-        terminal
-            .draw(|frame| {
-                let area = frame.area();
-                draw_header(frame, area, &live, true, DashboardView::Providers);
-            })
-            .expect("provider header");
-        let provider_header = rendered_non_space_symbols(&terminal);
-        assert!(provider_header.contains("供应商"));
-        assert!(!provider_header.contains("供应商2/2"));
-        assert!(!provider_header.contains("供应商2"));
+    #[test]
+    fn dashboard_header_uses_bounded_placeholders_without_a_snapshot() {
+        let live = LiveState::new(CliScope::Codex);
+
+        assert_eq!(
+            dashboard_header_lines(&live, 80),
+            [
+                "并发 — | 首选 —".to_string(),
+                "Codex | 今日 — | —".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn provider_availability_detail_uses_local_time_without_a_timezone_suffix() {
+        assert_eq!(
+            format_minute_with_offset(14 * 60 * 60_000 + 30 * 60_000, 8 * 60 * 60),
+            "22:30"
+        );
+        assert_eq!(
+            format_minute_with_offset(14 * 60 * 60_000 + 30 * 60_000, -5 * 60 * 60),
+            "09:30"
+        );
+
+        let lines = provider_availability_detail_lines(&availability_timeline());
+        assert!(lines.iter().any(|line| line.contains("成1 败0")));
+        assert!(lines.iter().all(|line| !line.contains("UTC")));
     }
 
     #[test]
