@@ -20,6 +20,7 @@ const AVAILABILITY_RETENTION_MS: i64 = 24 * 60 * 60 * 1_000;
 const AVAILABILITY_RETENTION_BATCH_SIZE: usize = 1_000;
 const AVAILABILITY_RETENTION_INTERVAL: Duration = Duration::from_secs(60 * 60);
 pub const TUI_PROVIDER_AVAILABILITY_BUCKETS: u16 = 12;
+pub const TRAY_PROVIDER_AVAILABILITY_BUCKETS: u16 = 18;
 pub const DESKTOP_PROVIDER_AVAILABILITY_BUCKETS: u16 = 36;
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -887,9 +888,11 @@ pub fn timelines(
     let hours = normalized_availability_hours(hours);
     if !matches!(
         bucket_count,
-        TUI_PROVIDER_AVAILABILITY_BUCKETS | DESKTOP_PROVIDER_AVAILABILITY_BUCKETS
+        TUI_PROVIDER_AVAILABILITY_BUCKETS
+            | TRAY_PROVIDER_AVAILABILITY_BUCKETS
+            | DESKTOP_PROVIDER_AVAILABILITY_BUCKETS
     ) {
-        return Err("SEC_INVALID_INPUT: bucket_count must be 12 or 36".into());
+        return Err("SEC_INVALID_INPUT: bucket_count must be 12, 18, or 36".into());
     }
     let mut seen = HashSet::new();
     let provider_ids = provider_ids
@@ -907,8 +910,13 @@ pub fn timelines(
     let bucket_ms = range_ms
         .checked_div(bucket_count_i64)
         .ok_or_else(|| "SEC_INVALID_INPUT: invalid availability range".to_string())?;
+    let alignment_bucket_count = if bucket_count == DESKTOP_PROVIDER_AVAILABILITY_BUCKETS {
+        TUI_PROVIDER_AVAILABILITY_BUCKETS
+    } else {
+        bucket_count
+    };
     let alignment_ms = range_ms
-        .checked_div(i64::from(TUI_PROVIDER_AVAILABILITY_BUCKETS))
+        .checked_div(i64::from(alignment_bucket_count))
         .ok_or_else(|| "SEC_INVALID_INPUT: invalid availability alignment".to_string())?;
     let now_ms = now_ms.max(0);
     let end_at_ms = now_ms
@@ -1216,8 +1224,21 @@ mod tests {
             .expect("load desktop timeline")
             .pop()
             .expect("desktop provider timeline");
+        let tray_timeline = timelines(&db, &[provider.id], 6, 18, now_ms)
+            .expect("load tray timeline")
+            .pop()
+            .expect("tray provider timeline");
         let current = timeline.buckets.last().expect("current bucket");
         assert_eq!(timeline.bucket_minutes, 30);
+        assert_eq!(tray_timeline.bucket_minutes, 20);
+        assert_eq!(
+            tray_timeline
+                .buckets
+                .last()
+                .expect("tray current bucket")
+                .start_at_ms,
+            10 * 60 * 60 * 1_000
+        );
         assert_eq!(current.start_at_ms, current_bucket_start);
         assert_eq!((current.success_count, current.failure_count), (3, 1));
         assert_eq!(current.state, ProviderAvailabilityState::Healthy);

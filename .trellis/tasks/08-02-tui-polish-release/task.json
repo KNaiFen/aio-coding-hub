@@ -1,0 +1,40 @@
+{
+  "id": "tui-polish-release",
+  "name": "tui-polish-release",
+  "title": "TUI 信息密度与托盘悬浮面板优化发布",
+  "description": "Coordinate the standalone TUI summary/timezone update, completed PENDING archive, macOS tray mini-panel density and visual polish, and patch release delivery.",
+  "status": "planning",
+  "dev_type": "cross-layer",
+  "scope": "tui-tray-release",
+  "package": "aio-coding-hub",
+  "priority": "P2",
+  "creator": "KNaiFen",
+  "assignee": "KNaiFen",
+  "createdAt": "2026-08-02",
+  "completedAt": null,
+  "branch": "codex/tui-polish-release",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-02-tui-summary-local-time",
+    "08-02-pending-completed-archive",
+    "08-02-macos-tray-mini-polish"
+  ],
+  "parent": null,
+  "relatedFiles": [
+    "PENDING.md",
+    "PENDING_COMPLETED.md",
+    "AGENTS.md",
+    "src-tauri/crates/aio-tui/src/ui.rs",
+    "src/tray/TrayProviderMiniApp.tsx",
+    "src/services/trayProviderMini.ts",
+    "src-tauri/src/app/tray_provider_mini.rs",
+    "src-tauri/src/app/resident.rs",
+    "src-tauri/src/domain/provider_availability.rs"
+  ],
+  "notes": "",
+  "meta": {}
+}

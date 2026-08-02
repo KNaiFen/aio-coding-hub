@@ -103,8 +103,10 @@ remote administration API.
   selects an item for five seconds; inactivity clears the selection and scroll
   offset so request snapshots resume following the newest rows. Detail view
   suspends expiry and returning to the list starts a new five-second window.
-  Snapshot refreshes never extend the deadline. A dim rule separates the shared
-  summary header from either list.
+  Snapshot refreshes never extend the deadline. Both views share the same two-line
+  summary: concurrency plus preferred provider, then CLI plus today's cost and
+  tokens. View names and connection-state text stay out of this header. A dim
+  rule separates the shared summary from either list.
 - Provider cards use four semantic base lines plus a dim separator. A fifth
   OAuth line is present only when locally cached label, five-hour, or weekly
   quota text is displayable. Labels and values are separate styled spans:
@@ -132,6 +134,9 @@ remote administration API.
 - Request rows retain the original client model and render an applied configured
   route as `source->effective` with optional reasoning effort. Old observers or
   invalid optional route fields continue to render the ordinary model safely.
+- Provider availability detail converts bucket timestamps to the host system's
+  local timezone at render time and displays `HH:MM-HH:MM` without a hard-coded
+  timezone suffix.
 
 ## Release boundary
 

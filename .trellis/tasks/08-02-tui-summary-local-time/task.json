@@ -1,0 +1,31 @@
+{
+  "id": "tui-summary-local-time",
+  "name": "tui-summary-local-time",
+  "title": "统一 TUI 顶部摘要与本地时区显示",
+  "description": "Unify the standalone TUI dashboard header across request and provider views, render provider availability bucket times in the host system timezone, and deliver the change in a patch release.",
+  "status": "in_progress",
+  "dev_type": "backend",
+  "scope": "standalone-tui",
+  "package": "aio-coding-hub",
+  "priority": "P2",
+  "creator": "KNaiFen",
+  "assignee": "KNaiFen",
+  "createdAt": "2026-08-02",
+  "completedAt": null,
+  "branch": "codex/tui-polish-release",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "08-02-tui-polish-release",
+  "relatedFiles": [
+    "src-tauri/crates/aio-tui/src/ui.rs",
+    "src-tauri/crates/aio-tui/Cargo.toml",
+    "src-tauri/Cargo.lock",
+    ".trellis/spec/aio-coding-hub/cross-layer/local-observer-tui-contract.md"
+  ],
+  "notes": "",
+  "meta": {}
+}

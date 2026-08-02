@@ -37,6 +37,7 @@ describe("main entry", () => {
   beforeEach(() => {
     vi.resetModules();
     window.history.replaceState(null, "", "/");
+    document.documentElement.classList.remove("tray-provider-mini-window");
   });
 
   afterEach(async () => {
@@ -51,6 +52,7 @@ describe("main entry", () => {
     await importMainEntry();
 
     expect(document.querySelector("[data-testid='main-entry-app']")).toBeInTheDocument();
+    expect(document.documentElement).not.toHaveClass("tray-provider-mini-window");
   }, 30000);
 
   it("registers global frontend error handlers", async () => {
@@ -70,5 +72,6 @@ describe("main entry", () => {
 
     expect(document.querySelector("[data-testid='tray-provider-mini-entry']")).toBeInTheDocument();
     expect(document.querySelector("[data-testid='main-entry-app']")).not.toBeInTheDocument();
+    expect(document.documentElement).toHaveClass("tray-provider-mini-window");
   }, 30000);
 });

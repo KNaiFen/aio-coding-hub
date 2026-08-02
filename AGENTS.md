@@ -12,10 +12,10 @@
 
 ## Deferred Work List
 
-- `PENDING.md` is the canonical durable list for small issues and improvements that the user asks to accumulate for a later batch.
+- `PENDING.md` is the canonical active list for unresolved small issues and improvements that the user asks to accumulate for a later batch. Completed and explicitly dropped history lives in `PENDING_COMPLETED.md` and is not part of the mandatory pre-planning context.
 - Recording an item is not authorization to implement it. When the user asks only to record or discuss an issue, update `PENDING.md` and do not change product code for that item.
 - Before producing any formal implementation plan, and before starting changes after an explicit instruction such as "start", "implement", or "begin modifying", read `PENDING.md` and include every unresolved `pending` or `planned` entry in the proposed work checklist. Do not silently omit an entry; surface conflicts, dependencies, or scope risks and ask before deferring it again.
-- Give each new entry a stable sequential ID, and record its status, date, observed problem, locked user decisions, proposed direction, and acceptance criteria. Preserve the history instead of deleting completed or dropped entries.
+- Give each new entry a stable sequential ID, and record its status, date, observed problem, locked user decisions, proposed direction, and acceptance criteria. After a `done` entry has merge/release evidence, or a `dropped` entry has an explicit user decision and reason, move the complete entry to `PENDING_COMPLETED.md`; never delete or compress its history.
 - When an entry is selected for implementation, link it to the corresponding Trellis task and change its status to `planned`. Mark it `done` only after the implementation is merged and verified, including the PR, commit, or release evidence. Use `dropped` only with an explicit user decision and record the reason.
 <!-- TRELLIS:START -->
 # Trellis Instructions
