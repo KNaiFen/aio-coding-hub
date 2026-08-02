@@ -25,6 +25,7 @@ mod request_end;
 mod sse;
 pub(in crate::gateway) mod status_override;
 mod types;
+mod upstream_error_response_rules;
 pub(in crate::gateway) mod upstream_client_error_rules;
 
 pub(super) use caches::{ProviderBaseUrlPingCache, RecentErrorCache};

@@ -31,6 +31,7 @@ import {
 } from "../../../services/gateway/modelRoutingPolicy";
 import { ModelRoutingPolicyFields } from "../../gateway/ModelRoutingPolicyFields";
 import { cn } from "../../../utils/cn";
+import { UpstreamErrorResponseRulesCard } from "../UpstreamErrorResponseRulesCard";
 
 export type CliManagerAvailability = "checking" | "available" | "unavailable";
 
@@ -747,6 +748,15 @@ export function CliManagerGeneralTab({
                 </div>
               </div>
             </CollapsibleSettingsCard>
+            {appSettings ? (
+              <UpstreamErrorResponseRulesCard
+                rules={appSettings.upstream_error_response_rules}
+                disabled={commonSettingsDisabled}
+                onPersist={(rules) =>
+                  onPersistCommonSettings({ upstream_error_response_rules: rules })
+                }
+              />
+            ) : null}
 
             <CollapsibleSettingsCard
               icon={<Shuffle className="h-5 w-5 text-white" />}

@@ -40,6 +40,7 @@ export function createTestAppSettings(overrides?: Partial<AppSettings>): AppSett
     failover_max_providers_to_try: 5,
     upstream_retry_policy: DEFAULT_UPSTREAM_RETRY_POLICY,
     model_routing_policy: DEFAULT_MODEL_ROUTING_POLICY,
+    upstream_error_response_rules: [],
     circuit_breaker_failure_threshold: 5,
     circuit_breaker_open_duration_minutes: 30,
     enable_circuit_breaker_notice: false,

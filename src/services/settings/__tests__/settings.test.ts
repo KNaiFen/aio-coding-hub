@@ -97,6 +97,22 @@ describe("services/settings/settings", () => {
 
     const input = createSettingsSetInput(createTestAppSettings(), {
       codex_oauth_compatible_proxy_mode: true,
+      upstream_error_response_rules: [
+        {
+          id: "8ca12e7b-4f19-45f7-9185-cc6fbd951c51",
+          name: "限额响应",
+          description: "",
+          enabled: true,
+          priority: 10,
+          status_codes: [429],
+          keywords: [],
+          match_mode: "any",
+          cli_keys: ["codex"],
+          provider_ids: [],
+          status_behavior: { mode: "passthrough" },
+          message_behavior: { mode: "passthrough" },
+        },
+      ],
       upstream_proxy_password: { mode: "clear" },
     });
 
@@ -107,6 +123,7 @@ describe("services/settings/settings", () => {
       codexOauthCompatibleProxyMode: true,
       cx2CcFallbackModelMain: "gpt-5.4",
       upstreamProxyPassword: { mode: "clear" },
+      upstreamErrorResponseRules: [expect.objectContaining({ name: "限额响应" })],
     });
     expect(input).not.toHaveProperty("autoStart");
     expect(Object.keys(input).filter((key) => key.includes("ReasoningGuard"))).toEqual([]);
