@@ -311,6 +311,12 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+html.tray-provider-mini-window,
+html.tray-provider-mini-window body,
+html.tray-provider-mini-window #root {
+  background: transparent;
+}
+
 /* Premium Global Custom Scrollbar Style for all elements */
 ::-webkit-scrollbar {
   width: var(--scrollbar-width, 8px);

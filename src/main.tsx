@@ -40,6 +40,8 @@ export function renderTrayProviderMini(rootElement: HTMLElement): Root {
 installGlobalErrorReporting();
 
 const rootElement = document.getElementById("root") as HTMLElement;
-export const appRoot = isTrayProviderMiniWindow(window.location.search)
+const trayProviderMiniWindow = isTrayProviderMiniWindow(window.location.search);
+document.documentElement.classList.toggle("tray-provider-mini-window", trayProviderMiniWindow);
+export const appRoot = trayProviderMiniWindow
   ? renderTrayProviderMini(rootElement)
   : renderApp(rootElement);

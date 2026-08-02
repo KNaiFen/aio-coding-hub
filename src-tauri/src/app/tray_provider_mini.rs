@@ -11,7 +11,8 @@ use serde::Serialize;
 use std::collections::HashMap;
 
 const RECENT_REQUEST_SCAN_LIMIT: usize = 200;
-pub(crate) const PROVIDER_AVAILABILITY_BUCKETS: usize = 12;
+pub(crate) const PROVIDER_AVAILABILITY_BUCKETS: usize =
+    crate::domain::provider_availability::TRAY_PROVIDER_AVAILABILITY_BUCKETS as usize;
 
 #[derive(Debug, Clone, Copy, Serialize, specta::Type, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -36,6 +37,8 @@ pub(crate) struct TrayProviderMiniProvider {
     pub provider_id: i64,
     pub provider_name: String,
     pub unavailable_reasons: Vec<TrayProviderMiniUnavailableReason>,
+    pub success_count: u32,
+    pub failure_count: u32,
     pub availability: Vec<crate::domain::provider_availability::ProviderAvailabilityState>,
 }
 
@@ -223,7 +226,7 @@ pub(crate) fn build_snapshot<R: tauri::Runtime>(
         db,
         &provider_ids,
         hours,
-        crate::domain::provider_availability::TUI_PROVIDER_AVAILABILITY_BUCKETS,
+        crate::domain::provider_availability::TRAY_PROVIDER_AVAILABILITY_BUCKETS,
         now_ms,
     )
     .unwrap_or_else(|error| {
@@ -234,16 +237,7 @@ pub(crate) fn build_snapshot<R: tauri::Runtime>(
         Vec::new()
     })
     .into_iter()
-    .map(|timeline| {
-        (
-            timeline.provider_id,
-            timeline
-                .buckets
-                .into_iter()
-                .map(|bucket| bucket.state)
-                .collect::<Vec<_>>(),
-        )
-    })
+    .map(|timeline| (timeline.provider_id, timeline))
     .collect::<HashMap<_, _>>();
 
     let providers = selection
@@ -265,15 +259,23 @@ pub(crate) fn build_snapshot<R: tauri::Runtime>(
                     unavailable_reasons.push(TrayProviderMiniUnavailableReason::CircuitOpen);
                 }
             }
-            let availability = availability
+            let (availability, success_count, failure_count) = availability
                 .get(&provider.id)
-                .filter(|states| states.len() == PROVIDER_AVAILABILITY_BUCKETS)
-                .cloned()
-                .unwrap_or_else(no_data_availability);
+                .filter(|timeline| timeline.buckets.len() == PROVIDER_AVAILABILITY_BUCKETS)
+                .map(|timeline| {
+                    (
+                        timeline.buckets.iter().map(|bucket| bucket.state).collect(),
+                        timeline.success_count,
+                        timeline.failure_count,
+                    )
+                })
+                .unwrap_or_else(|| (no_data_availability(), 0, 0));
             TrayProviderMiniProvider {
                 provider_id: provider.id,
                 provider_name: bounded_text(&provider.name, 128),
                 unavailable_reasons,
+                success_count,
+                failure_count,
                 availability,
             }
         })
@@ -354,10 +356,10 @@ mod tests {
     }
 
     #[test]
-    fn no_data_timeline_always_has_twelve_cells() {
+    fn no_data_timeline_always_has_eighteen_cells() {
         assert_eq!(
             no_data_availability(),
-            vec![crate::domain::provider_availability::ProviderAvailabilityState::NoData; 12]
+            vec![crate::domain::provider_availability::ProviderAvailabilityState::NoData; 18]
         );
     }
 }

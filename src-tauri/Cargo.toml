@@ -29,7 +29,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 aio-observer-protocol = { path = "crates/aio-observer-protocol" }
-tauri = { version = "2", features = ["tray-icon", "image-png", "protocol-asset"] }
+tauri = { version = "2", features = ["tray-icon", "image-png", "protocol-asset", "macos-private-api"] }
 tauri-plugin-opener = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-fs = "2"

@@ -66,13 +66,16 @@ function ProviderReasonMarkers({ reasons }: { reasons: TrayProviderMiniUnavailab
   });
 
   return (
-    <div className="flex h-5 min-w-5 items-center justify-end gap-1" aria-label="供应商状态">
+    <div
+      className="flex h-[18px] min-w-[18px] items-center justify-end gap-1"
+      aria-label="供应商状态"
+    >
       {markers.map((reason) => {
         const presentation = reasonPresentation[reason];
         return (
           <span
             key={presentation.marker}
-            className={`inline-flex h-5 w-5 items-center justify-center rounded border text-[10px] font-semibold ${presentation.className}`}
+            className={`inline-flex h-[18px] w-[18px] items-center justify-center rounded border text-[9px] font-semibold ${presentation.className}`}
             title={presentation.title}
           >
             {presentation.marker}
@@ -85,14 +88,29 @@ function ProviderReasonMarkers({ reasons }: { reasons: TrayProviderMiniUnavailab
 
 function AvailabilityCells({ provider }: { provider: TrayProviderMiniProvider }) {
   return (
-    <div className="grid h-4 grid-cols-12 items-center gap-[3px]" aria-label="供应商可用性">
+    <div
+      className="grid h-3 grid-cols-[repeat(18,minmax(0,1fr))] items-center gap-0.5"
+      aria-label="供应商可用性"
+    >
       {provider.availability.map((state, index) => (
         <span
           key={`${provider.providerId}-${index}`}
-          className={`h-3 min-w-0 rounded-[2px] ${availabilityStyle[state]}`}
+          className={`h-1.5 min-w-0 rounded-[2px] ${availabilityStyle[state]}`}
           title={availabilityLabel[state]}
         />
       ))}
+    </div>
+  );
+}
+
+function ProviderTotals({ provider }: { provider: TrayProviderMiniProvider }) {
+  return (
+    <div
+      className="flex items-center justify-end gap-1.5 text-[10px] font-medium tabular-nums"
+      aria-label={`总计 成功 ${provider.successCount}，失败 ${provider.failureCount}`}
+    >
+      <span className="text-emerald-600 dark:text-emerald-300">成{provider.successCount}</span>
+      <span className="text-rose-600 dark:text-rose-300">败{provider.failureCount}</span>
     </div>
   );
 }
@@ -103,16 +121,19 @@ function ProviderRows({ providers }: { providers: TrayProviderMiniProvider[] }) 
       {providers.map((provider) => (
         <div
           key={provider.providerId}
-          className="grid h-11 grid-cols-[minmax(0,1fr)_auto_132px] items-center gap-2 px-3"
+          className="grid h-9 grid-cols-[minmax(0,1fr)_216px_64px] items-center gap-2 px-3"
         >
-          <span
-            className="truncate text-xs font-medium text-foreground"
-            title={provider.providerName}
-          >
-            {provider.providerName}
-          </span>
-          <ProviderReasonMarkers reasons={provider.unavailableReasons} />
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span
+              className="min-w-0 flex-1 truncate text-xs font-medium text-foreground"
+              title={provider.providerName}
+            >
+              {provider.providerName}
+            </span>
+            <ProviderReasonMarkers reasons={provider.unavailableReasons} />
+          </div>
           <AvailabilityCells provider={provider} />
+          <ProviderTotals provider={provider} />
         </div>
       ))}
     </div>
@@ -132,7 +153,7 @@ function EmptyState({
   else if (snapshot) text = "当前路由没有已开启供应商";
 
   return (
-    <div className="flex h-[72px] items-center justify-center px-4 text-xs text-muted-foreground">
+    <div className="flex h-[68px] items-center justify-center px-4 text-xs text-muted-foreground">
       {text}
     </div>
   );
@@ -184,17 +205,17 @@ export function TrayProviderMiniApp() {
 
   return (
     <main
-      className="h-screen w-screen overflow-hidden border border-border bg-background text-foreground"
+      className="isolate h-screen w-screen overflow-hidden rounded-[14px] border border-black/10 bg-background/80 text-foreground backdrop-blur-xl dark:border-white/10 dark:bg-background/70"
       onPointerEnter={() => reportHover(true)}
       onPointerLeave={() => reportHover(false)}
     >
-      <header className="flex h-12 items-center justify-between gap-3 border-b border-border/70 px-3">
+      <header className="flex h-[42px] items-center justify-between gap-3 border-b border-border/60 px-3.5">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="shrink-0 text-sm font-semibold">
+          <span className="shrink-0 text-[13px] font-semibold">
             {cliName(snapshot?.cliKey ?? null)}
           </span>
           <span className="text-muted-foreground/50">/</span>
-          <Route className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <Route className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
           <span
             className="truncate text-xs text-muted-foreground"
             title={snapshot?.routeName ?? ""}
@@ -202,11 +223,11 @@ export function TrayProviderMiniApp() {
             {snapshot?.routeName ?? "默认"}
           </span>
         </div>
-        <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
           {snapshot?.hours ?? 6}h
         </span>
       </header>
-      <div ref={scrollRef} className="max-h-[440px] overflow-y-auto overscroll-contain">
+      <div ref={scrollRef} className="max-h-[360px] overflow-y-auto overscroll-contain">
         {providers.length > 0 ? (
           <ProviderRows providers={providers} />
         ) : (

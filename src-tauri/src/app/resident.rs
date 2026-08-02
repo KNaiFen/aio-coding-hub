@@ -16,13 +16,13 @@ const LIFECYCLE_INTENT_RESTART: u8 = 2;
 #[cfg(target_os = "macos")]
 const TRAY_PROVIDER_MINI_HIDE_DELAY_MS: u64 = 180;
 #[cfg(any(target_os = "macos", test))]
-const TRAY_PROVIDER_MINI_WIDTH: f64 = 356.0;
+const TRAY_PROVIDER_MINI_WIDTH: f64 = 440.0;
 #[cfg(any(target_os = "macos", test))]
-const TRAY_PROVIDER_MINI_HEADER_HEIGHT: f64 = 48.0;
+const TRAY_PROVIDER_MINI_HEADER_HEIGHT: f64 = 42.0;
 #[cfg(any(target_os = "macos", test))]
-const TRAY_PROVIDER_MINI_ROW_HEIGHT: f64 = 44.0;
+const TRAY_PROVIDER_MINI_ROW_HEIGHT: f64 = 36.0;
 #[cfg(any(target_os = "macos", test))]
-const TRAY_PROVIDER_MINI_EMPTY_HEIGHT: f64 = 72.0;
+const TRAY_PROVIDER_MINI_EMPTY_HEIGHT: f64 = 68.0;
 #[cfg(any(target_os = "macos", test))]
 const TRAY_PROVIDER_MINI_MAX_VISIBLE_ROWS: usize = 10;
 #[cfg(any(target_os = "macos", test))]
@@ -458,6 +458,15 @@ fn apply_tray_provider_mini_geometry(
         .focused(false)
         .visible(false)
         .decorations(false)
+        .transparent(true)
+        .background_color(tauri::window::Color(0, 0, 0, 0))
+        .effects(
+            tauri::window::EffectsBuilder::new()
+                .effect(tauri::window::Effect::Popover)
+                .state(tauri::window::EffectState::Active)
+                .radius(14.0)
+                .build(),
+        )
         .always_on_top(true)
         .visible_on_all_workspaces(true)
         .skip_taskbar(true)
@@ -957,6 +966,6 @@ mod tests {
         assert!(placement.y >= 32.0);
         assert!(placement.x + placement.width <= 1_720.0);
         assert!(placement.y + placement.height <= 1_096.0);
-        assert_eq!(placement.height, 490.0);
+        assert_eq!(placement.height, 404.0);
     }
 }

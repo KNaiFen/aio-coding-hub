@@ -33,7 +33,9 @@ const snapshot: TrayProviderMiniSnapshot = {
       providerId: 3,
       providerName: "大春",
       unavailableReasons: ["cooldown"],
-      availability: Array.from({ length: 12 }, () => "healthy"),
+      successCount: 24,
+      failureCount: 2,
+      availability: Array.from({ length: 18 }, () => "healthy"),
     },
   ],
   unavailable: false,
@@ -44,7 +46,7 @@ describe("trayProviderMini service", () => {
     vi.clearAllMocks();
   });
 
-  it("accepts the bounded snapshot contract and preserves twelve cells", () => {
+  it("accepts the bounded snapshot contract and preserves eighteen cells", () => {
     expect(normalizeTrayProviderMiniSnapshot(snapshot)).toEqual(snapshot);
   });
 
@@ -61,8 +63,15 @@ describe("trayProviderMini service", () => {
       providers: [{ ...snapshot.providers[0], availability: ["healthy"] }],
     });
     expect(normalized?.providers[0]?.availability).toEqual(
-      Array.from({ length: 12 }, () => "no_data")
+      Array.from({ length: 18 }, () => "no_data")
     );
+
+    expect(
+      normalizeTrayProviderMiniSnapshot({
+        ...snapshot,
+        providers: [{ ...snapshot.providers[0], failureCount: -1 }],
+      })
+    ).toBeNull();
   });
 
   it("uses generated IPC for snapshot reads and hover reports", async () => {

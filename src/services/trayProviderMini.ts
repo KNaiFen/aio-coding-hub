@@ -5,7 +5,7 @@ import { listenDesktopEvent } from "./desktop/event";
 import { invokeGeneratedIpc } from "./generatedIpc";
 
 export const TRAY_PROVIDER_MINI_SNAPSHOT_EVENT = "tray-provider-mini:snapshot";
-export const TRAY_PROVIDER_MINI_BUCKET_COUNT = 12;
+export const TRAY_PROVIDER_MINI_BUCKET_COUNT = 18;
 
 export type TrayProviderMiniAvailabilityState = "healthy" | "unhealthy" | "no_data";
 export type TrayProviderMiniUnavailableReason =
@@ -19,6 +19,8 @@ export type TrayProviderMiniProvider = {
   providerId: number;
   providerName: string;
   unavailableReasons: TrayProviderMiniUnavailableReason[];
+  successCount: number;
+  failureCount: number;
   availability: TrayProviderMiniAvailabilityState[];
 };
 
@@ -72,7 +74,11 @@ function normalizeProvider(value: unknown): TrayProviderMiniProvider | null {
   if (!isRecord(value)) return null;
   const providerId = finiteInteger(value.providerId, 1);
   const providerName = boundedString(value.providerName, 128);
-  if (providerId == null || providerName == null) return null;
+  const successCount = finiteInteger(value.successCount);
+  const failureCount = finiteInteger(value.failureCount);
+  if (providerId == null || providerName == null || successCount == null || failureCount == null) {
+    return null;
+  }
 
   const unavailableReasons = Array.isArray(value.unavailableReasons)
     ? Array.from(
@@ -97,6 +103,8 @@ function normalizeProvider(value: unknown): TrayProviderMiniProvider | null {
     providerId,
     providerName,
     unavailableReasons,
+    successCount,
+    failureCount,
     availability:
       availability.length === TRAY_PROVIDER_MINI_BUCKET_COUNT
         ? availability

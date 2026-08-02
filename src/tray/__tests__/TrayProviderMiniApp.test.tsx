@@ -36,11 +36,19 @@ const snapshot: TrayProviderMiniSnapshot = {
       providerId: 1,
       providerName: "大春",
       unavailableReasons: ["spend_limit", "oauth_limit"],
+      successCount: 23,
+      failureCount: 1,
       availability: [
         "healthy",
         "healthy",
         "unhealthy",
         "no_data",
+        "healthy",
+        "healthy",
+        "healthy",
+        "healthy",
+        "healthy",
+        "healthy",
         "healthy",
         "healthy",
         "healthy",
@@ -55,7 +63,9 @@ const snapshot: TrayProviderMiniSnapshot = {
       providerId: 2,
       providerName: "备用供应商",
       unavailableReasons: ["circuit_open"],
-      availability: Array.from({ length: 12 }, () => "no_data"),
+      successCount: 0,
+      failureCount: 4,
+      availability: Array.from({ length: 18 }, () => "no_data"),
     },
   ],
   unavailable: false,
@@ -69,7 +79,7 @@ describe("TrayProviderMiniApp", () => {
     vi.mocked(setTrayProviderMiniWindowHovered).mockResolvedValue();
   });
 
-  it("renders the frozen CLI route, compact reasons, and twelve stable cells", async () => {
+  it("renders the frozen CLI route, totals, and eighteen stable cells", async () => {
     render(<TrayProviderMiniApp />);
 
     expect(await screen.findByText("Codex")).toBeInTheDocument();
@@ -77,9 +87,11 @@ describe("TrayProviderMiniApp", () => {
     expect(screen.getByText("6h")).toBeInTheDocument();
     expect(screen.getAllByText("限")).toHaveLength(1);
     expect(screen.getByText("熔")).toBeInTheDocument();
+    expect(screen.getByLabelText("总计 成功 23，失败 1")).toBeInTheDocument();
+    expect(screen.getByLabelText("总计 成功 0，失败 4")).toBeInTheDocument();
     const timelines = screen.getAllByLabelText("供应商可用性");
-    expect(within(timelines[0]!).getAllByTitle(/正常|异常|无数据/)).toHaveLength(12);
-    expect(within(timelines[1]!).getAllByTitle("无数据")).toHaveLength(12);
+    expect(within(timelines[0]!).getAllByTitle(/正常|异常|无数据/)).toHaveLength(18);
+    expect(within(timelines[1]!).getAllByTitle("无数据")).toHaveLength(18);
   });
 
   it("reports pointer handoff without adding focusable controls", async () => {
