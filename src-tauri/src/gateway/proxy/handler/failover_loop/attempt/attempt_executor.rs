@@ -336,7 +336,7 @@ where
         );
     }
     if input.managed_model_route.is_some() || prepared.configured_model_route.is_some() {
-        if let Some(abort_guard) = abort_guard {
+        if let Some(abort_guard) = abort_guard.as_deref_mut() {
             emit_started_event(
                 input,
                 prepared,
@@ -395,6 +395,10 @@ where
         attempt_started_ms,
         attempt_started: Instant::now(),
     };
+
+    if let Some(abort_guard) = abort_guard.as_deref_mut() {
+        abort_guard.mark_in_flight_upstream_sent();
+    }
 
     let send_result = send::send_upstream_with_first_byte_timeout(
         ctx,
@@ -645,6 +649,7 @@ fn emit_started_event<R: tauri::Runtime>(
         provider_name: prepared.provider_name_base.clone(),
         base_url: prepared.provider_base_url_base.clone(),
         outcome: "started".to_string(),
+        upstream_sent: false,
         status: None,
         provider_index: Some(prepared.provider_index),
         retry_index: Some(retry_index),

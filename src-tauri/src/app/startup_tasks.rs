@@ -57,6 +57,7 @@ async fn run(app_handle: tauri::AppHandle) {
     }
 
     crate::request_logs::spawn_retention_task(app_handle.clone(), db.clone());
+    crate::domain::provider_availability::spawn_retention_task(db.clone());
     tauri::async_runtime::spawn(crate::app::observer::start_best_effort(app_handle.clone()));
 
     set_startup_stage(&app_handle, AppStartupStage::ReadingSettings);

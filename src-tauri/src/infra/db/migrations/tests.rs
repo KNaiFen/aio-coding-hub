@@ -1476,6 +1476,7 @@ fn baseline_v25_creates_complete_schema_for_fresh_install() {
     // Core tables from baseline
     assert!(tables.contains(&"providers".to_string()));
     assert!(tables.contains(&"request_logs".to_string()));
+    assert!(tables.contains(&"provider_availability_observations".to_string()));
     assert!(tables.contains(&"prompts".to_string()));
     assert!(tables.contains(&"mcp_servers".to_string()));
     assert!(tables.contains(&"skills".to_string()));
@@ -2473,6 +2474,42 @@ PRAGMA user_version = 43;
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("read v44 user version");
     assert_eq!(user_version, 44);
+}
+
+#[test]
+fn migrate_v44_to_v45_adds_provider_availability_observations() {
+    let mut conn = Connection::open_in_memory().expect("open v44 migration db");
+    conn.execute_batch(
+        r#"
+CREATE TABLE providers (id INTEGER PRIMARY KEY);
+PRAGMA user_version = 44;
+"#,
+    )
+    .expect("create v44 fixture");
+
+    v44_to_v45::migrate_v44_to_v45(&mut conn).expect("migrate v44->v45");
+
+    let user_version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("read migrated user version");
+    let columns: i64 = conn
+        .query_row(
+            "SELECT COUNT(1) FROM pragma_table_info('provider_availability_observations')",
+            [],
+            |row| row.get(0),
+        )
+        .expect("inspect provider availability columns");
+    let indexes: i64 = conn
+        .query_row(
+            "SELECT COUNT(1) FROM sqlite_master WHERE type = 'index' AND tbl_name = 'provider_availability_observations'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("inspect provider availability indexes");
+
+    assert_eq!(user_version, 45);
+    assert_eq!(columns, 5);
+    assert!(indexes >= 3, "primary key and both time indexes must exist");
 }
 
 #[test]

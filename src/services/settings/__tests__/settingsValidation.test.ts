@@ -12,6 +12,7 @@ describe("services/settings/settingsValidation", () => {
         preferredPort: 1024,
         logRetentionDays: 3650,
         providerCooldownSeconds: 0,
+        providerAvailabilityHours: 6,
         providerBaseUrlPingCacheTtlSeconds: 1,
         upstreamFirstByteTimeoutSeconds: 3600,
         upstreamStreamIdleTimeoutSeconds: 0,
@@ -24,6 +25,13 @@ describe("services/settings/settingsValidation", () => {
     ).toBeNull();
 
     expect(validateSettingsSetInput({ upstreamStreamIdleTimeoutSeconds: 60 })).toBeNull();
+  });
+
+  it("accepts only the supported provider availability ranges", () => {
+    for (const hours of [3, 6, 12]) {
+      expect(validateSettingsSetInput({ providerAvailabilityHours: hours })).toBeNull();
+    }
+    expect(validateSettingsSetInput({ providerAvailabilityHours: 4 })).toContain("3、6 或 12");
   });
 
   it("rejects numeric settings outside backend bounds before IPC", () => {

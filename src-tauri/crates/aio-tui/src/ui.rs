@@ -1551,6 +1551,7 @@ mod tests {
                 checked_at_unix: 1,
             }),
             account_usage: None,
+            availability: None,
         }
     }
 

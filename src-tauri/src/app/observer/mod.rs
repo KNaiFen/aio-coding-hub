@@ -5,13 +5,13 @@ mod snapshot;
 
 use aio_observer_protocol::{
     CliScope, ObserverApiError, ObserverApiErrorResponse, ObserverHealthV1, ObserverSnapshotV1,
-    OBSERVER_HISTORY_LIMIT_MAX, OBSERVER_PROTOCOL_VERSION,
+    ObserverProviderAvailabilityTestResult, OBSERVER_HISTORY_LIMIT_MAX, OBSERVER_PROTOCOL_VERSION,
 };
-use axum::extract::rejection::QueryRejection;
-use axum::extract::{Query, State};
+use axum::extract::rejection::{PathRejection, QueryRejection};
+use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -23,6 +23,8 @@ use tauri::Manager;
 use tokio::sync::{oneshot, Mutex, OwnedSemaphorePermit, Semaphore};
 
 const OBSERVER_MAX_CONCURRENT_REQUESTS: usize = 2;
+const OBSERVER_MAX_CONCURRENT_PROBES: usize = 2;
+const OBSERVER_PROBE_TIMEOUT: Duration = Duration::from_secs(20);
 const ACTIVE_CACHE_TTL: Duration = Duration::from_millis(400);
 const IDLE_CACHE_TTL: Duration = Duration::from_millis(1500);
 const DB_QUERY_PERMIT_TIMEOUT: Duration = Duration::from_millis(1600);
@@ -62,6 +64,7 @@ struct ObserverHttpState {
     db: Arc<Mutex<ObserverDbState>>,
     token: Arc<str>,
     limiter: Arc<Semaphore>,
+    probe_limiter: Arc<Semaphore>,
     db_query_limiter: Arc<Semaphore>,
     cache: Arc<Mutex<HashMap<CacheKey, CachedSnapshot>>>,
 }
@@ -131,12 +134,17 @@ async fn start(app: tauri::AppHandle) -> crate::shared::error::AppResult<()> {
         db: Arc::new(Mutex::new(ObserverDbState::default())),
         token: Arc::from(descriptor.token.as_str()),
         limiter: Arc::new(Semaphore::new(OBSERVER_MAX_CONCURRENT_REQUESTS)),
+        probe_limiter: Arc::new(Semaphore::new(OBSERVER_MAX_CONCURRENT_PROBES)),
         db_query_limiter: Arc::new(Semaphore::new(1)),
         cache: Arc::new(Mutex::new(HashMap::new())),
     };
     let router = Router::new()
         .route("/api/observer/v1/health", get(health))
         .route("/api/observer/v1/snapshot", get(snapshot_handler))
+        .route(
+            "/api/observer/v1/providers/:provider_id/test-availability",
+            post(provider_test_availability_handler),
+        )
         .with_state(http_state);
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
 
@@ -311,6 +319,117 @@ async fn snapshot_handler(
         },
     );
     secured(Json(snapshot).into_response())
+}
+
+async fn provider_test_availability_handler(
+    State(state): State<ObserverHttpState>,
+    headers: HeaderMap,
+    provider_id: Result<Path<i64>, PathRejection>,
+) -> Response {
+    if !authorized(&headers, &state.token) {
+        return api_error(StatusCode::UNAUTHORIZED, "OBS_UNAUTHORIZED", "unauthorized");
+    }
+    let provider_id = match provider_id {
+        Ok(Path(provider_id)) if provider_id > 0 => provider_id,
+        _ => {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "OBS_INVALID_INPUT",
+                "invalid provider id",
+            )
+        }
+    };
+    let _permit = match state.probe_limiter.clone().try_acquire_owned() {
+        Ok(permit) => permit,
+        Err(_) => {
+            return api_error(
+                StatusCode::TOO_MANY_REQUESTS,
+                "OBS_PROBE_BUSY",
+                "provider probe is busy",
+            )
+        }
+    };
+    let Some(db_state) = state.app.try_state::<crate::app_state::DbInitState>() else {
+        return api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "OBS_UNAVAILABLE",
+            "provider probe is unavailable",
+        );
+    };
+    let db = match crate::app_state::ensure_db_ready(state.app.clone(), db_state.inner()).await {
+        Ok(db) => db,
+        Err(_) => {
+            return api_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "OBS_UNAVAILABLE",
+                "provider probe is unavailable",
+            )
+        }
+    };
+    let result = match tokio::time::timeout(
+        OBSERVER_PROBE_TIMEOUT,
+        crate::domain::provider_availability::test_provider_availability(
+            &state.app,
+            db,
+            provider_id,
+        ),
+    )
+    .await
+    {
+        Ok(Ok(result)) => result,
+        Ok(Err(error)) if error.code() == "DB_NOT_FOUND" => {
+            return api_error(
+                StatusCode::NOT_FOUND,
+                "OBS_PROVIDER_NOT_FOUND",
+                "provider not found",
+            )
+        }
+        Ok(Err(_)) => {
+            return api_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "OBS_PROBE_FAILED",
+                "provider probe failed",
+            )
+        }
+        Err(_) => {
+            return api_error(
+                StatusCode::GATEWAY_TIMEOUT,
+                "OBS_PROBE_TIMEOUT",
+                "provider probe timed out",
+            )
+        }
+    };
+    let error = (!result.ok).then(|| match result.status {
+        Some(401 | 403) => "认证失败".to_string(),
+        Some(status) if status >= 500 => "上游服务异常".to_string(),
+        Some(_) => "供应商响应不可用".to_string(),
+        None => "连接或请求失败".to_string(),
+    });
+    secured(
+        Json(ObserverProviderAvailabilityTestResult {
+            ok: result.ok,
+            provider_id: result.provider_id,
+            provider_name: bounded_observer_text(&result.provider_name, 128),
+            status: result.status,
+            latency_ms: result.latency_ms,
+            error,
+        })
+        .into_response(),
+    )
+}
+
+fn bounded_observer_text(value: &str, max_chars: usize) -> String {
+    value
+        .chars()
+        .filter(|character| {
+            !character.is_control()
+                && !matches!(
+                    *character,
+                    '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
+                )
+        })
+        .take(max_chars)
+        .collect()
 }
 
 async fn wait_for_db_query_permit(limiter: Arc<Semaphore>) -> Option<OwnedSemaphorePermit> {

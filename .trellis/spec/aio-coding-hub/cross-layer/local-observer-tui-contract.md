@@ -2,7 +2,7 @@
 
 ## Scope
 
-The desktop application exposes a read-only, authenticated observer for a
+The desktop application exposes an observational, authenticated observer for a
 standalone `aio-tui` process running on the same machine. This surface is for
 SSH and narrow-terminal observability; it is not a second gateway and is not a
 remote administration API.
@@ -21,14 +21,20 @@ remote administration API.
   `/api/observer/v1/snapshot?cli=<scope>&history_limit=0..50`. The snapshot
   accepts optional `include_providers=true`; its response field is additive and
   optional so old clients and old observers can fail open independently.
+- The sole active operation is authenticated `POST`
+  `/api/observer/v1/providers/<provider_id>/test-availability`. It is bounded by
+  a separate concurrency limit and timeout, returns a secret-free fixed-shape
+  result, and never writes availability history, routing, limits, or circuit
+  state.
 - Responses are `no-store` and `nosniff`. Invalid input, authentication, busy,
   and internal failures use fixed structured messages without body, URL,
   credentials, or decoder details.
 
 ## Isolation and fail-open behavior
 
-- The observer never listens on the gateway port, calls an upstream provider,
-  mutates request state, or sends IPC commands.
+- The observer never listens on the gateway port, mutates request state, or
+  sends IPC commands. Only the explicit manual availability-test POST may call
+  one upstream provider; snapshot and health requests remain read-only.
 - Snapshot database reads use a separate single-connection SQLite read-only,
   `query_only` pool with short timeouts. Concurrent cache misses wait fairly for
   that query lane within a bounded deadline; contention timeout returns
@@ -86,6 +92,9 @@ remote administration API.
   Grok, and Gemini. A custom-route membership never makes a globally disabled
   provider eligible or preferred. Provider projection failures make only that
   optional section unavailable and never enter routing or health accounting.
+- Each provider may include a 12-bucket, 3/6/12-hour availability timeline
+  derived only from terminal real-upstream attempts. Manual tests, local
+  failures, skipped attempts, and aborted requests never contribute facts.
 
 ## TUI behavior
 

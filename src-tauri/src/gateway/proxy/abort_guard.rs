@@ -119,6 +119,12 @@ impl<R: tauri::Runtime> RequestAbortGuard<R> {
     pub(super) fn capture_in_flight_attempt(&mut self, attempt: &FailoverAttempt) {
         self.in_flight_attempt = Some(attempt.clone());
     }
+
+    pub(super) fn mark_in_flight_upstream_sent(&mut self) {
+        if let Some(attempt) = self.in_flight_attempt.as_mut() {
+            attempt.upstream_sent = true;
+        }
+    }
 }
 
 impl<R: tauri::Runtime> Drop for RequestAbortGuard<R> {
@@ -174,6 +180,7 @@ mod tests {
             provider_name: "Claude Bridge".to_string(),
             base_url: "https://example.com".to_string(),
             outcome: "started".to_string(),
+            upstream_sent: true,
             status: None,
             provider_index: Some(1),
             retry_index: Some(1),

@@ -84,6 +84,7 @@ fn respond_warmup_intercept<R: tauri::Runtime>(
         provider_name: "Warmup".to_string(),
         base_url: "/__aio__/warmup".to_string(),
         outcome: "success".to_string(),
+        upstream_sent: false,
         status: Some(StatusCode::OK.as_u16()),
         provider_index: None,
         retry_index: None,

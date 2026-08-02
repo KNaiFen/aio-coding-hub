@@ -943,6 +943,23 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async providerAvailabilityTimelinesGet(
+    providerIds: number[],
+    bucketCount: number
+  ): Promise<Result<ProviderAvailabilityTimeline[], string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("provider_availability_timelines_get", {
+          providerIds,
+          bucketCount,
+        }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async providerOauthStartFlow(
     cliKey: string,
     providerId: number
@@ -3078,6 +3095,7 @@ export type FailoverAttempt = {
   provider_name: string;
   base_url: string;
   outcome: string;
+  upstream_sent: boolean;
   status: number | null;
   provider_index: number | null;
   retry_index: number | null;
@@ -3971,6 +3989,23 @@ export type ProviderAvailabilityResult = {
   error: string | null;
   response_preview: string | null;
 };
+export type ProviderAvailabilityState = "healthy" | "unhealthy" | "no_data";
+export type ProviderAvailabilityBucket = {
+  start_at_ms: number;
+  end_at_ms: number;
+  success_count: number;
+  failure_count: number;
+  state: ProviderAvailabilityState;
+};
+export type ProviderAvailabilityTimeline = {
+  provider_id: number;
+  hours: number;
+  bucket_count: number;
+  bucket_minutes: number;
+  success_count: number;
+  failure_count: number;
+  buckets: ProviderAvailabilityBucket[];
+};
 export type ProviderBaseUrlMode = "order" | "ping";
 export type ProviderContribution = {
   providerType: string;
@@ -4360,6 +4395,7 @@ export type SettingsUpdate = {
   logRetentionDays: number;
   requestLogRetentionDays: number | null;
   providerCooldownSeconds: number | null;
+  providerAvailabilityHours: number | null;
   providerBaseUrlPingCacheTtlSeconds: number | null;
   upstreamFirstByteTimeoutSeconds: number | null;
   upstreamStreamIdleTimeoutSeconds: number | null;
@@ -4424,6 +4460,7 @@ export type SettingsView = {
   log_retention_days: number;
   request_log_retention_days: number;
   provider_cooldown_seconds: number;
+  provider_availability_hours: number;
   provider_base_url_ping_cache_ttl_seconds: number;
   upstream_first_byte_timeout_seconds: number;
   upstream_stream_idle_timeout_seconds: number;

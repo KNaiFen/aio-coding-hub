@@ -123,6 +123,7 @@ where
                 provider_name: prepared.provider_name_base.clone(),
                 base_url: prepared.provider_base_url_base.clone(),
                 outcome: format!("managed_model_invalid: code={error_code}"),
+                upstream_sent: false,
                 status: Some(StatusCode::BAD_REQUEST.as_u16()),
                 provider_index: Some(prepared.provider_index),
                 retry_index: Some(indices.retry_index),

@@ -708,6 +708,14 @@ pub(super) fn sanitize_provider_cooldown_seconds(settings: &mut AppSettings) -> 
     false
 }
 
+pub(super) fn sanitize_provider_availability_hours(settings: &mut AppSettings) -> bool {
+    if !matches!(settings.provider_availability_hours, 3 | 6 | 12) {
+        settings.provider_availability_hours = DEFAULT_PROVIDER_AVAILABILITY_HOURS;
+        return true;
+    }
+    false
+}
+
 pub(super) fn sanitize_provider_base_url_ping_cache_ttl_seconds(
     settings: &mut AppSettings,
 ) -> bool {
@@ -1351,6 +1359,17 @@ fn migrate_add_upstream_error_response_rules(
     )
 }
 
+fn migrate_add_provider_availability_hours(
+    settings: &mut AppSettings,
+    schema_version_present: bool,
+) -> bool {
+    migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_ADD_PROVIDER_AVAILABILITY_HOURS,
+    )
+}
+
 type SettingsMigration = fn(&mut AppSettings, bool) -> bool;
 
 const SETTINGS_MIGRATIONS: &[SettingsMigration] = &[
@@ -1393,6 +1412,7 @@ const SETTINGS_MIGRATIONS: &[SettingsMigration] = &[
     migrate_update_releases_url_to_user_fork,
     migrate_add_model_routing_policy,
     migrate_add_upstream_error_response_rules,
+    migrate_add_provider_availability_hours,
 ];
 
 fn apply_settings_migrations(settings: &mut AppSettings, schema_version_present: bool) -> bool {
@@ -1417,6 +1437,7 @@ pub(super) fn repair_settings(
     repaired |= sanitize_upstream_error_response_rules(&mut settings.upstream_error_response_rules);
     repaired |= sanitize_circuit_breaker_settings(settings);
     repaired |= sanitize_provider_cooldown_seconds(settings);
+    repaired |= sanitize_provider_availability_hours(settings);
     repaired |= sanitize_provider_base_url_ping_cache_ttl_seconds(settings);
     repaired |= sanitize_upstream_timeouts(settings);
     repaired |= sanitize_response_fixer_limits(settings);
@@ -1512,6 +1533,39 @@ mod tests {
             SCHEMA_VERSION_ADD_UPSTREAM_ERROR_RESPONSE_RULES
         );
         assert!(settings.upstream_error_response_rules.is_empty());
+    }
+
+    #[test]
+    fn migrate_add_provider_availability_hours_advances_schema() {
+        let mut settings = AppSettings {
+            schema_version: SCHEMA_VERSION_ADD_UPSTREAM_ERROR_RESPONSE_RULES,
+            ..Default::default()
+        };
+
+        assert!(migrate_add_provider_availability_hours(&mut settings, true));
+        assert_eq!(
+            settings.schema_version,
+            SCHEMA_VERSION_ADD_PROVIDER_AVAILABILITY_HOURS
+        );
+        assert_eq!(
+            settings.provider_availability_hours,
+            DEFAULT_PROVIDER_AVAILABILITY_HOURS
+        );
+    }
+
+    #[test]
+    fn sanitize_provider_availability_hours_restores_default() {
+        let mut settings = AppSettings {
+            provider_availability_hours: 4,
+            ..Default::default()
+        };
+
+        assert!(sanitize_provider_availability_hours(&mut settings));
+        assert_eq!(
+            settings.provider_availability_hours,
+            DEFAULT_PROVIDER_AVAILABILITY_HOURS
+        );
+        assert!(!sanitize_provider_availability_hours(&mut settings));
     }
 
     #[test]
