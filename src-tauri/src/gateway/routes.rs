@@ -900,6 +900,8 @@ mod tests {
                 account_usage_credentials_copy_from_provider_id: None,
                 upstream_retry_policy_override: None,
                 upstream_retry_policy_override_specified: false,
+                model_routing_policy_override: None,
+                model_routing_policy_override_specified: false,
             },
         )
         .expect("insert provider")
@@ -1040,6 +1042,8 @@ INSERT INTO codex_managed_profiles(
                 account_usage_credentials_copy_from_provider_id: None,
                 upstream_retry_policy_override: None,
                 upstream_retry_policy_override_specified: false,
+                model_routing_policy_override: None,
+                model_routing_policy_override_specified: false,
             },
         )
         .expect("insert oauth provider")
@@ -1097,6 +1101,8 @@ INSERT INTO codex_managed_profiles(
                 account_usage_credentials_copy_from_provider_id: None,
                 upstream_retry_policy_override: None,
                 upstream_retry_policy_override_specified: false,
+                model_routing_policy_override: None,
+                model_routing_policy_override_specified: false,
             },
         )
         .expect("insert cx2cc bridge provider")

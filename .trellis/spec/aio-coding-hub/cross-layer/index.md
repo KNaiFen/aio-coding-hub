@@ -11,6 +11,9 @@ TypeScript bindings, frontend adapters, and React UI.
   stable provider/model identity, provider-scoped discovery, hash-owned profile
   files and picker catalogs, explicit reasoning/context capabilities, exact
   readable/legacy alias routing, and wire-vs-observed diagnostics.
+- [Configured model routing contract](./configured-model-routing-contract.md):
+  global and provider policies, original-model matching, final wire rewrites,
+  authoritative target-model costing, and fail-open observations.
 - [Gateway failover route contract](./gateway-failover-route-contract.md):
   common provider-gate ownership, Ready-provider limits, persisted attempts,
   route hops, and UI count semantics.
@@ -43,6 +46,9 @@ TypeScript bindings, frontend adapters, and React UI.
   authenticated loopback snapshots, read-only isolation, global inference
   metrics, quota-aware preferred-provider projection, offline behavior, and
   four-platform standalone TUI assets.
+- [Task-complete notification contract](./task-complete-notification-contract.md):
+  per-CLI quiet periods, generation ownership, backend active-request checks,
+  and notification-only failure isolation.
 
 ## Pre-Development Checklist
 
@@ -68,6 +74,18 @@ When changing Codex provider models, managed profiles, or alias routing:
 5. For provider-model capability changes, trace the configured flag, effort
    set/default, and context through schema migration, IPC, adapter/query, UI,
    Profile creation gate, Profile-set hash, catalog rebuild, and compensation.
+
+When changing configured model routing:
+
+1. Read [Configured model routing contract](./configured-model-routing-contract.md).
+2. Trace global settings and provider whole-policy overrides through migration,
+   persistence, IPC, frontend validation, sharing, and full backup/restore.
+3. Keep matching anchored to the original client model and apply the configured
+   rewrite once, after protocol bridges and built-in mappings.
+4. Verify the final provider, target model, and target-model price basis stay
+   aligned across attempts, logs, the usage ledger, limits, desktop, and TUI.
+5. Prove malformed or future configuration and observation metadata fail open
+   without changing forwarding, retries, circuit health, or rendering.
 
 When changing provider account-usage fetching:
 
@@ -176,6 +194,14 @@ When changing the local observer or standalone TUI:
 6. Verify stale/offline recovery, protocol mismatch, narrow CJK rendering,
    stable selection keys, and all four standalone TUI release archives.
 
+When changing task-complete notifications:
+
+1. Read [Task-complete notification contract](./task-complete-notification-contract.md).
+2. Preserve per-CLI quiet periods and invalidate every stale timer or async
+   snapshot result with the owning Session generation.
+3. Check backend active inference requests for the same CLI before notifying;
+   snapshot failures must skip notification without affecting request handling.
+
 ## Quality Check
 
 - Regenerate and verify `src/generated/bindings.ts` from Rust source.
@@ -193,6 +219,10 @@ When changing the local observer or standalone TUI:
   `pnpm check:generated-bindings`.
 - When changing gateway selection or failover, verify skipped candidates,
   Ready-provider limits, route projection, and attempt/transition labels together.
+- When changing configured model routing, verify exact case-sensitive matching,
+  provider override/disable/inherit semantics, all four wire protocols, compact
+  requests, auxiliary exclusions, target-model pricing, and malformed-marker
+  fail-open behavior together.
 - When changing managed Codex models, verify exact UUID lookup, one bound
   provider, readable-profile plus legacy-UUID lookup, no cross-provider
   failover, canonical/wire/observed separation, stale-mismatch clearing,
@@ -222,6 +252,9 @@ When changing the local observer or standalone TUI:
 - Verify observer failures, read-only DB contention, invalid descriptors,
   malformed snapshot JSON, and circuit peeks leave gateway forwarding,
   retries, provider health, and shutdown behavior unchanged.
+- Verify notification timers use Codex 120 seconds and other CLIs 30 seconds,
+  suppress while the same CLI has an active inference request, and skip safely
+  on snapshot failure or stale async completion.
 - Verify preferred-provider spend/OAuth eligibility failures mark only that
   observer section unavailable and never mutate limits, circuit, or routing.
 - When changing config migration payloads, verify export/import boundary

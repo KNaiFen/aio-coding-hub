@@ -1518,6 +1518,7 @@ mod tests {
             cost_usd: None,
             route: Vec::new(),
             context_compaction: None,
+            configured_model_route: None,
         }
     }
 

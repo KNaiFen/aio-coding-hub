@@ -89,7 +89,8 @@ SELECT
   source_provider_id,
   (SELECT source.provider_uuid FROM providers source WHERE source.id = providers.source_provider_id)
     AS source_provider_uuid,
-  bridge_type
+  bridge_type,
+  model_routing_policy_json
 FROM providers
 ORDER BY cli_key ASC, sort_order ASC, id ASC
 "#,
@@ -154,6 +155,10 @@ ORDER BY cli_key ASC, sort_order ASC, id ASC
                     .and_then(|source_id| provider_cli_key_by_id.get(&source_id).cloned()),
                 source_provider_uuid: row.get("source_provider_uuid")?,
                 bridge_type: row.get("bridge_type")?,
+                model_routing_policy_override:
+                    crate::providers::model_routing_policy_override_from_json(
+                        row.get("model_routing_policy_json")?,
+                    ),
                 account_usage_config: None,
                 account_usage_credentials: None,
             })

@@ -72,6 +72,10 @@ remote administration API.
   selected detail unexpectedly.
 - Request projections are bounded and never contain body text, upstream URLs,
   credentials, raw error JSON, or other large configuration blobs.
+- A request projection may include a bounded optional configured-model-route
+  observation only when an applied provider-scoped marker is valid. Unknown,
+  malformed, future, or mismatched-provider markers are omitted without making
+  the request or snapshot unavailable.
 - The optional provider projection is capped at 512 rows. It contains only
   provider/CLI names, route rank and enable flags, authentication kind, fixed
   eligibility labels, non-mutating circuit snapshots, spend-window totals, and
@@ -115,6 +119,9 @@ remote administration API.
 - Status/request polling omits the provider projection. Entering the provider
   view requests it; if an older observer rejects the additive query, the client
   retries the legacy snapshot and marks only the provider view unsupported.
+- Request rows retain the original client model and render an applied configured
+  route as `source->effective` with optional reasoning effort. Old observers or
+  invalid optional route fields continue to render the ordinary model safely.
 
 ## Release boundary
 

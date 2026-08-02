@@ -46,6 +46,7 @@ export type CodexReasoningEffortSource = "request" | "default" | "unknown";
 export type ModelRouteReasoningEffortSource =
   | CodexReasoningEffortSource
   | "model_default"
+  | "configured_route"
   | "response";
 
 export type CodexReasoningEffortResolution = {
@@ -75,6 +76,20 @@ export type AioManagedModelRoute = {
   remoteModelId: string;
   requestedUpstreamModel: string;
   pricedModel: string | null;
+  applied: true;
+};
+
+export type ConfiguredModelRoute = {
+  providerId: number;
+  providerName: string | null;
+  policySource: "global" | "provider";
+  sourceModel: string;
+  targetModel: string | null;
+  effectiveModel: string;
+  reasoningEffort: string | null;
+  pricedCliKey: string | null;
+  modelApplied: boolean;
+  reasoningEffortApplied: boolean;
   applied: true;
 };
 
@@ -320,6 +335,7 @@ function normalizeModelRouteReasoningEffortSource(value: unknown): ModelRouteRea
   if (source === "request") return "request";
   if (source === "default") return "default";
   if (source === "model_default") return "model_default";
+  if (source === "configured_route") return "configured_route";
   if (source === "response") return "response";
   return "unknown";
 }
@@ -390,6 +406,7 @@ export function formatModelRouteReasoningEffortSource(
   if (source === "request") return "请求显式";
   if (source === "default") return "默认推断";
   if (source === "model_default") return "模型默认推断";
+  if (source === "configured_route") return "配置路由";
   if (source === "response") return "返回显式";
   return "未知";
 }
@@ -397,6 +414,12 @@ export function formatModelRouteReasoningEffortSource(
 function normalizeRouteText(value: unknown): string | null {
   const text = parsedSettingString(value).trim();
   return text ? text : null;
+}
+
+function normalizeConfiguredRouteText(value: unknown, maxChars = 256): string | null {
+  const text = normalizeRouteText(value);
+  if (!text || [...text].length > maxChars) return null;
+  return text;
 }
 
 function normalizeRouteNumber(value: unknown): number | null {
@@ -485,6 +508,70 @@ export function hasModelRouteMappingSpecialSetting(
   specialSettingsJson: string | null | undefined
 ): boolean {
   return resolveModelRouteMappingFromSpecialSettings(specialSettingsJson) !== null;
+}
+
+function normalizeConfiguredModelRouteSetting(
+  setting: ParsedRequestLogSpecialSetting
+): ConfiguredModelRoute | null {
+  if (setting.type !== "configured_model_route" || setting.applied !== true) return null;
+
+  const providerId = normalizeRouteNumber(setting.providerId);
+  const sourceModel = normalizeConfiguredRouteText(setting.sourceModel);
+  const effectiveModel = normalizeConfiguredRouteText(setting.effectiveModel);
+  const policySource = setting.policySource;
+  const modelApplied = setting.modelApplied === true;
+  const reasoningEffortApplied = setting.reasoningEffortApplied === true;
+  if (
+    providerId == null ||
+    providerId <= 0 ||
+    !sourceModel ||
+    !effectiveModel ||
+    (policySource !== "global" && policySource !== "provider") ||
+    (!modelApplied && !reasoningEffortApplied)
+  ) {
+    return null;
+  }
+
+  const targetModel = normalizeConfiguredRouteText(setting.targetModel);
+  const reasoningEffort = normalizeConfiguredRouteText(setting.reasoningEffort, 128);
+  if ((modelApplied && !targetModel) || (reasoningEffortApplied && !reasoningEffort)) {
+    return null;
+  }
+
+  return {
+    providerId,
+    providerName: normalizeConfiguredRouteText(setting.providerName, 128),
+    policySource,
+    sourceModel,
+    targetModel,
+    effectiveModel,
+    reasoningEffort,
+    pricedCliKey: normalizeConfiguredRouteText(setting.pricedCliKey, 32),
+    modelApplied,
+    reasoningEffortApplied,
+    applied: true,
+  };
+}
+
+export function resolveConfiguredModelRouteFromSpecialSettings(
+  specialSettingsJson: string | null | undefined,
+  finalProviderId?: number | null
+): ConfiguredModelRoute | null {
+  const routes = parseRequestLogSpecialSettings(specialSettingsJson)
+    .map(normalizeConfiguredModelRouteSetting)
+    .filter((route): route is ConfiguredModelRoute => route !== null);
+  if (routes.length === 0) return null;
+
+  if (finalProviderId != null) {
+    return (
+      routes
+        .slice()
+        .reverse()
+        .find((route) => route.providerId === finalProviderId) ?? null
+    );
+  }
+
+  return routes[routes.length - 1] ?? null;
 }
 
 function normalizeAioManagedModelRouteSetting(

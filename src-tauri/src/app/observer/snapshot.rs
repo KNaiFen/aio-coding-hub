@@ -7,11 +7,11 @@ use crate::{
     usage_stats,
 };
 use aio_observer_protocol::{
-    CliScope, ObserverContextCompaction, ObserverDominantProvider, ObserverGatewayStatus,
-    ObserverPreferredProvider, ObserverProviderCollection, ObserverProviderOAuthQuota,
-    ObserverProviderSpendWindow, ObserverProviderStatus, ObserverRequest, ObserverRequestState,
-    ObserverRequestUsage, ObserverRouteHop, ObserverSection, ObserverSnapshotV1,
-    ObserverTodayUsage, OBSERVER_PROTOCOL_VERSION,
+    CliScope, ObserverConfiguredModelRoute, ObserverContextCompaction, ObserverDominantProvider,
+    ObserverGatewayStatus, ObserverPreferredProvider, ObserverProviderCollection,
+    ObserverProviderOAuthQuota, ObserverProviderSpendWindow, ObserverProviderStatus,
+    ObserverRequest, ObserverRequestState, ObserverRequestUsage, ObserverRouteHop, ObserverSection,
+    ObserverSnapshotV1, ObserverTodayUsage, OBSERVER_PROTOCOL_VERSION,
 };
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -700,6 +700,14 @@ fn project_active(
     folders: &HashMap<FolderKey, String>,
     now_ms: i64,
 ) -> ObserverRequest {
+    let configured_model_route = item.current_attempt.as_ref().and_then(|attempt| {
+        parse_configured_model_route(
+            attempt
+                .observer_special_settings_json()
+                .or(item.special_settings_json.as_deref()),
+            Some(attempt.observer_provider_id()),
+        )
+    });
     let attempt_count = item
         .current_attempt
         .as_ref()
@@ -752,6 +760,7 @@ fn project_active(
         cost_usd: None,
         route,
         context_compaction: parse_context_compaction(item.special_settings_json.as_deref()),
+        configured_model_route,
     }
 }
 
@@ -816,6 +825,10 @@ fn project_terminal(
             .filter(|value| value.is_finite() && *value >= 0.0),
         route,
         context_compaction: parse_context_compaction(row.special_settings_json.as_deref()),
+        configured_model_route: parse_configured_model_route(
+            row.special_settings_json.as_deref(),
+            Some(row.final_provider_id),
+        ),
     }
 }
 
@@ -944,6 +957,57 @@ fn parse_context_compaction(raw: Option<&str>) -> Option<ObserverContextCompacti
     })
 }
 
+fn parse_configured_model_route(
+    raw: Option<&str>,
+    final_provider_id: Option<i64>,
+) -> Option<ObserverConfiguredModelRoute> {
+    let raw = raw?.trim();
+    if raw.is_empty() || raw.len() > SPECIAL_SETTINGS_MAX_BYTES {
+        return None;
+    }
+    let parsed = serde_json::from_str::<Value>(raw).ok()?;
+    let values = match &parsed {
+        Value::Array(items) => items.iter().collect::<Vec<_>>(),
+        Value::Object(_) => vec![&parsed],
+        _ => return None,
+    };
+    values.into_iter().rev().find_map(|value| {
+        let object = value.as_object()?;
+        if object.get("type")?.as_str()? != "configured_model_route"
+            || !object.get("applied")?.as_bool()?
+        {
+            return None;
+        }
+        let provider_id = object.get("providerId")?.as_i64()?;
+        if provider_id <= 0 || final_provider_id.is_some_and(|expected| expected != provider_id) {
+            return None;
+        }
+        let source_model = bounded_optional(object.get("sourceModel")?.as_str(), 256)?;
+        let effective_model = bounded_optional(object.get("effectiveModel")?.as_str(), 256)?;
+        let policy_source = known_value(object.get("policySource")?, &["global", "provider"])?;
+        let model_applied = object.get("modelApplied")?.as_bool()?;
+        let reasoning_effort_applied = object.get("reasoningEffortApplied")?.as_bool()?;
+        if !model_applied && !reasoning_effort_applied {
+            return None;
+        }
+        let reasoning_effort = object
+            .get("reasoningEffort")
+            .and_then(Value::as_str)
+            .and_then(|value| bounded_optional(Some(value), 128));
+        if reasoning_effort_applied && reasoning_effort.is_none() {
+            return None;
+        }
+        Some(ObserverConfiguredModelRoute {
+            source_model,
+            effective_model,
+            reasoning_effort,
+            policy_source,
+            model_applied,
+            reasoning_effort_applied,
+        })
+    })
+}
+
 fn known_value(value: &Value, allowed: &[&str]) -> Option<String> {
     let value = value.as_str()?;
     allowed.contains(&value).then(|| value.to_string())
@@ -1019,6 +1083,8 @@ mod tests {
                 account_usage_credentials_copy_from_provider_id: None,
                 upstream_retry_policy_override: None,
                 upstream_retry_policy_override_specified: false,
+                model_routing_policy_override: None,
+                model_routing_policy_override_specified: false,
             },
         )
         .expect("insert observer provider")
@@ -1037,6 +1103,26 @@ mod tests {
         assert!(parse_context_compaction(Some(
             r#"[{"type":"codex_context_compaction","mode":"future"}]"#
         ))
+        .is_none());
+    }
+
+    #[test]
+    fn configured_model_route_projection_is_provider_scoped_and_fail_open() {
+        let raw = r#"[{"type":"configured_model_route","providerId":7,"policySource":"provider","sourceModel":"fable5","effectiveModel":"opus4.8","reasoningEffort":"low","applied":true,"modelApplied":true,"reasoningEffortApplied":true}]"#;
+        let route = parse_configured_model_route(Some(raw), Some(7)).expect("valid route marker");
+
+        assert_eq!(route.source_model, "fable5");
+        assert_eq!(route.effective_model, "opus4.8");
+        assert_eq!(route.reasoning_effort.as_deref(), Some("low"));
+        assert_eq!(route.policy_source, "provider");
+        assert!(parse_configured_model_route(Some(raw), Some(8)).is_none());
+        assert!(parse_configured_model_route(Some("not-json"), Some(7)).is_none());
+        assert!(parse_configured_model_route(
+            Some(
+                r#"[{"type":"configured_model_route","providerId":7,"policySource":"future","sourceModel":"fable5","effectiveModel":"opus4.8","applied":true,"modelApplied":true,"reasoningEffortApplied":false}]"#,
+            ),
+            Some(7),
+        )
         .is_none());
     }
 

@@ -408,6 +408,8 @@ fn seed_direct_codex_provider(
             account_usage_credentials_copy_from_provider_id: None,
             upstream_retry_policy_override: None,
             upstream_retry_policy_override_specified: false,
+            model_routing_policy_override: None,
+            model_routing_policy_override_specified: false,
         },
     )
     .expect("seed direct Codex provider")
@@ -619,6 +621,8 @@ fn config_v3_round_trips_private_account_usage_snapshot_while_v2_ignores_it() {
             account_usage_credentials_copy_from_provider_id: None,
             upstream_retry_policy_override: None,
             upstream_retry_policy_override_specified: false,
+            model_routing_policy_override: None,
+            model_routing_policy_override_specified: false,
         },
     )
     .expect("seed account provider");
@@ -2539,6 +2543,7 @@ fn config_import_v2_restores_full_prompt_and_skill_payload() {
             source_provider_cli_key: None,
             source_provider_uuid: None,
             bridge_type: None,
+            model_routing_policy_override: None,
             account_usage_config: None,
             account_usage_credentials: None,
         }],

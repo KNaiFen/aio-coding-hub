@@ -1,5 +1,6 @@
 import type {
   GatewayListenMode,
+  ModelRoutingPolicy,
   SensitiveStringUpdate,
   UpstreamRetryPolicy,
   WslHostAddressMode,
@@ -14,6 +15,7 @@ import {
   MAX_UPSTREAM_RETRY_POLICY_TRANSPORT_ERRORS,
   validateUpstreamRetryPolicy as validateGatewayUpstreamRetryPolicy,
 } from "../gateway/upstreamRetryPolicy";
+import { validateModelRoutingPolicy } from "../gateway/modelRoutingPolicy";
 
 export const MAX_UPDATE_RELEASES_URL_LEN = 2048;
 export const MAX_UPSTREAM_PROXY_URL_LEN = 2048;
@@ -375,6 +377,7 @@ export type SettingsSetValidationInput = {
   failoverMaxAttemptsPerProvider?: number | null;
   failoverMaxProvidersToTry?: number | null;
   upstreamRetryPolicy?: UpstreamRetryPolicy | null;
+  modelRoutingPolicy?: ModelRoutingPolicy | null;
   circuitBreakerFailureThreshold?: number | null;
   circuitBreakerOpenDurationMinutes?: number | null;
   gatewayListenMode?: GatewayListenMode | null;
@@ -471,6 +474,10 @@ export function validateSettingsSetInput(input: SettingsSetValidationInput): str
 
   const upstreamRetryPolicyMessage = validateUpstreamRetryPolicy(input.upstreamRetryPolicy);
   if (upstreamRetryPolicyMessage) return upstreamRetryPolicyMessage;
+  if (input.modelRoutingPolicy != null) {
+    const modelRoutingPolicyMessage = validateModelRoutingPolicy(input.modelRoutingPolicy);
+    if (modelRoutingPolicyMessage) return modelRoutingPolicyMessage;
+  }
 
   if (input.gatewayListenMode === "custom" && input.gatewayCustomListenAddress != null) {
     const message = validateGatewayCustomListenAddress(input.gatewayCustomListenAddress);

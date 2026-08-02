@@ -2,6 +2,7 @@ import type {
   ClaudeModels,
   CliKey,
   ModelMapping,
+  ModelRoutingPolicy,
   ProviderOAuthDeviceCodeStartResult,
   ProviderOAuthStatusResult,
   ProviderExtensionValuesInput,
@@ -65,6 +66,8 @@ export type FormActionContext = {
   streamIdleTimeoutSeconds: string;
   upstreamRetryPolicyOverrideEnabled: boolean;
   upstreamRetryPolicyDraft: UpstreamRetryPolicy;
+  modelRoutingPolicyOverrideEnabled: boolean;
+  modelRoutingPolicyDraft: ModelRoutingPolicy;
   apiKeyConfigured: boolean;
   apiKeyValue: string;
   form: {
@@ -92,6 +95,8 @@ export type ProviderEditorPayloadContext = {
   streamIdleTimeoutSeconds: string;
   upstreamRetryPolicyOverrideEnabled: boolean;
   upstreamRetryPolicyDraft: UpstreamRetryPolicy;
+  modelRoutingPolicyOverrideEnabled: boolean;
+  modelRoutingPolicyDraft: ModelRoutingPolicy;
   apiKeyConfigured: boolean;
   isCodexGatewaySource: boolean;
   sourceProviderId: number | null;

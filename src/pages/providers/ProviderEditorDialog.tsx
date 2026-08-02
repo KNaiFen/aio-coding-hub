@@ -1,6 +1,7 @@
 import { ChevronDown } from "lucide-react";
 import type {
   CliKey,
+  ModelRoutingPolicy,
   ProviderSummary,
   UpstreamRetryPolicy,
 } from "../../services/providers/providers";
@@ -20,6 +21,7 @@ import { ProviderAccountUsageSection } from "./ProviderAccountUsageSection";
 import { LimitsSection } from "./LimitsSection";
 import { ClaudeModelSection } from "./ClaudeModelSection";
 import { RetryPolicyFields } from "../../components/gateway/RetryPolicyFields";
+import { ModelRoutingPolicyFields } from "../../components/gateway/ModelRoutingPolicyFields";
 import { cn } from "../../utils/cn";
 import { ContributionSlot } from "../../plugins/contributions/ContributionSlot";
 
@@ -132,6 +134,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
         />
 
         <ProviderRetryPolicySection form={f} />
+        <ProviderModelRoutingPolicySection form={f} />
 
         <LimitsSection form={f} />
         <ClaudeModelSection form={f} />
@@ -169,6 +172,60 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
         </div>
       </div>
     </Dialog>
+  );
+}
+
+function ProviderModelRoutingPolicySection({
+  form,
+}: {
+  form: ReturnType<typeof useProviderEditorForm>;
+}) {
+  const enabled = form.modelRoutingPolicyOverrideEnabled;
+  const policy = form.modelRoutingPolicyDraft;
+
+  function updatePolicy(next: ModelRoutingPolicy) {
+    form.setModelRoutingPolicyDraft(next);
+  }
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-border bg-white dark:bg-secondary">
+      <div className="flex w-full items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-secondary/50 dark:hover:bg-secondary/40">
+        <button
+          type="button"
+          className="min-w-0 flex-1 text-left"
+          onClick={() => form.setModelRoutingPolicyOverrideEnabled(!enabled)}
+          aria-expanded={enabled}
+        >
+          <div className="text-sm font-semibold text-foreground">覆盖全局模型路由</div>
+          <div className="mt-0.5 text-xs text-muted-foreground">
+            关闭时继承全局；开启后当前供应商使用独立规则。
+          </div>
+        </button>
+        <div className="flex items-center gap-2">
+          <Switch
+            checked={enabled}
+            aria-label="覆盖全局模型路由"
+            onCheckedChange={(checked) => form.setModelRoutingPolicyOverrideEnabled(checked)}
+            disabled={form.saving}
+          />
+          <ChevronDown
+            className={cn(
+              "h-4 w-4 text-muted-foreground transition-transform",
+              enabled && "rotate-180"
+            )}
+          />
+        </div>
+      </div>
+      {enabled ? (
+        <div className="space-y-4 border-t border-border px-4 py-4">
+          <ModelRoutingPolicyFields
+            policy={policy}
+            disabled={form.saving}
+            onChange={updatePolicy}
+          />
+        </div>
+      ) : null}
+    </div>
   );
 }
 

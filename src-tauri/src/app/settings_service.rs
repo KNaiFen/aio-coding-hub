@@ -57,6 +57,7 @@ pub(crate) struct SettingsUpdate {
     pub failover_max_attempts_per_provider: u32,
     pub failover_max_providers_to_try: u32,
     pub upstream_retry_policy: Option<settings::UpstreamRetryPolicy>,
+    pub model_routing_policy: Option<settings::ModelRoutingPolicy>,
     pub circuit_breaker_failure_threshold: Option<u32>,
     pub circuit_breaker_open_duration_minutes: Option<u32>,
     pub update_releases_url: Option<String>,
@@ -134,6 +135,7 @@ struct SettingsServiceOwnedToken {
     failover_max_attempts_per_provider: u32,
     failover_max_providers_to_try: u32,
     upstream_retry_policy: settings::UpstreamRetryPolicy,
+    model_routing_policy: settings::ModelRoutingPolicy,
     circuit_breaker_failure_threshold: u32,
     circuit_breaker_open_duration_minutes: u32,
     update_releases_url: String,
@@ -191,6 +193,7 @@ impl SettingsServiceOwnedToken {
             failover_max_attempts_per_provider: settings.failover_max_attempts_per_provider,
             failover_max_providers_to_try: settings.failover_max_providers_to_try,
             upstream_retry_policy: settings.upstream_retry_policy.clone(),
+            model_routing_policy: settings.model_routing_policy.clone(),
             circuit_breaker_failure_threshold: settings.circuit_breaker_failure_threshold,
             circuit_breaker_open_duration_minutes: settings.circuit_breaker_open_duration_minutes,
             update_releases_url: settings.update_releases_url.clone(),
@@ -254,6 +257,7 @@ impl SettingsServiceOwnedToken {
         settings.failover_max_attempts_per_provider = self.failover_max_attempts_per_provider;
         settings.failover_max_providers_to_try = self.failover_max_providers_to_try;
         settings.upstream_retry_policy = self.upstream_retry_policy.clone();
+        settings.model_routing_policy = self.model_routing_policy.clone();
         settings.circuit_breaker_failure_threshold = self.circuit_breaker_failure_threshold;
         settings.circuit_breaker_open_duration_minutes = self.circuit_breaker_open_duration_minutes;
         settings.update_releases_url = self.update_releases_url.clone();
@@ -325,6 +329,7 @@ pub(crate) struct SettingsView {
     pub failover_max_attempts_per_provider: u32,
     pub failover_max_providers_to_try: u32,
     pub upstream_retry_policy: settings::UpstreamRetryPolicy,
+    pub model_routing_policy: settings::ModelRoutingPolicy,
     pub circuit_breaker_failure_threshold: u32,
     pub circuit_breaker_open_duration_minutes: u32,
     pub enable_circuit_breaker_notice: bool,
@@ -455,6 +460,7 @@ impl From<&settings::AppSettings> for SettingsView {
             failover_max_attempts_per_provider: value.failover_max_attempts_per_provider,
             failover_max_providers_to_try: value.failover_max_providers_to_try,
             upstream_retry_policy: value.upstream_retry_policy.clone(),
+            model_routing_policy: value.model_routing_policy.clone(),
             circuit_breaker_failure_threshold: value.circuit_breaker_failure_threshold,
             circuit_breaker_open_duration_minutes: value.circuit_breaker_open_duration_minutes,
             enable_circuit_breaker_notice: value.enable_circuit_breaker_notice,
@@ -880,6 +886,11 @@ fn apply_settings_update_owned_patch(
         .clone()
         .unwrap_or_else(|| previous_token.upstream_retry_policy.clone());
     settings::normalize_upstream_retry_policy_for_write(&mut upstream_retry_policy)?;
+    let mut model_routing_policy = update
+        .model_routing_policy
+        .clone()
+        .unwrap_or_else(|| previous_token.model_routing_policy.clone());
+    settings::normalize_model_routing_policy_for_write(&mut model_routing_policy)?;
     let circuit_breaker_failure_threshold = update
         .circuit_breaker_failure_threshold
         .unwrap_or(previous_token.circuit_breaker_failure_threshold);
@@ -911,6 +922,7 @@ fn apply_settings_update_owned_patch(
         failover_max_attempts_per_provider: update.failover_max_attempts_per_provider,
         failover_max_providers_to_try: update.failover_max_providers_to_try,
         upstream_retry_policy,
+        model_routing_policy,
         circuit_breaker_failure_threshold,
         circuit_breaker_open_duration_minutes,
         update_releases_url,
@@ -2256,6 +2268,7 @@ mod tests {
             failover_max_attempts_per_provider: settings.failover_max_attempts_per_provider,
             failover_max_providers_to_try: settings.failover_max_providers_to_try,
             upstream_retry_policy: Some(settings.upstream_retry_policy.clone()),
+            model_routing_policy: Some(settings.model_routing_policy.clone()),
             circuit_breaker_failure_threshold,
             circuit_breaker_open_duration_minutes: Some(
                 settings.circuit_breaker_open_duration_minutes,

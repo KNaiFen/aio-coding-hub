@@ -209,6 +209,17 @@ pub struct ObserverContextCompaction {
     pub strategy: String,
 }
 
+#[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ObserverConfiguredModelRoute {
+    pub source_model: String,
+    pub effective_model: String,
+    pub reasoning_effort: Option<String>,
+    pub policy_source: String,
+    pub model_applied: bool,
+    pub reasoning_effort_applied: bool,
+}
+
 #[derive(Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ObserverRequest {
@@ -237,6 +248,8 @@ pub struct ObserverRequest {
     pub cost_usd: Option<f64>,
     pub route: Vec<ObserverRouteHop>,
     pub context_compaction: Option<ObserverContextCompaction>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub configured_model_route: Option<ObserverConfiguredModelRoute>,
 }
 
 #[derive(Clone, Deserialize, Serialize, PartialEq)]

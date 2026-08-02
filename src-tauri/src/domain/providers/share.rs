@@ -1,6 +1,7 @@
 //! Strict single-provider share format, preview projection, and atomic import.
 
 use super::queries::{
+    model_routing_policy_override_from_json, model_routing_policy_override_to_json,
     next_sort_order, replace_extension_values, retry_policy_override_from_json,
     retry_policy_override_to_json,
 };
@@ -74,6 +75,8 @@ struct ProviderShareConfiguration<RetryPolicy> {
     bridge_type: Option<String>,
     stream_idle_timeout_seconds: Option<u32>,
     upstream_retry_policy_override: Option<RetryPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    model_routing_policy_override: Option<crate::settings::ModelRoutingPolicy>,
 }
 
 type ProviderShareEnvelopeV1 = ProviderShareEnvelope<ProviderShareRetryPolicyV1>;
@@ -276,6 +279,7 @@ impl<RetryPolicy> ProviderShareEnvelope<RetryPolicy> {
             bridge_type,
             stream_idle_timeout_seconds,
             upstream_retry_policy_override,
+            model_routing_policy_override,
         } = configuration;
 
         ProviderShareEnvelope {
@@ -299,6 +303,7 @@ impl<RetryPolicy> ProviderShareEnvelope<RetryPolicy> {
                     bridge_type,
                     stream_idle_timeout_seconds,
                     upstream_retry_policy_override: upstream_retry_policy_override.map(map),
+                    model_routing_policy_override,
                 },
                 authentication,
                 extensions,
@@ -415,6 +420,7 @@ struct ProviderShareDbRow {
     bridge_type: Option<String>,
     stream_idle_timeout_seconds: Option<i64>,
     upstream_retry_policy_json: Option<String>,
+    model_routing_policy_json: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -673,6 +679,10 @@ fn normalize_provider_share_v2(
         let mut policy: crate::settings::UpstreamRetryPolicy = policy.into();
         crate::settings::normalize_upstream_retry_policy_for_write(&mut policy)?;
         provider.configuration.upstream_retry_policy_override = Some(policy.into());
+    }
+    if let Some(mut policy) = provider.configuration.model_routing_policy_override.take() {
+        crate::settings::normalize_model_routing_policy_for_write(&mut policy)?;
+        provider.configuration.model_routing_policy_override = Some(policy);
     }
 
     match &mut provider.authentication {
@@ -942,7 +952,8 @@ SELECT
   source_provider_id,
   bridge_type,
   stream_idle_timeout_seconds,
-  upstream_retry_policy_json
+  upstream_retry_policy_json,
+  model_routing_policy_json
 FROM providers
 WHERE id = ?1
 "#,
@@ -987,6 +998,7 @@ WHERE id = ?1
                 bridge_type: row.get("bridge_type")?,
                 stream_idle_timeout_seconds: row.get("stream_idle_timeout_seconds")?,
                 upstream_retry_policy_json: row.get("upstream_retry_policy_json")?,
+                model_routing_policy_json: row.get("model_routing_policy_json")?,
             })
         },
     )
@@ -1109,6 +1121,8 @@ pub(crate) fn export_provider_share_v2(
     };
     let upstream_retry_policy_override =
         retry_policy_override_from_json(row.upstream_retry_policy_json).map(Into::into);
+    let model_routing_policy_override =
+        model_routing_policy_override_from_json(row.model_routing_policy_json);
     let extensions = query_provider_share_extensions(&tx, provider_id)?;
     tx.commit()
         .map_err(|error| db_err!("failed to finish provider share snapshot: {error}"))?;
@@ -1144,6 +1158,7 @@ pub(crate) fn export_provider_share_v2(
                     row.stream_idle_timeout_seconds,
                 ),
                 upstream_retry_policy_override,
+                model_routing_policy_override,
             },
             authentication,
             extensions,
@@ -1546,6 +1561,8 @@ pub(crate) fn import_provider_share(
         .clone()
         .map(Into::into);
     let retry_policy_json = retry_policy_override_to_json(retry_policy)?;
+    let model_routing_policy_json =
+        model_routing_policy_override_to_json(configuration.model_routing_policy_override.clone())?;
     let auth = authentication_db_fields(&provider.authentication);
     let sort_order = next_sort_order(&tx, &provider.cli_key)?;
     let now = now_unix_seconds();
@@ -1595,6 +1612,7 @@ INSERT INTO providers(
   bridge_type,
   stream_idle_timeout_seconds,
   upstream_retry_policy_json,
+  model_routing_policy_json,
   created_at,
   updated_at
 ) VALUES (
@@ -1639,6 +1657,7 @@ INSERT INTO providers(
   :bridge_type,
   :stream_idle_timeout_seconds,
   :upstream_retry_policy_json,
+  :model_routing_policy_json,
   :now,
   :now
 )
@@ -1680,6 +1699,7 @@ INSERT INTO providers(
             ":bridge_type": configuration.bridge_type,
             ":stream_idle_timeout_seconds": configuration.stream_idle_timeout_seconds,
             ":upstream_retry_policy_json": retry_policy_json,
+            ":model_routing_policy_json": model_routing_policy_json,
             ":now": now,
         },
     )
@@ -1752,6 +1772,8 @@ mod tests {
             account_usage_credentials_copy_from_provider_id: None,
             upstream_retry_policy_override: None,
             upstream_retry_policy_override_specified: false,
+            model_routing_policy_override: None,
+            model_routing_policy_override_specified: false,
         }
     }
 
@@ -1785,6 +1807,7 @@ mod tests {
                     bridge_type: None,
                     stream_idle_timeout_seconds: None,
                     upstream_retry_policy_override: None,
+                    model_routing_policy_override: None,
                 },
                 authentication: ProviderShareAuthenticationV1::ApiKey {
                     api_key: "synthetic-key".to_string(),

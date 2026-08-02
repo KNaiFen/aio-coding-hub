@@ -407,7 +407,8 @@ fn extract_model_from_path(path: &str) -> Option<String> {
     }
 
     let end = rest.find(['/', ':', '?']).unwrap_or(rest.len());
-    sanitize_model(&rest[..end])
+    let decoded = url_decode_component(&rest[..end]);
+    sanitize_model(&decoded)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -608,6 +609,17 @@ mod tests {
         let info = infer_requested_model_info("/v1/responses", None, Some(&body));
 
         assert_eq!(info.model.as_deref(), body["model"].as_str());
+    }
+
+    #[test]
+    fn inferred_path_model_decodes_the_url_component() {
+        let info = infer_requested_model_info(
+            "/v1beta/models/publisher%2Fgemini-pro:generateContent",
+            None,
+            None,
+        );
+
+        assert_eq!(info.model.as_deref(), Some("publisher/gemini-pro"));
     }
 
     #[test]

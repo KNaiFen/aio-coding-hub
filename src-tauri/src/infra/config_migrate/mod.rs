@@ -118,6 +118,8 @@ pub struct ProviderExport {
     #[serde(default)]
     pub source_provider_uuid: Option<String>,
     pub bridge_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_routing_policy_override: Option<settings::ModelRoutingPolicy>,
     #[serde(default)]
     pub account_usage_config: Option<serde_json::Value>,
     #[serde(default)]

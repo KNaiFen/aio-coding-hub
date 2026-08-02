@@ -179,19 +179,7 @@ where
     let attempt_started_ms = input.started.elapsed().as_millis();
     let circuit_before = prepared.circuit_snapshot.clone();
 
-    // --- Build URL ---
-    let url = match try_build_url(prepared) {
-        Ok(u) => u,
-        Err(err) => {
-            return PreparedSendOutcome::UrlBuildFailed(PreparedUrlBuildFailure {
-                error: err,
-                attempt_started_ms,
-                circuit_before,
-            });
-        }
-    };
-
-    if input.managed_model_route.is_none() {
+    if input.managed_model_route.is_none() && prepared.configured_model_route.is_none() {
         if let Some(abort_guard) = abort_guard.as_deref_mut() {
             emit_started_event(
                 input,
@@ -304,6 +292,33 @@ where
     }
 
     headers = semantic_headers;
+    if let Some(route) = prepared.configured_model_route.clone() {
+        let priced_cli_key = prepared
+            .bridge_source
+            .as_ref()
+            .map(|(_, source_cli_key)| source_cli_key.as_str())
+            .unwrap_or(input.cli_key.as_str())
+            .to_string();
+        let outcome = crate::gateway::configured_model_route::apply(
+            &route,
+            &priced_cli_key,
+            &mut prepared.upstream_forwarded_path,
+            &mut prepared.upstream_query,
+            body_state_for_attempt.decoded().as_ref(),
+        );
+        if let Some(body) = outcome.body.as_ref() {
+            body_state_for_attempt.replace_decoded(body.clone());
+            prepared.upstream_body_bytes = body.clone();
+            prepared.strip_request_content_encoding = true;
+            prepared.request_body_mutated_before_attempt = true;
+        }
+        crate::gateway::configured_model_route::mark_result(
+            &input.special_settings,
+            &route,
+            &priced_cli_key,
+            &outcome,
+        );
+    }
     if let Err(reason) = sync_final_wire_model(input, prepared, &body_state_for_attempt) {
         return PreparedSendOutcome::ManagedModelInvalid(reason);
     }
@@ -314,7 +329,7 @@ where
             route.remote_model_id.as_str(),
         );
     }
-    if input.managed_model_route.is_some() {
+    if input.managed_model_route.is_some() || prepared.configured_model_route.is_some() {
         if let Some(abort_guard) = abort_guard {
             emit_started_event(
                 input,
@@ -327,6 +342,16 @@ where
             );
         }
     }
+    let url = match try_build_url(prepared) {
+        Ok(url) => url,
+        Err(error) => {
+            return PreparedSendOutcome::UrlBuildFailed(PreparedUrlBuildFailure {
+                error,
+                attempt_started_ms,
+                circuit_before,
+            });
+        }
+    };
     let upstream_body = body_state_for_attempt
         .finalize_for_upstream(&mut headers, crate::gateway::util::max_request_body_bytes());
 
@@ -387,7 +412,11 @@ fn sync_final_wire_model<R: tauri::Runtime>(
     prepared: &mut PreparedProvider,
     body: &crate::gateway::proxy::request_body::GatewayRequestBody,
 ) -> Result<(), String> {
-    if !should_sync_final_wire_model(&input.cli_key, input.managed_model_route.is_some()) {
+    if !should_sync_final_wire_model(
+        &input.cli_key,
+        input.managed_model_route.is_some(),
+        prepared.configured_model_route.is_some(),
+    ) {
         return Ok(());
     }
 
@@ -407,8 +436,12 @@ fn sync_final_wire_model<R: tauri::Runtime>(
     Ok(())
 }
 
-fn should_sync_final_wire_model(cli_key: &str, managed_model_route: bool) -> bool {
-    managed_model_route || cli_key == "codex"
+fn should_sync_final_wire_model(
+    cli_key: &str,
+    managed_model_route: bool,
+    configured_model_route: bool,
+) -> bool {
+    managed_model_route || configured_model_route || cli_key == "codex"
 }
 
 fn validate_managed_wire_model(
@@ -668,10 +701,11 @@ mod tests {
 
     #[test]
     fn final_wire_model_sync_is_scoped_to_codex_or_managed_routes() {
-        assert!(should_sync_final_wire_model("codex", false));
-        assert!(should_sync_final_wire_model("claude", true));
-        assert!(!should_sync_final_wire_model("claude", false));
-        assert!(!should_sync_final_wire_model("grok", false));
+        assert!(should_sync_final_wire_model("codex", false, false));
+        assert!(should_sync_final_wire_model("claude", true, false));
+        assert!(should_sync_final_wire_model("claude", false, true));
+        assert!(!should_sync_final_wire_model("claude", false, false));
+        assert!(!should_sync_final_wire_model("grok", false, false));
     }
 
     #[test]

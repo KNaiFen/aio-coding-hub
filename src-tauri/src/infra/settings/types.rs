@@ -207,6 +207,21 @@ impl<'de> Deserialize<'de> for UpstreamRetryPolicy {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type, Default)]
+#[serde(default)]
+pub struct ModelRoutingRule {
+    pub source_model: String,
+    pub target_model: Option<String>,
+    pub reasoning_effort: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type, Default)]
+#[serde(default)]
+pub struct ModelRoutingPolicy {
+    pub enabled: bool,
+    pub rules: Vec<ModelRoutingRule>,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type, PartialEq, Eq)]
 #[serde(default)]
 pub struct WslTargetCli {
@@ -284,6 +299,8 @@ pub struct AppSettings {
     pub failover_max_providers_to_try: u32,
     #[serde(default)]
     pub upstream_retry_policy: UpstreamRetryPolicy,
+    #[serde(default)]
+    pub model_routing_policy: ModelRoutingPolicy,
     pub circuit_breaker_failure_threshold: u32,
     pub circuit_breaker_open_duration_minutes: u32,
     // Circuit breaker notice toggle (default disabled).
@@ -375,6 +392,7 @@ impl Default for AppSettings {
             failover_max_attempts_per_provider: DEFAULT_FAILOVER_MAX_ATTEMPTS_PER_PROVIDER,
             failover_max_providers_to_try: DEFAULT_FAILOVER_MAX_PROVIDERS_TO_TRY,
             upstream_retry_policy: UpstreamRetryPolicy::default(),
+            model_routing_policy: ModelRoutingPolicy::default(),
             circuit_breaker_failure_threshold: DEFAULT_CIRCUIT_BREAKER_FAILURE_THRESHOLD,
             circuit_breaker_open_duration_minutes: DEFAULT_CIRCUIT_BREAKER_OPEN_DURATION_MINUTES,
             enable_circuit_breaker_notice: DEFAULT_ENABLE_CIRCUIT_BREAKER_NOTICE,

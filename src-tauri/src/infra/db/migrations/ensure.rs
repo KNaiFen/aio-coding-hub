@@ -30,6 +30,7 @@ pub(super) fn apply_ensure_patches(conn: &mut Connection) -> crate::shared::erro
     ensure_provider_stream_idle_timeout(conn)?;
     ensure_provider_availability_test_model(conn)?;
     ensure_provider_upstream_retry_policy(conn)?;
+    ensure_provider_model_routing_policy(conn)?;
     ensure_skills_update_columns(conn)?;
     ensure_plugin_tables(conn)?;
     Ok(())
@@ -1053,6 +1054,31 @@ fn ensure_provider_upstream_retry_policy(conn: &mut Connection) -> Result<(), St
     Ok(())
 }
 
+fn ensure_provider_model_routing_policy(conn: &mut Connection) -> Result<(), String> {
+    let providers_table_exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='providers')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("failed to check providers table: {error}"))?;
+    if !providers_table_exists {
+        return Ok(());
+    }
+
+    if !column_exists(conn, "providers", "model_routing_policy_json")? {
+        conn.execute(
+            "ALTER TABLE providers ADD COLUMN model_routing_policy_json TEXT DEFAULT NULL;",
+            [],
+        )
+        .map_err(|error| {
+            format!("failed to ensure providers.model_routing_policy_json: {error}")
+        })?;
+    }
+
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // ensure_request_logs_extended_columns
 // (provider_chain_json, error_details_json, visible_ttfb_ms, last_activity_ms, activity_details_json)
@@ -1317,7 +1343,7 @@ CREATE INDEX IF NOT EXISTS idx_plugin_hook_execution_reports_plugin_hook_created
 // Shared helper
 // ---------------------------------------------------------------------------
 
-fn column_exists(
+pub(super) fn column_exists(
     conn: &Connection,
     table: &str,
     column: &str,

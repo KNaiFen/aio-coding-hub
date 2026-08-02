@@ -37,6 +37,117 @@ function createTrace(overrides: Partial<TraceSession> = {}): TraceSession {
 }
 
 describe("components/home/requestLogPresentation", () => {
+  it("keeps the requested model and treats configured routing as neutral audit data", () => {
+    const specialSettings = JSON.stringify([
+      {
+        type: "configured_model_route",
+        providerId: 7,
+        providerName: "Budget backup",
+        policySource: "provider",
+        sourceModel: "fable5",
+        targetModel: "opus4.8",
+        effectiveModel: "opus4.8",
+        reasoningEffort: "low",
+        pricedCliKey: "claude",
+        applied: true,
+        modelApplied: true,
+        reasoningEffortApplied: true,
+      },
+      {
+        type: "model_route_mapping",
+        requestedModel: "fable5",
+        actualModel: "opus4.8",
+        requestedReasoningEffort: "high",
+        actualReasoningEffort: "low",
+        mismatch: true,
+        providerId: 7,
+      },
+    ]);
+
+    const display = resolveRequestLogModelDisplayMeta(
+      "claude",
+      "opus4.8",
+      specialSettings,
+      null,
+      7
+    );
+
+    expect(display.text).toBe("fable5");
+    expect(display.configuredRouteText).toBe("fable5 -> opus4.8 · 思考强度 low");
+    expect(display.isConfiguredRoute).toBe(true);
+    expect(display.isSevereRouteMismatch).toBe(false);
+    expect(display.mismatchLabel).toBe("模型路由");
+    expect(display.title).toContain("供应商覆盖");
+
+    const audit = buildRequestLogAuditMeta({
+      cli_key: "claude",
+      path: "/v1/messages",
+      status: 200,
+      special_settings_json: specialSettings,
+      final_provider_id: 7,
+    });
+    expect(audit.tags.map((tag) => tag.label)).not.toContain("模型路由");
+  });
+
+  it("keeps a real response mismatch severe after configured routing", () => {
+    const specialSettings = JSON.stringify([
+      {
+        type: "configured_model_route",
+        providerId: 7,
+        providerName: "Budget backup",
+        policySource: "provider",
+        sourceModel: "gpt-expensive",
+        targetModel: "gpt-cheap",
+        effectiveModel: "gpt-cheap",
+        reasoningEffort: "low",
+        pricedCliKey: "codex",
+        applied: true,
+        modelApplied: true,
+        reasoningEffortApplied: true,
+      },
+      {
+        type: "model_route_mapping",
+        cliKey: "codex",
+        requestedModel: "gpt-cheap",
+        requestedReasoningEffort: "low",
+        requestedReasoningEffortSource: "configured_route",
+        actualModel: "gpt-unexpected",
+        actualReasoningEffort: "medium",
+        actualReasoningEffortSource: "response",
+        modelMismatch: true,
+        effortMismatch: true,
+        mismatch: true,
+        providerId: 7,
+        providerName: "Budget backup",
+      },
+    ]);
+
+    const display = resolveRequestLogModelDisplayMeta(
+      "codex",
+      "gpt-expensive",
+      specialSettings,
+      null,
+      7
+    );
+
+    expect(display.isConfiguredRoute).toBe(true);
+    expect(display.isSevereRouteMismatch).toBe(true);
+    expect(display.mismatchLabel).toBe("模型/思考等级不一致");
+    expect(display.configuredRouteText).toContain("gpt-expensive -> gpt-cheap");
+    expect(display.configuredRouteText).toContain("上游返回 gpt-unexpected-medium");
+    expect(display.title).toContain("返回 gpt-unexpected-medium");
+    expect(display.title).toContain("请求等级 配置路由");
+
+    const audit = buildRequestLogAuditMeta({
+      cli_key: "codex",
+      path: "/v1/responses",
+      status: 200,
+      special_settings_json: specialSettings,
+      final_provider_id: 7,
+    });
+    expect(audit.tags.find((tag) => tag.label === "模型路由")?.className).toContain("rose");
+  });
+
   it("shows an AIO managed route as neutral audit information", () => {
     const specialSettings = JSON.stringify([
       {

@@ -6,7 +6,7 @@ describe("MSW defaults", () => {
     resetMswState();
 
     expect(getSettingsState()).toEqual({
-      schema_version: 55,
+      schema_version: 56,
       preferred_port: 37123,
       show_home_heatmap: true,
       show_home_usage: true,
@@ -48,6 +48,10 @@ describe("MSW defaults", () => {
           description: "",
         })),
         transport_errors: ["connect", "timeout", "read"],
+      },
+      model_routing_policy: {
+        enabled: false,
+        rules: [],
       },
       circuit_breaker_failure_threshold: 5,
       circuit_breaker_open_duration_minutes: 30,

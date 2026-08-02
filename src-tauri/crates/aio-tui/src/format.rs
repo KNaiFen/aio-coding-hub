@@ -125,10 +125,7 @@ fn status_segment(snapshot: &ObserverSnapshotV1, item: StatusItem) -> StatusSegm
             (route_result(request), route_tone(request))
         }),
         StatusItem::LastModel => last_request_field(snapshot, "模型", |request| {
-            (
-                request.model.as_deref().unwrap_or("—").to_string(),
-                StatusTone::Model,
-            )
+            (request_model(request), StatusTone::Model)
         }),
         StatusItem::LastFolder => last_request_field(snapshot, "目录", |request| {
             (
@@ -355,7 +352,7 @@ pub fn request_card_lines(request: &ObserverRequest, now_ms: i64, width: usize) 
             _ => " 压缩·未知",
         })
         .unwrap_or_default();
-    let model = request.model.as_deref().unwrap_or("—");
+    let model = request_model(request);
     let folder = request.folder_name.as_deref().unwrap_or("无目录");
     let provider = request.provider_name.as_deref().unwrap_or("未上游");
     let duration = request
@@ -419,7 +416,7 @@ pub fn detail_lines(request: &ObserverRequest, now_ms: i64) -> Vec<String> {
         format!("状态  {}", request_status_label(request)),
         format!("时间  {}", relative_time(request.created_at_ms, now_ms)),
         format!("CLI   {}", cli_label(&request.cli_key)),
-        format!("模型  {}", request.model.as_deref().unwrap_or("—")),
+        format!("模型  {}", request_model(request)),
         format!("目录  {}", request.folder_name.as_deref().unwrap_or("—")),
         format!(
             "供应商  {}",
@@ -448,6 +445,14 @@ pub fn detail_lines(request: &ObserverRequest, now_ms: i64) -> Vec<String> {
         format!("错误码  {}", request.error_code.as_deref().unwrap_or("—")),
         format!("Session  {}", request.session_id.as_deref().unwrap_or("—")),
     ];
+    if let Some(route) = request.configured_model_route.as_ref() {
+        let source = match route.policy_source.as_str() {
+            "provider" => "供应商覆盖",
+            "global" => "全局",
+            _ => "未知",
+        };
+        lines.insert(4, format!("路由规则  {source}"));
+    }
     if let Some(usage) = request.usage.as_ref() {
         lines.extend([
             format!(
@@ -516,6 +521,26 @@ pub fn detail_lines(request: &ObserverRequest, now_ms: i64) -> Vec<String> {
         }
     }
     lines
+}
+
+fn request_model(request: &ObserverRequest) -> String {
+    let Some(route) = request.configured_model_route.as_ref() else {
+        return request.model.as_deref().unwrap_or("—").to_string();
+    };
+    let model = if route.model_applied && route.source_model != route.effective_model {
+        format!("{}→{}", route.source_model, route.effective_model)
+    } else {
+        route.source_model.clone()
+    };
+    if route.reasoning_effort_applied {
+        format!(
+            "{}·思考{}",
+            model,
+            route.reasoning_effort.as_deref().unwrap_or("未知")
+        )
+    } else {
+        model
+    }
 }
 
 pub fn request_status_label(request: &ObserverRequest) -> String {
@@ -718,6 +743,7 @@ mod tests {
             cost_usd: None,
             route: Vec::new(),
             context_compaction: None,
+            configured_model_route: None,
         }
     }
 
@@ -888,5 +914,27 @@ mod tests {
         assert_eq!(route_result(&request_with_route_counts(2, 0, 1)), "切换1");
         assert_eq!(route_result(&request_with_route_counts(3, 2, 0)), "重试2");
         assert_eq!(route_result(&request_with_route_counts(0, 0, 0)), "未上游");
+    }
+
+    #[test]
+    fn configured_model_route_keeps_original_and_effective_model_with_policy_source() {
+        let mut request = request_with_route_counts(1, 0, 0);
+        request.model = Some("fable5".to_string());
+        request.configured_model_route =
+            Some(aio_observer_protocol::ObserverConfiguredModelRoute {
+                source_model: "fable5".to_string(),
+                effective_model: "opus4.8".to_string(),
+                reasoning_effort: Some("low".to_string()),
+                policy_source: "provider".to_string(),
+                model_applied: true,
+                reasoning_effort_applied: true,
+            });
+
+        assert!(request_card_lines(&request, 10, 80)
+            .iter()
+            .any(|line| line.contains("fable5→opus4.8·思考low")));
+        assert!(detail_lines(&request, 10)
+            .iter()
+            .any(|line| line == "路由规则  供应商覆盖"));
     }
 }
