@@ -2326,7 +2326,7 @@ mod tests {
             Some(Color::Red)
         );
         let separator = status_tone_style(StatusTone::Separator, true);
-        assert_eq!(separator.fg, None);
+        assert_eq!(separator.fg, Some(Color::DarkGray));
         assert!(separator.add_modifier.contains(Modifier::DIM));
         assert!(!status_tone_style(StatusTone::Scope, true)
             .add_modifier
@@ -2345,11 +2345,8 @@ mod tests {
             true,
         );
         assert_eq!(lines[0].spans[0].style.fg, Some(Color::Cyan));
-        assert_eq!(lines[2].spans[0].style.fg, Some(Color::Cyan));
-        assert!(lines[2].spans[0]
-            .style
-            .add_modifier
-            .contains(Modifier::BOLD));
+        assert_eq!(lines[2].style.fg, Some(Color::Cyan));
+        assert!(lines[2].style.add_modifier.contains(Modifier::BOLD));
         assert_eq!(lines[3].spans[0].style.fg, None);
     }
 
