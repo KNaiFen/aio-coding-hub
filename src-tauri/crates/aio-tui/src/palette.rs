@@ -51,6 +51,7 @@ impl Palette {
         Self { capability }
     }
 
+    #[cfg(test)]
     pub const fn capability(self) -> ColorCapability {
         self.capability
     }

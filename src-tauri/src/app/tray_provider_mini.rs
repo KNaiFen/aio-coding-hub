@@ -1,5 +1,7 @@
 //! Usage: Build the secret-free, frozen provider snapshot shown by the macOS tray panel.
 
+#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
+
 use crate::gateway::observation::is_model_inference_request;
 use crate::{
     cli_proxy, gateway_runtime_access, provider_limit_usage, providers, request_logs, settings,

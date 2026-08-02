@@ -391,7 +391,7 @@ where
         attempt_started: Instant::now(),
     };
 
-    if let Some(abort_guard) = abort_guard.as_deref_mut() {
+    if let Some(abort_guard) = abort_guard {
         abort_guard.mark_in_flight_upstream_sent();
     }
 

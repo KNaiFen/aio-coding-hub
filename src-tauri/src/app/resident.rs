@@ -5,6 +5,7 @@ use std::sync::{Mutex, OnceLock};
 
 const MAIN_WINDOW_LABEL: &str = "main";
 const TRAY_PROVIDER_MINI_WINDOW_LABEL: &str = "tray-provider-mini";
+#[cfg(target_os = "macos")]
 const TRAY_PROVIDER_MINI_SNAPSHOT_EVENT: &str = "tray-provider-mini:snapshot";
 const TRAY_ID: &str = "main-tray";
 const TRAY_MENU_TOGGLE_ID: &str = "tray.toggle";
@@ -12,15 +13,24 @@ const TRAY_MENU_QUIT_ID: &str = "tray.quit";
 const LIFECYCLE_INTENT_IDLE: u8 = 0;
 const LIFECYCLE_INTENT_EXIT: u8 = 1;
 const LIFECYCLE_INTENT_RESTART: u8 = 2;
+#[cfg(target_os = "macos")]
 const TRAY_PROVIDER_MINI_HIDE_DELAY_MS: u64 = 180;
+#[cfg(any(target_os = "macos", test))]
 const TRAY_PROVIDER_MINI_WIDTH: f64 = 356.0;
+#[cfg(any(target_os = "macos", test))]
 const TRAY_PROVIDER_MINI_HEADER_HEIGHT: f64 = 48.0;
+#[cfg(any(target_os = "macos", test))]
 const TRAY_PROVIDER_MINI_ROW_HEIGHT: f64 = 44.0;
+#[cfg(any(target_os = "macos", test))]
 const TRAY_PROVIDER_MINI_EMPTY_HEIGHT: f64 = 72.0;
+#[cfg(any(target_os = "macos", test))]
 const TRAY_PROVIDER_MINI_MAX_VISIBLE_ROWS: usize = 10;
+#[cfg(any(target_os = "macos", test))]
 const TRAY_PROVIDER_MINI_SCREEN_MARGIN: f64 = 8.0;
+#[cfg(any(target_os = "macos", test))]
 const TRAY_PROVIDER_MINI_ANCHOR_GAP: f64 = 6.0;
 
+#[cfg(any(target_os = "macos", test))]
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct TrayProviderMiniAnchor {
     x: f64,
@@ -34,6 +44,7 @@ struct TrayProviderMiniAnchor {
     scale_factor: f64,
 }
 
+#[cfg(any(target_os = "macos", test))]
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct TrayProviderMiniPlacement {
     x: f64,
@@ -42,6 +53,7 @@ struct TrayProviderMiniPlacement {
     height: f64,
 }
 
+#[cfg(any(target_os = "macos", test))]
 #[derive(Debug, Default)]
 struct TrayProviderMiniRuntime {
     tray_hovered: bool,
@@ -54,6 +66,7 @@ struct TrayProviderMiniRuntime {
     snapshot: Option<super::tray_provider_mini::TrayProviderMiniSnapshot>,
 }
 
+#[cfg(any(target_os = "macos", test))]
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum TrayProviderMiniHoverAction {
     Start {
@@ -69,6 +82,7 @@ enum TrayProviderMiniHoverAction {
 pub struct ResidentState {
     tray_enabled: AtomicBool,
     lifecycle_intent: AtomicU8,
+    #[cfg(any(target_os = "macos", test))]
     tray_provider_mini: Mutex<TrayProviderMiniRuntime>,
 }
 
@@ -77,6 +91,7 @@ impl Default for ResidentState {
         Self {
             tray_enabled: AtomicBool::new(true),
             lifecycle_intent: AtomicU8::new(LIFECYCLE_INTENT_IDLE),
+            #[cfg(any(target_os = "macos", test))]
             tray_provider_mini: Mutex::new(TrayProviderMiniRuntime::default()),
         }
     }
@@ -91,6 +106,7 @@ enum CloseRequestAction {
 }
 
 impl ResidentState {
+    #[cfg(any(target_os = "macos", test))]
     fn tray_provider_mini_runtime(&self) -> std::sync::MutexGuard<'_, TrayProviderMiniRuntime> {
         self.tray_provider_mini
             .lock()
@@ -138,6 +154,7 @@ impl ResidentState {
         }
     }
 
+    #[cfg(any(target_os = "macos", test))]
     fn begin_tray_provider_mini_hover(
         &self,
         anchor: TrayProviderMiniAnchor,
@@ -168,12 +185,14 @@ impl ResidentState {
         }
     }
 
+    #[cfg(any(target_os = "macos", test))]
     fn leave_tray_provider_mini_hover(&self) -> Option<u64> {
         let mut runtime = self.tray_provider_mini_runtime();
         runtime.tray_hovered = false;
         schedule_tray_provider_mini_close(&mut runtime)
     }
 
+    #[cfg(any(target_os = "macos", test))]
     fn set_tray_provider_mini_window_hovered(&self, hovered: bool) -> Option<u64> {
         let mut runtime = self.tray_provider_mini_runtime();
         if hovered && !runtime.visible {
@@ -188,6 +207,7 @@ impl ResidentState {
         }
     }
 
+    #[cfg(any(target_os = "macos", test))]
     fn complete_tray_provider_mini_open(
         &self,
         generation: u64,
@@ -203,6 +223,7 @@ impl ResidentState {
         runtime.anchor
     }
 
+    #[cfg(any(target_os = "macos", test))]
     fn close_tray_provider_mini_if_current(&self, close_token: u64) -> bool {
         let mut runtime = self.tray_provider_mini_runtime();
         if runtime.close_token != close_token || runtime.tray_hovered || runtime.window_hovered {
@@ -211,18 +232,28 @@ impl ResidentState {
         reset_tray_provider_mini_runtime(&mut runtime)
     }
 
+    #[cfg(target_os = "macos")]
     fn reset_tray_provider_mini(&self) -> bool {
         let mut runtime = self.tray_provider_mini_runtime();
         reset_tray_provider_mini_runtime(&mut runtime)
     }
 
+    #[cfg(any(target_os = "macos", test))]
     pub(crate) fn tray_provider_mini_snapshot(
         &self,
     ) -> Option<super::tray_provider_mini::TrayProviderMiniSnapshot> {
         self.tray_provider_mini_runtime().snapshot.clone()
     }
+
+    #[cfg(all(not(target_os = "macos"), not(test)))]
+    pub(crate) fn tray_provider_mini_snapshot(
+        &self,
+    ) -> Option<super::tray_provider_mini::TrayProviderMiniSnapshot> {
+        None
+    }
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn schedule_tray_provider_mini_close(runtime: &mut TrayProviderMiniRuntime) -> Option<u64> {
     if runtime.tray_hovered || runtime.window_hovered {
         return None;
@@ -231,6 +262,7 @@ fn schedule_tray_provider_mini_close(runtime: &mut TrayProviderMiniRuntime) -> O
     Some(runtime.close_token)
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn reset_tray_provider_mini_runtime(runtime: &mut TrayProviderMiniRuntime) -> bool {
     let changed = runtime.opening || runtime.visible || runtime.snapshot.is_some();
     runtime.tray_hovered = false;
@@ -244,6 +276,7 @@ fn reset_tray_provider_mini_runtime(runtime: &mut TrayProviderMiniRuntime) -> bo
     changed
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn tray_provider_mini_logical_height(provider_count: usize) -> f64 {
     let content_height = if provider_count == 0 {
         TRAY_PROVIDER_MINI_EMPTY_HEIGHT
@@ -254,6 +287,7 @@ fn tray_provider_mini_logical_height(provider_count: usize) -> f64 {
     TRAY_PROVIDER_MINI_HEADER_HEIGHT + content_height + 2.0
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn clamp_panel_axis(value: f64, minimum: f64, maximum: f64) -> f64 {
     if maximum <= minimum {
         minimum
@@ -262,6 +296,7 @@ fn clamp_panel_axis(value: f64, minimum: f64, maximum: f64) -> f64 {
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn tray_provider_mini_placement(
     anchor: TrayProviderMiniAnchor,
     provider_count: usize,
@@ -882,7 +917,8 @@ mod tests {
             TrayProviderMiniHoverAction::Start { generation } => generation,
             action => panic!("unexpected action: {action:?}"),
         };
-        let snapshot = super::tray_provider_mini::TrayProviderMiniSnapshot::unavailable(generation);
+        let snapshot =
+            crate::app::tray_provider_mini::TrayProviderMiniSnapshot::unavailable(generation);
         assert!(state
             .complete_tray_provider_mini_open(generation, snapshot)
             .is_some());
@@ -902,7 +938,8 @@ mod tests {
             TrayProviderMiniHoverAction::Start { generation } => generation,
             action => panic!("unexpected action: {action:?}"),
         };
-        let snapshot = super::tray_provider_mini::TrayProviderMiniSnapshot::unavailable(generation);
+        let snapshot =
+            crate::app::tray_provider_mini::TrayProviderMiniSnapshot::unavailable(generation);
         state.complete_tray_provider_mini_open(generation, snapshot);
         let close_token = state
             .leave_tray_provider_mini_hover()

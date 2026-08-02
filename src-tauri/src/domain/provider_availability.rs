@@ -727,9 +727,11 @@ pub fn is_valid_availability_hours(hours: u32) -> bool {
 }
 
 pub fn normalized_availability_hours(hours: u32) -> u32 {
-    is_valid_availability_hours(hours)
-        .then_some(hours)
-        .unwrap_or(crate::settings::DEFAULT_PROVIDER_AVAILABILITY_HOURS)
+    if is_valid_availability_hours(hours) {
+        hours
+    } else {
+        crate::settings::DEFAULT_PROVIDER_AVAILABILITY_HOURS
+    }
 }
 
 fn is_request_level_abort(error_code: Option<&str>) -> bool {
@@ -1188,7 +1190,7 @@ mod tests {
         let db = crate::db::init_for_tests(&db_path).expect("init db");
         let provider =
             upsert(&db, default_provider_params("timeline-provider")).expect("insert provider");
-        let now_ms = 10 * 60 * 60 * 1_000 + 17 * 60 * 1_000;
+        let now_ms: i64 = 10 * 60 * 60 * 1_000 + 17 * 60 * 1_000;
         let bucket_ms = 30 * 60 * 1_000;
         let current_bucket_start = now_ms.div_euclid(bucket_ms) * bucket_ms;
         let cutoff = now_ms - AVAILABILITY_RETENTION_MS;
