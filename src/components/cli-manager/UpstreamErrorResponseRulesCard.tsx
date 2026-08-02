@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Pencil, Plus, ShieldAlert, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { CLI_REGISTRY } from "../../constants/clis";
@@ -78,13 +78,21 @@ function ruleMatchSummary(rule: UpstreamErrorResponseRule): string {
   return parts.join(rule.match_mode === "all" ? " 且 " : " 或 ");
 }
 
-function ruleScopeSummary(rule: UpstreamErrorResponseRule, providers: ProviderSummary[]): string {
+function ruleScopeSummary(
+  rule: UpstreamErrorResponseRule,
+  providers: ProviderSummary[],
+  providerLoadState: ProviderLoadState
+): string {
   const cliScope = rule.cli_keys.length === 0 ? "全部 CLI" : rule.cli_keys.map(cliLabel).join("/");
   if (rule.provider_ids.length === 0) return `${cliScope} · 全部供应商`;
   const providerNames = new Map(providers.map((provider) => [provider.id, provider.name]));
-  const names = rule.provider_ids.map(
-    (id) => providerNames.get(id) ?? `已删除供应商 #${String(id)}`
-  );
+  const names = rule.provider_ids.map((id) => {
+    const providerName = providerNames.get(id);
+    if (providerName) return providerName;
+    if (providerLoadState === "ready") return `已删除供应商 #${String(id)}`;
+    if (providerLoadState === "error") return `供应商 #${String(id)}（数据不可用）`;
+    return `供应商 #${String(id)}`;
+  });
   return `${cliScope} · ${names.length <= 2 ? names.join("/") : `${names.length} 个供应商`}`;
 }
 
@@ -104,6 +112,7 @@ export function UpstreamErrorResponseRulesCard({ rules, disabled, onPersist }: P
   const [saving, setSaving] = useState(false);
   const [providers, setProviders] = useState<ProviderSummary[]>([]);
   const [providerLoadState, setProviderLoadState] = useState<ProviderLoadState>("idle");
+  const providerLoadMountedRef = useRef(true);
   const stableRules = useMemo(() => cloneUpstreamErrorResponseRules(rules), [rules]);
   const sortedRules = useMemo(
     () =>
@@ -118,22 +127,25 @@ export function UpstreamErrorResponseRulesCard({ rules, disabled, onPersist }: P
   const busy = disabled || saving;
 
   useEffect(() => {
-    if (!editor || providerLoadState !== "idle") return;
-    let active = true;
+    providerLoadMountedRef.current = true;
+    return () => {
+      providerLoadMountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if ((!open && !editor) || providerLoadState !== "idle") return;
     setProviderLoadState("loading");
     void Promise.all(CLI_REGISTRY.map((cli) => providersList(cli.key)))
       .then((groups) => {
-        if (!active) return;
+        if (!providerLoadMountedRef.current) return;
         setProviders(groups.flat());
         setProviderLoadState("ready");
       })
       .catch(() => {
-        if (active) setProviderLoadState("error");
+        if (providerLoadMountedRef.current) setProviderLoadState("error");
       });
-    return () => {
-      active = false;
-    };
-  }, [editor, providerLoadState]);
+  }, [editor, open, providerLoadState]);
 
   function openCreateEditor() {
     if (busy || stableRules.length >= MAX_UPSTREAM_ERROR_RESPONSE_RULES) return;
@@ -285,7 +297,7 @@ export function UpstreamErrorResponseRulesCard({ rules, disabled, onPersist }: P
                       </div>
                       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                         <span>{ruleMatchSummary(rule)}</span>
-                        <span>{ruleScopeSummary(rule, providers)}</span>
+                        <span>{ruleScopeSummary(rule, providers, providerLoadState)}</span>
                         <span>{ruleActionSummary(rule)}</span>
                       </div>
                     </div>

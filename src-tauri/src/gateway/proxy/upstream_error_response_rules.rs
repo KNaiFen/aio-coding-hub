@@ -159,9 +159,10 @@ fn safe_retry_after(headers: &HeaderMap) -> Option<HeaderValue> {
     let valid_delta_seconds =
         value.bytes().all(|byte| byte.is_ascii_digit()) && value.parse::<u64>().is_ok();
     let valid_http_date = chrono::DateTime::parse_from_rfc2822(value).is_ok();
-    (valid_delta_seconds || valid_http_date)
-        .then(|| HeaderValue::from_str(value).ok())
-        .flatten()
+    if !valid_delta_seconds && !valid_http_date {
+        return None;
+    }
+    HeaderValue::from_str(value).ok()
 }
 
 pub(super) fn match_response_rule(
@@ -457,6 +458,42 @@ mod tests {
         assert_eq!(matched.client_status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(matched.upstream_status, 429);
         assert_eq!(matched.message, "quota exhausted");
+    }
+
+    #[test]
+    fn orders_rules_by_priority_then_stable_list_position() {
+        let mut later_priority = rule();
+        later_priority.priority = 20;
+        later_priority.keywords.clear();
+        later_priority.match_mode = UpstreamErrorResponseMatchMode::Any;
+        later_priority.message_behavior = UpstreamErrorMessageBehavior::Override {
+            message: "priority-20".to_string(),
+        };
+
+        let mut first_at_priority = later_priority.clone();
+        first_at_priority.id = "11111111-1111-4111-8111-111111111111".to_string();
+        first_at_priority.priority = 10;
+        first_at_priority.message_behavior = UpstreamErrorMessageBehavior::Override {
+            message: "first-priority-10".to_string(),
+        };
+        let mut second_at_priority = first_at_priority.clone();
+        second_at_priority.id = "22222222-2222-4222-8222-222222222222".to_string();
+        second_at_priority.message_behavior = UpstreamErrorMessageBehavior::Override {
+            message: "second-priority-10".to_string(),
+        };
+
+        let matched = match_response_rule(
+            &[later_priority, first_at_priority, second_at_priority],
+            "codex",
+            7,
+            "provider",
+            StatusCode::TOO_MANY_REQUESTS,
+            None,
+            &HeaderMap::new(),
+        )
+        .expect("first rule at the lowest priority should match");
+
+        assert_eq!(matched.message, "first-priority-10");
     }
 
     #[test]

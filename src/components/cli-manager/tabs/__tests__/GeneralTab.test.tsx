@@ -158,6 +158,38 @@ describe("cli-manager/GeneralTab", () => {
     });
   });
 
+  it("does not label scoped providers as deleted when provider data is unavailable", async () => {
+    mockProvidersList.mockRejectedValue(new Error("provider list unavailable"));
+    const appSettings = createTestAppSettings({
+      upstream_error_response_rules: [
+        {
+          id: "8ca12e7b-4f19-45f7-9185-cc6fbd951c51",
+          name: "限额响应",
+          description: "",
+          enabled: true,
+          priority: 10,
+          status_codes: [429],
+          keywords: [],
+          match_mode: "any",
+          cli_keys: ["codex"],
+          provider_ids: [7],
+          status_behavior: { mode: "passthrough" },
+          message_behavior: { mode: "passthrough" },
+        },
+      ],
+    });
+    renderTab(<CliManagerGeneralTab {...createDefaultTabProps({ appSettings })} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "展开上游错误响应规则" }));
+    expect(screen.getByText(/供应商 #7$/u)).toBeInTheDocument();
+    expect(screen.queryByText(/已删除供应商/u)).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getByText(/供应商 #7（数据不可用）/u)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/已删除供应商/u)).not.toBeInTheDocument();
+  });
+
   it("renders unavailable state", () => {
     renderTab(
       <CliManagerGeneralTab

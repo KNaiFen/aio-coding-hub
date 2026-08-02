@@ -1500,6 +1500,24 @@ mod tests {
     }
 
     #[test]
+    fn migrate_add_upstream_error_response_rules_advances_model_routing_schema() {
+        let mut settings = AppSettings {
+            schema_version: SCHEMA_VERSION_ADD_MODEL_ROUTING_POLICY,
+            ..Default::default()
+        };
+
+        assert!(migrate_add_upstream_error_response_rules(
+            &mut settings,
+            true
+        ));
+        assert_eq!(
+            settings.schema_version,
+            SCHEMA_VERSION_ADD_UPSTREAM_ERROR_RESPONSE_RULES
+        );
+        assert!(settings.upstream_error_response_rules.is_empty());
+    }
+
+    #[test]
     fn normalize_model_routing_policy_accepts_model_or_effort_only_and_trims_values() {
         let mut policy = ModelRoutingPolicy {
             enabled: true,
