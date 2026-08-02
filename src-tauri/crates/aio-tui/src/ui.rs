@@ -1550,6 +1550,7 @@ mod tests {
                 weekly_reset_at_unix: None,
                 checked_at_unix: 1,
             }),
+            account_usage: None,
         }
     }
 

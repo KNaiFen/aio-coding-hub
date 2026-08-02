@@ -380,7 +380,7 @@ describe("query/providers", () => {
     });
 
     expect(providerAccountUsageFetch).toHaveBeenCalledTimes(1);
-    expect(providerAccountUsageFetch).toHaveBeenCalledWith(12);
+    expect(providerAccountUsageFetch).toHaveBeenCalledWith(12, false);
     expect(client.getQueryData(providerAccountUsageKeys.detail(12))).toEqual(accountUsage);
     expect(readProviderAccountUsageCache(client, 12)).toEqual(accountUsage);
 
@@ -403,6 +403,7 @@ describe("query/providers", () => {
         queryFn: sharedOptions.queryFn,
         staleTime: 0,
         retry: false,
+        meta: { force: true },
       })
     );
     expect(client.getQueryData(providerAccountUsageKeys.detail(12))).toEqual(refreshedAccountUsage);
@@ -585,7 +586,7 @@ describe("query/providers", () => {
     expect(client.getQueryData(gatewayKeys.circuits())).toEqual(gatewayState);
   });
 
-  it("auto-fetches initial account usage even when timed refresh is disabled", async () => {
+  it("keeps the consumer heartbeat when backend timed refresh is disabled", async () => {
     setTauriRuntime();
     vi.mocked(providerAccountUsageFetch).mockClear();
 
@@ -640,10 +641,10 @@ describe("query/providers", () => {
     });
 
     const query = client.getQueryCache().find({ queryKey: providerAccountUsageKeys.detail(13) });
-    expect((query?.options as { refetchInterval?: unknown }).refetchInterval).toBe(false);
+    expect((query?.options as { refetchInterval?: unknown }).refetchInterval).toBe(5_000);
   });
 
-  it("does not auto-fetch provider account usage for disabled providers", async () => {
+  it("keeps account usage active for globally disabled providers", async () => {
     setTauriRuntime();
     vi.mocked(providerAccountUsageFetch).mockClear();
 
@@ -664,18 +665,19 @@ describe("query/providers", () => {
       ],
     });
     const wrapper = createQueryWrapper(client);
+    const accountUsage = makeAccountUsage(6);
+    vi.mocked(providerAccountUsageFetch).mockResolvedValueOnce(accountUsage);
 
     const { result } = renderHook(() => useProviderAccountUsageQuery(provider), { wrapper });
-    await act(async () => {
-      await Promise.resolve();
+    await waitFor(() => {
+      expect(result.current.data).toEqual(accountUsage);
     });
 
-    expect(result.current.fetchStatus).toBe("idle");
-    expect(providerAccountUsageFetch).not.toHaveBeenCalled();
-    expect(readProviderAccountUsageCache(client, 14)).toBeNull();
+    expect(providerAccountUsageFetch).toHaveBeenCalledWith(14, false);
+    expect(readProviderAccountUsageCache(client, 14)).toEqual(accountUsage);
   });
 
-  it("uses configured account usage polling interval when timed refresh is enabled", () => {
+  it("uses a fixed consumer heartbeat while the backend owns the remote interval", () => {
     setTauriRuntime();
     vi.mocked(providerAccountUsageFetch).mockClear();
     vi.mocked(providerAccountUsageFetch).mockResolvedValue({
@@ -724,7 +726,10 @@ describe("query/providers", () => {
     renderHook(() => useProviderAccountUsageQuery(provider), { wrapper });
 
     const query = client.getQueryCache().find({ queryKey: providerAccountUsageKeys.detail(15) });
-    expect((query?.options as { refetchInterval?: unknown }).refetchInterval).toBe(60_000);
+    expect((query?.options as { refetchInterval?: unknown }).refetchInterval).toBe(5_000);
+    expect(
+      (query?.options as { refetchIntervalInBackground?: unknown }).refetchIntervalInBackground
+    ).toBe(true);
   });
 
   it("active OAuth limits refresh resets circuit after every successful refresh", async () => {

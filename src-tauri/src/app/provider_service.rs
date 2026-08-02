@@ -4,6 +4,7 @@ use crate::gateway_control::{
     app_gateway_set_provider_enabled,
 };
 use crate::{blocking, providers};
+use tauri::Manager;
 
 #[derive(serde::Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -318,6 +319,11 @@ pub(crate) async fn provider_upsert(
     .map_err(Into::into);
 
     if let Ok((ref provider, decision)) = result {
+        if let Some(runtime) = app.try_state::<
+            crate::app::provider_account_usage_runtime::ProviderAccountUsageRuntimeState,
+        >() {
+            runtime.invalidate(provider.id).await;
+        }
         app_gateway_set_provider_enabled(&app, provider.id, provider.enabled);
         if is_create {
             tracing::info!(
@@ -494,6 +500,11 @@ pub(crate) async fn provider_delete(
     .map_err(Into::into);
 
     if let Ok((true, ref cli_key)) = result {
+        if let Some(runtime) = app.try_state::<
+            crate::app::provider_account_usage_runtime::ProviderAccountUsageRuntimeState,
+        >() {
+            runtime.invalidate(provider_id).await;
+        }
         app_gateway_set_provider_enabled(&app, provider_id, false);
         let cleared = app_gateway_clear_cli_route_runtime_state(&app, cli_key);
         tracing::info!(

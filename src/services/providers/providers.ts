@@ -655,16 +655,17 @@ export async function providerOAuthFetchLimits(
 }
 
 export async function providerAccountUsageFetch(
-  providerId: number
+  providerId: number,
+  force = false
 ): Promise<ProviderAccountUsageResult | null> {
   const normalizedProviderId = validateProviderId(providerId);
 
   return invokeGeneratedIpc<ProviderAccountUsageResult>({
     title: "读取账户用量失败",
     cmd: "provider_account_usage_fetch",
-    args: { providerId: normalizedProviderId },
+    args: { providerId: normalizedProviderId, force },
     invoke: () =>
-      commands.providerAccountUsageFetch(normalizedProviderId) as Promise<
+      commands.providerAccountUsageFetch(normalizedProviderId, force) as Promise<
         GeneratedCommandResult<ProviderAccountUsageResult>
       >,
   });

@@ -903,7 +903,7 @@ describe("services/providers/providers", () => {
 
     expect(result?.status).toBe("available");
     expect(result?.balance).toBe(12.5);
-    expect(commands.providerAccountUsageFetch).toHaveBeenCalledWith(52);
+    expect(commands.providerAccountUsageFetch).toHaveBeenCalledWith(52, false);
     expect(logToConsole).not.toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),

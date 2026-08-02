@@ -174,7 +174,7 @@ describe("pages/providers/SortableProviderCard", () => {
       ],
     });
 
-    await waitFor(() => expect(providerAccountUsageFetch).toHaveBeenCalledWith(9));
+    await waitFor(() => expect(providerAccountUsageFetch).toHaveBeenCalledWith(9, false));
     expect(await screen.findByText(/账户: 可用 · Pro · 余额 12.5 USD/)).toBeInTheDocument();
     expect(screen.getByText("日 1.00/10.0 USD")).toBeInTheDocument();
     expect(gatewayCircuitResetProvider).not.toHaveBeenCalled();

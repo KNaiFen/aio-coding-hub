@@ -3,11 +3,13 @@ use crate::blocking;
 use crate::domain::provider_account_usage::{
     build_account_usage_url, config_from_extension_values, custom_config_from_draft,
     fetch_newapi_account_usage, fetch_newapi_user_account_usage, http_status_result,
-    parse_account_usage_response, redact_secret, NewapiQueryMode, ProviderAccountUsageAdapterKind,
-    ProviderAccountUsageConfigState, ProviderAccountUsageCustomScriptDraft,
-    ProviderAccountUsageResult, ProviderAccountUsageStatus, SUB2API_RESPONSE_BODY_LIMIT,
+    parse_account_usage_response, redact_secret, refresh_schedule_from_extension_values,
+    NewapiQueryMode, ProviderAccountUsageAdapterKind, ProviderAccountUsageConfigState,
+    ProviderAccountUsageCustomScriptDraft, ProviderAccountUsageResult, ProviderAccountUsageStatus,
+    SUB2API_RESPONSE_BODY_LIMIT,
 };
 use crate::domain::provider_account_usage_script::execute_custom_account_usage;
+use tauri::Manager;
 
 fn account_usage_provider_snapshot_matches(
     provider: &crate::providers::ProviderAccountUsageFetchContext,
@@ -24,7 +26,12 @@ fn account_usage_provider_snapshot_matches(
 pub(crate) async fn provider_account_usage_fetch(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
+    runtime_state: tauri::State<
+        '_,
+        crate::app::provider_account_usage_runtime::ProviderAccountUsageRuntimeState,
+    >,
     provider_id: i64,
+    force: Option<bool>,
 ) -> Result<ProviderAccountUsageResult, String> {
     if provider_id <= 0 {
         return Err(format!(
@@ -32,7 +39,51 @@ pub(crate) async fn provider_account_usage_fetch(
         ));
     }
 
-    let db = ensure_db_ready(app, db_state.inner()).await?;
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
+    let schedule = blocking::run("provider_account_usage_fetch_load_schedule", {
+        let db = db.clone();
+        move || {
+            let conn = db.open_connection()?;
+            let provider = crate::providers::get_account_usage_fetch_context(&conn, provider_id)?;
+            Ok::<_, crate::shared::error::AppError>(refresh_schedule_from_extension_values(
+                &provider.extension_values,
+            ))
+        }
+    })
+    .await
+    .map_err(Into::<String>::into)?;
+
+    let Some(schedule) = schedule else {
+        runtime_state.invalidate(provider_id).await;
+        return fetch_account_usage_uncached(app, provider_id).await;
+    };
+    runtime_state
+        .touch_desktop(
+            &app,
+            crate::app::provider_account_usage_runtime::ProviderAccountUsageTarget {
+                provider_id,
+                schedule,
+            },
+        )
+        .await;
+    Ok(runtime_state
+        .fetch(app, provider_id, force.unwrap_or(false))
+        .await)
+}
+
+pub(crate) async fn fetch_account_usage_uncached(
+    app: tauri::AppHandle,
+    provider_id: i64,
+) -> Result<ProviderAccountUsageResult, String> {
+    if provider_id <= 0 {
+        return Err(format!(
+            "SEC_INVALID_INPUT: invalid provider_id={provider_id}"
+        ));
+    }
+    let db_state = app
+        .try_state::<DbInitState>()
+        .ok_or_else(|| "SYSTEM_ERROR: database state is unavailable".to_string())?;
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
     let provider = blocking::run("provider_account_usage_fetch_load_provider", {
         let db = db.clone();
         move || {

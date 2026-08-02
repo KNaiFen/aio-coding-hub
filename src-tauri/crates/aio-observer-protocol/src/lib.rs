@@ -145,6 +145,15 @@ pub struct ObserverProviderOAuthQuota {
 
 #[derive(Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct ObserverProviderAccountUsage {
+    pub state: String,
+    pub amount: Option<f64>,
+    pub unit: Option<String>,
+    pub last_fetched_at_unix: Option<i64>,
+}
+
+#[derive(Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct ObserverProviderStatus {
     pub provider_id: i64,
     pub cli_key: String,
@@ -161,6 +170,8 @@ pub struct ObserverProviderStatus {
     pub recover_at_unix: Option<i64>,
     pub spend_windows: Vec<ObserverProviderSpendWindow>,
     pub oauth_quota: Option<ObserverProviderOAuthQuota>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_usage: Option<ObserverProviderAccountUsage>,
 }
 
 #[derive(Clone, Deserialize, Serialize, PartialEq)]

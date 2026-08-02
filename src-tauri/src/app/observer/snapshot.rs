@@ -8,14 +8,16 @@ use crate::{
 };
 use aio_observer_protocol::{
     CliScope, ObserverConfiguredModelRoute, ObserverContextCompaction, ObserverDominantProvider,
-    ObserverGatewayStatus, ObserverPreferredProvider, ObserverProviderCollection,
-    ObserverProviderOAuthQuota, ObserverProviderSpendWindow, ObserverProviderStatus,
-    ObserverRequest, ObserverRequestState, ObserverRequestUsage, ObserverRouteHop, ObserverSection,
-    ObserverSnapshotV1, ObserverTodayUsage, OBSERVER_PROTOCOL_VERSION,
+    ObserverGatewayStatus, ObserverPreferredProvider, ObserverProviderAccountUsage,
+    ObserverProviderCollection, ObserverProviderOAuthQuota, ObserverProviderSpendWindow,
+    ObserverProviderStatus, ObserverRequest, ObserverRequestState, ObserverRequestUsage,
+    ObserverRouteHop, ObserverSection, ObserverSnapshotV1, ObserverTodayUsage,
+    OBSERVER_PROTOCOL_VERSION,
 };
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
+use tauri::Manager;
 use tokio::sync::OwnedSemaphorePermit;
 
 const HISTORY_SCAN_LIMIT: usize = 500;
@@ -45,6 +47,8 @@ struct ProviderObservation {
     oauth_limited: bool,
     oauth_limited_reset_at: Option<i64>,
     oauth_quota: Option<ObserverProviderOAuthQuota>,
+    account_usage_target:
+        Option<crate::app::provider_account_usage_runtime::ProviderAccountUsageTarget>,
 }
 
 struct DbProjection {
@@ -169,11 +173,35 @@ pub(super) async fn build_snapshot(
         generated_at_ms / 1000,
         &db_projection,
     );
+    let account_usage_by_provider = if include_providers {
+        if let Some(runtime) = app.try_state::<
+            crate::app::provider_account_usage_runtime::ProviderAccountUsageRuntimeState,
+        >() {
+            let targets = db_projection
+                .provider_details
+                .iter()
+                .filter_map(|provider| provider.account_usage_target)
+                .collect::<Vec<_>>();
+            let provider_ids = targets
+                .iter()
+                .map(|target| target.provider_id)
+                .collect::<Vec<_>>();
+            runtime.touch_tui(app, targets).await;
+            runtime
+                .display_snapshots(&provider_ids, generated_at_ms / 1000)
+                .await
+        } else {
+            HashMap::new()
+        }
+    } else {
+        HashMap::new()
+    };
     let provider_statuses = project_provider_statuses(
         app,
         gateway_status.running,
         generated_at_ms / 1000,
         &db_projection,
+        &account_usage_by_provider,
     );
 
     ObserverSnapshotV1 {
@@ -355,6 +383,21 @@ fn load_provider_observations(
         .map(|row| {
             let spend = spend_by_provider.get(&row.id);
             let oauth = oauth_by_provider.get(&row.id);
+            let account_usage_target = row
+                .account_usage_values
+                .as_ref()
+                .and_then(|values| {
+                    crate::domain::provider_account_usage::refresh_schedule_from_value(
+                        values,
+                        row.account_usage_updated_at.unwrap_or_default(),
+                    )
+                })
+                .map(|schedule| {
+                    crate::app::provider_account_usage_runtime::ProviderAccountUsageTarget {
+                        provider_id: row.id,
+                        schedule,
+                    }
+                });
             ProviderObservation {
                 id: row.id,
                 cli_key: bounded_text(&row.cli_key, 16),
@@ -388,6 +431,7 @@ fn load_provider_observations(
                     weekly_reset_at_unix: value.limit_weekly_reset_at,
                     checked_at_unix: value.checked_at,
                 }),
+                account_usage_target,
             }
         })
         .collect();
@@ -531,6 +575,10 @@ fn project_provider_statuses(
     gateway_running: bool,
     now_unix: i64,
     projection: &DbProjection,
+    account_usage_by_provider: &HashMap<
+        i64,
+        crate::app::provider_account_usage_runtime::ProviderAccountUsageDisplaySnapshot,
+    >,
 ) -> Option<ObserverSection<ObserverProviderCollection>> {
     if !projection.provider_details_requested {
         return None;
@@ -584,6 +632,18 @@ fn project_provider_statuses(
                 },
                 spend_windows: provider.spend_windows.clone(),
                 oauth_quota: provider.oauth_quota.clone(),
+                account_usage: provider.account_usage_target.map(|_| {
+                    let snapshot = account_usage_by_provider.get(&provider.id);
+                    ObserverProviderAccountUsage {
+                        state: snapshot.map(|value| value.state).unwrap_or("loading").to_string(),
+                        amount: snapshot.and_then(|value| value.amount),
+                        unit: snapshot
+                            .and_then(|value| value.unit.as_deref())
+                            .map(|value| bounded_text(value, 24)),
+                        last_fetched_at_unix: snapshot
+                            .and_then(|value| value.last_fetched_at),
+                    }
+                }),
             }
         })
         .collect();
@@ -1323,6 +1383,7 @@ mod tests {
             oauth_limited: false,
             oauth_limited_reset_at: None,
             oauth_quota: None,
+            account_usage_target: None,
         };
         assert_eq!(
             provider_eligibility(&provider, None, true, 1_000),

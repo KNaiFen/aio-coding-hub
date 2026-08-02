@@ -1043,12 +1043,13 @@ export const commands = {
     }
   },
   async providerAccountUsageFetch(
-    providerId: number
+    providerId: number,
+    force: boolean | null
   ): Promise<Result<ProviderAccountUsageResult, string>> {
     try {
       return {
         status: "ok",
-        data: await TAURI_INVOKE("provider_account_usage_fetch", { providerId }),
+        data: await TAURI_INVOKE("provider_account_usage_fetch", { providerId, force }),
       };
     } catch (e) {
       if (e instanceof Error) throw e;

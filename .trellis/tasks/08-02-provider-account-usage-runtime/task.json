@@ -3,7 +3,7 @@
   "name": "provider-account-usage-runtime",
   "title": "共享账户余额运行时",
   "description": "实现 P004/P005 的共享缓存与按需刷新",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": "aio-coding-hub",

@@ -413,6 +413,8 @@ pub(crate) struct ProviderObserverRow {
     pub auth_mode: String,
     pub route_rank: Option<i64>,
     pub route_enabled: bool,
+    pub account_usage_values: Option<serde_json::Value>,
+    pub account_usage_updated_at: Option<i64>,
 }
 
 #[derive(Debug, Clone)]

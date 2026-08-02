@@ -1,121 +1,94 @@
 # Provider Account-Usage Query Contract
 
-## Scenario: Change Account-Usage Fetching Or Refresh
+## Scenario: Shared Demand-Driven Account-Usage Runtime
 
 ### 1. Scope / Trigger
 
-Use this contract when changing provider account-usage query keys, automatic or
-timed refresh, the manual refresh button, provider edit/delete cache cleanup, or
-the account-usage IPC adapter. A Tauri IPC Promise may continue after logical
-cancellation, so cache ownership and completion ordering are part of the
-contract.
+Use this contract when changing account-usage cache ownership, desktop/TUI
+consumer lifecycle, timed or manual refresh, provider edit/delete invalidation,
+or Observer account-usage projection.
 
 ### 2. Signatures
 
-The shared query owner is defined in `src/query/providers.ts`:
+The desktop query remains provider-keyed, but its interval is only a consumer
+heartbeat. The backend owns remote fetch timing and completion ordering:
 
 ```ts
-providerAccountUsageKeys.detail(providerId: number);
-
 providerAccountUsageQueryOptions(providerId: number);
-
-refreshProviderAccountUsage(
-  queryClient: QueryClient,
-  providerId: number,
-): Promise<ProviderAccountUsageResult | null>;
-
-useProviderAccountUsageQuery(provider: ProviderSummary, enabled?: boolean);
+refreshProviderAccountUsage(queryClient, providerId);
+useProviderAccountUsageQuery(provider, enabled?);
 ```
 
-The query function calls `providerAccountUsageFetch(providerId)` and returns
-`ProviderAccountUsageResult | null`.
+```rust
+provider_account_usage_fetch(provider_id, force);
+ProviderAccountUsageRuntimeState::touch_desktop(...);
+ProviderAccountUsageRuntimeState::touch_tui(...);
+ProviderAccountUsageRuntimeState::fetch(...);
+```
 
 ### 3. Contracts
 
-- Automatic initial fetch, timed refetch, and manual refresh use the exact same
-  provider-scoped key, top-level query function, and base query options.
-- Base options keep `staleTime: Infinity` and `retry: false`. Manual refresh
-  must first cancel that exact key, then call `fetchQuery` with the shared
-  options and `staleTime: 0` so a fresh cache entry cannot suppress the IPC.
-- Manual refresh must not call the IPC directly and then use `setQueryData`.
-  Query completion is the only owner allowed to commit a fetched result.
-- Logical TanStack cancellation must prevent an older automatic, timed, or
-  manual Promise from committing after a newer manual result, even if the
-  underlying Tauri IPC cannot be physically aborted.
-- The account component derives loading and error presentation from the query's
-  `isFetching` and `error`. Local component state must not become a second
-  request lifecycle or cache owner.
-- Cache identity is provider ID. Editing or deleting a provider removes only
-  that provider's account-usage key; refresh does not invalidate another
-  provider, provider lists, OAuth quota, availability, or gateway circuit data.
-- Account usage is display-only. Refresh never tests availability, resets a
-  circuit, mutates/reorders providers, or changes routing health.
+- The Tauri-managed runtime is the only process-wide owner of fetched results,
+  remote refresh timing, and per-provider in-flight state. React Query mirrors
+  the backend result for rendering; Observer reads the same backend result.
+- Desktop queries send a five-second heartbeat while their account row is
+  mounted. Observer snapshots with `include_providers=true` renew TUI leases.
+  Leases last 15 seconds; when all relevant desktop and TUI leases expire, no
+  new timed remote request may start.
+- A configured provider performs an initial fetch when no reusable result
+  exists. While a consumer remains active, timed refresh follows the persisted
+  60-300 second interval. Disabling timed refresh suppresses interval refresh,
+  but does not suppress the initial fetch, manual fetch, or 60-minute hard
+  expiry refresh.
+- The provider global `enabled` switch controls routing only. A configured,
+  globally disabled provider is still eligible for account-usage refresh while
+  it has an active balance consumer.
+- At most one remote account-usage request per provider may be in flight.
+  Manual and scheduled callers coalesce, up to four different providers may
+  fetch concurrently, and a result from an invalidated configuration generation
+  cannot commit.
+- A successful result is displayable only when `last_fetched_at <= now` and its
+  age is strictly less than 60 minutes. Loading, failed, expired, malformed, or
+  future-dated states expose no previous amount.
+- Provider save/delete invalidates only that provider's backend and frontend
+  account cache. Enable/disable alone does not invalidate or stop account usage.
+- Observer output is bounded and secret-free: configured providers expose only
+  state, the preferred plan-remaining-or-balance amount, unit, and fetch time.
+  It never exposes credentials, upstream bodies, or adapter error text.
+- Account usage stays display-only. It never changes routing, availability,
+  provider order, circuit/cooldown state, spend limits, or OAuth quota state.
 
 ### 4. Validation & Error Matrix
 
 | Input / condition | Required result |
 | --- | --- |
-| Provider ID is not a positive safe integer | Reject with `SEC_INVALID_INPUT` |
-| Cached data is fresh under `staleTime: Infinity` | Manual refresh still starts one new IPC |
-| Older initial/timed Promise finishes after manual result | Ignore old completion; cache remains manual result |
-| Second manual refresh starts before the first finishes | Cancel first lifecycle; latest result owns cache |
-| Manual request is pending | Query reports fetching; refresh button remains disabled |
-| Manual request fails | Query exposes the error; unrelated cached data is untouched |
-| Provider is disabled | No automatic fetch; existing manual/configured behavior is preserved |
-| Another provider has cached usage | Refresh leaves that exact key unchanged |
+| Provider ID is not positive | Reject with `SEC_INVALID_INPUT` |
+| Globally disabled but configured provider has consumer | Refresh normally; do not route it |
+| No desktop/TUI consumer after lease timeout | Start no further timed remote requests |
+| Desktop and TUI request the same due provider | One remote request and one shared result |
+| Manual refresh overlaps scheduled refresh | Coalesce with the in-flight request |
+| Provider config changes during fetch | Ignore the old-generation result; next consumer uses new config |
+| Successful cache age is exactly 60 minutes | Treat as expired and expose no old amount |
+| Successful timestamp is in the future | Fail closed and expose no amount |
+| Refresh fails after an older success | Show failure, never the historical amount |
+| Result has both plan remaining and cash balance | Project plan remaining |
+| Result lacks plan remaining but has cash balance | Project cash balance |
 
-### 5. Good / Base / Bad Cases
+### 5. Tests Required
 
-- Good: initial request A returns balance 0 late, manual request B returns
-  balance 9 first, and both the observer and cache remain at 9 after A settles.
-- Good: a fresh Infinity-stale cache still produces a new IPC when the user
-  requests a manual refresh.
-- Base: one configured enabled provider performs its initial query and optional
-  timed refetch through the shared options.
-- Bad: manual B writes balance 9 with `setQueryData`, then older automatic A
-  completes through `useQuery` and restores balance 0.
-- Bad: a successful availability test is required before account refresh, or a
-  refresh invalidates circuit/provider-list state.
-
-### 6. Tests Required
-
-- Assert hook and manual paths use the same key and query function; manual
-  refresh must call exact `cancelQueries` then forced `fetchQuery`.
-- Use deferred Promises for initial-old/manual-new and timed-old/manual-new
-  reversed completion. Assert both observer data and query cache after the old
-  Promise settles.
-- Cover repeated manual entry points and prove the older lifecycle is canceled
-  while the latest result remains cached.
-- Component-test query-owned loading, disabled-button timing, success display,
-  and error display.
-- Assert refresh does not call availability, circuit reset, provider mutation,
-  reorder, duplicate, or OAuth quota operations and does not invalidate other
-  caches.
-- Keep disabled-provider, interval, and provider edit/delete cleanup regressions
-  passing, followed by typecheck, lint, format, and diff checks.
-
-### 7. Wrong vs Correct
-
-#### Wrong
-
-```ts
-const next = await providerAccountUsageFetch(providerId);
-queryClient.setQueryData(providerAccountUsageKeys.detail(providerId), next);
-```
-
-This creates a second writer outside the query fetch lifecycle, so an older
-automatic completion can overwrite the manual result.
-
-#### Correct
-
-```ts
-const options = providerAccountUsageQueryOptions(providerId);
-await queryClient.cancelQueries({ queryKey: options.queryKey, exact: true });
-return queryClient.fetchQuery({ ...options, staleTime: 0 });
-```
-
-Cancellation establishes the new ordering boundary, and the forced shared
-query remains the only cache writer.
+- Cover lease establishment, renewal, timeout, re-entry, and no-consumer stop
+  with a controllable clock.
+- Cover initial, configured interval, timed-disabled, hard-expiry, failure
+  recovery, and globally disabled provider refresh.
+- Cover same-provider coalescing, four-provider concurrency, manual/scheduled
+  overlap, invalidation generation, and independent provider schedules.
+- Cover Observer omission for unconfigured providers and loading/available/
+  failed projection, plan precedence, unit preservation, hard expiry, malformed
+  values, and future timestamps.
+- Keep the frontend exact-key cancellation tests: manual refresh uses the shared
+  query function with `meta.force=true`, never a direct second cache writer.
+- Assert refresh remains isolated from routing, availability, circuit, OAuth,
+  mutations, reorder, and unrelated caches.
 
 ## Scenario: NewAPI Model-Token Billing Adapter
 
@@ -139,7 +112,9 @@ The production entry and NewAPI protocol helpers are:
 pub(crate) async fn provider_account_usage_fetch(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,
+    runtime_state: tauri::State<'_, ProviderAccountUsageRuntimeState>,
     provider_id: i64,
+    force: Option<bool>,
 ) -> Result<ProviderAccountUsageResult, String>;
 
 pub(crate) fn build_newapi_billing_urls(base_url: &str)

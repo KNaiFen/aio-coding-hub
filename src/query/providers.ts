@@ -34,10 +34,7 @@ import {
   validateProviderCliKey,
   validateProviderId,
 } from "../services/providers/providers";
-import {
-  isProviderAccountUsageConfigured,
-  readProviderAccountUsageConfig,
-} from "../services/providers/providerAccountUsageConfig";
+import { isProviderAccountUsageConfigured } from "../services/providers/providerAccountUsageConfig";
 import { logToConsole } from "../services/consoleLog";
 import { gatewayCircuitResetProvider } from "../services/gateway/gateway";
 import { formatUnknownError } from "../utils/errors";
@@ -174,8 +171,9 @@ type ProviderAccountUsageQueryKey = ReturnType<typeof providerAccountUsageKeys.d
 
 function fetchProviderAccountUsageQuery({
   queryKey,
+  meta,
 }: QueryFunctionContext<ProviderAccountUsageQueryKey>) {
-  return providerAccountUsageFetch(validateProviderId(queryKey[1]));
+  return providerAccountUsageFetch(validateProviderId(queryKey[1]), meta?.force === true);
 }
 
 export function providerAccountUsageQueryOptions(providerId: number) {
@@ -195,7 +193,7 @@ export async function refreshProviderAccountUsage(
 ): Promise<ProviderAccountUsageResult | null> {
   const options = providerAccountUsageQueryOptions(providerId);
   await queryClient.cancelQueries({ queryKey: options.queryKey, exact: true });
-  return queryClient.fetchQuery({ ...options, staleTime: 0 });
+  return queryClient.fetchQuery({ ...options, staleTime: 0, meta: { force: true } });
 }
 
 export async function resetProviderOAuthCodexQuota(
@@ -571,17 +569,17 @@ export function useProviderAccountUsageQuery(provider: ProviderSummary, enabled 
   const normalizedProviderId = validateProviderId(provider.id);
   const options = providerAccountUsageQueryOptions(normalizedProviderId);
   const configured = isProviderAccountUsageConfigured(provider);
-  const config = readProviderAccountUsageConfig(provider);
-  const autoFetchEnabled = enabled && provider.enabled && configured;
-  const refetchInterval =
-    autoFetchEnabled && config.timedRefreshEnabled ? config.refreshIntervalSeconds * 1000 : false;
+  const consumerEnabled = enabled && configured;
 
   return useQuery({
     ...options,
-    enabled: autoFetchEnabled,
-    refetchInterval,
+    enabled: consumerEnabled,
+    refetchInterval: consumerEnabled ? 5_000 : false,
+    refetchIntervalInBackground: true,
+    refetchOnMount: "always",
     meta: {
       configured: enabled && configured,
+      force: false,
     },
   });
 }

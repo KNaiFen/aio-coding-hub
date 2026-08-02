@@ -686,6 +686,8 @@ fn config_v3_round_trips_private_account_usage_snapshot_while_v2_ignores_it() {
                 adapter_kind:
                     crate::domain::provider_account_usage::ProviderAccountUsageAdapterKind::Newapi,
                 new_api_query_mode: crate::domain::provider_account_usage::NewapiQueryMode::Account,
+                timed_refresh_enabled: false,
+                refresh_interval_seconds: 120,
                 custom: None,
             }
         )

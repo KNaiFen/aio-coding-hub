@@ -1190,7 +1190,23 @@ WITH observed AS (
       ELSE COALESCE(mode_route.enabled, 0) = 1
     END AS route_enabled,
     pool.sort_order AS pool_order,
-    p.sort_order AS provider_order
+    p.sort_order AS provider_order,
+    (
+      SELECT values_json
+      FROM provider_extension_values account_usage
+      WHERE account_usage.provider_id = p.id
+        AND account_usage.plugin_id = 'core.provider-account-usage'
+        AND account_usage.namespace = 'accountUsage'
+      LIMIT 1
+    ) AS account_usage_values_json,
+    (
+      SELECT updated_at
+      FROM provider_extension_values account_usage
+      WHERE account_usage.provider_id = p.id
+        AND account_usage.plugin_id = 'core.provider-account-usage'
+        AND account_usage.namespace = 'accountUsage'
+      LIMIT 1
+    ) AS account_usage_updated_at
   FROM providers p
   LEFT JOIN sort_mode_active active
     ON active.cli_key = p.cli_key
@@ -1215,7 +1231,9 @@ SELECT
   enabled,
   auth_mode,
   route_rank,
-  route_enabled
+  route_enabled,
+  account_usage_values_json,
+  account_usage_updated_at
 FROM observed
 ORDER BY
   CASE cli_key
@@ -1249,6 +1267,10 @@ LIMIT ?2
                 auth_mode: row.get(4)?,
                 route_rank: row.get(5)?,
                 route_enabled: row.get::<_, i64>(6)? != 0,
+                account_usage_values: row
+                    .get::<_, Option<String>>(7)?
+                    .and_then(|value| serde_json::from_str(&value).ok()),
+                account_usage_updated_at: row.get(8)?,
             })
         })
         .map_err(|e| db_err!("failed to list observer provider statuses: {e}"))?;
