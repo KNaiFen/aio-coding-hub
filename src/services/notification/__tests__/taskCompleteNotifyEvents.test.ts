@@ -5,12 +5,20 @@ import { clearTauriEventListeners, emitTauriEvent } from "../../../test/mocks/ta
 import { clearTauriRuntime, setTauriRuntime } from "../../../test/utils/tauriRuntime";
 
 vi.mock("../notice", () => ({ noticeSend: vi.fn() }));
+vi.mock("../../gateway/activeRequests", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../gateway/activeRequests")>();
+  return { ...actual, activeRequestLogsSnapshot: vi.fn() };
+});
 
 async function importFreshTaskCompleteNotify() {
   vi.resetModules();
   const mod = await import("../taskCompleteNotifyEvents");
   const notice = await import("../notice");
-  return { mod, noticeSend: vi.mocked(notice.noticeSend) };
+  const activeRequests = await import("../../gateway/activeRequests");
+  const activeRequestLogsSnapshot = vi.mocked(activeRequests.activeRequestLogsSnapshot);
+  activeRequestLogsSnapshot.mockReset();
+  activeRequestLogsSnapshot.mockResolvedValue([]);
+  return { mod, noticeSend: vi.mocked(notice.noticeSend), activeRequestLogsSnapshot };
 }
 
 function requestSignalStart(cliKey: string, traceId: string, model?: string | null) {
@@ -33,6 +41,23 @@ function requestSignalComplete(cliKey: string, traceId = "t-1") {
     requested_model: null,
     ts: Date.now(),
   } as any;
+}
+
+function activeInferenceRequest(cliKey: string, traceId: string) {
+  return {
+    trace_id: traceId,
+    cli_key: cliKey,
+    method: "POST",
+    path: cliKey === "codex" ? "/v1/responses" : "/v1/messages",
+  } as any;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
 }
 
 describe("services/notification/taskCompleteNotifyEvents", () => {
@@ -333,7 +358,7 @@ describe("services/notification/taskCompleteNotifyEvents", () => {
     vi.useRealTimers();
   });
 
-  it("uses default quiet period for codex (no extra delay)", async () => {
+  it("uses the 120 second quiet period for codex", async () => {
     setTauriRuntime();
     vi.useFakeTimers();
     vi.setSystemTime(1_700_000_000_000);
@@ -346,11 +371,10 @@ describe("services/notification/taskCompleteNotifyEvents", () => {
     emitTauriEvent(gatewayEventNames.requestSignal, requestSignalStart("codex", "t-1", "gpt-4.1"));
     emitTauriEvent(gatewayEventNames.requestSignal, requestSignalComplete("codex", "t-1"));
 
-    // Quiet period is 30s; verify it doesn't fire early.
-    await vi.advanceTimersByTimeAsync(25_000);
+    await vi.advanceTimersByTimeAsync(119_000);
     expect(noticeSend).not.toHaveBeenCalled();
 
-    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(1_000);
     expect(noticeSend).toHaveBeenCalledTimes(1);
     expect(noticeSend).toHaveBeenCalledWith({
       level: "info",
@@ -376,7 +400,7 @@ describe("services/notification/taskCompleteNotifyEvents", () => {
     emitTauriEvent(gatewayEventNames.requestSignal, requestSignalStart("codex", "t-1", longModel));
     emitTauriEvent(gatewayEventNames.requestSignal, requestSignalComplete("codex", "t-1"));
 
-    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(120_000);
 
     expect(noticeSend).toHaveBeenCalledTimes(1);
     expect(noticeSend).toHaveBeenCalledWith(
@@ -390,6 +414,69 @@ describe("services/notification/taskCompleteNotifyEvents", () => {
       })
     );
 
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("suppresses notification when the backend still has an active inference request", async () => {
+    setTauriRuntime();
+    vi.useFakeTimers();
+
+    const { mod, noticeSend, activeRequestLogsSnapshot } = await importFreshTaskCompleteNotify();
+    activeRequestLogsSnapshot.mockResolvedValue([activeInferenceRequest("claude", "backend-live")]);
+    noticeSend.mockResolvedValue(true);
+    const cleanup = await mod.listenTaskCompleteNotifyEvents();
+
+    emitTauriEvent(
+      gatewayEventNames.requestSignal,
+      requestSignalComplete("claude", "missed-start")
+    );
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(activeRequestLogsSnapshot).toHaveBeenCalledTimes(1);
+    expect(noticeSend).not.toHaveBeenCalled();
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("skips notification when the backend snapshot cannot be read", async () => {
+    setTauriRuntime();
+    vi.useFakeTimers();
+
+    const { mod, noticeSend, activeRequestLogsSnapshot } = await importFreshTaskCompleteNotify();
+    activeRequestLogsSnapshot.mockRejectedValue(new Error("snapshot unavailable"));
+    noticeSend.mockResolvedValue(true);
+    const cleanup = await mod.listenTaskCompleteNotifyEvents();
+
+    emitTauriEvent(gatewayEventNames.requestSignal, requestSignalComplete("gemini", "done"));
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(noticeSend).not.toHaveBeenCalled();
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("invalidates an in-progress backend check when a new request starts", async () => {
+    setTauriRuntime();
+    vi.useFakeTimers();
+
+    const { mod, noticeSend, activeRequestLogsSnapshot } = await importFreshTaskCompleteNotify();
+    const snapshot = deferred<any[]>();
+    activeRequestLogsSnapshot.mockReturnValue(snapshot.promise);
+    noticeSend.mockResolvedValue(true);
+    const cleanup = await mod.listenTaskCompleteNotifyEvents();
+
+    emitTauriEvent(gatewayEventNames.requestSignal, requestSignalComplete("claude", "done"));
+    vi.advanceTimersByTime(30_000);
+    await Promise.resolve();
+    expect(activeRequestLogsSnapshot).toHaveBeenCalledTimes(1);
+
+    emitTauriEvent(gatewayEventNames.requestSignal, requestSignalStart("claude", "new-live"));
+    snapshot.resolve([]);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(noticeSend).not.toHaveBeenCalled();
     cleanup();
     vi.useRealTimers();
   });
