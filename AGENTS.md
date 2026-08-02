@@ -9,6 +9,14 @@
 - Keep upstream merge and drift-repair tasks integration-only. Make only the minimal changes required to resolve concrete textual or semantic conflicts and preserve an explicit fork decision. Do not fix defects that already exist in the pinned upstream revision independently of the merge, even when review or validation discovers them; record those defects as out-of-scope findings and handle them in a separately authorized follow-up task, not in the merge task or merge commit.
 - Never run Cargo, rustfmt, Clippy, Rust tests, Specta binding generation, `pnpm exec tauri`, or any package script that invokes them on a local machine. Native formatting, lock synchronization, generated bindings, tests, audit, signing, and desktop packaging are owned by GitHub Actions; apply the bounded CI drift patch when CI reports generated-file drift.
 - Keep local validation limited to Node.js, TypeScript, frontend tests, and the frontend Vite build. Use `pnpm dev` for local frontend-only development and the `dev-build` GitHub Actions workflow for native integration artifacts.
+
+## Deferred Work List
+
+- `PENDING.md` is the canonical durable list for small issues and improvements that the user asks to accumulate for a later batch.
+- Recording an item is not authorization to implement it. When the user asks only to record or discuss an issue, update `PENDING.md` and do not change product code for that item.
+- Before producing any formal implementation plan, and before starting changes after an explicit instruction such as "start", "implement", or "begin modifying", read `PENDING.md` and include every unresolved `pending` or `planned` entry in the proposed work checklist. Do not silently omit an entry; surface conflicts, dependencies, or scope risks and ask before deferring it again.
+- Give each new entry a stable sequential ID, and record its status, date, observed problem, locked user decisions, proposed direction, and acceptance criteria. Preserve the history instead of deleting completed or dropped entries.
+- When an entry is selected for implementation, link it to the corresponding Trellis task and change its status to `planned`. Mark it `done` only after the implementation is merged and verified, including the PR, commit, or release evidence. Use `dropped` only with an explicit user decision and record the reason.
 <!-- TRELLIS:START -->
 # Trellis Instructions
 
