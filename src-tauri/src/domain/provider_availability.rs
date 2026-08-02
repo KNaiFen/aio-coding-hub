@@ -1232,7 +1232,11 @@ mod tests {
         assert_eq!(timeline.bucket_minutes, 30);
         assert_eq!(tray_timeline.bucket_minutes, 20);
         assert_eq!(
-            tray_timeline.buckets.last().expect("tray current bucket").start_at_ms,
+            tray_timeline
+                .buckets
+                .last()
+                .expect("tray current bucket")
+                .start_at_ms,
             10 * 60 * 60 * 1_000
         );
         assert_eq!(current.start_at_ms, current_bucket_start);

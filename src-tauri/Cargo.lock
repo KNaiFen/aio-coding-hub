@@ -106,6 +106,7 @@ name = "aio-tui"
 version = "0.60.43"
 dependencies = [
  "aio-observer-protocol",
+ "chrono",
  "crossterm",
  "ratatui",
  "reqwest",
