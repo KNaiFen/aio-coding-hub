@@ -8,7 +8,7 @@ use crate::settings::{
     MAX_UPSTREAM_ERROR_RESPONSE_RULE_PRIORITY, MAX_UPSTREAM_ERROR_RESPONSE_RULE_PROVIDER_IDS,
     MAX_UPSTREAM_ERROR_RESPONSE_RULE_STATUS_CODES,
 };
-use axum::body::{Body, Bytes};
+use axum::body::Body;
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::Response;
 
@@ -608,7 +608,7 @@ mod tests {
     fn scope_and_success_status_do_not_match() {
         let candidate = rule();
         assert!(match_response_rule(
-            &[candidate.clone()],
+            std::slice::from_ref(&candidate),
             "claude",
             7,
             "provider",
