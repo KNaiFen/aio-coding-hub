@@ -1467,6 +1467,9 @@ INSERT INTO codex_managed_profiles(
             recent_errors: Arc::new(Mutex::new(RecentErrorCache::default())),
             latency_cache: Arc::new(Mutex::new(ProviderBaseUrlPingCache::default())),
             plugin_pipeline: GatewayPluginPipeline::empty_shared(),
+            provider_enable_gate: Arc::new(
+                crate::gateway::runtime::ProviderEnableGate::default(),
+            ),
             http_client_override: Some(
                 reqwest::Client::builder()
                     .no_proxy()

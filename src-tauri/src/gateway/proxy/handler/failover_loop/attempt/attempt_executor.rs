@@ -69,6 +69,8 @@ pub(super) enum AttemptSendOutcome {
     PluginBlocked(String),
     /// A request plugin changed a server-managed model binding before send.
     ManagedModelInvalid(String),
+    /// The provider was disabled after route selection but before this send.
+    ProviderDisabled(i64),
 }
 
 /// URL build failure from the shared prepared-send primitive.
@@ -88,6 +90,7 @@ pub(super) enum PreparedSendOutcome {
     OAuthInjectFailed(Box<FailoverAttempt>),
     PluginBlocked(String),
     ManagedModelInvalid(String),
+    ProviderDisabled(i64),
 }
 
 /// Build request headers, inject auth, clean body, send upstream, and return
@@ -154,6 +157,9 @@ where
         PreparedSendOutcome::PluginBlocked(reason) => AttemptSendOutcome::PluginBlocked(reason),
         PreparedSendOutcome::ManagedModelInvalid(reason) => {
             AttemptSendOutcome::ManagedModelInvalid(reason)
+        }
+        PreparedSendOutcome::ProviderDisabled(provider_id) => {
+            AttemptSendOutcome::ProviderDisabled(provider_id)
         }
     }
 }
@@ -354,6 +360,26 @@ where
     };
     let upstream_body = body_state_for_attempt
         .finalize_for_upstream(&mut headers, crate::gateway::util::max_request_body_bytes());
+
+    let disabled_provider_id = std::iter::once(prepared.provider_id)
+        .chain(
+            prepared
+                .bridge_source
+                .as_ref()
+                .map(|(source, _)| source.id),
+        )
+        .find(|provider_id| !ctx.state.provider_enable_gate.allows(*provider_id));
+    if let Some(disabled_provider_id) = disabled_provider_id {
+        tracing::info!(
+            trace_id = %input.trace_id,
+            cli_key = %input.cli_key,
+            provider_id = prepared.provider_id,
+            disabled_provider_id,
+            retry_index,
+            "provider skipped because the global provider switch is disabled"
+        );
+        return PreparedSendOutcome::ProviderDisabled(disabled_provider_id);
+    }
 
     emit_upstream_attempt_fingerprint(
         ctx,

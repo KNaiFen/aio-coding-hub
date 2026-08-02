@@ -83,8 +83,9 @@ remote administration API.
   credentials, tokens, email, notes, tags, extensions, and arbitrary/error JSON.
 - Eligible active-route providers follow actual route order. Disabled or
   out-of-route rows follow in stable pool order; `all` groups Codex, Claude,
-  Grok, and Gemini. Provider projection failures make only that optional section
-  unavailable and never enter routing or health accounting.
+  Grok, and Gemini. A custom-route membership never makes a globally disabled
+  provider eligible or preferred. Provider projection failures make only that
+  optional section unavailable and never enter routing or health accounting.
 
 ## TUI behavior
 

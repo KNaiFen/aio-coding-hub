@@ -1143,6 +1143,9 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
     const cliKey = activeCliRef.current;
     if (selection.kind !== "mode" || routeSavingRef.current) return;
 
+    const provider = providersRef.current.find((row) => row.id === providerId);
+    if (!provider?.enabled) return;
+
     const previousRows = modeProvidersRef.current;
     const currentRow = previousRows.find((row) => row.provider_id === providerId);
     if (!currentRow || currentRow.enabled === enabled) return;

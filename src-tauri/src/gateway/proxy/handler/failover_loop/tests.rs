@@ -377,3 +377,24 @@ fn gate_skip_attempt_json_input_none() -> FailoverAttempt {
     );
     attempts.remove(0)
 }
+
+#[test]
+fn provider_disabled_skip_is_all_unavailable_gate_evidence() {
+    let mut attempts = Vec::new();
+    push_skipped_provider_attempt(
+        &mut attempts,
+        SkippedProviderAttempt {
+            provider_id: 7,
+            provider_name: "Provider A",
+            base_url: "https://provider-a.example",
+            error_category: "provider_disabled",
+            error_code: GatewayErrorCode::NoEnabledProvider.as_str(),
+            reason: "provider disabled".to_string(),
+            reason_code: Some(dc::REASON_PROVIDER_DISABLED),
+            attempt_started_ms: 1,
+            circuit: None,
+        },
+    );
+
+    assert!(should_finalize_as_all_providers_unavailable(&attempts));
+}

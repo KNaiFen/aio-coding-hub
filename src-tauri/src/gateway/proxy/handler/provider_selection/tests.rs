@@ -128,6 +128,7 @@ fn gateway_state_for_selection(
         recent_errors: Arc::new(Mutex::new(RecentErrorCache::default())),
         latency_cache: Arc::new(Mutex::new(ProviderBaseUrlPingCache::default())),
         plugin_pipeline: GatewayPluginPipeline::empty_shared(),
+        provider_enable_gate: Arc::new(crate::gateway::runtime::ProviderEnableGate::default()),
         http_client_override: None,
         active_requests: Arc::new(ActiveRequestRegistry::default()),
     }

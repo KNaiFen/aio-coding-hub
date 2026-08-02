@@ -985,6 +985,7 @@ WHERE mp.mode_id = ?1
   AND mp.cli_key = ?2
   AND p.cli_key = ?2
   AND mp.enabled = 1
+  AND p.enabled = 1
 ORDER BY mp.sort_order ASC
 "#,
         )
@@ -1121,6 +1122,7 @@ WHERE mp.mode_id = ?1
   AND mp.cli_key = ?2
   AND p.cli_key = ?2
   AND mp.enabled = 1
+  AND p.enabled = 1
 ORDER BY mp.sort_order ASC
 "#,
             Some(mode_id),
@@ -1187,7 +1189,6 @@ WITH observed AS (
       WHEN active.mode_id IS NULL THEN default_route.provider_id IS NOT NULL
       ELSE COALESCE(mode_route.enabled, 0) = 1
     END AS route_enabled,
-    active.mode_id IS NOT NULL AS uses_custom_route,
     pool.sort_order AS pool_order,
     p.sort_order AS provider_order
   FROM providers p
@@ -1214,8 +1215,7 @@ SELECT
   enabled,
   auth_mode,
   route_rank,
-  route_enabled,
-  uses_custom_route
+  route_enabled
 FROM observed
 ORDER BY
   CASE cli_key
@@ -1226,7 +1226,7 @@ ORDER BY
     ELSE 4
   END ASC,
   CASE
-    WHEN (enabled = 1 OR uses_custom_route = 1)
+    WHEN enabled = 1
       AND route_rank IS NOT NULL
       AND route_enabled = 1 THEN 0
     ELSE 1
@@ -1249,7 +1249,6 @@ LIMIT ?2
                 auth_mode: row.get(4)?,
                 route_rank: row.get(5)?,
                 route_enabled: row.get::<_, i64>(6)? != 0,
-                uses_custom_route: row.get::<_, i64>(7)? != 0,
             })
         })
         .map_err(|e| db_err!("failed to list observer provider statuses: {e}"))?;
@@ -1331,13 +1330,7 @@ pub(crate) fn get_source_provider_for_gateway(
         )));
     }
 
-    let enabled_filter = if is_codex_bridge_type(bridge_type) {
-        ""
-    } else {
-        " AND enabled = 1"
-    };
-    let sql = format!(
-        r#"
+    let sql = r#"
 SELECT
   id,
   name,
@@ -1363,12 +1356,11 @@ SELECT
   upstream_retry_policy_json,
   model_routing_policy_json
 FROM providers
-WHERE id = ?1{enabled_filter} AND source_provider_id IS NULL AND bridge_type IS NULL
-"#,
-    );
+WHERE id = ?1 AND enabled = 1 AND source_provider_id IS NULL AND bridge_type IS NULL
+"#;
 
     let mut provider = conn
-        .query_row(&sql, params![source_provider_id], |row| {
+        .query_row(sql, params![source_provider_id], |row| {
             map_gateway_provider_row(row, &cli_key_owned, 0)
         })
         .optional()

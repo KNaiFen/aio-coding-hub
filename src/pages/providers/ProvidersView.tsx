@@ -501,9 +501,8 @@ export function ProvidersView({ activeCli, setActiveCli }: ProvidersViewProps) {
                             ? provider.name
                             : `未知 Provider #${provider?.id ?? row.provider_id}`;
                           const routeRowEnabled =
-                            routeDraftSelection.kind === "default"
-                              ? (provider?.enabled ?? false)
-                              : getRouteRowEnabled(row);
+                            (provider?.enabled ?? false) &&
+                            (routeDraftSelection.kind === "default" || getRouteRowEnabled(row));
                           const sessionReusePriority = row.session_reuse_priority ?? 0;
                           return (
                             <SortableProviderOrderItem
@@ -511,14 +510,13 @@ export function ProvidersView({ activeCli, setActiveCli }: ProvidersViewProps) {
                               provider={provider}
                               providerId={row.provider_id}
                               index={index}
-                              disabled={routeSaving}
-                              showProviderDisabledBadge={false}
+                              disabled={routeSaving || provider?.enabled === false}
                               trailing={
                                 <div className="flex shrink-0 items-center gap-2">
                                   <SessionReusePriorityInput
                                     value={sessionReusePriority}
                                     providerLabel={providerLabel}
-                                    disabled={routeSaving || provider == null}
+                                    disabled={routeSaving || provider == null || !provider.enabled}
                                     onCommit={(priority) =>
                                       void setRouteProviderSessionReusePriority(
                                         row.provider_id,
@@ -536,7 +534,9 @@ export function ProvidersView({ activeCli, setActiveCli }: ProvidersViewProps) {
                                         void setRouteProviderEnabled(row.provider_id, checked)
                                       }
                                       size="sm"
-                                      disabled={routeSaving || provider == null}
+                                      disabled={
+                                        routeSaving || provider == null || !provider.enabled
+                                      }
                                       aria-label={`${providerLabel} 在调用顺序中启用`}
                                     />
                                   </div>

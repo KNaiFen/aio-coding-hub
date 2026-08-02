@@ -42,6 +42,19 @@ buildRequestRouteMeta({
   denies reuse, keep it in the list and let the later common gate decide. Clear
   the binding only when the provider is no longer eligible for that candidate
   set.
+- The provider-global `enabled` switch is the outer routing authority. Default
+  routes, custom sort-mode membership, session reuse, forced candidate lists,
+  and bridge source resolution must all exclude globally disabled providers;
+  a route-member switch never overrides it. Route editors may preserve the
+  member value while showing the global-disabled state, but must disable the
+  member switch until the provider is globally enabled again.
+- Candidate SQL filters the global switch when the request is selected. A
+  running request also checks the shared provider-enable gate immediately
+  before every upstream send, including same-provider retries and bridge source
+  sends. A send already admitted before a successful disable command may
+  finish; later retries or provider switches record a gate-only disabled skip
+  and make no upstream call. Provider save, enable/disable, and delete paths
+  update this gate before returning success.
 - Route members may set `session_reuse_priority` in `0..=1000`; it is not the
   provider-global priority or ordinary route `sort_order`. A bound provider may
   be promoted only when no current eligible candidate has a higher reuse
@@ -65,7 +78,7 @@ buildRequestRouteMeta({
   error result that skips runtime invalidation. Keep result projection inside
   the write transaction, reserve the WAL writer before validation reads, and
   make commit the final fallible database step.
-- Every eligible candidate reaches
+- Every globally enabled route candidate reaches
   `failover_loop/prepare/provider_checks::run_gates`. A circuit, cooldown, or
   provider-limit denial creates one `outcome="skipped"` attempt with its stable
   error/reason data and makes zero upstream calls.
@@ -95,7 +108,8 @@ buildRequestRouteMeta({
   route content uses the current theme's semantic popover surface, suppresses
   only known duplicate internal reasons, preserves unknown reasons as wrapped
   text, and scrolls within the collision-bounded viewport height.
-- When all candidates are denied by gates, return
+- When all candidates are denied by gates, including the runtime global-switch
+  gate, return
   `GW_ALL_PROVIDERS_UNAVAILABLE` / HTTP 503 and preserve every denied provider
   in both attempts and route. Do not manufacture an upstream call to make the
   failure observable.
@@ -124,6 +138,7 @@ buildRequestRouteMeta({
 | attempts per provider x providers to try > 100 | Reject with `SEC_INVALID_INPUT` |
 | Eligible session-bound provider is circuit-open | Keep candidate; common gate records one skipped row |
 | Candidate is gate-skipped | Zero upstream calls and no Ready-provider budget consumed |
+| Provider or bridge source is disabled after selection | Current admitted send may finish; every later send is skipped |
 | All candidates are gate-skipped | HTTP 503 with every candidate in attempts and route |
 | Ready-provider cap is reached | Stop before the next Ready provider |
 | Two Ready providers consume cap 2, then a circuit-open candidate follows | Record the third skipped attempt/route; make no third upstream call |
@@ -168,6 +183,13 @@ buildRequestRouteMeta({
   bindings retain their existing rotation behavior.
 - Route-test all-gate-skip behavior: 503, one skipped row and route hop per
   candidate, preserved session binding, and zero upstream calls.
+- Query-test default/custom routes and bridge source resolution with a globally
+  disabled provider. Route-test disabling between two prepared attempts so the
+  admitted attempt can finish while the next retry makes zero upstream calls;
+  include the bridge-source variant.
+- Frontend-test that a globally disabled custom-route member keeps its stored
+  member value but renders off, carries the disabled label, and cannot invoke
+  the route-member mutation.
 - Route-test that skipped candidates do not consume the Ready-provider cap,
   plus a boundary where the cap stops before the next Ready provider.
 - Route-test the reverse boundary `Ready, Ready, circuit-open/cooldown` at cap

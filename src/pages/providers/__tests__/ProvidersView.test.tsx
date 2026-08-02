@@ -1433,6 +1433,68 @@ describe("pages/providers/ProvidersView", () => {
     expect(orderPanel.getByText("2/2")).toBeInTheDocument();
   });
 
+  it("keeps globally disabled providers off inside a sort mode", async () => {
+    const provider = {
+      id: 1,
+      cli_key: "claude",
+      name: "P1",
+      enabled: false,
+      base_urls: ["https://a"],
+      base_url_mode: "order",
+      cost_multiplier: 1,
+      claude_models: {},
+    } as any;
+
+    vi.mocked(useProvidersListQuery).mockReturnValue({
+      data: [provider],
+      isFetching: false,
+    } as any);
+    vi.mocked(useDefaultRouteProvidersQuery).mockReturnValue({
+      data: [{ provider_id: 1 }],
+      isFetching: false,
+    } as any);
+    vi.mocked(useGatewayCircuitStatusQuery).mockReturnValue({
+      data: [],
+      isFetching: false,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useProviderSetEnabledMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProviderDeleteMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProvidersReorderMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useGatewayCircuitResetProviderMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+    } as any);
+    vi.mocked(useGatewayCircuitResetCliMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useSortModesListQuery).mockReturnValue({
+      data: [{ id: 10, name: "Review Mode", created_at: 1, updated_at: 1 }],
+      isLoading: false,
+    } as any);
+    vi.mocked(useSortModeProvidersListQuery).mockReturnValue({
+      data: [{ provider_id: 1, enabled: true }],
+      isFetching: false,
+    } as any);
+    const setModeProviderEnabled = vi.fn();
+    vi.mocked(useSortModeProviderSetEnabledMutation).mockReturnValue({
+      mutateAsync: setModeProviderEnabled,
+    } as any);
+
+    renderWithQuery(<ProvidersView activeCli="claude" setActiveCli={vi.fn()} />);
+    fireEvent.change(screen.getByRole("combobox", { name: "选择调用顺序" }), {
+      target: { value: "mode:10" },
+    });
+
+    const orderPanel = within(screen.getByRole("complementary", { name: "供应商调用顺序" }));
+    const providerSwitch = await orderPanel.findByRole("switch", {
+      name: "P1 在调用顺序中启用",
+    });
+    expect(orderPanel.getByText("关闭")).toBeInTheDocument();
+    expect(providerSwitch).not.toBeChecked();
+    expect(providerSwitch).toBeDisabled();
+
+    fireEvent.click(providerSwitch);
+    expect(setModeProviderEnabled).not.toHaveBeenCalled();
+  });
+
   it("always shows the 全部 tag even when providers have no custom tags", () => {
     const providers = [
       {
@@ -1987,7 +2049,7 @@ describe("pages/providers/ProvidersView", () => {
         id: 2,
         cli_key: "claude",
         name: "P2",
-        enabled: false,
+        enabled: true,
         base_urls: ["https://b"],
         base_url_mode: "order",
         cost_multiplier: 2,

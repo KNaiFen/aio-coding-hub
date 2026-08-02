@@ -1,6 +1,7 @@
 use crate::app_state::{ensure_db_ready, DbInitState};
 use crate::gateway_control::{
     app_gateway_clear_cli_route_runtime_state, app_gateway_clear_cli_session_bindings,
+    app_gateway_set_provider_enabled,
 };
 use crate::{blocking, providers};
 
@@ -317,6 +318,7 @@ pub(crate) async fn provider_upsert(
     .map_err(Into::into);
 
     if let Ok((ref provider, decision)) = result {
+        app_gateway_set_provider_enabled(&app, provider.id, provider.enabled);
         if is_create {
             tracing::info!(
                 provider_id = provider.id,
@@ -420,6 +422,7 @@ pub(crate) async fn provider_duplicate(
     .map_err(Into::into);
 
     if let Ok(ref provider) = result {
+        app_gateway_set_provider_enabled(&app, provider.id, provider.enabled);
         if provider.enabled {
             let cleared = app_gateway_clear_cli_route_runtime_state(&app, &provider.cli_key);
             tracing::info!(
@@ -456,6 +459,7 @@ pub(crate) async fn provider_set_enabled(
     .map_err(Into::into);
 
     if let Ok(ref provider) = result {
+        app_gateway_set_provider_enabled(&app, provider.id, provider.enabled);
         let cleared = app_gateway_clear_cli_route_runtime_state(&app, &provider.cli_key);
         tracing::info!(
             provider_id = provider.id,
@@ -490,6 +494,7 @@ pub(crate) async fn provider_delete(
     .map_err(Into::into);
 
     if let Ok((true, ref cli_key)) = result {
+        app_gateway_set_provider_enabled(&app, provider_id, false);
         let cleared = app_gateway_clear_cli_route_runtime_state(&app, cli_key);
         tracing::info!(
             provider_id = provider_id,

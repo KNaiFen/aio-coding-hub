@@ -5,7 +5,7 @@
 //! return a final response to the client.
 
 use super::attempt_executor::{AttemptSendOutcome, AttemptTiming, RetryLoopState};
-use super::provider_iterator::PreparedProvider;
+use super::provider_iterator::{IterationCounters, PreparedProvider};
 use super::*;
 use crate::gateway::proxy::request_context::RequestContext;
 
@@ -24,6 +24,7 @@ pub(super) async fn run_retry_loop<R>(
     ctx: CommonCtx<'_, R>,
     input: &RequestContext<R>,
     prepared: &mut PreparedProvider,
+    counters: &mut IterationCounters,
     mut loop_state: LoopState<'_, R>,
 ) -> Option<Response>
 where
@@ -50,6 +51,7 @@ where
             &mut loop_state,
         )
         .await;
+        let release_ready_slot = should_release_ready_slot(retry_index, &send_outcome);
 
         let ctrl = dispatch_outcome(
             ctx,
@@ -70,12 +72,21 @@ where
                 retry_index = retry_index.saturating_add(1);
                 continue;
             }
-            LoopControl::BreakRetry => break,
+            LoopControl::BreakRetry => {
+                if release_ready_slot {
+                    counters.release_ready_slot();
+                }
+                break;
+            }
             LoopControl::Return(resp) => return Some(resp),
         }
     }
 
     None
+}
+
+fn should_release_ready_slot(retry_index: u32, outcome: &AttemptSendOutcome) -> bool {
+    retry_index == 1 && matches!(outcome, AttemptSendOutcome::ProviderDisabled(_))
 }
 
 /// Dispatch one attempt outcome to the appropriate handler and return
@@ -169,6 +180,25 @@ where
             .await;
             LoopControl::Return(response)
         }
+        AttemptSendOutcome::ProviderDisabled(disabled_provider_id) => {
+            push_skipped_provider_attempt(
+                loop_state.attempts,
+                SkippedProviderAttempt {
+                    provider_id: prepared.provider_id,
+                    provider_name: &prepared.provider_name_base,
+                    base_url: &prepared.provider_base_url_display,
+                    error_category: "provider_disabled",
+                    error_code: GatewayErrorCode::NoEnabledProvider.as_str(),
+                    reason: format!(
+                        "provider skipped because global provider #{disabled_provider_id} is disabled"
+                    ),
+                    reason_code: Some(dc::REASON_PROVIDER_DISABLED),
+                    attempt_started_ms: ctx.started.elapsed().as_millis(),
+                    circuit: None,
+                },
+            );
+            LoopControl::BreakRetry
+        }
         AttemptSendOutcome::Response(resp, timing) => {
             response_router::route_response(
                 ctx,
@@ -260,4 +290,22 @@ fn build_error_contexts<'a, R: tauri::Runtime>(
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::{should_release_ready_slot, AttemptSendOutcome};
+
+    #[test]
+    fn only_first_send_provider_disable_releases_ready_slot() {
+        assert!(should_release_ready_slot(
+            1,
+            &AttemptSendOutcome::ProviderDisabled(7)
+        ));
+        assert!(!should_release_ready_slot(
+            2,
+            &AttemptSendOutcome::ProviderDisabled(7)
+        ));
+        assert!(!should_release_ready_slot(
+            1,
+            &AttemptSendOutcome::OAuthInjectFailed
+        ));
+    }
+}

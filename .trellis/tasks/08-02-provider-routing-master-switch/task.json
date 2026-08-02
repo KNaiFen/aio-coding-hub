@@ -3,7 +3,7 @@
   "name": "provider-routing-master-switch",
   "title": "供应商全局路由总开关",
   "description": "实现 P001",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": "aio-coding-hub",

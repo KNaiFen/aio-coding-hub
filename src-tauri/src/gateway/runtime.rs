@@ -2,6 +2,7 @@
 
 use crate::shared::mutex_ext::MutexExt;
 use crate::{circuit_breaker, db, request_logs, session_manager};
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
 
@@ -22,6 +23,7 @@ pub(in crate::gateway) struct GatewayAppState<R: tauri::Runtime = tauri::Wry> {
     pub(super) recent_errors: Arc<Mutex<RecentErrorCache>>,
     pub(super) latency_cache: Arc<Mutex<ProviderBaseUrlPingCache>>,
     pub(super) plugin_pipeline: Arc<GatewayPluginPipeline>,
+    pub(super) provider_enable_gate: Arc<ProviderEnableGate>,
     #[cfg(test)]
     pub(super) http_client_override: Option<reqwest::Client>,
     pub(super) active_requests: Arc<ActiveRequestRegistry>,
@@ -39,9 +41,37 @@ impl<R: tauri::Runtime> Clone for GatewayAppState<R> {
             recent_errors: self.recent_errors.clone(),
             latency_cache: self.latency_cache.clone(),
             plugin_pipeline: self.plugin_pipeline.clone(),
+            provider_enable_gate: self.provider_enable_gate.clone(),
             #[cfg(test)]
             http_client_override: self.http_client_override.clone(),
             active_requests: self.active_requests.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct ProviderEnableGate {
+    disabled_provider_ids: Mutex<HashSet<i64>>,
+}
+
+impl ProviderEnableGate {
+    pub(crate) fn allows(&self, provider_id: i64) -> bool {
+        !self
+            .disabled_provider_ids
+            .lock_or_recover()
+            .contains(&provider_id)
+    }
+
+    pub(crate) fn set_enabled(&self, provider_id: i64, enabled: bool) {
+        if provider_id <= 0 {
+            return;
+        }
+
+        let mut disabled = self.disabled_provider_ids.lock_or_recover();
+        if enabled {
+            disabled.remove(&provider_id);
+        } else {
+            disabled.insert(provider_id);
         }
     }
 }
@@ -78,6 +108,19 @@ mod tests {
         let _handles = runtime.into_handles();
 
         assert!(active_requests.snapshot().is_empty());
+    }
+
+    #[test]
+    fn provider_enable_gate_tracks_runtime_switch_changes() {
+        let gate = ProviderEnableGate::default();
+
+        assert!(gate.allows(7));
+        gate.set_enabled(7, false);
+        assert!(!gate.allows(7));
+        assert!(gate.allows(8));
+
+        gate.set_enabled(7, true);
+        assert!(gate.allows(7));
     }
 }
 
@@ -122,6 +165,7 @@ pub(super) struct GatewayRuntimeInit {
     pub(super) session: Arc<session_manager::SessionManager>,
     pub(super) recent_errors: Arc<Mutex<RecentErrorCache>>,
     pub(super) plugin_pipeline: Arc<GatewayPluginPipeline>,
+    pub(super) provider_enable_gate: Arc<ProviderEnableGate>,
     pub(super) active_requests: Arc<ActiveRequestRegistry>,
     pub(super) shutdown: oneshot::Sender<()>,
     pub(super) task: tauri::async_runtime::JoinHandle<()>,
@@ -136,6 +180,7 @@ pub(crate) struct GatewayRuntime {
     session: Arc<session_manager::SessionManager>,
     recent_errors: Arc<Mutex<RecentErrorCache>>,
     plugin_pipeline: Arc<GatewayPluginPipeline>,
+    provider_enable_gate: Arc<ProviderEnableGate>,
     active_requests: Arc<ActiveRequestRegistry>,
     shutdown: oneshot::Sender<()>,
     task: tauri::async_runtime::JoinHandle<()>,
@@ -152,6 +197,7 @@ impl GatewayRuntime {
             session: init.session,
             recent_errors: init.recent_errors,
             plugin_pipeline: init.plugin_pipeline,
+            provider_enable_gate: init.provider_enable_gate,
             active_requests: init.active_requests,
             shutdown: init.shutdown,
             task: init.task,
@@ -186,6 +232,10 @@ impl GatewayRuntime {
 
     pub(crate) fn clear_all_session_bindings(&self) -> usize {
         self.session.clear_all_bindings()
+    }
+
+    pub(crate) fn set_provider_enabled(&self, provider_id: i64, enabled: bool) {
+        self.provider_enable_gate.set_enabled(provider_id, enabled);
     }
 
     pub(crate) fn clear_recent_errors(&self) -> usize {
@@ -314,6 +364,7 @@ impl GatewayRuntime {
             session,
             recent_errors,
             plugin_pipeline: GatewayPluginPipeline::empty_shared(),
+            provider_enable_gate: Arc::new(ProviderEnableGate::default()),
             active_requests: Arc::new(ActiveRequestRegistry::default()),
             shutdown,
             task: tauri::async_runtime::JoinHandle::Tokio(rt.spawn(async {})),

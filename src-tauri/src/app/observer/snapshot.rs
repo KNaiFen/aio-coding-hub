@@ -40,7 +40,6 @@ struct ProviderObservation {
     auth_kind: String,
     route_rank: Option<i64>,
     route_enabled: bool,
-    uses_custom_route: bool,
     spend_limited: bool,
     spend_windows: Vec<ObserverProviderSpendWindow>,
     oauth_limited: bool,
@@ -368,7 +367,6 @@ fn load_provider_observations(
                 },
                 route_rank: row.route_rank.map(|rank| rank.max(0).saturating_add(1)),
                 route_enabled: row.route_enabled,
-                uses_custom_route: row.uses_custom_route,
                 spend_limited: spend.is_some_and(|value| value.is_limit_reached()),
                 spend_windows: spend.map(spend_windows).unwrap_or_default(),
                 oauth_limited: oauth.is_some_and(|value| value.limited),
@@ -601,7 +599,7 @@ fn provider_eligibility(
     gateway_running: bool,
     now_unix: i64,
 ) -> &'static str {
-    if !provider.enabled && !provider.uses_custom_route {
+    if !provider.enabled {
         return "provider_disabled";
     }
     if provider.route_rank.is_none() {
@@ -1312,7 +1310,7 @@ mod tests {
 
     #[test]
     fn provider_eligibility_is_fail_closed_for_observer_display_only() {
-        let provider = ProviderObservation {
+        let mut provider = ProviderObservation {
             id: 1,
             cli_key: "codex".to_string(),
             name: "Provider".to_string(),
@@ -1320,7 +1318,6 @@ mod tests {
             auth_kind: "api_key".to_string(),
             route_rank: Some(1),
             route_enabled: true,
-            uses_custom_route: false,
             spend_limited: false,
             spend_windows: Vec::new(),
             oauth_limited: false,
@@ -1334,6 +1331,12 @@ mod tests {
         assert_eq!(
             provider_eligibility(&provider, None, false, 1_000),
             "gateway_stopped"
+        );
+
+        provider.enabled = false;
+        assert_eq!(
+            provider_eligibility(&provider, None, true, 1_000),
+            "provider_disabled"
         );
     }
 
