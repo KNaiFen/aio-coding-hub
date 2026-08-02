@@ -259,6 +259,12 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async trayProviderMiniSnapshotGet(): Promise<TrayProviderMiniSnapshot | null> {
+    return await TAURI_INVOKE("tray_provider_mini_snapshot_get");
+  },
+  async trayProviderMiniWindowHoverSet(hovered: boolean): Promise<boolean> {
+    return await TAURI_INVOKE("tray_provider_mini_window_hover_set", { hovered });
+  },
   async noticeSend(input: NoticeSendInput): Promise<Result<boolean, string>> {
     try {
       return { status: "ok", data: await TAURI_INVOKE("notice_send", { input }) };
@@ -4544,6 +4550,28 @@ export type SortModeProviderRow = {
 };
 export type SortModeSummary = { id: number; name: string; created_at: number; updated_at: number };
 export type TargetCliKey = "claude" | "codex" | "gemini";
+export type TrayProviderMiniProvider = {
+  providerId: number;
+  providerName: string;
+  unavailableReasons: TrayProviderMiniUnavailableReason[];
+  availability: ProviderAvailabilityState[];
+};
+export type TrayProviderMiniSelectionSource = "active_request" | "recent_request" | "enabled_cli";
+export type TrayProviderMiniSnapshot = {
+  generation: number;
+  generatedAtMs: number;
+  hours: number;
+  cliKey: string | null;
+  selectionSource: TrayProviderMiniSelectionSource | null;
+  routeName: string | null;
+  providers: TrayProviderMiniProvider[];
+  unavailable: boolean;
+};
+export type TrayProviderMiniUnavailableReason =
+  | "circuit_open"
+  | "cooldown"
+  | "spend_limit"
+  | "oauth_limit";
 export type UiContribution = {
   id: string;
   title?: string | null;

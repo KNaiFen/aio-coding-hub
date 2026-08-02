@@ -3,7 +3,7 @@
   "name": "macos-tray-provider-mini",
   "title": "macOS 托盘供应商面板",
   "description": "实现 P010",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": "aio-coding-hub",

@@ -50,6 +50,8 @@ describe("generated/bindings.ts contract", () => {
     expect(bindingsSource).toContain("desktop_opener_open_url");
     expect(bindingsSource).toContain("desktop_opener_reveal_item_in_dir");
     expect(bindingsSource).toContain("desktop_updater_check");
+    expect(bindingsSource).toContain("tray_provider_mini_snapshot_get");
+    expect(bindingsSource).toContain("tray_provider_mini_window_hover_set");
     expect(bindingsSource).toContain("app_about_get");
     expect(bindingsSource).toContain("app_heartbeat_pong");
     expect(bindingsSource).toContain("app_startup_status_get");
@@ -110,6 +112,18 @@ describe("generated/bindings.ts contract", () => {
     );
     expect(extractGeneratedCommand(bindingsSource, "usageAvailabilityTimelineV1")).toContain(
       'TAURI_INVOKE("usage_availability_timeline_v1", { params })'
+    );
+  });
+
+  it("exports the frozen tray provider mini contract", () => {
+    expect(extractTypeBody(bindingsSource, "TrayProviderMiniSnapshot")).toContain(
+      "providers: TrayProviderMiniProvider[]"
+    );
+    expect(extractTypeBody(bindingsSource, "TrayProviderMiniProvider")).toContain(
+      "availability: ProviderAvailabilityState[]"
+    );
+    expect(extractGeneratedCommand(bindingsSource, "trayProviderMiniSnapshotGet")).toContain(
+      'TAURI_INVOKE("tray_provider_mini_snapshot_get")'
     );
   });
 

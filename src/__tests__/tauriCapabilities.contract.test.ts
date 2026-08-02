@@ -30,6 +30,7 @@ describe("tauri capabilities contract", () => {
     expect(definitions.every((item) => item.data.windows.includes("main"))).toBe(true);
 
     const coreCapability = definitions.find((item) => item.data.identifier === "main-core");
+    expect(coreCapability?.data.windows).toEqual(["main", "tray-provider-mini"]);
     expect(coreCapability?.data.permissions).toEqual([
       "core:event:allow-listen",
       "core:event:allow-unlisten",

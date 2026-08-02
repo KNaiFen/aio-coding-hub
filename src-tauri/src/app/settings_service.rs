@@ -562,6 +562,9 @@ fn sync_runtime_side_effects<R: tauri::Runtime>(
     if let Some(resident) = app.try_state::<resident::ResidentState>() {
         resident.set_tray_enabled(next_settings.tray_enabled);
     }
+    if !next_settings.tray_enabled {
+        resident::hide_tray_provider_mini(app);
+    }
 
     let circuit_runtime_updated = try_app_gateway_update_circuit_config(
         app,

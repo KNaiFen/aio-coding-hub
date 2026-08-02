@@ -46,6 +46,8 @@ macro_rules! generated_command_registry {
             desktop_opener_reveal_item_in_dir => crate::commands::desktop::desktop_opener_reveal_item_in_dir,
             desktop_updater_check => crate::commands::desktop::desktop_updater_check,
             desktop_window_set_theme => crate::commands::desktop::desktop_window_set_theme,
+            tray_provider_mini_snapshot_get => crate::commands::tray_provider_mini::tray_provider_mini_snapshot_get,
+            tray_provider_mini_window_hover_set => crate::commands::tray_provider_mini::tray_provider_mini_window_hover_set,
             // ── notice ──
             notice_send => crate::commands::notice::notice_send,
             // ── cli_manager ──
@@ -392,6 +394,19 @@ mod tests {
             generated_command_names().contains(&"usage_availability_timeline_v1"),
             "usage availability should stay in the shared generated command registry"
         );
+    }
+
+    #[test]
+    fn includes_tray_provider_mini_commands_in_generated_command_registry() {
+        for command in [
+            "tray_provider_mini_snapshot_get",
+            "tray_provider_mini_window_hover_set",
+        ] {
+            assert!(
+                generated_command_names().contains(&command),
+                "{command} should stay in the generated command registry"
+            );
+        }
     }
 
     #[test]
