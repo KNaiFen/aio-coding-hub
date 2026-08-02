@@ -659,7 +659,7 @@ pub fn output_tokens_per_second(request: &ObserverRequest) -> Option<f64> {
         return Some(output_tokens as f64 / (duration_ms as f64 / 1_000.0));
     }
     let rate = output_tokens as f64 / (generation_ms as f64 / 1_000.0);
-    if generation_ms as f64 / duration_ms as f64 < 0.1 && rate > 5_000.0 {
+    if (generation_ms as f64) / (duration_ms as f64) < 0.1 && rate > 5_000.0 {
         return Some(output_tokens as f64 / (duration_ms as f64 / 1_000.0));
     }
     rate.is_finite().then_some(rate)
