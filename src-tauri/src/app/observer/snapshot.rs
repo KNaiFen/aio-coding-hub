@@ -974,7 +974,7 @@ fn parse_configured_model_route(
     values.into_iter().rev().find_map(|value| {
         let object = value.as_object()?;
         if object.get("type")?.as_str()? != "configured_model_route"
-            || object.get("applied")?.as_bool()? != true
+            || !object.get("applied")?.as_bool()?
         {
             return None;
         }
