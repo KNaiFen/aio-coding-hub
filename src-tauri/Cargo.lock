@@ -37,7 +37,7 @@ dependencies = [
 
 [[package]]
 name = "aio-coding-hub"
-version = "0.60.41"
+version = "0.60.42"
 dependencies = [
  "aio-observer-protocol",
  "axum",
@@ -95,7 +95,7 @@ dependencies = [
 
 [[package]]
 name = "aio-observer-protocol"
-version = "0.60.41"
+version = "0.60.42"
 dependencies = [
  "serde",
  "serde_json",
@@ -103,7 +103,7 @@ dependencies = [
 
 [[package]]
 name = "aio-tui"
-version = "0.60.41"
+version = "0.60.42"
 dependencies = [
  "aio-observer-protocol",
  "crossterm",
