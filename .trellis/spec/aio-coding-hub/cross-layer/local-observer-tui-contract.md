@@ -23,9 +23,9 @@ remote administration API.
   optional so old clients and old observers can fail open independently.
 - The sole active operation is authenticated `POST`
   `/api/observer/v1/providers/<provider_id>/test-availability`. It is bounded by
-  a separate concurrency limit and timeout, returns a secret-free fixed-shape
-  result, and never writes availability history, routing, limits, or circuit
-  state.
+  a separate concurrency limit and timeout, returns a bounded fixed-shape result
+  with credential-stripped URL and preview fields, and never writes availability
+  history, routing, limits, or circuit state.
 - Responses are `no-store` and `nosniff`. Invalid input, authentication, busy,
   and internal failures use fixed structured messages without body, URL,
   credentials, or decoder details.

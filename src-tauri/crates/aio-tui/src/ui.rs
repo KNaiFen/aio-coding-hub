@@ -5,14 +5,17 @@ use crate::format::{
     scope_label, status_segments, truncate_display, truncate_status_line, wrap_status_segments,
     StatusSegment, StatusTone,
 };
+use crate::palette::{Palette, Tone};
 use aio_observer_protocol::{
-    CliScope, ObserverProviderStatus, ObserverRequest, ObserverSnapshotV1,
+    CliScope, ObserverProviderAvailabilityTestResult, ObserverProviderStatus, ObserverRequest,
+    ObserverSnapshotV1,
 };
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
@@ -178,6 +181,14 @@ pub struct LogsState {
     pub detail_scroll: u16,
     pub help: bool,
     pub color: bool,
+    provider_probes: HashMap<i64, ProviderProbeState>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub enum ProviderProbeState {
+    Running,
+    Complete(ObserverProviderAvailabilityTestResult),
+    Failed(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -201,6 +212,7 @@ impl LogsState {
             detail_scroll: 0,
             help: false,
             color: std::env::var_os("NO_COLOR").is_none(),
+            provider_probes: HashMap::new(),
         }
     }
 
@@ -427,6 +439,40 @@ impl LogsState {
         self.detail = false;
         self.detail_scroll = 0;
     }
+
+    pub fn begin_provider_probe(&mut self) -> Option<i64> {
+        if self.view != DashboardView::Providers || !self.detail {
+            return None;
+        }
+        let provider_id = self.selected_provider()?.provider_id;
+        if matches!(
+            self.provider_probes.get(&provider_id),
+            Some(ProviderProbeState::Running)
+        ) {
+            return None;
+        }
+        self.provider_probes
+            .insert(provider_id, ProviderProbeState::Running);
+        Some(provider_id)
+    }
+
+    pub fn finish_provider_probe(
+        &mut self,
+        provider_id: i64,
+        result: Result<ObserverProviderAvailabilityTestResult, OfflineReason>,
+    ) {
+        if !matches!(
+            self.provider_probes.get(&provider_id),
+            Some(ProviderProbeState::Running)
+        ) {
+            return;
+        }
+        let state = match result {
+            Ok(result) => ProviderProbeState::Complete(result),
+            Err(reason) => ProviderProbeState::Failed(reason.label().to_string()),
+        };
+        self.provider_probes.insert(provider_id, state);
+    }
 }
 
 pub fn draw_status(frame: &mut Frame, state: &LiveState, items: &[StatusItem], color: bool) {
@@ -547,7 +593,11 @@ pub fn draw_statusline_picker(
     ]
     .join("\n");
     frame.render_widget(
-        Paragraph::new(header).style(Style::default().add_modifier(Modifier::BOLD)),
+        Paragraph::new(header).style(
+            Palette::detected(effective_colors)
+                .style(Tone::Accent)
+                .add_modifier(Modifier::BOLD),
+        ),
         chunks[0],
     );
 
@@ -565,8 +615,8 @@ pub fn draw_statusline_picker(
             } else {
                 "--".to_string()
             };
-            let checkbox_style = if row.enabled && effective_colors {
-                Style::default().fg(Color::Green)
+            let checkbox_style = if row.enabled {
+                Palette::detected(effective_colors).style(Tone::Success)
             } else {
                 muted_style(effective_colors)
             };
@@ -577,13 +627,9 @@ pub fn draw_statusline_picker(
             ]))
         })
         .collect::<Vec<_>>();
-    let highlight = if effective_colors {
-        Style::default()
-            .bg(Color::DarkGray)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().add_modifier(Modifier::REVERSED)
-    };
+    let highlight = Palette::detected(effective_colors)
+        .selected(Style::default())
+        .add_modifier(Modifier::BOLD);
     let mut list_state = ListState::default();
     list_state.select(Some(state.selected));
     frame.render_stateful_widget(
@@ -620,29 +666,21 @@ pub fn draw_statusline_picker(
 }
 
 fn status_tone_style(tone: StatusTone, color: bool) -> Style {
-    if tone == StatusTone::Separator {
-        return Style::default().add_modifier(Modifier::DIM);
-    }
-    if !color {
-        return Style::default();
-    }
-    let color = match tone {
-        StatusTone::Default => return Style::default(),
-        StatusTone::Success => Color::Green,
-        StatusTone::Warning => Color::Yellow,
-        StatusTone::Error => Color::Red,
-        StatusTone::Scope => Color::Cyan,
-        StatusTone::Provider => Color::Magenta,
-        StatusTone::Model => Color::Cyan,
-        StatusTone::Folder => Color::Green,
-        StatusTone::Timing => Color::Green,
-        StatusTone::Cost => Color::Green,
-        StatusTone::Activity => Color::Cyan,
-        StatusTone::Tokens => Color::Green,
-        StatusTone::Version => Color::Cyan,
-        StatusTone::Separator => unreachable!(),
+    let tone = match tone {
+        StatusTone::Default => Tone::Default,
+        StatusTone::Success => Tone::Success,
+        StatusTone::Warning => Tone::Warning,
+        StatusTone::Error => Tone::Error,
+        StatusTone::Scope | StatusTone::Activity | StatusTone::Version => Tone::Accent,
+        StatusTone::Provider => Tone::Provider,
+        StatusTone::Model => Tone::Info,
+        StatusTone::Folder
+        | StatusTone::Timing
+        | StatusTone::Cost
+        | StatusTone::Tokens => Tone::Success,
+        StatusTone::Separator => Tone::Muted,
     };
-    Style::default().fg(color)
+    Palette::detected(color).style(tone)
 }
 
 pub fn draw_logs(frame: &mut Frame, state: &mut LogsState) {
@@ -804,16 +842,12 @@ fn draw_header(frame: &mut Frame, area: Rect, state: &LiveState, color: bool, vi
         .unwrap_or_else(|| "—".to_string());
     let first = truncate_display(
         &format!(
-            "AIO {} | 并发 {} | {} {}/2 | {}",
+            "AIO {} | 并发 {} | {} | {}",
             online,
             concurrency,
             match view {
                 DashboardView::Requests => "请求",
                 DashboardView::Providers => "供应商",
-            },
-            match view {
-                DashboardView::Requests => 1,
-                DashboardView::Providers => 2,
             },
             scope_label(state.scope)
         ),
@@ -837,33 +871,17 @@ fn draw_header(frame: &mut Frame, area: Rect, state: &LiveState, color: bool, vi
             let tokens = today
                 .map(|value| format_tokens(value.total_tokens))
                 .unwrap_or_else(|| "—".to_string());
-            let provider_count = snapshot
-                .providers
-                .as_ref()
-                .and_then(|section| section.value.as_ref())
-                .map(|collection| {
-                    format!(
-                        "供应商 {}{} | ",
-                        collection.items.len(),
-                        if collection.truncated { "+" } else { "" }
-                    )
-                })
-                .unwrap_or_default();
             let summary = if view == DashboardView::Providers {
-                format!("{provider_count}首选 {preferred} | 今日 {cost}")
+                format!("首选 {preferred} | 今日 {cost}")
             } else {
                 format!("首选 {preferred} | 今日 {cost} | {tokens}")
             };
             truncate_display(&summary, usize::from(area.width))
         })
         .unwrap_or_else(|| "正在读取本地观测接口".to_string());
-    let style = if color {
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().add_modifier(Modifier::BOLD)
-    };
+    let style = Palette::detected(color)
+        .style(Tone::Accent)
+        .add_modifier(Modifier::BOLD);
     frame.render_widget(
         Paragraph::new(format!("{first}\n{second}")).style(style),
         area,
@@ -884,18 +902,42 @@ fn draw_detail(frame: &mut Frame, area: Rect, state: &LogsState) {
             DashboardView::Requests => "请求详情",
             DashboardView::Providers => "供应商详情",
         })
-        .style(Style::default().add_modifier(Modifier::BOLD)),
+        .style(
+            Palette::detected(state.color)
+                .style(Tone::Accent)
+                .add_modifier(Modifier::BOLD),
+        ),
         chunks[0],
     );
     let body = match state.view {
         DashboardView::Requests => state
             .selected_request()
-            .map(|request| crate::format::detail_lines(request, now_millis()).join("\n"))
-            .unwrap_or_else(|| "请求已不在当前快照中".to_string()),
+            .map(|request| {
+                styled_detail_lines(crate::format::detail_lines(request, now_millis()), state.color)
+            })
+            .unwrap_or_else(|| {
+                vec![Line::styled(
+                    "请求已不在当前快照中",
+                    muted_style(state.color),
+                )]
+            }),
         DashboardView::Providers => state
             .selected_provider()
-            .map(|provider| provider_detail_lines(provider).join("\n"))
-            .unwrap_or_else(|| "供应商已不在当前快照中".to_string()),
+            .map(|provider| {
+                styled_detail_lines(
+                    provider_detail_lines(
+                        provider,
+                        state.provider_probes.get(&provider.provider_id),
+                    ),
+                    state.color,
+                )
+            })
+            .unwrap_or_else(|| {
+                vec![Line::styled(
+                    "供应商已不在当前快照中",
+                    muted_style(state.color),
+                )]
+            }),
     };
     frame.render_widget(
         Paragraph::new(body)
@@ -903,14 +945,61 @@ fn draw_detail(frame: &mut Frame, area: Rect, state: &LogsState) {
             .scroll((state.detail_scroll, 0)),
         chunks[1],
     );
-    let footer = truncate_display("↑↓滚动 Esc返回 r刷新 q退出", usize::from(chunks[2].width));
+    let footer = truncate_display(
+        match state.view {
+            DashboardView::Requests => "↑↓滚动 Esc返回 r刷新 q退出",
+            DashboardView::Providers => "↑↓滚动 t测试 Esc返回 r刷新 q退出",
+        },
+        usize::from(chunks[2].width),
+    );
     frame.render_widget(
         Paragraph::new(footer).style(muted_style(state.color)),
         chunks[2],
     );
 }
 
-fn provider_detail_lines(provider: &ObserverProviderStatus) -> Vec<String> {
+fn styled_detail_lines(lines: Vec<String>, color: bool) -> Vec<Line<'static>> {
+    const SECTION_TITLES: [&str; 4] = [
+        "上下文压缩",
+        "路由链",
+        "短期可用性",
+        "手动可用性测试",
+    ];
+    let palette = Palette::detected(color);
+    lines
+        .into_iter()
+        .map(|line| {
+            if line.is_empty() {
+                return Line::default();
+            }
+            if SECTION_TITLES.contains(&line.as_str()) {
+                return Line::styled(
+                    line,
+                    palette.style(Tone::Accent).add_modifier(Modifier::BOLD),
+                );
+            }
+            if let Some((label, value)) = line.split_once("  ") {
+                return Line::from(vec![
+                    Span::styled(label.to_string(), palette.style(Tone::Accent)),
+                    Span::raw("  "),
+                    Span::raw(value.to_string()),
+                ]);
+            }
+            if let Some((label, value)) = line.split_once('：') {
+                return Line::from(vec![
+                    Span::styled(format!("{label}："), palette.style(Tone::Accent)),
+                    Span::raw(value.to_string()),
+                ]);
+            }
+            Line::raw(line)
+        })
+        .collect()
+}
+
+fn provider_detail_lines(
+    provider: &ObserverProviderStatus,
+    probe: Option<&ProviderProbeState>,
+) -> Vec<String> {
     let route = match provider.route_rank {
         Some(rank) if provider.route_enabled => format!("第 {rank} 位（启用）"),
         Some(rank) => format!("第 {rank} 位（停用）"),
@@ -973,6 +1062,17 @@ fn provider_detail_lines(provider: &ObserverProviderStatus) -> Vec<String> {
             )
         }));
     }
+    if let Some(usage) = provider.account_usage.as_ref() {
+        let balance = match (usage.state.as_str(), usage.amount) {
+            ("available", Some(amount)) => {
+                format_provider_account_amount(amount, usage.unit.as_deref())
+            }
+            ("available", None) => "—".to_string(),
+            ("loading", _) => "获取中".to_string(),
+            _ => "获取失败".to_string(),
+        };
+        lines.push(format!("账户余额：{balance}"));
+    }
     if let Some(quota) = displayable_oauth_quota(provider) {
         if let Some(label) = non_empty(quota.short_label.as_deref()) {
             lines.push(format!("OAuth 标签：{label}"));
@@ -990,7 +1090,86 @@ fn provider_detail_lines(provider: &ObserverProviderStatus) -> Vec<String> {
             lines.push(format!("周重置：{}", format_reset_at(reset_at)));
         }
     }
+    if let Some(availability) = provider.availability.as_ref() {
+        lines.extend(provider_availability_detail_lines(availability));
+    }
+    if let Some(probe) = probe {
+        lines.extend(provider_probe_detail_lines(probe));
+    }
     lines
+}
+
+fn provider_probe_detail_lines(probe: &ProviderProbeState) -> Vec<String> {
+    let mut lines = vec![String::new(), "手动可用性测试".to_string()];
+    match probe {
+        ProviderProbeState::Running => lines.push("结果：测试中".to_string()),
+        ProviderProbeState::Failed(message) => {
+            lines.push("结果：测试失败".to_string());
+            lines.push(format!("原因：{message}"));
+        }
+        ProviderProbeState::Complete(result) => {
+            lines.push(format!(
+                "结果：{}",
+                if result.ok { "可用" } else { "不可用" }
+            ));
+            lines.push(format!(
+                "HTTP：{}",
+                result
+                    .status
+                    .map(|status| status.to_string())
+                    .unwrap_or_else(|| "—".to_string())
+            ));
+            lines.push(format!("耗时：{}", format_duration(result.latency_ms)));
+            if !result.base_url.is_empty() {
+                lines.push(format!("Base URL：{}", result.base_url));
+            }
+            if let Some(error) = non_empty(result.error.as_deref()) {
+                lines.push(format!("原因：{error}"));
+            }
+            if let Some(preview) = non_empty(result.response_preview.as_deref()) {
+                lines.push("响应预览：".to_string());
+                lines.extend(preview.lines().map(|line| format!("  {line}")));
+            }
+        }
+    }
+    lines
+}
+
+fn provider_availability_detail_lines(
+    availability: &aio_observer_protocol::ObserverProviderAvailabilityTimeline,
+) -> Vec<String> {
+    let mut lines = vec![
+        String::new(),
+        "短期可用性".to_string(),
+        format!(
+            "范围：{}h，每格 {} 分钟",
+            availability.hours, availability.bucket_minutes
+        ),
+        format!(
+            "汇总：成功 {}，失败 {}",
+            availability.success_count, availability.failure_count
+        ),
+    ];
+    lines.extend(availability.buckets.iter().take(12).map(|bucket| {
+        let state = match bucket.state {
+            aio_observer_protocol::ObserverProviderAvailabilityState::Healthy => "可用",
+            aio_observer_protocol::ObserverProviderAvailabilityState::Unhealthy => "不可用",
+            aio_observer_protocol::ObserverProviderAvailabilityState::NoData => "无数据",
+        };
+        format!(
+            "  {}-{} UTC  {state}  成{} 败{}",
+            format_utc_minute(bucket.start_at_ms),
+            format_utc_minute(bucket.end_at_ms),
+            bucket.success_count,
+            bucket.failure_count
+        )
+    }));
+    lines
+}
+
+fn format_utc_minute(timestamp_ms: i64) -> String {
+    let minutes = timestamp_ms.div_euclid(60_000).rem_euclid(24 * 60);
+    format!("{:02}:{:02}", minutes / 60, minutes % 60)
 }
 
 fn format_reset_at(reset_at_unix: i64) -> String {
@@ -1005,11 +1184,7 @@ fn format_reset_at(reset_at_unix: i64) -> String {
 }
 
 fn muted_style(color: bool) -> Style {
-    if color {
-        Style::default().fg(Color::DarkGray)
-    } else {
-        Style::default()
-    }
+    Palette::detected(color).style(Tone::Muted)
 }
 
 fn draw_help(frame: &mut Frame, area: Rect, color: bool) {
@@ -1024,16 +1199,13 @@ fn draw_help(frame: &mut Frame, area: Rect, color: bool) {
         "Esc        返回列表",
         "←/→        请求/供应商视图",
         "Tab        切换 CLI",
+        "t          测试当前供应商",
         "r          立即刷新",
         "?          关闭帮助",
         "q/Ctrl-C   退出",
     ]
     .join("\n");
-    let style = if color {
-        Style::default().fg(Color::Cyan)
-    } else {
-        Style::default()
-    };
+    let style = Palette::detected(color).style(Tone::Accent);
     frame.render_widget(
         Paragraph::new(text).style(style).wrap(Wrap { trim: false }),
         area,
@@ -1046,35 +1218,25 @@ fn request_line_style(
     color: bool,
     selected: bool,
 ) -> Style {
-    let mut style = if color {
-        let foreground = match line_index {
-            0 if request.state == aio_observer_protocol::ObserverRequestState::Active => {
-                Color::Cyan
-            }
-            0 if request.interrupted => Color::Yellow,
-            0 if request
-                .status
-                .is_some_and(|status| (200..300).contains(&status)) =>
-            {
-                Color::Green
-            }
-            0 => Color::Red,
-            1 => Color::LightBlue,
-            2 => Color::Magenta,
-            3 if request.provider_switch_count > 0 || request.retry_count > 0 => Color::Yellow,
-            3 => Color::Green,
-            _ => Color::LightCyan,
-        };
-        Style::default().fg(foreground)
-    } else {
-        Style::default()
+    let tone = match line_index {
+        0 if request.state == aio_observer_protocol::ObserverRequestState::Active => Tone::Accent,
+        0 if request.interrupted => Tone::Warning,
+        0 if request
+            .status
+            .is_some_and(|status| (200..300).contains(&status)) =>
+        {
+            Tone::Success
+        }
+        0 => Tone::Error,
+        1 => Tone::Info,
+        2 => Tone::Provider,
+        3 if request.provider_switch_count > 0 || request.retry_count > 0 => Tone::Warning,
+        3 => Tone::Success,
+        _ => Tone::Accent,
     };
+    let mut style = Palette::detected(color).style(tone);
     if selected {
-        style = if color {
-            style.bg(Color::DarkGray)
-        } else {
-            style.add_modifier(Modifier::REVERSED)
-        };
+        style = Palette::detected(color).selected(style);
     }
     style
 }
@@ -1194,8 +1356,23 @@ fn provider_card_lines(
             color,
             selected,
         ),
-        provider_spend_line(provider, width, color, selected, spend_tone),
     ];
+
+    if !provider.spend_windows.is_empty() {
+        lines.push(provider_spend_line(
+            provider,
+            width,
+            color,
+            selected,
+            spend_tone,
+        ));
+    }
+
+    if let Some(usage) = provider.account_usage.as_ref() {
+        lines.push(provider_account_usage_line(
+            usage, width, color, selected,
+        ));
+    }
 
     if let Some(quota) = displayable_oauth_quota(provider) {
         let oauth_tone = if provider.eligibility == "oauth_limited" {
@@ -1226,6 +1403,15 @@ fn provider_card_lines(
         lines.push(provider_line(spans, width, color, selected));
     }
 
+    if let Some(availability) = provider.availability.as_ref() {
+        lines.push(provider_availability_line(
+            availability,
+            width,
+            color,
+            selected,
+        ));
+    }
+
     lines
 }
 
@@ -1236,30 +1422,113 @@ fn provider_spend_line(
     selected: bool,
     value_tone: ProviderTone,
 ) -> Line<'static> {
-    let mut spans = vec![provider_span("额", ProviderTone::Label, color)];
-    if provider.spend_windows.is_empty() {
-        spans.push(provider_span(" 未配置", ProviderTone::Muted, color));
-    } else {
-        for window in &provider.spend_windows {
-            spans.push(provider_span(" ", ProviderTone::Default, color));
-            spans.push(provider_span(
-                spend_window_label(&window.window),
-                ProviderTone::Muted,
-                color,
-            ));
-            spans.push(provider_span(" ", ProviderTone::Default, color));
-            spans.push(provider_span(
-                format!(
-                    "{}/{}",
-                    format_cost(window.usage_usd),
-                    format_cost(window.limit_usd)
-                ),
-                value_tone,
-                color,
-            ));
-        }
+    let mut spans = vec![provider_span("限", ProviderTone::Label, color)];
+    for window in &provider.spend_windows {
+        spans.push(provider_span(" ", ProviderTone::Default, color));
+        spans.push(provider_span(
+            spend_window_label(&window.window),
+            ProviderTone::Muted,
+            color,
+        ));
+        spans.push(provider_span(" ", ProviderTone::Default, color));
+        spans.push(provider_span(
+            format!(
+                "{}/{}",
+                format_provider_money(window.usage_usd),
+                format_provider_money(window.limit_usd)
+            ),
+            value_tone,
+            color,
+        ));
     }
     provider_line(spans, width, color, selected)
+}
+
+fn provider_account_usage_line(
+    usage: &aio_observer_protocol::ObserverProviderAccountUsage,
+    width: usize,
+    color: bool,
+    selected: bool,
+) -> Line<'static> {
+    let (value, tone) = match (usage.state.as_str(), usage.amount) {
+        ("available", Some(amount)) => (
+            format_provider_account_amount(amount, usage.unit.as_deref()),
+            ProviderTone::Success,
+        ),
+        ("available", None) => ("—".to_string(), ProviderTone::Muted),
+        ("loading", _) => ("获取中".to_string(), ProviderTone::Warning),
+        _ => ("获取失败".to_string(), ProviderTone::Error),
+    };
+    provider_line(
+        vec![
+            provider_span("余", ProviderTone::Label, color),
+            provider_span(" ", ProviderTone::Default, color),
+            provider_span(value, tone, color),
+        ],
+        width,
+        color,
+        selected,
+    )
+}
+
+fn provider_availability_line(
+    availability: &aio_observer_protocol::ObserverProviderAvailabilityTimeline,
+    width: usize,
+    color: bool,
+    selected: bool,
+) -> Line<'static> {
+    let mut spans = vec![
+        provider_span(
+            format!("{}h", availability.hours),
+            ProviderTone::Label,
+            color,
+        ),
+        provider_span(" ", ProviderTone::Default, color),
+    ];
+    for bucket in availability.buckets.iter().take(12) {
+        let tone = match bucket.state {
+            aio_observer_protocol::ObserverProviderAvailabilityState::Healthy => {
+                ProviderTone::Success
+            }
+            aio_observer_protocol::ObserverProviderAvailabilityState::Unhealthy => {
+                ProviderTone::Error
+            }
+            aio_observer_protocol::ObserverProviderAvailabilityState::NoData => {
+                ProviderTone::Muted
+            }
+        };
+        spans.push(provider_span("■", tone, color));
+    }
+    spans.extend([
+        provider_span(" 成", ProviderTone::Default, color),
+        provider_span(
+            availability.success_count.to_string(),
+            ProviderTone::Success,
+            color,
+        ),
+        provider_span(" 败", ProviderTone::Default, color),
+        provider_span(
+            availability.failure_count.to_string(),
+            ProviderTone::Error,
+            color,
+        ),
+    ]);
+    provider_line(spans, width, color, selected)
+}
+
+fn format_provider_money(value: f64) -> String {
+    format!("${:.1}", value.max(0.0))
+}
+
+fn format_provider_account_amount(amount: f64, unit: Option<&str>) -> String {
+    let amount = amount.max(0.0);
+    match unit.map(str::trim).filter(|unit| !unit.is_empty()) {
+        Some(unit) if matches!(unit, "$" | "¥" | "€" | "£") => {
+            format!("{unit}{amount:.1}")
+        }
+        Some(unit) => format!("{amount:.1} {unit}"),
+        None => format!("{amount:.1}"),
+    }
 }
 
 fn provider_line(
@@ -1328,36 +1597,20 @@ fn provider_separator(color: bool) -> Span<'static> {
 }
 
 fn provider_style(tone: ProviderTone, color: bool) -> Style {
-    if !color {
-        return if matches!(tone, ProviderTone::Muted) {
-            Style::default().add_modifier(Modifier::DIM)
-        } else {
-            Style::default()
-        };
-    }
-    let foreground = match tone {
-        ProviderTone::Default => return Style::default(),
-        ProviderTone::Label => Color::Cyan,
-        ProviderTone::Accent => Color::Magenta,
-        ProviderTone::Success => Color::Green,
-        ProviderTone::Warning => Color::Yellow,
-        ProviderTone::Error => Color::Red,
-        ProviderTone::Muted => Color::DarkGray,
+    let tone = match tone {
+        ProviderTone::Default => Tone::Default,
+        ProviderTone::Label => Tone::Accent,
+        ProviderTone::Accent => Tone::Provider,
+        ProviderTone::Success => Tone::Success,
+        ProviderTone::Warning => Tone::Warning,
+        ProviderTone::Error => Tone::Error,
+        ProviderTone::Muted => Tone::Muted,
     };
-    let style = Style::default().fg(foreground);
-    if matches!(tone, ProviderTone::Muted) {
-        style.add_modifier(Modifier::DIM)
-    } else {
-        style
-    }
+    Palette::detected(color).style(tone)
 }
 
 fn selected_style(style: Style, color: bool) -> Style {
-    if color {
-        style.bg(Color::DarkGray)
-    } else {
-        style.add_modifier(Modifier::REVERSED)
-    }
+    Palette::detected(color).selected(style)
 }
 
 fn provider_eligibility_tone(eligibility: &str) -> ProviderTone {
@@ -1422,22 +1675,18 @@ fn provider_eligibility_label(eligibility: &str) -> &'static str {
 }
 
 fn item_separator_style(color: bool) -> Style {
-    if color {
-        Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::DIM)
-    } else {
-        Style::default().add_modifier(Modifier::DIM)
-    }
+    Palette::detected(color).style(Tone::Muted)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use aio_observer_protocol::{
-        ObserverGatewayStatus, ObserverProviderCollection, ObserverProviderOAuthQuota,
-        ObserverProviderSpendWindow, ObserverRequestState, ObserverSection, ObserverTodayUsage,
-        OBSERVER_PROTOCOL_VERSION,
+        ObserverGatewayStatus, ObserverProviderAccountUsage,
+        ObserverProviderAvailabilityBucket, ObserverProviderAvailabilityState,
+        ObserverProviderAvailabilityTimeline, ObserverProviderCollection,
+        ObserverProviderOAuthQuota, ObserverProviderSpendWindow, ObserverRequestState,
+        ObserverSection, ObserverTodayUsage, OBSERVER_PROTOCOL_VERSION,
     };
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
@@ -1555,6 +1804,28 @@ mod tests {
         }
     }
 
+    fn availability_timeline() -> ObserverProviderAvailabilityTimeline {
+        ObserverProviderAvailabilityTimeline {
+            hours: 6,
+            bucket_minutes: 30,
+            success_count: 24,
+            failure_count: 3,
+            buckets: (0..12)
+                .map(|index| ObserverProviderAvailabilityBucket {
+                    start_at_ms: index * 30 * 60_000,
+                    end_at_ms: (index + 1) * 30 * 60_000,
+                    success_count: u32::from(index == 0),
+                    failure_count: u32::from(index == 1),
+                    state: match index {
+                        0 => ObserverProviderAvailabilityState::Healthy,
+                        1 => ObserverProviderAvailabilityState::Unhealthy,
+                        _ => ObserverProviderAvailabilityState::NoData,
+                    },
+                })
+                .collect(),
+        }
+    }
+
     #[test]
     fn narrow_logs_layout_renders_without_overflow() {
         let backend = TestBackend::new(32, 12);
@@ -1569,6 +1840,43 @@ mod tests {
         let text = rendered_non_space_symbols(&terminal);
         assert!(text.contains("并发13"));
         assert!(text.contains("暂无请求"));
+    }
+
+    #[test]
+    fn dashboard_header_omits_view_pages_and_provider_count() {
+        let mut live = LiveState::new(CliScope::Codex);
+        let mut snapshot = empty_snapshot(CliScope::Codex);
+        snapshot.providers = Some(ObserverSection::ready(ObserverProviderCollection {
+            items: vec![
+                provider_status(1, "A", true),
+                provider_status(2, "B", false),
+            ],
+            truncated: false,
+        }));
+        live.apply_snapshot(snapshot);
+
+        let backend = TestBackend::new(80, 2);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                draw_header(frame, area, &live, true, DashboardView::Requests);
+            })
+            .expect("request header");
+        let request_header = rendered_non_space_symbols(&terminal);
+        assert!(request_header.contains("请求"));
+        assert!(!request_header.contains("请求1/2"));
+
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                draw_header(frame, area, &live, true, DashboardView::Providers);
+            })
+            .expect("provider header");
+        let provider_header = rendered_non_space_symbols(&terminal);
+        assert!(provider_header.contains("供应商"));
+        assert!(!provider_header.contains("供应商2/2"));
+        assert!(!provider_header.contains("供应商2"));
     }
 
     #[test]
@@ -1603,7 +1911,7 @@ mod tests {
             .iter()
             .any(|cell| cell.symbol() == "─" && cell.bg == Color::Reset));
         assert!(cells.iter().any(|cell| cell.fg == Color::Green));
-        assert!(cells.iter().any(|cell| cell.fg == Color::LightBlue));
+        assert!(cells.iter().any(|cell| cell.fg == Color::Blue));
         assert!(cells.iter().any(|cell| cell.fg == Color::Magenta));
     }
 
@@ -1662,6 +1970,71 @@ mod tests {
         let cells = terminal.backend().buffer().content();
         assert!(cells.iter().any(|cell| cell.fg == Color::Green));
         assert!(cells.iter().any(|cell| cell.fg == Color::Cyan));
+    }
+
+    #[test]
+    fn provider_cards_hide_unconfigured_rows_and_keep_availability_last() {
+        let mut provider = provider_status(1, "完整供应商", true);
+        provider.spend_windows = vec![
+            ObserverProviderSpendWindow {
+                window: "five_hour".to_string(),
+                usage_usd: 0.04,
+                limit_usd: 100.0,
+            },
+            ObserverProviderSpendWindow {
+                window: "daily".to_string(),
+                usage_usd: 10.54,
+                limit_usd: 200.04,
+            },
+        ];
+        provider.account_usage = Some(ObserverProviderAccountUsage {
+            state: "available".to_string(),
+            amount: Some(12.54),
+            unit: Some("$".to_string()),
+            last_fetched_at_unix: Some(1),
+        });
+        provider.availability = Some(availability_timeline());
+
+        let lines = provider_card_lines(&provider, 80, true, false);
+        assert_eq!(lines.len(), 7);
+        assert_eq!(line_text(&lines[3]), "限 5h $0.0/$100.0 日 $10.5/$200.0");
+        assert_eq!(line_text(&lines[4]), "余 $12.5");
+        assert!(line_text(lines.last().expect("availability line")).starts_with("6h ■■■"));
+        assert!(line_text(lines.last().expect("availability line")).ends_with("成24 败3"));
+        assert_eq!(lines.last().expect("availability line").spans[2].style.fg, Some(Color::Green));
+        assert_eq!(lines.last().expect("availability line").spans[3].style.fg, Some(Color::Red));
+        assert_eq!(
+            lines.last().expect("availability line").spans[4].style.fg,
+            Some(Color::DarkGray)
+        );
+
+        provider.spend_windows.clear();
+        provider.account_usage = None;
+        provider.oauth_quota = None;
+        provider.availability = None;
+        let minimal = provider_card_lines(&provider, 80, true, false);
+        assert_eq!(minimal.len(), 3);
+        assert!(minimal.iter().all(|line| !line_text(line).starts_with('限')));
+    }
+
+    #[test]
+    fn provider_account_row_reports_loading_and_failure_without_stale_amount() {
+        let mut provider = provider_status(1, "余额供应商", true);
+        provider.spend_windows.clear();
+        provider.oauth_quota = None;
+        provider.account_usage = Some(ObserverProviderAccountUsage {
+            state: "loading".to_string(),
+            amount: Some(99.0),
+            unit: Some("credits".to_string()),
+            last_fetched_at_unix: Some(1),
+        });
+        assert_eq!(line_text(&provider_card_lines(&provider, 40, true, false)[3]), "余 获取中");
+
+        provider.account_usage.as_mut().expect("usage").state = "failed".to_string();
+        assert_eq!(
+            line_text(&provider_card_lines(&provider, 40, true, false)[3]),
+            "余 获取失败"
+        );
     }
 
     #[test]
@@ -1849,6 +2222,60 @@ mod tests {
     }
 
     #[test]
+    fn provider_probe_state_deduplicates_and_isolates_results_by_provider() {
+        let mut state = LogsState::new(CliScope::Codex);
+        state.switch_view(DashboardView::Providers);
+        let mut snapshot = empty_snapshot(CliScope::Codex);
+        snapshot.providers = Some(ObserverSection::ready(ObserverProviderCollection {
+            items: vec![
+                provider_status(1, "A", true),
+                provider_status(2, "B", false),
+            ],
+            truncated: false,
+        }));
+        state.apply_snapshot(snapshot);
+        state.select_current(0, Instant::now());
+        state.detail = true;
+
+        assert_eq!(state.begin_provider_probe(), Some(1));
+        assert_eq!(state.begin_provider_probe(), None);
+        state.finish_provider_probe(2, Err(OfflineReason::Unreachable));
+        assert!(matches!(
+            state.provider_probes.get(&1),
+            Some(ProviderProbeState::Running)
+        ));
+        state.finish_provider_probe(
+            1,
+            Ok(ObserverProviderAvailabilityTestResult {
+                ok: true,
+                provider_id: 1,
+                provider_name: "A".to_string(),
+                base_url: "https://example.com/v1".to_string(),
+                status: Some(200),
+                latency_ms: 123,
+                error: None,
+                response_preview: Some("ok".to_string()),
+            }),
+        );
+        let result_lines = provider_probe_detail_lines(
+            state.provider_probes.get(&1).expect("probe result"),
+        );
+        assert!(result_lines.iter().any(|line| line == "结果：可用"));
+        assert!(result_lines.iter().any(|line| line == "HTTP：200"));
+        assert!(result_lines
+            .iter()
+            .any(|line| line == "Base URL：https://example.com/v1"));
+        assert!(!state.provider_probes.contains_key(&2));
+
+        state.select_current(1, Instant::now());
+        assert_eq!(state.begin_provider_probe(), Some(2));
+        assert!(matches!(
+            state.provider_probes.get(&1),
+            Some(ProviderProbeState::Complete(result)) if result.provider_id == 1
+        ));
+    }
+
+    #[test]
     fn provider_view_reports_legacy_observer_without_dropping_logs() {
         let mut state = LogsState::new(CliScope::Codex);
         let mut snapshot = empty_snapshot(CliScope::Codex);
@@ -1904,6 +2331,26 @@ mod tests {
         assert!(!status_tone_style(StatusTone::Scope, true)
             .add_modifier
             .contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn detail_labels_and_sections_use_the_shared_palette() {
+        let lines = styled_detail_lines(
+            vec![
+                "状态  200 成功".to_string(),
+                String::new(),
+                "路由链".to_string(),
+                "1. Provider".to_string(),
+            ],
+            true,
+        );
+        assert_eq!(lines[0].spans[0].style.fg, Some(Color::Cyan));
+        assert_eq!(lines[2].spans[0].style.fg, Some(Color::Cyan));
+        assert!(lines[2].spans[0]
+            .style
+            .add_modifier
+            .contains(Modifier::BOLD));
+        assert_eq!(lines[3].spans[0].style.fg, None);
     }
 
     #[test]

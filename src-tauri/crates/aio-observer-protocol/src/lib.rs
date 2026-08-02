@@ -186,9 +186,11 @@ pub struct ObserverProviderAvailabilityTestResult {
     pub ok: bool,
     pub provider_id: i64,
     pub provider_name: String,
+    pub base_url: String,
     pub status: Option<u16>,
     pub latency_ms: i64,
     pub error: Option<String>,
+    pub response_preview: Option<String>,
 }
 
 #[derive(Clone, Deserialize, Serialize, PartialEq)]

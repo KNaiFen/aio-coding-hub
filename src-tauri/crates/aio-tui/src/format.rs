@@ -162,14 +162,14 @@ fn status_segment(snapshot: &ObserverSnapshotV1, item: StatusItem) -> StatusSegm
         }),
         StatusItem::RecentProvider => {
             if !snapshot.dominant_provider.available {
-                StatusSegment::new("近10 不可用", StatusTone::Warning)
+                StatusSegment::new("最近 不可用", StatusTone::Warning)
             } else if let Some(provider) = snapshot.dominant_provider.value.as_ref() {
                 StatusSegment::new(
-                    format!("近10 {}×{}", provider.provider_name, provider.count),
+                    format!("最近 {} *{}", provider.provider_name, provider.count),
                     StatusTone::Provider,
                 )
             } else {
-                StatusSegment::new("近10 —", StatusTone::Default)
+                StatusSegment::new("最近 —", StatusTone::Default)
             }
         }
         StatusItem::Concurrency => StatusSegment::new(
@@ -383,6 +383,15 @@ pub fn request_card_lines(request: &ObserverRequest, now_ms: i64, width: usize) 
         .cost_usd
         .map(format_cost)
         .unwrap_or_else(|| "—".to_string());
+    let route_summary = match output_tokens_per_second(request) {
+        Some(rate) => format!(
+            "{}  {}  {}",
+            route_result(request),
+            duration,
+            format_tokens_per_second_short(rate)
+        ),
+        None => format!("{}  {}", route_result(request), duration),
+    };
     [
         truncate_display(
             &format!(
@@ -396,8 +405,8 @@ pub fn request_card_lines(request: &ObserverRequest, now_ms: i64, width: usize) 
             &format!("{} / {}{}", cli_label(&request.cli_key), model, compaction),
             width,
         ),
-        truncate_display(&format!("{}  {}", folder, provider), width),
-        truncate_display(&format!("{}  {}", route_result(request), duration), width),
+        truncate_display(&format!("{}  {}", provider, folder), width),
+        truncate_display(&route_summary, width),
         truncate_display(
             &format!(
                 "I {} O {} C {} {}",
@@ -631,6 +640,40 @@ pub fn format_cost(value: f64) -> String {
     }
 }
 
+pub fn output_tokens_per_second(request: &ObserverRequest) -> Option<f64> {
+    if request.state != ObserverRequestState::Terminal
+        || !request
+            .status
+            .is_some_and(|status| (200..300).contains(&status))
+    {
+        return None;
+    }
+    let output_tokens = request.usage.as_ref()?.output_tokens?;
+    let duration_ms = request.duration_ms?;
+    let ttfb_ms = request.ttfb_ms?;
+    if output_tokens <= 0 || duration_ms <= 0 {
+        return None;
+    }
+    let generation_ms = duration_ms.saturating_sub(ttfb_ms);
+    if generation_ms <= 0 {
+        return Some(output_tokens as f64 / (duration_ms as f64 / 1_000.0));
+    }
+    let rate = output_tokens as f64 / (generation_ms as f64 / 1_000.0);
+    if generation_ms as f64 / duration_ms as f64 < 0.1 && rate > 5_000.0 {
+        return Some(output_tokens as f64 / (duration_ms as f64 / 1_000.0));
+    }
+    rate.is_finite().then_some(rate)
+}
+
+pub fn format_tokens_per_second_short(value: f64) -> String {
+    let value = value.max(0.0);
+    if value >= 1_000.0 {
+        format!("{:.1}k t/s", value / 1_000.0)
+    } else {
+        format!("{value:.1} t/s")
+    }
+}
+
 pub fn relative_time(created_at_ms: i64, now_ms: i64) -> String {
     let elapsed = now_ms.saturating_sub(created_at_ms).max(0);
     if elapsed < 60_000 {
@@ -709,7 +752,7 @@ mod tests {
     use super::*;
     use aio_observer_protocol::{
         ObserverDominantProvider, ObserverGatewayStatus, ObserverPreferredProvider,
-        ObserverSection, ObserverTodayUsage, OBSERVER_PROTOCOL_VERSION,
+        ObserverRequestUsage, ObserverSection, ObserverTodayUsage, OBSERVER_PROTOCOL_VERSION,
     };
 
     fn request_with_route_counts(
@@ -914,6 +957,78 @@ mod tests {
         assert_eq!(route_result(&request_with_route_counts(2, 0, 1)), "切换1");
         assert_eq!(route_result(&request_with_route_counts(3, 2, 0)), "重试2");
         assert_eq!(route_result(&request_with_route_counts(0, 0, 0)), "未上游");
+    }
+
+    #[test]
+    fn request_card_keeps_provider_before_folder_and_appends_output_rate() {
+        let mut request = request_with_route_counts(1, 0, 0);
+        request.provider_name = Some("INPUT 大春".to_string());
+        request.folder_name = Some("aio-coding-hub".to_string());
+        request.duration_ms = Some(2_000);
+        request.ttfb_ms = Some(500);
+        request.usage = Some(ObserverRequestUsage {
+            input_tokens: Some(611),
+            output_tokens: Some(200),
+            total_tokens: Some(811),
+            cache_read_tokens: Some(107_000),
+            cache_creation_tokens: None,
+        });
+
+        let lines = request_card_lines(&request, 60_001, 80);
+        assert_eq!(lines[2], "INPUT 大春  aio-coding-hub");
+        assert_eq!(lines[3], "直连  2.0s  133.3 t/s");
+        assert!(request_card_lines(&request, 60_001, 15)[2].starts_with("INPUT 大春"));
+    }
+
+    #[test]
+    fn output_rate_matches_desktop_fallbacks_and_visibility_rules() {
+        let mut request = request_with_route_counts(1, 0, 0);
+        request.duration_ms = Some(20_000);
+        request.ttfb_ms = Some(19_800);
+        request.usage = Some(ObserverRequestUsage {
+            input_tokens: None,
+            output_tokens: Some(1_200),
+            total_tokens: None,
+            cache_read_tokens: None,
+            cache_creation_tokens: None,
+        });
+        assert_eq!(output_tokens_per_second(&request), Some(60.0));
+        assert_eq!(format_tokens_per_second_short(1_500.0), "1.5k t/s");
+
+        request.duration_ms = Some(29_520);
+        request.ttfb_ms = Some(29_360);
+        request.usage.as_mut().expect("usage").output_tokens = Some(439);
+        assert!(output_tokens_per_second(&request).is_some_and(|rate| rate > 2_700.0));
+
+        request.status = Some(500);
+        assert_eq!(output_tokens_per_second(&request), None);
+        request.status = Some(200);
+        request.state = ObserverRequestState::Active;
+        assert_eq!(output_tokens_per_second(&request), None);
+        request.state = ObserverRequestState::Terminal;
+        request.ttfb_ms = None;
+        assert_eq!(output_tokens_per_second(&request), None);
+    }
+
+    #[test]
+    fn recent_provider_copy_uses_recent_and_ascii_count_marker() {
+        let snapshot = status_snapshot();
+        let normal = status_segments(&snapshot, &[StatusItem::RecentProvider]);
+        assert_eq!(normal[0].text, "最近 happy *7");
+
+        let mut unavailable = snapshot.clone();
+        unavailable.dominant_provider = ObserverSection::unavailable();
+        assert_eq!(
+            status_segments(&unavailable, &[StatusItem::RecentProvider])[0].text,
+            "最近 不可用"
+        );
+
+        let mut empty = snapshot;
+        empty.dominant_provider = ObserverSection::empty();
+        assert_eq!(
+            status_segments(&empty, &[StatusItem::RecentProvider])[0].text,
+            "最近 —"
+        );
     }
 
     #[test]

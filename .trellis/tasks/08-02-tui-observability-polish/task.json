@@ -3,7 +3,7 @@
   "name": "tui-observability-polish",
   "title": "TUI 观测与显示改造",
   "description": "实现 P002/P003/P004/P006/P007/P008/P009/P011 的 TUI 部分",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": "aio-coding-hub",

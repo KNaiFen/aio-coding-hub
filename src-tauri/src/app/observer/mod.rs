@@ -410,12 +410,28 @@ async fn provider_test_availability_handler(
             ok: result.ok,
             provider_id: result.provider_id,
             provider_name: bounded_observer_text(&result.provider_name, 128),
+            base_url: observer_probe_base_url(&result.base_url),
             status: result.status,
             latency_ms: result.latency_ms,
             error,
+            response_preview: result
+                .response_preview
+                .as_deref()
+                .map(|value| bounded_observer_text(value, 500)),
         })
         .into_response(),
     )
+}
+
+fn observer_probe_base_url(value: &str) -> String {
+    let Ok(mut url) = reqwest::Url::parse(value) else {
+        return String::new();
+    };
+    let _ = url.set_username("");
+    let _ = url.set_password(None);
+    url.set_query(None);
+    url.set_fragment(None);
+    bounded_observer_text(url.as_str(), 2_048)
 }
 
 fn bounded_observer_text(value: &str, max_chars: usize) -> String {
@@ -569,6 +585,23 @@ mod tests {
             HeaderValue::from_static("Bearer token"),
         );
         assert!(authorized(&headers, "token"));
+    }
+
+    #[test]
+    fn provider_probe_output_strips_url_credentials_and_bounds_text() {
+        assert_eq!(
+            observer_probe_base_url(
+                "https://user:secret@example.com/v1/responses?api_key=hidden#fragment"
+            ),
+            "https://example.com/v1/responses"
+        );
+        assert_eq!(observer_probe_base_url("not a url"), "");
+
+        let unsafe_text = format!("ok\nsecret\u{202e}{}", "x".repeat(600));
+        let bounded = bounded_observer_text(&unsafe_text, 10);
+        assert_eq!(bounded.chars().count(), 10);
+        assert!(!bounded.chars().any(char::is_control));
+        assert!(!bounded.contains('\u{202e}'));
     }
 
     #[tokio::test]
