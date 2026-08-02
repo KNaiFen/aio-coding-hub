@@ -1343,7 +1343,7 @@ CREATE INDEX IF NOT EXISTS idx_plugin_hook_execution_reports_plugin_hook_created
 // Shared helper
 // ---------------------------------------------------------------------------
 
-fn column_exists(
+pub(super) fn column_exists(
     conn: &Connection,
     table: &str,
     column: &str,
