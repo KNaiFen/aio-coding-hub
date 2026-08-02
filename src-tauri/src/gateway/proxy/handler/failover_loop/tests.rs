@@ -13,6 +13,7 @@ fn skipped_attempt(reason_code: Option<&'static str>) -> FailoverAttempt {
         provider_name: "provider".to_string(),
         base_url: "https://example.com".to_string(),
         outcome: "skipped".to_string(),
+        upstream_sent: false,
         status: None,
         provider_index: None,
         retry_index: None,
@@ -43,6 +44,7 @@ fn terminal_bridge_attempt() -> FailoverAttempt {
         provider_name: "Bridge".to_string(),
         base_url: String::new(),
         outcome: "skipped".to_string(),
+        upstream_sent: false,
         status: None,
         provider_index: None,
         retry_index: None,
@@ -73,6 +75,7 @@ fn real_attempt() -> FailoverAttempt {
         provider_name: "provider".to_string(),
         base_url: "https://example.com".to_string(),
         outcome: "request_error".to_string(),
+        upstream_sent: true,
         status: Some(502),
         provider_index: Some(1),
         retry_index: Some(1),
@@ -107,6 +110,7 @@ fn timeout_attempt(
         provider_name: format!("provider-{provider_id}"),
         base_url: "https://example.com".to_string(),
         outcome: "request_timeout: category=SYSTEM_ERROR code=GW_UPSTREAM_TIMEOUT decision=switch timeout_secs=30".to_string(),
+        upstream_sent: true,
         status: None,
         provider_index: Some(provider_index),
         retry_index: Some(1),
@@ -315,12 +319,13 @@ fn gate_skip_attempt_without_trigger_omits_trigger_key_but_keeps_state() {
 #[test]
 fn non_circuit_attempts_serialize_without_circuit_attribution_keys() {
     // The two circuit-only keys must be absent when None. Other stable wire
-    // fields, including requested_upstream_model, serialize explicit nulls.
+    // fields, including upstream_sent and requested_upstream_model, serialize.
     let expected_keys = [
         "provider_id",
         "provider_name",
         "base_url",
         "outcome",
+        "upstream_sent",
         "status",
         "provider_index",
         "retry_index",
@@ -376,4 +381,25 @@ fn gate_skip_attempt_json_input_none() -> FailoverAttempt {
         },
     );
     attempts.remove(0)
+}
+
+#[test]
+fn provider_disabled_skip_is_all_unavailable_gate_evidence() {
+    let mut attempts = Vec::new();
+    push_skipped_provider_attempt(
+        &mut attempts,
+        SkippedProviderAttempt {
+            provider_id: 7,
+            provider_name: "Provider A",
+            base_url: "https://provider-a.example",
+            error_category: "provider_disabled",
+            error_code: GatewayErrorCode::NoEnabledProvider.as_str(),
+            reason: "provider disabled".to_string(),
+            reason_code: Some(dc::REASON_PROVIDER_DISABLED),
+            attempt_started_ms: 1,
+            circuit: None,
+        },
+    );
+
+    assert!(should_finalize_as_all_providers_unavailable(&attempts));
 }

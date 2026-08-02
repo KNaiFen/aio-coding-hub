@@ -4,17 +4,23 @@
 //! are reachable and functional. Supports all recognized provider CLI types.
 
 use crate::providers::{is_supported_bridge_type, ModelMapping, CX2CC_BRIDGE_TYPE};
-use crate::shared::error::AppResult;
+use crate::shared::error::{db_err, AppResult};
 use crate::{blocking, db};
 use reqwest::header::{HeaderMap, HeaderValue};
-use rusqlite::OptionalExtension;
-use serde::Serialize;
+use rusqlite::{params, params_from_iter, OptionalExtension, TransactionBehavior};
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const PROBE_RESPONSE_BODY_LIMIT: usize = 64 * 1024;
 const PROBE_RESPONSE_PREVIEW_LIMIT: usize = 500;
+const AVAILABILITY_RETENTION_MS: i64 = 24 * 60 * 60 * 1_000;
+const AVAILABILITY_RETENTION_BATCH_SIZE: usize = 1_000;
+const AVAILABILITY_RETENTION_INTERVAL: Duration = Duration::from_secs(60 * 60);
+pub const TUI_PROVIDER_AVAILABILITY_BUCKETS: u16 = 12;
+pub const DESKTOP_PROVIDER_AVAILABILITY_BUCKETS: u16 = 36;
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct ProviderAvailabilityResult {
@@ -26,6 +32,52 @@ pub struct ProviderAvailabilityResult {
     pub latency_ms: i64,
     pub error: Option<String>,
     pub response_preview: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, specta::Type, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderAvailabilityState {
+    Healthy,
+    Unhealthy,
+    NoData,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type, PartialEq, Eq)]
+pub struct ProviderAvailabilityBucket {
+    pub start_at_ms: i64,
+    pub end_at_ms: i64,
+    pub success_count: u32,
+    pub failure_count: u32,
+    pub state: ProviderAvailabilityState,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type, PartialEq, Eq)]
+pub struct ProviderAvailabilityTimeline {
+    pub provider_id: i64,
+    pub hours: u32,
+    pub bucket_count: u16,
+    pub bucket_minutes: u32,
+    pub success_count: u32,
+    pub failure_count: u32,
+    pub buckets: Vec<ProviderAvailabilityBucket>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AvailabilityAttempt {
+    provider_id: i64,
+    outcome: String,
+    error_category: Option<String>,
+    #[serde(default)]
+    upstream_sent: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AvailabilityObservation {
+    trace_id: String,
+    cli_key: String,
+    provider_id: i64,
+    observed_at_ms: i64,
+    success: bool,
 }
 
 struct LoadedProvider {
@@ -213,8 +265,11 @@ async fn load_effective_provider_for_test(
         return Ok(provider);
     };
 
-    let (source, source_cli_key) =
-        crate::providers::get_source_provider_for_gateway(&db, source_provider_id, bridge_type)?;
+    let (source, source_cli_key) = crate::providers::get_source_provider_for_availability(
+        &db,
+        source_provider_id,
+        bridge_type,
+    )?;
 
     Ok(LoadedProvider {
         id: provider.id,
@@ -449,6 +504,10 @@ fn redact_key_param(msg: &str) -> String {
         .unwrap_or_else(|_| msg.to_string())
 }
 
+fn redact_probe_credential(input: &str, credential: &str) -> String {
+    crate::domain::provider_account_usage::redact_secret(input, credential)
+}
+
 fn looks_like_auth_failure(status: u16, response_text: &str) -> bool {
     if matches!(status, 401 | 403) {
         return true;
@@ -606,7 +665,8 @@ pub async fn test_provider_availability<R: tauri::Runtime>(
                     truncated: false,
                     limit: PROBE_RESPONSE_BODY_LIMIT,
                 });
-            let preview = probe_response_preview(&body);
+            let preview =
+                redact_probe_credential(&probe_response_preview(&body), &effective_credential);
             // Provider is "available" if the endpoint responds without an auth
             // failure or upstream 5xx. 400/404 model errors and 429 rate limits
             // still prove the configured base URL and credential reached the
@@ -627,7 +687,7 @@ pub async fn test_provider_availability<R: tauri::Runtime>(
                         })
                     })
                     .unwrap_or_else(|| format!("HTTP {status}"));
-                Some(msg)
+                Some(redact_probe_credential(&msg, &effective_credential))
             };
 
             Ok(ProviderAvailabilityResult {
@@ -649,6 +709,7 @@ pub async fn test_provider_availability<R: tauri::Runtime>(
             } else {
                 redact_key_param(&format!("请求失败: {err}"))
             };
+            let error_message = redact_probe_credential(&error_message, &effective_credential);
 
             Ok(ProviderAvailabilityResult {
                 ok: false,
@@ -664,6 +725,358 @@ pub async fn test_provider_availability<R: tauri::Runtime>(
     }
 }
 
+pub fn is_valid_availability_hours(hours: u32) -> bool {
+    matches!(hours, 3 | 6 | 12)
+}
+
+pub fn normalized_availability_hours(hours: u32) -> u32 {
+    if is_valid_availability_hours(hours) {
+        hours
+    } else {
+        crate::settings::DEFAULT_PROVIDER_AVAILABILITY_HOURS
+    }
+}
+
+fn is_request_level_abort(error_code: Option<&str>) -> bool {
+    matches!(
+        error_code,
+        Some(
+            "GW_REQUEST_ABORTED"
+                | "GW_STREAM_ABORTED"
+                | "GW_REQUEST_INTERRUPTED_BY_RESTART"
+                | "GW_REQUEST_INTERRUPTED_BY_GATEWAY_STOP"
+        )
+    )
+}
+
+fn is_provider_attributed_failure(attempt: &AvailabilityAttempt) -> bool {
+    if attempt
+        .outcome
+        .starts_with("cx2cc_event_stream_aggregate_error:")
+    {
+        return false;
+    }
+    matches!(
+        attempt.error_category.as_deref(),
+        Some("SYSTEM_ERROR" | "PROVIDER_ERROR" | "RESOURCE_NOT_FOUND")
+    )
+}
+
+fn observations_from_attempts(
+    trace_id: &str,
+    cli_key: &str,
+    observed_at_ms: i64,
+    request_error_code: Option<&str>,
+    attempts_json: &str,
+) -> Vec<AvailabilityObservation> {
+    if is_request_level_abort(request_error_code) {
+        return Vec::new();
+    }
+    let attempts =
+        serde_json::from_str::<Vec<AvailabilityAttempt>>(attempts_json).unwrap_or_default();
+    let mut outcomes = HashMap::<i64, bool>::new();
+    for attempt in attempts {
+        if attempt.provider_id <= 0 || !attempt.upstream_sent {
+            continue;
+        }
+        if attempt.outcome == "success" {
+            outcomes.insert(attempt.provider_id, true);
+        } else if is_provider_attributed_failure(&attempt) {
+            outcomes.entry(attempt.provider_id).or_insert(false);
+        }
+    }
+    outcomes
+        .into_iter()
+        .map(|(provider_id, success)| AvailabilityObservation {
+            trace_id: trace_id.to_string(),
+            cli_key: cli_key.to_string(),
+            provider_id,
+            observed_at_ms: observed_at_ms.max(0),
+            success,
+        })
+        .collect()
+}
+
+/// Projects terminal request attempts inside the request-log transaction so
+/// both records become visible together. Failures are diagnostic-only.
+pub(crate) fn record_request_observations_best_effort(
+    tx: &rusqlite::Transaction<'_>,
+    items: &[crate::request_logs::RequestLogInsert],
+) {
+    let observations = items
+        .iter()
+        .flat_map(|item| {
+            let observed_at_ms = if item.created_at_ms > 0 {
+                item.created_at_ms
+            } else {
+                item.created_at.saturating_mul(1_000)
+            };
+            observations_from_attempts(
+                &item.trace_id,
+                &item.cli_key,
+                observed_at_ms,
+                item.error_code.as_deref(),
+                &item.attempts_json,
+            )
+        })
+        .collect::<Vec<_>>();
+    if observations.is_empty() {
+        return;
+    }
+
+    let result = (|| -> AppResult<()> {
+        {
+            let mut statement = tx
+                .prepare_cached(
+                    r#"
+INSERT INTO provider_availability_observations(
+  trace_id, cli_key, provider_id, observed_at_ms, success
+)
+SELECT ?1, ?2, ?3, ?4, ?5
+WHERE EXISTS (SELECT 1 FROM providers WHERE id = ?3)
+ON CONFLICT(trace_id, provider_id) DO UPDATE SET
+  cli_key = excluded.cli_key,
+  observed_at_ms = excluded.observed_at_ms,
+  success = CASE
+    WHEN provider_availability_observations.success = 1 OR excluded.success = 1 THEN 1
+    ELSE 0
+  END
+"#,
+                )
+                .map_err(|error| db_err!("failed to prepare availability projection: {error}"))?;
+            for observation in observations {
+                statement
+                    .execute(params![
+                        observation.trace_id,
+                        observation.cli_key,
+                        observation.provider_id,
+                        observation.observed_at_ms,
+                        i64::from(observation.success),
+                    ])
+                    .map_err(|error| db_err!("failed to write availability fact: {error}"))?;
+            }
+        }
+        Ok(())
+    })();
+    if let Err(error) = result {
+        tracing::warn!(
+            error = %error.code(),
+            "provider availability observation projection failed"
+        );
+    }
+}
+
+fn bucket_state(success_count: u32, failure_count: u32) -> ProviderAvailabilityState {
+    let total = success_count.saturating_add(failure_count);
+    if total == 0 {
+        ProviderAvailabilityState::NoData
+    } else if success_count.saturating_mul(4) >= total.saturating_mul(3) {
+        ProviderAvailabilityState::Healthy
+    } else {
+        ProviderAvailabilityState::Unhealthy
+    }
+}
+
+pub fn timelines(
+    db: &db::Db,
+    provider_ids: &[i64],
+    hours: u32,
+    bucket_count: u16,
+    now_ms: i64,
+) -> AppResult<Vec<ProviderAvailabilityTimeline>> {
+    let hours = normalized_availability_hours(hours);
+    if !matches!(
+        bucket_count,
+        TUI_PROVIDER_AVAILABILITY_BUCKETS | DESKTOP_PROVIDER_AVAILABILITY_BUCKETS
+    ) {
+        return Err("SEC_INVALID_INPUT: bucket_count must be 12 or 36".into());
+    }
+    let mut seen = HashSet::new();
+    let provider_ids = provider_ids
+        .iter()
+        .copied()
+        .filter(|provider_id| *provider_id > 0 && seen.insert(*provider_id))
+        .take(512)
+        .collect::<Vec<_>>();
+    if provider_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let bucket_count_i64 = i64::from(bucket_count);
+    let range_ms = i64::from(hours).saturating_mul(60 * 60 * 1_000);
+    let bucket_ms = range_ms
+        .checked_div(bucket_count_i64)
+        .ok_or_else(|| "SEC_INVALID_INPUT: invalid availability range".to_string())?;
+    let alignment_ms = range_ms
+        .checked_div(i64::from(TUI_PROVIDER_AVAILABILITY_BUCKETS))
+        .ok_or_else(|| "SEC_INVALID_INPUT: invalid availability alignment".to_string())?;
+    let now_ms = now_ms.max(0);
+    let end_at_ms = now_ms
+        .div_euclid(alignment_ms)
+        .saturating_add(1)
+        .saturating_mul(alignment_ms);
+    let start_at_ms = end_at_ms.saturating_sub(bucket_ms.saturating_mul(bucket_count_i64));
+
+    let empty_buckets = || {
+        (0..bucket_count_i64)
+            .map(|index| {
+                let start = start_at_ms.saturating_add(index.saturating_mul(bucket_ms));
+                ProviderAvailabilityBucket {
+                    start_at_ms: start,
+                    end_at_ms: start.saturating_add(bucket_ms),
+                    success_count: 0,
+                    failure_count: 0,
+                    state: ProviderAvailabilityState::NoData,
+                }
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut output = provider_ids
+        .iter()
+        .map(|provider_id| ProviderAvailabilityTimeline {
+            provider_id: *provider_id,
+            hours,
+            bucket_count,
+            bucket_minutes: u32::try_from(bucket_ms / 60_000).unwrap_or_default(),
+            success_count: 0,
+            failure_count: 0,
+            buckets: empty_buckets(),
+        })
+        .collect::<Vec<_>>();
+    let positions = output
+        .iter()
+        .enumerate()
+        .map(|(index, timeline)| (timeline.provider_id, index))
+        .collect::<HashMap<_, _>>();
+
+    let placeholders = std::iter::repeat_n("?", provider_ids.len())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        r#"
+SELECT provider_id, observed_at_ms, success
+FROM provider_availability_observations
+WHERE observed_at_ms >= ?
+  AND observed_at_ms < ?
+  AND provider_id IN ({placeholders})
+ORDER BY observed_at_ms ASC
+"#
+    );
+    let mut values = Vec::<rusqlite::types::Value>::with_capacity(provider_ids.len() + 2);
+    values.push(start_at_ms.into());
+    values.push(end_at_ms.into());
+    values.extend(provider_ids.iter().copied().map(Into::into));
+    let conn = db.open_connection()?;
+    let mut statement = conn
+        .prepare(&sql)
+        .map_err(|error| db_err!("failed to prepare availability timeline: {error}"))?;
+    let rows = statement
+        .query_map(params_from_iter(values), |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)? != 0,
+            ))
+        })
+        .map_err(|error| db_err!("failed to query availability timeline: {error}"))?;
+    for row in rows {
+        let (provider_id, observed_at_ms, success) =
+            row.map_err(|error| db_err!("failed to read availability timeline row: {error}"))?;
+        let Some(position) = positions.get(&provider_id).copied() else {
+            continue;
+        };
+        let bucket_index = observed_at_ms
+            .saturating_sub(start_at_ms)
+            .div_euclid(bucket_ms);
+        let Ok(bucket_index) = usize::try_from(bucket_index) else {
+            continue;
+        };
+        let timeline = &mut output[position];
+        let Some(bucket) = timeline.buckets.get_mut(bucket_index) else {
+            continue;
+        };
+        if success {
+            bucket.success_count = bucket.success_count.saturating_add(1);
+            timeline.success_count = timeline.success_count.saturating_add(1);
+        } else {
+            bucket.failure_count = bucket.failure_count.saturating_add(1);
+            timeline.failure_count = timeline.failure_count.saturating_add(1);
+        }
+    }
+    for timeline in &mut output {
+        for bucket in &mut timeline.buckets {
+            bucket.state = bucket_state(bucket.success_count, bucket.failure_count);
+        }
+    }
+    Ok(output)
+}
+
+pub fn purge_expired_observations(db: &db::Db, now_ms: i64) -> AppResult<u64> {
+    let cutoff = now_ms.max(0).saturating_sub(AVAILABILITY_RETENTION_MS);
+    let mut deleted = 0_u64;
+    loop {
+        let mut conn = db.open_connection()?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|error| db_err!("failed to begin availability retention: {error}"))?;
+        let affected = tx
+            .execute(
+                r#"
+DELETE FROM provider_availability_observations
+WHERE rowid IN (
+  SELECT rowid
+  FROM provider_availability_observations
+  WHERE observed_at_ms < ?1
+  ORDER BY observed_at_ms ASC
+  LIMIT ?2
+)
+"#,
+                params![cutoff, AVAILABILITY_RETENTION_BATCH_SIZE as i64],
+            )
+            .map_err(|error| db_err!("failed to purge availability facts: {error}"))?;
+        tx.commit()
+            .map_err(|error| db_err!("failed to commit availability retention: {error}"))?;
+        deleted = deleted.saturating_add(affected as u64);
+        if affected < AVAILABILITY_RETENTION_BATCH_SIZE {
+            break;
+        }
+        std::thread::yield_now();
+    }
+    Ok(deleted)
+}
+
+pub(crate) fn spawn_retention_task(db: db::Db) {
+    tauri::async_runtime::spawn(async move {
+        run_retention_once(db.clone()).await;
+        let mut interval = tokio::time::interval(AVAILABILITY_RETENTION_INTERVAL);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        interval.tick().await;
+        loop {
+            interval.tick().await;
+            run_retention_once(db.clone()).await;
+        }
+    });
+}
+
+async fn run_retention_once(db: db::Db) {
+    let result = blocking::run("provider_availability_retention", move || {
+        purge_expired_observations(&db, crate::shared::time::now_unix_millis())
+    })
+    .await;
+    match result {
+        Ok(deleted) if deleted > 0 => {
+            tracing::info!(deleted, "purged expired provider availability observations");
+        }
+        Ok(_) => {}
+        Err(error) => {
+            tracing::warn!(
+                error = %error.code(),
+                "provider availability retention task failed"
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -673,6 +1086,62 @@ mod tests {
         CODEX_TO_OPENAI_RESPONSES_BRIDGE_TYPE,
     };
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[test]
+    fn request_observations_merge_retries_and_keep_failover_providers() {
+        let attempts = serde_json::json!([
+            {"provider_id": 1, "outcome": "request_error", "error_category": "SYSTEM_ERROR", "upstream_sent": true},
+            {"provider_id": 1, "outcome": "upstream_error", "error_category": "PROVIDER_ERROR", "upstream_sent": true},
+            {"provider_id": 2, "outcome": "success", "upstream_sent": true},
+            {"provider_id": 2, "outcome": "skipped", "error_category": "PROVIDER_ERROR", "upstream_sent": false}
+        ]);
+
+        let mut observations =
+            observations_from_attempts("trace", "codex", 1_000, None, &attempts.to_string());
+        observations.sort_by_key(|item| item.provider_id);
+
+        assert_eq!(observations.len(), 2);
+        assert_eq!(
+            (observations[0].provider_id, observations[0].success),
+            (1, false)
+        );
+        assert_eq!(
+            (observations[1].provider_id, observations[1].success),
+            (2, true)
+        );
+    }
+
+    #[test]
+    fn request_observations_prefer_eventual_success_and_ignore_local_failures() {
+        let attempts = serde_json::json!([
+            {"provider_id": 1, "outcome": "request_error", "error_category": "SYSTEM_ERROR", "upstream_sent": true},
+            {"provider_id": 1, "outcome": "success", "upstream_sent": true},
+            {"provider_id": 2, "outcome": "managed_model_invalid", "error_category": "NON_RETRYABLE_CLIENT_ERROR", "upstream_sent": false},
+            {"provider_id": 3, "outcome": "bridge_response_translate_error", "error_category": "NON_RETRYABLE_CLIENT_ERROR", "upstream_sent": true}
+        ]);
+
+        let observations =
+            observations_from_attempts("trace", "codex", 1_000, None, &attempts.to_string());
+
+        assert_eq!(observations.len(), 1);
+        assert_eq!(observations[0].provider_id, 1);
+        assert!(observations[0].success);
+        assert!(observations_from_attempts(
+            "trace",
+            "codex",
+            1_000,
+            Some("GW_REQUEST_ABORTED"),
+            &attempts.to_string(),
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn availability_state_uses_seventy_five_percent_boundary() {
+        assert_eq!(bucket_state(0, 0), ProviderAvailabilityState::NoData);
+        assert_eq!(bucket_state(3, 1), ProviderAvailabilityState::Healthy);
+        assert_eq!(bucket_state(2, 1), ProviderAvailabilityState::Unhealthy);
+    }
 
     fn default_provider_params(name: &str) -> ProviderUpsertParams {
         ProviderUpsertParams {
@@ -709,6 +1178,83 @@ mod tests {
             model_routing_policy_override: None,
             model_routing_policy_override_specified: false,
         }
+    }
+
+    #[test]
+    fn timelines_align_natural_buckets_and_retention_keeps_cutoff() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let db_path = temp.path().join("provider-availability-facts.sqlite3");
+        let db = crate::db::init_for_tests(&db_path).expect("init db");
+        let provider =
+            upsert(&db, default_provider_params("timeline-provider")).expect("insert provider");
+        let now_ms: i64 = 10 * 60 * 60 * 1_000 + 17 * 60 * 1_000;
+        let bucket_ms = 30 * 60 * 1_000;
+        let current_bucket_start = now_ms.div_euclid(bucket_ms) * bucket_ms;
+        let cutoff = now_ms - AVAILABILITY_RETENTION_MS;
+        let conn = db.open_connection().expect("open db");
+        for (trace, observed_at_ms, success) in [
+            ("success-1", current_bucket_start + 1, 1_i64),
+            ("success-2", current_bucket_start + 2, 1),
+            ("success-3", current_bucket_start + 3, 1),
+            ("failure-1", current_bucket_start + 4, 0),
+            ("expired", cutoff - 1, 0),
+            ("at-cutoff", cutoff, 1),
+        ] {
+            conn.execute(
+                "INSERT INTO provider_availability_observations(trace_id, cli_key, provider_id, observed_at_ms, success) VALUES (?1, 'codex', ?2, ?3, ?4)",
+                params![trace, provider.id, observed_at_ms, success],
+            )
+            .expect("insert observation");
+        }
+        drop(conn);
+
+        let timeline = timelines(&db, &[provider.id], 6, 12, now_ms)
+            .expect("load timeline")
+            .pop()
+            .expect("provider timeline");
+        let desktop_timeline = timelines(&db, &[provider.id], 6, 36, now_ms)
+            .expect("load desktop timeline")
+            .pop()
+            .expect("desktop provider timeline");
+        let current = timeline.buckets.last().expect("current bucket");
+        assert_eq!(timeline.bucket_minutes, 30);
+        assert_eq!(current.start_at_ms, current_bucket_start);
+        assert_eq!((current.success_count, current.failure_count), (3, 1));
+        assert_eq!(current.state, ProviderAvailabilityState::Healthy);
+        for (tui_bucket, desktop_buckets) in timeline
+            .buckets
+            .iter()
+            .zip(desktop_timeline.buckets.chunks_exact(3))
+        {
+            assert_eq!(tui_bucket.start_at_ms, desktop_buckets[0].start_at_ms);
+            assert_eq!(tui_bucket.end_at_ms, desktop_buckets[2].end_at_ms);
+            assert_eq!(
+                tui_bucket.success_count,
+                desktop_buckets
+                    .iter()
+                    .map(|bucket| bucket.success_count)
+                    .sum::<u32>()
+            );
+            assert_eq!(
+                tui_bucket.failure_count,
+                desktop_buckets
+                    .iter()
+                    .map(|bucket| bucket.failure_count)
+                    .sum::<u32>()
+            );
+        }
+
+        assert_eq!(purge_expired_observations(&db, now_ms).expect("purge"), 1);
+        let remaining: i64 = db
+            .open_connection()
+            .expect("open db")
+            .query_row(
+                "SELECT COUNT(1) FROM provider_availability_observations WHERE trace_id = 'at-cutoff'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count cutoff row");
+        assert_eq!(remaining, 1);
     }
 
     async fn response_from_request_capture(
@@ -972,6 +1518,19 @@ mod tests {
             "连接失败: https://host/v1beta/models?alt=sse&key=***&other=1"
         );
         assert!(!redacted.contains("sk-secret"));
+    }
+
+    #[test]
+    fn probe_output_redacts_an_echoed_effective_credential() {
+        let redacted = redact_probe_credential(
+            r#"{"error":"credential sk-secret was rejected"}"#,
+            "sk-secret",
+        );
+
+        assert_eq!(
+            redacted,
+            r#"{"error":"credential [REDACTED] was rejected"}"#
+        );
     }
 
     #[test]

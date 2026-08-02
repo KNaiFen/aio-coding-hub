@@ -69,6 +69,8 @@ pub(super) enum AttemptSendOutcome {
     PluginBlocked(String),
     /// A request plugin changed a server-managed model binding before send.
     ManagedModelInvalid(String),
+    /// The provider was disabled after route selection but before this send.
+    ProviderDisabled(i64),
 }
 
 /// URL build failure from the shared prepared-send primitive.
@@ -88,6 +90,7 @@ pub(super) enum PreparedSendOutcome {
     OAuthInjectFailed(Box<FailoverAttempt>),
     PluginBlocked(String),
     ManagedModelInvalid(String),
+    ProviderDisabled(i64),
 }
 
 /// Build request headers, inject auth, clean body, send upstream, and return
@@ -154,6 +157,9 @@ where
         PreparedSendOutcome::PluginBlocked(reason) => AttemptSendOutcome::PluginBlocked(reason),
         PreparedSendOutcome::ManagedModelInvalid(reason) => {
             AttemptSendOutcome::ManagedModelInvalid(reason)
+        }
+        PreparedSendOutcome::ProviderDisabled(provider_id) => {
+            AttemptSendOutcome::ProviderDisabled(provider_id)
         }
     }
 }
@@ -330,7 +336,7 @@ where
         );
     }
     if input.managed_model_route.is_some() || prepared.configured_model_route.is_some() {
-        if let Some(abort_guard) = abort_guard {
+        if let Some(abort_guard) = abort_guard.as_deref_mut() {
             emit_started_event(
                 input,
                 prepared,
@@ -355,6 +361,21 @@ where
     let upstream_body = body_state_for_attempt
         .finalize_for_upstream(&mut headers, crate::gateway::util::max_request_body_bytes());
 
+    let disabled_provider_id = std::iter::once(prepared.provider_id)
+        .chain(prepared.bridge_source.as_ref().map(|(source, _)| source.id))
+        .find(|provider_id| !ctx.state.provider_enable_gate.allows(*provider_id));
+    if let Some(disabled_provider_id) = disabled_provider_id {
+        tracing::info!(
+            trace_id = %input.trace_id,
+            cli_key = %input.cli_key,
+            provider_id = prepared.provider_id,
+            disabled_provider_id,
+            retry_index,
+            "provider skipped because the global provider switch is disabled"
+        );
+        return PreparedSendOutcome::ProviderDisabled(disabled_provider_id);
+    }
+
     emit_upstream_attempt_fingerprint(
         ctx,
         input,
@@ -369,6 +390,10 @@ where
         attempt_started_ms,
         attempt_started: Instant::now(),
     };
+
+    if let Some(abort_guard) = abort_guard {
+        abort_guard.mark_in_flight_upstream_sent();
+    }
 
     let send_result = send::send_upstream_with_first_byte_timeout(
         ctx,
@@ -619,6 +644,7 @@ fn emit_started_event<R: tauri::Runtime>(
         provider_name: prepared.provider_name_base.clone(),
         base_url: prepared.provider_base_url_base.clone(),
         outcome: "started".to_string(),
+        upstream_sent: false,
         status: None,
         provider_index: Some(prepared.provider_index),
         retry_index: Some(retry_index),

@@ -2,14 +2,19 @@ mod args;
 mod client;
 mod config;
 mod format;
+mod palette;
 mod terminal;
 mod ui;
 
-use aio_observer_protocol::{CliScope, ObserverSnapshotV1, OBSERVER_HISTORY_LIMIT_MAX};
+use aio_observer_protocol::{
+    CliScope, ObserverProviderAvailabilityTestResult, ObserverSnapshotV1,
+    OBSERVER_HISTORY_LIMIT_MAX,
+};
 use args::{Mode, ParseOutcome};
-use client::ObserverClient;
+use client::{ObserverClient, OfflineReason};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use std::io::IsTerminal;
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use terminal::TerminalSession;
 use ui::{DashboardView, LiveState, LogsState, StatuslinePickerState};
@@ -226,11 +231,19 @@ async fn run_statusline(client: ObserverClient, scope: CliScope) -> Result<(), S
 async fn run_logs(client: ObserverClient, scope: CliScope) -> Result<(), String> {
     let mut terminal = TerminalSession::enter().map_err(|error| error.to_string())?;
     let mut state = LogsState::new(scope);
+    let (provider_probe_tx, provider_probe_rx) = mpsc::channel::<(
+        i64,
+        Result<ObserverProviderAvailabilityTestResult, OfflineReason>,
+    )>();
     let mut next_refresh = Instant::now();
     let mut next_clock = Instant::now();
     let mut redraw = true;
 
     loop {
+        while let Ok((provider_id, result)) = provider_probe_rx.try_recv() {
+            state.finish_provider_probe(provider_id, result);
+            redraw = true;
+        }
         let now = Instant::now();
         if state.expire_inactive_selections(now) {
             redraw = true;
@@ -282,6 +295,14 @@ async fn run_logs(client: ObserverClient, scope: CliScope) -> Result<(), String>
                     if action.refresh {
                         next_refresh = Instant::now();
                     }
+                    if let Some(provider_id) = action.probe_provider_id {
+                        let probe_client = client.clone();
+                        let probe_tx = provider_probe_tx.clone();
+                        tokio::spawn(async move {
+                            let result = probe_client.test_provider_availability(provider_id).await;
+                            let _ = probe_tx.send((provider_id, result));
+                        });
+                    }
                     redraw |= action.redraw;
                 }
                 Event::Resize(_, _) => redraw = true,
@@ -295,6 +316,7 @@ async fn run_logs(client: ObserverClient, scope: CliScope) -> Result<(), String>
 struct KeyAction {
     redraw: bool,
     refresh: bool,
+    probe_provider_id: Option<i64>,
 }
 
 fn handle_logs_key(state: &mut LogsState, key: KeyEvent) -> KeyAction {
@@ -307,6 +329,7 @@ fn handle_logs_key_at(state: &mut LogsState, key: KeyEvent, now: Instant) -> Key
         return KeyAction {
             redraw: true,
             refresh: false,
+            probe_provider_id: None,
         };
     }
     if state.help {
@@ -315,20 +338,31 @@ fn handle_logs_key_at(state: &mut LogsState, key: KeyEvent, now: Instant) -> Key
             return KeyAction {
                 redraw: true,
                 refresh: false,
+                probe_provider_id: None,
             };
         }
         return KeyAction {
             redraw: false,
             refresh: false,
+            probe_provider_id: None,
         };
     }
     if matches!(key.code, KeyCode::Char('r')) {
         return KeyAction {
             redraw: false,
             refresh: true,
+            probe_provider_id: None,
         };
     }
     if state.detail {
+        if matches!(key.code, KeyCode::Char('t')) && state.view == DashboardView::Providers {
+            let provider_id = state.begin_provider_probe();
+            return KeyAction {
+                redraw: provider_id.is_some(),
+                refresh: false,
+                probe_provider_id: provider_id,
+            };
+        }
         match key.code {
             KeyCode::Esc => {
                 state.detail = false;
@@ -348,12 +382,14 @@ fn handle_logs_key_at(state: &mut LogsState, key: KeyEvent, now: Instant) -> Key
                 return KeyAction {
                     redraw: false,
                     refresh: false,
+                    probe_provider_id: None,
                 }
             }
         }
         return KeyAction {
             redraw: true,
             refresh: false,
+            probe_provider_id: None,
         };
     }
 
@@ -364,6 +400,7 @@ fn handle_logs_key_at(state: &mut LogsState, key: KeyEvent, now: Instant) -> Key
             return KeyAction {
                 redraw: true,
                 refresh: true,
+                probe_provider_id: None,
             };
         }
         KeyCode::Right => {
@@ -372,6 +409,7 @@ fn handle_logs_key_at(state: &mut LogsState, key: KeyEvent, now: Instant) -> Key
             return KeyAction {
                 redraw: true,
                 refresh: true,
+                probe_provider_id: None,
             };
         }
         KeyCode::Up | KeyCode::Char('k') => state.move_selection(-1, now),
@@ -390,18 +428,21 @@ fn handle_logs_key_at(state: &mut LogsState, key: KeyEvent, now: Instant) -> Key
             return KeyAction {
                 redraw: true,
                 refresh: true,
+                probe_provider_id: None,
             };
         }
         _ => {
             return KeyAction {
                 redraw: false,
                 refresh: false,
+                probe_provider_id: None,
             }
         }
     }
     KeyAction {
         redraw: true,
         refresh: false,
+        probe_provider_id: None,
     }
 }
 

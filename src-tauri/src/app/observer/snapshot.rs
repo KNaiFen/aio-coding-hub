@@ -8,14 +8,17 @@ use crate::{
 };
 use aio_observer_protocol::{
     CliScope, ObserverConfiguredModelRoute, ObserverContextCompaction, ObserverDominantProvider,
-    ObserverGatewayStatus, ObserverPreferredProvider, ObserverProviderCollection,
-    ObserverProviderOAuthQuota, ObserverProviderSpendWindow, ObserverProviderStatus,
-    ObserverRequest, ObserverRequestState, ObserverRequestUsage, ObserverRouteHop, ObserverSection,
-    ObserverSnapshotV1, ObserverTodayUsage, OBSERVER_PROTOCOL_VERSION,
+    ObserverGatewayStatus, ObserverPreferredProvider, ObserverProviderAccountUsage,
+    ObserverProviderAvailabilityBucket, ObserverProviderAvailabilityState,
+    ObserverProviderAvailabilityTimeline, ObserverProviderCollection, ObserverProviderOAuthQuota,
+    ObserverProviderSpendWindow, ObserverProviderStatus, ObserverRequest, ObserverRequestState,
+    ObserverRequestUsage, ObserverRouteHop, ObserverSection, ObserverSnapshotV1,
+    ObserverTodayUsage, OBSERVER_PROTOCOL_VERSION,
 };
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
+use tauri::Manager;
 use tokio::sync::OwnedSemaphorePermit;
 
 const HISTORY_SCAN_LIMIT: usize = 500;
@@ -40,12 +43,14 @@ struct ProviderObservation {
     auth_kind: String,
     route_rank: Option<i64>,
     route_enabled: bool,
-    uses_custom_route: bool,
     spend_limited: bool,
     spend_windows: Vec<ObserverProviderSpendWindow>,
     oauth_limited: bool,
     oauth_limited_reset_at: Option<i64>,
     oauth_quota: Option<ObserverProviderOAuthQuota>,
+    availability: Option<ObserverProviderAvailabilityTimeline>,
+    account_usage_target:
+        Option<crate::app::provider_account_usage_runtime::ProviderAccountUsageTarget>,
 }
 
 struct DbProjection {
@@ -170,11 +175,35 @@ pub(super) async fn build_snapshot(
         generated_at_ms / 1000,
         &db_projection,
     );
+    let account_usage_by_provider = if include_providers {
+        if let Some(runtime) = app.try_state::<
+            crate::app::provider_account_usage_runtime::ProviderAccountUsageRuntimeState,
+        >() {
+            let targets = db_projection
+                .provider_details
+                .iter()
+                .filter_map(|provider| provider.account_usage_target)
+                .collect::<Vec<_>>();
+            let provider_ids = targets
+                .iter()
+                .map(|target| target.provider_id)
+                .collect::<Vec<_>>();
+            runtime.touch_tui(app, targets).await;
+            runtime
+                .display_snapshots(&provider_ids, generated_at_ms / 1000)
+                .await
+        } else {
+            HashMap::new()
+        }
+    } else {
+        HashMap::new()
+    };
     let provider_statuses = project_provider_statuses(
         app,
         gateway_status.running,
         generated_at_ms / 1000,
         &db_projection,
+        &account_usage_by_provider,
     );
 
     ObserverSnapshotV1 {
@@ -263,11 +292,15 @@ fn build_db_projection(
         provider_result.and_then(Result::ok).unwrap_or_default();
 
     let today = today_usage(db);
+    let availability_hours = crate::settings::read(app)
+        .map(|settings| settings.provider_availability_hours)
+        .unwrap_or(crate::settings::DEFAULT_PROVIDER_AVAILABILITY_HOURS);
     let provider_details_result = include_providers.then(|| {
         load_provider_observations(
             db,
             (scope != CliScope::All).then(|| scope.as_str()),
             now_unix,
+            availability_hours,
         )
     });
     let provider_details_available = provider_details_result
@@ -331,8 +364,32 @@ fn load_provider_observations(
     db: &crate::db::Db,
     cli_key: Option<&str>,
     now_unix: i64,
+    availability_hours: u32,
 ) -> crate::shared::error::AppResult<(Vec<ProviderObservation>, bool)> {
     let (rows, truncated) = providers::list_observer_rows(db, cli_key, PROVIDER_STATUS_LIMIT)?;
+    let provider_ids = rows.iter().map(|row| row.id).collect::<Vec<_>>();
+    let availability_by_provider = crate::domain::provider_availability::timelines(
+        db,
+        &provider_ids,
+        availability_hours,
+        crate::domain::provider_availability::TUI_PROVIDER_AVAILABILITY_BUCKETS,
+        now_unix.saturating_mul(1_000),
+    )
+    .map(|timelines| {
+        timelines
+            .into_iter()
+            .map(|timeline| {
+                (
+                    timeline.provider_id,
+                    observer_availability_timeline(timeline),
+                )
+            })
+            .collect::<HashMap<_, _>>()
+    })
+    .unwrap_or_else(|error| {
+        tracing::warn!(error = %error.code(), "observer provider availability is unavailable");
+        HashMap::new()
+    });
     let spend_by_provider = provider_limit_usage::list_v1(db, cli_key)?
         .into_iter()
         .map(|row| (row.provider_id, row))
@@ -356,6 +413,21 @@ fn load_provider_observations(
         .map(|row| {
             let spend = spend_by_provider.get(&row.id);
             let oauth = oauth_by_provider.get(&row.id);
+            let account_usage_target = row
+                .account_usage_values
+                .as_ref()
+                .and_then(|values| {
+                    crate::domain::provider_account_usage::refresh_schedule_from_value(
+                        values,
+                        row.account_usage_updated_at.unwrap_or_default(),
+                    )
+                })
+                .map(|schedule| {
+                    crate::app::provider_account_usage_runtime::ProviderAccountUsageTarget {
+                        provider_id: row.id,
+                        schedule,
+                    }
+                });
             ProviderObservation {
                 id: row.id,
                 cli_key: bounded_text(&row.cli_key, 16),
@@ -368,7 +440,6 @@ fn load_provider_observations(
                 },
                 route_rank: row.route_rank.map(|rank| rank.max(0).saturating_add(1)),
                 route_enabled: row.route_enabled,
-                uses_custom_route: row.uses_custom_route,
                 spend_limited: spend.is_some_and(|value| value.is_limit_reached()),
                 spend_windows: spend.map(spend_windows).unwrap_or_default(),
                 oauth_limited: oauth.is_some_and(|value| value.limited),
@@ -390,10 +461,44 @@ fn load_provider_observations(
                     weekly_reset_at_unix: value.limit_weekly_reset_at,
                     checked_at_unix: value.checked_at,
                 }),
+                availability: availability_by_provider.get(&row.id).cloned(),
+                account_usage_target,
             }
         })
         .collect();
     Ok((items, truncated))
+}
+
+fn observer_availability_timeline(
+    timeline: crate::domain::provider_availability::ProviderAvailabilityTimeline,
+) -> ObserverProviderAvailabilityTimeline {
+    ObserverProviderAvailabilityTimeline {
+        hours: timeline.hours,
+        bucket_minutes: timeline.bucket_minutes,
+        success_count: timeline.success_count,
+        failure_count: timeline.failure_count,
+        buckets: timeline
+            .buckets
+            .into_iter()
+            .map(|bucket| ObserverProviderAvailabilityBucket {
+                start_at_ms: bucket.start_at_ms,
+                end_at_ms: bucket.end_at_ms,
+                success_count: bucket.success_count,
+                failure_count: bucket.failure_count,
+                state: match bucket.state {
+                    crate::domain::provider_availability::ProviderAvailabilityState::Healthy => {
+                        ObserverProviderAvailabilityState::Healthy
+                    }
+                    crate::domain::provider_availability::ProviderAvailabilityState::Unhealthy => {
+                        ObserverProviderAvailabilityState::Unhealthy
+                    }
+                    crate::domain::provider_availability::ProviderAvailabilityState::NoData => {
+                        ObserverProviderAvailabilityState::NoData
+                    }
+                },
+            })
+            .collect(),
+    }
 }
 
 fn spend_windows(
@@ -533,6 +638,10 @@ fn project_provider_statuses(
     gateway_running: bool,
     now_unix: i64,
     projection: &DbProjection,
+    account_usage_by_provider: &HashMap<
+        i64,
+        crate::app::provider_account_usage_runtime::ProviderAccountUsageDisplaySnapshot,
+    >,
 ) -> Option<ObserverSection<ObserverProviderCollection>> {
     if !projection.provider_details_requested {
         return None;
@@ -586,6 +695,21 @@ fn project_provider_statuses(
                 },
                 spend_windows: provider.spend_windows.clone(),
                 oauth_quota: provider.oauth_quota.clone(),
+                account_usage: provider.account_usage_target.map(|_| {
+                    let snapshot = account_usage_by_provider.get(&provider.id);
+                    ObserverProviderAccountUsage {
+                        state: snapshot
+                            .map(|value| value.state)
+                            .unwrap_or("loading")
+                            .to_string(),
+                        amount: snapshot.and_then(|value| value.amount),
+                        unit: snapshot
+                            .and_then(|value| value.unit.as_deref())
+                            .map(|value| bounded_text(value, 24)),
+                        last_fetched_at_unix: snapshot.and_then(|value| value.last_fetched_at),
+                    }
+                }),
+                availability: provider.availability.clone(),
             }
         })
         .collect();
@@ -601,7 +725,7 @@ fn provider_eligibility(
     gateway_running: bool,
     now_unix: i64,
 ) -> &'static str {
-    if !provider.enabled && !provider.uses_custom_route {
+    if !provider.enabled {
         return "provider_disabled";
     }
     if provider.route_rank.is_none() {
@@ -1293,7 +1417,7 @@ mod tests {
         assert_eq!(limited, HashSet::from([spend_limited, oauth_limited]));
 
         let (observed, truncated) =
-            load_provider_observations(&db, Some("codex"), 1_000).expect("load observations");
+            load_provider_observations(&db, Some("codex"), 1_000, 6).expect("load observations");
         assert!(!truncated);
         assert_eq!(
             observed
@@ -1312,7 +1436,7 @@ mod tests {
 
     #[test]
     fn provider_eligibility_is_fail_closed_for_observer_display_only() {
-        let provider = ProviderObservation {
+        let mut provider = ProviderObservation {
             id: 1,
             cli_key: "codex".to_string(),
             name: "Provider".to_string(),
@@ -1320,12 +1444,13 @@ mod tests {
             auth_kind: "api_key".to_string(),
             route_rank: Some(1),
             route_enabled: true,
-            uses_custom_route: false,
             spend_limited: false,
             spend_windows: Vec::new(),
             oauth_limited: false,
             oauth_limited_reset_at: None,
             oauth_quota: None,
+            availability: None,
+            account_usage_target: None,
         };
         assert_eq!(
             provider_eligibility(&provider, None, true, 1_000),
@@ -1334,6 +1459,12 @@ mod tests {
         assert_eq!(
             provider_eligibility(&provider, None, false, 1_000),
             "gateway_stopped"
+        );
+
+        provider.enabled = false;
+        assert_eq!(
+            provider_eligibility(&provider, None, true, 1_000),
+            "provider_disabled"
         );
     }
 

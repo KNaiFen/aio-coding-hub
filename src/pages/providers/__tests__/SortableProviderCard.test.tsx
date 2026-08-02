@@ -138,6 +138,35 @@ describe("pages/providers/SortableProviderCard", () => {
     expect(sortablePointerDownMock).toHaveBeenCalledTimes(1);
   });
 
+  it("renders the availability timeline as the final full-width card section", () => {
+    const startAt = Date.UTC(2026, 7, 2, 8);
+    renderCard(
+      {},
+      {
+        availability: {
+          provider_id: 1,
+          hours: 6,
+          bucket_count: 36,
+          bucket_minutes: 10,
+          success_count: 0,
+          failure_count: 0,
+          buckets: Array.from({ length: 36 }, (_, index) => ({
+            start_at_ms: startAt + index * 600_000,
+            end_at_ms: startAt + (index + 1) * 600_000,
+            success_count: 0,
+            failure_count: 0,
+            state: "no_data" as const,
+          })),
+        },
+      }
+    );
+
+    const section = screen.getByLabelText("Test Provider 过去 6 小时可用性");
+    expect(screen.getAllByRole("img")).toHaveLength(36);
+    expect(section.parentElement?.lastElementChild).toBe(section);
+    expect(section).toHaveClass("w-full", "sm:basis-full");
+  });
+
   it("auto-fetches configured account usage without resetting gateway circuit", async () => {
     vi.mocked(providerAccountUsageFetch).mockResolvedValueOnce({
       adapter_kind: "sub2api",
@@ -174,7 +203,7 @@ describe("pages/providers/SortableProviderCard", () => {
       ],
     });
 
-    await waitFor(() => expect(providerAccountUsageFetch).toHaveBeenCalledWith(9));
+    await waitFor(() => expect(providerAccountUsageFetch).toHaveBeenCalledWith(9, false));
     expect(await screen.findByText(/账户: 可用 · Pro · 余额 12.5 USD/)).toBeInTheDocument();
     expect(screen.getByText("日 1.00/10.0 USD")).toBeInTheDocument();
     expect(gatewayCircuitResetProvider).not.toHaveBeenCalled();

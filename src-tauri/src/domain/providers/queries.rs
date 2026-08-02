@@ -985,6 +985,7 @@ WHERE mp.mode_id = ?1
   AND mp.cli_key = ?2
   AND p.cli_key = ?2
   AND mp.enabled = 1
+  AND p.enabled = 1
 ORDER BY mp.sort_order ASC
 "#,
         )
@@ -1121,6 +1122,7 @@ WHERE mp.mode_id = ?1
   AND mp.cli_key = ?2
   AND p.cli_key = ?2
   AND mp.enabled = 1
+  AND p.enabled = 1
 ORDER BY mp.sort_order ASC
 "#,
             Some(mode_id),
@@ -1187,9 +1189,24 @@ WITH observed AS (
       WHEN active.mode_id IS NULL THEN default_route.provider_id IS NOT NULL
       ELSE COALESCE(mode_route.enabled, 0) = 1
     END AS route_enabled,
-    active.mode_id IS NOT NULL AS uses_custom_route,
     pool.sort_order AS pool_order,
-    p.sort_order AS provider_order
+    p.sort_order AS provider_order,
+    (
+      SELECT values_json
+      FROM provider_extension_values account_usage
+      WHERE account_usage.provider_id = p.id
+        AND account_usage.plugin_id = 'core.provider-account-usage'
+        AND account_usage.namespace = 'accountUsage'
+      LIMIT 1
+    ) AS account_usage_values_json,
+    (
+      SELECT updated_at
+      FROM provider_extension_values account_usage
+      WHERE account_usage.provider_id = p.id
+        AND account_usage.plugin_id = 'core.provider-account-usage'
+        AND account_usage.namespace = 'accountUsage'
+      LIMIT 1
+    ) AS account_usage_updated_at
   FROM providers p
   LEFT JOIN sort_mode_active active
     ON active.cli_key = p.cli_key
@@ -1215,7 +1232,8 @@ SELECT
   auth_mode,
   route_rank,
   route_enabled,
-  uses_custom_route
+  account_usage_values_json,
+  account_usage_updated_at
 FROM observed
 ORDER BY
   CASE cli_key
@@ -1226,7 +1244,7 @@ ORDER BY
     ELSE 4
   END ASC,
   CASE
-    WHEN (enabled = 1 OR uses_custom_route = 1)
+    WHEN enabled = 1
       AND route_rank IS NOT NULL
       AND route_enabled = 1 THEN 0
     ELSE 1
@@ -1249,7 +1267,10 @@ LIMIT ?2
                 auth_mode: row.get(4)?,
                 route_rank: row.get(5)?,
                 route_enabled: row.get::<_, i64>(6)? != 0,
-                uses_custom_route: row.get::<_, i64>(7)? != 0,
+                account_usage_values: row
+                    .get::<_, Option<String>>(7)?
+                    .and_then(|value| serde_json::from_str(&value).ok()),
+                account_usage_updated_at: row.get(8)?,
             })
         })
         .map_err(|e| db_err!("failed to list observer provider statuses: {e}"))?;
@@ -1302,10 +1323,11 @@ fn source_cli_key_for_bridge_type(bridge_type: &str) -> Option<&'static str> {
     }
 }
 
-pub(crate) fn get_source_provider_for_gateway(
+fn get_source_provider(
     db: &db::Db,
     source_provider_id: i64,
     bridge_type: &str,
+    require_enabled: bool,
 ) -> crate::shared::error::AppResult<(ProviderForGateway, String)> {
     let conn = db.open_connection()?;
     let cli_key_owned = conn
@@ -1331,13 +1353,7 @@ pub(crate) fn get_source_provider_for_gateway(
         )));
     }
 
-    let enabled_filter = if is_codex_bridge_type(bridge_type) {
-        ""
-    } else {
-        " AND enabled = 1"
-    };
-    let sql = format!(
-        r#"
+    let sql = r#"
 SELECT
   id,
   name,
@@ -1363,14 +1379,18 @@ SELECT
   upstream_retry_policy_json,
   model_routing_policy_json
 FROM providers
-WHERE id = ?1{enabled_filter} AND source_provider_id IS NULL AND bridge_type IS NULL
-"#,
-    );
+WHERE id = ?1
+  AND (?2 = 0 OR enabled = 1)
+  AND source_provider_id IS NULL
+  AND bridge_type IS NULL
+"#;
 
     let mut provider = conn
-        .query_row(&sql, params![source_provider_id], |row| {
-            map_gateway_provider_row(row, &cli_key_owned, 0)
-        })
+        .query_row(
+            sql,
+            params![source_provider_id, i64::from(require_enabled)],
+            |row| map_gateway_provider_row(row, &cli_key_owned, 0),
+        )
         .optional()
         .map_err(|e| db_err!("failed to query source provider: {e}"))?
         .ok_or_else(|| {
@@ -1378,6 +1398,24 @@ WHERE id = ?1{enabled_filter} AND source_provider_id IS NULL AND bridge_type IS 
         })?;
     fill_gateway_extension_values(&conn, &mut provider)?;
     Ok((provider, cli_key_owned))
+}
+
+pub(crate) fn get_source_provider_for_gateway(
+    db: &db::Db,
+    source_provider_id: i64,
+    bridge_type: &str,
+) -> crate::shared::error::AppResult<(ProviderForGateway, String)> {
+    get_source_provider(db, source_provider_id, bridge_type, true)
+}
+
+/// Manual diagnostics may inspect a disabled source without making it eligible
+/// for gateway routing.
+pub(crate) fn get_source_provider_for_availability(
+    db: &db::Db,
+    source_provider_id: i64,
+    bridge_type: &str,
+) -> crate::shared::error::AppResult<(ProviderForGateway, String)> {
+    get_source_provider(db, source_provider_id, bridge_type, false)
 }
 
 pub(crate) fn get_enabled_direct_codex_for_gateway_by_identity(

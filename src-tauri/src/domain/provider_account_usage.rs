@@ -164,7 +164,16 @@ impl ProviderAccountUsageResult {
 pub(crate) struct ProviderAccountUsageConfig {
     pub adapter_kind: ProviderAccountUsageAdapterKind,
     pub new_api_query_mode: NewapiQueryMode,
+    pub timed_refresh_enabled: bool,
+    pub refresh_interval_seconds: i64,
     pub custom: Option<ProviderAccountUsageCustomConfig>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ProviderAccountUsageRefreshSchedule {
+    pub timed_refresh_enabled: bool,
+    pub refresh_interval_seconds: i64,
+    pub revision: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -844,18 +853,71 @@ pub(crate) fn config_from_extension_values(
     config_from_value(&row.values)
 }
 
-fn config_from_value(values: &Value) -> ProviderAccountUsageConfigState {
+pub(crate) fn refresh_schedule_from_extension_values(
+    values: &[ProviderExtensionValues],
+) -> Option<ProviderAccountUsageRefreshSchedule> {
+    let row = values.iter().find(|value| {
+        value.plugin_id == ACCOUNT_USAGE_PLUGIN_ID && value.namespace == ACCOUNT_USAGE_NAMESPACE
+    })?;
+    refresh_schedule_from_value(&row.values, row.updated_at)
+}
+
+pub(crate) fn refresh_schedule_from_value(
+    values: &Value,
+    revision: i64,
+) -> Option<ProviderAccountUsageRefreshSchedule> {
+    match values
+        .get("adapterKind")
+        .and_then(Value::as_str)
+        .map(str::trim)
+    {
+        Some("sub2api" | "newapi" | "custom") => {}
+        _ => return None,
+    }
+
+    Some(ProviderAccountUsageRefreshSchedule {
+        timed_refresh_enabled: values
+            .get("timedRefreshEnabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
+        refresh_interval_seconds: normalize_refresh_interval_seconds(values),
+        revision,
+    })
+}
+
+fn normalize_refresh_interval_seconds(values: &Value) -> i64 {
+    values
+        .get("refreshIntervalSeconds")
+        .and_then(Value::as_f64)
+        .filter(|value| value.is_finite())
+        .map(|value| value.round() as i64)
+        .unwrap_or(ACCOUNT_USAGE_REFRESH_INTERVAL_DEFAULT_SECONDS)
+        .clamp(
+            ACCOUNT_USAGE_REFRESH_INTERVAL_MIN_SECONDS,
+            ACCOUNT_USAGE_REFRESH_INTERVAL_MAX_SECONDS,
+        )
+}
+
+pub(crate) fn config_from_value(values: &Value) -> ProviderAccountUsageConfigState {
     let adapter_kind = values
         .get("adapterKind")
         .and_then(Value::as_str)
         .map(str::trim)
         .unwrap_or("");
 
+    let timed_refresh_enabled = values
+        .get("timedRefreshEnabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let refresh_interval_seconds = normalize_refresh_interval_seconds(values);
+
     match adapter_kind {
         "" | "disabled" => ProviderAccountUsageConfigState::Disabled,
         "sub2api" => ProviderAccountUsageConfigState::Configured(ProviderAccountUsageConfig {
             adapter_kind: ProviderAccountUsageAdapterKind::Sub2api,
             new_api_query_mode: NewapiQueryMode::Billing,
+            timed_refresh_enabled,
+            refresh_interval_seconds,
             custom: None,
         }),
         "newapi" => {
@@ -866,6 +928,8 @@ fn config_from_value(values: &Value) -> ProviderAccountUsageConfigState {
             ProviderAccountUsageConfigState::Configured(ProviderAccountUsageConfig {
                 adapter_kind: ProviderAccountUsageAdapterKind::Newapi,
                 new_api_query_mode,
+                timed_refresh_enabled,
+                refresh_interval_seconds,
                 custom: None,
             })
         }
@@ -873,6 +937,8 @@ fn config_from_value(values: &Value) -> ProviderAccountUsageConfigState {
             Ok(custom) => ProviderAccountUsageConfigState::Configured(ProviderAccountUsageConfig {
                 adapter_kind: ProviderAccountUsageAdapterKind::Custom,
                 new_api_query_mode: NewapiQueryMode::Billing,
+                timed_refresh_enabled,
+                refresh_interval_seconds,
                 custom: Some(custom),
             }),
             Err(message) => ProviderAccountUsageConfigState::Invalid(message),
@@ -2818,6 +2884,8 @@ mod tests {
             ProviderAccountUsageConfigState::Configured(ProviderAccountUsageConfig {
                 adapter_kind: ProviderAccountUsageAdapterKind::Newapi,
                 new_api_query_mode: NewapiQueryMode::Billing,
+                timed_refresh_enabled: true,
+                refresh_interval_seconds: ACCOUNT_USAGE_REFRESH_INTERVAL_DEFAULT_SECONDS,
                 custom: None,
             })
         );
@@ -2843,6 +2911,32 @@ mod tests {
         assert!(!serialized.contains("UserId"));
         assert!(!serialized.contains("AccessToken"));
         assert!(!serialized.contains("SYNTHETIC_PRIVATE_VALUE"));
+    }
+
+    #[test]
+    fn account_usage_refresh_schedule_uses_saved_interval_without_provider_enabled_state() {
+        let values = vec![ProviderExtensionValues {
+            plugin_id: ACCOUNT_USAGE_PLUGIN_ID.to_string(),
+            namespace: ACCOUNT_USAGE_NAMESPACE.to_string(),
+            values: json!({
+                "adapterKind": "newapi",
+                "timedRefreshEnabled": false,
+                "refreshIntervalSeconds": 91.6
+            }),
+            updated_at: 44,
+        }];
+        assert_eq!(
+            refresh_schedule_from_extension_values(&values),
+            Some(ProviderAccountUsageRefreshSchedule {
+                timed_refresh_enabled: false,
+                refresh_interval_seconds: 92,
+                revision: 44,
+            })
+        );
+        assert_eq!(
+            refresh_schedule_from_value(&json!({ "adapterKind": "disabled" }), 45),
+            None
+        );
     }
 
     #[test]

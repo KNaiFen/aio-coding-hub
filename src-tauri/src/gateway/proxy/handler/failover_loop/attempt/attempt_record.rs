@@ -89,6 +89,7 @@ async fn record_system_failure_and_decide_impl<R: tauri::Runtime>(
 
     let category = ErrorCategory::SystemError;
     let effective_status = status_override::effective_status(status, Some(error_code));
+    let upstream_sent = !outcome.starts_with("build_target_url_error:");
 
     let is_count_tokens =
         is_claude_count_tokens_request(ctx.cli_key.as_str(), ctx.forwarded_path.as_str());
@@ -133,6 +134,7 @@ async fn record_system_failure_and_decide_impl<R: tauri::Runtime>(
         provider_name: provider_name_base.clone(),
         base_url: provider_base_url_base.clone(),
         outcome: outcome.clone(),
+        upstream_sent,
         status: effective_status,
         provider_index: Some(provider_index),
         retry_index: Some(retry_index),

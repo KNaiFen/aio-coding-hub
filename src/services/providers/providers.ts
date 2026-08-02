@@ -9,6 +9,7 @@ import {
   type ProviderAccountUsageResult,
   type ProviderAccountUsageCustomScriptDraft,
   type ProviderAvailabilityResult,
+  type ProviderAvailabilityTimeline,
   type ProviderBaseUrlMode as GeneratedProviderBaseUrlMode,
   type ProviderExtensionValuesInput,
   type ProviderOAuthDeviceCodeCancelResult as GeneratedProviderOAuthDeviceCodeCancelResult,
@@ -44,6 +45,7 @@ import { isCanonicalUuidV4 } from "./uuid";
 
 export type {
   ProviderAvailabilityResult,
+  ProviderAvailabilityTimeline,
   ProviderAccountUsageResult,
   ProviderAccountUsageCustomScriptDraft,
   ProviderExtensionValuesInput,
@@ -655,16 +657,17 @@ export async function providerOAuthFetchLimits(
 }
 
 export async function providerAccountUsageFetch(
-  providerId: number
+  providerId: number,
+  force = false
 ): Promise<ProviderAccountUsageResult | null> {
   const normalizedProviderId = validateProviderId(providerId);
 
   return invokeGeneratedIpc<ProviderAccountUsageResult>({
     title: "读取账户用量失败",
     cmd: "provider_account_usage_fetch",
-    args: { providerId: normalizedProviderId },
+    args: { providerId: normalizedProviderId, force },
     invoke: () =>
-      commands.providerAccountUsageFetch(normalizedProviderId) as Promise<
+      commands.providerAccountUsageFetch(normalizedProviderId, force) as Promise<
         GeneratedCommandResult<ProviderAccountUsageResult>
       >,
   });
@@ -719,6 +722,26 @@ export async function providerTestAvailability(
     invoke: () =>
       commands.providerTestAvailability(normalizedProviderId) as Promise<
         GeneratedCommandResult<ProviderAvailabilityResult>
+      >,
+  });
+}
+
+export async function providerAvailabilityTimelinesGet(
+  providerIds: readonly number[],
+  bucketCount: 12 | 36
+): Promise<ProviderAvailabilityTimeline[]> {
+  const normalizedProviderIds = Array.from(
+    new Set(providerIds.map((providerId) => validateProviderId(providerId)))
+  ).slice(0, MAX_PROVIDER_ORDER_IDS);
+  if (normalizedProviderIds.length === 0) return [];
+
+  return invokeGeneratedIpc<ProviderAvailabilityTimeline[]>({
+    title: "读取供应商可用性失败",
+    cmd: "provider_availability_timelines_get",
+    args: { providerIds: normalizedProviderIds, bucketCount },
+    invoke: () =>
+      commands.providerAvailabilityTimelinesGet(normalizedProviderIds, bucketCount) as Promise<
+        GeneratedCommandResult<ProviderAvailabilityTimeline[]>
       >,
   });
 }

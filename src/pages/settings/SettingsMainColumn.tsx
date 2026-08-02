@@ -34,6 +34,7 @@ type SettingsPersistPatch = Partial<{
   tray_enabled: boolean;
   enable_debug_log: boolean;
   request_log_retention_days: number;
+  provider_availability_hours: number;
 }>;
 
 const HOME_USAGE_PERIOD_OPTIONS: Array<{ value: HomeUsagePeriod; label: string }> = [
@@ -43,6 +44,7 @@ const HOME_USAGE_PERIOD_OPTIONS: Array<{ value: HomeUsagePeriod; label: string }
   { value: "month", label: "当月" },
 ];
 const THEME_OPTIONS = ["light", "dark", "system"] as const;
+const PROVIDER_AVAILABILITY_HOUR_OPTIONS = [3, 6, 12] as const;
 
 export type SettingsMainColumnProps = {
   gateway: GatewayStatus | null;
@@ -79,6 +81,8 @@ export type SettingsMainColumnProps = {
   setLogRetentionDays: (next: number) => void;
   requestLogRetentionDays: number;
   setRequestLogRetentionDays: (next: number) => void;
+  providerAvailabilityHours: number;
+  setProviderAvailabilityHours: (next: number) => void;
   enableDebugLog: boolean;
   setEnableDebugLog: (next: boolean) => void;
   requestPersist: (patch: SettingsPersistPatch) => void;
@@ -522,6 +526,45 @@ function HomeUsagePeriodSelector({
   );
 }
 
+function ProviderAvailabilityHoursSelector({
+  providerAvailabilityHours,
+  setProviderAvailabilityHours,
+  settingsInputsDisabled,
+  requestPersist,
+}: Pick<
+  SettingsMainColumnProps,
+  "providerAvailabilityHours" | "setProviderAvailabilityHours" | "requestPersist"
+> & {
+  settingsInputsDisabled: boolean;
+}) {
+  return (
+    <SettingsRow label="供应商可用性范围">
+      <div className="flex max-w-full flex-wrap items-center gap-1 rounded-xl border border-line bg-surface-inset p-1">
+        {PROVIDER_AVAILABILITY_HOUR_OPTIONS.map((hours) => (
+          <button
+            key={hours}
+            type="button"
+            className={cn(
+              "flex shrink-0 items-center justify-center rounded-lg border border-transparent px-3 py-1.5 text-xs font-bold transition-all",
+              providerAvailabilityHours === hours
+                ? "cursor-default border-primary bg-primary text-primary-foreground shadow-sm shadow-primary/15"
+                : "cursor-pointer text-muted-foreground hover:bg-state-hover/50 hover:text-foreground dark:hover:bg-state-hover/20"
+            )}
+            aria-pressed={providerAvailabilityHours === hours}
+            disabled={settingsInputsDisabled}
+            onClick={() => {
+              setProviderAvailabilityHours(hours);
+              requestPersist({ provider_availability_hours: hours });
+            }}
+          >
+            {hours} 小时
+          </button>
+        ))}
+      </div>
+    </SettingsRow>
+  );
+}
+
 function UiPreferencesPanel({
   theme,
   setTheme,
@@ -529,6 +572,8 @@ function UiPreferencesPanel({
   setShowHomeUsage,
   homeUsagePeriod,
   setHomeUsagePeriod,
+  providerAvailabilityHours,
+  setProviderAvailabilityHours,
   cliPriorityOrder,
   setCliPriorityOrder,
   homeWorkspaceConfigShowAll,
@@ -541,6 +586,8 @@ function UiPreferencesPanel({
   | "setShowHomeUsage"
   | "homeUsagePeriod"
   | "setHomeUsagePeriod"
+  | "providerAvailabilityHours"
+  | "setProviderAvailabilityHours"
   | "cliPriorityOrder"
   | "setCliPriorityOrder"
   | "requestPersist"
@@ -561,6 +608,12 @@ function UiPreferencesPanel({
         <HomeUsagePeriodSelector
           homeUsagePeriod={homeUsagePeriod}
           setHomeUsagePeriod={setHomeUsagePeriod}
+          settingsInputsDisabled={settingsInputsDisabled}
+          requestPersist={requestPersist}
+        />
+        <ProviderAvailabilityHoursSelector
+          providerAvailabilityHours={providerAvailabilityHours}
+          setProviderAvailabilityHours={setProviderAvailabilityHours}
           settingsInputsDisabled={settingsInputsDisabled}
           requestPersist={requestPersist}
         />
@@ -663,6 +716,8 @@ export function SettingsMainColumn({
   setLogRetentionDays,
   requestLogRetentionDays,
   setRequestLogRetentionDays,
+  providerAvailabilityHours,
+  setProviderAvailabilityHours,
   enableDebugLog,
   setEnableDebugLog,
   requestPersist,
@@ -741,6 +796,8 @@ export function SettingsMainColumn({
           setShowHomeUsage,
           homeUsagePeriod,
           setHomeUsagePeriod,
+          providerAvailabilityHours,
+          setProviderAvailabilityHours,
           cliPriorityOrder,
           setCliPriorityOrder,
           homeWorkspaceConfigShowAll,

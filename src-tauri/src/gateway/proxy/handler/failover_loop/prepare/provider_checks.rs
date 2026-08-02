@@ -46,6 +46,25 @@ pub(super) fn run_gates<R: tauri::Runtime>(
     counters: &mut IterationCounters,
     attempts: &mut Vec<FailoverAttempt>,
 ) -> Option<provider_gate::ProviderGateAllow> {
+    if !ctx.state.provider_enable_gate.allows(identity.provider_id) {
+        push_skipped_provider_attempt(
+            attempts,
+            SkippedProviderAttempt {
+                provider_id: identity.provider_id,
+                provider_name: identity.provider_name_base,
+                base_url: identity.provider_base_url_display,
+                error_category: "provider_disabled",
+                error_code: GatewayErrorCode::NoEnabledProvider.as_str(),
+                reason: "provider skipped because the global provider switch is disabled"
+                    .to_string(),
+                reason_code: Some(dc::REASON_PROVIDER_DISABLED),
+                attempt_started_ms: input.started.elapsed().as_millis(),
+                circuit: None,
+            },
+        );
+        return None;
+    }
+
     let skipped_open_before = counters.skipped_open;
     let skipped_cooldown_before = counters.skipped_cooldown;
     let mut deny_snapshot = None;

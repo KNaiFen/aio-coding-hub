@@ -116,6 +116,12 @@ export function useSettingsPersistence(options: {
     },
     [setField]
   );
+  const setProviderAvailabilityHours = useCallback(
+    (next: number) => {
+      setField("provider_availability_hours", next);
+    },
+    [setField]
+  );
   const setEnableDebugLog = useCallback(
     (next: boolean) => {
       setField("enable_debug_log", next);
@@ -149,6 +155,8 @@ export function useSettingsPersistence(options: {
     setLogRetentionDays,
     requestLogRetentionDays: draft.request_log_retention_days,
     setRequestLogRetentionDays,
+    providerAvailabilityHours: draft.provider_availability_hours,
+    setProviderAvailabilityHours,
     enableDebugLog: draft.enable_debug_log,
     setEnableDebugLog,
 

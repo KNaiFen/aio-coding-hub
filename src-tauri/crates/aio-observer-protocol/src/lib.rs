@@ -145,6 +145,56 @@ pub struct ObserverProviderOAuthQuota {
 
 #[derive(Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct ObserverProviderAccountUsage {
+    pub state: String,
+    pub amount: Option<f64>,
+    pub unit: Option<String>,
+    pub last_fetched_at_unix: Option<i64>,
+}
+
+#[derive(Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ObserverProviderAvailabilityState {
+    Healthy,
+    Unhealthy,
+    NoData,
+}
+
+#[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ObserverProviderAvailabilityBucket {
+    pub start_at_ms: i64,
+    pub end_at_ms: i64,
+    pub success_count: u32,
+    pub failure_count: u32,
+    pub state: ObserverProviderAvailabilityState,
+}
+
+#[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ObserverProviderAvailabilityTimeline {
+    pub hours: u32,
+    pub bucket_minutes: u32,
+    pub success_count: u32,
+    pub failure_count: u32,
+    pub buckets: Vec<ObserverProviderAvailabilityBucket>,
+}
+
+#[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ObserverProviderAvailabilityTestResult {
+    pub ok: bool,
+    pub provider_id: i64,
+    pub provider_name: String,
+    pub base_url: String,
+    pub status: Option<u16>,
+    pub latency_ms: i64,
+    pub error: Option<String>,
+    pub response_preview: Option<String>,
+}
+
+#[derive(Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct ObserverProviderStatus {
     pub provider_id: i64,
     pub cli_key: String,
@@ -161,6 +211,10 @@ pub struct ObserverProviderStatus {
     pub recover_at_unix: Option<i64>,
     pub spend_windows: Vec<ObserverProviderSpendWindow>,
     pub oauth_quota: Option<ObserverProviderOAuthQuota>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_usage: Option<ObserverProviderAccountUsage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub availability: Option<ObserverProviderAvailabilityTimeline>,
 }
 
 #[derive(Clone, Deserialize, Serialize, PartialEq)]

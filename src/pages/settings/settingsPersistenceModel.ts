@@ -25,6 +25,7 @@ export type PersistedSettings = {
   log_retention_days: number;
   request_log_retention_days: number;
   provider_cooldown_seconds: number;
+  provider_availability_hours: number;
   provider_base_url_ping_cache_ttl_seconds: number;
   upstream_first_byte_timeout_seconds: number;
   upstream_stream_idle_timeout_seconds: number;
@@ -51,6 +52,7 @@ export const DEFAULT_PERSISTED_SETTINGS: PersistedSettings = {
   log_retention_days: 7,
   request_log_retention_days: 0,
   provider_cooldown_seconds: 30,
+  provider_availability_hours: 6,
   provider_base_url_ping_cache_ttl_seconds: 60,
   upstream_first_byte_timeout_seconds: 0,
   upstream_stream_idle_timeout_seconds: 0,
@@ -78,6 +80,7 @@ const PERSISTED_SETTINGS_INPUT_KEYS = [
   "logRetentionDays",
   "requestLogRetentionDays",
   "providerCooldownSeconds",
+  "providerAvailabilityHours",
   "providerBaseUrlPingCacheTtlSeconds",
   "upstreamFirstByteTimeoutSeconds",
   "upstreamStreamIdleTimeoutSeconds",
@@ -155,6 +158,8 @@ export function buildPersistedSettingsSnapshot(
       settingsValue.request_log_retention_days ?? fallback.request_log_retention_days,
     provider_cooldown_seconds:
       settingsValue.provider_cooldown_seconds ?? fallback.provider_cooldown_seconds,
+    provider_availability_hours:
+      settingsValue.provider_availability_hours ?? fallback.provider_availability_hours,
     provider_base_url_ping_cache_ttl_seconds:
       settingsValue.provider_base_url_ping_cache_ttl_seconds ??
       fallback.provider_base_url_ping_cache_ttl_seconds,
@@ -221,6 +226,12 @@ export function validatePersistedSettings(desired: PersistedSettings, keys: Pers
   if (keys.includes("provider_cooldown_seconds")) {
     if (!isIntegerInRange(desired.provider_cooldown_seconds, 0, 3600)) {
       return "短熔断冷却必须为 0-3600 秒";
+    }
+  }
+
+  if (keys.includes("provider_availability_hours")) {
+    if (![3, 6, 12].includes(desired.provider_availability_hours)) {
+      return "供应商可用性范围必须为 3、6 或 12 小时";
     }
   }
 

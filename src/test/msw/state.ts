@@ -26,7 +26,7 @@ const DEFAULT_CLI_PROXY_STATUS: CliProxyStatus[] = [
 
 // Default settings matching the Rust backend defaults.
 const DEFAULT_SETTINGS: AppSettings = {
-  schema_version: 57,
+  schema_version: 58,
   preferred_port: 37123,
   show_home_heatmap: true,
   show_home_usage: true,
@@ -49,6 +49,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   log_retention_days: 7,
   request_log_retention_days: 0,
   provider_cooldown_seconds: 30,
+  provider_availability_hours: 6,
   provider_base_url_ping_cache_ttl_seconds: 60,
   upstream_first_byte_timeout_seconds: 30,
   upstream_stream_idle_timeout_seconds: 300,

@@ -46,6 +46,7 @@ pub(crate) struct SettingsUpdate {
     // Option keeps older frontend payloads valid (0 = keep forever).
     pub request_log_retention_days: Option<u32>,
     pub provider_cooldown_seconds: Option<u32>,
+    pub provider_availability_hours: Option<u32>,
     pub provider_base_url_ping_cache_ttl_seconds: Option<u32>,
     pub upstream_first_byte_timeout_seconds: Option<u32>,
     pub upstream_stream_idle_timeout_seconds: Option<u32>,
@@ -125,6 +126,7 @@ struct SettingsServiceOwnedToken {
     log_retention_days: u32,
     request_log_retention_days: u32,
     provider_cooldown_seconds: u32,
+    provider_availability_hours: u32,
     provider_base_url_ping_cache_ttl_seconds: u32,
     upstream_first_byte_timeout_seconds: u32,
     upstream_stream_idle_timeout_seconds: u32,
@@ -182,6 +184,7 @@ impl SettingsServiceOwnedToken {
             log_retention_days: settings.log_retention_days,
             request_log_retention_days: settings.request_log_retention_days,
             provider_cooldown_seconds: settings.provider_cooldown_seconds,
+            provider_availability_hours: settings.provider_availability_hours,
             provider_base_url_ping_cache_ttl_seconds: settings
                 .provider_base_url_ping_cache_ttl_seconds,
             upstream_first_byte_timeout_seconds: settings.upstream_first_byte_timeout_seconds,
@@ -247,6 +250,7 @@ impl SettingsServiceOwnedToken {
         settings.log_retention_days = self.log_retention_days;
         settings.request_log_retention_days = self.request_log_retention_days;
         settings.provider_cooldown_seconds = self.provider_cooldown_seconds;
+        settings.provider_availability_hours = self.provider_availability_hours;
         settings.provider_base_url_ping_cache_ttl_seconds =
             self.provider_base_url_ping_cache_ttl_seconds;
         settings.upstream_first_byte_timeout_seconds = self.upstream_first_byte_timeout_seconds;
@@ -325,6 +329,7 @@ pub(crate) struct SettingsView {
     pub log_retention_days: u32,
     pub request_log_retention_days: u32,
     pub provider_cooldown_seconds: u32,
+    pub provider_availability_hours: u32,
     pub provider_base_url_ping_cache_ttl_seconds: u32,
     pub upstream_first_byte_timeout_seconds: u32,
     pub upstream_stream_idle_timeout_seconds: u32,
@@ -455,6 +460,7 @@ impl From<&settings::AppSettings> for SettingsView {
             log_retention_days: value.log_retention_days,
             request_log_retention_days: value.request_log_retention_days,
             provider_cooldown_seconds: value.provider_cooldown_seconds,
+            provider_availability_hours: value.provider_availability_hours,
             provider_base_url_ping_cache_ttl_seconds: value
                 .provider_base_url_ping_cache_ttl_seconds,
             upstream_first_byte_timeout_seconds: value.upstream_first_byte_timeout_seconds,
@@ -555,6 +561,9 @@ fn sync_runtime_side_effects<R: tauri::Runtime>(
     }
     if let Some(resident) = app.try_state::<resident::ResidentState>() {
         resident.set_tray_enabled(next_settings.tray_enabled);
+    }
+    if !next_settings.tray_enabled {
+        resident::hide_tray_provider_mini(app);
     }
 
     let circuit_runtime_updated = try_app_gateway_update_circuit_config(
@@ -723,6 +732,9 @@ fn apply_settings_update_owned_patch(
     let provider_cooldown_seconds = update
         .provider_cooldown_seconds
         .unwrap_or(previous_token.provider_cooldown_seconds);
+    let provider_availability_hours = update
+        .provider_availability_hours
+        .unwrap_or(previous_token.provider_availability_hours);
     let gateway_listen_mode = update
         .gateway_listen_mode
         .unwrap_or(previous_token.gateway_listen_mode);
@@ -924,6 +936,7 @@ fn apply_settings_update_owned_patch(
         log_retention_days: update.log_retention_days,
         request_log_retention_days,
         provider_cooldown_seconds,
+        provider_availability_hours,
         provider_base_url_ping_cache_ttl_seconds,
         upstream_first_byte_timeout_seconds,
         upstream_stream_idle_timeout_seconds,
@@ -2265,6 +2278,7 @@ mod tests {
             log_retention_days: settings.log_retention_days,
             request_log_retention_days: Some(settings.request_log_retention_days),
             provider_cooldown_seconds: Some(settings.provider_cooldown_seconds),
+            provider_availability_hours: Some(settings.provider_availability_hours),
             provider_base_url_ping_cache_ttl_seconds: Some(
                 settings.provider_base_url_ping_cache_ttl_seconds,
             ),

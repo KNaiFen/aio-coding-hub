@@ -19,6 +19,11 @@ export function ProvidersPage() {
     providerCliKeys[0];
   const [activeCli, setActiveCli] = useState<CliKey | null>(null);
   const effectiveCli = activeCli ?? defaultCli;
+  const availabilityHours = [3, 6, 12].includes(
+    settingsQuery.data?.provider_availability_hours ?? 6
+  )
+    ? (settingsQuery.data?.provider_availability_hours ?? 6)
+    : 6;
   const viewTabs: Array<{ key: CliKey; label: string }> = orderedCliTabs.map((cli) => ({
     key: cli.key,
     label: cli.name,
@@ -38,7 +43,11 @@ export function ProvidersPage() {
         }
       />
 
-      <ProvidersView activeCli={effectiveCli} setActiveCli={setActiveCli} />
+      <ProvidersView
+        activeCli={effectiveCli}
+        setActiveCli={setActiveCli}
+        availabilityHours={availabilityHours}
+      />
     </div>
   );
 }

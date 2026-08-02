@@ -15,7 +15,7 @@ use super::codex_session_id::CodexSessionIdCache;
 use super::events::{GatewayLogEvent, GATEWAY_LOG_EVENT_NAME, GATEWAY_STATUS_EVENT_NAME};
 use super::proxy::{GatewayErrorCode, ProviderBaseUrlPingCache, RecentErrorCache};
 use super::routes::build_router;
-use super::runtime::{GatewayAppState, GatewayRuntime, GatewayRuntimeInit};
+use super::runtime::{GatewayAppState, GatewayRuntime, GatewayRuntimeInit, ProviderEnableGate};
 use super::util::now_unix_seconds;
 use super::GatewayProviderCircuitStatus;
 
@@ -83,6 +83,7 @@ impl GatewayControlService {
         let session = Arc::new(session_manager::SessionManager::new());
         let recent_errors = Arc::new(Mutex::new(RecentErrorCache::default()));
         let plugin_pipeline = load_gateway_plugin_pipeline(&db);
+        let provider_enable_gate = Arc::new(ProviderEnableGate::default());
         let active_requests = Arc::new(ActiveRequestRegistry::default());
 
         let state = GatewayAppState {
@@ -95,6 +96,7 @@ impl GatewayControlService {
             recent_errors: recent_errors.clone(),
             latency_cache: Arc::new(Mutex::new(ProviderBaseUrlPingCache::default())),
             plugin_pipeline: plugin_pipeline.clone(),
+            provider_enable_gate: provider_enable_gate.clone(),
             #[cfg(test)]
             http_client_override: None,
             active_requests: active_requests.clone(),
@@ -135,6 +137,7 @@ impl GatewayControlService {
             task,
             background_tasks,
             plugin_pipeline: plugin_pipeline.clone(),
+            provider_enable_gate,
         });
         let status = runtime.status();
         *running = Some(runtime);

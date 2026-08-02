@@ -259,6 +259,12 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async trayProviderMiniSnapshotGet(): Promise<TrayProviderMiniSnapshot | null> {
+    return await TAURI_INVOKE("tray_provider_mini_snapshot_get");
+  },
+  async trayProviderMiniWindowHoverSet(hovered: boolean): Promise<boolean> {
+    return await TAURI_INVOKE("tray_provider_mini_window_hover_set", { hovered });
+  },
   async noticeSend(input: NoticeSendInput): Promise<Result<boolean, string>> {
     try {
       return { status: "ok", data: await TAURI_INVOKE("notice_send", { input }) };
@@ -943,6 +949,23 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async providerAvailabilityTimelinesGet(
+    providerIds: number[],
+    bucketCount: number
+  ): Promise<Result<ProviderAvailabilityTimeline[], string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("provider_availability_timelines_get", {
+          providerIds,
+          bucketCount,
+        }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async providerOauthStartFlow(
     cliKey: string,
     providerId: number
@@ -1043,12 +1066,13 @@ export const commands = {
     }
   },
   async providerAccountUsageFetch(
-    providerId: number
+    providerId: number,
+    force: boolean | null
   ): Promise<Result<ProviderAccountUsageResult, string>> {
     try {
       return {
         status: "ok",
-        data: await TAURI_INVOKE("provider_account_usage_fetch", { providerId }),
+        data: await TAURI_INVOKE("provider_account_usage_fetch", { providerId, force }),
       };
     } catch (e) {
       if (e instanceof Error) throw e;
@@ -3077,6 +3101,7 @@ export type FailoverAttempt = {
   provider_name: string;
   base_url: string;
   outcome: string;
+  upstream_sent: boolean;
   status: number | null;
   provider_index: number | null;
   retry_index: number | null;
@@ -3970,6 +3995,23 @@ export type ProviderAvailabilityResult = {
   error: string | null;
   response_preview: string | null;
 };
+export type ProviderAvailabilityState = "healthy" | "unhealthy" | "no_data";
+export type ProviderAvailabilityBucket = {
+  start_at_ms: number;
+  end_at_ms: number;
+  success_count: number;
+  failure_count: number;
+  state: ProviderAvailabilityState;
+};
+export type ProviderAvailabilityTimeline = {
+  provider_id: number;
+  hours: number;
+  bucket_count: number;
+  bucket_minutes: number;
+  success_count: number;
+  failure_count: number;
+  buckets: ProviderAvailabilityBucket[];
+};
 export type ProviderBaseUrlMode = "order" | "ping";
 export type ProviderContribution = {
   providerType: string;
@@ -4359,6 +4401,7 @@ export type SettingsUpdate = {
   logRetentionDays: number;
   requestLogRetentionDays: number | null;
   providerCooldownSeconds: number | null;
+  providerAvailabilityHours: number | null;
   providerBaseUrlPingCacheTtlSeconds: number | null;
   upstreamFirstByteTimeoutSeconds: number | null;
   upstreamStreamIdleTimeoutSeconds: number | null;
@@ -4423,6 +4466,7 @@ export type SettingsView = {
   log_retention_days: number;
   request_log_retention_days: number;
   provider_cooldown_seconds: number;
+  provider_availability_hours: number;
   provider_base_url_ping_cache_ttl_seconds: number;
   upstream_first_byte_timeout_seconds: number;
   upstream_stream_idle_timeout_seconds: number;
@@ -4506,6 +4550,28 @@ export type SortModeProviderRow = {
 };
 export type SortModeSummary = { id: number; name: string; created_at: number; updated_at: number };
 export type TargetCliKey = "claude" | "codex" | "gemini";
+export type TrayProviderMiniProvider = {
+  providerId: number;
+  providerName: string;
+  unavailableReasons: TrayProviderMiniUnavailableReason[];
+  availability: ProviderAvailabilityState[];
+};
+export type TrayProviderMiniSelectionSource = "active_request" | "recent_request" | "enabled_cli";
+export type TrayProviderMiniSnapshot = {
+  generation: number;
+  generatedAtMs: number;
+  hours: number;
+  cliKey: string | null;
+  selectionSource: TrayProviderMiniSelectionSource | null;
+  routeName: string | null;
+  providers: TrayProviderMiniProvider[];
+  unavailable: boolean;
+};
+export type TrayProviderMiniUnavailableReason =
+  | "circuit_open"
+  | "cooldown"
+  | "spend_limit"
+  | "oauth_limit";
 export type UiContribution = {
   id: string;
   title?: string | null;

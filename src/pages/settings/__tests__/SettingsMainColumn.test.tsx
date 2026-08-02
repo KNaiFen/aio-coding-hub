@@ -99,6 +99,8 @@ function renderSettingsMainColumn(
     setLogRetentionDays: vi.fn(),
     requestLogRetentionDays: 0,
     setRequestLogRetentionDays: vi.fn(),
+    providerAvailabilityHours: 6,
+    setProviderAvailabilityHours: vi.fn(),
     enableDebugLog: false,
     setEnableDebugLog: vi.fn(),
     requestPersist: vi.fn(),
@@ -149,6 +151,28 @@ describe("pages/settings/SettingsMainColumn", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "System" }));
     expect(setTheme).toHaveBeenCalledWith("system");
+  });
+
+  it("persists the provider availability time range", () => {
+    const setProviderAvailabilityHours = vi.fn();
+    const requestPersist = vi.fn();
+    vi.mocked(useTheme).mockReturnValue({
+      theme: "system",
+      resolvedTheme: "light",
+      setTheme: vi.fn(),
+    } as any);
+
+    renderSettingsMainColumn({
+      providerAvailabilityHours: 6,
+      setProviderAvailabilityHours,
+      requestPersist,
+    });
+
+    expect(screen.getByRole("button", { name: "6 小时" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "12 小时" }));
+
+    expect(setProviderAvailabilityHours).toHaveBeenCalledWith(12);
+    expect(requestPersist).toHaveBeenCalledWith({ provider_availability_hours: 12 });
   });
 
   it("renders local visibility controls for home information tabs and CLI buttons", () => {

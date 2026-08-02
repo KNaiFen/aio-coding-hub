@@ -128,6 +128,7 @@ fn gateway_state_for_selection(
         recent_errors: Arc::new(Mutex::new(RecentErrorCache::default())),
         latency_cache: Arc::new(Mutex::new(ProviderBaseUrlPingCache::default())),
         plugin_pipeline: GatewayPluginPipeline::empty_shared(),
+        provider_enable_gate: Arc::new(crate::gateway::runtime::ProviderEnableGate::default()),
         http_client_override: None,
         active_requests: Arc::new(ActiveRequestRegistry::default()),
     }
@@ -594,7 +595,7 @@ fn default_mode_switches_to_enabled_provider_after_bound_provider_disabled_and_c
 }
 
 #[test]
-fn sort_mode_retains_open_bound_provider_for_the_common_gate() {
+fn sort_mode_excludes_globally_disabled_open_bound_provider() {
     let dir = tempfile::tempdir().expect("tempdir");
     let db_path = dir.path().join("test.db");
     let db = crate::db::init_for_tests(&db_path).expect("init db");
@@ -619,7 +620,7 @@ fn sort_mode_retains_open_bound_provider_for_the_common_gate() {
 
     let mut enabled = providers::list_enabled_for_gateway_in_mode(&db, "claude", Some(mode_id))
         .expect("list enabled");
-    assert_eq!(ids(&enabled), vec![p1.id, p2.id]);
+    assert_eq!(ids(&enabled), vec![p2.id]);
 
     let selected = resolve_session_bound_provider_id(
         &session,
@@ -635,11 +636,11 @@ fn sort_mode_retains_open_bound_provider_for_the_common_gate() {
         Some(&[p1.id, p2.id]),
     );
 
-    assert_eq!(ids(&enabled), vec![p1.id, p2.id]);
+    assert_eq!(ids(&enabled), vec![p2.id]);
     assert_eq!(selected, None);
     assert_eq!(
         session.get_bound_provider("claude", "sess_1", route_generation, now),
-        Some(p1.id)
+        None
     );
     assert!(!circuit.should_allow(p1.id, now).allow);
     assert!(circuit.should_allow(p2.id, now).allow);

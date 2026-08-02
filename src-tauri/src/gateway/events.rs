@@ -37,6 +37,7 @@ pub(in crate::gateway) mod decision_chain {
     pub(in crate::gateway) const REASON_CIRCUIT_OPEN: &str = "circuit_open";
     pub(in crate::gateway) const REASON_CIRCUIT_COOLDOWN: &str = "circuit_cooldown";
     pub(in crate::gateway) const REASON_RATE_LIMITED: &str = "rate_limited";
+    pub(in crate::gateway) const REASON_PROVIDER_DISABLED: &str = "provider_disabled";
 
     /// Determine how the provider was selected for this attempt.
     /// Only meaningful for the first attempt (provider_index=1, retry_index=1).
@@ -75,6 +76,8 @@ pub(super) struct FailoverAttempt {
     pub(super) provider_name: String,
     pub(super) base_url: String,
     pub(super) outcome: String,
+    #[serde(default)]
+    pub(super) upstream_sent: bool,
     pub(super) status: Option<u16>,
     pub(super) provider_index: Option<u32>,
     pub(super) retry_index: Option<u32>,
@@ -768,6 +771,7 @@ mod tests {
             provider_name: format!("Provider {provider_id}"),
             base_url: format!("https://provider-{provider_id}.example"),
             outcome: "failed".to_string(),
+            upstream_sent: true,
             status: Some(500),
             provider_index: Some(provider_id as u32),
             retry_index: Some(1),
@@ -891,6 +895,7 @@ mod tests {
                 provider_name: "Provider A".to_string(),
                 base_url: "https://provider-a.example".to_string(),
                 outcome: "success".to_string(),
+                upstream_sent: true,
                 status: Some(200),
                 provider_index: Some(1),
                 retry_index: Some(1),

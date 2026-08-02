@@ -164,7 +164,7 @@ fn get_source_provider_for_gateway_allows_cross_cli_codex_bridge_sources() {
 }
 
 #[test]
-fn get_source_provider_for_gateway_allows_disabled_source_for_codex_bridge() {
+fn get_source_provider_for_gateway_rejects_disabled_source_for_codex_bridge() {
     let temp = tempfile::tempdir().expect("tempdir");
     let db_path = temp.path().join("providers-disabled-source.sqlite3");
     let db = crate::db::init_for_tests(&db_path).expect("init db");
@@ -174,12 +174,11 @@ fn get_source_provider_for_gateway_allows_disabled_source_for_codex_bridge() {
     source_params.enabled = false;
     let source = upsert(&db, source_params).expect("insert codex source");
 
-    let (resolved, cli_key) =
+    let err =
         get_source_provider_for_gateway(&db, source.id, CODEX_TO_OPENAI_RESPONSES_BRIDGE_TYPE)
-            .expect("codex responses bridge source");
+            .expect_err("codex responses bridge should reject disabled source");
 
-    assert_eq!(resolved.id, source.id);
-    assert_eq!(cli_key, "codex");
+    assert!(err.to_string().contains("source provider not found"));
 }
 
 #[test]
@@ -1502,6 +1501,15 @@ fn observer_provider_identities_follow_active_route_order() {
         vec![(second.id, "observer-second")]
     );
     assert_eq!(active[0].auth_mode, "api_key");
+
+    set_enabled(&db, second.id, false).expect("globally disable active mode provider");
+    let disabled = list_enabled_gateway_provider_identities_using_active_mode(&db, "claude")
+        .expect("list active observer route after global disable");
+    assert!(disabled.is_empty());
+
+    let selection =
+        list_enabled_for_gateway_using_active_mode(&db, "claude").expect("list gateway route");
+    assert!(selection.providers.is_empty());
 }
 
 fn seed_usage_request_log(db: &crate::db::Db, trace_id: &str, provider_id: i64) {

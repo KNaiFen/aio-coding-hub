@@ -47,6 +47,8 @@ export function SettingsPage() {
             setLogRetentionDays={persistence.setLogRetentionDays}
             requestLogRetentionDays={persistence.requestLogRetentionDays}
             setRequestLogRetentionDays={persistence.setRequestLogRetentionDays}
+            providerAvailabilityHours={persistence.providerAvailabilityHours}
+            setProviderAvailabilityHours={persistence.setProviderAvailabilityHours}
             enableDebugLog={persistence.enableDebugLog}
             setEnableDebugLog={persistence.setEnableDebugLog}
             requestPersist={persistence.requestPersist}

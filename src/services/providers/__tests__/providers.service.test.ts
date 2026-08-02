@@ -22,6 +22,7 @@ import {
   providerOAuthStatus,
   providerSetEnabled,
   providerTestAvailability,
+  providerAvailabilityTimelinesGet,
   providersList,
   providersReorder,
   providerUpsert,
@@ -63,6 +64,7 @@ vi.mock("../../../generated/bindings", async () => {
       providerOauthFetchLimits: vi.fn(),
       providerOauthResetCodexQuota: vi.fn(),
       providerTestAvailability: vi.fn(),
+      providerAvailabilityTimelinesGet: vi.fn(),
     },
   };
 });
@@ -903,7 +905,7 @@ describe("services/providers/providers", () => {
 
     expect(result?.status).toBe("available");
     expect(result?.balance).toBe(12.5);
-    expect(commands.providerAccountUsageFetch).toHaveBeenCalledWith(52);
+    expect(commands.providerAccountUsageFetch).toHaveBeenCalledWith(52, false);
     expect(logToConsole).not.toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
@@ -994,5 +996,19 @@ describe("services/providers/providers", () => {
         }),
       })
     );
+  });
+
+  it("providerAvailabilityTimelinesGet normalizes provider ids and uses one generated IPC call", async () => {
+    vi.mocked(commands.providerAvailabilityTimelinesGet).mockResolvedValueOnce({
+      status: "ok",
+      data: [],
+    });
+
+    await expect(providerAvailabilityTimelinesGet([3, 2, 3], 36)).resolves.toEqual([]);
+
+    expect(commands.providerAvailabilityTimelinesGet).toHaveBeenCalledTimes(1);
+    expect(commands.providerAvailabilityTimelinesGet).toHaveBeenCalledWith([3, 2], 36);
+    await expect(providerAvailabilityTimelinesGet([], 36)).resolves.toEqual([]);
+    expect(commands.providerAvailabilityTimelinesGet).toHaveBeenCalledTimes(1);
   });
 });

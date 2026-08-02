@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { FREE_TAG } from "../../constants/providers";
 import type { GatewayProviderCircuitStatus } from "../../services/gateway/gateway";
+import type { ProviderAvailabilityTimeline } from "../../generated/bindings";
 import { getGatewayCircuitDerivedState } from "../../query/gateway";
 import {
   refreshProviderOAuthLimits,
@@ -38,6 +39,7 @@ import {
 } from "../../services/providers/providers";
 import { OAuthQuotaUsageInline } from "../../components/providers/OAuthQuotaUsageInline";
 import { ProviderAccountUsageInline } from "../../components/providers/ProviderAccountUsageInline";
+import { ProviderAvailabilityStrip } from "../../components/providers/ProviderAvailabilityStrip";
 import { openDesktopUrl } from "../../services/desktop/opener";
 import { Button } from "../../ui/Button";
 import { Card } from "../../ui/Card";
@@ -143,6 +145,7 @@ function EdgeAction({ children }: { children: ReactNode }) {
 
 export type SortableProviderCardProps = {
   provider: ProviderSummary;
+  availability?: ProviderAvailabilityTimeline | null;
   sourceProviderName?: string | null;
   sourceProvider?: ProviderSummary | null;
   trailing?: ReactNode;
@@ -171,6 +174,7 @@ type ProviderCardProps = SortableProviderCardProps & {
 
 const ProviderCard = memo(function ProviderCard({
   provider,
+  availability = null,
   sourceProviderName = null,
   sourceProvider = null,
   trailing = null,
@@ -322,7 +326,7 @@ const ProviderCard = memo(function ProviderCard({
       <Card
         padding="sm"
         className={cn(
-          "rounded-lg sm:rounded-xl flex flex-col gap-2 transition-shadow duration-200 sm:flex-row sm:items-stretch sm:justify-between",
+          "rounded-lg sm:rounded-xl flex flex-col gap-2 transition-shadow duration-200 sm:flex-row sm:flex-wrap sm:items-stretch sm:justify-between",
           className
         )}
         {...cardProps}
@@ -673,6 +677,7 @@ const ProviderCard = memo(function ProviderCard({
             </div>
           ) : null}
         </div>
+        <ProviderAvailabilityStrip timeline={availability} providerName={provider.name} />
       </Card>
       <ConfirmDialog
         open={resetConfirmOpen}

@@ -100,6 +100,18 @@ pub(crate) fn app_gateway_clear_cli_route_runtime_state<R: tauri::Runtime>(
     })
 }
 
+pub(crate) fn app_gateway_set_provider_enabled<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    provider_id: i64,
+    enabled: bool,
+) {
+    super::gateway_state::with_app_running_gateway(app, |running| {
+        if let Some(runtime) = running {
+            runtime.set_provider_enabled(provider_id, enabled);
+        }
+    });
+}
+
 pub(crate) fn app_gateway_clear_all_session_bindings<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> usize {

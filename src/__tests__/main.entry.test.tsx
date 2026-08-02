@@ -6,6 +6,10 @@ vi.mock("../App", () => ({
   default: () => <div data-testid="main-entry-app">mock app</div>,
 }));
 
+vi.mock("../tray/TrayProviderMiniApp", () => ({
+  TrayProviderMiniApp: () => <div data-testid="tray-provider-mini-entry">tray mini</div>,
+}));
+
 vi.mock("../components/AppErrorBoundary", () => ({
   AppErrorBoundary: ({ children }: { children: ReactNode }) => children,
 }));
@@ -32,6 +36,7 @@ async function importMainEntry() {
 describe("main entry", () => {
   beforeEach(() => {
     vi.resetModules();
+    window.history.replaceState(null, "", "/");
   });
 
   afterEach(async () => {
@@ -55,5 +60,15 @@ describe("main entry", () => {
     await importMainEntry();
 
     expect(reporter.installGlobalErrorReporting).toHaveBeenCalled();
+  }, 30000);
+
+  it("renders only the tray mini root for the tray window query", async () => {
+    document.body.innerHTML = '<div id="root"></div>';
+    window.history.replaceState(null, "", "/?window=tray-provider-mini");
+
+    await importMainEntry();
+
+    expect(document.querySelector("[data-testid='tray-provider-mini-entry']")).toBeInTheDocument();
+    expect(document.querySelector("[data-testid='main-entry-app']")).not.toBeInTheDocument();
   }, 30000);
 });

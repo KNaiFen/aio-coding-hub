@@ -55,6 +55,7 @@ pub(super) fn push_skipped_provider_attempt(
         provider_name: skipped.provider_name.to_string(),
         base_url: skipped.base_url.to_string(),
         outcome: "skipped".to_string(),
+        upstream_sent: false,
         status: None,
         provider_index: None,
         retry_index: None,
@@ -91,7 +92,12 @@ pub(super) fn is_gate_only_skipped_attempt(attempt: &FailoverAttempt) -> bool {
 
     matches!(
         attempt.reason_code,
-        Some(dc::REASON_CIRCUIT_OPEN | dc::REASON_CIRCUIT_COOLDOWN | dc::REASON_RATE_LIMITED)
+        Some(
+            dc::REASON_CIRCUIT_OPEN
+                | dc::REASON_CIRCUIT_COOLDOWN
+                | dc::REASON_RATE_LIMITED
+                | dc::REASON_PROVIDER_DISABLED
+        )
     )
 }
 

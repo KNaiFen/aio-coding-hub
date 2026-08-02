@@ -103,6 +103,15 @@ describe("pages/settings/settingsPersistenceModel", () => {
         ["circuit_breaker_failure_threshold"]
       )
     ).toBeNull();
+
+    expect(
+      validatePersistedSettings(
+        applyPersistedSettingsPatch(DEFAULT_PERSISTED_SETTINGS, {
+          provider_availability_hours: 4,
+        }),
+        ["provider_availability_hours"]
+      )
+    ).toBe("供应商可用性范围必须为 3、6 或 12 小时");
   });
 
   it("validates failover bounds and total attempt product", () => {
@@ -156,6 +165,7 @@ describe("pages/settings/settingsPersistenceModel", () => {
       logRetentionDays: 7,
       requestLogRetentionDays: 0,
       providerCooldownSeconds: 30,
+      providerAvailabilityHours: 6,
       providerBaseUrlPingCacheTtlSeconds: 60,
       upstreamFirstByteTimeoutSeconds: 0,
       upstreamStreamIdleTimeoutSeconds: 0,

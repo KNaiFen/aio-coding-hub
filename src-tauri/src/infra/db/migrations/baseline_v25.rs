@@ -113,6 +113,22 @@ CREATE INDEX IF NOT EXISTS idx_request_logs_cli_created_at_ms ON request_logs(cl
 CREATE INDEX IF NOT EXISTS idx_request_logs_session_id ON request_logs(session_id);
 CREATE INDEX IF NOT EXISTS idx_request_logs_final_provider_id_created_at ON request_logs(final_provider_id, created_at);
 
+CREATE TABLE IF NOT EXISTS provider_availability_observations (
+  trace_id TEXT NOT NULL,
+  cli_key TEXT NOT NULL,
+  provider_id INTEGER NOT NULL,
+  observed_at_ms INTEGER NOT NULL,
+  success INTEGER NOT NULL CHECK(success IN (0, 1)),
+  PRIMARY KEY(trace_id, provider_id),
+  FOREIGN KEY(provider_id) REFERENCES providers(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_provider_availability_provider_time
+ON provider_availability_observations(provider_id, observed_at_ms);
+
+CREATE INDEX IF NOT EXISTS idx_provider_availability_observed_at
+ON provider_availability_observations(observed_at_ms);
+
 CREATE TABLE IF NOT EXISTS prompts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   cli_key TEXT NOT NULL,

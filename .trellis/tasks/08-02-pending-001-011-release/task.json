@@ -1,0 +1,33 @@
+{
+  "id": "pending-001-011-release",
+  "name": "pending-001-011-release",
+  "title": "完成 PENDING 001-011 并发布 0.60.43",
+  "description": "按六个功能批次完成全部待办、合并、发布并交付制品",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": null,
+  "package": "aio-coding-hub",
+  "priority": "P1",
+  "creator": "KNaiFen",
+  "assignee": "KNaiFen",
+  "createdAt": "2026-08-02",
+  "completedAt": null,
+  "branch": "codex/pending-001-011",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-02-provider-routing-master-switch",
+    "08-02-provider-account-usage-runtime",
+    "08-02-provider-availability-core",
+    "08-02-tui-observability-polish",
+    "08-02-desktop-provider-availability",
+    "08-02-macos-tray-provider-mini"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

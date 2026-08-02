@@ -392,6 +392,7 @@ export type SettingsSetValidationInput = {
   logRetentionDays?: number | null;
   requestLogRetentionDays?: number | null;
   providerCooldownSeconds?: number | null;
+  providerAvailabilityHours?: number | null;
   providerBaseUrlPingCacheTtlSeconds?: number | null;
   upstreamFirstByteTimeoutSeconds?: number | null;
   upstreamStreamIdleTimeoutSeconds?: number | null;
@@ -422,6 +423,13 @@ export type SettingsSetValidationInput = {
 };
 
 export function validateSettingsSetInput(input: SettingsSetValidationInput): string | null {
+  if (
+    input.providerAvailabilityHours != null &&
+    ![3, 6, 12].includes(input.providerAvailabilityHours)
+  ) {
+    return "供应商可用性时间范围必须为 3、6 或 12 小时";
+  }
+
   for (const [fieldLabel, value, min, max] of [
     ["首选端口", input.preferredPort, MIN_PREFERRED_PORT, MAX_PREFERRED_PORT],
     ["日志保留天数", input.logRetentionDays, MIN_LOG_RETENTION_DAYS, MAX_LOG_RETENTION_DAYS],

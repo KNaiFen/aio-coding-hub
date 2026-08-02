@@ -785,6 +785,7 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
         provider_name: provider_name_base.clone(),
         base_url: provider_base_url_base.clone(),
         outcome: outcome.clone(),
+        upstream_sent: true,
         status: Some(status.as_u16()),
         provider_index: Some(provider_index),
         retry_index: Some(retry_index),

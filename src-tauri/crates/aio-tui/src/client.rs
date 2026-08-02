@@ -1,6 +1,6 @@
 use aio_observer_protocol::{
-    CliScope, ObserverDescriptorV1, ObserverSnapshotV1, OBSERVER_DESCRIPTOR_FILE_NAME,
-    OBSERVER_PROTOCOL_VERSION,
+    CliScope, ObserverDescriptorV1, ObserverProviderAvailabilityTestResult, ObserverSnapshotV1,
+    OBSERVER_DESCRIPTOR_FILE_NAME, OBSERVER_PROTOCOL_VERSION,
 };
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -8,6 +8,7 @@ use std::time::Duration;
 const DESCRIPTOR_MAX_BYTES: usize = 4 * 1024;
 const DESCRIPTOR_TOKEN_MIN_BYTES: usize = 32;
 const RESPONSE_MAX_BYTES: usize = 4 * 1024 * 1024;
+const PROBE_RESPONSE_MAX_BYTES: usize = 128 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OfflineReason {
@@ -34,6 +35,7 @@ impl OfflineReason {
     }
 }
 
+#[derive(Clone)]
 pub struct ObserverClient {
     http: reqwest::Client,
 }
@@ -82,6 +84,37 @@ impl ObserverClient {
         }
     }
 
+    pub async fn test_provider_availability(
+        &self,
+        provider_id: i64,
+    ) -> Result<ObserverProviderAvailabilityTestResult, OfflineReason> {
+        if provider_id <= 0 {
+            return Err(OfflineReason::InvalidResponse);
+        }
+        let descriptor = read_descriptor()?;
+        let url = format!(
+            "http://127.0.0.1:{}/api/observer/v1/providers/{provider_id}/test-availability",
+            descriptor.port
+        );
+        let mut response = self
+            .http
+            .post(url)
+            .bearer_auth(&descriptor.token)
+            .send()
+            .await
+            .map_err(|_| OfflineReason::Unreachable)?;
+        if let Some(reason) = response_failure_reason(response.status()) {
+            return Err(reason);
+        }
+        let bytes = read_bounded_response(&mut response, PROBE_RESPONSE_MAX_BYTES).await?;
+        let result = serde_json::from_slice::<ObserverProviderAvailabilityTestResult>(&bytes)
+            .map_err(|_| OfflineReason::InvalidResponse)?;
+        if result.provider_id != provider_id {
+            return Err(OfflineReason::InvalidResponse);
+        }
+        Ok(result)
+    }
+
     async fn fetch_snapshot(
         &self,
         scope: CliScope,
@@ -111,23 +144,7 @@ impl ObserverClient {
         if let Some(reason) = response_failure_reason(response.status()) {
             return Err(reason);
         }
-        if response
-            .content_length()
-            .is_some_and(|length| length > RESPONSE_MAX_BYTES as u64)
-        {
-            return Err(OfflineReason::InvalidResponse);
-        }
-        let mut bytes = Vec::new();
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|_| OfflineReason::InvalidResponse)?
-        {
-            if bytes.len().saturating_add(chunk.len()) > RESPONSE_MAX_BYTES {
-                return Err(OfflineReason::InvalidResponse);
-            }
-            bytes.extend_from_slice(&chunk);
-        }
+        let bytes = read_bounded_response(&mut response, RESPONSE_MAX_BYTES).await?;
         let snapshot = serde_json::from_slice::<ObserverSnapshotV1>(&bytes)
             .map_err(|_| OfflineReason::InvalidResponse)?;
         if snapshot.protocol_version != OBSERVER_PROTOCOL_VERSION {
@@ -135,6 +152,30 @@ impl ObserverClient {
         }
         Ok(SnapshotFetch::Ready(Box::new(snapshot)))
     }
+}
+
+async fn read_bounded_response(
+    response: &mut reqwest::Response,
+    max_bytes: usize,
+) -> Result<Vec<u8>, OfflineReason> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > max_bytes as u64)
+    {
+        return Err(OfflineReason::InvalidResponse);
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|_| OfflineReason::InvalidResponse)?
+    {
+        if bytes.len().saturating_add(chunk.len()) > max_bytes {
+            return Err(OfflineReason::InvalidResponse);
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
 }
 
 fn response_failure_reason(status: reqwest::StatusCode) -> Option<OfflineReason> {
