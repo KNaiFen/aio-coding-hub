@@ -3,7 +3,7 @@
   "name": "pending-001-011-release",
   "title": "完成 PENDING 001-011 并发布 0.60.43",
   "description": "按六个功能批次完成全部待办、合并、发布并交付制品",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": "aio-coding-hub",

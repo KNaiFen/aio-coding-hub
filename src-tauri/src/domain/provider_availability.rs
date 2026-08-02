@@ -501,6 +501,10 @@ fn redact_key_param(msg: &str) -> String {
         .unwrap_or_else(|_| msg.to_string())
 }
 
+fn redact_probe_credential(input: &str, credential: &str) -> String {
+    crate::domain::provider_account_usage::redact_secret(input, credential)
+}
+
 fn looks_like_auth_failure(status: u16, response_text: &str) -> bool {
     if matches!(status, 401 | 403) {
         return true;
@@ -658,7 +662,10 @@ pub async fn test_provider_availability<R: tauri::Runtime>(
                     truncated: false,
                     limit: PROBE_RESPONSE_BODY_LIMIT,
                 });
-            let preview = probe_response_preview(&body);
+            let preview = redact_probe_credential(
+                &probe_response_preview(&body),
+                &effective_credential,
+            );
             // Provider is "available" if the endpoint responds without an auth
             // failure or upstream 5xx. 400/404 model errors and 429 rate limits
             // still prove the configured base URL and credential reached the
@@ -679,7 +686,7 @@ pub async fn test_provider_availability<R: tauri::Runtime>(
                         })
                     })
                     .unwrap_or_else(|| format!("HTTP {status}"));
-                Some(msg)
+                Some(redact_probe_credential(&msg, &effective_credential))
             };
 
             Ok(ProviderAvailabilityResult {
@@ -701,6 +708,7 @@ pub async fn test_provider_availability<R: tauri::Runtime>(
             } else {
                 redact_key_param(&format!("请求失败: {err}"))
             };
+            let error_message = redact_probe_credential(&error_message, &effective_credential);
 
             Ok(ProviderAvailabilityResult {
                 ok: false,
@@ -896,15 +904,18 @@ pub fn timelines(
     }
 
     let bucket_count_i64 = i64::from(bucket_count);
-    let bucket_ms = i64::from(hours)
-        .saturating_mul(60 * 60 * 1_000)
+    let range_ms = i64::from(hours).saturating_mul(60 * 60 * 1_000);
+    let bucket_ms = range_ms
         .checked_div(bucket_count_i64)
         .ok_or_else(|| "SEC_INVALID_INPUT: invalid availability range".to_string())?;
+    let alignment_ms = range_ms
+        .checked_div(i64::from(TUI_PROVIDER_AVAILABILITY_BUCKETS))
+        .ok_or_else(|| "SEC_INVALID_INPUT: invalid availability alignment".to_string())?;
     let now_ms = now_ms.max(0);
     let end_at_ms = now_ms
-        .div_euclid(bucket_ms)
+        .div_euclid(alignment_ms)
         .saturating_add(1)
-        .saturating_mul(bucket_ms);
+        .saturating_mul(alignment_ms);
     let start_at_ms = end_at_ms.saturating_sub(bucket_ms.saturating_mul(bucket_count_i64));
 
     let empty_buckets = || {
@@ -1206,11 +1217,37 @@ mod tests {
             .expect("load timeline")
             .pop()
             .expect("provider timeline");
+        let desktop_timeline = timelines(&db, &[provider.id], 6, 36, now_ms)
+            .expect("load desktop timeline")
+            .pop()
+            .expect("desktop provider timeline");
         let current = timeline.buckets.last().expect("current bucket");
         assert_eq!(timeline.bucket_minutes, 30);
         assert_eq!(current.start_at_ms, current_bucket_start);
         assert_eq!((current.success_count, current.failure_count), (3, 1));
         assert_eq!(current.state, ProviderAvailabilityState::Healthy);
+        for (tui_bucket, desktop_buckets) in timeline
+            .buckets
+            .iter()
+            .zip(desktop_timeline.buckets.chunks_exact(3))
+        {
+            assert_eq!(tui_bucket.start_at_ms, desktop_buckets[0].start_at_ms);
+            assert_eq!(tui_bucket.end_at_ms, desktop_buckets[2].end_at_ms);
+            assert_eq!(
+                tui_bucket.success_count,
+                desktop_buckets
+                    .iter()
+                    .map(|bucket| bucket.success_count)
+                    .sum::<u32>()
+            );
+            assert_eq!(
+                tui_bucket.failure_count,
+                desktop_buckets
+                    .iter()
+                    .map(|bucket| bucket.failure_count)
+                    .sum::<u32>()
+            );
+        }
 
         assert_eq!(purge_expired_observations(&db, now_ms).expect("purge"), 1);
         let remaining: i64 = db
@@ -1486,6 +1523,19 @@ mod tests {
             "连接失败: https://host/v1beta/models?alt=sse&key=***&other=1"
         );
         assert!(!redacted.contains("sk-secret"));
+    }
+
+    #[test]
+    fn probe_output_redacts_an_echoed_effective_credential() {
+        let redacted = redact_probe_credential(
+            r#"{"error":"credential sk-secret was rejected"}"#,
+            "sk-secret",
+        );
+
+        assert_eq!(
+            redacted,
+            r#"{"error":"credential [REDACTED] was rejected"}"#
+        );
     }
 
     #[test]

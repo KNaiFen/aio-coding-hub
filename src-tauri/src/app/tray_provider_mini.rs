@@ -69,6 +69,10 @@ fn is_terminal(row: &request_logs::RequestLogSummary) -> bool {
     row.status.is_some() || row.error_code.is_some() || row.is_interrupted
 }
 
+fn terminal_completed_at_ms(created_at_ms: i64, duration_ms: i64) -> i64 {
+    created_at_ms.saturating_add(duration_ms.max(0))
+}
+
 fn latest_inference_cli<'a>(
     requests: impl IntoIterator<Item = (&'a str, &'a str, &'a str, i64)>,
 ) -> Option<&'a str> {
@@ -168,7 +172,7 @@ pub(crate) fn build_snapshot<R: tauri::Runtime>(
                 row.cli_key.as_str(),
                 row.method.as_str(),
                 row.path.as_str(),
-                row.created_at_ms,
+                terminal_completed_at_ms(row.created_at_ms, row.duration_ms),
             )
         },
     ));
@@ -349,6 +353,26 @@ mod tests {
                 TrayProviderMiniSelectionSource::EnabledCli
             ))
         );
+    }
+
+    #[test]
+    fn recent_inference_cli_uses_completion_time_instead_of_start_time() {
+        let selected = latest_inference_cli([
+            (
+                "claude",
+                "POST",
+                "/v1/messages",
+                terminal_completed_at_ms(100, 500),
+            ),
+            (
+                "codex",
+                "POST",
+                "/v1/responses",
+                terminal_completed_at_ms(300, 10),
+            ),
+        ]);
+
+        assert_eq!(selected, Some("claude"));
     }
 
     #[test]
