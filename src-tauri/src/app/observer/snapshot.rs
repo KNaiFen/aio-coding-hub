@@ -827,7 +827,7 @@ fn project_terminal(
         context_compaction: parse_context_compaction(row.special_settings_json.as_deref()),
         configured_model_route: parse_configured_model_route(
             row.special_settings_json.as_deref(),
-            row.final_provider_id,
+            Some(row.final_provider_id),
         ),
     }
 }
