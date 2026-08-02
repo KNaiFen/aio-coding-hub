@@ -1258,8 +1258,7 @@ INSERT INTO codex_managed_profiles(
         };
         value.as_array().is_some_and(|settings| {
             settings.iter().any(|setting| {
-                setting.get("type").and_then(Value::as_str)
-                    == Some("upstream_error_response_rule")
+                setting.get("type").and_then(Value::as_str) == Some("upstream_error_response_rule")
             })
         })
     }
@@ -1322,12 +1321,8 @@ INSERT INTO codex_managed_profiles(
         .expect("init test db");
         let (upstream_base_url, call_count, upstream_task) =
             spawn_counting_status_upstream(upstream_status, upstream_body).await;
-        let provider_id = insert_codex_provider_with_priority(
-            &db,
-            "Response Rule Stub",
-            upstream_base_url,
-            0,
-        );
+        let provider_id =
+            insert_codex_provider_with_priority(&db, "Response Rule Stub", upstream_base_url, 0);
         let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
         let router = build_router(gateway_state(app_handle, db, log_tx));
         let request = Request::builder()
@@ -5703,8 +5698,7 @@ INSERT INTO codex_managed_profiles(
         let marker = parse_special_settings(&observation.log)
             .into_iter()
             .find(|setting| {
-                setting.get("type").and_then(Value::as_str)
-                    == Some("upstream_error_response_rule")
+                setting.get("type").and_then(Value::as_str) == Some("upstream_error_response_rule")
             })
             .expect("response rule marker");
         assert_eq!(marker["providerId"].as_i64(), Some(observation.provider_id));

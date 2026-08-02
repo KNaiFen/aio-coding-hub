@@ -2283,9 +2283,7 @@ mod tests {
             failover_max_providers_to_try: settings.failover_max_providers_to_try,
             upstream_retry_policy: Some(settings.upstream_retry_policy.clone()),
             model_routing_policy: Some(settings.model_routing_policy.clone()),
-            upstream_error_response_rules: Some(
-                settings.upstream_error_response_rules.clone(),
-            ),
+            upstream_error_response_rules: Some(settings.upstream_error_response_rules.clone()),
             circuit_breaker_failure_threshold,
             circuit_breaker_open_duration_minutes: Some(
                 settings.circuit_breaker_open_duration_minutes,

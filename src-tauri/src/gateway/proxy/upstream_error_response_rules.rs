@@ -3,7 +3,7 @@
 use crate::settings::{
     UpstreamErrorMessageBehavior, UpstreamErrorResponseMatchMode, UpstreamErrorResponseRule,
     UpstreamErrorStatusBehavior, MAX_UPSTREAM_ERROR_RESPONSE_RULE_DESCRIPTION_CHARS,
-    MAX_UPSTREAM_ERROR_RESPONSE_RULE_KEYWORD_CHARS, MAX_UPSTREAM_ERROR_RESPONSE_RULE_KEYWORDS,
+    MAX_UPSTREAM_ERROR_RESPONSE_RULE_KEYWORDS, MAX_UPSTREAM_ERROR_RESPONSE_RULE_KEYWORD_CHARS,
     MAX_UPSTREAM_ERROR_RESPONSE_RULE_MESSAGE_CHARS, MAX_UPSTREAM_ERROR_RESPONSE_RULE_NAME_CHARS,
     MAX_UPSTREAM_ERROR_RESPONSE_RULE_PRIORITY, MAX_UPSTREAM_ERROR_RESPONSE_RULE_PROVIDER_IDS,
     MAX_UPSTREAM_ERROR_RESPONSE_RULE_STATUS_CODES,
@@ -56,7 +56,10 @@ impl UpstreamErrorResponseRewrite {
         let trace_header = HeaderValue::from_str(trace_id).ok()?;
         let mut builder = Response::builder()
             .status(self.client_status)
-            .header(header::CONTENT_TYPE, HeaderValue::from_static("application/json"))
+            .header(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/json"),
+            )
             .header("x-trace-id", trace_header);
         if let Some(retry_after) = self.retry_after.as_ref() {
             builder = builder.header(header::RETRY_AFTER, retry_after.clone());
@@ -214,7 +217,10 @@ pub(super) fn match_response_rule(
                 if trimmed.is_empty() {
                     return None;
                 }
-                (truncate_chars(trimmed, MAX_UPSTREAM_ERROR_RESPONSE_RULE_MESSAGE_CHARS), "override")
+                (
+                    truncate_chars(trimmed, MAX_UPSTREAM_ERROR_RESPONSE_RULE_MESSAGE_CHARS),
+                    "override",
+                )
             }
         };
 
@@ -247,8 +253,7 @@ fn rule_applies_to_scope(
 
 fn has_disallowed_control(value: &str, allow_multiline: bool) -> bool {
     value.chars().any(|character| {
-        character.is_control()
-            && !(allow_multiline && matches!(character, '\n' | '\t'))
+        character.is_control() && !(allow_multiline && matches!(character, '\n' | '\t'))
     })
 }
 
@@ -270,9 +275,7 @@ fn runtime_rule_is_safe(rule: &UpstreamErrorResponseRule) -> bool {
     };
     let valid_status_behavior = match &rule.status_behavior {
         UpstreamErrorStatusBehavior::Passthrough => true,
-        UpstreamErrorStatusBehavior::Override { status_code } => {
-            (400..=599).contains(status_code)
-        }
+        UpstreamErrorStatusBehavior::Override { status_code } => (400..=599).contains(status_code),
     };
     let valid_message_behavior = match &rule.message_behavior {
         UpstreamErrorMessageBehavior::Passthrough => true,
@@ -287,8 +290,7 @@ fn runtime_rule_is_safe(rule: &UpstreamErrorResponseRule) -> bool {
         && !rule.name.trim().is_empty()
         && rule.name.chars().count() <= MAX_UPSTREAM_ERROR_RESPONSE_RULE_NAME_CHARS
         && !has_disallowed_control(rule.name.as_str(), false)
-        && rule.description.chars().count()
-            <= MAX_UPSTREAM_ERROR_RESPONSE_RULE_DESCRIPTION_CHARS
+        && rule.description.chars().count() <= MAX_UPSTREAM_ERROR_RESPONSE_RULE_DESCRIPTION_CHARS
         && !has_disallowed_control(rule.description.as_str(), false)
         && rule.priority <= MAX_UPSTREAM_ERROR_RESPONSE_RULE_PRIORITY
         && (!rule.status_codes.is_empty() || !rule.keywords.is_empty())
@@ -303,9 +305,10 @@ fn runtime_rule_is_safe(rule: &UpstreamErrorResponseRule) -> bool {
                 && keyword.chars().count() <= MAX_UPSTREAM_ERROR_RESPONSE_RULE_KEYWORD_CHARS
                 && !has_disallowed_control(keyword.as_str(), false)
         })
-        && rule.cli_keys.iter().all(|key| {
-            crate::shared::cli_key::is_supported_cli_key(key.as_str())
-        })
+        && rule
+            .cli_keys
+            .iter()
+            .all(|key| crate::shared::cli_key::is_supported_cli_key(key.as_str()))
         && rule.provider_ids.len() <= MAX_UPSTREAM_ERROR_RESPONSE_RULE_PROVIDER_IDS
         && rule.provider_ids.iter().all(|provider_id| *provider_id > 0)
         && valid_status_behavior
@@ -661,7 +664,10 @@ mod tests {
         assert!(!supports_bounded_body_observation(&headers));
 
         let mut repeated = HeaderMap::new();
-        repeated.append(header::CONTENT_ENCODING, HeaderValue::from_static("identity"));
+        repeated.append(
+            header::CONTENT_ENCODING,
+            HeaderValue::from_static("identity"),
+        );
         repeated.append(header::CONTENT_ENCODING, HeaderValue::from_static("gzip"));
         assert!(!supports_bounded_body_observation(&repeated));
     }
@@ -686,10 +692,7 @@ mod tests {
             Some("120")
         );
 
-        headers.insert(
-            header::RETRY_AFTER,
-            HeaderValue::from_static("not-a-delay"),
-        );
+        headers.insert(header::RETRY_AFTER, HeaderValue::from_static("not-a-delay"));
         assert!(safe_retry_after(&headers).is_none());
 
         let mut repeated = HeaderMap::new();

@@ -235,7 +235,9 @@ pub enum UpstreamErrorResponseMatchMode {
 pub enum UpstreamErrorStatusBehavior {
     #[default]
     Passthrough,
-    Override { status_code: u16 },
+    Override {
+        status_code: u16,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type, Default)]
@@ -243,7 +245,9 @@ pub enum UpstreamErrorStatusBehavior {
 pub enum UpstreamErrorMessageBehavior {
     #[default]
     Passthrough,
-    Override { message: String },
+    Override {
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]

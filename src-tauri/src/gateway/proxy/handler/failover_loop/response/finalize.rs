@@ -232,9 +232,7 @@ pub(super) async fn all_providers_failed<R: tauri::Runtime>(
         .as_ref()
         .map(|outcome| outcome.error_code)
         .unwrap_or(GatewayErrorCode::UpstreamAllFailed.as_str());
-    let final_error_category = last_outcome
-        .as_ref()
-        .map(|outcome| outcome.error_category);
+    let final_error_category = last_outcome.as_ref().map(|outcome| outcome.error_category);
 
     // Disk log: all providers tried and failed.
     tracing::error!(

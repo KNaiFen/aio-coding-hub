@@ -2,8 +2,8 @@
 
 use super::defaults::*;
 use super::types::{
-    AppSettings, CodexHomeMode, ModelRoutingPolicy, ModelRoutingRule, UpstreamRetryPolicy,
-    UpstreamErrorMessageBehavior, UpstreamErrorResponseRule, UpstreamErrorStatusBehavior,
+    AppSettings, CodexHomeMode, ModelRoutingPolicy, ModelRoutingRule, UpstreamErrorMessageBehavior,
+    UpstreamErrorResponseRule, UpstreamErrorStatusBehavior, UpstreamRetryPolicy,
 };
 use crate::shared::error::AppResult;
 use std::collections::HashSet;
@@ -449,16 +449,13 @@ fn is_canonical_uuid_v4(value: &str) -> bool {
     }
 
     bytes.iter().enumerate().all(|(index, byte)| {
-        matches!(index, 8 | 13 | 18 | 23)
-            || byte.is_ascii_digit()
-            || matches!(*byte, b'a'..=b'f')
+        matches!(index, 8 | 13 | 18 | 23) || byte.is_ascii_digit() || matches!(*byte, b'a'..=b'f')
     })
 }
 
 fn has_disallowed_control(value: &str, allow_multiline: bool) -> bool {
     value.chars().any(|character| {
-        character.is_control()
-            && !(allow_multiline && matches!(character, '\n' | '\t'))
+        character.is_control() && !(allow_multiline && matches!(character, '\n' | '\t'))
     })
 }
 
@@ -515,7 +512,8 @@ fn normalize_error_response_rule_for_write(
             .into());
         }
     }
-    rule.status_codes.retain(|status| seen_statuses.insert(*status));
+    rule.status_codes
+        .retain(|status| seen_statuses.insert(*status));
 
     if rule.keywords.len() > MAX_UPSTREAM_ERROR_RESPONSE_RULE_KEYWORDS {
         return Err(format!(
@@ -570,8 +568,7 @@ fn normalize_error_response_rule_for_write(
             .into());
         }
     }
-    rule
-        .cli_keys
+    rule.cli_keys
         .retain(|cli_key| seen_cli_keys.insert(cli_key.clone()));
 
     if rule.provider_ids.len() > MAX_UPSTREAM_ERROR_RESPONSE_RULE_PROVIDER_IDS {
@@ -580,15 +577,18 @@ fn normalize_error_response_rule_for_write(
         )
         .into());
     }
-    if rule.provider_ids.iter().any(|provider_id| *provider_id <= 0) {
+    if rule
+        .provider_ids
+        .iter()
+        .any(|provider_id| *provider_id <= 0)
+    {
         return Err(format!(
             "SEC_INVALID_INPUT: upstream_error_response_rules[{rule_index}].provider_ids must contain positive IDs"
         )
         .into());
     }
     let mut seen_provider_ids = HashSet::new();
-    rule
-        .provider_ids
+    rule.provider_ids
         .retain(|provider_id| seen_provider_ids.insert(*provider_id));
 
     if let UpstreamErrorStatusBehavior::Override { status_code } = &rule.status_behavior {
@@ -640,9 +640,7 @@ pub fn normalize_upstream_error_response_rules_for_write(
     Ok(*rules != original)
 }
 
-pub fn sanitize_upstream_error_response_rules(
-    rules: &mut Vec<UpstreamErrorResponseRule>,
-) -> bool {
+pub fn sanitize_upstream_error_response_rules(rules: &mut Vec<UpstreamErrorResponseRule>) -> bool {
     let original = rules.clone();
     let mut sanitized = Vec::new();
     let mut seen_ids = HashSet::new();
@@ -1416,9 +1414,7 @@ pub(super) fn repair_settings(
     repaired |= sanitize_failover_settings(settings);
     repaired |= sanitize_upstream_retry_policy(&mut settings.upstream_retry_policy);
     repaired |= sanitize_model_routing_policy(&mut settings.model_routing_policy);
-    repaired |= sanitize_upstream_error_response_rules(
-        &mut settings.upstream_error_response_rules,
-    );
+    repaired |= sanitize_upstream_error_response_rules(&mut settings.upstream_error_response_rules);
     repaired |= sanitize_circuit_breaker_settings(settings);
     repaired |= sanitize_provider_cooldown_seconds(settings);
     repaired |= sanitize_provider_base_url_ping_cache_ttl_seconds(settings);
@@ -1459,8 +1455,9 @@ mod tests {
     #[test]
     fn normalize_upstream_error_response_rules_canonicalizes_safe_fields() {
         let mut rules = vec![upstream_error_response_rule()];
-        assert!(normalize_upstream_error_response_rules_for_write(&mut rules)
-            .expect("valid rules"));
+        assert!(
+            normalize_upstream_error_response_rules_for_write(&mut rules).expect("valid rules")
+        );
         assert_eq!(rules[0].name, "quota");
         assert_eq!(rules[0].description, "test");
         assert_eq!(rules[0].status_codes, vec![429]);

@@ -869,7 +869,8 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
                 );
 
             if let Some(rewrite) = error_response_rewrite.as_ref() {
-                if let Some(response) = rewrite.build_response(cli_key.as_str(), trace_id.as_str()) {
+                if let Some(response) = rewrite.build_response(cli_key.as_str(), trace_id.as_str())
+                {
                     response_fixer::push_special_setting(
                         &special_settings,
                         rewrite.special_setting(),
@@ -902,12 +903,14 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
                             created_at_ms,
                             created_at,
                         })
-                        .with_completion(RequestCompletion::failure_with_ttfb(
-                            rewrite.client_status.as_u16(),
-                            Some(category.as_str()),
-                            error_code,
-                            duration_ms,
-                        )),
+                        .with_completion(
+                            RequestCompletion::failure_with_ttfb(
+                                rewrite.client_status.as_u16(),
+                                Some(category.as_str()),
+                                error_code,
+                                duration_ms,
+                            ),
+                        ),
                     )
                     .await;
 

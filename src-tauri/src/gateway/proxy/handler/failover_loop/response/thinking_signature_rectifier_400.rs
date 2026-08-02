@@ -585,12 +585,14 @@ pub(super) async fn handle_thinking_rectifiers_400<R: tauri::Runtime>(
                                 created_at_ms,
                                 created_at,
                             })
-                            .with_completion(RequestCompletion::failure_with_ttfb(
-                                rewrite.client_status.as_u16(),
-                                Some(category.as_str()),
-                                error_code,
-                                duration_ms,
-                            )),
+                            .with_completion(
+                                RequestCompletion::failure_with_ttfb(
+                                    rewrite.client_status.as_u16(),
+                                    Some(category.as_str()),
+                                    error_code,
+                                    duration_ms,
+                                ),
+                            ),
                         )
                         .await;
 

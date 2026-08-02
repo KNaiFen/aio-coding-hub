@@ -48,8 +48,7 @@ pub(super) struct RequestContext<R: tauri::Runtime = tauri::Wry> {
     pub(super) max_providers_to_try: u32,
     pub(super) upstream_retry_policy: crate::settings::UpstreamRetryPolicy,
     pub(super) model_routing_policy: crate::settings::ModelRoutingPolicy,
-    pub(super) upstream_error_response_rules:
-        Vec<crate::settings::UpstreamErrorResponseRule>,
+    pub(super) upstream_error_response_rules: Vec<crate::settings::UpstreamErrorResponseRule>,
     pub(super) provider_cooldown_secs: i64,
     pub(super) upstream_first_byte_timeout_secs: u32,
     pub(super) upstream_first_byte_timeout: Option<Duration>,
@@ -318,8 +317,7 @@ pub(super) struct RequestContextParts<R: tauri::Runtime = tauri::Wry> {
     pub(super) max_providers_to_try: u32,
     pub(super) upstream_retry_policy: crate::settings::UpstreamRetryPolicy,
     pub(super) model_routing_policy: crate::settings::ModelRoutingPolicy,
-    pub(super) upstream_error_response_rules:
-        Vec<crate::settings::UpstreamErrorResponseRule>,
+    pub(super) upstream_error_response_rules: Vec<crate::settings::UpstreamErrorResponseRule>,
     pub(super) provider_cooldown_secs: i64,
     pub(super) upstream_first_byte_timeout_secs: u32,
     pub(super) upstream_stream_idle_timeout_secs: u32,
