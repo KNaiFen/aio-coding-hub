@@ -979,9 +979,7 @@ fn parse_configured_model_route(
             return None;
         }
         let provider_id = object.get("providerId")?.as_i64()?;
-        if provider_id <= 0
-            || final_provider_id.is_some_and(|expected| expected != provider_id)
-        {
+        if provider_id <= 0 || final_provider_id.is_some_and(|expected| expected != provider_id) {
             return None;
         }
         let source_model = bounded_optional(object.get("sourceModel")?.as_str(), 256)?;

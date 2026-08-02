@@ -316,10 +316,9 @@ pub(crate) fn effective_cost_basis(
     special_settings_json: Option<&str>,
     final_provider_id: Option<i64>,
 ) -> Option<EffectiveCostBasis> {
-    if let Some((cli_key, model)) = semantics::resolve_configured_model_cost_basis(
-        special_settings_json,
-        final_provider_id,
-    ) {
+    if let Some((cli_key, model)) =
+        semantics::resolve_configured_model_cost_basis(special_settings_json, final_provider_id)
+    {
         return Some(EffectiveCostBasis { cli_key, model });
     }
 

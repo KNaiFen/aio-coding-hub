@@ -334,7 +334,10 @@ mod tests {
             resolve_configured_model_cost_basis(Some(&json), Some(7)),
             Some(("codex".to_string(), "gpt-5.6-terra".to_string()))
         );
-        assert_eq!(resolve_configured_model_cost_basis(Some(&json), Some(9)), None);
+        assert_eq!(
+            resolve_configured_model_cost_basis(Some(&json), Some(9)),
+            None
+        );
         assert_eq!(resolve_configured_model_cost_basis(Some(&json), None), None);
 
         let incomplete = r#"[{"type":"configured_model_route","providerId":7,"pricedCliKey":"codex","applied":true}]"#;

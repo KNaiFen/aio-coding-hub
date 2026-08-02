@@ -2134,12 +2134,12 @@ INSERT INTO providers(
                 } else {
                     existing_upstream_retry_policy_json
                 };
-            let next_model_routing_policy_override_json =
-                if model_routing_policy_override_specified {
-                    model_routing_policy_override_json
-                } else {
-                    existing_model_routing_policy_json
-                };
+            let next_model_routing_policy_override_json = if model_routing_policy_override_specified
+            {
+                model_routing_policy_override_json
+            } else {
+                existing_model_routing_policy_json
+            };
             let connection_changed = existing_base_urls_json != base_urls_json
                 || existing_base_url_mode != base_url_mode.as_str()
                 || existing_auth_mode_raw != next_auth_mode

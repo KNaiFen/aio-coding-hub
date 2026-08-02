@@ -920,16 +920,15 @@ mod tests {
     fn configured_model_route_keeps_original_and_effective_model_with_policy_source() {
         let mut request = request_with_route_counts(1, 0, 0);
         request.model = Some("fable5".to_string());
-        request.configured_model_route = Some(
-            aio_observer_protocol::ObserverConfiguredModelRoute {
+        request.configured_model_route =
+            Some(aio_observer_protocol::ObserverConfiguredModelRoute {
                 source_model: "fable5".to_string(),
                 effective_model: "opus4.8".to_string(),
                 reasoning_effort: Some("low".to_string()),
                 policy_source: "provider".to_string(),
                 model_applied: true,
                 reasoning_effort_applied: true,
-            },
-        );
+            });
 
         assert!(request_card_lines(&request, 10, 80)
             .iter()

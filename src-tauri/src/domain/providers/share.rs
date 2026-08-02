@@ -1561,9 +1561,8 @@ pub(crate) fn import_provider_share(
         .clone()
         .map(Into::into);
     let retry_policy_json = retry_policy_override_to_json(retry_policy)?;
-    let model_routing_policy_json = model_routing_policy_override_to_json(
-        configuration.model_routing_policy_override.clone(),
-    )?;
+    let model_routing_policy_json =
+        model_routing_policy_override_to_json(configuration.model_routing_policy_override.clone())?;
     let auth = authentication_db_fields(&provider.authentication);
     let sort_order = next_sort_order(&tx, &provider.cli_key)?;
     let now = now_unix_seconds();

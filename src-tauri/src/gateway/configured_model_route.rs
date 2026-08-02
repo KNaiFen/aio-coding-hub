@@ -46,7 +46,9 @@ pub(in crate::gateway) fn resolve(
         return None;
     }
 
-    let requested_model = requested_model.map(str::trim).filter(|value| !value.is_empty())?;
+    let requested_model = requested_model
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
     if requested_model.starts_with("aio/") {
         return None;
     }
@@ -105,10 +107,7 @@ pub(in crate::gateway) fn mark_result(
     );
 }
 
-fn upsert_route_setting(
-    special_settings: &Arc<Mutex<Vec<Value>>>,
-    setting: serde_json::Value,
-) {
+fn upsert_route_setting(special_settings: &Arc<Mutex<Vec<Value>>>, setting: serde_json::Value) {
     crate::gateway::response_fixer::upsert_configured_model_route(special_settings, setting);
 }
 
@@ -179,16 +178,16 @@ pub(in crate::gateway) fn apply(
                     false
                 }
             }
-            Some(crate::gateway::util::RequestedModelLocation::BodyJson) | None => body_json
-                .as_mut()
-                .is_some_and(|root| {
+            Some(crate::gateway::util::RequestedModelLocation::BodyJson) | None => {
+                body_json.as_mut().is_some_and(|root| {
                     let changed = crate::gateway::proxy::model_rewrite::replace_model_in_body_json(
                         root,
                         target_model,
                     );
                     body_changed |= changed;
                     changed
-                }),
+                })
+            }
         };
 
         if !model_applied {
@@ -215,7 +214,11 @@ pub(in crate::gateway) fn apply(
     body_changed |= reasoning_effort_applied;
 
     let serialized_body = body_changed
-        .then(|| body_json.as_ref().and_then(|root| serde_json::to_vec(root).ok()))
+        .then(|| {
+            body_json
+                .as_ref()
+                .and_then(|root| serde_json::to_vec(root).ok())
+        })
         .flatten()
         .map(Bytes::from);
     if body_changed && serialized_body.is_none() {

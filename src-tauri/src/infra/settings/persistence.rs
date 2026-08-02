@@ -3,8 +3,8 @@
 use super::defaults::*;
 use super::migration::{
     normalize_cli_priority_order, normalize_codex_home_override,
-    normalize_model_routing_policy_for_write,
-    normalize_upstream_retry_policy_for_write, repair_settings,
+    normalize_model_routing_policy_for_write, normalize_upstream_retry_policy_for_write,
+    repair_settings,
 };
 use super::types::{AppSettings, CodexHomeMode, GatewayListenMode, WslHostAddressMode};
 use crate::app_paths;

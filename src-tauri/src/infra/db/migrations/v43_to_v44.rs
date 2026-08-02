@@ -2,9 +2,7 @@
 
 use rusqlite::Connection;
 
-pub(super) fn migrate_v43_to_v44(
-    conn: &mut Connection,
-) -> crate::shared::error::AppResult<()> {
+pub(super) fn migrate_v43_to_v44(conn: &mut Connection) -> crate::shared::error::AppResult<()> {
     let tx = conn
         .transaction()
         .map_err(|error| format!("failed to start sqlite transaction: {error}"))?;

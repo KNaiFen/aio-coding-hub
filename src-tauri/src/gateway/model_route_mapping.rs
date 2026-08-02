@@ -78,13 +78,12 @@ pub(in crate::gateway) fn build_model_route_mapping_setting(
 
     let requested_model = normalize_text(input.requested_model)?;
     let actual_model = normalize_text(input.actual_model)?;
-    let requested_effort =
-        resolve_requested_effort(
-            input.cli_key,
-            &requested_model,
-            input.special_settings,
-            input.provider_id,
-        );
+    let requested_effort = resolve_requested_effort(
+        input.cli_key,
+        &requested_model,
+        input.special_settings,
+        input.provider_id,
+    );
     let actual_effort = resolve_actual_effort(
         &actual_model,
         input.actual_reasoning_effort,

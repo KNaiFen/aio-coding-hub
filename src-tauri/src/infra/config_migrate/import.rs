@@ -115,9 +115,7 @@ pub(super) fn import_into_transaction(
             .map_err(|e| format!("SYSTEM_ERROR: failed to serialize base_urls: {e}"))?;
         let base_url_primary = base_urls.first().cloned().unwrap_or_default();
         let model_routing_policy_json =
-            crate::providers::model_routing_policy_override_to_json(
-                model_routing_policy_override,
-            )?;
+            crate::providers::model_routing_policy_override_to_json(model_routing_policy_override)?;
 
         tx.execute(
             r#"

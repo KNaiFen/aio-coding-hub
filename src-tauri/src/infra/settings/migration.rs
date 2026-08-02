@@ -408,10 +408,8 @@ pub fn sanitize_model_routing_policy(policy: &mut ModelRoutingPolicy) -> bool {
         {
             continue;
         }
-        let target_model = normalize_optional_model_routing_text(
-            rule.target_model,
-            MAX_MODEL_ROUTING_MODEL_BYTES,
-        );
+        let target_model =
+            normalize_optional_model_routing_text(rule.target_model, MAX_MODEL_ROUTING_MODEL_BYTES);
         let reasoning_effort = rule
             .reasoning_effort
             .map(|value| value.trim().to_string())
