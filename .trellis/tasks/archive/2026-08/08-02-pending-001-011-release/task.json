@@ -3,7 +3,7 @@
   "name": "pending-001-011-release",
   "title": "完成 PENDING 001-011 并发布 0.60.43",
   "description": "按六个功能批次完成全部待办、合并、发布并交付制品",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": null,
   "scope": null,
   "package": "aio-coding-hub",
@@ -11,12 +11,12 @@
   "creator": "KNaiFen",
   "assignee": "KNaiFen",
   "createdAt": "2026-08-02",
-  "completedAt": null,
-  "branch": "codex/pending-001-011",
+  "completedAt": "2026-08-03",
+  "branch": "agent/release-0.60.43",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": null,
-  "pr_url": null,
+  "commit": "32247d3c79cdc77e8ff97dc1bedd38236c84e904",
+  "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/19",
   "subtasks": [],
   "children": [
     "08-02-provider-routing-master-switch",
@@ -28,6 +28,6 @@
   ],
   "parent": null,
   "relatedFiles": [],
-  "notes": "",
+  "notes": "功能 PR #18 与发布 PR #19 均已合并。精确主分支候选 CI 30760562843 和发布工作流 30762121860 已成功；aio-coding-hub-v0.60.43 已公开发布 12 个资产，SHA256SUMS.txt 中 11 个有效载荷已逐项校验通过。",
   "meta": {}
 }

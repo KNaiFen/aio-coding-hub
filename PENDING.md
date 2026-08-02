@@ -14,7 +14,8 @@
 
 - `AIO-PENDING-001` 至 `AIO-PENDING-011` 已由 PR #18 合并到 `main`，合并提交为 `4d985a83eefde7021b9016206d769581fc3c4cfd`。
 - 精确头部完整 CI `30758235885` 已通过前端、Rust、格式/绑定、Clippy、Rust 全工作区测试和依赖审计；macOS ARM 集成构建 `30758280877` 已成功。
-- 本发布批次版本为 `0.60.43`；正式标签与发布产物由该版本合并后的主分支候选构建生成。
+- 发布准备 PR #19 已通过 GitHub Auto-merge 合并，发布提交为 `32247d3c79cdc77e8ff97dc1bedd38236c84e904`；精确主分支候选 CI `30760562843` 已成功。
+- 正式版本为 [`aio-coding-hub-v0.60.43`](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.43)，发布工作流 `30762121860` 已成功；12 个 Release 资产已上传，`SHA256SUMS.txt` 中 11 个有效载荷已逐项校验通过。
 
 ## 条目
 

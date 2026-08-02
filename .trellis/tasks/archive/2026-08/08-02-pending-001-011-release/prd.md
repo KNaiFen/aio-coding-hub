@@ -13,12 +13,13 @@
 
 ## Acceptance Criteria
 
-- [ ] 六个子任务全部合并并通过完整 CI 与 macOS 云端构建。
-- [ ] P001-P011 均有提交、PR、合并与发布证据并标记为 `done`。
-- [ ] 发布 `aio-coding-hub-v0.60.43`，校验所有桌面、TUI、更新器和校验和制品。
+- [x] 六个子任务全部合并并通过完整 CI 与 macOS 云端构建。
+- [x] P001-P011 均有提交、PR、合并与发布证据并标记为 `done`。
+- [x] 发布 `aio-coding-hub-v0.60.43`，校验所有桌面、TUI、更新器和校验和制品。
 
 ## Notes
 
-- Keep `prd.md` focused on requirements, constraints, and acceptance criteria.
-- Lightweight tasks can remain PRD-only.
-- For complex tasks, add `design.md` for technical design and `implement.md` for execution planning before `task.py start`.
+- 功能 PR：https://github.com/KNaiFen/aio-coding-hub/pull/18
+- 发布 PR：https://github.com/KNaiFen/aio-coding-hub/pull/19
+- 发布候选 CI：https://github.com/KNaiFen/aio-coding-hub/actions/runs/30760562843
+- 正式发布：https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.43
