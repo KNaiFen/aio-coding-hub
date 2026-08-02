@@ -1323,10 +1323,11 @@ fn source_cli_key_for_bridge_type(bridge_type: &str) -> Option<&'static str> {
     }
 }
 
-pub(crate) fn get_source_provider_for_gateway(
+fn get_source_provider(
     db: &db::Db,
     source_provider_id: i64,
     bridge_type: &str,
+    require_enabled: bool,
 ) -> crate::shared::error::AppResult<(ProviderForGateway, String)> {
     let conn = db.open_connection()?;
     let cli_key_owned = conn
@@ -1378,13 +1379,18 @@ SELECT
   upstream_retry_policy_json,
   model_routing_policy_json
 FROM providers
-WHERE id = ?1 AND enabled = 1 AND source_provider_id IS NULL AND bridge_type IS NULL
+WHERE id = ?1
+  AND (?2 = 0 OR enabled = 1)
+  AND source_provider_id IS NULL
+  AND bridge_type IS NULL
 "#;
 
     let mut provider = conn
-        .query_row(sql, params![source_provider_id], |row| {
-            map_gateway_provider_row(row, &cli_key_owned, 0)
-        })
+        .query_row(
+            sql,
+            params![source_provider_id, i64::from(require_enabled)],
+            |row| map_gateway_provider_row(row, &cli_key_owned, 0),
+        )
         .optional()
         .map_err(|e| db_err!("failed to query source provider: {e}"))?
         .ok_or_else(|| {
@@ -1392,6 +1398,24 @@ WHERE id = ?1 AND enabled = 1 AND source_provider_id IS NULL AND bridge_type IS 
         })?;
     fill_gateway_extension_values(&conn, &mut provider)?;
     Ok((provider, cli_key_owned))
+}
+
+pub(crate) fn get_source_provider_for_gateway(
+    db: &db::Db,
+    source_provider_id: i64,
+    bridge_type: &str,
+) -> crate::shared::error::AppResult<(ProviderForGateway, String)> {
+    get_source_provider(db, source_provider_id, bridge_type, true)
+}
+
+/// Manual diagnostics may inspect a disabled source without making it eligible
+/// for gateway routing.
+pub(crate) fn get_source_provider_for_availability(
+    db: &db::Db,
+    source_provider_id: i64,
+    bridge_type: &str,
+) -> crate::shared::error::AppResult<(ProviderForGateway, String)> {
+    get_source_provider(db, source_provider_id, bridge_type, false)
 }
 
 pub(crate) fn get_enabled_direct_codex_for_gateway_by_identity(

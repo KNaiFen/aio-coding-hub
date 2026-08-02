@@ -935,10 +935,10 @@ fn insert_batch_once(
         }
     }
 
+    crate::domain::provider_availability::record_request_observations_best_effort(&tx, items);
+
     tx.commit()
         .map_err(|e| DbWriteError::from_rusqlite("failed to commit transaction", e))?;
-
-    crate::domain::provider_availability::record_request_observations_best_effort(db, items);
 
     Ok(())
 }

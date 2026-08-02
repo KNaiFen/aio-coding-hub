@@ -19,6 +19,7 @@
       "provider_name": "Provider A",
       "base_url": "https://provider-a.example",
       "outcome": "success",
+      "upstream_sent": true,
       "status": 200,
       "provider_index": 1,
       "retry_index": 1,

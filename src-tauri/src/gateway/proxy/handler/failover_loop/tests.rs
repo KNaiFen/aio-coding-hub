@@ -319,12 +319,13 @@ fn gate_skip_attempt_without_trigger_omits_trigger_key_but_keeps_state() {
 #[test]
 fn non_circuit_attempts_serialize_without_circuit_attribution_keys() {
     // The two circuit-only keys must be absent when None. Other stable wire
-    // fields, including requested_upstream_model, serialize explicit nulls.
+    // fields, including upstream_sent and requested_upstream_model, serialize.
     let expected_keys = [
         "provider_id",
         "provider_name",
         "base_url",
         "outcome",
+        "upstream_sent",
         "status",
         "provider_index",
         "retry_index",

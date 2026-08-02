@@ -700,6 +700,7 @@ describe("services/gateway/traceStore", () => {
       provider_name: `P${index}`,
       base_url: `https://p${index}.example`,
       outcome: "failed",
+      upstream_sent: true,
       status: 500,
       requested_upstream_model: null,
     }));

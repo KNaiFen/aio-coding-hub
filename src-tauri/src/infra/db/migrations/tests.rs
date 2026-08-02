@@ -2379,7 +2379,7 @@ fn fresh_baseline_creates_complete_usage_ledger_schema() {
     let user_version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("read fresh user version");
-    assert_eq!(user_version, 44);
+    assert_eq!(user_version, 45);
     for object in [
         ("table", "usage_ledger"),
         ("table", "usage_ledger_backfill_state"),

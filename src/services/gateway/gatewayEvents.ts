@@ -28,7 +28,13 @@ export type { GatewayCircuitEvent, GatewayLogEvent } from "../../generated/bindi
 // normalizeGatewayAttempt 仅保留核心字段，attempts 收窄为 FailoverAttempt 的子集。
 export type GatewayAttempt = Pick<
   FailoverAttempt,
-  "provider_id" | "provider_name" | "base_url" | "outcome" | "status" | "requested_upstream_model"
+  | "provider_id"
+  | "provider_name"
+  | "base_url"
+  | "outcome"
+  | "upstream_sent"
+  | "status"
+  | "requested_upstream_model"
 >;
 
 export type GatewayRequestEvent = Omit<GeneratedGatewayRequestEvent, "attempts"> & {
@@ -231,6 +237,7 @@ function isGatewayAttempt(payload: unknown): payload is GatewayAttempt {
     isString(payload.provider_name) &&
     isString(payload.base_url) &&
     isString(payload.outcome) &&
+    isNullableBoolean(payload.upstream_sent) &&
     isNullableNumber(payload.status) &&
     isNullableString(payload.requested_upstream_model)
   );
@@ -243,6 +250,7 @@ function normalizeGatewayAttempt(payload: unknown): GatewayAttempt | null {
     provider_name: truncateString(payload.provider_name, EVENT_SHORT_TEXT_MAX_LENGTH),
     base_url: truncateString(payload.base_url, EVENT_URL_MAX_LENGTH),
     outcome: truncateString(payload.outcome, EVENT_STATE_MAX_LENGTH),
+    upstream_sent: payload.upstream_sent === true,
     status: payload.status ?? null,
     requested_upstream_model:
       truncateNullableString(payload.requested_upstream_model, EVENT_SHORT_TEXT_MAX_LENGTH) ?? null,

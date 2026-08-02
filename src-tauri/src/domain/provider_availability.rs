@@ -265,8 +265,11 @@ async fn load_effective_provider_for_test(
         return Ok(provider);
     };
 
-    let (source, source_cli_key) =
-        crate::providers::get_source_provider_for_gateway(&db, source_provider_id, bridge_type)?;
+    let (source, source_cli_key) = crate::providers::get_source_provider_for_availability(
+        &db,
+        source_provider_id,
+        bridge_type,
+    )?;
 
     Ok(LoadedProvider {
         id: provider.id,
@@ -794,10 +797,10 @@ fn observations_from_attempts(
         .collect()
 }
 
-/// Projects terminal request attempts into provider facts after the request-log
-/// transaction has committed. Failures are intentionally diagnostic-only.
+/// Projects terminal request attempts inside the request-log transaction so
+/// both records become visible together. Failures are diagnostic-only.
 pub(crate) fn record_request_observations_best_effort(
-    db: &db::Db,
+    tx: &rusqlite::Transaction<'_>,
     items: &[crate::request_logs::RequestLogInsert],
 ) {
     let observations = items
@@ -822,10 +825,6 @@ pub(crate) fn record_request_observations_best_effort(
     }
 
     let result = (|| -> AppResult<()> {
-        let mut conn = db.open_connection()?;
-        let tx = conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|error| db_err!("failed to begin availability projection: {error}"))?;
         {
             let mut statement = tx
                 .prepare_cached(
@@ -857,8 +856,6 @@ ON CONFLICT(trace_id, provider_id) DO UPDATE SET
                     .map_err(|error| db_err!("failed to write availability fact: {error}"))?;
             }
         }
-        tx.commit()
-            .map_err(|error| db_err!("failed to commit availability projection: {error}"))?;
         Ok(())
     })();
     if let Err(error) = result {
