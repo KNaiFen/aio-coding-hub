@@ -33,6 +33,7 @@ pub(crate) use queries::{
     get_source_provider_for_gateway, list_enabled_for_gateway_in_mode,
     list_enabled_for_gateway_using_active_mode,
     list_enabled_gateway_provider_identities_using_active_mode,
+    model_routing_policy_override_from_json, model_routing_policy_override_to_json,
     list_oauth_providers_needing_refresh, list_observer_rows, replace_extension_values,
     resolve_effective_credential, resolve_effective_transport_credential, set_enabled,
     set_oauth_last_error, update_oauth_tokens, update_oauth_tokens_if_last_refreshed_matches,

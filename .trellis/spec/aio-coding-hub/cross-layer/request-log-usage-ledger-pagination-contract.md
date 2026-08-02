@@ -41,6 +41,12 @@ leaderboards, trends, cache rate, Session and folder views, cost backfill,
 provider-limit display, and actual provider-limit gating. Detail, attempt, and
 replay APIs continue reading `request_logs`.
 
+When an applied configured-model-route marker matches the final provider, its
+target CLI/model is the authoritative cost basis for both the request log and
+ledger. A missing target-model price remains unknown; costing must never fall
+back to the original client model. Malformed, future, pending, or
+provider-mismatched markers are ignored.
+
 ## Retention And Clear Operations
 
 Automatic retention verifies durable ledger coverage before deleting each

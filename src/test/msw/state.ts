@@ -8,6 +8,7 @@ import type { GatewayStatus } from "../../services/gateway/gateway";
 import type { PluginDetail, PluginSummary } from "../../services/plugins";
 import type { CliKey, ProviderSummary } from "../../services/providers/providers";
 import type { AppSettings } from "../../services/settings/settings";
+import { DEFAULT_MODEL_ROUTING_POLICY } from "../../services/gateway/modelRoutingPolicy";
 import { DEFAULT_UPSTREAM_RETRY_POLICY } from "../../services/gateway/upstreamRetryPolicy";
 import type { SortModeActiveRow, SortModeSummary } from "../../services/providers/sortModes";
 import type { UsageSummary } from "../../services/usage/usage";
@@ -25,7 +26,7 @@ const DEFAULT_CLI_PROXY_STATUS: CliProxyStatus[] = [
 
 // Default settings matching the Rust backend defaults.
 const DEFAULT_SETTINGS: AppSettings = {
-  schema_version: 55,
+  schema_version: 56,
   preferred_port: 37123,
   show_home_heatmap: true,
   show_home_usage: true,
@@ -56,6 +57,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   failover_max_attempts_per_provider: 5,
   failover_max_providers_to_try: 5,
   upstream_retry_policy: DEFAULT_UPSTREAM_RETRY_POLICY,
+  model_routing_policy: DEFAULT_MODEL_ROUTING_POLICY,
   circuit_breaker_failure_threshold: 5,
   circuit_breaker_open_duration_minutes: 30,
   enable_circuit_breaker_notice: false,

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import type { ProviderSummary } from "../../../services/providers/providers";
 import { DEFAULT_UPSTREAM_RETRY_POLICY } from "../../../services/gateway/upstreamRetryPolicy";
+import { DEFAULT_MODEL_ROUTING_POLICY } from "../../../services/gateway/modelRoutingPolicy";
 import { DEFAULT_FORM_VALUES } from "../providerEditorUtils";
 import { runProviderEditorSave } from "../providerEditorSaveRunner";
 import type { SaveActionContext } from "../providerEditorActionContext";
@@ -43,6 +44,7 @@ function makeSavedProvider(partial: Partial<ProviderSummary> = {}): ProviderSumm
     stream_idle_timeout_seconds: partial.stream_idle_timeout_seconds ?? null,
     extension_values: partial.extension_values ?? [],
     upstream_retry_policy_override: partial.upstream_retry_policy_override ?? null,
+    model_routing_policy_override: partial.model_routing_policy_override ?? null,
     availability_test_model: partial.availability_test_model ?? null,
     api_key_configured: partial.api_key_configured ?? true,
     newapi_account_user_id: partial.newapi_account_user_id ?? null,
@@ -77,6 +79,8 @@ function makeContext(overrides: Partial<SaveActionContext> = {}): SaveActionCont
     streamIdleTimeoutSeconds: "",
     upstreamRetryPolicyOverrideEnabled: false,
     upstreamRetryPolicyDraft: DEFAULT_UPSTREAM_RETRY_POLICY,
+    modelRoutingPolicyOverrideEnabled: false,
+    modelRoutingPolicyDraft: DEFAULT_MODEL_ROUTING_POLICY,
     apiKeyConfigured: false,
     isCodexGatewaySource: false,
     sourceProviderId: null,

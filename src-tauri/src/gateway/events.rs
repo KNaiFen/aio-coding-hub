@@ -218,6 +218,14 @@ impl GatewayAttemptEvent {
     pub(crate) fn observer_session_reuse(&self) -> bool {
         self.session_reuse == Some(true)
     }
+
+    pub(crate) fn observer_provider_id(&self) -> i64 {
+        self.provider_id
+    }
+
+    pub(crate) fn observer_special_settings_json(&self) -> Option<&str> {
+        self.special_settings_json.as_deref()
+    }
 }
 
 #[derive(Debug, Serialize, Clone, specta::Type)]

@@ -3,6 +3,8 @@ import {
   type ClaudeModels as GeneratedClaudeModels,
   type DailyResetMode as GeneratedDailyResetMode,
   type ModelMapping as GeneratedModelMapping,
+  type ModelRoutingPolicy,
+  type ModelRoutingRule,
   type ProviderAuthMode as GeneratedProviderAuthMode,
   type ProviderAccountUsageResult,
   type ProviderAccountUsageCustomScriptDraft,
@@ -48,6 +50,8 @@ export type {
   GeneratedProviderOAuthDeviceCodePollResult as ProviderOAuthDeviceCodePollResult,
   GeneratedProviderOAuthDeviceCodeStartResult as ProviderOAuthDeviceCodeStartResult,
   GeneratedProviderOAuthDeviceCodeCancelResult as ProviderOAuthDeviceCodeCancelResult,
+  ModelRoutingPolicy,
+  ModelRoutingRule,
   ProviderOAuthDisconnectResult,
   ProviderOAuthLimitsResult,
   ProviderOAuthRefreshResult,
@@ -124,6 +128,8 @@ type ProviderUpsertFieldMap = {
   accountUsageCredentials: "accountUsageCredentials";
   upstreamRetryPolicyOverride: "upstreamRetryPolicyOverride";
   upstreamRetryPolicyOverrideSpecified: "upstreamRetryPolicyOverrideSpecified";
+  modelRoutingPolicyOverride: "modelRoutingPolicyOverride";
+  modelRoutingPolicyOverrideSpecified: "modelRoutingPolicyOverrideSpecified";
 };
 
 type ProviderUpsertAuthority = RemapGeneratedKeys<
@@ -145,10 +151,13 @@ export type ProviderUpsertInput = Omit<
 
 type ProviderUpsertTransportInput = Omit<
   GeneratedProviderUpsertInput,
-  "streamIdleTimeoutSeconds" | "upstreamRetryPolicyOverrideSpecified"
+  | "streamIdleTimeoutSeconds"
+  | "upstreamRetryPolicyOverrideSpecified"
+  | "modelRoutingPolicyOverrideSpecified"
 > & {
   streamIdleTimeoutSeconds?: GeneratedProviderUpsertInput["streamIdleTimeoutSeconds"];
   upstreamRetryPolicyOverrideSpecified?: GeneratedProviderUpsertInput["upstreamRetryPolicyOverrideSpecified"];
+  modelRoutingPolicyOverrideSpecified?: GeneratedProviderUpsertInput["modelRoutingPolicyOverrideSpecified"];
 };
 
 function toCliKey(value: string, label: string): CliKey {
@@ -221,6 +230,7 @@ function toProviderUpsertPayload(input: ProviderUpsertInput): ProviderUpsertTran
     extensionValues: input.extensionValues ?? null,
     accountUsageCredentials: input.accountUsageCredentials ?? null,
     upstreamRetryPolicyOverride: null,
+    modelRoutingPolicyOverride: null,
   } satisfies Omit<GeneratedProviderUpsertInput, "streamIdleTimeoutSeconds">;
 
   const payload: ProviderUpsertTransportInput = { ...payloadBase };
@@ -232,6 +242,11 @@ function toProviderUpsertPayload(input: ProviderUpsertInput): ProviderUpsertTran
   if (Object.prototype.hasOwnProperty.call(input, "upstreamRetryPolicyOverride")) {
     payload.upstreamRetryPolicyOverride = input.upstreamRetryPolicyOverride ?? null;
     payload.upstreamRetryPolicyOverrideSpecified = true;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(input, "modelRoutingPolicyOverride")) {
+    payload.modelRoutingPolicyOverride = input.modelRoutingPolicyOverride ?? null;
+    payload.modelRoutingPolicyOverrideSpecified = true;
   }
 
   return payload;

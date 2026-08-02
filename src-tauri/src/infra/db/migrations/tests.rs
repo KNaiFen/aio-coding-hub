@@ -2378,7 +2378,7 @@ fn fresh_baseline_creates_complete_usage_ledger_schema() {
     let user_version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("read fresh user version");
-    assert_eq!(user_version, 43);
+    assert_eq!(user_version, 44);
     for object in [
         ("table", "usage_ledger"),
         ("table", "usage_ledger_backfill_state"),
@@ -2446,6 +2446,33 @@ WHERE id = 1
             "usage ledger must not persist {forbidden}"
         );
     }
+}
+
+#[test]
+fn migrate_v43_to_v44_adds_provider_model_routing_policy_column() {
+    let mut conn = Connection::open_in_memory().expect("open v43 migration db");
+    apply_migrations(&mut conn).expect("create current schema fixture");
+    conn.execute_batch(
+        r#"
+DROP VIEW IF EXISTS usage_events;
+ALTER TABLE providers DROP COLUMN model_routing_policy_json;
+PRAGMA user_version = 43;
+"#,
+    )
+    .expect("downgrade fixture to v43 shape");
+
+    v43_to_v44::migrate_v43_to_v44(&mut conn).expect("migrate v43->v44");
+
+    assert!(test_has_column(
+        &conn,
+        "providers",
+        "model_routing_policy_json"
+    ));
+    assert!(test_has_view(&conn, "usage_events"));
+    let user_version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("read v44 user version");
+    assert_eq!(user_version, 44);
 }
 
 #[test]

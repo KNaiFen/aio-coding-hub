@@ -3,6 +3,7 @@
 // For MSW defaults matching the Rust backend, see `src/test/msw/state.ts`.
 
 import type { AppSettings } from "../../services/settings/settings";
+import { DEFAULT_MODEL_ROUTING_POLICY } from "../../services/gateway/modelRoutingPolicy";
 import { DEFAULT_UPSTREAM_RETRY_POLICY } from "../../services/gateway/upstreamRetryPolicy";
 
 export function createTestAppSettings(overrides?: Partial<AppSettings>): AppSettings {
@@ -38,6 +39,7 @@ export function createTestAppSettings(overrides?: Partial<AppSettings>): AppSett
     failover_max_attempts_per_provider: 5,
     failover_max_providers_to_try: 5,
     upstream_retry_policy: DEFAULT_UPSTREAM_RETRY_POLICY,
+    model_routing_policy: DEFAULT_MODEL_ROUTING_POLICY,
     circuit_breaker_failure_threshold: 5,
     circuit_breaker_open_duration_minutes: 30,
     enable_circuit_breaker_notice: false,

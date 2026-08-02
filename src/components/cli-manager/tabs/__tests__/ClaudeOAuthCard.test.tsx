@@ -68,6 +68,7 @@ function makeProvider(overrides: Partial<ProviderSummary> = {}): ProviderSummary
     stream_idle_timeout_seconds: overrides.stream_idle_timeout_seconds ?? null,
     extension_values: overrides.extension_values ?? [],
     upstream_retry_policy_override: overrides.upstream_retry_policy_override ?? null,
+    model_routing_policy_override: overrides.model_routing_policy_override ?? null,
   };
 }
 

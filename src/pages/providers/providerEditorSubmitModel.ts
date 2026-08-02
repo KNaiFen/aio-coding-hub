@@ -12,6 +12,10 @@ import { normalizeBaseUrlRows } from "./baseUrl";
 import { resolveStreamIdleTimeoutSeconds } from "./providerEditorTimeout";
 import { validateUpstreamRetryPolicy } from "../../services/gateway/upstreamRetryPolicy";
 import {
+  normalizeModelRoutingPolicy,
+  validateModelRoutingPolicy,
+} from "../../services/gateway/modelRoutingPolicy";
+import {
   CODEX_TO_OPENAI_CHAT_BRIDGE_TYPE,
   CODEX_TO_OPENAI_RESPONSES_BRIDGE_TYPE,
 } from "./providerEditorUtils";
@@ -71,6 +75,18 @@ export function buildProviderEditorUpsertInput(
         error: {
           kind: "message",
           message: retryPolicyError,
+        },
+      };
+    }
+  }
+  if (ctx.modelRoutingPolicyOverrideEnabled) {
+    const modelRoutingPolicyError = validateModelRoutingPolicy(ctx.modelRoutingPolicyDraft);
+    if (modelRoutingPolicyError) {
+      return {
+        ok: false,
+        error: {
+          kind: "message",
+          message: modelRoutingPolicyError,
         },
       };
     }
@@ -184,6 +200,9 @@ export function buildProviderEditorUpsertInput(
     streamIdleTimeoutSeconds: parsedTimeout,
     upstreamRetryPolicyOverride: ctx.upstreamRetryPolicyOverrideEnabled
       ? ctx.upstreamRetryPolicyDraft
+      : null,
+    modelRoutingPolicyOverride: ctx.modelRoutingPolicyOverrideEnabled
+      ? normalizeModelRoutingPolicy(ctx.modelRoutingPolicyDraft)
       : null,
     ...(ctx.cliKey === "claude" ? { claudeModels: ctx.claudeModels } : {}),
     ...(ctx.cliKey === "codex" && ctx.authMode === "cx2cc"

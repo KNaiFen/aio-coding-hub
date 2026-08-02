@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-pub const SCHEMA_VERSION: u32 = 55;
+pub const SCHEMA_VERSION: u32 = 56;
 pub const DEFAULT_GATEWAY_PORT: u16 = 37123;
 pub const MAX_GATEWAY_PORT: u16 = 37199;
 pub const DEFAULT_PROVIDER_COOLDOWN_SECONDS: u32 = 30;
@@ -50,6 +50,11 @@ pub(super) const SCHEMA_VERSION_ADD_IMAGE_GEN_STORAGE_ROOTS: u32 = 52;
 pub(super) const SCHEMA_VERSION_ADD_UPSTREAM_HTTP_RETRY_RULES: u32 = 53;
 pub(super) const SCHEMA_VERSION_ADD_SESSION_REUSE: u32 = 54;
 pub(super) const SCHEMA_VERSION_UPDATE_RELEASES_URL_TO_USER_FORK: u32 = 55;
+pub(super) const SCHEMA_VERSION_ADD_MODEL_ROUTING_POLICY: u32 = 56;
+
+pub const MAX_MODEL_ROUTING_RULES: usize = 128;
+pub const MAX_MODEL_ROUTING_MODEL_BYTES: usize = 256;
+pub const MAX_MODEL_ROUTING_EFFORT_CHARS: usize = 64;
 
 pub(super) const DEFAULT_LOG_RETENTION_DAYS: u32 = 7;
 pub(super) const MAX_LOG_RETENTION_DAYS: u32 = 3650;

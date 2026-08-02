@@ -3,6 +3,7 @@
 use super::defaults::*;
 use super::migration::{
     normalize_cli_priority_order, normalize_codex_home_override,
+    normalize_model_routing_policy_for_write,
     normalize_upstream_retry_policy_for_write, repair_settings,
 };
 use super::types::{AppSettings, CodexHomeMode, GatewayListenMode, WslHostAddressMode};
@@ -481,6 +482,8 @@ pub(crate) fn validate_bounds(settings: &AppSettings) -> AppResult<()> {
 
     let mut retry_policy = settings.upstream_retry_policy.clone();
     normalize_upstream_retry_policy_for_write(&mut retry_policy)?;
+    let mut model_routing_policy = settings.model_routing_policy.clone();
+    normalize_model_routing_policy_for_write(&mut model_routing_policy)?;
 
     if settings.circuit_breaker_failure_threshold == 0 {
         return Err("SEC_INVALID_INPUT: circuit_breaker_failure_threshold must be >= 1".into());
@@ -523,6 +526,7 @@ fn write_unlocked<R: tauri::Runtime>(
     settings.cx2cc_service_tier = settings.cx2cc_service_tier.trim().to_string();
     settings.codex_home_override = normalize_codex_home_override(&settings.codex_home_override);
     normalize_upstream_retry_policy_for_write(&mut settings.upstream_retry_policy)?;
+    normalize_model_routing_policy_for_write(&mut settings.model_routing_policy)?;
     if settings.codex_home_mode != CodexHomeMode::Custom {
         settings.codex_home_override.clear();
     }

@@ -220,6 +220,28 @@ request_markers AS (
         AND json_extract(scoped.value, '$.bridge_provider_id') > 0
     ) AS has_scoped_cx2cc_marker,
     (
+      SELECT route.value
+      FROM json_each(base.safe_settings_json) route
+      WHERE route.type = 'object'
+        AND json_extract(route.value, '$.type') = 'configured_model_route'
+        AND json_type(route.value, '$.applied') = 'true'
+        AND json_extract(route.value, '$.applied') = 1
+        AND json_type(route.value, '$.providerId') = 'integer'
+        AND json_extract(route.value, '$.providerId') = base.effective_final_provider_id
+        AND json_type(route.value, '$.pricedCliKey') = 'text'
+        AND TRIM(
+          json_extract(route.value, '$.pricedCliKey'),
+          char(32) || char(9) || char(10) || char(13)
+        ) != ''
+        AND json_type(route.value, '$.pricedModel') = 'text'
+        AND TRIM(
+          json_extract(route.value, '$.pricedModel'),
+          char(32) || char(9) || char(10) || char(13)
+        ) != ''
+      ORDER BY CAST(route.key AS INTEGER) DESC
+      LIMIT 1
+    ) AS configured_route_json,
+    (
       SELECT TRIM(
         json_extract(route.value, '$.pricedModel'),
         char(32) || char(9) || char(10) || char(13)
@@ -328,7 +350,23 @@ request_normalized AS (
         char(32) || char(9) || char(10) || char(13)
       ), '')
       ELSE NULL
-    END AS cx2cc_source_cli_key
+    END AS cx2cc_source_cli_key,
+    CASE
+      WHEN json_type(markers.configured_route_json, '$.pricedCliKey') = 'text'
+      THEN NULLIF(TRIM(
+        json_extract(markers.configured_route_json, '$.pricedCliKey'),
+        char(32) || char(9) || char(10) || char(13)
+      ), '')
+      ELSE NULL
+    END AS configured_priced_cli_key,
+    CASE
+      WHEN json_type(markers.configured_route_json, '$.pricedModel') = 'text'
+      THEN NULLIF(TRIM(
+        json_extract(markers.configured_route_json, '$.pricedModel'),
+        char(32) || char(9) || char(10) || char(13)
+      ), '')
+      ELSE NULL
+    END AS configured_priced_model
   FROM request_markers markers
 )
 SELECT
@@ -421,10 +459,13 @@ SELECT
     WHEN request.projected_trace_id IS NOT NULL
     THEN request.projected_cost_basis_cli_key
     WHEN COALESCE(
+      request.configured_priced_model,
       request.cx2cc_priced_model,
       request.managed_priced_model,
       NULLIF(TRIM(request.requested_model), '')
     ) IS NULL THEN NULL
+    WHEN request.configured_priced_model IS NOT NULL
+    THEN request.configured_priced_cli_key
     WHEN request.cx2cc_priced_model IS NOT NULL
     THEN request.cx2cc_source_cli_key
     ELSE request.cli_key
@@ -433,6 +474,7 @@ SELECT
     WHEN request.projected_trace_id IS NOT NULL
     THEN request.projected_cost_basis_model
     ELSE COALESCE(
+      request.configured_priced_model,
       request.cx2cc_priced_model,
       request.managed_priced_model,
       NULLIF(TRIM(request.requested_model), '')

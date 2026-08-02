@@ -15,7 +15,7 @@ mod gemini_oauth;
 mod handler;
 mod http_util;
 mod logging;
-mod model_rewrite;
+pub(in crate::gateway) mod model_rewrite;
 pub(in crate::gateway) mod protocol_bridge;
 pub(crate) mod provider_adapters;
 pub(in crate::gateway) mod provider_router;

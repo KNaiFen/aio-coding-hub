@@ -382,6 +382,8 @@ pub fn provider_upsert_bridge_json<R: tauri::Runtime>(
             model_mapping: None,
             upstream_retry_policy_override: None,
             upstream_retry_policy_override_specified: false,
+            model_routing_policy_override: None,
+            model_routing_policy_override_specified: false,
         },
     )?;
     serialize_json(provider)

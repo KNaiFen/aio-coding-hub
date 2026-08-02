@@ -29,6 +29,8 @@ pub(super) struct PreparedProvider {
     pub(super) upstream_query: Option<String>,
     pub(super) upstream_body_bytes: Bytes,
     pub(super) active_requested_model: Option<String>,
+    pub(super) configured_model_route:
+        Option<crate::gateway::configured_model_route::ConfiguredModelRoute>,
     pub(super) strip_request_content_encoding: bool,
     pub(super) request_body_mutated_before_attempt: bool,
     pub(super) gemini_oauth_response_mode: Option<GeminiOAuthResponseMode>,
@@ -351,6 +353,21 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
         Some(id) => (id == provider_id && provider_index == 1).then_some(true),
         None => None,
     };
+    crate::gateway::response_fixer::clear_configured_model_route(&input.special_settings);
+    let configured_model_route = crate::gateway::configured_model_route::resolve(
+        &input.cli_key,
+        &input.method_hint,
+        &input.forwarded_path,
+        input.requested_model.as_deref(),
+        input.managed_model_route.is_some(),
+        &input.model_routing_policy,
+        provider.model_routing_policy_override.as_ref(),
+        provider_id,
+        &provider_name_base,
+    );
+    if let Some(route) = configured_model_route.as_ref() {
+        crate::gateway::configured_model_route::mark_pending(&input.special_settings, route);
+    }
     let active_requested_model = input
         .managed_model_route
         .as_ref()
@@ -430,6 +447,7 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
         upstream_query,
         upstream_body_bytes,
         active_requested_model: active_requested_model.map(str::to_string),
+        configured_model_route,
         strip_request_content_encoding,
         request_body_mutated_before_attempt,
         gemini_oauth_response_mode,

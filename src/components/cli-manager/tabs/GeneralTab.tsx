@@ -18,13 +18,18 @@ import { SettingsRow } from "../../../ui/SettingsRow";
 import { Switch } from "../../../ui/Switch";
 import { NetworkSettingsCard } from "../NetworkSettingsCard";
 import { WslSettingsCard } from "../WslSettingsCard";
-import { Bell, ChevronDown, Shield, TrendingDown, Globe, Route } from "lucide-react";
-import type { UpstreamRetryPolicy } from "../../../services/settings/settings";
+import { Bell, ChevronDown, Shield, TrendingDown, Globe, Route, Shuffle } from "lucide-react";
+import type { ModelRoutingPolicy, UpstreamRetryPolicy } from "../../../services/settings/settings";
 import {
   cloneUpstreamRetryPolicy,
   validateUpstreamRetryPolicy,
 } from "../../../services/gateway/upstreamRetryPolicy";
 import { RetryPolicyFields } from "../../gateway/RetryPolicyFields";
+import {
+  cloneModelRoutingPolicy,
+  validateModelRoutingPolicy,
+} from "../../../services/gateway/modelRoutingPolicy";
+import { ModelRoutingPolicyFields } from "../../gateway/ModelRoutingPolicyFields";
 import { cn } from "../../../utils/cn";
 
 export type CliManagerAvailability = "checking" | "available" | "unavailable";
@@ -85,6 +90,8 @@ export type CliManagerGeneralTabProps = {
 
   upstreamRetryPolicy: UpstreamRetryPolicy;
   setUpstreamRetryPolicy: (value: UpstreamRetryPolicy) => void;
+  modelRoutingPolicy: ModelRoutingPolicy;
+  setModelRoutingPolicy: (value: ModelRoutingPolicy) => void;
 
   blurOnEnter: (e: ReactKeyboardEvent<HTMLInputElement>) => void;
 };
@@ -133,6 +140,8 @@ export function CliManagerGeneralTab({
   setCircuitBreakerOpenDurationMinutes,
   upstreamRetryPolicy,
   setUpstreamRetryPolicy,
+  modelRoutingPolicy,
+  setModelRoutingPolicy,
   blurOnEnter,
 }: CliManagerGeneralTabProps) {
   const navigate = useNavigate();
@@ -336,7 +345,7 @@ export function CliManagerGeneralTab({
               <div className="divide-y divide-border">
                 <SettingsRow
                   label="任务结束提醒"
-                  subtitle="当 AI CLI 工具（Claude/Gemini：30 秒；Codex：120 秒）请求结束后静默无新请求时，发送系统通知提醒。"
+                  subtitle="当 AI CLI 工具（Claude/Gemini/Grok：30 秒；Codex：120 秒）请求结束后静默无新请求时，发送系统通知提醒。"
                 >
                   <Switch
                     checked={taskCompleteNotifyEnabled}
@@ -736,6 +745,42 @@ export function CliManagerGeneralTab({
                     保存重试策略
                   </Button>
                 </div>
+              </div>
+            </CollapsibleSettingsCard>
+
+            <CollapsibleSettingsCard
+              icon={<Shuffle className="h-5 w-5 text-white" />}
+              title="模型路由"
+              subtitle="全局模型名称与思考强度覆盖。"
+              iconClassName="bg-emerald-600"
+            >
+              <ModelRoutingPolicyFields
+                policy={modelRoutingPolicy}
+                disabled={commonSettingsDisabled}
+                onChange={setModelRoutingPolicy}
+              />
+              <div className="mt-3 flex justify-end">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={commonSettingsDisabled}
+                  onClick={async () => {
+                    if (!appSettings) return;
+                    const validationMessage = validateModelRoutingPolicy(modelRoutingPolicy);
+                    if (validationMessage) {
+                      toast(validationMessage);
+                      return;
+                    }
+                    const updated = await onPersistCommonSettings({
+                      model_routing_policy: modelRoutingPolicy,
+                    });
+                    if (updated) {
+                      setModelRoutingPolicy(cloneModelRoutingPolicy(updated.model_routing_policy));
+                    }
+                  }}
+                >
+                  保存模型路由
+                </Button>
               </div>
             </CollapsibleSettingsCard>
           </div>

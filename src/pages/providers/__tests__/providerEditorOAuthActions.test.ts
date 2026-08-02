@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { logToConsole } from "../../../services/consoleLog";
 import { openDesktopUrl } from "../../../services/desktop/opener";
+import { DEFAULT_MODEL_ROUTING_POLICY } from "../../../services/gateway/modelRoutingPolicy";
 import {
   providerOAuthDisconnect,
   providerOAuthFetchLimits,
@@ -115,6 +116,7 @@ function makeProvider(partial: Partial<ProviderSummary> = {}): ProviderSummary {
     api_key_configured: partial.api_key_configured ?? false,
     stream_idle_timeout_seconds: partial.stream_idle_timeout_seconds ?? null,
     extension_values: partial.extension_values ?? [],
+    model_routing_policy_override: partial.model_routing_policy_override ?? null,
     newapi_account_user_id: partial.newapi_account_user_id ?? null,
     newapi_account_access_token_configured: partial.newapi_account_access_token_configured ?? false,
   };
@@ -172,6 +174,8 @@ function makeCtx(overrides: Partial<OAuthActionContext> = {}) {
       backoff_ms: 1000,
       counts_toward_circuit_breaker: false,
     },
+    modelRoutingPolicyOverrideEnabled: false,
+    modelRoutingPolicyDraft: DEFAULT_MODEL_ROUTING_POLICY,
     streamIdleTimeoutSeconds: "",
     apiKeyConfigured: false,
     isCodexGatewaySource: false,

@@ -5,6 +5,7 @@ import type { ReactElement } from "react";
 import { toast } from "sonner";
 import { CACHE_ANOMALY_MONITOR_GUIDE_COPY } from "../../../../services/gateway/cacheAnomalyMonitorConfig";
 import { DEFAULT_UPSTREAM_RETRY_POLICY } from "../../../../services/gateway/upstreamRetryPolicy";
+import { DEFAULT_MODEL_ROUTING_POLICY } from "../../../../services/gateway/modelRoutingPolicy";
 import type { GatewayRectifierSettingsPatch } from "../../../../services/settings/settingsGatewayRectifier";
 import { createTestAppSettings } from "../../../../test/fixtures/settings";
 import { CliManagerGeneralTab, type CliManagerGeneralTabProps } from "../GeneralTab";
@@ -112,6 +113,8 @@ function createDefaultTabProps(overrides: DefaultPropsOverrides = {}) {
     setCircuitBreakerOpenDurationMinutes: vi.fn(),
     upstreamRetryPolicy: DEFAULT_UPSTREAM_RETRY_POLICY,
     setUpstreamRetryPolicy: vi.fn(),
+    modelRoutingPolicy: DEFAULT_MODEL_ROUTING_POLICY,
+    setModelRoutingPolicy: vi.fn(),
     blurOnEnter: vi.fn(),
   };
 }
@@ -163,6 +166,8 @@ describe("cli-manager/GeneralTab", () => {
         setCircuitBreakerOpenDurationMinutes={vi.fn()}
         upstreamRetryPolicy={DEFAULT_UPSTREAM_RETRY_POLICY}
         setUpstreamRetryPolicy={vi.fn()}
+        modelRoutingPolicy={DEFAULT_MODEL_ROUTING_POLICY}
+        setModelRoutingPolicy={vi.fn()}
         blurOnEnter={vi.fn()}
       />
     );
@@ -241,6 +246,8 @@ describe("cli-manager/GeneralTab", () => {
         setCircuitBreakerOpenDurationMinutes={setCircuitBreakerOpenDurationMinutes}
         upstreamRetryPolicy={DEFAULT_UPSTREAM_RETRY_POLICY}
         setUpstreamRetryPolicy={vi.fn()}
+        modelRoutingPolicy={DEFAULT_MODEL_ROUTING_POLICY}
+        setModelRoutingPolicy={vi.fn()}
         blurOnEnter={blurOnEnter}
       />
     );
@@ -393,6 +400,8 @@ describe("cli-manager/GeneralTab", () => {
         setCircuitBreakerOpenDurationMinutes={vi.fn()}
         upstreamRetryPolicy={DEFAULT_UPSTREAM_RETRY_POLICY}
         setUpstreamRetryPolicy={vi.fn()}
+        modelRoutingPolicy={DEFAULT_MODEL_ROUTING_POLICY}
+        setModelRoutingPolicy={vi.fn()}
         blurOnEnter={vi.fn()}
       />
     );

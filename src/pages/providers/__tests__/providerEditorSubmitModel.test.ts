@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_UPSTREAM_RETRY_POLICY } from "../../../services/gateway/upstreamRetryPolicy";
+import { DEFAULT_MODEL_ROUTING_POLICY } from "../../../services/gateway/modelRoutingPolicy";
 import { DEFAULT_FORM_VALUES, deriveCodexBridgeTarget } from "../providerEditorUtils";
 import { buildProviderEditorUpsertInput } from "../providerEditorSubmitModel";
 import type { ProviderEditorPayloadContext } from "../providerEditorActionContext";
@@ -22,6 +23,8 @@ function makeContext(
     streamIdleTimeoutSeconds: "",
     upstreamRetryPolicyOverrideEnabled: false,
     upstreamRetryPolicyDraft: DEFAULT_UPSTREAM_RETRY_POLICY,
+    modelRoutingPolicyOverrideEnabled: false,
+    modelRoutingPolicyDraft: DEFAULT_MODEL_ROUTING_POLICY,
     apiKeyConfigured: false,
     isCodexGatewaySource: false,
     sourceProviderId: null,
@@ -114,6 +117,61 @@ describe("pages/providers/providerEditorSubmitModel", () => {
     if (!result.ok) return;
 
     expect(result.value.payload.availabilityTestModel).toBe("gpt-5.4");
+  });
+
+  it("normalizes a provider model-routing override and clears it when inheritance is selected", () => {
+    const overridden = buildProviderEditorUpsertInput(
+      makeContext({
+        modelRoutingPolicyOverrideEnabled: true,
+        modelRoutingPolicyDraft: {
+          enabled: true,
+          rules: [
+            {
+              source_model: " fable5 ",
+              target_model: " opus4.8 ",
+              reasoning_effort: " low ",
+            },
+          ],
+        },
+      })
+    );
+    expect(overridden.ok).toBe(true);
+    if (!overridden.ok) return;
+    expect(overridden.value.payload.modelRoutingPolicyOverride).toEqual({
+      enabled: true,
+      rules: [
+        {
+          source_model: "fable5",
+          target_model: "opus4.8",
+          reasoning_effort: "low",
+        },
+      ],
+    });
+
+    const inherited = buildProviderEditorUpsertInput(makeContext());
+    expect(inherited.ok).toBe(true);
+    if (!inherited.ok) return;
+    expect(inherited.value.payload.modelRoutingPolicyOverride).toBeNull();
+  });
+
+  it("rejects an enabled provider model-routing override with an incomplete rule", () => {
+    const result = buildProviderEditorUpsertInput(
+      makeContext({
+        modelRoutingPolicyOverrideEnabled: true,
+        modelRoutingPolicyDraft: {
+          enabled: true,
+          rules: [{ source_model: "fable5", target_model: null, reasoning_effort: null }],
+        },
+      })
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        kind: "message",
+        message: "第 1 条模型路由至少填写目标模型或思考强度",
+      },
+    });
   });
 
   it("passes explicit NewAPI account credential preserve and clear semantics", () => {

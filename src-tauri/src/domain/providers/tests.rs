@@ -557,6 +557,8 @@ fn default_provider_params(name: &str) -> ProviderUpsertParams {
         account_usage_credentials_copy_from_provider_id: None,
         upstream_retry_policy_override: None,
         upstream_retry_policy_override_specified: false,
+        model_routing_policy_override: None,
+        model_routing_policy_override_specified: false,
     }
 }
 
@@ -1780,6 +1782,8 @@ fn create_oauth_provider_for_cas_test(db: &crate::db::Db, name: &str) -> i64 {
             account_usage_credentials_copy_from_provider_id: None,
             upstream_retry_policy_override: None,
             upstream_retry_policy_override_specified: false,
+            model_routing_policy_override: None,
+            model_routing_policy_override_specified: false,
         },
     )
     .expect("create oauth provider")

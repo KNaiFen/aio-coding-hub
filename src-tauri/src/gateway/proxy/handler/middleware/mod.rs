@@ -162,6 +162,7 @@ impl<R: tauri::Runtime> ProxyContext<R> {
             max_attempts_per_provider: rs.max_attempts_per_provider,
             max_providers_to_try: rs.max_providers_to_try,
             upstream_retry_policy: rs.upstream_retry_policy,
+            model_routing_policy: rs.model_routing_policy,
             provider_cooldown_secs: rs.provider_cooldown_secs,
             // Compact requests get a widened first-byte timeout: the whole
             // prompt cache is invalidated upstream, so the first byte can

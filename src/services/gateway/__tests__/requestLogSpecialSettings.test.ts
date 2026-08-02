@@ -12,10 +12,95 @@ import {
   resolveAioManagedModelRouteFromSpecialSettings,
   resolveCodexContextCompactionMarker,
   resolveCodexReasoningEffort,
+  resolveConfiguredModelRouteFromSpecialSettings,
   resolveModelRouteMappingFromSpecialSettings,
 } from "../requestLogSpecialSettings";
 
 describe("services/gateway/requestLogSpecialSettings", () => {
+  it("resolves only an applied configured route for the final provider", () => {
+    const settings = JSON.stringify([
+      {
+        type: "configured_model_route",
+        providerId: 1,
+        providerName: "Primary",
+        policySource: "global",
+        sourceModel: "fable5",
+        targetModel: "opus4.8",
+        effectiveModel: "opus4.8",
+        reasoningEffort: null,
+        pricedCliKey: "claude",
+        applied: true,
+        modelApplied: true,
+        reasoningEffortApplied: false,
+      },
+      {
+        type: "configured_model_route",
+        providerId: 2,
+        providerName: "Backup",
+        policySource: "provider",
+        sourceModel: "fable5",
+        targetModel: null,
+        effectiveModel: "fable5",
+        reasoningEffort: "low",
+        pricedCliKey: "claude",
+        applied: true,
+        modelApplied: false,
+        reasoningEffortApplied: true,
+      },
+    ]);
+
+    expect(resolveConfiguredModelRouteFromSpecialSettings(settings, 2)).toEqual({
+      providerId: 2,
+      providerName: "Backup",
+      policySource: "provider",
+      sourceModel: "fable5",
+      targetModel: null,
+      effectiveModel: "fable5",
+      reasoningEffort: "low",
+      pricedCliKey: "claude",
+      modelApplied: false,
+      reasoningEffortApplied: true,
+      applied: true,
+    });
+    expect(resolveConfiguredModelRouteFromSpecialSettings(settings, 99)).toBeNull();
+  });
+
+  it("fails open for pending, malformed, and future configured route markers", () => {
+    const invalid = [
+      "bad-json",
+      JSON.stringify([{ type: "configured_model_route", applied: false }]),
+      JSON.stringify([
+        {
+          type: "configured_model_route",
+          providerId: 1,
+          policySource: "future",
+          sourceModel: "fable5",
+          effectiveModel: "opus4.8",
+          applied: true,
+          modelApplied: true,
+          reasoningEffortApplied: false,
+        },
+      ]),
+      JSON.stringify([
+        {
+          type: "configured_model_route",
+          providerId: 1,
+          policySource: "global",
+          sourceModel: "fable5",
+          targetModel: "opus4.8",
+          effectiveModel: "opus4.8",
+          applied: true,
+          modelApplied: false,
+          reasoningEffortApplied: false,
+        },
+      ]),
+    ];
+
+    for (const value of invalid) {
+      expect(resolveConfiguredModelRouteFromSpecialSettings(value)).toBeNull();
+    }
+  });
+
   it("parses fixed Codex context compaction markers and formats complete display text", () => {
     const marker = resolveCodexContextCompactionMarker(
       JSON.stringify([
