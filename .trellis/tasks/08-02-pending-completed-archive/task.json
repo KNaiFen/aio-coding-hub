@@ -1,0 +1,30 @@
+{
+  "id": "pending-completed-archive",
+  "name": "pending-completed-archive",
+  "title": "归档已完成 PENDING 历史",
+  "description": "Keep PENDING.md focused on unresolved work by moving completed entries and evidence into a durable completed archive without losing history.",
+  "status": "in_progress",
+  "dev_type": "documentation",
+  "scope": "pending-history",
+  "package": "aio-coding-hub",
+  "priority": "P2",
+  "creator": "KNaiFen",
+  "assignee": "KNaiFen",
+  "createdAt": "2026-08-02",
+  "completedAt": null,
+  "branch": "codex/tui-polish-release",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "08-02-tui-polish-release",
+  "relatedFiles": [
+    "PENDING.md",
+    "PENDING_COMPLETED.md",
+    "AGENTS.md"
+  ],
+  "notes": "",
+  "meta": {}
+}
