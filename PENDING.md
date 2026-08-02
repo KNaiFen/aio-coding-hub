@@ -10,12 +10,18 @@
 - 条目进入实施后应关联 Trellis 任务；只有完成合并和验证后才能标记为 `done`。
 - 已完成或放弃的条目保留在本文件中，并补充对应的提交、PR、版本或放弃原因。
 
+## 本批次完成证据
+
+- `AIO-PENDING-001` 至 `AIO-PENDING-011` 已由 PR #18 合并到 `main`，合并提交为 `4d985a83eefde7021b9016206d769581fc3c4cfd`。
+- 精确头部完整 CI `30758235885` 已通过前端、Rust、格式/绑定、Clippy、Rust 全工作区测试和依赖审计；macOS ARM 集成构建 `30758280877` 已成功。
+- 本发布批次版本为 `0.60.43`；正式标签与发布产物由该版本合并后的主分支候选构建生成。
+
 ## 条目
 
 ### AIO-PENDING-001：供应商开关应作为全局总开关
 
-- 状态：`planned`
-- Trellis：`.trellis/tasks/08-02-provider-routing-master-switch`
+- 状态：`done`
+- Trellis：`.trellis/tasks/archive/2026-08/08-02-provider-routing-master-switch`
 - 记录日期：2026-08-02
 - 涉及范围：供应商管理、默认路由、自定义路由、Session 复用、首页/TUI 观测
 - 当前问题：默认路由会检查供应商全局 `enabled`，但启用自定义路由模板后，候选选择和观测列表只检查该模板中的路由开关。结果是供应商界面显示“已停止”的供应商仍可能继续接收自定义路由流量，供应商开关并不是真正的全局总开关。
@@ -37,8 +43,8 @@
 
 ### AIO-PENDING-002：精简 TUI 面板顶栏
 
-- 状态：`planned`
-- Trellis：`.trellis/tasks/08-02-tui-observability-polish`
+- 状态：`done`
+- Trellis：`.trellis/tasks/archive/2026-08/08-02-tui-observability-polish`
 - 记录日期：2026-08-02
 - 涉及范围：独立 TUI 的请求视图与供应商视图顶栏、窄终端布局
 - 当前问题：供应商视图第一行的“供应商 2/2”和请求视图的“请求 1/2”只是两个视图的页码，并不是供应商可用比例或请求数量；供应商第二行的“供应商 10”则只是当前观测快照返回的供应商条目数。这些字段容易被误解，对日常观察价值较低并占用窄窗口空间。
@@ -54,8 +60,8 @@
 
 ### AIO-PENDING-003：精简 TUI 供应商消费限额行
 
-- 状态：`planned`
-- Trellis：`.trellis/tasks/08-02-tui-observability-polish`
+- 状态：`done`
+- Trellis：`.trellis/tasks/archive/2026-08/08-02-tui-observability-polish`
 - 记录日期：2026-08-02
 - 涉及范围：独立 TUI 的供应商状态卡、消费限额摘要、窄终端布局
 - 当前问题：供应商卡片使用不明确的“额”表示消费限额；没有配置限额时仍显示“额 未配置”，占用一整行；金额复用通用费用格式，小额会显示 6 位小数，例如 `$0.000000/$100.00`，影响扫描效率。
@@ -74,8 +80,8 @@
 
 ### AIO-PENDING-004：在 TUI 供应商卡片显示账户余额
 
-- 状态：`planned`
-- Trellis：`.trellis/tasks/08-02-provider-account-usage-runtime`、`.trellis/tasks/08-02-tui-observability-polish`
+- 状态：`done`
+- Trellis：`.trellis/tasks/archive/2026-08/08-02-provider-account-usage-runtime`、`.trellis/tasks/archive/2026-08/08-02-tui-observability-polish`
 - 记录日期：2026-08-02
 - 涉及范围：供应商账户用量、后端观测快照、独立 TUI 供应商状态卡
 - 当前问题：桌面供应商卡片可以查询并显示账户余额，但余额结果只保存在前端 React Query 缓存中；TUI 观测协议及供应商状态快照没有账户余额字段，因此无法显示同一结果。
@@ -97,8 +103,8 @@
 
 ### AIO-PENDING-005：建立供应商账户余额共享按需刷新
 
-- 状态：`planned`
-- Trellis：`.trellis/tasks/08-02-provider-account-usage-runtime`
+- 状态：`done`
+- Trellis：`.trellis/tasks/archive/2026-08/08-02-provider-account-usage-runtime`
 - 记录日期：2026-08-02
 - 涉及范围：供应商账户用量查询、定时调度、前端缓存、应用生命周期
 - 根因复核：2026-08-02 已确认此前余额不刷新的直接原因是所有供应商都被全局关闭，当前前端查询把 `provider.enabled` 作为自动查询条件；“供应商已开启且页面保持焦点仍不刷新”的判断撤销，不再按该错误前提安排修复或回归测试。
@@ -122,8 +128,8 @@
 
 ### AIO-PENDING-006：在 TUI 最近请求卡片显示输出速率
 
-- 状态：`planned`
-- Trellis：`.trellis/tasks/08-02-tui-observability-polish`
+- 状态：`done`
+- Trellis：`.trellis/tasks/archive/2026-08/08-02-tui-observability-polish`
 - 记录日期：2026-08-02
 - 涉及范围：独立 TUI 请求记录卡、请求详情、输出速率格式化
 - 当前问题：TUI 最近请求卡片已经显示路由结果和总耗时，例如“直连  8.9s”，但没有首页已有的输出 Token 速率；查看慢请求时无法快速区分等待首字和生成阶段的速度。
@@ -142,8 +148,8 @@
 
 ### AIO-PENDING-007：统一柔化 TUI 全局配色并精简最近供应商文案
 
-- 状态：`planned`
-- Trellis：`.trellis/tasks/08-02-tui-observability-polish`
+- 状态：`done`
+- Trellis：`.trellis/tasks/archive/2026-08/08-02-tui-observability-polish`
 - 记录日期：2026-08-02
 - 涉及范围：独立 TUI Statusline、请求视图与详情、供应商视图与详情、终端颜色能力适配、最近供应商摘要
 - 当前问题：AIO Statusline 的各字段直接使用 Ratatui 的 ANSI 基础色 `Cyan`、`Magenta`、`Green`、`Yellow` 和 `Red`，最终深浅取决于终端主题映射；请求模式和供应商模式的标题、卡片、状态、选中态、分隔符及详情字段也各自使用直接色值或基础 ANSI 色。当前没有像 Codex CLI 那样经过统一调色板柔化并按终端色彩能力降级，因此同一终端中不仅 Statusline 更深、更生硬，两个主页面也可能出现色调不一致或局部仍然过深。现有测试名虽然声称使用柔和 Codex 调色板，实际只断言了基础 ANSI 色，没有覆盖真正的柔化效果。另外，“近10 INPUT 大春×10”略显机械且乘号不符合用户期望。
@@ -166,8 +172,8 @@
 
 ### AIO-PENDING-008：在 TUI 供应商详情中手动测试可用性
 
-- 状态：`planned`
-- Trellis：`.trellis/tasks/08-02-provider-availability-core`、`.trellis/tasks/08-02-tui-observability-polish`
+- 状态：`done`
+- Trellis：`.trellis/tasks/archive/2026-08/08-02-provider-availability-core`、`.trellis/tasks/archive/2026-08/08-02-tui-observability-polish`
 - 记录日期：2026-08-02
 - 涉及范围：独立 TUI 供应商详情、本地观测动作接口、现有供应商可用性探测
 - 当前问题：TUI 可以进入供应商详情查看路由、资格、熔断和额度信息，但本地观测服务目前只有只读的健康与快照 GET 接口，无法像桌面供应商页面一样主动执行可用性测试并查看结果。仓库已经存在统一的 `test_provider_availability` 领域能力，支持各 CLI、桥接供应商、测试模型、模型映射、OAuth/API Key 传输及有界响应预览，因此不应在 TUI 中另行拼装探测请求。
@@ -188,8 +194,8 @@
 
 ### AIO-PENDING-009：在桌面端与 TUI 展示供应商短期可用性状态条
 
-- 状态：`planned`
-- Trellis：`.trellis/tasks/08-02-provider-availability-core`、`.trellis/tasks/08-02-tui-observability-polish`、`.trellis/tasks/08-02-desktop-provider-availability`
+- 状态：`done`
+- Trellis：`.trellis/tasks/archive/2026-08/08-02-provider-availability-core`、`.trellis/tasks/archive/2026-08/08-02-tui-observability-polish`、`.trellis/tasks/archive/2026-08/08-02-desktop-provider-availability`
 - 记录日期：2026-08-02
 - 涉及范围：供应商真实请求观测、手动可用性测试隔离、桌面供应商页面、独立 TUI 供应商页面、全局设置
 - 参考界面：用户提供的示例采用“健康状态 + 成功/失败计数 + 一排离散时间单元”的紧凑结构；每个单元汇总一个时间段，并使用绿色、红色、灰色表达高可用、低可用和数据不足/不确定。
@@ -232,8 +238,8 @@
 
 ### AIO-PENDING-010：在 macOS 顶栏图标悬停展示供应商可用性 mini 面板
 
-- 状态：`planned`
-- Trellis：`.trellis/tasks/08-02-macos-tray-provider-mini`
+- 状态：`done`
+- Trellis：`.trellis/tasks/archive/2026-08/08-02-macos-tray-provider-mini`
 - 记录日期：2026-08-02
 - 涉及范围：macOS 顶栏 Tray、供应商当前路由资格、短期可用性状态条、轻量悬浮窗口
 - 当前能力与可行性：macOS 当前使用 Tauri `TrayIconBuilder` 创建顶栏图标，现有回调只处理左键 `Click`，左键会显示主窗口，右键则使用原生菜单提供“显示/隐藏”和“退出”。仓库锁定的 Tauri `2.9.5` 与 `tray-icon 0.21.3` 已在 macOS 实现 `Enter`、`Move` 和 `Leave` 事件，因此可以直接实现真正的鼠标悬停，而不必占用右键。系统原生 tooltip 只能显示简单文本，无法承载多行、彩色、动态的供应商状态条；本功能需要使用锚定在 Tray 图标下方的无边框 mini 窗口。
@@ -268,8 +274,8 @@
 
 ### AIO-PENDING-011：在 TUI 请求卡中前置供应商名称
 
-- 状态：`planned`
-- Trellis：`.trellis/tasks/08-02-tui-observability-polish`
+- 状态：`done`
+- Trellis：`.trellis/tasks/archive/2026-08/08-02-tui-observability-polish`
 - 记录日期：2026-08-02
 - 涉及范围：独立 TUI 最近请求卡片、窄终端截断
 - 当前问题：请求卡第 3 行当前按“工作目录  供应商”显示，例如 `aio-coding-hub  INPUT 大春`。不同目录长度会让供应商名称左右移动，难以快速扫描最近请求实际使用的供应商。
@@ -283,4 +289,4 @@
 
 ## 已完成或放弃
 
-暂无。
+- 2026-08-03：`AIO-PENDING-001` 至 `AIO-PENDING-011` 已完成，证据见“本批次完成证据”；正式发布记录将在父 Trellis 任务完成时补充。
