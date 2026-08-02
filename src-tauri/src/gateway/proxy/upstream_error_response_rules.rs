@@ -503,7 +503,7 @@ mod tests {
     fn missing_body_stops_before_lower_priority_rule() {
         let mut uncertain = rule();
         uncertain.priority = 1;
-        uncertain.status_codes = vec![500];
+        uncertain.status_codes = vec![429];
         let mut lower = rule();
         lower.priority = 2;
         lower.status_codes = vec![429];
