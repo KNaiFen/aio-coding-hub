@@ -28,6 +28,19 @@ export const providerAccountUsageKeys = {
   detail: (providerId: number) => [...providerAccountUsageAllKey, providerId] as const,
 };
 
+const providerAvailabilityAllKey = ["providerAvailability"] as const;
+export const providerAvailabilityKeys = {
+  all: providerAvailabilityAllKey,
+  timelines: (providerIds: readonly number[], hours: number, bucketCount: 12 | 36) =>
+    [
+      ...providerAvailabilityAllKey,
+      "timelines",
+      [...new Set(providerIds)].sort((left, right) => left - right),
+      hours,
+      bucketCount,
+    ] as const,
+};
+
 const providersAllKey = ["providers"] as const;
 export const providersKeys = {
   all: providersAllKey,

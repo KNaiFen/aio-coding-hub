@@ -3,7 +3,7 @@
   "name": "desktop-provider-availability",
   "title": "桌面供应商可用性",
   "description": "实现 P009 的桌面卡片与设置",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": "aio-coding-hub",

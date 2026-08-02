@@ -12,6 +12,7 @@ import {
   providerOAuthResetCodexQuota,
   providerOAuthStatus,
   providerAccountUsageFetch,
+  providerAvailabilityTimelinesGet,
   providerClaudeTerminalLaunchCommand,
   providerDelete,
   providerDuplicate,
@@ -33,6 +34,7 @@ import {
   resetProviderOAuthCodexQuota,
   useOAuthLimitsQuery,
   useProviderAccountUsageQuery,
+  useProviderAvailabilityTimelinesQuery,
   useProviderClaudeTerminalLaunchCommandMutation,
   useProviderDeleteMutation,
   useProviderDuplicateMutation,
@@ -49,6 +51,7 @@ import {
   gatewayKeys,
   oauthLimitsKeys,
   providerAccountUsageKeys,
+  providerAvailabilityKeys,
   providerModelsKeys,
   providersKeys,
 } from "../keys";
@@ -64,6 +67,7 @@ vi.mock("../../services/providers/providers", async () => {
     providersList: vi.fn(),
     providerOAuthStatus: vi.fn(),
     providerAccountUsageFetch: vi.fn(),
+    providerAvailabilityTimelinesGet: vi.fn(),
     providerOAuthFetchLimits: vi.fn(),
     providerOAuthResetCodexQuota: vi.fn(),
     providerUpsert: vi.fn(),
@@ -409,6 +413,32 @@ describe("query/providers", () => {
     expect(client.getQueryData(providerAccountUsageKeys.detail(12))).toEqual(refreshedAccountUsage);
     expect(readProviderAccountUsageCache(client, 12)).toEqual(refreshedAccountUsage);
     expect(gatewayCircuitResetProvider).not.toHaveBeenCalled();
+  });
+
+  it("batches, sorts, and deduplicates provider availability timeline queries", async () => {
+    setTauriRuntime();
+    const timeline = {
+      provider_id: 3,
+      hours: 6,
+      bucket_count: 36,
+      bucket_minutes: 10,
+      success_count: 1,
+      failure_count: 0,
+      buckets: [],
+    };
+    vi.mocked(providerAvailabilityTimelinesGet).mockResolvedValueOnce([timeline]);
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+    const { result } = renderHook(() => useProviderAvailabilityTimelinesQuery([9, 3, 9], 6), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.data).toEqual([timeline]));
+    expect(providerAvailabilityTimelinesGet).toHaveBeenCalledWith([3, 9], 36);
+    expect(client.getQueryData(providerAvailabilityKeys.timelines([9, 3, 9], 6, 36))).toEqual([
+      timeline,
+    ]);
   });
 
   it("keeps a manual result authoritative when an uncancellable initial request finishes late", async () => {

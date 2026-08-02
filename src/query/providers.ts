@@ -17,6 +17,7 @@ import {
   providerDelete,
   providerOAuthStatus,
   providerAccountUsageFetch,
+  providerAvailabilityTimelinesGet,
   providerOAuthFetchLimits,
   providerOAuthResetCodexQuota,
   providerSetEnabled,
@@ -28,6 +29,7 @@ import {
   type ProviderAccountUsageResult,
   type ProviderOAuthResetCodexQuotaResult,
   type ProviderAvailabilityResult,
+  type ProviderAvailabilityTimeline,
   type ProviderRouteRow,
   type ProviderUpsertInput,
   type ProviderSummary,
@@ -46,6 +48,7 @@ import {
   gatewayKeys,
   oauthLimitsKeys,
   providerAccountUsageKeys,
+  providerAvailabilityKeys,
   providerModelsKeys,
   providersKeys,
 } from "./keys";
@@ -581,6 +584,29 @@ export function useProviderAccountUsageQuery(provider: ProviderSummary, enabled 
       configured: enabled && configured,
       force: false,
     },
+  });
+}
+
+export function useProviderAvailabilityTimelinesQuery(
+  providerIds: readonly number[],
+  hours: number,
+  options?: { enabled?: boolean }
+) {
+  const normalizedProviderIds = useMemo(
+    () =>
+      [...new Set(providerIds.map((providerId) => validateProviderId(providerId)))].sort(
+        (left, right) => left - right
+      ),
+    [providerIds]
+  );
+  const enabled = (options?.enabled ?? true) && normalizedProviderIds.length > 0;
+
+  return useQuery<ProviderAvailabilityTimeline[]>({
+    queryKey: providerAvailabilityKeys.timelines(normalizedProviderIds, hours, 36),
+    queryFn: () => providerAvailabilityTimelinesGet(normalizedProviderIds, 36),
+    enabled,
+    refetchInterval: enabled ? 15_000 : false,
+    retry: false,
   });
 }
 

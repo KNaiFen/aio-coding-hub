@@ -26,6 +26,7 @@ import { isCodexDirectProvider } from "../../services/providers/providerModels";
 export type ProvidersViewProps = {
   activeCli: CliKey;
   setActiveCli: (cliKey: CliKey) => void;
+  availabilityHours?: number;
 };
 
 type PendingProvidersScrollRestore = {
@@ -39,10 +40,15 @@ function getRouteRowEnabled(row: unknown) {
   return typeof row.enabled === "boolean" ? row.enabled : true;
 }
 
-export function ProvidersView({ activeCli, setActiveCli }: ProvidersViewProps) {
-  const model = useProvidersViewDataModel(activeCli);
+export function ProvidersView({
+  activeCli,
+  setActiveCli,
+  availabilityHours = 6,
+}: ProvidersViewProps) {
+  const model = useProvidersViewDataModel(activeCli, availabilityHours);
   const {
     providers,
+    availabilityByProviderId,
     codexProviders,
     bridgeSourceProviders,
     providersLoading,
@@ -334,6 +340,7 @@ export function ProvidersView({ activeCli, setActiveCli }: ProvidersViewProps) {
                         <SortableProviderCard
                           key={provider.id}
                           provider={provider}
+                          availability={availabilityByProviderId[provider.id] ?? null}
                           trailing={
                             joined ? (
                               <Button

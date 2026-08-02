@@ -28,6 +28,7 @@ import {
   useDefaultRouteProviderSetSessionReusePriorityMutation,
   useDefaultRouteProvidersQuery,
   useDefaultRouteProvidersSetOrderMutation,
+  useProviderAvailabilityTimelinesQuery,
   useProviderClaudeTerminalLaunchCommandMutation,
   useProviderDeleteMutation,
   useProviderSetEnabledMutation,
@@ -178,6 +179,7 @@ vi.mock("../../../query/providers", async () => {
     useDefaultRouteProvidersQuery: vi.fn(),
     useDefaultRouteProvidersSetOrderMutation: vi.fn(),
     useDefaultRouteProviderSetSessionReusePriorityMutation: vi.fn(),
+    useProviderAvailabilityTimelinesQuery: vi.fn(),
     useProviderClaudeTerminalLaunchCommandMutation: vi.fn(),
     useProviderSetEnabledMutation: vi.fn(),
     useProviderDeleteMutation: vi.fn(),
@@ -233,6 +235,10 @@ beforeEach(() => {
   } as any);
   vi.mocked(useProviderTestAvailabilityMutation).mockReturnValue({
     mutateAsync: vi.fn().mockResolvedValue({ ok: true, latency_ms: 100, status: 200, error: null }),
+  } as any);
+  vi.mocked(useProviderAvailabilityTimelinesQuery).mockReturnValue({
+    data: [],
+    isFetching: false,
   } as any);
   vi.mocked(useGatewaySessionsListQuery).mockReturnValue({
     data: [],

@@ -83,6 +83,8 @@ describe("pages/settings/SettingsPage", () => {
       setTrayEnabled: vi.fn(),
       logRetentionDays: 7,
       setLogRetentionDays: vi.fn(),
+      providerAvailabilityHours: 6,
+      setProviderAvailabilityHours: vi.fn(),
       requestPersist: vi.fn(),
     } as any);
 
@@ -102,6 +104,7 @@ describe("pages/settings/SettingsPage", () => {
 
     expect(lastMainColumnProps?.gatewayAvailable).toBe(true);
     expect(lastMainColumnProps?.settingsWriteBlocked).toBe(false);
+    expect(lastMainColumnProps?.providerAvailabilityHours).toBe(6);
     expect(lastSidebarProps?.updateMeta).toBeTruthy();
   });
 });

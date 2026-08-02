@@ -35,6 +35,7 @@ import {
   useDefaultRouteProvidersSetOrderMutation,
   useProviderClaudeTerminalLaunchCommandMutation,
   useProviderDeleteMutation,
+  useProviderAvailabilityTimelinesQuery,
   useProviderDuplicateMutation,
   useProviderSetEnabledMutation,
   useProviderTestAvailabilityMutation,
@@ -253,7 +254,7 @@ function finishStatefulProviderAction(
   });
 }
 
-export function useProvidersViewDataModel(activeCli: CliKey) {
+export function useProvidersViewDataModel(activeCli: CliKey, availabilityHours = 6) {
   const mountedRef = useRef(false);
   useEffect(() => {
     mountedRef.current = true;
@@ -271,6 +272,18 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
   const providers = useMemo<ProviderSummary[]>(
     () => providersQuery.data ?? [],
     [providersQuery.data]
+  );
+  const providerIds = useMemo(() => providers.map((provider) => provider.id), [providers]);
+  const providerAvailabilityQuery = useProviderAvailabilityTimelinesQuery(
+    providerIds,
+    availabilityHours
+  );
+  const availabilityByProviderId = useMemo(
+    () =>
+      Object.fromEntries(
+        (providerAvailabilityQuery.data ?? []).map((timeline) => [timeline.provider_id, timeline])
+      ),
+    [providerAvailabilityQuery.data]
   );
   const codexProvidersQuery = useProvidersListQuery("codex", { enabled: activeCli === "claude" });
   const codexProviders = useMemo<ProviderSummary[]>(
@@ -1450,6 +1463,7 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
 
   return {
     providers,
+    availabilityByProviderId,
     codexProviders,
     bridgeSourceProviders,
     providersLoading,

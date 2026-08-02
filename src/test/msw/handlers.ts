@@ -382,6 +382,37 @@ export const handlers = [
     })
   ),
 
+  http.post(`${TAURI_ENDPOINT}/provider_availability_timelines_get`, async ({ request }) => {
+    const payload = await withJson<{ providerIds?: number[]; bucketCount?: number }>(request);
+    const providerIds = Array.isArray(payload.providerIds) ? payload.providerIds : [];
+    const bucketCount = payload.bucketCount === 12 ? 12 : 36;
+    const hours = getSettingsState().provider_availability_hours;
+    const bucketMinutes = (hours * 60) / bucketCount;
+    const endAt = Date.now();
+    const bucketDurationMs = bucketMinutes * 60_000;
+
+    return HttpResponse.json(
+      providerIds.map((providerId) => ({
+        provider_id: providerId,
+        hours,
+        bucket_count: bucketCount,
+        bucket_minutes: bucketMinutes,
+        success_count: 0,
+        failure_count: 0,
+        buckets: Array.from({ length: bucketCount }, (_, index) => {
+          const startAt = endAt - (bucketCount - index) * bucketDurationMs;
+          return {
+            start_at_ms: startAt,
+            end_at_ms: startAt + bucketDurationMs,
+            success_count: 0,
+            failure_count: 0,
+            state: "no_data",
+          };
+        }),
+      }))
+    );
+  }),
+
   // ---- Usage ----
   http.post(`${TAURI_ENDPOINT}/usage_summary`, () => HttpResponse.json(getUsageSummaryState())),
 
