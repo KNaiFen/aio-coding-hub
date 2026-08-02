@@ -484,6 +484,8 @@ pub(crate) fn validate_bounds(settings: &AppSettings) -> AppResult<()> {
     normalize_upstream_retry_policy_for_write(&mut retry_policy)?;
     let mut model_routing_policy = settings.model_routing_policy.clone();
     normalize_model_routing_policy_for_write(&mut model_routing_policy)?;
+    let mut error_response_rules = settings.upstream_error_response_rules.clone();
+    super::migration::normalize_upstream_error_response_rules_for_write(&mut error_response_rules)?;
 
     if settings.circuit_breaker_failure_threshold == 0 {
         return Err("SEC_INVALID_INPUT: circuit_breaker_failure_threshold must be >= 1".into());
@@ -527,6 +529,9 @@ fn write_unlocked<R: tauri::Runtime>(
     settings.codex_home_override = normalize_codex_home_override(&settings.codex_home_override);
     normalize_upstream_retry_policy_for_write(&mut settings.upstream_retry_policy)?;
     normalize_model_routing_policy_for_write(&mut settings.model_routing_policy)?;
+    super::migration::normalize_upstream_error_response_rules_for_write(
+        &mut settings.upstream_error_response_rules,
+    )?;
     if settings.codex_home_mode != CodexHomeMode::Custom {
         settings.codex_home_override.clear();
     }

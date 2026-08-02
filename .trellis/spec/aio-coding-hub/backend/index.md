@@ -20,6 +20,9 @@ Rules for the root application's Rust backend and local gateway runtime.
 - [Local observer and TUI contract](../cross-layer/local-observer-tui-contract.md):
   loopback-only authenticated snapshots and non-blocking read-only monitoring
   boundaries.
+- [Upstream error response rule contract](./upstream-error-response-rule-contract.md):
+  final-error matching, fail-open protocol rewriting, and separation from
+  provider routing and health facts.
 
 ## Pre-Development Checklist
 
@@ -62,6 +65,15 @@ When changing the local observer runtime:
 3. Keep circuit inspection non-mutating and all projections bounded and
    secret-free.
 
+When changing upstream error response rules:
+
+1. Read [Upstream error response rule contract](./upstream-error-response-rule-contract.md).
+2. Keep retry, failover, quota, cooldown, and circuit decisions on original
+   upstream facts.
+3. Apply a rewrite only at a terminal HTTP error response and fail open when
+   bounded evidence is unavailable.
+4. Keep attempt logs original and the request-level status client-visible.
+
 ## Quality Check
 
 - Unit-test the attempt-budget calculation at its boundary values.
@@ -74,3 +86,5 @@ When changing the local observer runtime:
   invalid or oversized encoded bodies make zero upstream attempts.
 - Prove context-compaction classification cannot change request bytes, headers,
   timeouts, provider selection, retries, circuit state, or response status.
+- Prove error response rules cannot change provider selection, retry counts,
+  circuit state, or attempt evidence, including a failure followed by success.

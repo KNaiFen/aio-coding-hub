@@ -4,6 +4,7 @@ import {
   formatCodexContextCompactionBadgeLabel,
   formatCodexContextCompactionTooltip,
   formatCodexReasoningEffortSource,
+  formatUpstreamErrorResponseRuleTooltip,
   hasClaudeModelMappingSpecialSetting,
   hasCodexSystemRequestSpecialSetting,
   hasExplicitCodexReasoningEffortSpecialSetting,
@@ -14,6 +15,7 @@ import {
   resolveCodexReasoningEffort,
   resolveConfiguredModelRouteFromSpecialSettings,
   resolveModelRouteMappingFromSpecialSettings,
+  resolveUpstreamErrorResponseRuleMarker,
 } from "../requestLogSpecialSettings";
 
 describe("services/gateway/requestLogSpecialSettings", () => {
@@ -210,6 +212,60 @@ describe("services/gateway/requestLogSpecialSettings", () => {
 
     for (const settings of invalidSettings) {
       expect(resolveCodexContextCompactionMarker(settings)).toBeNull();
+    }
+  });
+
+  it("parses response-rule audit markers without exposing response content", () => {
+    const marker = resolveUpstreamErrorResponseRuleMarker(
+      JSON.stringify([
+        {
+          type: "upstream_error_response_rule",
+          ruleId: "8ca12e7b-4f19-45f7-9185-cc6fbd951c51",
+          ruleName: "限额响应",
+          providerId: 7,
+          providerName: "中转站",
+          upstreamStatus: 429,
+          clientStatus: 503,
+          statusMode: "override",
+          messageMode: "passthrough",
+        },
+      ])
+    );
+
+    expect(marker).not.toBeNull();
+    expect(formatUpstreamErrorResponseRuleTooltip(marker!)).toContain("状态码：429 → 503");
+    expect(formatUpstreamErrorResponseRuleTooltip(marker!)).toContain("信息行为：提取并透传");
+    expect(marker).not.toHaveProperty("message");
+  });
+
+  it("fails open for malformed or future response-rule markers", () => {
+    for (const marker of [
+      "bad-json",
+      JSON.stringify({ type: "upstream_error_response_rule" }),
+      JSON.stringify({
+        type: "upstream_error_response_rule",
+        ruleId: "id",
+        ruleName: "rule",
+        providerId: 1,
+        providerName: "provider",
+        upstreamStatus: 429,
+        clientStatus: 200,
+        statusMode: "override",
+        messageMode: "passthrough",
+      }),
+      JSON.stringify({
+        type: "upstream_error_response_rule",
+        ruleId: "id",
+        ruleName: "rule",
+        providerId: 1,
+        providerName: "provider",
+        upstreamStatus: 429,
+        clientStatus: 503,
+        statusMode: "future",
+        messageMode: "passthrough",
+      }),
+    ]) {
+      expect(resolveUpstreamErrorResponseRuleMarker(marker)).toBeNull();
     }
   });
 

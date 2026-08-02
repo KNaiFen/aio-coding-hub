@@ -57,7 +57,11 @@ import {
 } from "./requestLogSpecialSettings";
 import { getErrorCodeLabel } from "./requestLogErrorLabels";
 import { Clock, CheckCircle2, XCircle, Server, RefreshCw, ArrowUpRight } from "lucide-react";
-import { CodexContextCompactionBadge, RealtimeTraceCards } from "./RealtimeTraceCards";
+import {
+  CodexContextCompactionBadge,
+  RealtimeTraceCards,
+  UpstreamErrorResponseRuleBadge,
+} from "./RealtimeTraceCards";
 import { CliBrandIcon } from "./CliBrandIcon";
 import {
   buildPreviewRequestLogs,
@@ -279,6 +283,11 @@ const RequestLogCard = memo(function RequestLogCard({
 
               <CodexContextCompactionBadge
                 cliKey={log.cli_key}
+                specialSettingsJson={log.special_settings_json}
+                showCustomTooltip={showCustomTooltip}
+              />
+
+              <UpstreamErrorResponseRuleBadge
                 specialSettingsJson={log.special_settings_json}
                 showCustomTooltip={showCustomTooltip}
               />

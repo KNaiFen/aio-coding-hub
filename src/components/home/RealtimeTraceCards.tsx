@@ -12,7 +12,9 @@ import { REALTIME_TRACE_EXIT_START_MS } from "../../services/gateway/requestActi
 import {
   formatCodexContextCompactionBadgeLabel,
   formatCodexContextCompactionTooltip,
+  formatUpstreamErrorResponseRuleTooltip,
   resolveCodexContextCompactionMarker,
+  resolveUpstreamErrorResponseRuleMarker,
 } from "../../services/gateway/requestLogSpecialSettings";
 import { requestLogActiveActivityState } from "../../services/gateway/requestLogState";
 import { hasFailoverFromSegments } from "../../services/gateway/traceRoute";
@@ -81,6 +83,38 @@ export function CodexContextCompactionBadge({
     <Tooltip
       content={tooltip}
       contentClassName="max-w-[320px] whitespace-pre-line text-left leading-5"
+    >
+      {badge}
+    </Tooltip>
+  ) : (
+    badge
+  );
+}
+
+export function UpstreamErrorResponseRuleBadge({
+  specialSettingsJson,
+  showCustomTooltip,
+}: {
+  specialSettingsJson: string | null | undefined;
+  showCustomTooltip: boolean;
+}) {
+  const marker = resolveUpstreamErrorResponseRuleMarker(specialSettingsJson);
+  if (!marker) return null;
+
+  const tooltip = formatUpstreamErrorResponseRuleTooltip(marker);
+  const badge = (
+    <span
+      className="inline-flex max-w-44 shrink-0 cursor-help items-center rounded-md border border-amber-500/20 bg-amber-50/80 px-1.5 py-0.5 text-[10px] font-semibold leading-4 text-amber-700 shadow-pill-subtle dark:border-amber-400/20 dark:bg-amber-500/15 dark:text-amber-300"
+      title={showCustomTooltip ? undefined : tooltip}
+    >
+      <span className="truncate">响应规则 · {marker.ruleName}</span>
+    </span>
+  );
+
+  return showCustomTooltip ? (
+    <Tooltip
+      content={tooltip}
+      contentClassName="max-w-[360px] whitespace-pre-line text-left leading-5"
     >
       {badge}
     </Tooltip>
@@ -426,6 +460,11 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
 
                   <CodexContextCompactionBadge
                     cliKey={trace.cli_key}
+                    specialSettingsJson={specialSettingsJson}
+                    showCustomTooltip={showCustomTooltip}
+                  />
+
+                  <UpstreamErrorResponseRuleBadge
                     specialSettingsJson={specialSettingsJson}
                     showCustomTooltip={showCustomTooltip}
                   />
