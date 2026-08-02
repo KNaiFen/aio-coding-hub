@@ -10,11 +10,10 @@ use aio_observer_protocol::{
     CliScope, ObserverConfiguredModelRoute, ObserverContextCompaction, ObserverDominantProvider,
     ObserverGatewayStatus, ObserverPreferredProvider, ObserverProviderAccountUsage,
     ObserverProviderAvailabilityBucket, ObserverProviderAvailabilityState,
-    ObserverProviderAvailabilityTimeline,
-    ObserverProviderCollection, ObserverProviderOAuthQuota, ObserverProviderSpendWindow,
-    ObserverProviderStatus, ObserverRequest, ObserverRequestState, ObserverRequestUsage,
-    ObserverRouteHop, ObserverSection, ObserverSnapshotV1, ObserverTodayUsage,
-    OBSERVER_PROTOCOL_VERSION,
+    ObserverProviderAvailabilityTimeline, ObserverProviderCollection, ObserverProviderOAuthQuota,
+    ObserverProviderSpendWindow, ObserverProviderStatus, ObserverRequest, ObserverRequestState,
+    ObserverRequestUsage, ObserverRouteHop, ObserverSection, ObserverSnapshotV1,
+    ObserverTodayUsage, OBSERVER_PROTOCOL_VERSION,
 };
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -369,29 +368,28 @@ fn load_provider_observations(
 ) -> crate::shared::error::AppResult<(Vec<ProviderObservation>, bool)> {
     let (rows, truncated) = providers::list_observer_rows(db, cli_key, PROVIDER_STATUS_LIMIT)?;
     let provider_ids = rows.iter().map(|row| row.id).collect::<Vec<_>>();
-    let availability_by_provider =
-        crate::domain::provider_availability::timelines(
-            db,
-            &provider_ids,
-            availability_hours,
-            crate::domain::provider_availability::TUI_PROVIDER_AVAILABILITY_BUCKETS,
-            now_unix.saturating_mul(1_000),
-        )
-        .map(|timelines| {
-            timelines
-                .into_iter()
-                .map(|timeline| {
-                    (
-                        timeline.provider_id,
-                        observer_availability_timeline(timeline),
-                    )
-                })
-                .collect::<HashMap<_, _>>()
-        })
-        .unwrap_or_else(|error| {
-            tracing::warn!(error = %error.code(), "observer provider availability is unavailable");
-            HashMap::new()
-        });
+    let availability_by_provider = crate::domain::provider_availability::timelines(
+        db,
+        &provider_ids,
+        availability_hours,
+        crate::domain::provider_availability::TUI_PROVIDER_AVAILABILITY_BUCKETS,
+        now_unix.saturating_mul(1_000),
+    )
+    .map(|timelines| {
+        timelines
+            .into_iter()
+            .map(|timeline| {
+                (
+                    timeline.provider_id,
+                    observer_availability_timeline(timeline),
+                )
+            })
+            .collect::<HashMap<_, _>>()
+    })
+    .unwrap_or_else(|error| {
+        tracing::warn!(error = %error.code(), "observer provider availability is unavailable");
+        HashMap::new()
+    });
     let spend_by_provider = provider_limit_usage::list_v1(db, cli_key)?
         .into_iter()
         .map(|row| (row.provider_id, row))
@@ -700,13 +698,15 @@ fn project_provider_statuses(
                 account_usage: provider.account_usage_target.map(|_| {
                     let snapshot = account_usage_by_provider.get(&provider.id);
                     ObserverProviderAccountUsage {
-                        state: snapshot.map(|value| value.state).unwrap_or("loading").to_string(),
+                        state: snapshot
+                            .map(|value| value.state)
+                            .unwrap_or("loading")
+                            .to_string(),
                         amount: snapshot.and_then(|value| value.amount),
                         unit: snapshot
                             .and_then(|value| value.unit.as_deref())
                             .map(|value| bounded_text(value, 24)),
-                        last_fetched_at_unix: snapshot
-                            .and_then(|value| value.last_fetched_at),
+                        last_fetched_at_unix: snapshot.and_then(|value| value.last_fetched_at),
                     }
                 }),
                 availability: provider.availability.clone(),
@@ -1417,8 +1417,7 @@ mod tests {
         assert_eq!(limited, HashSet::from([spend_limited, oauth_limited]));
 
         let (observed, truncated) =
-            load_provider_observations(&db, Some("codex"), 1_000, 6)
-                .expect("load observations");
+            load_provider_observations(&db, Some("codex"), 1_000, 6).expect("load observations");
         assert!(!truncated);
         assert_eq!(
             observed

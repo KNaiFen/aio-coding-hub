@@ -391,9 +391,7 @@ pub(crate) fn validate_bounds(settings: &AppSettings) -> AppResult<()> {
         .into());
     }
     if !matches!(settings.provider_availability_hours, 3 | 6 | 12) {
-        return Err(
-            "SEC_INVALID_INPUT: provider_availability_hours must be 3, 6, or 12".into(),
-        );
+        return Err("SEC_INVALID_INPUT: provider_availability_hours must be 3, 6, or 12".into());
     }
     if settings.provider_base_url_ping_cache_ttl_seconds == 0 {
         return Err(

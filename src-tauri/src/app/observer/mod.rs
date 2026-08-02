@@ -4,8 +4,9 @@ mod descriptor;
 mod snapshot;
 
 use aio_observer_protocol::{
-    CliScope, ObserverApiError, ObserverApiErrorResponse, ObserverHealthV1, ObserverSnapshotV1,
-    ObserverProviderAvailabilityTestResult, OBSERVER_HISTORY_LIMIT_MAX, OBSERVER_PROTOCOL_VERSION,
+    CliScope, ObserverApiError, ObserverApiErrorResponse, ObserverHealthV1,
+    ObserverProviderAvailabilityTestResult, ObserverSnapshotV1, OBSERVER_HISTORY_LIMIT_MAX,
+    OBSERVER_PROTOCOL_VERSION,
 };
 use axum::extract::rejection::{PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};

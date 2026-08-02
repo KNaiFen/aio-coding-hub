@@ -237,19 +237,12 @@ impl ProviderAccountUsageRuntimeState {
         RefreshDecision::Lead(generation)
     }
 
-    async fn perform_refresh(
-        &self,
-        app: tauri::AppHandle,
-        provider_id: i64,
-        generation: u64,
-    ) {
+    async fn perform_refresh(&self, app: tauri::AppHandle, provider_id: i64, generation: u64) {
         let result = match self.shared.fetch_limiter.clone().acquire_owned().await {
             Ok(permit) => {
-                let result = crate::commands::providers::fetch_account_usage_uncached(
-                    app,
-                    provider_id,
-                )
-                .await;
+                let result =
+                    crate::commands::providers::fetch_account_usage_uncached(app, provider_id)
+                        .await;
                 drop(permit);
                 result
             }
@@ -382,9 +375,7 @@ fn entry_has_active_consumer(entry: &RuntimeEntry, now: Instant) -> bool {
         && (entry
             .desktop_lease_until
             .is_some_and(|deadline| deadline > now)
-            || entry
-                .tui_lease_until
-                .is_some_and(|deadline| deadline > now))
+            || entry.tui_lease_until.is_some_and(|deadline| deadline > now))
 }
 
 fn entry_is_due(entry: &RuntimeEntry, now_unix: i64) -> bool {
@@ -425,10 +416,7 @@ fn is_fresh_success(result: &ProviderAccountUsageResult, now_unix: i64) -> bool 
     fetched_at <= now_unix && (0..SUCCESS_CACHE_TTL_SECONDS).contains(&age)
 }
 
-fn display_snapshot(
-    entry: &RuntimeEntry,
-    now_unix: i64,
-) -> ProviderAccountUsageDisplaySnapshot {
+fn display_snapshot(entry: &RuntimeEntry, now_unix: i64) -> ProviderAccountUsageDisplaySnapshot {
     if entry.in_flight_generation.is_some() {
         return ProviderAccountUsageDisplaySnapshot {
             state: "loading",
@@ -518,10 +506,7 @@ mod tests {
 
         let untimed = entry_with_result(false, 1_000, 1_000);
         assert!(!entry_is_due(&untimed, 1_060));
-        assert!(entry_is_due(
-            &untimed,
-            1_000 + SUCCESS_CACHE_TTL_SECONDS
-        ));
+        assert!(entry_is_due(&untimed, 1_000 + SUCCESS_CACHE_TTL_SECONDS));
     }
 
     #[test]
@@ -587,10 +572,7 @@ mod tests {
             ..RuntimeEntry::default()
         };
         assert!(entry_has_active_consumer(&entry, now));
-        assert!(!entry_has_active_consumer(
-            &entry,
-            now + CONSUMER_LEASE
-        ));
+        assert!(!entry_has_active_consumer(&entry, now + CONSUMER_LEASE));
     }
 
     #[test]

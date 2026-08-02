@@ -662,10 +662,8 @@ pub async fn test_provider_availability<R: tauri::Runtime>(
                     truncated: false,
                     limit: PROBE_RESPONSE_BODY_LIMIT,
                 });
-            let preview = redact_probe_credential(
-                &probe_response_preview(&body),
-                &effective_credential,
-            );
+            let preview =
+                redact_probe_credential(&probe_response_preview(&body), &effective_credential);
             // Provider is "available" if the endpoint responds without an auth
             // failure or upstream 5xx. 400/404 model errors and 429 rate limits
             // still prove the configured base URL and credential reached the
@@ -769,8 +767,8 @@ fn observations_from_attempts(
     if is_request_level_abort(request_error_code) {
         return Vec::new();
     }
-    let attempts = serde_json::from_str::<Vec<AvailabilityAttempt>>(attempts_json)
-        .unwrap_or_default();
+    let attempts =
+        serde_json::from_str::<Vec<AvailabilityAttempt>>(attempts_json).unwrap_or_default();
     let mut outcomes = HashMap::<i64, bool>::new();
     for attempt in attempts {
         if attempt.provider_id <= 0 || !attempt.upstream_sent {
@@ -829,7 +827,7 @@ pub(crate) fn record_request_observations_best_effort(
         {
             let mut statement = tx
                 .prepare_cached(
-                r#"
+                    r#"
 INSERT INTO provider_availability_observations(
   trace_id, cli_key, provider_id, observed_at_ms, success
 )
@@ -888,8 +886,10 @@ pub fn timelines(
     now_ms: i64,
 ) -> AppResult<Vec<ProviderAvailabilityTimeline>> {
     let hours = normalized_availability_hours(hours);
-    if !matches!(bucket_count, TUI_PROVIDER_AVAILABILITY_BUCKETS | DESKTOP_PROVIDER_AVAILABILITY_BUCKETS)
-    {
+    if !matches!(
+        bucket_count,
+        TUI_PROVIDER_AVAILABILITY_BUCKETS | DESKTOP_PROVIDER_AVAILABILITY_BUCKETS
+    ) {
         return Err("SEC_INVALID_INPUT: bucket_count must be 12 or 36".into());
     }
     let mut seen = HashSet::new();
@@ -981,8 +981,8 @@ ORDER BY observed_at_ms ASC
         })
         .map_err(|error| db_err!("failed to query availability timeline: {error}"))?;
     for row in rows {
-        let (provider_id, observed_at_ms, success) = row
-            .map_err(|error| db_err!("failed to read availability timeline row: {error}"))?;
+        let (provider_id, observed_at_ms, success) =
+            row.map_err(|error| db_err!("failed to read availability timeline row: {error}"))?;
         let Some(position) = positions.get(&provider_id).copied() else {
             continue;
         };
@@ -1097,18 +1097,19 @@ mod tests {
             {"provider_id": 2, "outcome": "skipped", "error_category": "PROVIDER_ERROR", "upstream_sent": false}
         ]);
 
-        let mut observations = observations_from_attempts(
-            "trace",
-            "codex",
-            1_000,
-            None,
-            &attempts.to_string(),
-        );
+        let mut observations =
+            observations_from_attempts("trace", "codex", 1_000, None, &attempts.to_string());
         observations.sort_by_key(|item| item.provider_id);
 
         assert_eq!(observations.len(), 2);
-        assert_eq!((observations[0].provider_id, observations[0].success), (1, false));
-        assert_eq!((observations[1].provider_id, observations[1].success), (2, true));
+        assert_eq!(
+            (observations[0].provider_id, observations[0].success),
+            (1, false)
+        );
+        assert_eq!(
+            (observations[1].provider_id, observations[1].success),
+            (2, true)
+        );
     }
 
     #[test]
@@ -1120,13 +1121,8 @@ mod tests {
             {"provider_id": 3, "outcome": "bridge_response_translate_error", "error_category": "NON_RETRYABLE_CLIENT_ERROR", "upstream_sent": true}
         ]);
 
-        let observations = observations_from_attempts(
-            "trace",
-            "codex",
-            1_000,
-            None,
-            &attempts.to_string(),
-        );
+        let observations =
+            observations_from_attempts("trace", "codex", 1_000, None, &attempts.to_string());
 
         assert_eq!(observations.len(), 1);
         assert_eq!(observations[0].provider_id, 1);
@@ -1190,8 +1186,8 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let db_path = temp.path().join("provider-availability-facts.sqlite3");
         let db = crate::db::init_for_tests(&db_path).expect("init db");
-        let provider = upsert(&db, default_provider_params("timeline-provider"))
-            .expect("insert provider");
+        let provider =
+            upsert(&db, default_provider_params("timeline-provider")).expect("insert provider");
         let now_ms = 10 * 60 * 60 * 1_000 + 17 * 60 * 1_000;
         let bucket_ms = 30 * 60 * 1_000;
         let current_bucket_start = now_ms.div_euclid(bucket_ms) * bucket_ms;

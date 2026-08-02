@@ -56,7 +56,9 @@ struct TrayProviderMiniRuntime {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum TrayProviderMiniHoverAction {
-    Start { generation: u64 },
+    Start {
+        generation: u64,
+    },
     Reposition {
         anchor: TrayProviderMiniAnchor,
         provider_count: usize,
@@ -203,10 +205,7 @@ impl ResidentState {
 
     fn close_tray_provider_mini_if_current(&self, close_token: u64) -> bool {
         let mut runtime = self.tray_provider_mini_runtime();
-        if runtime.close_token != close_token
-            || runtime.tray_hovered
-            || runtime.window_hovered
-        {
+        if runtime.close_token != close_token || runtime.tray_hovered || runtime.window_hovered {
             return false;
         }
         reset_tray_provider_mini_runtime(&mut runtime)
@@ -350,10 +349,10 @@ pub fn on_window_event(_window: &tauri::Window, _event: &tauri::WindowEvent) {}
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 #[cfg(desktop)]
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-#[cfg(desktop)]
-use tauri::Manager;
 #[cfg(target_os = "macos")]
 use tauri::Emitter;
+#[cfg(desktop)]
+use tauri::Manager;
 
 #[cfg(target_os = "macos")]
 fn tray_provider_mini_anchor(

@@ -41,12 +41,7 @@ impl Palette {
             let no_color = std::env::var_os("NO_COLOR").is_some();
             let color_term = std::env::var("COLORTERM").ok();
             let term = std::env::var("TERM").ok();
-            capability_from_values(
-                enabled,
-                no_color,
-                color_term.as_deref(),
-                term.as_deref(),
-            )
+            capability_from_values(enabled, no_color, color_term.as_deref(), term.as_deref())
         };
 
         Self::new(capability)
@@ -192,9 +187,7 @@ mod tests {
             Some(Color::Green)
         );
         assert_eq!(
-            Palette::new(ColorCapability::None)
-                .style(Tone::Success)
-                .fg,
+            Palette::new(ColorCapability::None).style(Tone::Success).fg,
             None
         );
         assert_eq!(

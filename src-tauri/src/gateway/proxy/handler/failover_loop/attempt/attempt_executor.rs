@@ -362,12 +362,7 @@ where
         .finalize_for_upstream(&mut headers, crate::gateway::util::max_request_body_bytes());
 
     let disabled_provider_id = std::iter::once(prepared.provider_id)
-        .chain(
-            prepared
-                .bridge_source
-                .as_ref()
-                .map(|(source, _)| source.id),
-        )
+        .chain(prepared.bridge_source.as_ref().map(|(source, _)| source.id))
         .find(|provider_id| !ctx.state.provider_enable_gate.allows(*provider_id));
     if let Some(disabled_provider_id) = disabled_provider_id {
         tracing::info!(

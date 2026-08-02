@@ -674,10 +674,9 @@ fn status_tone_style(tone: StatusTone, color: bool) -> Style {
         StatusTone::Scope | StatusTone::Activity | StatusTone::Version => Tone::Accent,
         StatusTone::Provider => Tone::Provider,
         StatusTone::Model => Tone::Info,
-        StatusTone::Folder
-        | StatusTone::Timing
-        | StatusTone::Cost
-        | StatusTone::Tokens => Tone::Success,
+        StatusTone::Folder | StatusTone::Timing | StatusTone::Cost | StatusTone::Tokens => {
+            Tone::Success
+        }
         StatusTone::Separator => Tone::Muted,
     };
     Palette::detected(color).style(tone)
@@ -913,7 +912,10 @@ fn draw_detail(frame: &mut Frame, area: Rect, state: &LogsState) {
         DashboardView::Requests => state
             .selected_request()
             .map(|request| {
-                styled_detail_lines(crate::format::detail_lines(request, now_millis()), state.color)
+                styled_detail_lines(
+                    crate::format::detail_lines(request, now_millis()),
+                    state.color,
+                )
             })
             .unwrap_or_else(|| {
                 vec![Line::styled(
@@ -959,12 +961,7 @@ fn draw_detail(frame: &mut Frame, area: Rect, state: &LogsState) {
 }
 
 fn styled_detail_lines(lines: Vec<String>, color: bool) -> Vec<Line<'static>> {
-    const SECTION_TITLES: [&str; 4] = [
-        "上下文压缩",
-        "路由链",
-        "短期可用性",
-        "手动可用性测试",
-    ];
+    const SECTION_TITLES: [&str; 4] = ["上下文压缩", "路由链", "短期可用性", "手动可用性测试"];
     let palette = Palette::detected(color);
     lines
         .into_iter()
@@ -1360,18 +1357,12 @@ fn provider_card_lines(
 
     if !provider.spend_windows.is_empty() {
         lines.push(provider_spend_line(
-            provider,
-            width,
-            color,
-            selected,
-            spend_tone,
+            provider, width, color, selected, spend_tone,
         ));
     }
 
     if let Some(usage) = provider.account_usage.as_ref() {
-        lines.push(provider_account_usage_line(
-            usage, width, color, selected,
-        ));
+        lines.push(provider_account_usage_line(usage, width, color, selected));
     }
 
     if let Some(quota) = displayable_oauth_quota(provider) {
@@ -1493,9 +1484,7 @@ fn provider_availability_line(
             aio_observer_protocol::ObserverProviderAvailabilityState::Unhealthy => {
                 ProviderTone::Error
             }
-            aio_observer_protocol::ObserverProviderAvailabilityState::NoData => {
-                ProviderTone::Muted
-            }
+            aio_observer_protocol::ObserverProviderAvailabilityState::NoData => ProviderTone::Muted,
         };
         spans.push(provider_span("■", tone, color));
     }
@@ -1682,11 +1671,10 @@ fn item_separator_style(color: bool) -> Style {
 mod tests {
     use super::*;
     use aio_observer_protocol::{
-        ObserverGatewayStatus, ObserverProviderAccountUsage,
-        ObserverProviderAvailabilityBucket, ObserverProviderAvailabilityState,
-        ObserverProviderAvailabilityTimeline, ObserverProviderCollection,
-        ObserverProviderOAuthQuota, ObserverProviderSpendWindow, ObserverRequestState,
-        ObserverSection, ObserverTodayUsage, OBSERVER_PROTOCOL_VERSION,
+        ObserverGatewayStatus, ObserverProviderAccountUsage, ObserverProviderAvailabilityBucket,
+        ObserverProviderAvailabilityState, ObserverProviderAvailabilityTimeline,
+        ObserverProviderCollection, ObserverProviderOAuthQuota, ObserverProviderSpendWindow,
+        ObserverRequestState, ObserverSection, ObserverTodayUsage, OBSERVER_PROTOCOL_VERSION,
     };
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
@@ -2001,8 +1989,14 @@ mod tests {
         assert_eq!(line_text(&lines[4]), "余 $12.5");
         assert!(line_text(lines.last().expect("availability line")).starts_with("6h ■■■"));
         assert!(line_text(lines.last().expect("availability line")).ends_with("成24 败3"));
-        assert_eq!(lines.last().expect("availability line").spans[2].style.fg, Some(Color::Green));
-        assert_eq!(lines.last().expect("availability line").spans[3].style.fg, Some(Color::Red));
+        assert_eq!(
+            lines.last().expect("availability line").spans[2].style.fg,
+            Some(Color::Green)
+        );
+        assert_eq!(
+            lines.last().expect("availability line").spans[3].style.fg,
+            Some(Color::Red)
+        );
         assert_eq!(
             lines.last().expect("availability line").spans[4].style.fg,
             Some(Color::DarkGray)
@@ -2014,7 +2008,9 @@ mod tests {
         provider.availability = None;
         let minimal = provider_card_lines(&provider, 80, true, false);
         assert_eq!(minimal.len(), 3);
-        assert!(minimal.iter().all(|line| !line_text(line).starts_with('限')));
+        assert!(minimal
+            .iter()
+            .all(|line| !line_text(line).starts_with('限')));
     }
 
     #[test]
@@ -2028,7 +2024,10 @@ mod tests {
             unit: Some("credits".to_string()),
             last_fetched_at_unix: Some(1),
         });
-        assert_eq!(line_text(&provider_card_lines(&provider, 40, true, false)[3]), "余 获取中");
+        assert_eq!(
+            line_text(&provider_card_lines(&provider, 40, true, false)[3]),
+            "余 获取中"
+        );
 
         provider.account_usage.as_mut().expect("usage").state = "failed".to_string();
         assert_eq!(
@@ -2257,9 +2256,8 @@ mod tests {
                 response_preview: Some("ok".to_string()),
             }),
         );
-        let result_lines = provider_probe_detail_lines(
-            state.provider_probes.get(&1).expect("probe result"),
-        );
+        let result_lines =
+            provider_probe_detail_lines(state.provider_probes.get(&1).expect("probe result"));
         assert!(result_lines.iter().any(|line| line == "结果：可用"));
         assert!(result_lines.iter().any(|line| line == "HTTP：200"));
         assert!(result_lines

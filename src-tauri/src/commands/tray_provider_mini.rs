@@ -13,10 +13,7 @@ pub(crate) fn tray_provider_mini_snapshot_get(
 
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn tray_provider_mini_window_hover_set(
-    app: tauri::AppHandle,
-    hovered: bool,
-) -> bool {
+pub(crate) fn tray_provider_mini_window_hover_set(app: tauri::AppHandle, hovered: bool) -> bool {
     crate::resident::set_tray_provider_mini_window_hovered(&app, hovered);
     hovered
 }

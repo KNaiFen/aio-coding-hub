@@ -78,9 +78,7 @@ fn latest_inference_cli<'a>(
 ) -> Option<&'a str> {
     requests
         .into_iter()
-        .filter(|(cli_key, method, path, _)| {
-            is_model_inference_request(cli_key, method, path)
-        })
+        .filter(|(cli_key, method, path, _)| is_model_inference_request(cli_key, method, path))
         .max_by_key(|(_, _, _, created_at_ms)| *created_at_ms)
         .map(|(cli_key, _, _, _)| cli_key)
 }
@@ -106,12 +104,7 @@ fn choose_cli_key(
     priority_order
         .iter()
         .find(|cli_key| is_enabled(cli_key))
-        .map(|cli_key| {
-            (
-                cli_key.clone(),
-                TrayProviderMiniSelectionSource::EnabledCli,
-            )
-        })
+        .map(|cli_key| (cli_key.clone(), TrayProviderMiniSelectionSource::EnabledCli))
 }
 
 fn bounded_text(value: &str, max_chars: usize) -> String {
@@ -129,8 +122,7 @@ fn current_route_name(db: &crate::db::Db, mode_id: Option<i64>) -> String {
         .unwrap_or_else(|| "自定义路由".to_string())
 }
 
-fn no_data_availability(
-) -> Vec<crate::domain::provider_availability::ProviderAvailabilityState> {
+fn no_data_availability() -> Vec<crate::domain::provider_availability::ProviderAvailabilityState> {
     vec![
         crate::domain::provider_availability::ProviderAvailabilityState::NoData;
         PROVIDER_AVAILABILITY_BUCKETS
@@ -157,25 +149,23 @@ pub(crate) fn build_snapshot<R: tauri::Runtime>(
             request.created_at_ms,
         )
     }));
-    let recent = request_logs::list_recent_all(db, RECENT_REQUEST_SCAN_LIMIT).unwrap_or_else(
-        |error| {
+    let recent =
+        request_logs::list_recent_all(db, RECENT_REQUEST_SCAN_LIMIT).unwrap_or_else(|error| {
             tracing::warn!(
                 error = %error.code(),
                 "tray provider mini could not read recent requests"
             );
             Vec::new()
-        },
-    );
-    let recent_cli_key = latest_inference_cli(recent.iter().filter(|row| is_terminal(row)).map(
-        |row| {
+        });
+    let recent_cli_key =
+        latest_inference_cli(recent.iter().filter(|row| is_terminal(row)).map(|row| {
             (
                 row.cli_key.as_str(),
                 row.method.as_str(),
                 row.path.as_str(),
                 terminal_completed_at_ms(row.created_at_ms, row.duration_ms),
             )
-        },
-    ));
+        }));
     let selected = choose_cli_key(
         active_cli_key,
         recent_cli_key,
@@ -222,14 +212,11 @@ pub(crate) fn build_snapshot<R: tauri::Runtime>(
     .into_iter()
     .map(|snapshot| (snapshot.provider_id, snapshot.limited))
     .collect::<HashMap<_, _>>();
-    let circuit_status = gateway_runtime_access::app_gateway_circuit_status_peek(
-        app,
-        &provider_ids,
-        now_unix,
-    )
-    .into_iter()
-    .map(|status| (status.provider_id, status))
-    .collect::<HashMap<_, _>>();
+    let circuit_status =
+        gateway_runtime_access::app_gateway_circuit_status_peek(app, &provider_ids, now_unix)
+            .into_iter()
+            .map(|status| (status.provider_id, status))
+            .collect::<HashMap<_, _>>();
     let availability = crate::domain::provider_availability::timelines(
         db,
         &provider_ids,
@@ -262,25 +249,14 @@ pub(crate) fn build_snapshot<R: tauri::Runtime>(
         .into_iter()
         .map(|provider| {
             let mut unavailable_reasons = Vec::new();
-            if spend_limited
-                .get(&provider.id)
-                .copied()
-                .unwrap_or(false)
-            {
+            if spend_limited.get(&provider.id).copied().unwrap_or(false) {
                 unavailable_reasons.push(TrayProviderMiniUnavailableReason::SpendLimit);
             }
-            if oauth_limited
-                .get(&provider.id)
-                .copied()
-                .unwrap_or(false)
-            {
+            if oauth_limited.get(&provider.id).copied().unwrap_or(false) {
                 unavailable_reasons.push(TrayProviderMiniUnavailableReason::OAuthLimit);
             }
             if let Some(status) = circuit_status.get(&provider.id) {
-                if status
-                    .cooldown_until
-                    .is_some_and(|until| until > now_unix)
-                {
+                if status.cooldown_until.is_some_and(|until| until > now_unix) {
                     unavailable_reasons.push(TrayProviderMiniUnavailableReason::Cooldown);
                 }
                 if status.state == "OPEN" {
@@ -379,10 +355,7 @@ mod tests {
     fn no_data_timeline_always_has_twelve_cells() {
         assert_eq!(
             no_data_availability(),
-            vec![
-                crate::domain::provider_availability::ProviderAvailabilityState::NoData;
-                12
-            ]
+            vec![crate::domain::provider_availability::ProviderAvailabilityState::NoData; 12]
         );
     }
 }
