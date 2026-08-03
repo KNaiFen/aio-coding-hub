@@ -86,3 +86,34 @@
 ## 当前结论
 
 `origin/main@a0db6c20` 与本功能业务目标兼容；schema v47、scope-aware 性能门禁和同文件业务语义已经按上述决定修补。第二轮 rebase 和本地允许检查已完成；云端完整 CI 通过并在合并前再次复核最新 main 后方可合并。
+
+## 第三轮主线漂移
+
+更新 PR 前的最终核验发现 `origin/main` 又从 `a0db6c20` 前进到
+`0f864415d56f3808d7bff1a344739b668224d7d2`。新增提交为
+`69bb4bf8` 及其 PR #36 merge commit，只把 PR #35 的五个 Trellis
+任务文件从活动目录移动到
+`.trellis/tasks/archive/2026-08/08-04-tray-limit-routing-fix/`，并补齐
+任务完成状态、CI、dev-build、merge 和合并后 main CI 证据。
+
+人工审查确认本轮没有产品代码、配置、依赖或测试变更；五个归档路径与本功能
+100 个变更路径交集为 0，也不触碰本功能的 `08-03-*` Trellis 任务。
+业务影响仅为从活动任务列表移除已经完成的 PR #35，不改变供应商趋势、日汇总、
+schema v47、路由、Session、attempt 或 request ledger 语义。因此无需业务补丁，
+可以完整带入。
+
+第三轮 rebase 无冲突完成。`origin/main@0f864415` 是候选 HEAD 的
+merge-base；PR #36 的归档目录与主线逐字一致，功能范围和工作树
+`git diff --check` 均通过。rebase 后再次验证：
+
+- 310 个 Vitest 文件、2738 个测试通过。
+- TypeScript typecheck、ESLint、Prettier、spec link、gateway error-code sync、
+  CI change-scope self-test 和 Vite production build 通过。
+- 依仓库政策仍未在本地运行 Cargo、Rust tests、rustfmt、Clippy、Specta 或
+  Tauri；这些原生门禁必须由新 PR head 的 GitHub Actions 验证。
+
+## 最终 PR 前结论
+
+`origin/main@0f864415` 与候选业务语义兼容，且本轮主线漂移没有代码级
+交叉或隐含回归。候选可以更新 PR；合并前仍必须再次核验 main SHA，若再次前进，
+重复同样的逐提交业务审查、rebase 和完整 CI。
