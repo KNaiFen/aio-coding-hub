@@ -1,5 +1,6 @@
 import { RefreshCw } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useRef, useState } from "react";
 import { refreshProviderAccountUsage, useProviderAccountUsageQuery } from "../../query/providers";
 import type {
   ProviderAccountUsageResult,
@@ -154,10 +155,12 @@ export function ProviderAccountUsageInline({
   const accountCredentialsRequired = isProviderAccountUsageAccountCredentialsRequired(provider);
   const config = readProviderAccountUsageConfig(provider);
   const queryClient = useQueryClient();
+  const [manualRefreshing, setManualRefreshing] = useState(false);
+  const manualRefreshInFlightRef = useRef(false);
   const {
     data = null,
     error,
-    isFetching,
+    isLoading,
   } = useProviderAccountUsageQuery(provider, configured && !accountCredentialsRequired);
 
   if (!configured) return null;
@@ -179,12 +182,30 @@ export function ProviderAccountUsageInline({
   const display = buildUsageDisplay(data, {
     historicalUsed: config.adapterKind === "newapi" && config.newApiQueryMode === "account",
   });
-  const refreshError = !isFetching && error ? formatUnknownError(error) : null;
+  const refreshError = error ? formatUnknownError(error) : null;
   const text = refreshError ?? display.summary;
-  const metrics = refreshError || isFetching ? [] : display.metrics;
+  const metrics = refreshError ? [] : display.metrics;
+  const showLoadingText = (isLoading || manualRefreshing) && !data && !refreshError;
+  const visibleText = showLoadingText ? "账户: 刷新中" : text;
+  const iconSpinning = isLoading || manualRefreshing;
   const tone = refreshError
     ? "text-amber-700 dark:text-amber-400"
     : resultTone(data?.status ?? "unsupported");
+
+  const refresh = async () => {
+    if (manualRefreshInFlightRef.current) return;
+
+    manualRefreshInFlightRef.current = true;
+    setManualRefreshing(true);
+    try {
+      await refreshProviderAccountUsage(queryClient, provider.id);
+    } catch {
+      // React Query owns the error state rendered after the refresh completes.
+    } finally {
+      manualRefreshInFlightRef.current = false;
+      setManualRefreshing(false);
+    }
+  };
 
   return (
     <span className={cn("inline-flex min-w-0 flex-wrap items-center gap-2", className)}>
@@ -192,11 +213,13 @@ export function ProviderAccountUsageInline({
         type="button"
         onClick={(event) => {
           event.stopPropagation();
-          if (isFetching) return;
-          void refreshProviderAccountUsage(queryClient, provider.id).catch(() => undefined);
+          void refresh();
         }}
-        disabled={isFetching}
-        aria-label={`刷新账户用量，${isFetching ? "账户: 刷新中" : [text, ...metrics].join("，")}`}
+        disabled={manualRefreshing}
+        aria-label={`刷新账户用量，${manualRefreshing ? "正在刷新，" : ""}${[
+          visibleText,
+          ...metrics,
+        ].join("，")}`}
         className={cn(
           "inline-flex min-w-0 max-w-full shrink items-start gap-1 rounded-sm font-mono text-xs text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60",
           tone,
@@ -205,11 +228,11 @@ export function ProviderAccountUsageInline({
         title={refreshError ?? display.title}
       >
         <RefreshCw
-          className={cn("mt-0.5 h-3 w-3 shrink-0", isFetching && "animate-spin")}
+          className={cn("mt-0.5 h-3 w-3 shrink-0", iconSpinning && "animate-spin")}
           aria-hidden="true"
         />
         <span className="flex min-w-0 max-w-full flex-col gap-1">
-          <span className="min-w-0 max-w-full truncate">{isFetching ? "账户: 刷新中" : text}</span>
+          <span className="min-w-0 max-w-full truncate">{visibleText}</span>
           {metrics.length ? (
             <span className="flex max-w-full flex-nowrap gap-1.5 overflow-hidden">
               {metrics.map((metric) => (

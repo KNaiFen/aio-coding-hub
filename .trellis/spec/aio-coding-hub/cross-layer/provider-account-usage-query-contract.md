@@ -50,6 +50,18 @@ ProviderAccountUsageRuntimeState::fetch(...);
 - A successful result is displayable only when `last_fetched_at <= now` and its
   age is strictly less than 60 minutes. Loading, failed, expired, malformed, or
   future-dated states expose no previous amount.
+- The desktop account-usage inline renderer treats the five-second query
+  interval as an invisible consumer heartbeat. Only `isLoading` with no result
+  may replace its visible content with the initial loading label. A background
+  fetch must preserve the current summary, metric DOM, refresh-icon state, and
+  button enabled state until its completed result changes them.
+- A user-initiated refresh uses local manual-refresh state and a synchronous
+  re-entry guard around `refreshProviderAccountUsage`. While it is pending,
+  existing visible summary and metrics stay in place, the fixed-size refresh
+  icon may spin, the button is disabled, and its accessible label states that
+  refresh is in progress. The guard and local state are released in `finally`.
+  A completed failure renders the normalized error and hides every stale metric
+  or amount; it never keeps an earlier successful balance visible.
 - Provider save/delete invalidates only that provider's backend and frontend
   account cache. Enable/disable alone does not invalidate or stop account usage.
 - Observer output is bounded and secret-free: configured providers expose only
@@ -87,6 +99,11 @@ ProviderAccountUsageRuntimeState::fetch(...);
   values, and future timestamps.
 - Keep the frontend exact-key cancellation tests: manual refresh uses the shared
   query function with `meta.force=true`, never a direct second cache writer.
+- Frontend component tests use fake timers for two or more mounted account rows
+  across at least three heartbeat cycles, asserting that heartbeat activity
+  leaves visible text, metrics, icon, button state, and row structure stable.
+  They also cover initial loading, background success/failure, manual
+  success/failure, and rapid repeated manual clicks.
 - Assert refresh remains isolated from routing, availability, circuit, OAuth,
   mutations, reorder, and unrelated caches.
 

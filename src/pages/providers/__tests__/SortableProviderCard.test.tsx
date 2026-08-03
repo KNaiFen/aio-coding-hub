@@ -258,7 +258,11 @@ describe("pages/providers/SortableProviderCard", () => {
     await waitFor(() => {
       expect(providerAccountUsageFetch).toHaveBeenCalledTimes(2);
       expect(refreshButton).toBeDisabled();
-      expect(refreshButton).toHaveAccessibleName("刷新账户用量，账户: 刷新中");
+      expect(refreshButton).toHaveAccessibleName(
+        "刷新账户用量，正在刷新，账户: 可用 · 余额 1.00 USD，已用 2.00/3.00 USD"
+      );
+      expect(refreshButton).toHaveTextContent("账户: 可用 · 余额 1.00 USD");
+      expect(refreshButton).toHaveTextContent("已用 2.00/3.00 USD");
     });
 
     manualRefresh.resolve({ ...usage, balance: 8 });

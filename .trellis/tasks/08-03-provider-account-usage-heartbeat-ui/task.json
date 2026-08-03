@@ -3,7 +3,7 @@
   "name": "provider-account-usage-heartbeat-ui",
   "title": "稳定账户余额心跳渲染",
   "description": "实施 AIO-PENDING-014，区分首次加载、后台心跳和手动刷新，消除 Providers 页面布局抖动。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": "@aio-coding-hub",
   "package": "aio-coding-hub",
