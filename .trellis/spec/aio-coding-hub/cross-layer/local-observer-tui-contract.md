@@ -131,9 +131,16 @@ remote administration API.
 - Status/request polling omits the provider projection. Entering the provider
   view requests it; if an older observer rejects the additive query, the client
   retries the legacy snapshot and marks only the provider view unsupported.
-- Request rows retain the original client model and render an applied configured
-  route as `source->effective` with optional reasoning effort. Old observers or
-  invalid optional route fields continue to render the ordinary model safely.
+- Request cards use semantic status, model, target-model, provider, route, and
+  metrics lines so dynamic model routing does not change color ownership. When
+  an applied configured route changes the model, the card renders `CLI / 源模型
+  →` followed by a display-width-right-aligned target line containing
+  `effective[·effort][ 压缩·模式]`; the source arrow remains visible at every
+  nonzero width. Requests without a model change retain one model line. This
+  card-only compact effort text omits the Chinese thinking label; Statusline and
+  request detail retain their existing `source→effective·思考effort` semantics.
+  Old observers or invalid optional route fields continue to render the ordinary
+  model safely.
 - Provider availability detail converts bucket timestamps to the host system's
   local timezone at render time and displays `HH:MM-HH:MM` without a hard-coded
   timezone suffix.

@@ -3,7 +3,7 @@ use crate::config::{colors_enabled, StatusItem, TuiConfig};
 use crate::format::{
     cli_label, format_cost, format_duration, format_tokens, now_millis, request_card_lines,
     scope_label, status_segments, truncate_display, truncate_status_line, wrap_status_segments,
-    StatusSegment, StatusTone,
+    RequestCardLineKind, StatusSegment, StatusTone,
 };
 use crate::palette::{Palette, Tone};
 use aio_observer_protocol::{
@@ -760,11 +760,10 @@ fn draw_request_list(frame: &mut Frame, area: Rect, state: &mut LogsState, width
             let selected = state.selected == Some(index);
             let mut lines = request_card_lines(request, now_ms, width)
                 .into_iter()
-                .enumerate()
-                .map(|(line_index, line)| {
+                .map(|line| {
                     Line::styled(
-                        line,
-                        request_line_style(request, line_index, state.color, selected),
+                        line.text,
+                        request_line_style(request, line.kind, state.color, selected),
                     )
                 })
                 .collect::<Vec<_>>();
@@ -1208,25 +1207,34 @@ fn draw_help(frame: &mut Frame, area: Rect, color: bool) {
 
 fn request_line_style(
     request: &ObserverRequest,
-    line_index: usize,
+    kind: RequestCardLineKind,
     color: bool,
     selected: bool,
 ) -> Style {
-    let tone = match line_index {
-        0 if request.state == aio_observer_protocol::ObserverRequestState::Active => Tone::Accent,
-        0 if request.interrupted => Tone::Warning,
-        0 if request
+    let tone = match kind {
+        RequestCardLineKind::Status
+            if request.state == aio_observer_protocol::ObserverRequestState::Active =>
+        {
+            Tone::Accent
+        }
+        RequestCardLineKind::Status if request.interrupted => Tone::Warning,
+        RequestCardLineKind::Status
+            if request
             .status
             .is_some_and(|status| (200..300).contains(&status)) =>
         {
             Tone::Success
         }
-        0 => Tone::Error,
-        1 => Tone::Info,
-        2 => Tone::Provider,
-        3 if request.provider_switch_count > 0 || request.retry_count > 0 => Tone::Warning,
-        3 => Tone::Success,
-        _ => Tone::Accent,
+        RequestCardLineKind::Status => Tone::Error,
+        RequestCardLineKind::Model | RequestCardLineKind::ModelTarget => Tone::Info,
+        RequestCardLineKind::Provider => Tone::Provider,
+        RequestCardLineKind::Route
+            if request.provider_switch_count > 0 || request.retry_count > 0 =>
+        {
+            Tone::Warning
+        }
+        RequestCardLineKind::Route => Tone::Success,
+        RequestCardLineKind::Metrics => Tone::Accent,
     };
     let mut style = Palette::detected(color).style(tone);
     if selected {
@@ -1668,11 +1676,11 @@ fn item_separator_style(color: bool) -> Style {
 mod tests {
     use super::*;
     use aio_observer_protocol::{
-        ObserverGatewayStatus, ObserverPreferredProvider, ObserverProviderAccountUsage,
-        ObserverProviderAvailabilityBucket, ObserverProviderAvailabilityState,
-        ObserverProviderAvailabilityTimeline, ObserverProviderCollection,
-        ObserverProviderOAuthQuota, ObserverProviderSpendWindow, ObserverRequestState,
-        ObserverSection, ObserverTodayUsage, OBSERVER_PROTOCOL_VERSION,
+        ObserverConfiguredModelRoute, ObserverGatewayStatus, ObserverPreferredProvider,
+        ObserverProviderAccountUsage, ObserverProviderAvailabilityBucket,
+        ObserverProviderAvailabilityState, ObserverProviderAvailabilityTimeline,
+        ObserverProviderCollection, ObserverProviderOAuthQuota, ObserverProviderSpendWindow,
+        ObserverRequestState, ObserverSection, ObserverTodayUsage, OBSERVER_PROTOCOL_VERSION,
     };
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
@@ -1914,8 +1922,19 @@ mod tests {
         let mut terminal = Terminal::new(backend).expect("terminal");
         let mut state = LogsState::new(CliScope::Codex);
         let mut snapshot = empty_snapshot(CliScope::Codex);
-        snapshot.recent_requests =
-            ObserverSection::ready(vec![terminal_request("newest"), terminal_request("older")]);
+        let mut routed = terminal_request("newest");
+        routed.configured_model_route = Some(ObserverConfiguredModelRoute {
+            source_model: "gpt-5".to_string(),
+            effective_model: "gpt-5.6-terra".to_string(),
+            reasoning_effort: None,
+            policy_source: "global".to_string(),
+            model_applied: true,
+            reasoning_effort_applied: false,
+        });
+        let ordinary = terminal_request("older");
+        assert_eq!(request_card_lines(&routed, 10, 32).len(), 6);
+        assert_eq!(request_card_lines(&ordinary, 10, 32).len(), 5);
+        snapshot.recent_requests = ObserverSection::ready(vec![routed, ordinary]);
         state.apply_snapshot(snapshot);
         terminal
             .draw(|frame| draw_logs(frame, &mut state))
@@ -1930,6 +1949,39 @@ mod tests {
         assert!(cells.iter().any(|cell| cell.fg == Color::Green));
         assert!(cells.iter().any(|cell| cell.fg == Color::Blue));
         assert!(cells.iter().any(|cell| cell.fg == Color::Magenta));
+    }
+
+    #[test]
+    fn request_card_line_kinds_control_color_and_selection() {
+        let request = terminal_request("semantic");
+        assert_eq!(
+            request_line_style(&request, RequestCardLineKind::Status, true, false).fg,
+            Some(Color::Green)
+        );
+        assert_eq!(
+            request_line_style(&request, RequestCardLineKind::Model, true, false).fg,
+            Some(Color::Blue)
+        );
+        assert_eq!(
+            request_line_style(&request, RequestCardLineKind::ModelTarget, true, false).fg,
+            Some(Color::Blue)
+        );
+        assert_eq!(
+            request_line_style(&request, RequestCardLineKind::Provider, true, false).fg,
+            Some(Color::Magenta)
+        );
+        assert_eq!(
+            request_line_style(&request, RequestCardLineKind::Route, true, false).fg,
+            Some(Color::Green)
+        );
+        assert_eq!(
+            request_line_style(&request, RequestCardLineKind::Metrics, true, false).fg,
+            Some(Color::Cyan)
+        );
+        assert_eq!(
+            request_line_style(&request, RequestCardLineKind::ModelTarget, true, true).bg,
+            Some(Color::DarkGray)
+        );
     }
 
     #[test]
