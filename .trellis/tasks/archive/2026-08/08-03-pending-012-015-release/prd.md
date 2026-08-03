@@ -18,11 +18,11 @@
 
 - [x] AIO-PENDING-012 满足自身验收并随 `aio-coding-hub-v0.60.45` 发布。
 - [x] AIO-PENDING-014 满足自身验收并随 `aio-coding-hub-v0.60.45` 发布。
-- [ ] AIO-PENDING-015 满足重新打开后的固定宽度、名称省略、固定计数列与视觉验收。
-- [ ] 015 功能 PR、版本 PR 与精确 main SHA 的 CI 全部成功。
-- [ ] `aio-coding-hub-v0.60.46` 正式发布，标签指向版本 PR 的 main 合并提交。
-- [ ] Release 的 12 个资产齐全，`SHA256SUMS.txt` 中 11 个载荷校验通过，`latest.json` 有效。
-- [ ] AIO-PENDING-015 在发布后携带 PR、提交、CI、截图和 Release 证据迁入完成归档，父任务随后归档。
+- [x] AIO-PENDING-015 满足重新打开后的固定宽度、名称省略、固定计数列与视觉验收。
+- [x] 015 功能 PR、版本 PR 与精确 main SHA 的 CI 全部成功。
+- [x] `aio-coding-hub-v0.60.46` 正式发布，标签指向版本 PR 的 main 合并提交。
+- [x] Release 的 12 个资产齐全，`SHA256SUMS.txt` 中 11 个载荷校验通过，`latest.json` 有效。
+- [x] AIO-PENDING-015 在发布后携带 PR、提交、CI、截图和 Release 证据迁入完成归档，父任务随后归档。
 
 ## Notes
 
