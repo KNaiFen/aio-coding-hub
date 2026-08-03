@@ -3,7 +3,7 @@
   "name": "tui-summary-local-time",
   "title": "统一 TUI 顶部摘要与本地时区显示",
   "description": "Unify the standalone TUI dashboard header across request and provider views, render provider availability bucket times in the host system timezone, and deliver the change in a patch release.",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": "backend",
   "scope": "standalone-tui",
   "package": "aio-coding-hub",
@@ -11,12 +11,12 @@
   "creator": "KNaiFen",
   "assignee": "KNaiFen",
   "createdAt": "2026-08-02",
-  "completedAt": null,
+  "completedAt": "2026-08-03",
   "branch": "codex/tui-polish-release",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": null,
-  "pr_url": null,
+  "commit": "aa0a536bb08ce1aeb8438db278b4863d2b7dffd8",
+  "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/21",
   "subtasks": [],
   "children": [],
   "parent": "08-02-tui-polish-release",
@@ -26,6 +26,6 @@
     "src-tauri/Cargo.lock",
     ".trellis/spec/aio-coding-hub/cross-layer/local-observer-tui-contract.md"
   ],
-  "notes": "",
+  "notes": "功能 PR #21 已合并，完整 CI 30768707035 通过；随 0.60.44 发布，主分支候选 CI 30770727285 与发布工作流 30783353284 均成功。",
   "meta": {}
 }

@@ -15,13 +15,17 @@
 
 ## Acceptance Criteria
 
-- [ ] 三个子任务各自满足 PRD 验收标准，且父任务完成跨子任务差异审查。
-- [ ] `PENDING.md` 不再加载已完成的 11 个长条目，但完整历史可以从明确链接的归档文件访问。
-- [ ] TUI 请求/供应商视图共享同一摘要，供应商详情时间按系统时区显示。
-- [ ] macOS 悬浮面板显示 18 个扁长状态格、每家供应商的总成功/失败数，并具有圆角原生 Popover 观感。
-- [ ] 前端测试、类型检查、lint 和 Vite 构建通过；云端完整 CI、macOS 集成构建和发布工作流通过。
-- [ ] `aio-coding-hub-v0.60.44` 正式发布，Release 资产和 `SHA256SUMS.txt` 完整且校验一致。
+- [x] 三个子任务各自满足 PRD 验收标准，且父任务完成跨子任务差异审查。
+- [x] `PENDING.md` 不再加载已完成的 11 个长条目，但完整历史可以从明确链接的归档文件访问。
+- [x] TUI 请求/供应商视图共享同一摘要，供应商详情时间按系统时区显示。
+- [x] macOS 悬浮面板显示 18 个扁长状态格、每家供应商的总成功/失败数，并具有圆角原生 Popover 观感。
+- [x] 前端测试、类型检查、lint 和 Vite 构建通过；云端完整 CI、macOS 集成构建和发布工作流通过。
+- [x] `aio-coding-hub-v0.60.44` 正式发布，Release 资产和 `SHA256SUMS.txt` 完整且校验一致。
 
 ## Notes
 
 - 父任务只拥有需求映射、集成审查和发布证据；具体代码由三个子任务承接。
+- 功能 PR：https://github.com/KNaiFen/aio-coding-hub/pull/21
+- 发布 PR：https://github.com/KNaiFen/aio-coding-hub/pull/22
+- 发布候选 CI：https://github.com/KNaiFen/aio-coding-hub/actions/runs/30770727285
+- 正式发布：https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.44

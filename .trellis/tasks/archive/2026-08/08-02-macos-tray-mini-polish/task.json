@@ -3,7 +3,7 @@
   "name": "macos-tray-mini-polish",
   "title": "精修 macOS 托盘供应商悬浮面板",
   "description": "Increase the tray provider timeline to 18 compact cells, surface total success/failure counts, tighten provider row spacing, and adopt a rounded native macOS popover presentation.",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": "cross-layer",
   "scope": "macos-tray-mini",
   "package": "aio-coding-hub",
@@ -11,12 +11,12 @@
   "creator": "KNaiFen",
   "assignee": "KNaiFen",
   "createdAt": "2026-08-02",
-  "completedAt": null,
+  "completedAt": "2026-08-03",
   "branch": "codex/tui-polish-release",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": null,
-  "pr_url": null,
+  "commit": "aa0a536bb08ce1aeb8438db278b4863d2b7dffd8",
+  "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/21",
   "subtasks": [],
   "children": [],
   "parent": "08-02-tui-polish-release",
@@ -30,6 +30,6 @@
     "src/tray/TrayProviderMiniApp.tsx",
     "src/tray/__tests__/TrayProviderMiniApp.test.tsx"
   ],
-  "notes": "",
+  "notes": "功能 PR #21 已合并，完整 CI 30768707035 通过；随 0.60.44 发布，主分支候选 CI 30770727285 与发布工作流 30783353284 均成功。",
   "meta": {}
 }
