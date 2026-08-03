@@ -10,14 +10,14 @@
 | Low | 0 |
 
 - 总体风险：Medium。风险来自网关路由资格和错误语义变化，不是已发现缺陷。
-- 当前建议：Conditional。允许提交并进入 PR；只有 GitHub Actions 原生检查通过，且合并前最新 `origin/main` 的代码与业务影响审查通过，才允许合并。
+- 最终建议：通过。PR 原生检查、macOS arm64 dev-build、合并前最新主线审查和合并后 main CI 均已通过。
 - 分析文件：27/27。
 - 高风险生产路径：限额计算、候选过滤、Session 绑定、failover 收口，共 100% 人工审查。
 - 已发现安全回归：0。
 
 ## 变更内容
 
-基线为建分支时的 `origin/main`：`ca15f02b`。当前差异包含 3 个已提交变更和待提交的路由实现，共 27 个文件，约 `+1016/-159` 行。
+建分支基线为 `origin/main@ca15f02b`；PR 最终基线为 `523256fc`，最终 head 为 `b91cd16e`。PR 相对最终基线共变更 30 个文件，约 `+1130/-161` 行。
 
 | 范围 | 风险 | 影响 |
 | --- | --- | --- |
@@ -75,17 +75,17 @@
 
 - [x] 完成本地前端验证和视觉验证。
 - [x] 完成当前分支五轴差异审查。
-- [ ] GitHub Actions 的 Rust tests、rustfmt、Clippy、生成绑定和原生构建全部通过。
-- [ ] 合并前重新 fetch `origin/main`，逐提交审查其代码与业务影响。
-- [ ] 若主线有漂移，普通 merge 最新 `origin/main`，解决文本和语义冲突后重跑验证与 CI。
-- [ ] 无法同时保留主线和本分支业务语义时停止合并，交由用户处理。
+- [x] GitHub Actions 的 Rust tests、rustfmt、Clippy、生成绑定和原生构建全部通过。
+- [x] 合并前重新 fetch `origin/main`，逐提交审查其代码与业务影响。
+- [x] 主线第一次漂移仅含已完成任务归档，已普通 merge；最终 fetch 无新增漂移，无需额外冲突补丁。
+- [x] 已确认主线和本分支业务语义可同时保留，不需要交由用户解决冲突。
 
 ## 分析方法
 
 - 策略：Deep。生产代码变更少于 20 个文件，逐个 diff 区域审查，并用 CodeGraph 跟踪候选解析、Session 绑定、限额 gate、错误收口与真实 429 路径。
 - 技术：基线/当前版本对比、历史 blame/log、调用链与爆炸半径分析、测试矩阵映射、对抗性边界推演、前端全量验证和实际像素检查。
 - 限制：依仓库政策未在本地编译或执行 Rust；此项由 CI 补足。
-- 置信度：当前分支业务语义为 High；原生编译为 Pending CI；最终主线兼容性为 Pending pre-merge review。
+- 置信度：High。业务语义、原生编译与测试、桌面构建、最终主线兼容性均已取得对应证据。
 
 ## 主线差异审查
 
@@ -111,3 +111,20 @@
 - 业务影响：失败发生在编译期，没有生成或发布可运行制品；CI 日志未显示路由断言失败，因此不能据此证明业务语义，但也不存在失败制品进入用户路径的风险。
 - 修补边界：限额辅助函数改为经 `provider_limits -> failover_loop -> forwarder` 窄接口导出；纯限额竞态响应由 `handler::early_error` 的单一代理函数封装。未修改限额计算、候选顺序、Session 绑定、attempt 生成条件或错误契约。
 - 本地复核：模块树与调用路径经 CodeGraph 和逐文件 diff 检查；`git diff --check` 通过。依仓库政策仍不在本地运行 Rust 工具链，修补后的编译、格式和原生测试继续由新一轮 CI 验证。
+
+### 云端格式漂移闭环
+
+- 修补提交 `c8fb1343` 的 PR CI `30837774389` 只在 generated-file drift 门禁失败，Clippy 和 Rust tests 因门禁顺序尚未执行。
+- 下载并逐行审查 artifact `cloud-native-fixes-f4ed32fa0e448164a7f91b052c13d96baec122ac-1`；补丁只含 3 个 Rust 文件的 `rustfmt` 排版和 import 顺序，零逻辑与零绑定变化。
+- 机械补丁以 `b91cd16e` 提交；对应 PR CI `30838390347` 的格式/绑定漂移为零，Clippy、Rust tests、dependency audit、frontend、契约与总门禁全部成功。
+- 同一 head 的 macOS arm64 dev-build `30838393906` 完成桌面构建和开发制品上传。
+
+### 最终合并审查与主线验证
+
+- 合并前再次 fetch 后，`origin/main` 仍为 `523256fc4108f03731bedb3962ff1d88acab01f4`；相对第一次同步新增提交 0、变更文件 0。
+- `origin/main` 是 PR head 的祖先；PR base/head 分别为 `523256fc` / `b91cd16e`，GitHub 状态为 `CLEAN`、`MERGEABLE`，无评论、review 或未解决线程。
+- 因最终主线没有新增代码，不存在需要再次组合的调用链、契约或业务语义；没有用 CI 结果替代代码审查，也没有虚构不存在的主线变更。
+- PR #35 以普通 merge 合入，merge commit 为 `a0db6c20cfbae0d2b3cb64fbf868eed4110979b0`。该 merge commit 的文件树与已验证 head 差异为 0。
+- 合并后 main CI `30840406383` 全部成功；候选构建经 candidate plan 判定无需执行并正常跳过。
+
+最终结论：未发现业务冲突或待修补问题，合并与主线验证通过。

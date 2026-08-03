@@ -7,8 +7,16 @@
 - [x] 更新 OAuth、消费限额、Session 复用、全限额、混合 gate、forced/managed 与真实 429 路由测试。
 - [x] 修订 gateway failover 与 Tray geometry 跨层规范，明确新旧契约边界。
 - [x] 运行前端目标/全量测试、typecheck、lint、build、format check、diff check 和五轴代码审查。
-- [ ] 提交并推送到 origin，创建 PR；等待 GitHub Actions 原生检查并检查 dev-build 视觉结果。
-- [ ] 合并前 fetch 最新 main；如有漂移则合并主线、解决冲突、重新运行验证与 CI，再合并 PR。
+- [x] 提交并推送到 origin，创建 PR；等待 GitHub Actions 原生检查并检查 dev-build 视觉结果。
+- [x] 合并前 fetch 最新 main；如有漂移则合并主线、解决冲突、重新运行验证与 CI，再合并 PR。
+
+## 交付证据
+
+- 功能 PR：[#35](https://github.com/KNaiFen/aio-coding-hub/pull/35)，head `b91cd16e4acedc2ed94273497c9fea769451d1e6`，merge commit `a0db6c20cfbae0d2b3cb64fbf868eed4110979b0`。
+- PR CI：`30838390347` 全部通过，包括 frontend、Rust format/bindings、Clippy、Rust tests、dependency audit、契约检查与总门禁。
+- macOS arm64 dev-build：`30838393906` 构建与开发制品上传通过。
+- 合并后 main CI：`30840406383` 全部通过；候选构建经计划判定正常跳过。
+- 合并前最终 fetch 的 `origin/main` 仍为已审查的 `523256fc4108f03731bedb3962ff1d88acab01f4`，新增提交和文件均为 0；合并提交与已验证 head 的文件树差异为 0。
 
 ## 验证命令
 
