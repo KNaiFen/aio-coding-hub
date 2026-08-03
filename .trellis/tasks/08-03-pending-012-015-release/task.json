@@ -3,7 +3,7 @@
   "name": "pending-012-015-release",
   "title": "处理待办 012/014/015 并发布 0.60.45",
   "description": "在一个补丁版本中完成 AIO-PENDING-012、014、015，经 origin PR 合并并发布 0.60.45。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": "@aio-coding-hub",
   "package": "aio-coding-hub",
