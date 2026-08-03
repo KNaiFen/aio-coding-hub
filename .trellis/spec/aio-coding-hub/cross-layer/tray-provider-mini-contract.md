@@ -11,16 +11,17 @@ frozen-generation behavior, title, and empty state remain unchanged.
 ## Geometry
 
 - The native logical width is `404` pixels. The complete horizontal contract is
-  `1 border + 12 padding + 96 provider + 8 gap + 178 availability + 8 gap + 88 totals + 12 padding + 1 border`.
-- Provider rows use fixed `96px / 178px / 88px` tracks. Provider names truncate
+  `1 border + 12 padding + 96 provider + 8 gap + 170 availability + 8 gap + 96 totals + 12 padding + 1 border`.
+- Provider rows use fixed `96px / 170px / 96px` tracks. Provider names truncate
   within the first track while preserving the exact name in `title`; reason
   markers remain in that track and do not shrink.
-- The availability track contains eighteen 8-pixel cells separated by
-  seventeen 2-pixel gaps.
-- Totals use fixed `12px / 32px / 12px / 32px` tracks for the success label,
-  success value, failure label, and failure value. Values use 9px monospace
-  tabular figures, are right-aligned, and never wrap; labels retain the 10px
-  proportional text style.
+- The availability track contains eighteen equal `minmax(0, 1fr)` cells
+  separated by seventeen 2-pixel gaps.
+- Totals use two fixed `12px / 32px` groups separated by a 1-pixel divider.
+  The 7 remaining pixels are distributed evenly around the divider so success
+  and failure read as distinct zones. Values use 9px monospace tabular figures,
+  are right-aligned, and never wrap; labels retain the 10px proportional text
+  style.
 - Each provider row in `TrayProviderMiniApp` uses Tailwind `h-6` (24 logical
   pixels).
 - Its internal scrolling container uses `max-h-[240px]`, so it displays at
