@@ -1,35 +1,18 @@
 use crate::db;
 use crate::shared::error::db_err;
 use rusqlite::{params_from_iter, Connection};
+use std::collections::HashSet;
 
-use super::filters::{
-    build_optional_range_cli_provider_filters, sql_exclude_cx2cc_gateway_bridge_clause,
+use super::trend_common::{
+    build_trend_source_ctes, plan_trend, trend_query_params, validate_trend_budget, TrendPlanQuery,
 };
 use super::{
-    has_valid_provider_key, resolve_query_params, sql_effective_input_tokens_expr_with_alias,
-    ProviderKey, UsagePeriodV2, UsageProviderCacheRateTrendRowV1, UsageQueryParams,
+    has_valid_provider_key, resolve_query_params, ProviderKey, UsageProviderCacheRateTrendRowV1,
+    UsageQueryParams, UsageTrendGranularityV1,
 };
-
-#[derive(Debug, Clone, Copy)]
-enum TrendBucketV1 {
-    Hour,
-    Day,
-    Month,
-}
-
-fn bucket_for_period(period: UsagePeriodV2) -> TrendBucketV1 {
-    match period {
-        UsagePeriodV2::Daily => TrendBucketV1::Hour,
-        UsagePeriodV2::AllTime => TrendBucketV1::Month,
-        UsagePeriodV2::Weekly | UsagePeriodV2::Monthly | UsagePeriodV2::Custom => {
-            TrendBucketV1::Day
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ProviderCacheRateTrendQuery<'a> {
-    pub period: UsagePeriodV2,
     pub start_ts: Option<i64>,
     pub end_ts: Option<i64>,
     pub cli_key: Option<&'a str>,
@@ -42,77 +25,70 @@ pub(super) fn provider_cache_rate_trend_v1_with_conn(
     conn: &Connection,
     query: ProviderCacheRateTrendQuery<'_>,
 ) -> Result<Vec<UsageProviderCacheRateTrendRowV1>, String> {
-    let bucket = bucket_for_period(query.period);
-    let limit = match query.limit {
-        None => -1,
-        Some(0) => -1,
-        Some(v) => v.clamp(1, 200) as i64,
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|error| db_err!("failed to start Provider cache trend read snapshot: {error}"))?;
+    let rows = provider_cache_rate_trend_v1_in_snapshot(&tx, query)?;
+    tx.commit()
+        .map_err(|error| db_err!("failed to close Provider cache trend read snapshot: {error}"))?;
+    Ok(rows)
+}
+
+fn provider_cache_rate_trend_v1_in_snapshot(
+    conn: &Connection,
+    query: ProviderCacheRateTrendQuery<'_>,
+) -> Result<Vec<UsageProviderCacheRateTrendRowV1>, String> {
+    let source_query = TrendPlanQuery {
+        start_ts: query.start_ts,
+        end_ts: query.end_ts,
+        cli_key: query.cli_key,
+        provider_id: query.provider_id,
+        requested_provider_limit: query.limit,
+        exclude_cx2cc_gateway_bridge: query.exclude_cx2cc_gateway_bridge,
     };
-
-    let (select_fields, group_by_fields, order_by_fields) = match bucket {
-        TrendBucketV1::Hour => (
-            "strftime('%Y-%m-%d', r.created_at, 'unixepoch','localtime') AS day, CAST(strftime('%H', r.created_at, 'unixepoch','localtime') AS INTEGER) AS hour",
-            "day, hour",
-            "b.day ASC, b.hour ASC",
-        ),
-        TrendBucketV1::Day => (
-            "strftime('%Y-%m-%d', r.created_at, 'unixepoch','localtime') AS day, NULL AS hour",
-            "day",
-            "b.day ASC",
-        ),
-        TrendBucketV1::Month => (
-            "strftime('%Y-%m', r.created_at, 'unixepoch','localtime') AS day, NULL AS hour",
-            "day",
-            "b.day ASC",
-        ),
+    let plan = plan_trend(conn, source_query)?;
+    let source_ctes = build_trend_source_ctes(conn, plan, source_query)?;
+    let order_by_fields = match plan.granularity {
+        UsageTrendGranularityV1::Hour => "b.day ASC, b.hour ASC",
+        UsageTrendGranularityV1::Day
+        | UsageTrendGranularityV1::Week
+        | UsageTrendGranularityV1::Month
+        | UsageTrendGranularityV1::Year => "b.day ASC",
     };
-
-    let effective_input_expr = sql_effective_input_tokens_expr_with_alias("r");
-    let denom_expr = format!(
-        "({effective_input_expr}) + COALESCE(r.cache_creation_input_tokens, 0) + COALESCE(r.cache_read_input_tokens, 0)",
-        effective_input_expr = effective_input_expr
-    );
-    let (where_clause, where_params) = build_optional_range_cli_provider_filters(
-        "r.created_at",
-        "r.cli_key",
-        "r.final_provider_id",
-        query.start_ts,
-        query.end_ts,
-        query.cli_key,
-        query.provider_id,
-    );
-    let cx2cc_filter_clause =
-        sql_exclude_cx2cc_gateway_bridge_clause(Some("r"), query.exclude_cx2cc_gateway_bridge);
-
+    let top_provider_having = if query.provider_id.is_some() {
+        ""
+    } else {
+        "HAVING SUM(s.requests_success) > 0"
+    };
     let sql = format!(
         r#"
-WITH bucketed AS (
-  SELECT
-    {select_fields},
-    r.cli_key AS cli_key,
-    r.final_provider_id AS provider_id,
-    MAX(NULLIF(TRIM(r.provider_name_snapshot), '')) AS provider_name,
-    SUM({denom_expr}) AS denom_tokens,
-    SUM(COALESCE(r.cache_read_input_tokens, 0)) AS cache_read_input_tokens,
-    COUNT(*) AS requests_success
-  FROM usage_events r
-  WHERE r.excluded_from_stats = 0
-  AND r.status >= 200 AND r.status < 300 AND r.error_present = 0
-  AND r.final_provider_id IS NOT NULL
-  AND r.final_provider_id > 0
-  {where_clause}
-  {cx2cc_filter_clause}
-  GROUP BY {group_by_fields}, r.cli_key, r.final_provider_id
-),
+WITH {source_ctes},
 top_providers AS (
   SELECT
-    cli_key,
-    provider_id,
-    SUM(denom_tokens) AS denom_tokens
-  FROM bucketed
-  GROUP BY cli_key, provider_id
-  ORDER BY denom_tokens DESC
-  LIMIT ?{limit_bind_idx}
+    s.cli_key,
+    s.provider_id,
+    SUM(s.requests_success) AS requests_success
+  FROM trend_source s
+  GROUP BY s.cli_key, s.provider_id
+  {top_provider_having}
+  ORDER BY requests_success DESC, s.cli_key ASC, s.provider_id ASC
+  LIMIT ?5
+),
+bucketed AS (
+  SELECT
+    s.day,
+    s.hour,
+    s.cli_key,
+    s.provider_id,
+    s.provider_name_success AS provider_name,
+    s.cache_denom_tokens AS denom_tokens,
+    s.cache_read_input_tokens,
+    s.requests_success
+  FROM trend_source s
+  JOIN top_providers tp
+    ON tp.cli_key = s.cli_key
+   AND tp.provider_id = s.provider_id
+  WHERE s.requests_success > 0
 )
 SELECT
   b.day,
@@ -124,21 +100,11 @@ SELECT
   b.cache_read_input_tokens,
   b.requests_success
 FROM bucketed b
-JOIN top_providers tp
-  ON tp.cli_key = b.cli_key
- AND tp.provider_id = b.provider_id
-ORDER BY {order_by_fields}, b.denom_tokens DESC
-"#,
-        denom_expr = denom_expr,
-        select_fields = select_fields,
-        group_by_fields = group_by_fields,
-        order_by_fields = order_by_fields,
-        where_clause = where_clause,
-        cx2cc_filter_clause = cx2cc_filter_clause,
-        limit_bind_idx = where_params.len() + 1,
+ORDER BY {order_by_fields}, b.requests_success DESC, b.cli_key ASC, b.provider_id ASC
+"#
     );
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug)]
     struct RawRow {
         day: String,
         hour: Option<i64>,
@@ -152,15 +118,10 @@ ORDER BY {order_by_fields}, b.denom_tokens DESC
 
     let mut stmt = conn
         .prepare(&sql)
-        .map_err(|e| db_err!("failed to prepare provider cache trend query: {e}"))?;
-
+        .map_err(|error| db_err!("failed to prepare provider cache trend query: {error}"))?;
     let rows = stmt
         .query_map(
-            params_from_iter({
-                let mut params = where_params.clone();
-                params.push(limit.into());
-                params
-            }),
+            params_from_iter(trend_query_params(plan, source_query)),
             |row| {
                 Ok(RawRow {
                     day: row.get("day")?,
@@ -183,36 +144,51 @@ ORDER BY {order_by_fields}, b.denom_tokens DESC
                 })
             },
         )
-        .map_err(|e| db_err!("failed to run provider cache trend query: {e}"))?;
+        .map_err(|error| db_err!("failed to run provider cache trend query: {error}"))?;
+    let items = rows
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|error| db_err!("failed to read provider cache trend row: {error}"))?;
+    let bucket_count = items
+        .iter()
+        .map(|row| (row.day.as_str(), row.hour))
+        .collect::<HashSet<_>>()
+        .len();
+    let provider_count = items
+        .iter()
+        .map(|row| (row.cli_key.as_str(), row.provider_id))
+        .collect::<HashSet<_>>()
+        .len();
+    validate_trend_budget(
+        items.len(),
+        bucket_count,
+        provider_count,
+        plan.provider_limit,
+    )?;
 
-    let mut items = Vec::new();
-    for row in rows {
-        items.push(row.map_err(|e| db_err!("failed to read cache trend row: {e}"))?);
-    }
-
-    let mut out = Vec::new();
+    let mut out = Vec::with_capacity(items.len());
     for row in items {
         let Some(provider_name) = row
             .provider_name
             .as_deref()
             .map(str::trim)
-            .filter(|value| !value.is_empty() && *value != "Unknown")
+            .filter(|name| !name.is_empty())
             .map(str::to_string)
         else {
             continue;
         };
-        let key = ProviderKey {
+        let provider_key = ProviderKey {
             cli_key: row.cli_key.clone(),
             provider_id: row.provider_id,
             provider_name: provider_name.clone(),
         };
-        if !has_valid_provider_key(&key) {
+        if !has_valid_provider_key(&provider_key) {
             continue;
         }
 
         out.push(UsageProviderCacheRateTrendRowV1 {
             day: row.day,
             hour: row.hour,
+            granularity: plan.granularity,
             key: format!("{}:{}", row.cli_key, row.provider_id),
             name: format!("{}/{}", row.cli_key, provider_name),
             denom_tokens: row.denom_tokens,
@@ -220,11 +196,9 @@ ORDER BY {order_by_fields}, b.denom_tokens DESC
             requests_success: row.requests_success,
         });
     }
-
     Ok(out)
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn provider_cache_rate_trend_v1(
     db: &db::Db,
     params: &UsageQueryParams,
@@ -237,7 +211,6 @@ pub fn provider_cache_rate_trend_v1(
     Ok(provider_cache_rate_trend_v1_with_conn(
         &conn,
         ProviderCacheRateTrendQuery {
-            period: resolved.period,
             start_ts: resolved.start_ts,
             end_ts: resolved.end_ts,
             cli_key: resolved.cli_key,

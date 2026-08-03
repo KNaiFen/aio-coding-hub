@@ -28,5 +28,6 @@ pub(crate) mod request_attempt_logs;
 pub(crate) mod request_logs;
 pub(crate) mod settings;
 pub(crate) mod usage_ledger;
+pub(crate) mod usage_provider_daily_rollup;
 #[cfg_attr(not(windows), allow(dead_code, unused_imports))]
 pub(crate) mod wsl;

@@ -7,7 +7,11 @@ use super::leaderboard_v2::{
     leaderboard_v2_folder_filtered_with_conn, leaderboard_v2_with_conn,
     leaderboard_v2_with_conn_day_start, FolderFilteredLeaderboardParams,
 };
+use super::metrics_trend_v1::{provider_metric_trend_v1_with_conn, ProviderMetricTrendQuery};
 use super::summary::{summary_query, summary_v2_with_conn};
+use super::trend_common::{
+    plan_trend, TrendPlanQuery, TREND_MAX_BUCKETS, TREND_MAX_PROVIDERS, TREND_MAX_ROWS,
+};
 use super::*;
 use crate::db;
 use rusqlite::{params, Connection};
@@ -541,6 +545,85 @@ WHERE id = 1
     assert_eq!(rows[0].key, "codex:410");
     assert_eq!(rows[0].name, "codex/Ledger Provider");
     assert_eq!(rows[0].total_tokens, 120);
+}
+
+#[test]
+fn provider_trends_are_invariant_after_detail_and_provider_deletion() {
+    let (_dir, db) = setup_temp_db();
+    let conn = db.open_connection().expect("open test db connection");
+    let start_ts = 1_704_067_200i64;
+    insert_migrated_provider(&conn, 411, "codex", "Ledger Trend Provider", None, None);
+    for (trace_id, created_at, input_tokens, output_tokens) in [
+        ("trace-ledger-trend-1", start_ts + 3600, 100, 20),
+        ("trace-ledger-trend-2", start_ts + 7200, 200, 40),
+    ] {
+        insert_migrated_usage_log(
+            &conn,
+            trace_id,
+            "codex",
+            411,
+            "Ledger Trend Provider",
+            input_tokens,
+            output_tokens,
+            created_at,
+            Some("ledger-trend-session"),
+        );
+        assert_eq!(
+            crate::usage_ledger::project_trace(&conn, trace_id)
+                .expect("project request into usage ledger"),
+            1
+        );
+    }
+    conn.execute(
+        r#"
+UPDATE usage_ledger_backfill_state
+SET status = 'complete', completed_at = ?1
+WHERE id = 1
+        "#,
+        params![start_ts],
+    )
+    .expect("complete usage ledger backfill");
+
+    let metric_query = ProviderMetricTrendQuery {
+        start_ts: Some(start_ts),
+        end_ts: Some(start_ts + 86_400),
+        cli_key: None,
+        provider_id: Some(411),
+        limit: None,
+        exclude_cx2cc_gateway_bridge: false,
+    };
+    let cache_query = ProviderCacheRateTrendQuery {
+        start_ts: Some(start_ts),
+        end_ts: Some(start_ts + 86_400),
+        cli_key: None,
+        provider_id: Some(411),
+        limit: None,
+        exclude_cx2cc_gateway_bridge: false,
+    };
+    let metric_before = provider_metric_trend_v1_with_conn(&conn, metric_query)
+        .expect("metric trend before detail deletion");
+    let cache_before = provider_cache_rate_trend_v1_with_conn(&conn, cache_query)
+        .expect("cache trend before detail deletion");
+    assert_eq!(metric_before.len(), 2);
+    assert_eq!(cache_before.len(), 2);
+
+    conn.execute(
+        "DELETE FROM request_logs WHERE trace_id LIKE 'trace-ledger-trend-%'",
+        [],
+    )
+    .expect("delete request log details");
+    conn.execute("DELETE FROM providers WHERE id = 411", [])
+        .expect("delete provider record");
+
+    let metric_after = provider_metric_trend_v1_with_conn(&conn, metric_query)
+        .expect("metric trend after detail deletion");
+    let cache_after = provider_cache_rate_trend_v1_with_conn(&conn, cache_query)
+        .expect("cache trend after detail deletion");
+    assert_eq!(metric_after, metric_before);
+    assert_eq!(cache_after, cache_before);
+    assert!(metric_after
+        .iter()
+        .all(|row| row.provider_name == "Ledger Trend Provider"));
 }
 
 #[test]
@@ -1516,6 +1599,424 @@ INSERT INTO usage_events (
     assert_eq!(row.requests_failed, 0);
 }
 
+fn create_provider_daily_rollup_fixture_schema(conn: &Connection) {
+    conn.execute_batch(
+        r#"
+CREATE TABLE usage_provider_daily_rollup_days (
+  local_day TEXT PRIMARY KEY,
+  day_start_ts INTEGER NOT NULL,
+  day_end_ts INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  source_row_count INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE usage_provider_daily_rollups (
+  local_day TEXT NOT NULL,
+  cli_key TEXT NOT NULL,
+  final_provider_id INTEGER NOT NULL,
+  provider_name_all_snapshot TEXT,
+  provider_name_success_snapshot TEXT,
+  created_at_min INTEGER NOT NULL,
+  created_at_max INTEGER NOT NULL,
+  requests_total INTEGER NOT NULL,
+  requests_success INTEGER NOT NULL,
+  success_duration_ms_sum INTEGER NOT NULL,
+  success_ttfb_ms_sum INTEGER NOT NULL,
+  success_ttfb_ms_count INTEGER NOT NULL,
+  success_generation_ms_sum INTEGER NOT NULL,
+  success_output_tokens_for_rate_sum INTEGER NOT NULL,
+  success_output_rate_count INTEGER NOT NULL,
+  cache_denom_tokens INTEGER NOT NULL,
+  cache_read_input_tokens INTEGER NOT NULL,
+  PRIMARY KEY(local_day, cli_key, final_provider_id)
+);
+
+CREATE TABLE usage_provider_daily_rollup_backfill_state (
+  id INTEGER PRIMARY KEY,
+  next_local_day TEXT,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE usage_ledger AS SELECT * FROM usage_events;
+CREATE INDEX idx_usage_ledger_created_at ON usage_ledger(created_at);
+
+CREATE TABLE usage_ledger_backfill_state (
+  id INTEGER PRIMARY KEY,
+  status TEXT NOT NULL
+);
+
+INSERT INTO usage_provider_daily_rollup_backfill_state(id, next_local_day, updated_at)
+VALUES (1, NULL, 0);
+INSERT INTO usage_ledger_backfill_state(id, status) VALUES (1, 'complete');
+"#,
+    )
+    .expect("create Provider daily rollup fixture schema");
+}
+
+fn materialize_provider_daily_rollup_fixture(
+    conn: &Connection,
+    local_day: &str,
+    day_start_ts: i64,
+    day_end_ts: i64,
+    status: &str,
+) {
+    let source_row_count = conn
+        .query_row(
+            r#"
+SELECT COUNT(*)
+FROM usage_events
+WHERE created_at >= ?1
+  AND created_at < ?2
+  AND excluded_from_stats = 0
+  AND final_provider_id IS NOT NULL
+  AND final_provider_id > 0
+"#,
+            params![day_start_ts, day_end_ts],
+            |row| row.get::<_, i64>(0),
+        )
+        .expect("count daily rollup source rows");
+    conn.execute(
+        r#"
+INSERT INTO usage_provider_daily_rollup_days(
+  local_day,
+  day_start_ts,
+  day_end_ts,
+  status,
+  source_row_count,
+  updated_at
+) VALUES (?1, ?2, ?3, ?4, ?5, ?3)
+"#,
+        params![
+            local_day,
+            day_start_ts,
+            day_end_ts,
+            status,
+            source_row_count
+        ],
+    )
+    .expect("insert daily rollup day fixture");
+    if status != "complete" {
+        return;
+    }
+
+    let success = "r.status >= 200 AND r.status < 300 AND r.error_present = 0";
+    let valid_ttfb = "r.ttfb_ms IS NOT NULL AND r.ttfb_ms < r.duration_ms";
+    let valid_output_rate =
+        "r.output_tokens IS NOT NULL AND r.ttfb_ms IS NOT NULL AND r.ttfb_ms < r.duration_ms";
+    let effective_input = sql_effective_input_tokens_expr_with_alias("r");
+    let cache_denom = format!(
+        "({effective_input}) + COALESCE(r.cache_creation_input_tokens, 0) + COALESCE(r.cache_read_input_tokens, 0)"
+    );
+    let sql = format!(
+        r#"
+INSERT INTO usage_provider_daily_rollups(
+  local_day,
+  cli_key,
+  final_provider_id,
+  provider_name_all_snapshot,
+  provider_name_success_snapshot,
+  created_at_min,
+  created_at_max,
+  requests_total,
+  requests_success,
+  success_duration_ms_sum,
+  success_ttfb_ms_sum,
+  success_ttfb_ms_count,
+  success_generation_ms_sum,
+  success_output_tokens_for_rate_sum,
+  success_output_rate_count,
+  cache_denom_tokens,
+  cache_read_input_tokens
+)
+SELECT
+  ?1,
+  r.cli_key,
+  r.final_provider_id,
+  MAX(NULLIF(TRIM(r.provider_name_snapshot), '')),
+  MAX(CASE WHEN {success} THEN NULLIF(TRIM(r.provider_name_snapshot), '') END),
+  MIN(r.created_at),
+  MAX(r.created_at),
+  COUNT(*),
+  SUM(CASE WHEN {success} THEN 1 ELSE 0 END),
+  SUM(CASE WHEN {success} THEN r.duration_ms ELSE 0 END),
+  SUM(CASE WHEN {success} AND {valid_ttfb} THEN r.ttfb_ms ELSE 0 END),
+  SUM(CASE WHEN {success} AND {valid_ttfb} THEN 1 ELSE 0 END),
+  SUM(CASE WHEN {success} AND {valid_output_rate} THEN r.duration_ms - r.ttfb_ms ELSE 0 END),
+  SUM(CASE WHEN {success} AND {valid_output_rate} THEN r.output_tokens ELSE 0 END),
+  SUM(CASE WHEN {success} AND {valid_output_rate} THEN 1 ELSE 0 END),
+  SUM(CASE WHEN {success} THEN {cache_denom} ELSE 0 END),
+  SUM(CASE WHEN {success} THEN COALESCE(r.cache_read_input_tokens, 0) ELSE 0 END)
+FROM usage_events r
+WHERE r.created_at >= ?2
+  AND r.created_at < ?3
+  AND r.excluded_from_stats = 0
+  AND r.final_provider_id IS NOT NULL
+  AND r.final_provider_id > 0
+GROUP BY r.cli_key, r.final_provider_id
+"#
+    );
+    conn.execute(&sql, params![local_day, day_start_ts, day_end_ts])
+        .expect("materialize daily Provider rollup fixture");
+}
+
+#[test]
+fn provider_trends_mix_complete_rollups_with_raw_gaps_without_overlap() {
+    let conn = setup_conn();
+    conn.execute(
+        "INSERT INTO providers (id, name) VALUES (?1, ?2)",
+        params![123, "Alpha Success"],
+    )
+    .expect("insert normal Provider");
+    conn.execute(
+        r#"INSERT INTO providers (id, name, source_provider_id, bridge_type) VALUES (?1, ?2, ?3, ?4)"#,
+        params![900, "Bridge CX2CC", Option::<i64>::None, "cx2cc"],
+    )
+    .expect("insert CX2CC Provider");
+
+    let calendar_start = local_day_start_ts(&conn, "2024-01-01");
+    for day in 0..=6i64 {
+        let created_at = calendar_start + day * 86_400 + 3 * 3600;
+        insert_usage_log(
+            &conn,
+            TestUsageLog {
+                provider_name: "Alpha Success",
+                duration_ms: 1000 + day,
+                ttfb_ms: Some(100 + day),
+                input_tokens: Some(200 + day),
+                output_tokens: Some(20 + day),
+                cache_read_input_tokens: Some(40 + day),
+                created_at,
+                ..base_usage_log(created_at)
+            },
+        );
+    }
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            provider_name: "Zulu Failure",
+            status: Some(500),
+            error_code: Some("UPSTREAM_ERROR"),
+            created_at: calendar_start + 86_400 + 4 * 3600,
+            ..base_usage_log(calendar_start + 86_400 + 4 * 3600)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            cli_key: "claude",
+            provider_id: 900,
+            provider_name: "Bridge CX2CC",
+            input_tokens: Some(300),
+            cache_read_input_tokens: Some(75),
+            created_at: calendar_start + 3 * 86_400 + 5 * 3600,
+            ..base_usage_log(calendar_start + 3 * 86_400 + 5 * 3600)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            provider_name: "Alpha Success",
+            created_at: calendar_start + 6 * 86_400 + 30 * 60,
+            ..base_usage_log(calendar_start + 6 * 86_400 + 30 * 60)
+        },
+    );
+
+    let query_start = calendar_start + 2 * 3600;
+    let query_end = calendar_start + 6 * 86_400 + 3600;
+    let metric_query = ProviderMetricTrendQuery {
+        start_ts: Some(query_start),
+        end_ts: Some(query_end),
+        cli_key: None,
+        provider_id: None,
+        limit: None,
+        exclude_cx2cc_gateway_bridge: false,
+    };
+    let cache_query = ProviderCacheRateTrendQuery {
+        start_ts: metric_query.start_ts,
+        end_ts: metric_query.end_ts,
+        cli_key: None,
+        provider_id: None,
+        limit: None,
+        exclude_cx2cc_gateway_bridge: false,
+    };
+    let raw_metrics =
+        provider_metric_trend_v1_with_conn(&conn, metric_query).expect("raw metric trend");
+    let raw_cache =
+        provider_cache_rate_trend_v1_with_conn(&conn, cache_query).expect("raw cache trend");
+    let all_time_metric_query = ProviderMetricTrendQuery {
+        start_ts: None,
+        end_ts: None,
+        ..metric_query
+    };
+    let all_time_cache_query = ProviderCacheRateTrendQuery {
+        start_ts: None,
+        end_ts: None,
+        ..cache_query
+    };
+    let raw_all_time_metrics = provider_metric_trend_v1_with_conn(&conn, all_time_metric_query)
+        .expect("raw all-time metric trend");
+    let raw_all_time_cache = provider_cache_rate_trend_v1_with_conn(&conn, all_time_cache_query)
+        .expect("raw all-time cache trend");
+    let hour_metric_query = ProviderMetricTrendQuery {
+        start_ts: Some(calendar_start + 86_400),
+        end_ts: Some(calendar_start + 2 * 86_400),
+        provider_id: Some(123),
+        ..metric_query
+    };
+    let raw_hour_metrics = provider_metric_trend_v1_with_conn(&conn, hour_metric_query)
+        .expect("raw hourly metric trend");
+
+    create_provider_daily_rollup_fixture_schema(&conn);
+    for (day_offset, status) in [(1i64, "complete"), (2, "dirty"), (3, "complete")] {
+        let day_start = calendar_start + day_offset * 86_400;
+        let local_day = local_day_key(&conn, day_start);
+        materialize_provider_daily_rollup_fixture(
+            &conn,
+            &local_day,
+            day_start,
+            day_start + 86_400,
+            status,
+        );
+    }
+
+    let hybrid_metrics =
+        provider_metric_trend_v1_with_conn(&conn, metric_query).expect("hybrid metric trend");
+    let hybrid_cache =
+        provider_cache_rate_trend_v1_with_conn(&conn, cache_query).expect("hybrid cache trend");
+    assert_eq!(hybrid_metrics, raw_metrics);
+    assert_eq!(hybrid_cache, raw_cache);
+    assert_eq!(
+        provider_metric_trend_v1_with_conn(&conn, all_time_metric_query)
+            .expect("hybrid all-time metric trend"),
+        raw_all_time_metrics
+    );
+    assert_eq!(
+        provider_cache_rate_trend_v1_with_conn(&conn, all_time_cache_query)
+            .expect("hybrid all-time cache trend"),
+        raw_all_time_cache
+    );
+    assert_eq!(
+        provider_metric_trend_v1_with_conn(&conn, hour_metric_query)
+            .expect("hourly trend with daily rollup schema"),
+        raw_hour_metrics,
+        "hour granularity must remain raw-only"
+    );
+    assert!(hybrid_metrics.iter().any(|row| {
+        row.provider_id == 123
+            && row.provider_name == "Zulu Failure"
+            && row.granularity == UsageTrendGranularityV1::Day
+    }));
+    assert!(hybrid_cache
+        .iter()
+        .any(|row| row.key == "codex:123" && row.name == "codex/Alpha Success"));
+
+    let raw_excluded_metrics = provider_metric_trend_v1_with_conn(
+        &conn,
+        ProviderMetricTrendQuery {
+            exclude_cx2cc_gateway_bridge: true,
+            ..metric_query
+        },
+    )
+    .expect("hybrid metric trend excluding CX2CC");
+    let raw_excluded_cache = provider_cache_rate_trend_v1_with_conn(
+        &conn,
+        ProviderCacheRateTrendQuery {
+            exclude_cx2cc_gateway_bridge: true,
+            ..cache_query
+        },
+    )
+    .expect("hybrid cache trend excluding CX2CC");
+    assert!(raw_excluded_metrics
+        .iter()
+        .all(|row| row.provider_id != 900));
+    assert!(raw_excluded_cache.iter().all(|row| row.key != "claude:900"));
+
+    let stale_day = local_day_key(&conn, calendar_start + 86_400);
+    conn.execute(
+        r#"
+UPDATE usage_provider_daily_rollups
+SET requests_total = requests_total + 1,
+    success_duration_ms_sum = success_duration_ms_sum + 999999,
+    cache_denom_tokens = cache_denom_tokens + 999999
+WHERE local_day = ?1
+"#,
+        [&stale_day],
+    )
+    .expect("make rollup source count inconsistent");
+    assert_eq!(
+        provider_metric_trend_v1_with_conn(&conn, metric_query)
+            .expect("raw metric fallback for inconsistent rollup count"),
+        raw_metrics
+    );
+    assert_eq!(
+        provider_cache_rate_trend_v1_with_conn(&conn, cache_query)
+            .expect("raw cache fallback for inconsistent rollup count"),
+        raw_cache
+    );
+    conn.execute(
+        r#"
+UPDATE usage_provider_daily_rollups
+SET requests_total = requests_total - 1,
+    success_duration_ms_sum = success_duration_ms_sum - 999999,
+    cache_denom_tokens = cache_denom_tokens - 999999
+WHERE local_day = ?1
+"#,
+        [&stale_day],
+    )
+    .expect("restore rollup source count");
+    conn.execute(
+        "UPDATE usage_provider_daily_rollup_days SET day_start_ts = day_start_ts + 1 WHERE local_day = ?1",
+        [&stale_day],
+    )
+    .expect("make rollup calendar boundary stale");
+    conn.execute(
+        r#"
+UPDATE usage_provider_daily_rollups
+SET success_duration_ms_sum = success_duration_ms_sum + 999999,
+    cache_denom_tokens = cache_denom_tokens + 999999
+WHERE local_day = ?1
+"#,
+        [&stale_day],
+    )
+    .expect("make stale-boundary rollup observably incorrect");
+    assert_eq!(
+        provider_metric_trend_v1_with_conn(&conn, metric_query)
+            .expect("raw metric fallback for stale rollup boundary"),
+        raw_metrics
+    );
+    assert_eq!(
+        provider_cache_rate_trend_v1_with_conn(&conn, cache_query)
+            .expect("raw cache fallback for stale rollup boundary"),
+        raw_cache
+    );
+
+    conn.execute(
+        "UPDATE usage_ledger_backfill_state SET status = 'incomplete' WHERE id = 1",
+        [],
+    )
+    .expect("mark ledger backfill incomplete");
+    conn.execute(
+        r#"
+UPDATE usage_provider_daily_rollups
+SET success_duration_ms_sum = success_duration_ms_sum + 999999,
+    cache_denom_tokens = cache_denom_tokens + 999999
+"#,
+        [],
+    )
+    .expect("make rollup observably stale");
+    assert_eq!(
+        provider_metric_trend_v1_with_conn(&conn, metric_query)
+            .expect("raw metric fallback while ledger backfill is incomplete"),
+        raw_metrics
+    );
+    assert_eq!(
+        provider_cache_rate_trend_v1_with_conn(&conn, cache_query)
+            .expect("raw cache fallback while ledger backfill is incomplete"),
+        raw_cache
+    );
+}
+
 #[test]
 fn v1_provider_cache_rate_trend_uses_effective_denom_and_bucket() {
     let conn = setup_conn();
@@ -1568,7 +2069,6 @@ INSERT INTO usage_events (
     let rows_hour = provider_cache_rate_trend_v1_with_conn(
         &conn,
         ProviderCacheRateTrendQuery {
-            period: UsagePeriodV2::Daily,
             start_ts: Some(start_ts_today),
             end_ts: Some(start_ts_today + 86_400),
             cli_key: None,
@@ -1582,6 +2082,7 @@ INSERT INTO usage_events (
     assert_eq!(rows_hour.len(), 2);
     assert_eq!(rows_hour[0].name, "codex/OpenAI");
     assert_eq!(rows_hour[0].hour, Some(1));
+    assert_eq!(rows_hour[0].granularity, UsageTrendGranularityV1::Hour);
     assert_eq!(rows_hour[0].denom_tokens, 500);
     assert_eq!(rows_hour[0].cache_read_input_tokens, 200);
 
@@ -1589,13 +2090,12 @@ INSERT INTO usage_events (
     assert_eq!(rows_hour[1].denom_tokens, 100);
     assert_eq!(rows_hour[1].cache_read_input_tokens, 50);
 
-    // Weekly bucket is day-based and aggregates both rows into a single point.
+    // A six-day range no longer fits the 120-hour budget, so it uses day buckets.
     let rows_day = provider_cache_rate_trend_v1_with_conn(
         &conn,
         ProviderCacheRateTrendQuery {
-            period: UsagePeriodV2::Weekly,
             start_ts: Some(start_ts_today),
-            end_ts: Some(start_ts_today + 86_400),
+            end_ts: Some(start_ts_today + 6 * 86_400),
             cli_key: None,
             provider_id: None,
             limit: None,
@@ -1606,13 +2106,348 @@ INSERT INTO usage_events (
 
     assert_eq!(rows_day.len(), 1);
     assert_eq!(rows_day[0].hour, None);
+    assert_eq!(rows_day[0].granularity, UsageTrendGranularityV1::Day);
     assert_eq!(rows_day[0].denom_tokens, 600);
     assert_eq!(rows_day[0].cache_read_input_tokens, 250);
     assert_eq!(rows_day[0].requests_success, 2);
 }
 
 #[test]
-fn provider_cache_rate_trend_excludes_cx2cc_gateway_bridge_when_requested() {
+fn provider_metric_trend_matches_summary_formulas_and_sample_guards() {
+    let conn = setup_conn();
+    conn.execute(
+        "INSERT INTO providers (id, name) VALUES (?1, ?2)",
+        params![123, "Formula Provider"],
+    )
+    .expect("insert provider");
+    let start_ts = local_day_start_ts(&conn, "2024-01-01");
+    let bucket_ts = start_ts + 3600;
+
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            provider_name: "Formula Provider",
+            duration_ms: 1000,
+            ttfb_ms: Some(200),
+            output_tokens: Some(300),
+            created_at: bucket_ts,
+            ..base_usage_log(bucket_ts)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            provider_name: "Formula Provider",
+            duration_ms: 2000,
+            ttfb_ms: Some(5000),
+            output_tokens: Some(999),
+            created_at: bucket_ts + 1,
+            ..base_usage_log(bucket_ts + 1)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            provider_name: "Formula Provider",
+            duration_ms: 1200,
+            ttfb_ms: Some(100),
+            output_tokens: None,
+            created_at: bucket_ts + 2,
+            ..base_usage_log(bucket_ts + 2)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            provider_name: "Formula Provider",
+            status: Some(500),
+            error_code: Some("UPSTREAM_ERROR"),
+            duration_ms: 90_000,
+            ttfb_ms: Some(50),
+            output_tokens: Some(90_000),
+            created_at: bucket_ts + 3,
+            ..base_usage_log(bucket_ts + 3)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            provider_name: "Formula Provider",
+            duration_ms: 90_000,
+            ttfb_ms: Some(50),
+            output_tokens: Some(90_000),
+            excluded_from_stats: 1,
+            created_at: bucket_ts + 4,
+            ..base_usage_log(bucket_ts + 4)
+        },
+    );
+
+    let summary = summary_query(
+        &conn,
+        Some(start_ts),
+        Some(start_ts + 86_400),
+        None,
+        Some(123),
+        false,
+    )
+    .expect("summary");
+    let rows = provider_metric_trend_v1_with_conn(
+        &conn,
+        ProviderMetricTrendQuery {
+            start_ts: Some(start_ts),
+            end_ts: Some(start_ts + 86_400),
+            cli_key: None,
+            provider_id: Some(123),
+            limit: None,
+            exclude_cx2cc_gateway_bridge: false,
+        },
+    )
+    .expect("provider metric trend");
+
+    assert_eq!(rows.len(), 1);
+    let row = &rows[0];
+    assert_eq!(row.granularity, UsageTrendGranularityV1::Hour);
+    assert_eq!(row.requests_total, 4);
+    assert_eq!(row.requests_success, 3);
+    assert_eq!(row.duration_samples, 3);
+    assert_eq!(row.ttfb_samples, 2);
+    assert_eq!(row.output_rate_samples, 1);
+    assert_eq!(row.avg_duration_ms, summary.avg_duration_ms);
+    assert_eq!(row.avg_ttfb_ms, summary.avg_ttfb_ms);
+    assert_eq!(
+        row.avg_output_tokens_per_second,
+        summary.avg_output_tokens_per_second
+    );
+    assert_eq!(row.avg_duration_ms, Some(1400));
+    assert_eq!(row.avg_ttfb_ms, Some(150));
+    assert_eq!(row.avg_output_tokens_per_second, Some(375.0));
+}
+
+#[test]
+fn selected_provider_metric_trend_keeps_failure_only_buckets() {
+    let conn = setup_conn();
+    conn.execute(
+        "INSERT INTO providers (id, name) VALUES (?1, ?2)",
+        params![777, "Failure Only Provider"],
+    )
+    .expect("insert provider");
+    let start_ts = local_day_start_ts(&conn, "2024-01-01");
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            provider_id: 777,
+            provider_name: "Failure Only Provider",
+            status: Some(500),
+            error_code: Some("UPSTREAM_ERROR"),
+            created_at: start_ts + 3600,
+            ..base_usage_log(start_ts + 3600)
+        },
+    );
+
+    let rows = provider_metric_trend_v1_with_conn(
+        &conn,
+        ProviderMetricTrendQuery {
+            start_ts: Some(start_ts),
+            end_ts: Some(start_ts + 86_400),
+            cli_key: None,
+            provider_id: Some(777),
+            limit: None,
+            exclude_cx2cc_gateway_bridge: false,
+        },
+    )
+    .expect("failure-only selected provider trend");
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].requests_total, 1);
+    assert_eq!(rows[0].requests_success, 0);
+    assert_eq!(rows[0].avg_duration_ms, None);
+    assert_eq!(rows[0].avg_ttfb_ms, None);
+    assert_eq!(rows[0].avg_output_tokens_per_second, None);
+}
+
+#[test]
+fn provider_trend_planner_selects_the_finest_bounded_granularity() {
+    let conn = setup_conn();
+    let start_ts = local_day_start_ts(&conn, "2024-01-01");
+    let plan_for_days = |days: i64, provider_id: Option<i64>, limit: Option<usize>| {
+        plan_trend(
+            &conn,
+            TrendPlanQuery {
+                start_ts: Some(start_ts),
+                end_ts: Some(start_ts + days * 86_400),
+                cli_key: None,
+                provider_id,
+                requested_provider_limit: limit,
+                exclude_cx2cc_gateway_bridge: false,
+            },
+        )
+        .expect("trend plan")
+    };
+
+    assert_eq!(
+        plan_for_days(4, None, None).granularity,
+        UsageTrendGranularityV1::Hour
+    );
+    assert_eq!(
+        plan_for_days(6, None, None).granularity,
+        UsageTrendGranularityV1::Day
+    );
+    assert_eq!(
+        plan_for_days(121, None, None).granularity,
+        UsageTrendGranularityV1::Week
+    );
+    assert_eq!(
+        plan_for_days(900, None, None).granularity,
+        UsageTrendGranularityV1::Month
+    );
+    assert_eq!(
+        plan_for_days(11 * 366, None, None).granularity,
+        UsageTrendGranularityV1::Year
+    );
+    assert_eq!(plan_for_days(4, None, None).provider_limit, 10);
+    assert_eq!(plan_for_days(4, None, Some(0)).provider_limit, 1);
+    assert_eq!(plan_for_days(4, None, Some(999)).provider_limit, 10);
+    assert_eq!(plan_for_days(4, Some(123), Some(999)).provider_limit, 1);
+
+    let oversized = plan_trend(
+        &conn,
+        TrendPlanQuery {
+            start_ts: Some(start_ts),
+            end_ts: Some(start_ts + 121 * 366 * 86_400),
+            cli_key: None,
+            provider_id: None,
+            requested_provider_limit: None,
+            exclude_cx2cc_gateway_bridge: false,
+        },
+    )
+    .expect_err("more than 120 calendar years must fail before aggregation");
+    assert!(oversized.contains("120-bucket year budget"));
+}
+
+#[test]
+fn provider_metric_and_cache_trends_share_top_request_and_row_budgets() {
+    let mut conn = setup_conn();
+    let start_ts = local_day_start_ts(&conn, "2024-01-01");
+    let end_ts = start_ts + 130 * 86_400;
+    let tx = conn.transaction().expect("start fixture transaction");
+    for provider_id in 1..=12i64 {
+        let provider_name = format!("Provider {provider_id}");
+        tx.execute(
+            "INSERT INTO providers (id, name) VALUES (?1, ?2)",
+            params![provider_id, provider_name],
+        )
+        .expect("insert provider");
+        for day in 0..130i64 {
+            let created_at = start_ts + day * 86_400 + provider_id;
+            insert_usage_log(
+                &tx,
+                TestUsageLog {
+                    provider_id,
+                    provider_name: &provider_name,
+                    input_tokens: Some(if provider_id == 11 { 1_000_000 } else { 1 }),
+                    output_tokens: Some(1),
+                    created_at,
+                    ..base_usage_log(created_at)
+                },
+            );
+        }
+    }
+    insert_usage_log(
+        &tx,
+        TestUsageLog {
+            provider_id: 1,
+            provider_name: "Provider 1",
+            input_tokens: Some(1),
+            output_tokens: Some(1),
+            created_at: start_ts + 1,
+            ..base_usage_log(start_ts + 1)
+        },
+    );
+    tx.commit().expect("commit fixture transaction");
+
+    let metric_rows = provider_metric_trend_v1_with_conn(
+        &conn,
+        ProviderMetricTrendQuery {
+            start_ts: Some(start_ts),
+            end_ts: Some(end_ts),
+            cli_key: None,
+            provider_id: None,
+            limit: None,
+            exclude_cx2cc_gateway_bridge: false,
+        },
+    )
+    .expect("bounded provider metric trend");
+    let metric_providers = metric_rows
+        .iter()
+        .map(|row| row.key.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    let metric_buckets = metric_rows
+        .iter()
+        .map(|row| (row.day.as_str(), row.hour))
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(metric_providers.len(), TREND_MAX_PROVIDERS);
+    assert!(!metric_providers.contains("codex:11"));
+    assert!(!metric_providers.contains("codex:12"));
+    assert!(metric_buckets.len() <= TREND_MAX_BUCKETS);
+    assert!(metric_rows.len() <= TREND_MAX_ROWS);
+    assert!(metric_rows
+        .iter()
+        .all(|row| row.granularity == UsageTrendGranularityV1::Week));
+
+    let selected_rows = provider_metric_trend_v1_with_conn(
+        &conn,
+        ProviderMetricTrendQuery {
+            start_ts: Some(start_ts),
+            end_ts: Some(end_ts),
+            cli_key: None,
+            provider_id: Some(12),
+            limit: None,
+            exclude_cx2cc_gateway_bridge: false,
+        },
+    )
+    .expect("selected provider metric trend");
+    assert!(selected_rows.len() <= TREND_MAX_BUCKETS);
+    assert!(selected_rows.iter().all(|row| row.provider_id == 12));
+
+    let cache_rows = provider_cache_rate_trend_v1_with_conn(
+        &conn,
+        ProviderCacheRateTrendQuery {
+            start_ts: Some(start_ts),
+            end_ts: Some(end_ts),
+            cli_key: None,
+            provider_id: None,
+            limit: None,
+            exclude_cx2cc_gateway_bridge: false,
+        },
+    )
+    .expect("bounded provider cache trend");
+    assert!(cache_rows.len() <= TREND_MAX_ROWS);
+    assert_eq!(
+        cache_rows
+            .iter()
+            .map(|row| row.key.as_str())
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        TREND_MAX_PROVIDERS
+    );
+
+    let cache_top = provider_cache_rate_trend_v1_with_conn(
+        &conn,
+        ProviderCacheRateTrendQuery {
+            start_ts: Some(start_ts),
+            end_ts: Some(end_ts),
+            cli_key: None,
+            provider_id: None,
+            limit: Some(1),
+            exclude_cx2cc_gateway_bridge: false,
+        },
+    )
+    .expect("top provider cache trend");
+    assert!(cache_top.iter().all(|row| row.key == "codex:1"));
+}
+
+#[test]
+fn provider_trends_exclude_cx2cc_gateway_bridge_when_requested() {
     let conn = setup_conn();
 
     conn.execute(
@@ -1653,7 +2488,6 @@ fn provider_cache_rate_trend_excludes_cx2cc_gateway_bridge_when_requested() {
     let rows_with_bridge = provider_cache_rate_trend_v1_with_conn(
         &conn,
         ProviderCacheRateTrendQuery {
-            period: UsagePeriodV2::Daily,
             start_ts: None,
             end_ts: None,
             cli_key: None,
@@ -1668,7 +2502,6 @@ fn provider_cache_rate_trend_excludes_cx2cc_gateway_bridge_when_requested() {
     let rows_without_bridge = provider_cache_rate_trend_v1_with_conn(
         &conn,
         ProviderCacheRateTrendQuery {
-            period: UsagePeriodV2::Daily,
             start_ts: None,
             end_ts: None,
             cli_key: None,
@@ -1681,12 +2514,26 @@ fn provider_cache_rate_trend_excludes_cx2cc_gateway_bridge_when_requested() {
     assert_eq!(rows_without_bridge.len(), 1);
     assert_eq!(rows_without_bridge[0].key, "codex:123");
 
+    let metric_rows_without_bridge = provider_metric_trend_v1_with_conn(
+        &conn,
+        ProviderMetricTrendQuery {
+            start_ts: None,
+            end_ts: None,
+            cli_key: None,
+            provider_id: None,
+            limit: None,
+            exclude_cx2cc_gateway_bridge: true,
+        },
+    )
+    .expect("metric trend without bridge");
+    assert_eq!(metric_rows_without_bridge.len(), 1);
+    assert_eq!(metric_rows_without_bridge[0].key, "codex:123");
+
     conn.execute("UPDATE providers SET bridge_type = NULL WHERE id = 900", [])
         .expect("remove live gateway bridge relationship");
     let rows_after_provider_change = provider_cache_rate_trend_v1_with_conn(
         &conn,
         ProviderCacheRateTrendQuery {
-            period: UsagePeriodV2::Daily,
             start_ts: None,
             end_ts: None,
             cli_key: None,
@@ -1701,6 +2548,19 @@ fn provider_cache_rate_trend_excludes_cx2cc_gateway_bridge_when_requested() {
         2,
         "gateway exclusion must follow the current provider relationship"
     );
+    let metric_rows_after_provider_change = provider_metric_trend_v1_with_conn(
+        &conn,
+        ProviderMetricTrendQuery {
+            start_ts: None,
+            end_ts: None,
+            cli_key: None,
+            provider_id: None,
+            limit: None,
+            exclude_cx2cc_gateway_bridge: true,
+        },
+    )
+    .expect("metric trend after bridge relationship change");
+    assert_eq!(metric_rows_after_provider_change.len(), 2);
 }
 
 #[test]
@@ -1797,7 +2657,6 @@ INSERT INTO usage_events (
     let cache_rows = provider_cache_rate_trend_v1_with_conn(
         &conn,
         ProviderCacheRateTrendQuery {
-            period: UsagePeriodV2::Daily,
             start_ts: None,
             end_ts: None,
             cli_key: None,

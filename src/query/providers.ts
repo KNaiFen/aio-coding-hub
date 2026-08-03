@@ -44,6 +44,7 @@ import {
   advanceProviderModelIdentityGenerationsForProviderId,
   invalidateProviderModelCatalog,
 } from "./providerModels";
+import type { SortModeProviderRow } from "../services/providers/sortModes";
 import {
   gatewayKeys,
   oauthLimitsKeys,
@@ -52,6 +53,7 @@ import {
   providerModelsKeys,
   providersKeys,
 } from "./keys";
+import { sortModeProvidersQueryPrefix } from "./sortModes";
 
 export function useProvidersListQuery(cliKey: CliKey, options?: { enabled?: boolean }) {
   const normalizedCliKey = validateProviderCliKey(cliKey);
@@ -94,15 +96,31 @@ export function useProviderOAuthStatusQuery(
 }
 
 export async function fetchProviderOAuthStatus(
-  queryClient: ReturnType<typeof useQueryClient>,
+  queryClient: QueryClient,
   providerId: number | null
 ) {
   if (providerId == null) return null;
   const normalizedProviderId = validateProviderId(providerId);
+  const queryKey = providersKeys.oauthStatus(normalizedProviderId);
+  // Login and token refresh must bypass the five-minute global stale window.
+  // Cancel older work first so its late result cannot replace the new status.
+  await queryClient.cancelQueries({ queryKey });
   return queryClient.fetchQuery({
-    queryKey: providersKeys.oauthStatus(normalizedProviderId),
+    queryKey,
     queryFn: () => providerOAuthStatus(normalizedProviderId),
+    staleTime: 0,
   });
+}
+
+export function writeProviderOAuthStatusCache(
+  queryClient: QueryClient,
+  providerId: number | null,
+  status: Awaited<ReturnType<typeof providerOAuthStatus>> | null
+) {
+  if (providerId == null) return;
+  const queryKey = providersKeys.oauthStatus(validateProviderId(providerId));
+  void queryClient.cancelQueries({ queryKey });
+  queryClient.setQueryData(queryKey, status);
 }
 
 const EMPTY_OAUTH_LIMITS_RESULT: OAuthLimitsResult = {
@@ -320,18 +338,48 @@ export function useProviderDeleteMutation() {
     onSuccess: async (ok, input) => {
       if (!ok) return;
       const cliKey = validateProviderCliKey(input.cliKey);
+      const providerId = validateProviderId(input.providerId);
+      const providersListKey = providersKeys.list(cliKey);
+      const defaultRouteKey = providersKeys.defaultRoute(cliKey);
+      const sortModeProvidersPrefix = sortModeProvidersQueryPrefix(cliKey);
 
-      queryClient.setQueryData<ProviderSummary[] | null>(providersKeys.list(cliKey), (prev) => {
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: providersListKey, exact: true }),
+        queryClient.cancelQueries({ queryKey: defaultRouteKey, exact: true }),
+        queryClient.cancelQueries({ queryKey: sortModeProvidersPrefix }),
+      ]);
+
+      queryClient.setQueryData<ProviderSummary[] | null>(providersListKey, (prev) => {
         if (!prev) return prev;
-        return prev.filter((row) => row.id !== input.providerId);
+        return prev.filter((row) => row.id !== providerId);
       });
-      queryClient.removeQueries({ queryKey: providerAccountUsageKeys.detail(input.providerId) });
-      advanceProviderModelIdentityGenerationsForProviderId(queryClient, input.providerId);
-      await queryClient.cancelQueries({
-        queryKey: providerModelsKeys.catalogsByProvider(input.providerId),
+      queryClient.setQueryData<ProviderRouteRow[] | null>(defaultRouteKey, (prev) => {
+        if (!prev) return prev;
+        return prev.filter((row) => row.provider_id !== providerId);
       });
+      queryClient.setQueriesData<SortModeProviderRow[] | null>(
+        { queryKey: sortModeProvidersPrefix },
+        (prev) => {
+          if (!prev) return prev;
+          return prev.filter((row) => row.provider_id !== providerId);
+        }
+      );
+
+      const routeInvalidations = Promise.all([
+        queryClient.invalidateQueries({ queryKey: providersListKey, exact: true }),
+        queryClient.invalidateQueries({ queryKey: defaultRouteKey, exact: true }),
+        queryClient.invalidateQueries({ queryKey: sortModeProvidersPrefix }),
+      ]);
+
+      queryClient.removeQueries({ queryKey: providerAccountUsageKeys.detail(providerId) });
+      advanceProviderModelIdentityGenerationsForProviderId(queryClient, providerId);
+      const providerModelCancellation = queryClient.cancelQueries({
+        queryKey: providerModelsKeys.catalogsByProvider(providerId),
+      });
+
+      await Promise.all([routeInvalidations, providerModelCancellation]);
       queryClient.removeQueries({
-        queryKey: providerModelsKeys.catalogsByProvider(input.providerId),
+        queryKey: providerModelsKeys.catalogsByProvider(providerId),
       });
     },
   });

@@ -8,12 +8,14 @@ import {
   USAGE_LEADERBOARD_V2_MAX_LIMIT,
   USAGE_LIMIT_MIN,
   USAGE_PROVIDER_CACHE_RATE_TREND_MAX_LIMIT,
+  USAGE_PROVIDER_TREND_MAX_LIMIT,
   type UsageDayDetailV1,
   type UsageFolderOptionV1,
   type UsageDayRow,
   type UsageHourlyRow,
   type UsageLeaderboardRow,
   type UsageProviderCacheRateTrendRowV1,
+  type UsageProviderMetricTrendRowV1,
   type UsageProviderRow,
   type UsageSummary,
   normalizeUsageDay,
@@ -25,6 +27,7 @@ import {
   normalizeUsageLeaderboardLimit,
   normalizeUsageLeaderboardV2Limit,
   normalizeUsageProviderCacheRateTrendLimit,
+  normalizeUsageProviderTrendLimit,
   normalizeUsageQueryInputV2,
   validateUsageCliKey,
   usageDayDetailV1,
@@ -35,6 +38,7 @@ import {
   usageLeaderboardProvider,
   usageLeaderboardV2,
   usageProviderCacheRateTrendV1,
+  usageProviderMetricTrendV1,
   usageSummary,
   usageSummaryV2,
 } from "../usage";
@@ -57,6 +61,7 @@ vi.mock("../../../generated/bindings", async () => {
       usageLeaderboardV2: vi.fn(),
       usageLeaderboardCsvExport: vi.fn(),
       usageProviderCacheRateTrendV1: vi.fn(),
+      usageProviderMetricTrendV1: vi.fn(),
     },
   };
 });
@@ -174,11 +179,36 @@ function makeUsageProviderCacheRateTrendRow(
   return {
     day: "2026-04-22",
     hour: null,
+    granularity: "day",
     key: "provider:1",
     name: "P1",
     denom_tokens: 300,
     cache_read_input_tokens: 30,
     requests_success: 1,
+    ...overrides,
+  };
+}
+
+function makeUsageProviderMetricTrendRow(
+  overrides: Partial<UsageProviderMetricTrendRowV1> = {}
+): UsageProviderMetricTrendRowV1 {
+  return {
+    day: "2026-04-22",
+    hour: null,
+    granularity: "day",
+    key: "codex:1",
+    name: "codex/P1",
+    cli_key: "codex",
+    provider_id: 1,
+    provider_name: "P1",
+    requests_total: 2,
+    requests_success: 1,
+    duration_samples: 1,
+    ttfb_samples: 1,
+    output_rate_samples: 1,
+    avg_duration_ms: 120,
+    avg_ttfb_ms: 30,
+    avg_output_tokens_per_second: 10,
     ...overrides,
   };
 }
@@ -451,7 +481,7 @@ describe("services/usage/usage", () => {
         dayStartHour: null,
         excludeCx2CcGatewayBridge: true,
       },
-      20
+      10
     );
     expect(commands.usageLeaderboardCsvExport).toHaveBeenCalledWith(
       "/tmp/usage.csv",
@@ -606,6 +636,7 @@ describe("services/usage/usage", () => {
     vi.mocked(commands.usageLeaderboardV2).mockClear();
     vi.mocked(commands.usageDayDetailV1).mockClear();
     vi.mocked(commands.usageProviderCacheRateTrendV1).mockClear();
+    vi.mocked(commands.usageProviderMetricTrendV1).mockClear();
 
     vi.mocked(commands.usageLeaderboardProvider).mockResolvedValue({
       status: "ok",
@@ -631,6 +662,10 @@ describe("services/usage/usage", () => {
       status: "ok",
       data: [makeUsageProviderCacheRateTrendRow()],
     });
+    vi.mocked(commands.usageProviderMetricTrendV1).mockResolvedValue({
+      status: "ok",
+      data: [makeUsageProviderMetricTrendRow()],
+    });
 
     expect(normalizeUsageLeaderboardLimit(null)).toBeNull();
     expect(normalizeUsageLeaderboardLimit(0)).toBe(USAGE_LIMIT_MIN);
@@ -641,6 +676,9 @@ describe("services/usage/usage", () => {
     expect(normalizeUsageProviderCacheRateTrendLimit(999)).toBe(
       USAGE_PROVIDER_CACHE_RATE_TREND_MAX_LIMIT
     );
+    expect(USAGE_PROVIDER_CACHE_RATE_TREND_MAX_LIMIT).toBe(USAGE_PROVIDER_TREND_MAX_LIMIT);
+    expect(normalizeUsageProviderTrendLimit(null)).toBeNull();
+    expect(normalizeUsageProviderTrendLimit(999)).toBe(USAGE_PROVIDER_TREND_MAX_LIMIT);
 
     await usageLeaderboardProvider("today", { limit: 0 });
     await usageLeaderboardDay("today", { limit: 999 });
@@ -651,6 +689,14 @@ describe("services/usage/usage", () => {
       folderLimit: 999,
     });
     await usageProviderCacheRateTrendV1("daily", { limit: 999 });
+    await usageProviderMetricTrendV1("custom", {
+      startTs: 1,
+      endTs: 2,
+      cliKey: "codex",
+      providerId: 1,
+      limit: 999,
+      excludeCx2CcGatewayBridge: true,
+    });
 
     expect(commands.usageLeaderboardProvider).toHaveBeenCalledWith("today", null, USAGE_LIMIT_MIN);
     expect(commands.usageLeaderboardDay).toHaveBeenCalledWith(
@@ -671,12 +717,26 @@ describe("services/usage/usage", () => {
       expect.objectContaining({ period: "daily" }),
       USAGE_PROVIDER_CACHE_RATE_TREND_MAX_LIMIT
     );
+    expect(commands.usageProviderMetricTrendV1).toHaveBeenCalledWith(
+      {
+        period: "custom",
+        startTs: 1,
+        endTs: 2,
+        cliKey: "codex",
+        providerId: 1,
+        folderKeys: null,
+        dayStartHour: null,
+        excludeCx2CcGatewayBridge: true,
+      },
+      USAGE_PROVIDER_TREND_MAX_LIMIT
+    );
   });
 
   it("rejects invalid usage limits before ipc", async () => {
     vi.mocked(commands.usageLeaderboardProvider).mockClear();
     vi.mocked(commands.usageHourlySeries).mockClear();
     vi.mocked(commands.usageProviderCacheRateTrendV1).mockClear();
+    vi.mocked(commands.usageProviderMetricTrendV1).mockClear();
 
     await expect(usageLeaderboardProvider("today", { limit: 1.5 })).rejects.toThrow(
       "SEC_INVALID_INPUT"
@@ -685,9 +745,13 @@ describe("services/usage/usage", () => {
     await expect(
       usageProviderCacheRateTrendV1("daily", { limit: Number.POSITIVE_INFINITY })
     ).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(
+      usageProviderMetricTrendV1("daily", { limit: Number.POSITIVE_INFINITY })
+    ).rejects.toThrow("SEC_INVALID_INPUT");
 
     expect(commands.usageLeaderboardProvider).not.toHaveBeenCalled();
     expect(commands.usageHourlySeries).not.toHaveBeenCalled();
     expect(commands.usageProviderCacheRateTrendV1).not.toHaveBeenCalled();
+    expect(commands.usageProviderMetricTrendV1).not.toHaveBeenCalled();
   });
 });

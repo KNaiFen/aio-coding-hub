@@ -159,6 +159,15 @@ export async function handleOAuthLogin(ctx: OAuthActionContext) {
         if (!isCurrentAttempt()) {
           return;
         }
+        status = {
+          connected: true,
+          provider_type: result.provider_type,
+          email: null,
+          expires_at: result.expires_at,
+          has_refresh_token: null,
+        };
+        ctx.setOauthStatus(status);
+        ctx.writeOauthStatusCache(status, targetProviderId);
         toast("OAuth 登录成功，但读取连接状态失败，可稍后重试");
         logToConsole(
           "warn",
@@ -487,6 +496,7 @@ export async function handleOAuthDisconnect(ctx: OAuthActionContext) {
     if (result.success) {
       ctx.invalidateProviderModels(ctx.editingProviderId, ctx.editProvider.provider_uuid);
       ctx.setOauthStatus(null);
+      ctx.writeOauthStatusCache(null, ctx.editingProviderId);
       toast("已断开 OAuth 连接");
       logToConsole("info", `OAuth 已断开连接：${ctx.form.getValues().name}`, {
         provider_id: ctx.editingProviderId,

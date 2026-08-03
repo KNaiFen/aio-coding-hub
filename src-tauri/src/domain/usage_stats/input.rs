@@ -165,7 +165,6 @@ pub(super) fn normalize_day_start_hour(value: Option<i64>) -> crate::shared::err
 
 /// Validated and resolved query parameters ready for SQL execution.
 pub(super) struct ResolvedQueryParams<'a> {
-    pub period: UsagePeriodV2,
     pub start_ts: Option<i64>,
     pub end_ts: Option<i64>,
     pub cli_key: Option<&'a str>,
@@ -179,7 +178,7 @@ pub(super) struct ResolvedQueryParams<'a> {
 ///
 /// Consolidates the 4-step resolution sequence (parse period, compute bounds,
 /// normalize cli_key, normalize provider_id) that was previously duplicated
-/// across `summary_v2`, `leaderboard_v2`, and `provider_cache_rate_trend_v1`.
+/// across summaries, leaderboards, and both bounded provider trend queries.
 pub(super) fn resolve_query_params<'a>(
     conn: &Connection,
     params: &'a UsageQueryParams,
@@ -193,7 +192,6 @@ pub(super) fn resolve_query_params<'a>(
     let folder_keys = normalize_folder_keys(params.folder_keys.as_deref())?;
     let exclude_cx2cc_gateway_bridge = params.exclude_cx2cc_gateway_bridge.unwrap_or(false);
     Ok(ResolvedQueryParams {
-        period,
         start_ts,
         end_ts,
         cli_key,

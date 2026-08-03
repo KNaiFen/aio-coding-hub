@@ -1,11 +1,14 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import type {
   ProviderAccountUsageResult,
+  ProviderOAuthStatusResult,
   ProviderRouteRow,
   ProviderSummary,
 } from "../../services/providers/providers";
 import type { ProviderModelCatalog } from "../../services/providers/providerModels";
+import type { SortModeProviderRow } from "../../services/providers/sortModes";
 import {
   defaultRouteProviderSetSessionReusePriority,
   providerOAuthFetchLimits,
@@ -45,6 +48,7 @@ import {
   useProviderUpsertMutation,
   useProvidersListQuery,
   useProvidersReorderMutation,
+  writeProviderOAuthStatusCache,
 } from "../providers";
 import { useProviderModelsRefreshMutation } from "../providerModels";
 import {
@@ -55,6 +59,7 @@ import {
   providerModelsKeys,
   providersKeys,
 } from "../keys";
+import { sortModeProvidersQueryKey, sortModeProvidersQueryPrefix } from "../sortModes";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 
@@ -314,6 +319,77 @@ describe("query/providers", () => {
     expect(providerOAuthStatus).toHaveBeenCalledWith(9);
     expect(client.getQueryData(providersKeys.oauthStatus(9))).toEqual(status);
     expect(client.getQueryState(providersKeys.oauthStatus(Number.NaN))).toBeUndefined();
+  });
+
+  it("fetchProviderOAuthStatus bypasses a fresh cached status", async () => {
+    setTauriRuntime();
+
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 5 * 60 * 1000 } },
+    });
+    const stale: ProviderOAuthStatusResult = {
+      connected: true,
+      provider_type: "grok_oauth",
+      email: "user@example.com",
+      expires_at: 1_700_000_000,
+      has_refresh_token: true,
+    };
+    const fresh: ProviderOAuthStatusResult = { ...stale, expires_at: 1_800_000_000 };
+    client.setQueryData(providersKeys.oauthStatus(9), stale);
+    vi.mocked(providerOAuthStatus).mockResolvedValue(fresh);
+
+    await expect(fetchProviderOAuthStatus(client, 9)).resolves.toEqual(fresh);
+    expect(providerOAuthStatus).toHaveBeenCalledWith(9);
+    expect(client.getQueryData(providersKeys.oauthStatus(9))).toEqual(fresh);
+  });
+
+  it("fetchProviderOAuthStatus cancels an older request before fetching fresh status", async () => {
+    setTauriRuntime();
+
+    const client = createTestQueryClient();
+    const queryKey = providersKeys.oauthStatus(9);
+    const stale: ProviderOAuthStatusResult = {
+      connected: true,
+      provider_type: "grok_oauth",
+      email: "user@example.com",
+      expires_at: 1_700_000_000,
+      has_refresh_token: true,
+    };
+    const fresh: ProviderOAuthStatusResult = { ...stale, expires_at: 1_800_000_000 };
+    let resolveStale!: (value: ProviderOAuthStatusResult) => void;
+    vi.mocked(providerOAuthStatus)
+      .mockImplementationOnce(() => new Promise((resolve) => (resolveStale = resolve)))
+      .mockResolvedValueOnce(fresh);
+
+    const inflight = client
+      .fetchQuery({ queryKey, queryFn: () => providerOAuthStatus(9) })
+      .catch(() => null);
+    await expect(fetchProviderOAuthStatus(client, 9)).resolves.toEqual(fresh);
+
+    resolveStale(stale);
+    await inflight;
+    expect(client.getQueryData(queryKey)).toEqual(fresh);
+  });
+
+  it("writeProviderOAuthStatusCache writes, clears, and validates the cache key", () => {
+    const client = createTestQueryClient();
+    const status: ProviderOAuthStatusResult = {
+      connected: true,
+      provider_type: "grok_oauth",
+      email: "user@example.com",
+      expires_at: 1_800_000_000,
+      has_refresh_token: true,
+    };
+
+    writeProviderOAuthStatusCache(client, 9, status);
+    expect(client.getQueryData(providersKeys.oauthStatus(9))).toEqual(status);
+    writeProviderOAuthStatusCache(client, 9, null);
+    expect(client.getQueryData(providersKeys.oauthStatus(9))).toBeNull();
+    writeProviderOAuthStatusCache(client, null, status);
+    expect(client.getQueryCache().getAll()).toHaveLength(1);
+    expect(() => writeProviderOAuthStatusCache(client, Number.NaN, status)).toThrow(
+      "SEC_INVALID_INPUT"
+    );
   });
 
   it("normalizes OAuth limits providerId before cache reads, refreshes, and query calls", async () => {
@@ -1303,18 +1379,61 @@ describe("query/providers", () => {
     expect(client.getQueryData(providersKeys.list("claude"))).toBeNull();
   });
 
-  it("useProviderDeleteMutation removes provider from cached list", async () => {
+  it("useProviderDeleteMutation removes only the deleted provider from every cached route", async () => {
     setTauriRuntime();
 
     const providers: ProviderSummary[] = [
-      makeProvider({ id: 1, cli_key: "claude", name: "P1" }),
-      makeProvider({ id: 2, cli_key: "claude", name: "P2" }),
+      makeProvider({
+        id: 1,
+        cli_key: "claude",
+        name: "Shared provider",
+        base_urls: ["https://shared.example.test/v1"],
+      }),
+      makeProvider({
+        id: 2,
+        cli_key: "claude",
+        name: "Shared provider",
+        base_urls: ["https://shared.example.test/v1"],
+      }),
     ];
+    const defaultRouteRows: ProviderRouteRow[] = [
+      { provider_id: 1, session_reuse_priority: 101 },
+      { provider_id: 2, session_reuse_priority: 202 },
+    ];
+    const modeOneRows: SortModeProviderRow[] = [
+      { provider_id: 1, enabled: false, session_reuse_priority: 303 },
+      { provider_id: 2, enabled: true, session_reuse_priority: 404 },
+    ];
+    const modeTwoRows: SortModeProviderRow[] = [
+      { provider_id: 2, enabled: false, session_reuse_priority: 505 },
+      { provider_id: 1, enabled: true, session_reuse_priority: 606 },
+    ];
+    const otherCliProviders = [makeProvider({ id: 3, cli_key: "codex", name: "Codex" })];
+    const otherCliDefaultRouteRows: ProviderRouteRow[] = [
+      { provider_id: 1, session_reuse_priority: 707 },
+      { provider_id: 3, session_reuse_priority: 808 },
+    ];
+    const otherCliModeRows: SortModeProviderRow[] = [
+      { provider_id: 1, enabled: true, session_reuse_priority: 909 },
+      { provider_id: 3, enabled: false, session_reuse_priority: 1000 },
+    ];
+    const modeOneKey = sortModeProvidersQueryKey(11, "claude");
+    const modeTwoKey = sortModeProvidersQueryKey(12, "claude");
+    const otherCliModeKey = sortModeProvidersQueryKey(11, "codex");
+    const availabilityKey = providerAvailabilityKeys.timelines([1, 2], 24, 12);
+    const availabilityCache = { marker: "provider-id-set-cache" };
+    const siblingAccountUsage = makeAccountUsage(2);
 
     vi.mocked(providerDelete).mockResolvedValue(true);
 
     const client = createTestQueryClient();
     client.setQueryData(providersKeys.list("claude"), providers);
+    client.setQueryData(providersKeys.defaultRoute("claude"), defaultRouteRows);
+    client.setQueryData(modeOneKey, modeOneRows);
+    client.setQueryData(modeTwoKey, modeTwoRows);
+    client.setQueryData(providersKeys.list("codex"), otherCliProviders);
+    client.setQueryData(providersKeys.defaultRoute("codex"), otherCliDefaultRouteRows);
+    client.setQueryData(otherCliModeKey, otherCliModeRows);
     client.setQueryData(providerModelsKeys.catalog(1, providers[0].provider_uuid), {
       providerId: 1,
       marker: "target",
@@ -1323,27 +1442,13 @@ describe("query/providers", () => {
       providerId: 2,
       marker: "other",
     });
-    client.setQueryData(providerAccountUsageKeys.detail(1), {
-      adapter_kind: "sub2api",
-      status: "available",
-      freshness: "fresh",
-      plan_name: null,
-      balance: 1,
-      plan_remaining: null,
-      used: null,
-      total: null,
-      unit: "USD",
-      unit_note: null,
-      daily_used: null,
-      daily_total: null,
-      weekly_used: null,
-      weekly_total: null,
-      monthly_used: null,
-      monthly_total: null,
-      expires_at: null,
-      last_fetched_at: 1,
-      message: null,
-    });
+    client.setQueryData(providerAccountUsageKeys.detail(1), makeAccountUsage(1));
+    client.setQueryData(providerAccountUsageKeys.detail(2), siblingAccountUsage);
+    client.setQueryData(availabilityKey, availabilityCache);
+    const cancelQueriesSpy = vi.spyOn(client, "cancelQueries");
+    const setQueryDataSpy = vi.spyOn(client, "setQueryData");
+    const setQueriesDataSpy = vi.spyOn(client, "setQueriesData");
+    const invalidateQueriesSpy = vi.spyOn(client, "invalidateQueries");
     const wrapper = createQueryWrapper(client);
 
     const { result } = renderHook(() => useProviderDeleteMutation(), { wrapper });
@@ -1353,7 +1458,15 @@ describe("query/providers", () => {
 
     expect(providerDelete).toHaveBeenCalledWith(1, { clearUsageStats: false });
     expect(client.getQueryData(providersKeys.list("claude"))).toEqual([providers[1]]);
+    expect(client.getQueryData(providersKeys.defaultRoute("claude"))).toEqual([
+      defaultRouteRows[1],
+    ]);
+    expect(client.getQueryData(modeOneKey)).toEqual([modeOneRows[1]]);
+    expect(client.getQueryData(modeTwoKey)).toEqual([modeTwoRows[0]]);
     expect(client.getQueryData(providerAccountUsageKeys.detail(1))).toBeUndefined();
+    expect(client.getQueryData(providerAccountUsageKeys.detail(2))).toBe(siblingAccountUsage);
+    expect(client.getQueryData(availabilityKey)).toBe(availabilityCache);
+    expect(client.getQueryState(availabilityKey)?.isInvalidated).toBe(false);
     expect(
       client.getQueryData(providerModelsKeys.catalog(1, providers[0].provider_uuid))
     ).toBeUndefined();
@@ -1361,7 +1474,135 @@ describe("query/providers", () => {
       providerId: 2,
       marker: "other",
     });
+    expect(client.getQueryData(providersKeys.list("codex"))).toBe(otherCliProviders);
+    expect(client.getQueryData(providersKeys.defaultRoute("codex"))).toBe(otherCliDefaultRouteRows);
+    expect(client.getQueryData(otherCliModeKey)).toBe(otherCliModeRows);
+    expect(client.getQueryState(providersKeys.list("claude"))?.isInvalidated).toBe(true);
+    expect(client.getQueryState(providersKeys.defaultRoute("claude"))?.isInvalidated).toBe(true);
+    expect(client.getQueryState(modeOneKey)?.isInvalidated).toBe(true);
+    expect(client.getQueryState(modeTwoKey)?.isInvalidated).toBe(true);
+    expect(client.getQueryState(providersKeys.list("codex"))?.isInvalidated).toBe(false);
+    expect(client.getQueryState(providersKeys.defaultRoute("codex"))?.isInvalidated).toBe(false);
+    expect(client.getQueryState(otherCliModeKey)?.isInvalidated).toBe(false);
     expect(client.getQueryData(providersKeys.list(" claude " as never))).toBeUndefined();
+
+    expect(cancelQueriesSpy).toHaveBeenNthCalledWith(1, {
+      queryKey: providersKeys.list("claude"),
+      exact: true,
+    });
+    expect(cancelQueriesSpy).toHaveBeenNthCalledWith(2, {
+      queryKey: providersKeys.defaultRoute("claude"),
+      exact: true,
+    });
+    expect(cancelQueriesSpy).toHaveBeenNthCalledWith(3, {
+      queryKey: sortModeProvidersQueryPrefix("claude"),
+    });
+    expect(cancelQueriesSpy).toHaveBeenNthCalledWith(4, {
+      queryKey: providerModelsKeys.catalogsByProvider(1),
+    });
+    expect(invalidateQueriesSpy).toHaveBeenNthCalledWith(1, {
+      queryKey: providersKeys.list("claude"),
+      exact: true,
+    });
+    expect(invalidateQueriesSpy).toHaveBeenNthCalledWith(2, {
+      queryKey: providersKeys.defaultRoute("claude"),
+      exact: true,
+    });
+    expect(invalidateQueriesSpy).toHaveBeenNthCalledWith(3, {
+      queryKey: sortModeProvidersQueryPrefix("claude"),
+    });
+
+    const lastRouteCancellation = cancelQueriesSpy.mock.invocationCallOrder[2];
+    const firstCacheFilter = setQueryDataSpy.mock.invocationCallOrder[0];
+    const lastCacheFilter = Math.max(
+      ...setQueryDataSpy.mock.invocationCallOrder,
+      ...setQueriesDataSpy.mock.invocationCallOrder
+    );
+    const firstRouteInvalidation = invalidateQueriesSpy.mock.invocationCallOrder[0];
+    const lastRouteInvalidation = invalidateQueriesSpy.mock.invocationCallOrder[2];
+    const providerModelCancellation = cancelQueriesSpy.mock.invocationCallOrder[3];
+
+    expect(lastRouteCancellation).toBeLessThan(firstCacheFilter);
+    expect(lastCacheFilter).toBeLessThan(firstRouteInvalidation);
+    expect(lastRouteInvalidation).toBeLessThan(providerModelCancellation);
+  });
+
+  it("prevents deleted providers from returning through older in-flight route queries", async () => {
+    setTauriRuntime();
+
+    const providers = [
+      makeProvider({ id: 1, cli_key: "claude", name: "Deleted" }),
+      makeProvider({ id: 2, cli_key: "claude", name: "Kept" }),
+    ];
+    const defaultRouteRows: ProviderRouteRow[] = [
+      { provider_id: 1, session_reuse_priority: 101 },
+      { provider_id: 2, session_reuse_priority: 202 },
+    ];
+    const modeOneRows: SortModeProviderRow[] = [
+      { provider_id: 1, enabled: true, session_reuse_priority: 303 },
+      { provider_id: 2, enabled: false, session_reuse_priority: 404 },
+    ];
+    const modeTwoRows: SortModeProviderRow[] = [
+      { provider_id: 2, enabled: true, session_reuse_priority: 505 },
+      { provider_id: 1, enabled: false, session_reuse_priority: 606 },
+    ];
+    const listKey = providersKeys.list("claude");
+    const defaultRouteKey = providersKeys.defaultRoute("claude");
+    const modeOneKey = sortModeProvidersQueryKey(21, "claude");
+    const modeTwoKey = sortModeProvidersQueryKey(22, "claude");
+    const pendingList = deferred<ProviderSummary[]>();
+    const pendingDefaultRoute = deferred<ProviderRouteRow[]>();
+    const pendingModeOne = deferred<SortModeProviderRow[]>();
+    const pendingModeTwo = deferred<SortModeProviderRow[]>();
+
+    vi.mocked(providerDelete).mockResolvedValue(true);
+
+    const client = createTestQueryClient();
+    client.setQueryData(listKey, providers);
+    client.setQueryData(defaultRouteKey, defaultRouteRows);
+    client.setQueryData(modeOneKey, modeOneRows);
+    client.setQueryData(modeTwoKey, modeTwoRows);
+    const inFlightQueries = Promise.allSettled([
+      client.fetchQuery({ queryKey: listKey, queryFn: () => pendingList.promise }),
+      client.fetchQuery({
+        queryKey: defaultRouteKey,
+        queryFn: () => pendingDefaultRoute.promise,
+      }),
+      client.fetchQuery({ queryKey: modeOneKey, queryFn: () => pendingModeOne.promise }),
+      client.fetchQuery({ queryKey: modeTwoKey, queryFn: () => pendingModeTwo.promise }),
+    ]);
+    await waitFor(() => expect(client.isFetching()).toBe(4));
+
+    const wrapper = createQueryWrapper(client);
+    const { result } = renderHook(() => useProviderDeleteMutation(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ cliKey: "claude", providerId: 1 });
+    });
+
+    expect(client.getQueryData(listKey)).toEqual([providers[1]]);
+    expect(client.getQueryData(defaultRouteKey)).toEqual([defaultRouteRows[1]]);
+    expect(client.getQueryData(modeOneKey)).toEqual([modeOneRows[1]]);
+    expect(client.getQueryData(modeTwoKey)).toEqual([modeTwoRows[0]]);
+
+    await act(async () => {
+      pendingModeTwo.resolve(modeTwoRows);
+      pendingModeOne.resolve(modeOneRows);
+      pendingDefaultRoute.resolve(defaultRouteRows);
+      pendingList.resolve(providers);
+      await Promise.all([
+        pendingModeTwo.promise,
+        pendingModeOne.promise,
+        pendingDefaultRoute.promise,
+        pendingList.promise,
+      ]);
+      await Promise.resolve();
+    });
+    await inFlightQueries;
+
+    expect(client.getQueryData(listKey)).toEqual([providers[1]]);
+    expect(client.getQueryData(defaultRouteKey)).toEqual([defaultRouteRows[1]]);
+    expect(client.getQueryData(modeOneKey)).toEqual([modeOneRows[1]]);
+    expect(client.getQueryData(modeTwoKey)).toEqual([modeTwoRows[0]]);
   });
 
   it("retires in-flight model mutations for a deleted provider without affecting another provider", async () => {
@@ -1461,11 +1702,18 @@ describe("query/providers", () => {
     setTauriRuntime();
 
     const providers: ProviderSummary[] = [makeProvider({ id: 1, cli_key: "claude", name: "P1" })];
+    const defaultRouteRows: ProviderRouteRow[] = [{ provider_id: 1, session_reuse_priority: 101 }];
+    const modeRows: SortModeProviderRow[] = [
+      { provider_id: 1, enabled: true, session_reuse_priority: 202 },
+    ];
+    const modeKey = sortModeProvidersQueryKey(31, "claude");
 
     vi.mocked(providerDelete).mockResolvedValue(false);
 
     const client = createTestQueryClient();
     client.setQueryData(providersKeys.list("claude"), providers);
+    client.setQueryData(providersKeys.defaultRoute("claude"), defaultRouteRows);
+    client.setQueryData(modeKey, modeRows);
     const wrapper = createQueryWrapper(client);
 
     const { result } = renderHook(() => useProviderDeleteMutation(), { wrapper });
@@ -1473,16 +1721,57 @@ describe("query/providers", () => {
       await result.current.mutateAsync({ cliKey: "claude", providerId: 1 });
     });
 
-    expect(client.getQueryData(providersKeys.list("claude"))).toEqual(providers);
+    expect(client.getQueryData(providersKeys.list("claude"))).toBe(providers);
+    expect(client.getQueryData(providersKeys.defaultRoute("claude"))).toBe(defaultRouteRows);
+    expect(client.getQueryData(modeKey)).toBe(modeRows);
+    expect(client.getQueryState(providersKeys.list("claude"))?.isInvalidated).toBe(false);
+    expect(client.getQueryState(providersKeys.defaultRoute("claude"))?.isInvalidated).toBe(false);
+    expect(client.getQueryState(modeKey)?.isInvalidated).toBe(false);
   });
 
-  it("useProviderDeleteMutation does not update when list cache is missing", async () => {
+  it("useProviderDeleteMutation preserves all caches when the service rejects", async () => {
+    setTauriRuntime();
+
+    const providers: ProviderSummary[] = [makeProvider({ id: 1, cli_key: "claude", name: "P1" })];
+    const defaultRouteRows: ProviderRouteRow[] = [{ provider_id: 1, session_reuse_priority: 101 }];
+    const modeRows: SortModeProviderRow[] = [
+      { provider_id: 1, enabled: true, session_reuse_priority: 202 },
+    ];
+    const modeKey = sortModeProvidersQueryKey(32, "claude");
+
+    vi.mocked(providerDelete).mockRejectedValueOnce(new Error("delete failed"));
+
+    const client = createTestQueryClient();
+    client.setQueryData(providersKeys.list("claude"), providers);
+    client.setQueryData(providersKeys.defaultRoute("claude"), defaultRouteRows);
+    client.setQueryData(modeKey, modeRows);
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(() => useProviderDeleteMutation(), { wrapper });
+    await act(async () => {
+      await expect(result.current.mutateAsync({ cliKey: "claude", providerId: 1 })).rejects.toThrow(
+        "delete failed"
+      );
+    });
+
+    expect(client.getQueryData(providersKeys.list("claude"))).toBe(providers);
+    expect(client.getQueryData(providersKeys.defaultRoute("claude"))).toBe(defaultRouteRows);
+    expect(client.getQueryData(modeKey)).toBe(modeRows);
+    expect(client.getQueryState(providersKeys.list("claude"))?.isInvalidated).toBe(false);
+    expect(client.getQueryState(providersKeys.defaultRoute("claude"))?.isInvalidated).toBe(false);
+    expect(client.getQueryState(modeKey)?.isInvalidated).toBe(false);
+  });
+
+  it("useProviderDeleteMutation preserves null caches and does not create missing ones", async () => {
     setTauriRuntime();
 
     vi.mocked(providerDelete).mockResolvedValue(true);
 
     const client = createTestQueryClient();
     client.setQueryData(providersKeys.list("claude"), null);
+    const nullModeKey = [...sortModeProvidersQueryPrefix("claude"), null] as const;
+    const missingModeKey = sortModeProvidersQueryKey(33, "claude");
+    client.setQueryData(nullModeKey, null);
     const wrapper = createQueryWrapper(client);
 
     const { result } = renderHook(() => useProviderDeleteMutation(), { wrapper });
@@ -1491,6 +1780,9 @@ describe("query/providers", () => {
     });
 
     expect(client.getQueryData(providersKeys.list("claude"))).toBeNull();
+    expect(client.getQueryState(providersKeys.defaultRoute("claude"))).toBeUndefined();
+    expect(client.getQueryData(nullModeKey)).toBeNull();
+    expect(client.getQueryState(missingModeKey)).toBeUndefined();
   });
 
   it("useProvidersReorderMutation sets cached list when service returns next order", async () => {

@@ -4,6 +4,7 @@ use super::queries::{
 };
 use super::types::CX2CC_BRIDGE_TYPE;
 use super::*;
+use crate::sort_modes::create_mode;
 use rusqlite::{params, OptionalExtension};
 
 // -- ClaudeModels::map_model --
@@ -561,6 +562,129 @@ fn default_provider_params(name: &str) -> ProviderUpsertParams {
     }
 }
 
+#[derive(Debug, Default, PartialEq, Eq)]
+struct ProviderPersistenceSnapshot {
+    provider: Option<(String, String, i64)>,
+    pool_order: Vec<(String, i64)>,
+    default_route_order: Vec<(String, i64, i64)>,
+    sort_mode_order: Vec<(i64, String, i64, i64, i64)>,
+}
+
+fn provider_persistence_snapshot(
+    db: &crate::db::Db,
+    provider_id: i64,
+) -> ProviderPersistenceSnapshot {
+    let conn = db.open_connection().expect("open db");
+    let provider = conn
+        .query_row(
+            "SELECT cli_key, name, enabled FROM providers WHERE id = ?1",
+            params![provider_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()
+        .expect("read provider persistence state");
+
+    let pool_order = {
+        let mut statement = conn
+            .prepare(
+                r#"
+SELECT cli_key, sort_order
+FROM provider_pool_order
+WHERE provider_id = ?1
+ORDER BY cli_key ASC
+"#,
+            )
+            .expect("prepare provider pool order query");
+        statement
+            .query_map(params![provider_id], |row| Ok((row.get(0)?, row.get(1)?)))
+            .expect("query provider pool order")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("read provider pool order")
+    };
+
+    let default_route_order = {
+        let mut statement = conn
+            .prepare(
+                r#"
+SELECT cli_key, sort_order, session_reuse_priority
+FROM default_route_providers
+WHERE provider_id = ?1
+ORDER BY cli_key ASC
+"#,
+            )
+            .expect("prepare default route order query");
+        statement
+            .query_map(params![provider_id], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .expect("query default route order")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("read default route order")
+    };
+
+    let sort_mode_order = {
+        let mut statement = conn
+            .prepare(
+                r#"
+SELECT mode_id, cli_key, sort_order, enabled, session_reuse_priority
+FROM sort_mode_providers
+WHERE provider_id = ?1
+ORDER BY mode_id ASC, cli_key ASC
+"#,
+            )
+            .expect("prepare sort mode provider query");
+        statement
+            .query_map(params![provider_id], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            })
+            .expect("query sort mode provider state")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("read sort mode provider state")
+    };
+
+    ProviderPersistenceSnapshot {
+        provider,
+        pool_order,
+        default_route_order,
+        sort_mode_order,
+    }
+}
+
+fn seed_sort_mode_provider_order(
+    db: &crate::db::Db,
+    mode_id: i64,
+    cli_key: &str,
+    providers: &[(i64, bool, i64)],
+) {
+    let conn = db.open_connection().expect("open db");
+    for (sort_order, (provider_id, enabled, session_reuse_priority)) in providers.iter().enumerate()
+    {
+        conn.execute(
+            r#"
+INSERT INTO sort_mode_providers(
+  mode_id, cli_key, provider_id, sort_order, enabled,
+  session_reuse_priority, created_at, updated_at
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, 1)
+"#,
+            params![
+                mode_id,
+                cli_key,
+                provider_id,
+                sort_order as i64,
+                if *enabled { 1 } else { 0 },
+                session_reuse_priority
+            ],
+        )
+        .expect("seed sort mode provider order");
+    }
+}
+
 fn confirmed_custom_account_usage_params(name: &str, base_url: &str) -> ProviderUpsertParams {
     let mut params = default_provider_params(name);
     params.base_urls = vec![base_url.to_string()];
@@ -723,6 +847,87 @@ fn managed_gateway_loader_accepts_only_enabled_direct_codex_provider() {
 }
 
 #[test]
+fn delete_cascades_all_route_references_and_preserves_similar_provider_state() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db_path = dir.path().join("provider_delete_route_cascade.db");
+    let db = crate::db::init_for_tests(&db_path).expect("init db");
+
+    let target = upsert(&db, default_provider_params("Cascade Twin")).expect("target provider");
+    let mut retained_params = default_provider_params("Cascade Twin Retained");
+    retained_params.enabled = false;
+    let retained = upsert(&db, retained_params).expect("retained provider");
+    assert_eq!(target.cli_key, retained.cli_key);
+    assert_eq!(target.base_urls, retained.base_urls);
+
+    pool_order_set(&db, "claude", vec![target.id, retained.id]).expect("set pool order");
+    default_route_set_order(&db, "claude", vec![retained.id, target.id])
+        .expect("set default route");
+    default_route_set_session_reuse_priority(&db, "claude", target.id, 111)
+        .expect("set target default route priority");
+    default_route_set_session_reuse_priority(&db, "claude", retained.id, 222)
+        .expect("set retained default route priority");
+
+    let primary_mode = create_mode(&db, "Cascade primary").expect("create primary mode");
+    seed_sort_mode_provider_order(
+        &db,
+        primary_mode.id,
+        "claude",
+        &[(target.id, true, 311), (retained.id, false, 322)],
+    );
+
+    let secondary_mode = create_mode(&db, "Cascade secondary").expect("create secondary mode");
+    seed_sort_mode_provider_order(
+        &db,
+        secondary_mode.id,
+        "claude",
+        &[(retained.id, true, 411), (target.id, false, 422)],
+    );
+
+    let retained_before = provider_persistence_snapshot(&db, retained.id);
+    assert_eq!(retained_before.pool_order, vec![("claude".to_string(), 1)]);
+    assert_eq!(
+        retained_before.default_route_order,
+        vec![("claude".to_string(), 0, 222)]
+    );
+    assert_eq!(
+        retained_before.sort_mode_order,
+        vec![
+            (primary_mode.id, "claude".to_string(), 1, 0, 322),
+            (secondary_mode.id, "claude".to_string(), 0, 1, 411),
+        ]
+    );
+
+    delete(&db, target.id, false).expect("delete target provider");
+    drop(db);
+
+    let db = crate::db::init_for_tests(&db_path).expect("reopen db");
+    assert_eq!(
+        provider_persistence_snapshot(&db, target.id),
+        ProviderPersistenceSnapshot::default(),
+        "the provider row and every persisted route reference must cascade"
+    );
+    assert_eq!(
+        provider_persistence_snapshot(&db, retained.id),
+        retained_before,
+        "deleting by stable provider ID must not reorder, toggle, or reprioritize a similar provider"
+    );
+
+    let conn = db.open_connection().expect("open db for foreign key check");
+    let mut statement = conn
+        .prepare("PRAGMA foreign_key_check")
+        .expect("prepare foreign key check");
+    let violations = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .expect("run foreign key check")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("read foreign key violations");
+    assert!(
+        violations.is_empty(),
+        "foreign_key_check reported violations: {violations:?}"
+    );
+}
+
+#[test]
 fn provider_delete_is_blocked_while_managed_profile_references_its_model() {
     let dir = tempfile::tempdir().expect("tempdir");
     let db_path = dir.path().join("managed_profile_delete_guard.db");
@@ -730,6 +935,24 @@ fn provider_delete_is_blocked_while_managed_profile_references_its_model() {
     let mut params = default_provider_params("Managed Delete Guard");
     params.cli_key = "codex".to_string();
     let provider = upsert(&db, params).expect("provider");
+    let mut retained_params = default_provider_params("Managed Delete Guard Retained");
+    retained_params.cli_key = "codex".to_string();
+    let retained = upsert(&db, retained_params).expect("retained provider");
+    pool_order_set(&db, "codex", vec![provider.id, retained.id]).expect("set pool order");
+    default_route_set_order(&db, "codex", vec![retained.id, provider.id])
+        .expect("set default route");
+    default_route_set_session_reuse_priority(&db, "codex", provider.id, 511)
+        .expect("set guarded default route priority");
+    default_route_set_session_reuse_priority(&db, "codex", retained.id, 522)
+        .expect("set retained default route priority");
+    let mode = create_mode(&db, "Managed delete guard").expect("create sort mode");
+    seed_sort_mode_provider_order(
+        &db,
+        mode.id,
+        "codex",
+        &[(provider.id, true, 611), (retained.id, false, 622)],
+    );
+
     let model_uuid = crate::shared::uuid::new_uuid_v4();
     let profile_uuid = crate::shared::uuid::new_uuid_v4();
     let conn = db.open_connection().expect("open db");
@@ -792,8 +1015,20 @@ WHERE id = 1
     .expect("mark provider usage incomplete");
     drop(conn);
 
+    let provider_before = provider_persistence_snapshot(&db, provider.id);
+    let retained_before = provider_persistence_snapshot(&db, retained.id);
     let error = delete(&db, provider.id, false).expect_err("referenced provider must remain");
     assert_eq!(error.code(), "PROVIDER_MANAGED_PROFILE_REFERENCED");
+    assert_eq!(
+        provider_persistence_snapshot(&db, provider.id),
+        provider_before,
+        "a rejected delete must not partially clear provider route references"
+    );
+    assert_eq!(
+        provider_persistence_snapshot(&db, retained.id),
+        retained_before,
+        "a rejected delete must not mutate neighboring provider state"
+    );
     assert!(
         !usage_ledger_exists(&db, "managed-profile-precheck-unprojected"),
         "the managed-profile precheck must reject before any provider usage projection"
@@ -806,6 +1041,10 @@ WHERE id = 1
     .expect("delete profile metadata");
     drop(conn);
     delete(&db, provider.id, false).expect("delete after unlink");
+    assert_eq!(
+        provider_persistence_snapshot(&db, retained.id),
+        retained_before
+    );
 }
 
 #[test]
@@ -1579,6 +1818,76 @@ fn usage_ledger_provider_name(db: &crate::db::Db, trace_id: &str) -> Option<Stri
     .expect("read provider name snapshot")
 }
 
+fn seed_provider_daily_rollup(db: &crate::db::Db, provider_id: i64, provider_name: &str) {
+    let conn = db.open_connection().expect("open db connection");
+    conn.execute(
+        r#"
+INSERT INTO usage_provider_daily_rollup_days(
+  local_day, day_start_ts, day_end_ts, status, source_row_count, updated_at
+) VALUES (
+  date(100, 'unixepoch', 'localtime'),
+  CAST(strftime(
+    '%s', date(100, 'unixepoch', 'localtime'), 'utc'
+  ) AS INTEGER),
+  CAST(strftime(
+    '%s', date(100, 'unixepoch', 'localtime', '+1 day'), 'utc'
+  ) AS INTEGER),
+  'complete',
+  1,
+  1
+)
+ON CONFLICT(local_day) DO UPDATE SET
+  day_start_ts = excluded.day_start_ts,
+  day_end_ts = excluded.day_end_ts,
+  status = 'complete',
+  source_row_count = 1,
+  updated_at = 1
+"#,
+        [],
+    )
+    .expect("insert daily rollup day");
+    conn.execute(
+        r#"
+INSERT INTO usage_provider_daily_rollups(
+  local_day, cli_key, final_provider_id, provider_name_all_snapshot,
+  provider_name_success_snapshot, created_at_min, created_at_max,
+  requests_total, requests_success, success_duration_ms_sum,
+  success_ttfb_ms_sum, success_ttfb_ms_count, success_generation_ms_sum,
+  success_output_tokens_for_rate_sum, success_output_rate_count,
+  cache_denom_tokens, cache_read_input_tokens
+) VALUES (
+  date(100, 'unixepoch', 'localtime'), 'claude', ?1, ?2, ?2, 100, 100,
+  1, 1, 12, 0, 0, 0, 0, 0, 15, 0
+)
+"#,
+        rusqlite::params![provider_id, provider_name],
+    )
+    .expect("insert provider daily rollup");
+    conn.execute(
+        r#"
+UPDATE usage_provider_daily_rollup_days
+SET source_row_count = COALESCE((
+  SELECT SUM(requests_total)
+  FROM usage_provider_daily_rollups rollup
+  WHERE rollup.local_day = usage_provider_daily_rollup_days.local_day
+), 0)
+WHERE local_day = date(100, 'unixepoch', 'localtime')
+"#,
+        [],
+    )
+    .expect("synchronize daily rollup fixture coverage");
+}
+
+fn provider_daily_rollup_exists(db: &crate::db::Db, provider_id: i64) -> bool {
+    let conn = db.open_connection().expect("open db connection");
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM usage_provider_daily_rollups WHERE final_provider_id = ?1)",
+        [provider_id],
+        |row| row.get(0),
+    )
+    .expect("inspect provider daily rollup")
+}
+
 #[test]
 fn delete_keeps_request_logs_and_usage_ledger_by_default() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -1587,11 +1896,13 @@ fn delete_keeps_request_logs_and_usage_ledger_by_default() {
 
     let saved = upsert(&db, default_provider_params("delete-keep-logs")).expect("save provider");
     seed_usage_request_log(&db, "trace-delete-keep", saved.id);
+    seed_provider_daily_rollup(&db, saved.id, "delete-keep-logs");
 
     delete(&db, saved.id, false).expect("delete provider");
 
     assert!(request_log_exists(&db, "trace-delete-keep"));
     assert!(usage_ledger_exists(&db, "trace-delete-keep"));
+    assert!(provider_daily_rollup_exists(&db, saved.id));
     assert_eq!(
         usage_ledger_provider_name(&db, "trace-delete-keep").as_deref(),
         Some("delete-keep-logs")
@@ -1730,6 +2041,8 @@ fn delete_removes_provider_request_logs_and_usage_ledger_when_requested() {
         upsert(&db, default_provider_params("delete-clear-other")).expect("save other provider");
     seed_usage_request_log(&db, "trace-delete-clear", saved.id);
     seed_usage_request_log(&db, "trace-delete-other", other.id);
+    seed_provider_daily_rollup(&db, saved.id, "delete-clear-logs");
+    seed_provider_daily_rollup(&db, other.id, "delete-clear-other");
     {
         let conn = db.open_connection().expect("open db connection");
         let attempts_json = serde_json::json!([{
@@ -1753,8 +2066,10 @@ WHERE trace_id = 'trace-delete-clear'
 
     assert!(!request_log_exists(&db, "trace-delete-clear"));
     assert!(!usage_ledger_exists(&db, "trace-delete-clear"));
+    assert!(!provider_daily_rollup_exists(&db, saved.id));
     assert!(request_log_exists(&db, "trace-delete-other"));
     assert!(usage_ledger_exists(&db, "trace-delete-other"));
+    assert!(provider_daily_rollup_exists(&db, other.id));
 }
 
 fn create_oauth_provider_for_cas_test(db: &crate::db::Db, name: &str) -> i64 {

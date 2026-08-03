@@ -23,6 +23,7 @@ import { setTauriRuntime } from "../../test/utils/tauriRuntime";
 import { sortModesKeys } from "../keys";
 import {
   sortModeProvidersQueryKey,
+  sortModeProvidersQueryPrefix,
   useSortModeActiveListQuery,
   useSortModeActiveSetMutation,
   useSortModeCreateMutation,
@@ -76,6 +77,14 @@ function makeSortModeProviderRow(
 }
 
 describe("query/sortModes", () => {
+  it("builds normalized CLI-wide provider prefixes and exact mode keys", () => {
+    const prefix = sortModeProvidersQueryPrefix(" claude " as never);
+
+    expect(prefix).toEqual([...sortModesKeys.all, "providers", "claude"]);
+    expect(sortModeProvidersQueryKey(7, " claude " as never)).toEqual([...prefix, 7]);
+    expect(() => sortModeProvidersQueryPrefix("opencode" as never)).toThrow("SEC_INVALID_INPUT");
+  });
+
   it("calls sortModesList and sortModeActiveList with tauri runtime", async () => {
     setTauriRuntime();
 

@@ -73,6 +73,73 @@ bounded list/after-id realtime feed.
 Array realtime-feed caches and page-object caches have distinct query-key
 branches and reset shapes.
 
+## Bounded Provider Trends
+
+Provider cache-rate and performance trends query `usage_events`, never
+`request_logs` or request/attempt JSON. This keeps trend history aligned with
+the ledger lifetime and preserves the same result after covered request-detail
+rows or the live Provider record are deleted.
+
+Without a Provider filter, both trends rank at most ten `(cli_key,
+provider_id)` series by successful-request count over the complete filtered
+range. A Provider filter returns only that Provider. Missing and zero limits
+must never mean unlimited; caller-provided limits are bounded to `1..=10`.
+
+The shared planner selects the finest local-calendar bucket among hour, day,
+week, month, and year that fits at most 120 buckets. Queries preserve the full
+filtered range and enforce a second response check of at most 1,200 rows; a
+single-Provider response is at most 120 rows. Week buckets start on Monday.
+
+Performance trend formulas are identical to the usage summary formulas:
+
+- average duration is successful duration divided by successful requests;
+- average TTFB includes only successful rows where `ttfb_ms < duration_ms`;
+- output rate is the sum of non-null output tokens divided by the sum of
+  valid `(duration_ms - ttfb_ms)` generation time, not an average of
+  per-request rates.
+
+Errors, statistics-excluded rows, missing output usage, and invalid TTFB never
+enter those metric denominators. Trend ranges use local natural calendar
+boundaries and intentionally ignore the configurable statistics day-start
+offset.
+
+Each performance row exposes the valid sample count for duration, TTFB, and
+output rate separately. Consumers must display the sample count for the active
+metric rather than treating the total successful-request count as every
+metric's denominator.
+
+## Provider Daily Trend Projection
+
+Provider daily rollups are a rebuildable performance projection over
+`usage_ledger`; they are not a replacement fact source and never authorize
+automatic ledger deletion. Model, Session, folder, cost repair, provider-limit,
+hourly, and partial-day consumers continue reading event-level ledger rows.
+
+The projection stores one additive row per local natural day, CLI, and Provider,
+plus a separate day-coverage record. Only a `complete` day whose stored local
+midnight boundaries still match the current system time-zone rules is trusted.
+The current day, partial query boundaries, dirty or missing days, invalid legacy
+timestamps, and every hour-granularity query use raw ledger data. Day and coarser
+queries combine trusted rollups with the exact raw complement inside one SQLite
+read snapshot, then perform Top Provider selection and final division after the
+two sources are re-aggregated.
+
+Ledger inserts, deletes, and real changes to trend-relevant fields atomically
+mark both the old and new local days dirty. Rebuilding a closed day uses one
+`IMMEDIATE` transaction, independently compares the eligible raw row count with
+the projected request sum, and marks the day complete only after they match.
+Request-log retention runs first; rollup maintenance rebuilds at most 32 days per
+batch and releases the maintenance mutex between delayed continuation batches.
+
+A time-zone boundary change invalidates the derived projection so it can be
+rebuilt from the retained ledger. If ensure detects a missing rollup table or
+dirty-day trigger, it restores the schema, clears all potentially stale derived
+rows, and resets the projection cursor before queries may trust coverage again.
+
+Provider deletion with `clear_usage_stats=true` removes matching request logs,
+ledger rows, and Provider rollup rows in the same transaction. Default Provider
+deletion retains both ledger history and rollup name snapshots.
+
 ## Home Realtime Concurrency
 
 The Home current-concurrency value counts active model inference requests, not
@@ -92,6 +159,7 @@ request logging, historical pagination, or IPC contracts.
 
 Verify migration, resumable backfill, concurrent dual-write, pending
 reconciliation, failure isolation, retention coverage, manual clear, provider
-deletion, cost correction, aggregate equality before/after cutover, cursor
-validation, equal-timestamp page boundaries, filter semantics, live overlays,
-and generated binding compatibility.
+deletion, cost correction, aggregate equality before/after cutover, bounded
+provider trend formulas/ranking/buckets/rows and detail-retention invariance,
+cursor validation, equal-timestamp page boundaries, filter semantics, live
+overlays, and generated binding compatibility.

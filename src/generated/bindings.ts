@@ -2264,6 +2264,20 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async usageProviderMetricTrendV1(
+    params: UsageQueryParams,
+    limit: number | null
+  ): Promise<Result<UsageProviderMetricTrendRowV1[], string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("usage_provider_metric_trend_v1", { params, limit }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async imageGenConfigGet(adapterId: string): Promise<Result<ImageGenConfigView, string>> {
     try {
       return { status: "ok", data: await TAURI_INVOKE("image_gen_config_get", { adapterId }) };
@@ -4729,11 +4743,30 @@ export type UsageLeaderboardRow = {
 export type UsageProviderCacheRateTrendRowV1 = {
   day: string;
   hour: number | null;
+  granularity: UsageTrendGranularityV1;
   key: string;
   name: string;
   denom_tokens: number;
   cache_read_input_tokens: number;
   requests_success: number;
+};
+export type UsageProviderMetricTrendRowV1 = {
+  day: string;
+  hour: number | null;
+  granularity: UsageTrendGranularityV1;
+  key: string;
+  name: string;
+  cli_key: string;
+  provider_id: number;
+  provider_name: string;
+  requests_total: number;
+  requests_success: number;
+  duration_samples: number;
+  ttfb_samples: number;
+  output_rate_samples: number;
+  avg_duration_ms: number | null;
+  avg_ttfb_ms: number | null;
+  avg_output_tokens_per_second: number | null;
 };
 export type UsageProviderRow = {
   cli_key: string;
@@ -4782,6 +4815,7 @@ export type UsageSummary = {
   cache_creation_5m_input_tokens: number;
   cache_creation_1h_input_tokens: number;
 };
+export type UsageTrendGranularityV1 = "hour" | "day" | "week" | "month" | "year";
 export type WorkspaceApplyReport = {
   cli_key: string;
   from_workspace_id: number | null;

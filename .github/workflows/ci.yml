@@ -27,6 +27,7 @@ jobs:
       scope: ${{ steps.scope.outputs.scope }}
       full_ci: ${{ steps.scope.outputs.full_ci }}
       docs_checks: ${{ steps.scope.outputs.docs_checks }}
+      provider_trend_benchmark: ${{ steps.scope.outputs.provider_trend_benchmark }}
       reason: ${{ steps.scope.outputs.reason }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -176,6 +177,8 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 2
 
       - name: Install system dependencies
         run: |
@@ -251,6 +254,16 @@ jobs:
         env:
           CARGO_BUILD_JOBS: "1"
         run: cargo test --workspace --locked -- --test-threads=1
+
+      - name: Provider trend million-row release benchmark
+        if: needs.change-scope.outputs.provider_trend_benchmark == 'true'
+        working-directory: src-tauri
+        env:
+          CARGO_BUILD_JOBS: "1"
+        run: >-
+          cargo test --release --locked --lib
+          provider_trend_million_ledger_rows_release_under_one_second --
+          --ignored --test-threads=1
 
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
