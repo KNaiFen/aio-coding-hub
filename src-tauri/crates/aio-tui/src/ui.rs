@@ -1220,8 +1220,8 @@ fn request_line_style(
         RequestCardLineKind::Status if request.interrupted => Tone::Warning,
         RequestCardLineKind::Status
             if request
-            .status
-            .is_some_and(|status| (200..300).contains(&status)) =>
+                .status
+                .is_some_and(|status| (200..300).contains(&status)) =>
         {
             Tone::Success
         }
