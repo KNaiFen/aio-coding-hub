@@ -3,7 +3,7 @@
   "name": "provider-metric-trends-ledger",
   "title": "基于 ledger 实现有界 Provider 趋势",
   "description": "参考 d27efdb8，基于 usage ledger 实现 Top 10、120 桶的性能趋势并治理缓存率趋势预算。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": "@aio-coding-hub",
   "package": "aio-coding-hub",

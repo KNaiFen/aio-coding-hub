@@ -10,12 +10,12 @@ use super::trend_common::{
     bucket_select_and_group, plan_trend, validate_trend_budget, TrendPlanQuery,
 };
 use super::{
-    has_valid_provider_key, resolve_query_params, sql_effective_input_tokens_expr_with_alias,
-    ProviderKey, UsageProviderCacheRateTrendRowV1, UsageQueryParams, UsageTrendGranularityV1,
+    has_valid_provider_key, resolve_query_params, ProviderKey, UsageProviderMetricTrendRowV1,
+    UsageQueryParams, UsageTrendGranularityV1,
 };
 
 #[derive(Debug, Clone, Copy)]
-pub(super) struct ProviderCacheRateTrendQuery<'a> {
+pub(super) struct ProviderMetricTrendQuery<'a> {
     pub start_ts: Option<i64>,
     pub end_ts: Option<i64>,
     pub cli_key: Option<&'a str>,
@@ -24,10 +24,16 @@ pub(super) struct ProviderCacheRateTrendQuery<'a> {
     pub exclude_cx2cc_gateway_bridge: bool,
 }
 
-pub(super) fn provider_cache_rate_trend_v1_with_conn(
+const SUCCESS: &str =
+    "r.status >= 200 AND r.status < 300 AND r.error_present = 0";
+const VALID_TTFB: &str = "r.ttfb_ms IS NOT NULL AND r.ttfb_ms < r.duration_ms";
+const VALID_OUTPUT_RATE: &str =
+    "r.output_tokens IS NOT NULL AND r.ttfb_ms IS NOT NULL AND r.ttfb_ms < r.duration_ms";
+
+pub(super) fn provider_metric_trend_v1_with_conn(
     conn: &Connection,
-    query: ProviderCacheRateTrendQuery<'_>,
-) -> Result<Vec<UsageProviderCacheRateTrendRowV1>, String> {
+    query: ProviderMetricTrendQuery<'_>,
+) -> Result<Vec<UsageProviderMetricTrendRowV1>, String> {
     let plan = plan_trend(
         conn,
         TrendPlanQuery {
@@ -47,10 +53,6 @@ pub(super) fn provider_cache_rate_trend_v1_with_conn(
         | UsageTrendGranularityV1::Month
         | UsageTrendGranularityV1::Year => "b.day ASC",
     };
-    let effective_input_expr = sql_effective_input_tokens_expr_with_alias("r");
-    let denom_expr = format!(
-        "({effective_input_expr}) + COALESCE(r.cache_creation_input_tokens, 0) + COALESCE(r.cache_read_input_tokens, 0)"
-    );
     let (where_clause, where_params) = build_optional_range_cli_provider_filters(
         "r.created_at",
         "r.cli_key",
@@ -91,15 +93,18 @@ bucketed AS (
     r.cli_key AS cli_key,
     r.final_provider_id AS provider_id,
     MAX(NULLIF(TRIM(r.provider_name_snapshot), '')) AS provider_name,
-    SUM({denom_expr}) AS denom_tokens,
-    SUM(COALESCE(r.cache_read_input_tokens, 0)) AS cache_read_input_tokens,
-    COUNT(*) AS requests_success
+    COUNT(*) AS requests_total,
+    SUM(CASE WHEN {success} THEN 1 ELSE 0 END) AS requests_success,
+    SUM(CASE WHEN {success} THEN r.duration_ms ELSE 0 END) AS success_duration_ms_sum,
+    SUM(CASE WHEN {success} AND {valid_ttfb} THEN r.ttfb_ms ELSE 0 END) AS success_ttfb_ms_sum,
+    SUM(CASE WHEN {success} AND {valid_ttfb} THEN 1 ELSE 0 END) AS success_ttfb_ms_count,
+    SUM(CASE WHEN {success} AND {valid_output_rate} THEN r.duration_ms - r.ttfb_ms ELSE 0 END) AS success_generation_ms_sum,
+    SUM(CASE WHEN {success} AND {valid_output_rate} THEN r.output_tokens ELSE 0 END) AS success_output_tokens_for_rate_sum
   FROM usage_events r
   JOIN top_providers tp
     ON tp.cli_key = r.cli_key
    AND tp.provider_id = r.final_provider_id
   WHERE r.excluded_from_stats = 0
-  AND r.status >= 200 AND r.status < 300 AND r.error_present = 0
   AND r.final_provider_id IS NOT NULL
   AND r.final_provider_id > 0
   {where_clause}
@@ -112,12 +117,19 @@ SELECT
   b.cli_key,
   b.provider_id,
   b.provider_name,
-  b.denom_tokens,
-  b.cache_read_input_tokens,
-  b.requests_success
+  b.requests_total,
+  b.requests_success,
+  b.success_duration_ms_sum,
+  b.success_ttfb_ms_sum,
+  b.success_ttfb_ms_count,
+  b.success_generation_ms_sum,
+  b.success_output_tokens_for_rate_sum
 FROM bucketed b
 ORDER BY {order_by_fields}, b.requests_success DESC, b.cli_key ASC, b.provider_id ASC
 "#,
+        success = SUCCESS,
+        valid_ttfb = VALID_TTFB,
+        valid_output_rate = VALID_OUTPUT_RATE,
         limit_bind_idx = where_params.len() + 1,
     );
 
@@ -128,14 +140,18 @@ ORDER BY {order_by_fields}, b.requests_success DESC, b.cli_key ASC, b.provider_i
         cli_key: String,
         provider_id: i64,
         provider_name: Option<String>,
-        denom_tokens: i64,
-        cache_read_input_tokens: i64,
+        requests_total: i64,
         requests_success: i64,
+        success_duration_ms_sum: i64,
+        success_ttfb_ms_sum: i64,
+        success_ttfb_ms_count: i64,
+        success_generation_ms_sum: i64,
+        success_output_tokens_for_rate_sum: i64,
     }
 
     let mut stmt = conn
         .prepare(&sql)
-        .map_err(|error| db_err!("failed to prepare provider cache trend query: {error}"))?;
+        .map_err(|error| db_err!("failed to prepare provider metric trend query: {error}"))?;
     let rows = stmt
         .query_map(
             params_from_iter({
@@ -150,25 +166,33 @@ ORDER BY {order_by_fields}, b.requests_success DESC, b.cli_key ASC, b.provider_i
                     cli_key: row.get("cli_key")?,
                     provider_id: row.get("provider_id")?,
                     provider_name: row.get("provider_name")?,
-                    denom_tokens: row
-                        .get::<_, Option<i64>>("denom_tokens")?
-                        .unwrap_or(0)
-                        .max(0),
-                    cache_read_input_tokens: row
-                        .get::<_, Option<i64>>("cache_read_input_tokens")?
-                        .unwrap_or(0)
-                        .max(0),
+                    requests_total: row.get("requests_total")?,
                     requests_success: row
                         .get::<_, Option<i64>>("requests_success")?
-                        .unwrap_or(0)
-                        .max(0),
+                        .unwrap_or(0),
+                    success_duration_ms_sum: row
+                        .get::<_, Option<i64>>("success_duration_ms_sum")?
+                        .unwrap_or(0),
+                    success_ttfb_ms_sum: row
+                        .get::<_, Option<i64>>("success_ttfb_ms_sum")?
+                        .unwrap_or(0),
+                    success_ttfb_ms_count: row
+                        .get::<_, Option<i64>>("success_ttfb_ms_count")?
+                        .unwrap_or(0),
+                    success_generation_ms_sum: row
+                        .get::<_, Option<i64>>("success_generation_ms_sum")?
+                        .unwrap_or(0),
+                    success_output_tokens_for_rate_sum: row
+                        .get::<_, Option<i64>>("success_output_tokens_for_rate_sum")?
+                        .unwrap_or(0),
                 })
             },
         )
-        .map_err(|error| db_err!("failed to run provider cache trend query: {error}"))?;
+        .map_err(|error| db_err!("failed to run provider metric trend query: {error}"))?;
+
     let items = rows
         .collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(|error| db_err!("failed to read provider cache trend row: {error}"))?;
+        .map_err(|error| db_err!("failed to read provider metric trend row: {error}"))?;
     let bucket_count = items
         .iter()
         .map(|row| (row.day.as_str(), row.hour))
@@ -206,32 +230,55 @@ ORDER BY {order_by_fields}, b.requests_success DESC, b.cli_key ASC, b.provider_i
             continue;
         }
 
-        out.push(UsageProviderCacheRateTrendRowV1 {
+        let avg_duration_ms = if row.requests_success > 0 {
+            Some(row.success_duration_ms_sum / row.requests_success)
+        } else {
+            None
+        };
+        let avg_ttfb_ms = if row.success_ttfb_ms_count > 0 {
+            Some(row.success_ttfb_ms_sum / row.success_ttfb_ms_count)
+        } else {
+            None
+        };
+        let avg_output_tokens_per_second = if row.success_generation_ms_sum > 0 {
+            Some(
+                row.success_output_tokens_for_rate_sum as f64
+                    / (row.success_generation_ms_sum as f64 / 1000.0),
+            )
+        } else {
+            None
+        };
+        out.push(UsageProviderMetricTrendRowV1 {
             day: row.day,
             hour: row.hour,
             granularity: plan.granularity,
             key: format!("{}:{}", row.cli_key, row.provider_id),
             name: format!("{}/{}", row.cli_key, provider_name),
-            denom_tokens: row.denom_tokens,
-            cache_read_input_tokens: row.cache_read_input_tokens,
+            cli_key: row.cli_key,
+            provider_id: row.provider_id,
+            provider_name,
+            requests_total: row.requests_total,
             requests_success: row.requests_success,
+            avg_duration_ms,
+            avg_ttfb_ms,
+            avg_output_tokens_per_second,
         });
     }
     Ok(out)
 }
 
-pub fn provider_cache_rate_trend_v1(
+pub fn provider_metric_trend_v1(
     db: &db::Db,
     params: &UsageQueryParams,
     limit: Option<usize>,
-) -> crate::shared::error::AppResult<Vec<UsageProviderCacheRateTrendRowV1>> {
+) -> crate::shared::error::AppResult<Vec<UsageProviderMetricTrendRowV1>> {
     let conn = db.open_connection()?;
     let mut params = params.clone();
     params.day_start_hour = None;
     let resolved = resolve_query_params(&conn, &params)?;
-    Ok(provider_cache_rate_trend_v1_with_conn(
+    Ok(provider_metric_trend_v1_with_conn(
         &conn,
-        ProviderCacheRateTrendQuery {
+        ProviderMetricTrendQuery {
             start_ts: resolved.start_ts,
             end_ts: resolved.end_ts,
             cli_key: resolved.cli_key,

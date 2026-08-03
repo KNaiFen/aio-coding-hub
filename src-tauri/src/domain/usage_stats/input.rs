@@ -179,7 +179,7 @@ pub(super) struct ResolvedQueryParams<'a> {
 ///
 /// Consolidates the 4-step resolution sequence (parse period, compute bounds,
 /// normalize cli_key, normalize provider_id) that was previously duplicated
-/// across `summary_v2`, `leaderboard_v2`, and `provider_cache_rate_trend_v1`.
+/// across summaries, leaderboards, and both bounded provider trend queries.
 pub(super) fn resolve_query_params<'a>(
     conn: &Connection,
     params: &'a UsageQueryParams,

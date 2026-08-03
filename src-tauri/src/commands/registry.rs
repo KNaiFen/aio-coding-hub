@@ -245,6 +245,7 @@ macro_rules! generated_command_registry {
             usage_day_detail_v1 => crate::commands::usage::usage_day_detail_v1,
             usage_folder_options_v1 => crate::commands::usage::usage_folder_options_v1,
             usage_provider_cache_rate_trend_v1 => crate::commands::usage::usage_provider_cache_rate_trend_v1,
+            usage_provider_metric_trend_v1 => crate::commands::usage::usage_provider_metric_trend_v1,
             // ── image_gen ──
             image_gen_config_get => crate::commands::image_gen::image_gen_config_get,
             image_gen_config_set => crate::commands::image_gen::image_gen_config_set,
@@ -393,6 +394,14 @@ mod tests {
         assert!(
             generated_command_names().contains(&"usage_availability_timeline_v1"),
             "usage availability should stay in the shared generated command registry"
+        );
+    }
+
+    #[test]
+    fn includes_provider_metric_trend_in_generated_command_registry() {
+        assert!(
+            generated_command_names().contains(&"usage_provider_metric_trend_v1"),
+            "provider metric trend should stay in the shared generated command registry"
         );
     }
 

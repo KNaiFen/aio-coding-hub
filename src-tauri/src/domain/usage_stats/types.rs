@@ -1,5 +1,15 @@
 use serde::Serialize;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum UsageTrendGranularityV1 {
+    Hour,
+    Day,
+    Week,
+    Month,
+    Year,
+}
+
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct UsageSummary {
     pub requests_total: i64,
@@ -65,15 +75,33 @@ pub struct UsageHourlyRow {
     pub total_tokens: i64,
 }
 
-#[derive(Debug, Clone, Serialize, specta::Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, specta::Type)]
 pub struct UsageProviderCacheRateTrendRowV1 {
     pub day: String,
     pub hour: Option<i64>,
+    pub granularity: UsageTrendGranularityV1,
     pub key: String,
     pub name: String,
     pub denom_tokens: i64,
     pub cache_read_input_tokens: i64,
     pub requests_success: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, specta::Type)]
+pub struct UsageProviderMetricTrendRowV1 {
+    pub day: String,
+    pub hour: Option<i64>,
+    pub granularity: UsageTrendGranularityV1,
+    pub key: String,
+    pub name: String,
+    pub cli_key: String,
+    pub provider_id: i64,
+    pub provider_name: String,
+    pub requests_total: i64,
+    pub requests_success: i64,
+    pub avg_duration_ms: Option<i64>,
+    pub avg_ttfb_ms: Option<i64>,
+    pub avg_output_tokens_per_second: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
