@@ -32,7 +32,7 @@
 
 ## Acceptance Criteria
 
-- [ ] A process-documentation-only PR reports a successful required `ci-gate`
+- [x] A process-documentation-only PR reports a successful required `ci-gate`
       while frontend, Rust, support-contract, documentation-contract, and
       release jobs are skipped.
 - [x] A checked-documentation-only PR runs the targeted Node.js documentation
@@ -43,7 +43,7 @@
 - [x] Rename, copy, deletion, empty-diff, invalid-SHA, and classification-error
       cases are covered by deterministic Node.js self-tests.
 - [x] The implementation PR runs and passes the complete CI on GitHub Actions.
-- [ ] A separate Trellis archive PR containing only process documentation
+- [x] A separate Trellis archive PR containing only process documentation
       proves the lightweight route in the actual protected-branch workflow.
 - [x] The boundary and fail-closed rules are recorded in the cross-layer Trellis
       specification.
@@ -65,5 +65,8 @@
 - The classifier self-test covers each documentation tier and fail-closed edge
   case; the implementation PR also exercised `docs-contract` together with the
   complete suites.
-- The separate process-documentation archive PR remains the live proof for the
-  minimal `change-scope` + `pr-title` + `ci-gate` path.
+- Archive PR: <https://github.com/KNaiFen/aio-coding-hub/pull/33>.
+- The archive PR's first lightweight CI run
+  <https://github.com/KNaiFen/aio-coding-hub/actions/runs/30829783655>
+  ran only `change-scope`, `pr-title`, and `ci-gate`; all complete suites,
+  contract suites, candidate planning, and release jobs were skipped.
