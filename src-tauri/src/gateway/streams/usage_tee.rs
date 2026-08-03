@@ -313,8 +313,12 @@ where
             tracker.with_stream_internal_error_classifier(
                 ctx.upstream_retry_policy.enabled
                     && ctx.upstream_retry_policy.stream_internal_errors.enabled,
-                &ctx.upstream_retry_policy.stream_internal_errors.retry_keywords,
-                &ctx.upstream_retry_policy.stream_internal_errors.non_retry_keywords,
+                &ctx.upstream_retry_policy
+                    .stream_internal_errors
+                    .retry_keywords,
+                &ctx.upstream_retry_policy
+                    .stream_internal_errors
+                    .non_retry_keywords,
             )
         } else {
             tracker

@@ -175,7 +175,9 @@ fn is_terminal_error_sse_frame(event_name: &str, data: &serde_json::Value) -> bo
 
 enum BufferedStreamPrefixDecision {
     NeedMore,
-    StartStreaming { guard_cap_reached: bool },
+    StartStreaming {
+        guard_cap_reached: bool,
+    },
     ProviderFailure {
         error_code: &'static str,
         evidence: Option<usage::StreamInternalErrorEvidence>,
@@ -208,13 +210,12 @@ fn inspect_buffered_event_stream_prefix(
     state: &mut BufferedStreamPrefixState,
     raw: &[u8],
 ) -> BufferedStreamPrefixDecision {
-    let inspect_empty_success =
-        is_native_codex_responses_event_stream_path(
-            cli_key,
-            path,
-            active_bridge_type,
-            provider_bridged,
-        );
+    let inspect_empty_success = is_native_codex_responses_event_stream_path(
+        cli_key,
+        path,
+        active_bridge_type,
+        provider_bridged,
+    );
     let buffer_cap_reached = if inspect_empty_success {
         raw.len() >= MAX_STREAM_INTERNAL_ERROR_GUARD_BYTES
     } else {
@@ -895,11 +896,8 @@ where
                     FirstChunkProbe::Timeout
                 } else {
                     let remaining = total - elapsed;
-                    match tokio::time::timeout(
-                        remaining,
-                        next_event_stream_chunk(&mut upstream),
-                    )
-                    .await
+                    match tokio::time::timeout(remaining, next_event_stream_chunk(&mut upstream))
+                        .await
                     {
                         Ok(Ok(Some(chunk))) => FirstChunkProbe::Ok(
                             Some(chunk),
@@ -1175,8 +1173,7 @@ where
                 BufferedStreamPrefixDecision::NeedMore => {}
             }
 
-            let guard_remaining =
-                prefix_state.guard_remaining(common.stream_internal_error_guard);
+            let guard_remaining = prefix_state.guard_remaining(common.stream_internal_error_guard);
             let wait = match (upstream_stream_idle_timeout, guard_remaining) {
                 (Some(idle), Some(guard)) => Some((idle.min(guard), guard <= idle)),
                 (Some(idle), None) => Some((idle, false)),
@@ -1185,16 +1182,11 @@ where
             };
             let chunk_result = match wait {
                 Some((wait, guard_timeout)) => {
-                    match tokio::time::timeout(
-                        wait,
-                        next_event_stream_chunk(&mut upstream),
-                    )
-                    .await
-                    {
+                    match tokio::time::timeout(wait, next_event_stream_chunk(&mut upstream)).await {
                         Ok(result) => result,
                         Err(_) if guard_timeout => {
-                            first_chunk = (!buffered_prefix.is_empty())
-                                .then(|| Bytes::from(buffered_prefix));
+                            first_chunk =
+                                (!buffered_prefix.is_empty()).then(|| Bytes::from(buffered_prefix));
                             break;
                         }
                         Err(_) => {
@@ -1211,9 +1203,8 @@ where
                                     .configured_transient_retries_used
                                     .saturating_add(1);
                             }
-                            let timeout_secs = upstream_stream_idle_timeout.map(|value| {
-                                value.as_secs().min(u64::from(u32::MAX)) as u32
-                            });
+                            let timeout_secs = upstream_stream_idle_timeout
+                                .map(|value| value.as_secs().min(u64::from(u32::MAX)) as u32);
                             let outcome = format!(
                                 "stream_prefix_idle_timeout: category={} code={} decision={} timeout_secs={}",
                                 ErrorCategory::SystemError.as_str(),

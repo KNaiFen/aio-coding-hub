@@ -359,12 +359,8 @@ pub fn sanitize_upstream_retry_policy(policy: &mut UpstreamRetryPolicy) -> bool 
     policy
         .transport_errors
         .truncate(MAX_UPSTREAM_RETRY_POLICY_TRANSPORT_ERRORS);
-    sanitize_stream_internal_error_keywords(
-        &mut policy.stream_internal_errors.retry_keywords,
-    );
-    sanitize_stream_internal_error_keywords(
-        &mut policy.stream_internal_errors.non_retry_keywords,
-    );
+    sanitize_stream_internal_error_keywords(&mut policy.stream_internal_errors.retry_keywords);
+    sanitize_stream_internal_error_keywords(&mut policy.stream_internal_errors.non_retry_keywords);
     policy.max_retries = policy
         .max_retries
         .min(MAX_UPSTREAM_RETRY_POLICY_MAX_RETRIES);
@@ -1483,8 +1479,7 @@ fn migrate_add_stream_internal_error_retry(
         SCHEMA_VERSION_ADD_STREAM_INTERNAL_ERROR_RETRY,
     );
     if !has_capacity_retry_intent(&settings.upstream_retry_policy)
-        && settings.upstream_retry_policy.http_rules.len()
-            < MAX_UPSTREAM_RETRY_POLICY_HTTP_RULES
+        && settings.upstream_retry_policy.http_rules.len() < MAX_UPSTREAM_RETRY_POLICY_HTTP_RULES
     {
         settings
             .upstream_retry_policy
@@ -2437,7 +2432,10 @@ mod tests {
         assert!(policy.enabled);
         assert!(policy.transport_errors.is_empty());
         assert_eq!(policy.stream_internal_errors.retry_keywords, vec!["LIMIT"]);
-        assert_eq!(policy.stream_internal_errors.non_retry_keywords, vec!["POLICY"]);
+        assert_eq!(
+            policy.stream_internal_errors.non_retry_keywords,
+            vec!["POLICY"]
+        );
         assert_eq!(policy.max_retries, MAX_UPSTREAM_RETRY_POLICY_MAX_RETRIES);
         assert_eq!(policy.backoff_ms, MAX_UPSTREAM_RETRY_POLICY_BACKOFF_MS);
     }
@@ -2535,8 +2533,14 @@ mod tests {
         assert!(normalize_upstream_retry_policy_for_write(&mut policy).unwrap());
         assert_eq!(policy.http_rules[0].body_contains, vec!["quota"]);
         assert_eq!(policy.http_rules[0].description, "Temporary quota");
-        assert_eq!(policy.stream_internal_errors.retry_keywords, vec!["Capacity"]);
-        assert_eq!(policy.stream_internal_errors.non_retry_keywords, vec!["Policy"]);
+        assert_eq!(
+            policy.stream_internal_errors.retry_keywords,
+            vec!["Capacity"]
+        );
+        assert_eq!(
+            policy.stream_internal_errors.non_retry_keywords,
+            vec!["Policy"]
+        );
     }
 
     #[test]
@@ -2642,18 +2646,12 @@ mod tests {
             .last()
             .expect("capacity rule");
         assert_eq!(capacity.status_code, 400);
-        assert_eq!(
-            capacity.body_contains,
-            vec![DEFAULT_CAPACITY_RETRY_KEYWORD]
-        );
+        assert_eq!(capacity.body_contains, vec![DEFAULT_CAPACITY_RETRY_KEYWORD]);
     }
 
     #[test]
     fn migrate_stream_internal_error_retry_respects_disabled_and_status_only_intent() {
-        for body_contains in [
-            vec![DEFAULT_CAPACITY_RETRY_KEYWORD.to_string()],
-            Vec::new(),
-        ] {
+        for body_contains in [vec![DEFAULT_CAPACITY_RETRY_KEYWORD.to_string()], Vec::new()] {
             let mut settings = AppSettings {
                 schema_version: SCHEMA_VERSION_ADD_PROVIDER_AVAILABILITY_HOURS,
                 ..Default::default()

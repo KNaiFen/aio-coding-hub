@@ -762,7 +762,10 @@ fn codex_stream_internal_error_evidence_redacts_secrets_and_bounds_unicode() {
         assert!(!redacted.contains(secret), "secret leaked: {secret}");
     }
     assert!(redacted.contains("[REDACTED]"));
-    assert_eq!(redacted.chars().count(), STREAM_INTERNAL_ERROR_MESSAGE_MAX_CHARS);
+    assert_eq!(
+        redacted.chars().count(),
+        STREAM_INTERNAL_ERROR_MESSAGE_MAX_CHARS
+    );
     assert!(evidence.truncated);
 }
 
@@ -784,11 +787,8 @@ fn codex_reasoning_summary_counts_as_meaningful_output() {
 #[test]
 fn sse_usage_tracker_keeps_post_commit_stream_internal_error_evidence() {
     let retry = vec!["selected model is at capacity".to_string()];
-    let mut tracker = SseUsageTracker::new("codex").with_stream_internal_error_classifier(
-        true,
-        &retry,
-        &[],
-    );
+    let mut tracker =
+        SseUsageTracker::new("codex").with_stream_internal_error_classifier(true, &retry, &[]);
     tracker.ingest_chunk(
         b"event: response.failed\ndata: {\"error\":{\"message\":\"Selected model is at capacity\"}}\n\n",
     );

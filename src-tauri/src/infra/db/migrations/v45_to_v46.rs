@@ -88,10 +88,7 @@ fn http_rules_from_wire_default(
         return Ok(rules);
     }
 
-    Ok([502, 503, 504]
-        .into_iter()
-        .map(status_only_rule)
-        .collect())
+    Ok([502, 503, 504].into_iter().map(status_only_rule).collect())
 }
 
 fn add_stream_error_defaults(raw: &str) -> Result<Option<String>, String> {
@@ -117,7 +114,11 @@ fn add_stream_error_defaults(raw: &str) -> Result<Option<String>, String> {
             changed = true;
         }
     }
-    if object.get("http_rules").and_then(serde_json::Value::as_array) != Some(&http_rules) {
+    if object
+        .get("http_rules")
+        .and_then(serde_json::Value::as_array)
+        != Some(&http_rules)
+    {
         object.insert(
             "http_rules".to_string(),
             serde_json::Value::Array(http_rules),
@@ -154,11 +155,15 @@ pub(super) fn migrate_v45_to_v46(conn: &mut Connection) -> Result<(), String> {
                 )
                 .map_err(|error| format!("failed to prepare v45->v46 provider migration: {error}"))?;
             let mapped = statement
-                .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Value>(1)?)))
+                .query_map([], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, Value>(1)?))
+                })
                 .map_err(|error| format!("failed to query provider retry policies: {error}"))?;
             let mut rows = Vec::new();
             for row in mapped {
-                rows.push(row.map_err(|error| format!("failed to read provider retry policy: {error}"))?);
+                rows.push(
+                    row.map_err(|error| format!("failed to read provider retry policy: {error}"))?,
+                );
             }
             rows
         };
@@ -311,7 +316,9 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(&migrated).expect("valid JSON");
         let rules = value["http_rules"].as_array().expect("rules");
         assert_eq!(rules.len(), 17);
-        assert!(super::is_capacity_retry_intent(rules.last().expect("capacity rule")));
+        assert!(super::is_capacity_retry_intent(
+            rules.last().expect("capacity rule")
+        ));
     }
 
     #[test]

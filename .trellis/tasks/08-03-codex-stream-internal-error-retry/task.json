@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "PR #31；已触发 macos-arm64 dev-build：https://github.com/KNaiFen/aio-coding-hub/actions/runs/30822721768；等待 PR CI 与原生验证。",
+  "notes": "PR #31；macos-arm64 dev-build：https://github.com/KNaiFen/aio-coding-hub/actions/runs/30822721768；已同步 PR CI 30822801043 报告的有界 rustfmt 漂移，等待新一轮 PR CI 与原生验证。",
   "meta": {}
 }

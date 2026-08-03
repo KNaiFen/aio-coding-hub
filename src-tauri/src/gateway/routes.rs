@@ -798,15 +798,10 @@ mod tests {
                         "\r\n"
                     );
                     let _ = socket.write_all(headers.as_bytes()).await;
-                    let metadata = format!(
-                        "{:X}\r\n{}\r\n",
-                        metadata_chunk.len(),
-                        metadata_chunk
-                    );
+                    let metadata = format!("{:X}\r\n{}\r\n", metadata_chunk.len(), metadata_chunk);
                     let _ = socket.write_all(metadata.as_bytes()).await;
                     tokio::time::sleep(delay).await;
-                    let error =
-                        format!("{:X}\r\n{}\r\n0\r\n\r\n", error_chunk.len(), error_chunk);
+                    let error = format!("{:X}\r\n{}\r\n0\r\n\r\n", error_chunk.len(), error_chunk);
                     let _ = socket.write_all(error.as_bytes()).await;
                 } else {
                     let response = format!(
@@ -9398,7 +9393,8 @@ INSERT INTO codex_managed_profiles(
             "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-gzip-retry-ok\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"gzip-retry-ok\"}]}],\"usage\":{\"input_tokens\":11,\"output_tokens\":1,\"total_tokens\":12}}}\n\n"
         );
         let (base_url, call_count, upstream_task) =
-            spawn_retrying_sse_upstream(gzip_bytes(first_body.as_bytes()), true, success_body).await;
+            spawn_retrying_sse_upstream(gzip_bytes(first_body.as_bytes()), true, success_body)
+                .await;
         let db_dir = tempfile::tempdir().expect("db dir");
         let db = db::init_for_tests(
             &db_dir
@@ -9492,7 +9488,10 @@ INSERT INTO codex_managed_profiles(
         assert_eq!(log.status, Some(502));
         assert_eq!(log.error_code.as_deref(), Some("GW_FAKE_200"));
         let attempts: Value = serde_json::from_str(&log.attempts_json).expect("attempts json");
-        assert_eq!(attempts[0]["stream_internal_error"]["message"], "quota exhausted");
+        assert_eq!(
+            attempts[0]["stream_internal_error"]["message"],
+            "quota exhausted"
+        );
         assert_eq!(
             attempts[0]["stream_internal_error"]["classification"],
             "unknown"

@@ -10,8 +10,7 @@ const STREAM_INTERNAL_ERROR_MESSAGE_MAX_CHARS: usize = 2_048;
 const STREAM_INTERNAL_ERROR_SHORT_FIELD_MAX_CHARS: usize = 512;
 
 static STREAM_ERROR_BEARER_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)(\bbearer\s+)([^\s,;\"']+)"#)
-        .expect("valid stream-error bearer regex")
+    Regex::new(r#"(?i)(\bbearer\s+)([^\s,;\"']+)"#).expect("valid stream-error bearer regex")
 });
 static STREAM_ERROR_SECRET_ASSIGNMENT_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
@@ -24,9 +23,7 @@ static STREAM_ERROR_KEYLIKE_RE: LazyLock<Regex> = LazyLock::new(|| {
         .expect("valid stream-error key regex")
 });
 
-#[derive(
-    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
 pub struct StreamInternalErrorEvidence {
     pub event_type: String,
     pub error_type: Option<String>,
@@ -44,10 +41,8 @@ impl StreamInternalErrorEvidence {
     }
 
     pub fn set_disposition(&mut self, disposition: &str) {
-        let (disposition, truncated) = bounded_stream_error_text(
-            disposition,
-            STREAM_INTERNAL_ERROR_SHORT_FIELD_MAX_CHARS,
-        );
+        let (disposition, truncated) =
+            bounded_stream_error_text(disposition, STREAM_INTERNAL_ERROR_SHORT_FIELD_MAX_CHARS);
         self.disposition = disposition;
         self.truncated |= truncated;
     }
@@ -148,11 +143,11 @@ pub fn classify_codex_stream_internal_error(
         raw_error_code,
         raw_message,
     ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join("\n")
-        .to_lowercase();
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join("\n")
+    .to_lowercase();
 
     let retry_match = retry_keywords
         .iter()
@@ -178,10 +173,8 @@ pub fn classify_codex_stream_internal_error(
             value
         })
     };
-    let (event_type, event_truncated) = bounded_stream_error_text(
-        &event_type,
-        STREAM_INTERNAL_ERROR_SHORT_FIELD_MAX_CHARS,
-    );
+    let (event_type, event_truncated) =
+        bounded_stream_error_text(&event_type, STREAM_INTERNAL_ERROR_SHORT_FIELD_MAX_CHARS);
     truncated |= event_truncated;
     let error_type = bounded_optional(
         raw_error_type,
@@ -203,10 +196,8 @@ pub fn classify_codex_stream_internal_error(
         STREAM_INTERNAL_ERROR_SHORT_FIELD_MAX_CHARS,
         &mut truncated,
     );
-    let (disposition, disposition_truncated) = bounded_stream_error_text(
-        disposition,
-        STREAM_INTERNAL_ERROR_SHORT_FIELD_MAX_CHARS,
-    );
+    let (disposition, disposition_truncated) =
+        bounded_stream_error_text(disposition, STREAM_INTERNAL_ERROR_SHORT_FIELD_MAX_CHARS);
     truncated |= disposition_truncated;
 
     Some(StreamInternalErrorEvidence {
@@ -842,8 +833,7 @@ fn is_completion_event_type(event_type: &str) -> bool {
 
 fn is_terminal_error_event_type(event_type: &str) -> bool {
     let normalized = normalize_ascii_lower(event_type);
-    matches!(normalized.as_str(), "error" | "response.error")
-        || normalized.ends_with(".error")
+    matches!(normalized.as_str(), "error" | "response.error") || normalized.ends_with(".error")
 }
 
 fn is_completion_status(status: &str) -> bool {
@@ -921,10 +911,8 @@ pub(crate) fn has_codex_meaningful_output(data: &Value) -> bool {
         Some(
             "response.output_text.delta"
             | "response.refusal.delta"
-            | "response.reasoning_summary_text.delta"
-        )
-            if non_empty_string(data.get("delta")) =>
-        {
+            | "response.reasoning_summary_text.delta",
+        ) if non_empty_string(data.get("delta")) => {
             return true;
         }
         Some("response.function_call_arguments.delta") if non_empty_string(data.get("delta")) => {
@@ -933,10 +921,8 @@ pub(crate) fn has_codex_meaningful_output(data: &Value) -> bool {
         Some(
             "response.output_text.done"
             | "response.refusal.done"
-            | "response.reasoning_summary_text.done"
-        )
-            if non_empty_string(data.get("text")) || non_empty_string(data.get("refusal")) =>
-        {
+            | "response.reasoning_summary_text.done",
+        ) if non_empty_string(data.get("text")) || non_empty_string(data.get("refusal")) => {
             return true;
         }
         _ => {}

@@ -234,8 +234,7 @@ impl From<ProviderShareRetryPolicyV1> for crate::settings::UpstreamRetryPolicy {
                 .map(crate::settings::UpstreamHttpRetryRule::status_only)
                 .collect(),
             transport_errors: value.transport_errors,
-            stream_internal_errors:
-                crate::settings::UpstreamStreamInternalErrorPolicy::default(),
+            stream_internal_errors: crate::settings::UpstreamStreamInternalErrorPolicy::default(),
             max_retries: value.max_retries,
             backoff_ms: value.backoff_ms,
             counts_toward_circuit_breaker: value.counts_toward_circuit_breaker,
