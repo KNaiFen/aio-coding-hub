@@ -8,7 +8,10 @@ but they are not part of provider routing or health evaluation.
 - Match only an upstream HTTP 4xx/5xx response.
 - Match against the original upstream status, bounded response body, request CLI,
   and actual provider ID.
-- HTTP 200 in-band errors and transport failures are outside this feature.
+- HTTP 200 in-band errors and transport failures are outside this feature. A
+  native Codex Responses stream-internal policy may independently intercept a
+  recognized event before downstream commit; response rules never see or
+  control that retry decision.
 - Retry, failover, quota handling, cooldown, and circuit accounting always use
   original upstream facts and finish before a rewrite is returned.
 - A failed attempt's candidate is discarded by every later success or different

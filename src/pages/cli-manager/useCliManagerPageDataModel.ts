@@ -123,6 +123,7 @@ export function useCliManagerPageDataModel() {
   const [upstreamFirstByteTimeoutSeconds, setUpstreamFirstByteTimeoutSeconds] = useState<number>(0);
   const [upstreamStreamIdleTimeoutSeconds, setUpstreamStreamIdleTimeoutSeconds] =
     useState<number>(0);
+  const [streamInternalErrorGuardMs, setStreamInternalErrorGuardMs] = useState<number>(500);
   const [upstreamRequestTimeoutNonStreamingSeconds, setUpstreamRequestTimeoutNonStreamingSeconds] =
     useState<number>(0);
   const [providerCooldownSeconds, setProviderCooldownSeconds] = useState<number>(30);
@@ -239,6 +240,7 @@ export function useCliManagerPageDataModel() {
     setCodexSessionIdCompletionEnabled(appSettings.enable_codex_session_id_completion ?? true);
     setUpstreamFirstByteTimeoutSeconds(appSettings.upstream_first_byte_timeout_seconds);
     setUpstreamStreamIdleTimeoutSeconds(appSettings.upstream_stream_idle_timeout_seconds);
+    setStreamInternalErrorGuardMs(appSettings.stream_internal_error_guard_ms);
     setUpstreamRequestTimeoutNonStreamingSeconds(
       appSettings.upstream_request_timeout_non_streaming_seconds
     );
@@ -434,12 +436,14 @@ export function useCliManagerPageDataModel() {
       });
 
       if (!updated) {
+        setStreamInternalErrorGuardMs(prev.stream_internal_error_guard_ms);
         return null;
       }
       const updatedSettings = updated.settings;
 
       setUpstreamFirstByteTimeoutSeconds(updatedSettings.upstream_first_byte_timeout_seconds);
       setUpstreamStreamIdleTimeoutSeconds(updatedSettings.upstream_stream_idle_timeout_seconds);
+      setStreamInternalErrorGuardMs(updatedSettings.stream_internal_error_guard_ms);
       setUpstreamRequestTimeoutNonStreamingSeconds(
         updatedSettings.upstream_request_timeout_non_streaming_seconds
       );
@@ -462,6 +466,7 @@ export function useCliManagerPageDataModel() {
       toast(formatted.toast);
       setUpstreamFirstByteTimeoutSeconds(prev.upstream_first_byte_timeout_seconds);
       setUpstreamStreamIdleTimeoutSeconds(prev.upstream_stream_idle_timeout_seconds);
+      setStreamInternalErrorGuardMs(prev.stream_internal_error_guard_ms);
       setUpstreamRequestTimeoutNonStreamingSeconds(
         prev.upstream_request_timeout_non_streaming_seconds
       );
@@ -725,6 +730,8 @@ export function useCliManagerPageDataModel() {
       setUpstreamFirstByteTimeoutSeconds,
       upstreamStreamIdleTimeoutSeconds,
       setUpstreamStreamIdleTimeoutSeconds,
+      streamInternalErrorGuardMs,
+      setStreamInternalErrorGuardMs,
       upstreamRequestTimeoutNonStreamingSeconds,
       setUpstreamRequestTimeoutNonStreamingSeconds,
       providerCooldownSeconds,

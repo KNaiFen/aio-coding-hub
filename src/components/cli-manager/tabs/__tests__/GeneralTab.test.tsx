@@ -106,6 +106,8 @@ function createDefaultTabProps(overrides: DefaultPropsOverrides = {}) {
     setUpstreamFirstByteTimeoutSeconds: vi.fn(),
     upstreamStreamIdleTimeoutSeconds: 0,
     setUpstreamStreamIdleTimeoutSeconds: vi.fn(),
+    streamInternalErrorGuardMs: 500,
+    setStreamInternalErrorGuardMs: vi.fn(),
     upstreamRequestTimeoutNonStreamingSeconds: 0,
     setUpstreamRequestTimeoutNonStreamingSeconds: vi.fn(),
     providerCooldownSeconds: 30,
@@ -224,6 +226,8 @@ describe("cli-manager/GeneralTab", () => {
         setUpstreamFirstByteTimeoutSeconds={vi.fn()}
         upstreamStreamIdleTimeoutSeconds={0}
         setUpstreamStreamIdleTimeoutSeconds={vi.fn()}
+        streamInternalErrorGuardMs={500}
+        setStreamInternalErrorGuardMs={vi.fn()}
         upstreamRequestTimeoutNonStreamingSeconds={0}
         setUpstreamRequestTimeoutNonStreamingSeconds={vi.fn()}
         providerCooldownSeconds={30}
@@ -262,6 +266,7 @@ describe("cli-manager/GeneralTab", () => {
 
     const setUpstreamFirstByteTimeoutSeconds = vi.fn();
     const setUpstreamStreamIdleTimeoutSeconds = vi.fn();
+    const setStreamInternalErrorGuardMs = vi.fn();
     const setUpstreamRequestTimeoutNonStreamingSeconds = vi.fn();
     const setProviderCooldownSeconds = vi.fn();
     const setProviderBaseUrlPingCacheTtlSeconds = vi.fn();
@@ -304,6 +309,8 @@ describe("cli-manager/GeneralTab", () => {
         setUpstreamFirstByteTimeoutSeconds={setUpstreamFirstByteTimeoutSeconds}
         upstreamStreamIdleTimeoutSeconds={0}
         setUpstreamStreamIdleTimeoutSeconds={setUpstreamStreamIdleTimeoutSeconds}
+        streamInternalErrorGuardMs={500}
+        setStreamInternalErrorGuardMs={setStreamInternalErrorGuardMs}
         upstreamRequestTimeoutNonStreamingSeconds={0}
         setUpstreamRequestTimeoutNonStreamingSeconds={setUpstreamRequestTimeoutNonStreamingSeconds}
         providerCooldownSeconds={30}
@@ -357,33 +364,44 @@ describe("cli-manager/GeneralTab", () => {
       upstream_first_byte_timeout_seconds: 5,
     });
 
-    fireEvent.change(inputs[1], { target: { value: "-1" } });
-    fireEvent.blur(inputs[1], { target: { value: "-1" } });
+    fireEvent.change(inputs[1], { target: { value: "750" } });
+    fireEvent.blur(inputs[1], { target: { value: "750" } });
+    expect(setStreamInternalErrorGuardMs).toHaveBeenCalledWith(750);
+    expect(onPersistCommonSettings).toHaveBeenCalledWith({
+      stream_internal_error_guard_ms: 750,
+    });
+    fireEvent.change(inputs[1], { target: { value: "5001" } });
+    fireEvent.blur(inputs[1], { target: { value: "5001" } });
+    expect(toast).toHaveBeenCalledWith("流内部错误观察窗口必须为 0-5000 毫秒");
+    expect(setStreamInternalErrorGuardMs).toHaveBeenCalledWith(500);
+
+    fireEvent.change(inputs[2], { target: { value: "-1" } });
+    fireEvent.blur(inputs[2], { target: { value: "-1" } });
     expect(toast).toHaveBeenCalledWith("上游流式空闲超时必须为 0（禁用）或 60-3600 秒");
     expect(setUpstreamStreamIdleTimeoutSeconds).toHaveBeenCalled();
 
-    fireEvent.change(inputs[2], { target: { value: "10" } });
-    fireEvent.blur(inputs[2], { target: { value: "10" } });
+    fireEvent.change(inputs[3], { target: { value: "10" } });
+    fireEvent.blur(inputs[3], { target: { value: "10" } });
     expect(setUpstreamRequestTimeoutNonStreamingSeconds).toHaveBeenCalled();
     expect(onPersistCommonSettings).toHaveBeenCalledWith({
       upstream_request_timeout_non_streaming_seconds: 10,
     });
 
-    fireEvent.change(inputs[3], { target: { value: "12" } });
-    fireEvent.blur(inputs[3], { target: { value: "12" } });
+    fireEvent.change(inputs[4], { target: { value: "12" } });
+    fireEvent.blur(inputs[4], { target: { value: "12" } });
     expect(setProviderCooldownSeconds).toHaveBeenCalled();
     expect(onPersistCommonSettings).toHaveBeenCalledWith({ provider_cooldown_seconds: 12 });
 
-    fireEvent.change(inputs[4], { target: { value: "120" } });
-    fireEvent.blur(inputs[4], { target: { value: "120" } });
+    fireEvent.change(inputs[5], { target: { value: "120" } });
+    fireEvent.blur(inputs[5], { target: { value: "120" } });
     expect(setProviderBaseUrlPingCacheTtlSeconds).toHaveBeenCalled();
 
-    fireEvent.change(inputs[5], { target: { value: "6" } });
-    fireEvent.blur(inputs[5], { target: { value: "6" } });
+    fireEvent.change(inputs[6], { target: { value: "6" } });
+    fireEvent.blur(inputs[6], { target: { value: "6" } });
     expect(setCircuitBreakerFailureThreshold).toHaveBeenCalled();
 
-    fireEvent.change(inputs[6], { target: { value: "31" } });
-    fireEvent.blur(inputs[6], { target: { value: "31" } });
+    fireEvent.change(inputs[7], { target: { value: "31" } });
+    fireEvent.blur(inputs[7], { target: { value: "31" } });
     expect(setCircuitBreakerOpenDurationMinutes).toHaveBeenCalled();
   });
 
@@ -458,6 +476,8 @@ describe("cli-manager/GeneralTab", () => {
         setUpstreamFirstByteTimeoutSeconds={vi.fn()}
         upstreamStreamIdleTimeoutSeconds={0}
         setUpstreamStreamIdleTimeoutSeconds={vi.fn()}
+        streamInternalErrorGuardMs={500}
+        setStreamInternalErrorGuardMs={vi.fn()}
         upstreamRequestTimeoutNonStreamingSeconds={0}
         setUpstreamRequestTimeoutNonStreamingSeconds={vi.fn()}
         providerCooldownSeconds={30}

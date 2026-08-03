@@ -16,6 +16,7 @@ pub(super) struct StreamRequestCompletion {
     pub(super) usage_metrics: Option<crate::usage::UsageMetrics>,
     pub(super) usage: Option<crate::usage::UsageExtract>,
     pub(super) terminal_signal: Option<&'static str>,
+    pub(super) stream_internal_error: Option<crate::usage::StreamInternalErrorEvidence>,
 }
 
 impl StreamRequestCompletion {
@@ -34,6 +35,7 @@ impl StreamRequestCompletion {
             usage_metrics,
             usage,
             terminal_signal: Some("completed"),
+            stream_internal_error: None,
         }
     }
 
@@ -53,6 +55,7 @@ impl StreamRequestCompletion {
             usage_metrics,
             usage,
             terminal_signal: Some("error"),
+            stream_internal_error: None,
         }
     }
 
@@ -85,6 +88,14 @@ impl StreamRequestCompletion {
 
     pub(super) fn with_terminal_signal(mut self, terminal_signal: Option<&'static str>) -> Self {
         self.terminal_signal = terminal_signal;
+        self
+    }
+
+    pub(super) fn with_stream_internal_error(
+        mut self,
+        evidence: Option<crate::usage::StreamInternalErrorEvidence>,
+    ) -> Self {
+        self.stream_internal_error = evidence;
         self
     }
 }
@@ -186,15 +197,15 @@ pub(super) fn emit_request_event_and_spawn_request_log<R: tauri::Runtime>(
     // When a stream error occurs, update the last attempt's outcome to reflect
     // the actual error instead of keeping the stale "success" recorded when the
     // stream initially started.
-    let (attempts, attempts_json) = if completion.error_code.is_some() {
+    let (attempts, attempts_json) = if completion.error_code.is_some()
+        || completion.stream_internal_error.is_some()
+    {
         let mut attempts = ctx.attempts.clone();
         if let Some(last) = attempts.last_mut() {
-            if last.outcome == "success" {
-                last.outcome = format!(
-                    "stream_error: code={}",
-                    completion.error_code.unwrap_or("unknown")
-                );
-                last.error_code = completion.error_code;
+            last.stream_internal_error = completion.stream_internal_error.clone();
+            if let Some(error_code) = completion.error_code.filter(|_| last.outcome == "success") {
+                last.outcome = format!("stream_error: code={error_code}");
+                last.error_code = Some(error_code);
                 last.error_category = effective_error_category.or(Some(
                     crate::gateway::proxy::ErrorCategory::SystemError.as_str(),
                 ));
@@ -341,6 +352,8 @@ mod tests {
             created_at: 1_700_000_000,
             provider_cooldown_secs: 0,
             upstream_first_byte_timeout_secs: 300,
+            upstream_retry_policy: crate::settings::UpstreamRetryPolicy::default(),
+            detect_stream_internal_errors: true,
             provider_id: 1,
             provider_name: "test-provider".to_string(),
             base_url: "https://upstream.example".to_string(),

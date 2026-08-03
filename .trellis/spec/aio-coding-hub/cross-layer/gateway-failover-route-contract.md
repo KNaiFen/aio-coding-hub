@@ -128,6 +128,18 @@ buildRequestRouteMeta({
   contents, hit fragments, and response bodies are never added by this feature.
   Description `%`, `,`, and `=` delimiters are percent-escaped before joining
   the attempt-reason field format so they cannot impersonate another field.
+- A native Codex Responses in-band terminal error may add one optional
+  `stream_internal_error` object to its attempt. Persist only the recognized
+  event/type/code/message, classification, matched keyword, disposition, and
+  truncation flag. The message is one line and at most 2048 Unicode characters;
+  other text fields are at most 512. Redact bearer credentials, common API-key
+  forms, and token assignments before serialization. Never persist the raw SSE
+  frame or ordinary model output.
+- Before downstream commit, a positive stream-internal match belongs to the
+  failover loop and its failed attempt remains visible even if a later retry
+  succeeds. After commit, retry is unsafe: forward the original event and let
+  stream completion update the optimistic success attempt with the same bounded
+  evidence. Old or malformed evidence remains observational and fail-open.
 
 ### 4. Validation & Error Matrix
 
@@ -148,6 +160,7 @@ buildRequestRouteMeta({
 | One provider is sent 3 times | Compact label `重2·请3` |
 | Upstream 401/403 body contains a credential-like value | Keep status and safe reason, but persist/log none of the body |
 | Gzip body exceeds the decoded scan prefix | Match only decoded bytes within the first 64 KiB; never scan compressed fallback bytes |
+| Native Codex `response.failed` contains a credential and a capacity phrase | Retry only before commit; persist the redacted structured evidence and no raw SSE |
 
 ### 5. Good / Base / Bad Cases
 
@@ -197,6 +210,9 @@ buildRequestRouteMeta({
 - Use `SYNTHETIC_SECRET` in 401 and 403 bodies; assert console output, attempt
   serialization, and error details omit it without changing failover/auth
   classification or the recorded status.
+- Use `SYNTHETIC_SECRET` in pre-commit and post-commit Codex terminal events;
+  assert attempts, error details, frontend copy text, and diagnostics omit it,
+  while successful retry chains retain the failed attempt's bounded evidence.
 - Keep model-discovery strict-attempt and health-neutral circuit tests passing;
   shared gate changes must not broaden those requests.
 - Frontend-test provider, effective transition, skipped-hop, sent-request, and
