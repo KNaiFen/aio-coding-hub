@@ -3,7 +3,7 @@
   "name": "tui-polish-release",
   "title": "TUI 信息密度与托盘悬浮面板优化发布",
   "description": "Coordinate the standalone TUI summary/timezone update, completed PENDING archive, macOS tray mini-panel density and visual polish, and patch release delivery.",
-  "status": "planning",
+  "status": "completed",
   "dev_type": "cross-layer",
   "scope": "tui-tray-release",
   "package": "aio-coding-hub",
@@ -11,12 +11,12 @@
   "creator": "KNaiFen",
   "assignee": "KNaiFen",
   "createdAt": "2026-08-02",
-  "completedAt": null,
+  "completedAt": "2026-08-03",
   "branch": "codex/tui-polish-release",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": null,
-  "pr_url": null,
+  "commit": "9366ae56c65ef9243bd50938b69aacb238f20e78",
+  "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/22",
   "subtasks": [],
   "children": [
     "08-02-tui-summary-local-time",
@@ -35,6 +35,6 @@
     "src-tauri/src/app/resident.rs",
     "src-tauri/src/domain/provider_availability.rs"
   ],
-  "notes": "",
+  "notes": "功能 PR #21 与发布 PR #22 均已合并。精确主分支候选 CI 30770727285 和发布工作流 30783353284 已成功；aio-coding-hub-v0.60.44 已公开发布 12 个资产，SHA256SUMS.txt 中 11 个有效载荷已核对。",
   "meta": {}
 }

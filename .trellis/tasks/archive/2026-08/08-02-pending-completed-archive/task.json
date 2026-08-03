@@ -3,7 +3,7 @@
   "name": "pending-completed-archive",
   "title": "归档已完成 PENDING 历史",
   "description": "Keep PENDING.md focused on unresolved work by moving completed entries and evidence into a durable completed archive without losing history.",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": "documentation",
   "scope": "pending-history",
   "package": "aio-coding-hub",
@@ -11,12 +11,12 @@
   "creator": "KNaiFen",
   "assignee": "KNaiFen",
   "createdAt": "2026-08-02",
-  "completedAt": null,
+  "completedAt": "2026-08-03",
   "branch": "codex/tui-polish-release",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": null,
-  "pr_url": null,
+  "commit": "aa0a536bb08ce1aeb8438db278b4863d2b7dffd8",
+  "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/21",
   "subtasks": [],
   "children": [],
   "parent": "08-02-tui-polish-release",
@@ -25,6 +25,6 @@
     "PENDING_COMPLETED.md",
     "AGENTS.md"
   ],
-  "notes": "",
+  "notes": "功能 PR #21 已合并，PENDING.md 仅保留活跃条目并链接完整归档；未跟踪的用户文件未纳入提交。",
   "meta": {}
 }

@@ -14,12 +14,13 @@
 
 ## Acceptance Criteria
 
-- [ ] `PENDING.md` 不再包含 11 个已完成条目的正文，文件保持简短。
-- [ ] `PENDING_COMPLETED.md` 完整保留 `AIO-PENDING-001` 至 `AIO-PENDING-011` 及其证据。
-- [ ] 两个文件互相链接，且新条目明确从 `AIO-PENDING-012` 开始。
-- [ ] `AGENTS.md` 的规则同时满足“减少活跃上下文”和“保留历史”两项目标。
-- [ ] 未跟踪的用户文件没有被纳入迁移或提交。
+- [x] `PENDING.md` 不再包含 11 个已完成条目的正文，文件保持简短。
+- [x] `PENDING_COMPLETED.md` 完整保留 `AIO-PENDING-001` 至 `AIO-PENDING-011` 及其证据。
+- [x] 两个文件互相链接，且新条目明确从 `AIO-PENDING-012` 开始。
+- [x] `AGENTS.md` 的规则同时满足“减少活跃上下文”和“保留历史”两项目标。
+- [x] 未跟踪的用户文件没有被纳入迁移或提交。
 
 ## Notes
 
 - 本任务只调整仓库工作文档，不改变产品运行时行为。
+- 功能 PR #21 已合并；活跃 `PENDING.md` 此后只保留后续新增的未解决条目。
