@@ -16,6 +16,7 @@ import heartbeatSource from "../../../src-tauri/src/app/heartbeat_watchdog.rs?ra
 import noticeSource from "../../../src-tauri/src/app/notice.rs?raw";
 import settingsServiceSource from "../../../src-tauri/src/app/settings_service.rs?raw";
 import startupStateSource from "../../../src-tauri/src/app/startup_state.rs?raw";
+import residentSource from "../../../src-tauri/src/app/resident.rs?raw";
 import promptsSource from "../../../src-tauri/src/domain/prompts.rs?raw";
 import providersValidationSource from "../../../src-tauri/src/domain/providers/validation.rs?raw";
 import workspacesSource from "../../../src-tauri/src/domain/workspaces.rs?raw";
@@ -24,6 +25,7 @@ import gatewayEventsSource from "../../../src-tauri/src/gateway/events.rs?raw";
 import codexRequestClassifierSource from "../../../src-tauri/src/gateway/proxy/handler/middleware/codex_request_classifier.rs?raw";
 import gatewayErrorCodeSource from "../../../src-tauri/src/gateway/proxy/error_code.rs?raw";
 import settingsDefaultsSource from "../../../src-tauri/src/infra/settings/defaults.rs?raw";
+import trayProviderMiniAppSource from "../../tray/TrayProviderMiniApp.tsx?raw";
 import settingsPersistenceSource from "../../../src-tauri/src/infra/settings/persistence.rs?raw";
 
 function extractRustStringConst(source: string, constName: string) {
@@ -56,6 +58,12 @@ function extractRustBoolConst(source: string, constName: string) {
   return match?.[1] === "true";
 }
 
+function extractRustFloatConst(source: string, constName: string) {
+  const match = source.match(new RegExp(`const\\s+${constName}:\\s*f64\\s*=\\s*([0-9.]+);`));
+  expect(match, `missing Rust float const ${constName}`).toBeTruthy();
+  return Number.parseFloat(match?.[1] ?? "NaN");
+}
+
 function extractRustGatewayErrorCodes(source: string) {
   return Array.from(
     new Set(
@@ -67,6 +75,17 @@ function extractRustGatewayErrorCodes(source: string) {
 }
 
 describe("cross-layer contracts", () => {
+  it("keeps Tray provider mini native width aligned with its frontend tracks", () => {
+    const nativeWidth = extractRustFloatConst(residentSource, "TRAY_PROVIDER_MINI_WIDTH");
+    const contractedWidth = 1 + 12 + 96 + 8 + 178 + 8 + 88 + 12 + 1;
+
+    expect(nativeWidth).toBe(404);
+    expect(nativeWidth).toBe(contractedWidth);
+    expect(trayProviderMiniAppSource).toContain("grid-cols-[96px_178px_88px]");
+    expect(trayProviderMiniAppSource).toContain("grid-cols-[12px_32px_12px_32px]");
+    expect(trayProviderMiniAppSource).toContain("font-mono text-[9px]");
+  });
+
   it("keeps app event names aligned with Rust emitters", () => {
     expect(extractRustStringConst(heartbeatSource, "HEARTBEAT_EVENT_NAME")).toBe(
       appEventNames.heartbeat
