@@ -29,15 +29,22 @@
 
 ## Acceptance Criteria
 
-- [ ] `response.created` / `response.in_progress` 与稍后独立 chunk 的容量 `response.failed` 在下游提交前被拦截，客户端收到成功重试结果而不是原始错误帧。
-- [ ] 同 chunk、跨 chunk、大小写变化及 SSE `event` / JSON `type` 组合均能稳定分类；正反词同时命中时正向词获胜。
-- [ ] 禁止词、未知错误、策略关闭、保护窗到期后的错误均不发生不可靠重试，并保留原始下游协议行为和准确日志。
-- [ ] 保护窗 0/500/5000ms、成功完成/EOF 提前提交和 1 MiB 放行均有边界测试；默认只增加约 500ms 首次真实输出延迟。
-- [ ] 流内重试与 HTTP/传输重试共享同一供应商级 `max_retries` 计数，退避、熔断计数、供应商切换和严格辅助请求预算保持既有合同。
-- [ ] 新旧全局配置、供应商完整覆盖、单供应商分享和完整备份均保留新字段；400 默认规则迁移幂等且不破坏用户规则。
-- [ ] 重试成功和最终失败的请求日志都能显示脱敏错误证据；合成凭据不会进入 `attempts_json`、`error_details_json`、前端或导出。
-- [ ] 前端策略编辑、校验、继承/覆盖和复制交互通过定向测试，TypeScript、ESLint、Prettier 与 Vite build 通过。
-- [ ] GitHub Actions 完成 Rust 格式、Clippy、测试、生成绑定和桌面集成验证；PR 只提交到 `origin/main`，不合并、不发布。
+- [x] `response.created` / `response.in_progress` 与稍后独立 chunk 的容量 `response.failed` 在下游提交前被拦截，客户端收到成功重试结果而不是原始错误帧。
+- [x] 同 chunk、跨 chunk、大小写变化及 SSE `event` / JSON `type` 组合均能稳定分类；正反词同时命中时正向词获胜。
+- [x] 禁止词、未知错误、策略关闭、保护窗到期后的错误均不发生不可靠重试，并保留原始下游协议行为和准确日志。
+- [x] 保护窗 0/500/5000ms、成功完成/EOF 提前提交和 1 MiB 放行均有边界测试；默认只增加约 500ms 首次真实输出延迟。
+- [x] 流内重试与 HTTP/传输重试共享同一供应商级 `max_retries` 计数，退避、熔断计数、供应商切换和严格辅助请求预算保持既有合同。
+- [x] 新旧全局配置、供应商完整覆盖、单供应商分享和完整备份均保留新字段；400 默认规则迁移幂等且不破坏用户规则。
+- [x] 重试成功和最终失败的请求日志都能显示脱敏错误证据；合成凭据不会进入 `attempts_json`、`error_details_json`、前端或导出。
+- [x] 前端策略编辑、校验、继承/覆盖和复制交互通过定向测试，TypeScript、ESLint、Prettier 与 Vite build 通过。
+- [x] GitHub Actions 完成 Rust 格式、Clippy、测试、生成绑定和桌面集成验证；PR #31 在同步并审查最新 `origin/main` 后合入 `main`，未触发发布。
+
+## Completion Evidence
+
+- 功能头 `d8d23383c8ea380cab6c042b508be83f9f556162` 已同步合并时最新主线 `5a9b67eb`；GitHub 合并提交为 `ca15f02bd6b409df08f2892b5e5082bcc42aa3b3`。
+- PR #31 完整 CI `30831184921` 与合并后主线 CI `30832756330` 全部通过；macOS ARM64 dev-build `30822721768` 通过。
+- 主线漂移审查覆盖 37 个文件。生产代码只涉及 Tray 小窗布局，唯一直接重叠文件为跨层合同测试；双方断言均完整保留，托盘统计、CI 分流、版本与候选发布路径未发现业务冲突。
+- `0.60.46` 版本来自先行主线变更；本功能合并未改版本，候选发布作业按预期跳过。
 
 ## Out Of Scope
 
