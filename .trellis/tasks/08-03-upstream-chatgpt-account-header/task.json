@@ -3,7 +3,7 @@
   "name": "upstream-chatgpt-account-header",
   "title": "隔离 ChatGPT 来访账户头",
   "description": "选择性移植 7cc1d8ac，确保每个 Provider attempt 只携带当前 Provider 派生的 chatgpt-account-id。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": "@aio-coding-hub",
   "package": "aio-coding-hub",

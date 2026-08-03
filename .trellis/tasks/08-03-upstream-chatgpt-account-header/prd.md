@@ -12,11 +12,12 @@
 
 ## Acceptance Criteria
 
-- [ ] 客户端 account ID 被当前 Provider ID 覆写。
-- [ ] Provider 无 account ID 时请求中不存在该 header。
-- [ ] failover 每个 attempt 使用各自 Provider 身份，不能复用前一个 attempt 的 ID。
-- [ ] 变更可追溯到 `7cc1d8accc3725d63ff34519fde9d82f285d3510`，且不宣称解决 `AUD-016`。
+- [x] 客户端 account ID 被当前 Provider ID 覆写。
+- [x] Provider 无 account ID 时请求中不存在该 header。
+- [x] failover 每个 attempt 使用各自 Provider 身份，不能复用前一个 attempt 的 ID。
+- [x] 变更可追溯到 `7cc1d8accc3725d63ff34519fde9d82f285d3510`，且不宣称解决 `AUD-016`。
 
 ## Notes
 
 - 仅移植安全行为和对应测试，不接收上游文件整体版本。
+- 本地仅执行静态差异检查；Rust 格式、编译与测试按仓库规则交由 GitHub Actions。
