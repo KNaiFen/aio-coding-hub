@@ -21,6 +21,6 @@
   "children": [],
   "parent": "08-03-upstream-selective-integration",
   "relatedFiles": [],
-  "notes": "",
+  "notes": "已移植 7cc1d8ac 的每-attempt Provider 身份隔离。独立复审记录两项固定上游范围外风险：高信任 beforeSend 插件仍可覆写 chatgpt-account-id；调试日志与普通插件读取尚未统一按敏感头处理。本次不扩展插件信任模型，后续需单独授权。",
   "meta": {}
 }
