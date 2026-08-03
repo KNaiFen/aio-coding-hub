@@ -7,9 +7,7 @@ use super::leaderboard_v2::{
     leaderboard_v2_folder_filtered_with_conn, leaderboard_v2_with_conn,
     leaderboard_v2_with_conn_day_start, FolderFilteredLeaderboardParams,
 };
-use super::metrics_trend_v1::{
-    provider_metric_trend_v1_with_conn, ProviderMetricTrendQuery,
-};
+use super::metrics_trend_v1::{provider_metric_trend_v1_with_conn, ProviderMetricTrendQuery};
 use super::summary::{summary_query, summary_v2_with_conn};
 use super::trend_common::{
     plan_trend, TrendPlanQuery, TREND_MAX_BUCKETS, TREND_MAX_PROVIDERS, TREND_MAX_ROWS,
@@ -554,14 +552,7 @@ fn provider_trends_are_invariant_after_detail_and_provider_deletion() {
     let (_dir, db) = setup_temp_db();
     let conn = db.open_connection().expect("open test db connection");
     let start_ts = 1_704_067_200i64;
-    insert_migrated_provider(
-        &conn,
-        411,
-        "codex",
-        "Ledger Trend Provider",
-        None,
-        None,
-    );
+    insert_migrated_provider(&conn, 411, "codex", "Ledger Trend Provider", None, None);
     for (trace_id, created_at, input_tokens, output_tokens) in [
         ("trace-ledger-trend-1", start_ts + 3600, 100, 20),
         ("trace-ledger-trend-2", start_ts + 7200, 200, 40),
@@ -630,11 +621,9 @@ WHERE id = 1
         .expect("cache trend after detail deletion");
     assert_eq!(metric_after, metric_before);
     assert_eq!(cache_after, cache_before);
-    assert!(
-        metric_after
-            .iter()
-            .all(|row| row.provider_name == "Ledger Trend Provider")
-    );
+    assert!(metric_after
+        .iter()
+        .all(|row| row.provider_name == "Ledger Trend Provider"));
 }
 
 #[test]
@@ -1983,11 +1972,9 @@ fn provider_metric_and_cache_trends_share_top_request_and_row_budgets() {
     assert!(!metric_providers.contains("codex:12"));
     assert!(metric_buckets.len() <= TREND_MAX_BUCKETS);
     assert!(metric_rows.len() <= TREND_MAX_ROWS);
-    assert!(
-        metric_rows
-            .iter()
-            .all(|row| row.granularity == UsageTrendGranularityV1::Week)
-    );
+    assert!(metric_rows
+        .iter()
+        .all(|row| row.granularity == UsageTrendGranularityV1::Week));
 
     let selected_rows = provider_metric_trend_v1_with_conn(
         &conn,

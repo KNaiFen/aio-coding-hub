@@ -1,9 +1,7 @@
 use super::cache_rate_trend_v1::{
     provider_cache_rate_trend_v1_with_conn, ProviderCacheRateTrendQuery,
 };
-use super::metrics_trend_v1::{
-    provider_metric_trend_v1_with_conn, ProviderMetricTrendQuery,
-};
+use super::metrics_trend_v1::{provider_metric_trend_v1_with_conn, ProviderMetricTrendQuery};
 use crate::db;
 use rusqlite::params;
 

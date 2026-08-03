@@ -24,8 +24,7 @@ pub(super) struct ProviderMetricTrendQuery<'a> {
     pub exclude_cx2cc_gateway_bridge: bool,
 }
 
-const SUCCESS: &str =
-    "r.status >= 200 AND r.status < 300 AND r.error_present = 0";
+const SUCCESS: &str = "r.status >= 200 AND r.status < 300 AND r.error_present = 0";
 const VALID_TTFB: &str = "r.ttfb_ms IS NOT NULL AND r.ttfb_ms < r.duration_ms";
 const VALID_OUTPUT_RATE: &str =
     "r.output_tokens IS NOT NULL AND r.ttfb_ms IS NOT NULL AND r.ttfb_ms < r.duration_ms";
@@ -170,9 +169,7 @@ ORDER BY {order_by_fields}, b.requests_success DESC, b.cli_key ASC, b.provider_i
                     provider_id: row.get("provider_id")?,
                     provider_name: row.get("provider_name")?,
                     requests_total: row.get("requests_total")?,
-                    requests_success: row
-                        .get::<_, Option<i64>>("requests_success")?
-                        .unwrap_or(0),
+                    requests_success: row.get::<_, Option<i64>>("requests_success")?.unwrap_or(0),
                     success_duration_ms_sum: row
                         .get::<_, Option<i64>>("success_duration_ms_sum")?
                         .unwrap_or(0),

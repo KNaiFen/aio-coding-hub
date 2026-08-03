@@ -96,9 +96,7 @@ AND r.final_provider_id > 0
 
     match (min_ts, max_ts, query.end_ts) {
         (Some(min_ts), Some(_), Some(end_ts)) => Ok(Some((min_ts, end_ts))),
-        (Some(min_ts), Some(max_ts), None) => {
-            Ok(Some((min_ts, max_ts.saturating_add(1))))
-        }
+        (Some(min_ts), Some(max_ts), None) => Ok(Some((min_ts, max_ts.saturating_add(1)))),
         _ => Ok(None),
     }
 }
@@ -168,9 +166,7 @@ FROM local_parts
     Ok(counts)
 }
 
-fn finest_bounded_granularity(
-    counts: BucketCounts,
-) -> Result<UsageTrendGranularityV1, String> {
+fn finest_bounded_granularity(counts: BucketCounts) -> Result<UsageTrendGranularityV1, String> {
     if counts.hours <= TREND_MAX_BUCKETS {
         Ok(UsageTrendGranularityV1::Hour)
     } else if counts.days <= TREND_MAX_BUCKETS {
