@@ -70,6 +70,19 @@
 
 本候选不修改候选解析、Session 绑定、限额计算、发送前 gate、attempt 收口或 Tray。主线代码原样保留；Provider 趋势查询和日汇总只消费其最终持久化结果。第二轮 rebase 后必须重跑允许的本地验证和云端原生 CI。
 
+第二轮 rebase 已完成：`origin/main@a0db6c20` 是候选 HEAD 的 merge-base。PR #35 的 30 个文件、六个流式终态文件和主线 `v45_to_v46.rs` 均与 `origin/main` 逐字一致；仓库无冲突标记，提交范围 `git diff --check` 通过。
+
+## 本地验证证据
+
+- Node 22（与 CI 主版本一致）：310 个 Vitest 文件、2738 个测试通过。
+- TypeScript typecheck、ESLint、目标 Prettier、spec link、gateway error-code sync 和 Vite production build 通过。
+- CI change-scope self-test 通过；趋势目录、日汇总、ledger/retention 文件会触发百万行门禁，分类失败和手动触发会保守执行。
+- Trellis 上下文验证通过：implement/check 各 4 条。
+- Node SQLite 烟测通过：v47 的 3 个表和 3 个 trigger 可创建；同值 ledger UPDATE 保持 `complete`，真实状态变化标记 `dirty`；迁移设置 schema 47。
+- 首次全量 Vitest 曾在替代执行器的 Node 24 下因其未配置文件的实验性全局 `localStorage` 产生 225 个 setup/teardown 连锁失败；同一现象在旧候选可复现。切换到 Node 22 后原复现文件和全量套件全部通过，因此该轮不作为产品失败。
+
+依仓库政策未在本地运行 Cargo、Rust tests、rustfmt、Clippy、Specta 或 Tauri。迁移/Rust 编译、原生测试和百万行 release benchmark 仍是 PR CI 的强制门槛。
+
 ## 当前结论
 
-`origin/main@a0db6c20` 与本功能业务目标兼容；schema v47、scope-aware 性能门禁和同文件业务语义已经按上述决定修补。完成第二轮 rebase、本地允许检查、云端完整 CI，并在合并前复核最新 main 后方可合并。
+`origin/main@a0db6c20` 与本功能业务目标兼容；schema v47、scope-aware 性能门禁和同文件业务语义已经按上述决定修补。第二轮 rebase 和本地允许检查已完成；云端完整 CI 通过并在合并前再次复核最新 main 后方可合并。
