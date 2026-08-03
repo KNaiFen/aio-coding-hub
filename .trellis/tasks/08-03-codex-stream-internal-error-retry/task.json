@@ -15,12 +15,12 @@
   "branch": "codex/feature-fake200",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": null,
-  "pr_url": null,
+  "commit": "957b649",
+  "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/31",
   "subtasks": [],
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "",
+  "notes": "PR #31；已触发 macos-arm64 dev-build：https://github.com/KNaiFen/aio-coding-hub/actions/runs/30822721768；等待 PR CI 与原生验证。",
   "meta": {}
 }

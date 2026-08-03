@@ -27,7 +27,7 @@
 
 11. [x] 按项目规则仅在本地运行定向 Vitest、源码范围 Vitest、TypeScript、ESLint、Prettier、Vite build、Trellis validate 和 `git diff --check`。
 12. [x] 审查 diff、残留调试输出、TODO、凭据模式与无关改动；不在本机运行 Cargo、rustfmt、Clippy、Rust tests 或绑定生成。
-13. [ ] 按逻辑切片提交，使用 `origin` 创建目标为 `main` 的功能 PR；触发 `dev-build` / PR Actions 获取 Rust、格式、Clippy、测试、生成绑定和桌面集成结果。
+13. [x] 按逻辑切片提交，使用 `origin` 创建目标为 `main` 的功能 PR；触发 `dev-build` / PR Actions 获取 Rust、格式、Clippy、测试、生成绑定和桌面集成结果。
 14. [ ] 只应用 CI 报告的有界 Rust 格式/生成绑定漂移，重新验证并更新 PR；不合并、不发布。
 
 ## 回滚点
