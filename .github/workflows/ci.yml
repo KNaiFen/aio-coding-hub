@@ -27,6 +27,7 @@ jobs:
       scope: ${{ steps.scope.outputs.scope }}
       full_ci: ${{ steps.scope.outputs.full_ci }}
       docs_checks: ${{ steps.scope.outputs.docs_checks }}
+      provider_trend_benchmark: ${{ steps.scope.outputs.provider_trend_benchmark }}
       reason: ${{ steps.scope.outputs.reason }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -254,23 +255,8 @@ jobs:
           CARGO_BUILD_JOBS: "1"
         run: cargo test --workspace --locked -- --test-threads=1
 
-      - id: provider-trend-benchmark-plan
-        name: Detect Provider trend query changes
-        shell: bash
-        run: |
-          set -euo pipefail
-          if git diff --quiet HEAD^1 HEAD -- \
-            src-tauri/src/domain/usage_stats/cache_rate_trend_v1.rs \
-            src-tauri/src/domain/usage_stats/metrics_trend_v1.rs \
-            src-tauri/src/domain/usage_stats/trend_common.rs \
-            src-tauri/src/domain/usage_stats/trend_benchmark_tests.rs; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Provider trend million-row release benchmark
-        if: steps.provider-trend-benchmark-plan.outputs.run == 'true'
+        if: needs.change-scope.outputs.provider_trend_benchmark == 'true'
         working-directory: src-tauri
         env:
           CARGO_BUILD_JOBS: "1"

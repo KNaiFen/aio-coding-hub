@@ -14,6 +14,13 @@ const CONTROL_PLANE_EXACT_PATHS = new Set([
   "scripts/ci-change-scope.selftest.mjs",
 ]);
 const CONTROL_PLANE_PREFIXES = [".github/"];
+const PROVIDER_TREND_BENCHMARK_EXACT_PATHS = new Set([
+  "src-tauri/src/infra/db/migrations/v46_to_v47.rs",
+  "src-tauri/src/infra/request_logs.rs",
+  "src-tauri/src/infra/usage_ledger.rs",
+  "src-tauri/src/infra/usage_provider_daily_rollup.rs",
+]);
+const PROVIDER_TREND_BENCHMARK_PREFIXES = ["src-tauri/src/domain/usage_stats/"];
 
 function assertExactKeys(value, expected, label) {
   const actual = Object.keys(value).sort();
@@ -139,10 +146,19 @@ export function fullCiResult(reason, error = undefined) {
     scope: "full",
     fullCi: true,
     docsChecks: false,
+    providerTrendBenchmark: true,
     reason,
     classifications: [],
     ...(error ? { error } : {}),
   };
+}
+
+export function shouldRunProviderTrendBenchmark(paths) {
+  return paths.some(
+    (path) =>
+      PROVIDER_TREND_BENCHMARK_EXACT_PATHS.has(path) ||
+      PROVIDER_TREND_BENCHMARK_PREFIXES.some((prefix) => path.startsWith(prefix))
+  );
 }
 
 export function classifyPaths(paths, policy) {
@@ -158,6 +174,7 @@ export function classifyPaths(paths, policy) {
     scope: fullCi ? "full" : docsChecks ? "checked-docs" : "process-docs",
     fullCi,
     docsChecks,
+    providerTrendBenchmark: shouldRunProviderTrendBenchmark(uniquePaths),
     reason: fullCi
       ? "full-ci-path"
       : docsChecks
@@ -307,6 +324,7 @@ function writeGitHubOutputs(result) {
       `scope=${result.scope}`,
       `full_ci=${String(result.fullCi)}`,
       `docs_checks=${String(result.docsChecks)}`,
+      `provider_trend_benchmark=${String(result.providerTrendBenchmark)}`,
       `reason=${result.reason}`,
       "",
     ].join("\n")

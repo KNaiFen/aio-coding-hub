@@ -1,3 +1,4 @@
 {"file": ".trellis/spec/aio-coding-hub/cross-layer/request-log-usage-ledger-pagination-contract.md", "reason": "以 ledger 为聚合事实源并保持详情独立生命周期"}
 {"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "约束 Rust IPC service query UI 数据流"}
 {"file": ".trellis/tasks/08-03-provider-metric-trends-ledger/research/daily-rollup-contract.md", "reason": "约束日汇总与长期 ledger 事实源边界"}
+{"file": ".trellis/tasks/08-03-provider-metric-trends-ledger/research/main-drift-differential-review.md", "reason": "约束主线 schema、流终态和 CI 分类冲突的修补"}

@@ -9,6 +9,7 @@ import {
   loadPolicy,
   parseNameStatus,
   runClassifier,
+  shouldRunProviderTrendBenchmark,
   validatePolicy,
 } from "./ci-change-scope.mjs";
 
@@ -21,6 +22,7 @@ function expectScope(paths, expected) {
   assert.equal(result.scope, expected.scope);
   assert.equal(result.fullCi, expected.fullCi);
   assert.equal(result.docsChecks, expected.docsChecks);
+  assert.equal(result.providerTrendBenchmark, expected.providerTrendBenchmark ?? false);
 }
 
 expectScope(["PENDING.md", ".trellis/tasks/08-03-task/task.json", "omx_wiki/guide.md"], {
@@ -80,7 +82,24 @@ ambiguousPolicy.checkedDocumentation.exactPaths.push("PENDING.md");
 validatePolicy(ambiguousPolicy);
 assert.equal(classifyPath("PENDING.md", ambiguousPolicy).reason, "ambiguous-policy");
 
-expectScope([], { scope: "full", fullCi: true, docsChecks: false });
+expectScope([], {
+  scope: "full",
+  fullCi: true,
+  docsChecks: false,
+  providerTrendBenchmark: true,
+});
+
+expectScope(["src-tauri/src/domain/usage_stats/trend_common.rs"], {
+  scope: "full",
+  fullCi: true,
+  docsChecks: false,
+  providerTrendBenchmark: true,
+});
+assert.equal(
+  shouldRunProviderTrendBenchmark(["src-tauri/src/infra/usage_provider_daily_rollup.rs"]),
+  true
+);
+assert.equal(shouldRunProviderTrendBenchmark(["src/main.tsx", "README.md"]), false);
 
 const parsed = parseNameStatus(
   "M\0PENDING.md\0D\0docs/old.md\0R100\0PENDING.md\0src/pending.ts\0C090\0README.md\0docs/copy.md\0"
@@ -152,7 +171,11 @@ const failedClosed = runClassifier({
 });
 assert.equal(failedClosed.scope, "full");
 assert.equal(failedClosed.fullCi, true);
+assert.equal(failedClosed.providerTrendBenchmark, true);
 assert.equal(failedClosed.reason, "classification-error");
+
+const manual = runClassifier({ eventName: "workflow_dispatch", policyPath });
+assert.equal(manual.providerTrendBenchmark, true);
 
 assert.throws(
   () =>
