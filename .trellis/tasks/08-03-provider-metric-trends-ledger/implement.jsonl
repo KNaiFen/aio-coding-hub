@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/aio-coding-hub/cross-layer/request-log-usage-ledger-pagination-contract.md", "reason": "以 ledger 为聚合事实源并保持详情独立生命周期"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "约束 Rust IPC service query UI 数据流"}
