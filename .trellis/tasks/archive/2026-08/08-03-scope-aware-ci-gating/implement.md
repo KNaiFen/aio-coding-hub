@@ -18,7 +18,7 @@
 
 - [x] Run local Node.js, documentation, format, diff, and Trellis checks.
 - [x] Review the complete diff for fail-open paths and required-check deadlocks.
-- [ ] Push the implementation PR and wait for complete GitHub Actions success.
-- [ ] Merge the implementation PR.
-- [ ] Archive the Trellis task in a separate documentation-only PR.
-- [ ] Verify only lightweight required checks run, then merge the archive PR.
+- [x] Push the implementation PR and wait for complete GitHub Actions success.
+- [x] Merge the implementation PR.
+- [x] Archive the Trellis task in a separate documentation-only PR.
+- [x] Verify only lightweight required checks run, then merge the archive PR.
