@@ -108,6 +108,38 @@ output rate separately. Consumers must display the sample count for the active
 metric rather than treating the total successful-request count as every
 metric's denominator.
 
+## Provider Daily Trend Projection
+
+Provider daily rollups are a rebuildable performance projection over
+`usage_ledger`; they are not a replacement fact source and never authorize
+automatic ledger deletion. Model, Session, folder, cost repair, provider-limit,
+hourly, and partial-day consumers continue reading event-level ledger rows.
+
+The projection stores one additive row per local natural day, CLI, and Provider,
+plus a separate day-coverage record. Only a `complete` day whose stored local
+midnight boundaries still match the current system time-zone rules is trusted.
+The current day, partial query boundaries, dirty or missing days, invalid legacy
+timestamps, and every hour-granularity query use raw ledger data. Day and coarser
+queries combine trusted rollups with the exact raw complement inside one SQLite
+read snapshot, then perform Top Provider selection and final division after the
+two sources are re-aggregated.
+
+Ledger inserts, deletes, and real changes to trend-relevant fields atomically
+mark both the old and new local days dirty. Rebuilding a closed day uses one
+`IMMEDIATE` transaction, independently compares the eligible raw row count with
+the projected request sum, and marks the day complete only after they match.
+Request-log retention runs first; rollup maintenance rebuilds at most 32 days per
+batch and releases the maintenance mutex between delayed continuation batches.
+
+A time-zone boundary change invalidates the derived projection so it can be
+rebuilt from the retained ledger. If ensure detects a missing rollup table or
+dirty-day trigger, it restores the schema, clears all potentially stale derived
+rows, and resets the projection cursor before queries may trust coverage again.
+
+Provider deletion with `clear_usage_stats=true` removes matching request logs,
+ledger rows, and Provider rollup rows in the same transaction. Default Provider
+deletion retains both ledger history and rollup name snapshots.
+
 ## Home Realtime Concurrency
 
 The Home current-concurrency value counts active model inference requests, not

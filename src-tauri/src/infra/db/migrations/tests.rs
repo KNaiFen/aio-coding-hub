@@ -2883,3 +2883,271 @@ INSERT INTO providers(
         );
     }
 }
+
+#[test]
+fn migrate_v46_to_v47_creates_daily_rollup_schema_and_marks_changed_days_dirty() {
+    let mut conn = Connection::open_in_memory().expect("open v46 migration db");
+    v42_to_v43::create_usage_ledger_schema(&conn).expect("create v46 usage ledger fixture");
+    conn.pragma_update(None, "user_version", 46)
+        .expect("mark rollup fixture as v46");
+
+    v46_to_v47::migrate_v46_to_v47(&mut conn).expect("migrate v46->v47");
+
+    let user_version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("read v47 user version");
+    assert_eq!(user_version, 47);
+    for (object_type, name) in [
+        ("table", "usage_provider_daily_rollup_days"),
+        ("table", "usage_provider_daily_rollups"),
+        ("table", "usage_provider_daily_rollup_backfill_state"),
+        ("trigger", "trg_usage_ledger_daily_rollup_insert"),
+        ("trigger", "trg_usage_ledger_daily_rollup_update"),
+        ("trigger", "trg_usage_ledger_daily_rollup_delete"),
+        ("index", "idx_usage_provider_daily_rollups_provider_day"),
+        ("index", "idx_usage_provider_daily_rollups_cli_day"),
+        ("index", "idx_usage_provider_daily_rollup_days_status_day"),
+    ] {
+        let exists: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = ?1 AND name = ?2)",
+                [object_type, name],
+                |row| row.get(0),
+            )
+            .expect("inspect v46 object");
+        assert!(exists, "missing {object_type} {name}");
+    }
+
+    let first_ts = 1_700_000_000_i64;
+    let second_ts = first_ts + 2 * 24 * 60 * 60;
+    conn.execute(
+        r#"
+INSERT INTO usage_ledger(request_log_id, trace_id, cli_key, created_at)
+VALUES (1, 'trace-rollup-migration', 'codex', ?1)
+"#,
+        [first_ts],
+    )
+    .expect("insert ledger fixture");
+    conn.execute(
+        "UPDATE usage_provider_daily_rollup_days SET status = 'complete', updated_at = 1",
+        [],
+    )
+    .expect("complete inserted fixture day");
+    conn.execute(
+        "UPDATE usage_ledger SET created_at = created_at WHERE request_log_id = 1",
+        [],
+    )
+    .expect("repeat identical trend fields");
+    let unchanged_after_identical_update: (String, i64) = conn
+        .query_row(
+            "SELECT status, updated_at FROM usage_provider_daily_rollup_days",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("read day after identical update");
+    assert_eq!(
+        unchanged_after_identical_update,
+        ("complete".to_string(), 1),
+        "identical ledger projection must not dirty a completed day"
+    );
+    conn.execute(
+        "UPDATE usage_ledger SET cost_usd_femto = 10 WHERE request_log_id = 1",
+        [],
+    )
+    .expect("update non-trend ledger field");
+    let unchanged_day: (String, i64) = conn
+        .query_row(
+            "SELECT status, updated_at FROM usage_provider_daily_rollup_days",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("read day after non-trend update");
+    assert_eq!(unchanged_day, ("complete".to_string(), 1));
+    conn.execute(
+        "UPDATE usage_ledger SET created_at = ?1 WHERE request_log_id = 1",
+        [second_ts],
+    )
+    .expect("move ledger fixture to another day");
+    conn.execute("DELETE FROM usage_ledger WHERE request_log_id = 1", [])
+        .expect("delete ledger fixture");
+
+    let dirty_days: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM usage_provider_daily_rollup_days WHERE status = 'dirty'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count dirty days");
+    assert_eq!(dirty_days, 2, "updates must dirty both old and new local days");
+
+    let invalid_ts = i64::MAX;
+    conn.execute(
+        r#"
+INSERT INTO usage_ledger(request_log_id, trace_id, cli_key, created_at)
+VALUES (2, 'trace-rollup-invalid-timestamp', 'codex', ?1)
+"#,
+        [invalid_ts],
+    )
+    .expect("malformed legacy timestamp must not block ledger writes");
+    let unchanged_days: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM usage_provider_daily_rollup_days",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count rollup days after malformed timestamp");
+    assert_eq!(unchanged_days, 2);
+}
+
+#[test]
+fn ensure_restores_daily_rollup_triggers_and_invalidates_untracked_writes() {
+    let mut conn = Connection::open_in_memory().expect("open current migration db");
+    apply_migrations(&mut conn).expect("create current schema");
+    let missed_created_at = 1_700_000_000_i64;
+    let (local_day, day_start_ts, day_end_ts): (String, i64, i64) = conn
+        .query_row(
+            r#"
+SELECT
+  date(?1, 'unixepoch', 'localtime'),
+  CAST(strftime('%s', date(?1, 'unixepoch', 'localtime'), 'utc') AS INTEGER),
+  CAST(strftime(
+    '%s', date(?1, 'unixepoch', 'localtime', '+1 day'), 'utc'
+  ) AS INTEGER)
+"#,
+            [missed_created_at],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .expect("resolve stale projection day");
+    conn.execute(
+        r#"
+INSERT INTO usage_provider_daily_rollup_days(
+  local_day,
+  day_start_ts,
+  day_end_ts,
+  status,
+  source_row_count,
+  updated_at
+) VALUES (?1, ?2, ?3, 'complete', 0, 1)
+"#,
+        rusqlite::params![local_day, day_start_ts, day_end_ts],
+    )
+    .expect("create complete empty projection day");
+    conn.execute_batch("DROP TRIGGER trg_usage_ledger_daily_rollup_insert;")
+        .expect("drop daily rollup trigger");
+    conn.execute(
+        r#"
+INSERT INTO usage_ledger(
+  request_log_id,
+  trace_id,
+  cli_key,
+  created_at,
+  status,
+  error_present,
+  excluded_from_stats,
+  duration_ms,
+  final_provider_id,
+  provider_name_snapshot
+) VALUES (1, 'missed-daily-rollup-write', 'codex', ?1, 200, 0, 0, 100, 7, 'Missed')
+"#,
+        [missed_created_at],
+    )
+    .expect("write ledger row while the insert trigger is absent");
+
+    apply_migrations(&mut conn).expect("repair daily rollup trigger");
+
+    let exists: bool = conn
+        .query_row(
+            r#"
+SELECT EXISTS(
+  SELECT 1
+  FROM sqlite_master
+  WHERE type = 'trigger' AND name = 'trg_usage_ledger_daily_rollup_insert'
+)
+"#,
+            [],
+            |row| row.get(0),
+        )
+        .expect("inspect repaired daily rollup trigger");
+    assert!(exists);
+    let projection_rows: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM usage_provider_daily_rollup_days",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count invalidated daily projection days");
+    assert_eq!(projection_rows, 0);
+    let cursor: Option<String> = conn
+        .query_row(
+            "SELECT next_local_day FROM usage_provider_daily_rollup_backfill_state WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read reset daily rollup cursor");
+    assert_eq!(cursor, None);
+}
+
+#[test]
+fn migrate_v46_to_v47_recovers_a_missing_usage_ledger_before_adding_triggers() {
+    let mut conn = Connection::open_in_memory().expect("open drifted v46 migration db");
+    v42_to_v43::create_usage_ledger_schema(&conn).expect("create usage ledger drift fixture");
+    conn.execute_batch(
+        r#"
+INSERT INTO usage_ledger_backfill_state(
+  id,
+  status,
+  target_request_log_id,
+  last_request_log_id,
+  completed_at,
+  updated_at
+) VALUES (1, 'complete', 100, 100, 1, 1);
+DROP TABLE usage_ledger;
+PRAGMA user_version = 46;
+"#,
+    )
+    .expect("create drifted v46 fixture");
+
+    v46_to_v47::migrate_v46_to_v47(&mut conn).expect("migrate drifted v46->v47");
+
+    for name in [
+        "usage_ledger",
+        "usage_ledger_backfill_state",
+        "usage_provider_daily_rollup_days",
+        "usage_provider_daily_rollups",
+    ] {
+        let exists: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+                [name],
+                |row| row.get(0),
+            )
+            .expect("inspect recovered table");
+        assert!(exists, "missing recovered table {name}");
+    }
+    let trigger_exists: bool = conn
+        .query_row(
+            r#"
+SELECT EXISTS(
+  SELECT 1
+  FROM sqlite_master
+  WHERE type = 'trigger' AND name = 'trg_usage_ledger_daily_rollup_insert'
+)
+"#,
+            [],
+            |row| row.get(0),
+        )
+        .expect("inspect recovered daily rollup trigger");
+    assert!(trigger_exists);
+
+    let stale_state_rows: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM usage_ledger_backfill_state",
+            [],
+            |row| row.get(0),
+        )
+        .expect("inspect reset usage ledger backfill state");
+    assert_eq!(
+        stale_state_rows, 0,
+        "a recreated ledger must not inherit a stale complete marker"
+    );
+}

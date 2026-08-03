@@ -233,8 +233,6 @@ export function UsageProviderMetricsTrendChart({
 
     for (const row of rows) {
       if (!row.key) continue;
-      const value = config.pickValue(row);
-      if (value == null || !Number.isFinite(value)) continue;
       const xKey = providerTrendBucketKey(row);
       if (!xKey) continue;
       buckets.set(xKey, row);

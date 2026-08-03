@@ -3,15 +3,13 @@ use crate::shared::error::db_err;
 use rusqlite::{params_from_iter, Connection};
 use std::collections::HashSet;
 
-use super::filters::{
-    build_optional_range_cli_provider_filters, sql_exclude_cx2cc_gateway_bridge_clause,
-};
 use super::trend_common::{
-    bucket_select_and_group, plan_trend, validate_trend_budget, TrendPlanQuery,
+    build_trend_source_ctes, plan_trend, trend_query_params, validate_trend_budget,
+    TrendPlanQuery,
 };
 use super::{
-    has_valid_provider_key, resolve_query_params, sql_effective_input_tokens_expr_with_alias,
-    ProviderKey, UsageProviderCacheRateTrendRowV1, UsageQueryParams, UsageTrendGranularityV1,
+    has_valid_provider_key, resolve_query_params, ProviderKey,
+    UsageProviderCacheRateTrendRowV1, UsageQueryParams, UsageTrendGranularityV1,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -28,18 +26,30 @@ pub(super) fn provider_cache_rate_trend_v1_with_conn(
     conn: &Connection,
     query: ProviderCacheRateTrendQuery<'_>,
 ) -> Result<Vec<UsageProviderCacheRateTrendRowV1>, String> {
-    let plan = plan_trend(
-        conn,
-        TrendPlanQuery {
-            start_ts: query.start_ts,
-            end_ts: query.end_ts,
-            cli_key: query.cli_key,
-            provider_id: query.provider_id,
-            requested_provider_limit: query.limit,
-            exclude_cx2cc_gateway_bridge: query.exclude_cx2cc_gateway_bridge,
-        },
-    )?;
-    let (select_fields, group_by_fields) = bucket_select_and_group(plan.granularity);
+    let tx = conn.unchecked_transaction().map_err(|error| {
+        db_err!("failed to start Provider cache trend read snapshot: {error}")
+    })?;
+    let rows = provider_cache_rate_trend_v1_in_snapshot(&tx, query)?;
+    tx.commit().map_err(|error| {
+        db_err!("failed to close Provider cache trend read snapshot: {error}")
+    })?;
+    Ok(rows)
+}
+
+fn provider_cache_rate_trend_v1_in_snapshot(
+    conn: &Connection,
+    query: ProviderCacheRateTrendQuery<'_>,
+) -> Result<Vec<UsageProviderCacheRateTrendRowV1>, String> {
+    let source_query = TrendPlanQuery {
+        start_ts: query.start_ts,
+        end_ts: query.end_ts,
+        cli_key: query.cli_key,
+        provider_id: query.provider_id,
+        requested_provider_limit: query.limit,
+        exclude_cx2cc_gateway_bridge: query.exclude_cx2cc_gateway_bridge,
+    };
+    let plan = plan_trend(conn, source_query)?;
+    let source_ctes = build_trend_source_ctes(conn, plan, source_query)?;
     let order_by_fields = match plan.granularity {
         UsageTrendGranularityV1::Hour => "b.day ASC, b.hour ASC",
         UsageTrendGranularityV1::Day
@@ -47,64 +57,40 @@ pub(super) fn provider_cache_rate_trend_v1_with_conn(
         | UsageTrendGranularityV1::Month
         | UsageTrendGranularityV1::Year => "b.day ASC",
     };
-    let effective_input_expr = sql_effective_input_tokens_expr_with_alias("r");
-    let denom_expr = format!(
-        "({effective_input_expr}) + COALESCE(r.cache_creation_input_tokens, 0) + COALESCE(r.cache_read_input_tokens, 0)"
-    );
-    let (where_clause, where_params) = build_optional_range_cli_provider_filters(
-        "r.created_at",
-        "r.cli_key",
-        "r.final_provider_id",
-        query.start_ts,
-        query.end_ts,
-        query.cli_key,
-        query.provider_id,
-    );
-    let cx2cc_filter_clause =
-        sql_exclude_cx2cc_gateway_bridge_clause(Some("r"), query.exclude_cx2cc_gateway_bridge);
-    let top_provider_success_clause = if query.provider_id.is_some() {
+    let top_provider_having = if query.provider_id.is_some() {
         ""
     } else {
-        "AND r.status >= 200 AND r.status < 300 AND r.error_present = 0"
+        "HAVING SUM(s.requests_success) > 0"
     };
     let sql = format!(
         r#"
-WITH top_providers AS (
+WITH {source_ctes},
+top_providers AS (
   SELECT
-    r.cli_key AS cli_key,
-    r.final_provider_id AS provider_id,
-    COUNT(*) AS requests_success
-  FROM usage_events r
-  WHERE r.excluded_from_stats = 0
-  {top_provider_success_clause}
-  AND r.final_provider_id IS NOT NULL
-  AND r.final_provider_id > 0
-  {where_clause}
-  {cx2cc_filter_clause}
-  GROUP BY r.cli_key, r.final_provider_id
-  ORDER BY requests_success DESC, r.cli_key ASC, r.final_provider_id ASC
-  LIMIT ?{limit_bind_idx}
+    s.cli_key,
+    s.provider_id,
+    SUM(s.requests_success) AS requests_success
+  FROM trend_source s
+  GROUP BY s.cli_key, s.provider_id
+  {top_provider_having}
+  ORDER BY requests_success DESC, s.cli_key ASC, s.provider_id ASC
+  LIMIT ?5
 ),
 bucketed AS (
   SELECT
-    {select_fields},
-    r.cli_key AS cli_key,
-    r.final_provider_id AS provider_id,
-    MAX(NULLIF(TRIM(r.provider_name_snapshot), '')) AS provider_name,
-    SUM({denom_expr}) AS denom_tokens,
-    SUM(COALESCE(r.cache_read_input_tokens, 0)) AS cache_read_input_tokens,
-    COUNT(*) AS requests_success
-  FROM usage_events r
+    s.day,
+    s.hour,
+    s.cli_key,
+    s.provider_id,
+    s.provider_name_success AS provider_name,
+    s.cache_denom_tokens AS denom_tokens,
+    s.cache_read_input_tokens,
+    s.requests_success
+  FROM trend_source s
   JOIN top_providers tp
-    ON tp.cli_key = r.cli_key
-   AND tp.provider_id = r.final_provider_id
-  WHERE r.excluded_from_stats = 0
-  AND r.status >= 200 AND r.status < 300 AND r.error_present = 0
-  AND r.final_provider_id IS NOT NULL
-  AND r.final_provider_id > 0
-  {where_clause}
-  {cx2cc_filter_clause}
-  GROUP BY {group_by_fields}, r.cli_key, r.final_provider_id
+    ON tp.cli_key = s.cli_key
+   AND tp.provider_id = s.provider_id
+  WHERE s.requests_success > 0
 )
 SELECT
   b.day,
@@ -117,8 +103,7 @@ SELECT
   b.requests_success
 FROM bucketed b
 ORDER BY {order_by_fields}, b.requests_success DESC, b.cli_key ASC, b.provider_id ASC
-"#,
-        limit_bind_idx = where_params.len() + 1,
+"#
     );
 
     #[derive(Debug)]
@@ -138,11 +123,7 @@ ORDER BY {order_by_fields}, b.requests_success DESC, b.cli_key ASC, b.provider_i
         .map_err(|error| db_err!("failed to prepare provider cache trend query: {error}"))?;
     let rows = stmt
         .query_map(
-            params_from_iter({
-                let mut params = where_params;
-                params.push((plan.provider_limit as i64).into());
-                params
-            }),
+            params_from_iter(trend_query_params(plan, source_query)),
             |row| {
                 Ok(RawRow {
                     day: row.get("day")?,

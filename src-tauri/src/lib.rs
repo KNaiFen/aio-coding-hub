@@ -19,7 +19,7 @@ pub(crate) use infra::{
     codex_config, codex_model_catalog, codex_paths, codex_provider_sync, data_management, db,
     env_conflicts, gemini_config, grok_config, mcp_sync, model_price_aliases, model_prices,
     model_prices_sync, prompt_sync, provider_circuit_breakers, request_attempt_logs, request_logs,
-    settings, usage_ledger, wsl,
+    settings, usage_ledger, usage_provider_daily_rollup, wsl,
 };
 pub(crate) use shared::{blocking, circuit_breaker};
 

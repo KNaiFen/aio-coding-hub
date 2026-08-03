@@ -2454,6 +2454,11 @@ WHERE final_provider_id = ?1
             params![provider_id],
         )
         .map_err(|e| db_err!("failed to delete provider usage ledger: {e}"))?;
+        tx.execute(
+            "DELETE FROM usage_provider_daily_rollups WHERE final_provider_id = ?1",
+            params![provider_id],
+        )
+        .map_err(|e| db_err!("failed to delete provider daily usage rollups: {e}"))?;
     }
 
     let changed = tx

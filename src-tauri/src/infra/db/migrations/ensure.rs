@@ -27,6 +27,7 @@ pub(super) fn apply_ensure_patches(conn: &mut Connection) -> crate::shared::erro
     drop_legacy_request_attempt_logs_table(conn)?;
     ensure_request_logs_extended_columns(conn)?;
     ensure_usage_ledger(conn)?;
+    ensure_usage_provider_daily_rollups(conn)?;
     ensure_provider_stream_idle_timeout(conn)?;
     ensure_provider_availability_test_model(conn)?;
     ensure_provider_upstream_retry_policy(conn)?;
@@ -1191,6 +1192,58 @@ ON CONFLICT(id) DO UPDATE SET
     super::v42_to_v43::refresh_usage_events_view(&tx)?;
     tx.commit()
         .map_err(|error| format!("failed to commit usage ledger ensure transaction: {error}"))?;
+    Ok(())
+}
+
+fn ensure_usage_provider_daily_rollups(conn: &mut Connection) -> Result<(), String> {
+    let tx = conn
+        .transaction()
+        .map_err(|error| format!("failed to start Provider daily rollup ensure: {error}"))?;
+    let projection_schema_incomplete = tx
+        .query_row(
+            r#"
+SELECT
+  (SELECT COUNT(*)
+   FROM sqlite_master
+   WHERE type = 'table'
+     AND name IN (
+       'usage_provider_daily_rollup_days',
+       'usage_provider_daily_rollups',
+       'usage_provider_daily_rollup_backfill_state'
+     )) != 3
+  OR
+  (SELECT COUNT(*)
+   FROM sqlite_master
+   WHERE type = 'trigger'
+     AND name IN (
+       'trg_usage_ledger_daily_rollup_insert',
+       'trg_usage_ledger_daily_rollup_update',
+       'trg_usage_ledger_daily_rollup_delete'
+     )) != 3
+"#,
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(|error| format!("failed to inspect Provider daily rollup schema: {error}"))?;
+    super::v46_to_v47::create_provider_daily_rollup_schema(&tx)?;
+    if projection_schema_incomplete {
+        tx.execute("DELETE FROM usage_provider_daily_rollups", [])
+            .map_err(|error| format!("failed to reset Provider daily rollups: {error}"))?;
+        tx.execute("DELETE FROM usage_provider_daily_rollup_days", [])
+            .map_err(|error| format!("failed to reset Provider daily rollup days: {error}"))?;
+        tx.execute(
+            r#"
+UPDATE usage_provider_daily_rollup_backfill_state
+SET next_local_day = NULL,
+    updated_at = CAST(strftime('%s', 'now') AS INTEGER)
+WHERE id = 1
+"#,
+            [],
+        )
+        .map_err(|error| format!("failed to reset Provider daily rollup cursor: {error}"))?;
+    }
+    tx.commit()
+        .map_err(|error| format!("failed to commit Provider daily rollup ensure: {error}"))?;
     Ok(())
 }
 

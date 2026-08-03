@@ -1819,6 +1819,76 @@ fn usage_ledger_provider_name(db: &crate::db::Db, trace_id: &str) -> Option<Stri
     .expect("read provider name snapshot")
 }
 
+fn seed_provider_daily_rollup(db: &crate::db::Db, provider_id: i64, provider_name: &str) {
+    let conn = db.open_connection().expect("open db connection");
+    conn.execute(
+        r#"
+INSERT INTO usage_provider_daily_rollup_days(
+  local_day, day_start_ts, day_end_ts, status, source_row_count, updated_at
+) VALUES (
+  date(100, 'unixepoch', 'localtime'),
+  CAST(strftime(
+    '%s', date(100, 'unixepoch', 'localtime'), 'utc'
+  ) AS INTEGER),
+  CAST(strftime(
+    '%s', date(100, 'unixepoch', 'localtime', '+1 day'), 'utc'
+  ) AS INTEGER),
+  'complete',
+  1,
+  1
+)
+ON CONFLICT(local_day) DO UPDATE SET
+  day_start_ts = excluded.day_start_ts,
+  day_end_ts = excluded.day_end_ts,
+  status = 'complete',
+  source_row_count = 1,
+  updated_at = 1
+"#,
+        [],
+    )
+    .expect("insert daily rollup day");
+    conn.execute(
+        r#"
+INSERT INTO usage_provider_daily_rollups(
+  local_day, cli_key, final_provider_id, provider_name_all_snapshot,
+  provider_name_success_snapshot, created_at_min, created_at_max,
+  requests_total, requests_success, success_duration_ms_sum,
+  success_ttfb_ms_sum, success_ttfb_ms_count, success_generation_ms_sum,
+  success_output_tokens_for_rate_sum, success_output_rate_count,
+  cache_denom_tokens, cache_read_input_tokens
+) VALUES (
+  date(100, 'unixepoch', 'localtime'), 'claude', ?1, ?2, ?2, 100, 100,
+  1, 1, 12, 0, 0, 0, 0, 0, 15, 0
+)
+"#,
+        rusqlite::params![provider_id, provider_name],
+    )
+    .expect("insert provider daily rollup");
+    conn.execute(
+        r#"
+UPDATE usage_provider_daily_rollup_days
+SET source_row_count = COALESCE((
+  SELECT SUM(requests_total)
+  FROM usage_provider_daily_rollups rollup
+  WHERE rollup.local_day = usage_provider_daily_rollup_days.local_day
+), 0)
+WHERE local_day = date(100, 'unixepoch', 'localtime')
+"#,
+        [],
+    )
+    .expect("synchronize daily rollup fixture coverage");
+}
+
+fn provider_daily_rollup_exists(db: &crate::db::Db, provider_id: i64) -> bool {
+    let conn = db.open_connection().expect("open db connection");
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM usage_provider_daily_rollups WHERE final_provider_id = ?1)",
+        [provider_id],
+        |row| row.get(0),
+    )
+    .expect("inspect provider daily rollup")
+}
+
 #[test]
 fn delete_keeps_request_logs_and_usage_ledger_by_default() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -1827,11 +1897,13 @@ fn delete_keeps_request_logs_and_usage_ledger_by_default() {
 
     let saved = upsert(&db, default_provider_params("delete-keep-logs")).expect("save provider");
     seed_usage_request_log(&db, "trace-delete-keep", saved.id);
+    seed_provider_daily_rollup(&db, saved.id, "delete-keep-logs");
 
     delete(&db, saved.id, false).expect("delete provider");
 
     assert!(request_log_exists(&db, "trace-delete-keep"));
     assert!(usage_ledger_exists(&db, "trace-delete-keep"));
+    assert!(provider_daily_rollup_exists(&db, saved.id));
     assert_eq!(
         usage_ledger_provider_name(&db, "trace-delete-keep").as_deref(),
         Some("delete-keep-logs")
@@ -1970,6 +2042,8 @@ fn delete_removes_provider_request_logs_and_usage_ledger_when_requested() {
         upsert(&db, default_provider_params("delete-clear-other")).expect("save other provider");
     seed_usage_request_log(&db, "trace-delete-clear", saved.id);
     seed_usage_request_log(&db, "trace-delete-other", other.id);
+    seed_provider_daily_rollup(&db, saved.id, "delete-clear-logs");
+    seed_provider_daily_rollup(&db, other.id, "delete-clear-other");
     {
         let conn = db.open_connection().expect("open db connection");
         let attempts_json = serde_json::json!([{
@@ -1993,8 +2067,10 @@ WHERE trace_id = 'trace-delete-clear'
 
     assert!(!request_log_exists(&db, "trace-delete-clear"));
     assert!(!usage_ledger_exists(&db, "trace-delete-clear"));
+    assert!(!provider_daily_rollup_exists(&db, saved.id));
     assert!(request_log_exists(&db, "trace-delete-other"));
     assert!(usage_ledger_exists(&db, "trace-delete-other"));
+    assert!(provider_daily_rollup_exists(&db, other.id));
 }
 
 fn create_oauth_provider_for_cas_test(db: &crate::db::Db, name: &str) -> i64 {

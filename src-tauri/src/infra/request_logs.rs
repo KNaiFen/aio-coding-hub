@@ -2,14 +2,14 @@
 
 use crate::shared::error::{db_err, AppResult};
 use crate::shared::time::now_unix_seconds;
-use crate::{cost, db, model_price_aliases, usage_ledger};
+use crate::{cost, db, model_price_aliases, usage_ledger, usage_provider_daily_rollup};
 use rusqlite::{params, params_from_iter, ErrorCode, OptionalExtension, TransactionBehavior};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
-use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{mpsc, Mutex, OwnedSemaphorePermit, Semaphore};
 
 mod types;
 // These DTOs are part of this crate's IPC-facing request-log API. Some are
@@ -42,6 +42,7 @@ const INSERT_RETRY_MAX_DELAY_MS: u64 = 500;
 const RETENTION_PURGE_BATCH_SIZE: usize = 1000;
 const RETENTION_PURGE_BATCH_PAUSE_MS: u64 = 50;
 const RETENTION_TASK_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
+const DAILY_ROLLUP_CONTINUATION_DELAY: Duration = Duration::from_millis(250);
 
 const COST_MULTIPLIER_CACHE_MAX_ENTRIES: usize = 256;
 const MODEL_PRICE_CACHE_MAX_ENTRIES: usize = 512;
@@ -57,6 +58,7 @@ WHERE bridge.id = ?1
 "#;
 
 static WRITE_THROUGH_LIMITER: OnceLock<Arc<Semaphore>> = OnceLock::new();
+static MAINTENANCE_LOCK: Mutex<()> = Mutex::const_new(());
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RequestLogReconcileReason {
@@ -500,15 +502,61 @@ pub(crate) fn spawn_retention_once(app: tauri::AppHandle, db: db::Db) {
     });
 }
 
+async fn refresh_daily_rollup_batch(db: &db::Db) -> bool {
+    let rollup_db = db.clone();
+    let rollup_result = crate::blocking::run("usage_provider_daily_rollup", move || {
+        usage_provider_daily_rollup::refresh_completed_days_batch(
+            &rollup_db,
+            now_unix_seconds(),
+            usage_provider_daily_rollup::BACKGROUND_REFRESH_MAX_DAYS,
+        )
+    })
+    .await;
+
+    match rollup_result {
+        Ok(report) => {
+            if report.rebuilt_days > 0 {
+                tracing::info!(
+                    rebuilt_days = report.rebuilt_days,
+                    source_rows = report.source_rows,
+                    reset_for_calendar_change = report.reset_for_calendar_change,
+                    "refreshed Provider daily usage rollups"
+                );
+            }
+            report.ledger_backfill_complete && report.has_more_work
+        }
+        Err(err) => {
+            tracing::warn!("Provider daily usage rollup refresh failed: {}", err);
+            false
+        }
+    }
+}
+
+fn spawn_daily_rollup_continuation(db: db::Db) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(DAILY_ROLLUP_CONTINUATION_DELAY).await;
+            let maintenance_guard = MAINTENANCE_LOCK.lock().await;
+            let has_more_work = refresh_daily_rollup_batch(&db).await;
+            drop(maintenance_guard);
+            if !has_more_work {
+                break;
+            }
+        }
+    });
+}
+
 async fn run_retention_once(app: &tauri::AppHandle, db: &db::Db) {
-    let app = app.clone();
-    let db = db.clone();
+    let maintenance_guard = MAINTENANCE_LOCK.lock().await;
+
+    let retention_app = app.clone();
+    let retention_db = db.clone();
     let result = crate::blocking::run("request_log_retention", move || {
-        let retention_days = crate::settings::request_log_retention_days_fail_open(&app);
+        let retention_days = crate::settings::request_log_retention_days_fail_open(&retention_app);
         if retention_days == 0 {
             return Ok::<u64, crate::shared::error::AppError>(0);
         }
-        let deleted = purge_expired(&db, retention_days, now_unix_seconds())?;
+        let deleted = purge_expired(&retention_db, retention_days, now_unix_seconds())?;
         if deleted > 0 {
             tracing::info!(retention_days, deleted, "purged expired request logs");
         }
@@ -518,6 +566,12 @@ async fn run_retention_once(app: &tauri::AppHandle, db: &db::Db) {
 
     if let Err(err) = result {
         tracing::warn!("request-log retention task failed: {}", err);
+    }
+
+    let has_more_rollup_work = refresh_daily_rollup_batch(db).await;
+    drop(maintenance_guard);
+    if has_more_rollup_work {
+        spawn_daily_rollup_continuation(db.clone());
     }
 }
 

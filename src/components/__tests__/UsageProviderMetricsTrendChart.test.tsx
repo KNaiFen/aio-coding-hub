@@ -142,6 +142,32 @@ describe("components/UsageProviderMetricsTrendChart", () => {
     });
   }
 
+  it("keeps provider series and buckets stable when the selected metric has missing samples", () => {
+    const rows: UsageProviderMetricTrendRowV1[] = [
+      { ...sampleRow, avg_ttfb_ms: null, ttfb_samples: 0 },
+      {
+        ...sampleRow,
+        day: "2026-02-21",
+        key: "claude:2",
+        name: "claude/Anthropic",
+        cli_key: "claude",
+        provider_id: 2,
+        provider_name: "Anthropic",
+      },
+    ];
+    const { rerender } = render(<UsageProviderMetricsTrendChart rows={rows} metric="duration" />);
+
+    expect(screen.getByTestId("line-chart").getAttribute("data-points")).toBe("2");
+    expect(screen.getByTestId("line-codex:1")).toBeTruthy();
+    expect(screen.getByTestId("line-claude:2")).toBeTruthy();
+
+    rerender(<UsageProviderMetricsTrendChart rows={rows} metric="ttfb" />);
+
+    expect(screen.getByTestId("line-chart").getAttribute("data-points")).toBe("2");
+    expect(screen.getByTestId("line-codex:1")).toBeTruthy();
+    expect(screen.getByTestId("line-claude:2")).toBeTruthy();
+  });
+
   it("formats rate axis as tokens per second", () => {
     render(<UsageProviderMetricsTrendChart rows={[sampleRow]} metric="rate" />);
     expect(screen.getByTestId("y-axis").getAttribute("data-formatted")).not.toContain("ms");

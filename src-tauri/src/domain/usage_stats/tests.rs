@@ -1599,6 +1599,419 @@ INSERT INTO usage_events (
     assert_eq!(row.requests_failed, 0);
 }
 
+fn create_provider_daily_rollup_fixture_schema(conn: &Connection) {
+    conn.execute_batch(
+        r#"
+CREATE TABLE usage_provider_daily_rollup_days (
+  local_day TEXT PRIMARY KEY,
+  day_start_ts INTEGER NOT NULL,
+  day_end_ts INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  source_row_count INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE usage_provider_daily_rollups (
+  local_day TEXT NOT NULL,
+  cli_key TEXT NOT NULL,
+  final_provider_id INTEGER NOT NULL,
+  provider_name_all_snapshot TEXT,
+  provider_name_success_snapshot TEXT,
+  created_at_min INTEGER NOT NULL,
+  created_at_max INTEGER NOT NULL,
+  requests_total INTEGER NOT NULL,
+  requests_success INTEGER NOT NULL,
+  success_duration_ms_sum INTEGER NOT NULL,
+  success_ttfb_ms_sum INTEGER NOT NULL,
+  success_ttfb_ms_count INTEGER NOT NULL,
+  success_generation_ms_sum INTEGER NOT NULL,
+  success_output_tokens_for_rate_sum INTEGER NOT NULL,
+  success_output_rate_count INTEGER NOT NULL,
+  cache_denom_tokens INTEGER NOT NULL,
+  cache_read_input_tokens INTEGER NOT NULL,
+  PRIMARY KEY(local_day, cli_key, final_provider_id)
+);
+
+CREATE TABLE usage_provider_daily_rollup_backfill_state (
+  id INTEGER PRIMARY KEY,
+  next_local_day TEXT,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE usage_ledger_backfill_state (
+  id INTEGER PRIMARY KEY,
+  status TEXT NOT NULL
+);
+
+INSERT INTO usage_provider_daily_rollup_backfill_state(id, next_local_day, updated_at)
+VALUES (1, NULL, 0);
+INSERT INTO usage_ledger_backfill_state(id, status) VALUES (1, 'complete');
+"#,
+    )
+    .expect("create Provider daily rollup fixture schema");
+}
+
+fn materialize_provider_daily_rollup_fixture(
+    conn: &Connection,
+    local_day: &str,
+    day_start_ts: i64,
+    day_end_ts: i64,
+    status: &str,
+) {
+    let source_row_count = conn
+        .query_row(
+            r#"
+SELECT COUNT(*)
+FROM usage_events
+WHERE created_at >= ?1
+  AND created_at < ?2
+  AND excluded_from_stats = 0
+  AND final_provider_id IS NOT NULL
+  AND final_provider_id > 0
+"#,
+            params![day_start_ts, day_end_ts],
+            |row| row.get::<_, i64>(0),
+        )
+        .expect("count daily rollup source rows");
+    conn.execute(
+        r#"
+INSERT INTO usage_provider_daily_rollup_days(
+  local_day,
+  day_start_ts,
+  day_end_ts,
+  status,
+  source_row_count,
+  updated_at
+) VALUES (?1, ?2, ?3, ?4, ?5, ?3)
+"#,
+        params![
+            local_day,
+            day_start_ts,
+            day_end_ts,
+            status,
+            source_row_count
+        ],
+    )
+    .expect("insert daily rollup day fixture");
+    if status != "complete" {
+        return;
+    }
+
+    let success = "r.status >= 200 AND r.status < 300 AND r.error_present = 0";
+    let valid_ttfb = "r.ttfb_ms IS NOT NULL AND r.ttfb_ms < r.duration_ms";
+    let valid_output_rate =
+        "r.output_tokens IS NOT NULL AND r.ttfb_ms IS NOT NULL AND r.ttfb_ms < r.duration_ms";
+    let effective_input = sql_effective_input_tokens_expr_with_alias("r");
+    let cache_denom = format!(
+        "({effective_input}) + COALESCE(r.cache_creation_input_tokens, 0) + COALESCE(r.cache_read_input_tokens, 0)"
+    );
+    let sql = format!(
+        r#"
+INSERT INTO usage_provider_daily_rollups(
+  local_day,
+  cli_key,
+  final_provider_id,
+  provider_name_all_snapshot,
+  provider_name_success_snapshot,
+  created_at_min,
+  created_at_max,
+  requests_total,
+  requests_success,
+  success_duration_ms_sum,
+  success_ttfb_ms_sum,
+  success_ttfb_ms_count,
+  success_generation_ms_sum,
+  success_output_tokens_for_rate_sum,
+  success_output_rate_count,
+  cache_denom_tokens,
+  cache_read_input_tokens
+)
+SELECT
+  ?1,
+  r.cli_key,
+  r.final_provider_id,
+  MAX(NULLIF(TRIM(r.provider_name_snapshot), '')),
+  MAX(CASE WHEN {success} THEN NULLIF(TRIM(r.provider_name_snapshot), '') END),
+  MIN(r.created_at),
+  MAX(r.created_at),
+  COUNT(*),
+  SUM(CASE WHEN {success} THEN 1 ELSE 0 END),
+  SUM(CASE WHEN {success} THEN r.duration_ms ELSE 0 END),
+  SUM(CASE WHEN {success} AND {valid_ttfb} THEN r.ttfb_ms ELSE 0 END),
+  SUM(CASE WHEN {success} AND {valid_ttfb} THEN 1 ELSE 0 END),
+  SUM(CASE WHEN {success} AND {valid_output_rate} THEN r.duration_ms - r.ttfb_ms ELSE 0 END),
+  SUM(CASE WHEN {success} AND {valid_output_rate} THEN r.output_tokens ELSE 0 END),
+  SUM(CASE WHEN {success} AND {valid_output_rate} THEN 1 ELSE 0 END),
+  SUM(CASE WHEN {success} THEN {cache_denom} ELSE 0 END),
+  SUM(CASE WHEN {success} THEN COALESCE(r.cache_read_input_tokens, 0) ELSE 0 END)
+FROM usage_events r
+WHERE r.created_at >= ?2
+  AND r.created_at < ?3
+  AND r.excluded_from_stats = 0
+  AND r.final_provider_id IS NOT NULL
+  AND r.final_provider_id > 0
+GROUP BY r.cli_key, r.final_provider_id
+"#
+    );
+    conn.execute(&sql, params![local_day, day_start_ts, day_end_ts])
+        .expect("materialize daily Provider rollup fixture");
+}
+
+#[test]
+fn provider_trends_mix_complete_rollups_with_raw_gaps_without_overlap() {
+    let conn = setup_conn();
+    conn.execute(
+        "INSERT INTO providers (id, name) VALUES (?1, ?2)",
+        params![123, "Alpha Success"],
+    )
+    .expect("insert normal Provider");
+    conn.execute(
+        r#"INSERT INTO providers (id, name, source_provider_id, bridge_type) VALUES (?1, ?2, ?3, ?4)"#,
+        params![900, "Bridge CX2CC", Option::<i64>::None, "cx2cc"],
+    )
+    .expect("insert CX2CC Provider");
+
+    let calendar_start = local_day_start_ts(&conn, "2024-01-01");
+    for day in 0..=6i64 {
+        let created_at = calendar_start + day * 86_400 + 3 * 3600;
+        insert_usage_log(
+            &conn,
+            TestUsageLog {
+                provider_name: "Alpha Success",
+                duration_ms: 1000 + day,
+                ttfb_ms: Some(100 + day),
+                input_tokens: Some(200 + day),
+                output_tokens: Some(20 + day),
+                cache_read_input_tokens: Some(40 + day),
+                created_at,
+                ..base_usage_log(created_at)
+            },
+        );
+    }
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            provider_name: "Zulu Failure",
+            status: Some(500),
+            error_code: Some("UPSTREAM_ERROR"),
+            created_at: calendar_start + 86_400 + 4 * 3600,
+            ..base_usage_log(calendar_start + 86_400 + 4 * 3600)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            cli_key: "claude",
+            provider_id: 900,
+            provider_name: "Bridge CX2CC",
+            input_tokens: Some(300),
+            cache_read_input_tokens: Some(75),
+            created_at: calendar_start + 3 * 86_400 + 5 * 3600,
+            ..base_usage_log(calendar_start + 3 * 86_400 + 5 * 3600)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            provider_name: "Alpha Success",
+            created_at: calendar_start + 6 * 86_400 + 30 * 60,
+            ..base_usage_log(calendar_start + 6 * 86_400 + 30 * 60)
+        },
+    );
+
+    let query_start = calendar_start + 2 * 3600;
+    let query_end = calendar_start + 6 * 86_400 + 3600;
+    let metric_query = ProviderMetricTrendQuery {
+        start_ts: Some(query_start),
+        end_ts: Some(query_end),
+        cli_key: None,
+        provider_id: None,
+        limit: None,
+        exclude_cx2cc_gateway_bridge: false,
+    };
+    let cache_query = ProviderCacheRateTrendQuery {
+        start_ts: metric_query.start_ts,
+        end_ts: metric_query.end_ts,
+        cli_key: None,
+        provider_id: None,
+        limit: None,
+        exclude_cx2cc_gateway_bridge: false,
+    };
+    let raw_metrics =
+        provider_metric_trend_v1_with_conn(&conn, metric_query).expect("raw metric trend");
+    let raw_cache =
+        provider_cache_rate_trend_v1_with_conn(&conn, cache_query).expect("raw cache trend");
+    let all_time_metric_query = ProviderMetricTrendQuery {
+        start_ts: None,
+        end_ts: None,
+        ..metric_query
+    };
+    let all_time_cache_query = ProviderCacheRateTrendQuery {
+        start_ts: None,
+        end_ts: None,
+        ..cache_query
+    };
+    let raw_all_time_metrics = provider_metric_trend_v1_with_conn(&conn, all_time_metric_query)
+        .expect("raw all-time metric trend");
+    let raw_all_time_cache = provider_cache_rate_trend_v1_with_conn(&conn, all_time_cache_query)
+        .expect("raw all-time cache trend");
+    let hour_metric_query = ProviderMetricTrendQuery {
+        start_ts: Some(calendar_start + 86_400),
+        end_ts: Some(calendar_start + 2 * 86_400),
+        provider_id: Some(123),
+        ..metric_query
+    };
+    let raw_hour_metrics = provider_metric_trend_v1_with_conn(&conn, hour_metric_query)
+        .expect("raw hourly metric trend");
+
+    create_provider_daily_rollup_fixture_schema(&conn);
+    for (day_offset, status) in [(1i64, "complete"), (2, "dirty"), (3, "complete")] {
+        let day_start = calendar_start + day_offset * 86_400;
+        let local_day = local_day_key(&conn, day_start);
+        materialize_provider_daily_rollup_fixture(
+            &conn,
+            &local_day,
+            day_start,
+            day_start + 86_400,
+            status,
+        );
+    }
+
+    let hybrid_metrics =
+        provider_metric_trend_v1_with_conn(&conn, metric_query).expect("hybrid metric trend");
+    let hybrid_cache =
+        provider_cache_rate_trend_v1_with_conn(&conn, cache_query).expect("hybrid cache trend");
+    assert_eq!(hybrid_metrics, raw_metrics);
+    assert_eq!(hybrid_cache, raw_cache);
+    assert_eq!(
+        provider_metric_trend_v1_with_conn(&conn, all_time_metric_query)
+            .expect("hybrid all-time metric trend"),
+        raw_all_time_metrics
+    );
+    assert_eq!(
+        provider_cache_rate_trend_v1_with_conn(&conn, all_time_cache_query)
+            .expect("hybrid all-time cache trend"),
+        raw_all_time_cache
+    );
+    assert_eq!(
+        provider_metric_trend_v1_with_conn(&conn, hour_metric_query)
+            .expect("hourly trend with daily rollup schema"),
+        raw_hour_metrics,
+        "hour granularity must remain raw-only"
+    );
+    assert!(hybrid_metrics.iter().any(|row| {
+        row.provider_id == 123
+            && row.provider_name == "Zulu Failure"
+            && row.granularity == UsageTrendGranularityV1::Day
+    }));
+    assert!(hybrid_cache
+        .iter()
+        .any(|row| row.key == "codex:123" && row.name == "codex/Alpha Success"));
+
+    let raw_excluded_metrics = provider_metric_trend_v1_with_conn(
+        &conn,
+        ProviderMetricTrendQuery {
+            exclude_cx2cc_gateway_bridge: true,
+            ..metric_query
+        },
+    )
+    .expect("hybrid metric trend excluding CX2CC");
+    let raw_excluded_cache = provider_cache_rate_trend_v1_with_conn(
+        &conn,
+        ProviderCacheRateTrendQuery {
+            exclude_cx2cc_gateway_bridge: true,
+            ..cache_query
+        },
+    )
+    .expect("hybrid cache trend excluding CX2CC");
+    assert!(raw_excluded_metrics.iter().all(|row| row.provider_id != 900));
+    assert!(raw_excluded_cache.iter().all(|row| row.key != "claude:900"));
+
+    let stale_day = local_day_key(&conn, calendar_start + 86_400);
+    conn.execute(
+        r#"
+UPDATE usage_provider_daily_rollups
+SET requests_total = requests_total + 1,
+    success_duration_ms_sum = success_duration_ms_sum + 999999,
+    cache_denom_tokens = cache_denom_tokens + 999999
+WHERE local_day = ?1
+"#,
+        [&stale_day],
+    )
+    .expect("make rollup source count inconsistent");
+    assert_eq!(
+        provider_metric_trend_v1_with_conn(&conn, metric_query)
+            .expect("raw metric fallback for inconsistent rollup count"),
+        raw_metrics
+    );
+    assert_eq!(
+        provider_cache_rate_trend_v1_with_conn(&conn, cache_query)
+            .expect("raw cache fallback for inconsistent rollup count"),
+        raw_cache
+    );
+    conn.execute(
+        r#"
+UPDATE usage_provider_daily_rollups
+SET requests_total = requests_total - 1,
+    success_duration_ms_sum = success_duration_ms_sum - 999999,
+    cache_denom_tokens = cache_denom_tokens - 999999
+WHERE local_day = ?1
+"#,
+        [&stale_day],
+    )
+    .expect("restore rollup source count");
+    conn.execute(
+        "UPDATE usage_provider_daily_rollup_days SET day_start_ts = day_start_ts + 1 WHERE local_day = ?1",
+        [&stale_day],
+    )
+    .expect("make rollup calendar boundary stale");
+    conn.execute(
+        r#"
+UPDATE usage_provider_daily_rollups
+SET success_duration_ms_sum = success_duration_ms_sum + 999999,
+    cache_denom_tokens = cache_denom_tokens + 999999
+WHERE local_day = ?1
+"#,
+        [&stale_day],
+    )
+    .expect("make stale-boundary rollup observably incorrect");
+    assert_eq!(
+        provider_metric_trend_v1_with_conn(&conn, metric_query)
+            .expect("raw metric fallback for stale rollup boundary"),
+        raw_metrics
+    );
+    assert_eq!(
+        provider_cache_rate_trend_v1_with_conn(&conn, cache_query)
+            .expect("raw cache fallback for stale rollup boundary"),
+        raw_cache
+    );
+
+    conn.execute(
+        "UPDATE usage_ledger_backfill_state SET status = 'incomplete' WHERE id = 1",
+        [],
+    )
+    .expect("mark ledger backfill incomplete");
+    conn.execute(
+        r#"
+UPDATE usage_provider_daily_rollups
+SET success_duration_ms_sum = success_duration_ms_sum + 999999,
+    cache_denom_tokens = cache_denom_tokens + 999999
+"#,
+        [],
+    )
+    .expect("make rollup observably stale");
+    assert_eq!(
+        provider_metric_trend_v1_with_conn(&conn, metric_query)
+            .expect("raw metric fallback while ledger backfill is incomplete"),
+        raw_metrics
+    );
+    assert_eq!(
+        provider_cache_rate_trend_v1_with_conn(&conn, cache_query)
+            .expect("raw cache fallback while ledger backfill is incomplete"),
+        raw_cache
+    );
+}
+
 #[test]
 fn v1_provider_cache_rate_trend_uses_effective_denom_and_bucket() {
     let conn = setup_conn();
