@@ -437,10 +437,7 @@ describe("query/gateway", () => {
       const client = createTestQueryClient();
       const wrapper = createQueryWrapper(client);
 
-      renderHook(
-        () => useGatewayActiveSessionCountQuery({ refetchIntervalMs: 20 }),
-        { wrapper }
-      );
+      renderHook(() => useGatewayActiveSessionCountQuery({ refetchIntervalMs: 20 }), { wrapper });
 
       await waitFor(() => expect(gatewayActiveSessionCount).toHaveBeenCalledTimes(1));
       await new Promise((resolve) => setTimeout(resolve, 120));

@@ -1,6 +1,7 @@
 //! Middleware: resolves session routing and selects providers with session binding.
 
 use super::{MiddlewareAction, ProxyContext};
+use crate::gateway::proxy::forwarder::{filter_routing_candidates, needs_limit_evaluation};
 use crate::gateway::proxy::handler::early_error::{
     build_early_error_log_ctx, early_error_contract, force_provider_if_requested,
     push_special_setting, respond_early_error_with_enqueue, respond_invalid_cli_key_with_spawn,
@@ -118,6 +119,54 @@ impl ProviderResolutionMiddleware {
             ctx.forced_provider_id,
             &ctx.special_settings,
         );
+        let provider_ids_after_force = provider_ids(&ctx.providers);
+
+        // A known OAuth or spend-limit exhaustion is route eligibility, not a
+        // failed attempt. Filter it before session binding so the first
+        // actually usable provider remains provider_index=1 and can reuse an
+        // existing session binding.
+        let limit_excluded_provider_ids = if !ctx.providers.iter().any(needs_limit_evaluation) {
+            Vec::new()
+        } else {
+            let state = ctx.state.clone();
+            let created_at = ctx.created_at;
+            let providers_to_filter = std::mem::take(&mut ctx.providers);
+            let fallback_providers = providers_to_filter.clone();
+            let filter_result = crate::blocking::run(
+                "gateway_provider_limit_filter",
+                move || -> crate::shared::error::AppResult<_> {
+                    let conn = match state.db.open_connection() {
+                        Ok(conn) => conn,
+                        Err(err) => {
+                            tracing::warn!(
+                                "failed to open database for provider limit prefilter; allowing candidates: {err}"
+                            );
+                            return Ok((providers_to_filter, Vec::new()));
+                        }
+                    };
+                    let (eligible, excluded_provider_ids) =
+                        filter_routing_candidates(&conn, providers_to_filter, created_at);
+                    Ok((eligible, excluded_provider_ids))
+                },
+            )
+            .await;
+
+            match filter_result {
+                Ok((eligible, excluded_provider_ids)) => {
+                    ctx.providers = eligible;
+                    excluded_provider_ids
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        trace_id = %ctx.trace_id,
+                        cli_key = %ctx.cli_key,
+                        "provider limit prefilter failed; allowing candidates: {err}"
+                    );
+                    ctx.providers = fallback_providers;
+                    Vec::new()
+                }
+            }
+        };
 
         // --- session bound provider ---
         ctx.session_bound_provider_id = resolve_session_bound_provider_id(
@@ -149,7 +198,9 @@ impl ProviderResolutionMiddleware {
                     session_bound_provider_id: ctx.session_bound_provider_id,
                     forced_provider_id: ctx.forced_provider_id,
                     initial_provider_ids: &initial_provider_ids,
+                    provider_ids_after_force: &provider_ids_after_force,
                     final_provider_ids: &final_provider_ids,
+                    limit_excluded_provider_ids: &limit_excluded_provider_ids,
                     forced_provider_missing,
                 }),
             );
@@ -190,7 +241,9 @@ struct NoEnabledProviderDiagnosticArgs<'a> {
     session_bound_provider_id: Option<i64>,
     forced_provider_id: Option<i64>,
     initial_provider_ids: &'a [i64],
+    provider_ids_after_force: &'a [i64],
     final_provider_ids: &'a [i64],
+    limit_excluded_provider_ids: &'a [i64],
     forced_provider_missing: bool,
 }
 
@@ -201,6 +254,8 @@ fn no_enabled_provider_diagnostic(args: &NoEnabledProviderDiagnosticArgs<'_>) ->
     };
     let cleared_reason = if args.forced_provider_missing {
         "forced_provider_not_in_candidates"
+    } else if !args.limit_excluded_provider_ids.is_empty() && args.final_provider_ids.is_empty() {
+        "all_candidates_limit_excluded"
     } else if args.effective_sort_mode_id.is_some() {
         "empty_sort_mode_candidates"
     } else {
@@ -230,8 +285,12 @@ fn no_enabled_provider_diagnostic(args: &NoEnabledProviderDiagnosticArgs<'_>) ->
         "forcedProviderMissing": args.forced_provider_missing,
         "candidateProviderIdsBeforeForce": args.initial_provider_ids,
         "candidateProviderCountBeforeForce": args.initial_provider_ids.len(),
-        "candidateProviderIdsAfterForce": args.final_provider_ids,
-        "candidateProviderCountAfterForce": args.final_provider_ids.len(),
+        "candidateProviderIdsAfterForce": args.provider_ids_after_force,
+        "candidateProviderCountAfterForce": args.provider_ids_after_force.len(),
+        "candidateProviderIdsAfterLimit": args.final_provider_ids,
+        "candidateProviderCountAfterLimit": args.final_provider_ids.len(),
+        "limitExcludedProviderIds": args.limit_excluded_provider_ids,
+        "limitExcludedProviderCount": args.limit_excluded_provider_ids.len(),
     })
 }
 
@@ -271,7 +330,9 @@ mod tests {
             session_bound_provider_id: None,
             forced_provider_id: None,
             initial_provider_ids: &[],
+            provider_ids_after_force: &[],
             final_provider_ids: &[],
+            limit_excluded_provider_ids: &[],
             forced_provider_missing: false,
         });
 
@@ -327,7 +388,9 @@ mod tests {
             session_bound_provider_id: Some(11),
             forced_provider_id: Some(99),
             initial_provider_ids: &[11, 22],
+            provider_ids_after_force: &[],
             final_provider_ids: &[],
+            limit_excluded_provider_ids: &[],
             forced_provider_missing: true,
         });
 
@@ -361,6 +424,49 @@ mod tests {
         assert_eq!(
             value.get("forcedProviderMissing").and_then(|v| v.as_bool()),
             Some(true)
+        );
+    }
+
+    #[test]
+    fn no_enabled_provider_diagnostic_marks_limit_exclusions() {
+        let value = no_enabled_provider_diagnostic(&NoEnabledProviderDiagnosticArgs {
+            cli_key: "codex",
+            active_sort_mode_id: None,
+            effective_sort_mode_id: None,
+            session_bound_sort_mode_id: None,
+            session_id: Some("session-limit-test"),
+            session_bound_provider_id: None,
+            forced_provider_id: None,
+            initial_provider_ids: &[11, 22],
+            provider_ids_after_force: &[11, 22],
+            final_provider_ids: &[],
+            limit_excluded_provider_ids: &[11, 22],
+            forced_provider_missing: false,
+        });
+
+        assert_eq!(
+            value.get("clearedReason").and_then(|v| v.as_str()),
+            Some("all_candidates_limit_excluded")
+        );
+        assert_eq!(
+            value
+                .get("candidateProviderIdsAfterForce")
+                .and_then(|v| v.as_array())
+                .map(|items| items.iter().filter_map(|v| v.as_i64()).collect::<Vec<_>>()),
+            Some(vec![11, 22])
+        );
+        assert_eq!(
+            value
+                .get("limitExcludedProviderIds")
+                .and_then(|v| v.as_array())
+                .map(|items| items.iter().filter_map(|v| v.as_i64()).collect::<Vec<_>>()),
+            Some(vec![11, 22])
+        );
+        assert_eq!(
+            value
+                .get("candidateProviderCountAfterLimit")
+                .and_then(|v| v.as_u64()),
+            Some(0)
         );
     }
 }

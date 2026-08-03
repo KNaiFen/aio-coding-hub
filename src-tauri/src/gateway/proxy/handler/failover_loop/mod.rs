@@ -40,6 +40,9 @@ mod provider_gate;
 mod provider_iterator;
 #[path = "prepare/provider_limits.rs"]
 mod provider_limits;
+pub(in crate::gateway::proxy) use provider_limits::{
+    filter_routing_candidates, needs_limit_evaluation,
+};
 #[path = "prepare/request_sanitizer.rs"]
 mod request_sanitizer;
 
@@ -90,7 +93,8 @@ use event_helpers::{
 };
 use loop_helpers::{
     apply_cx2cc_request_settings, finalize_owned_from_input, push_skipped_provider_attempt,
-    should_finalize_as_all_providers_unavailable, SkippedProviderAttempt,
+    should_finalize_as_all_providers_unavailable,
+    should_finalize_as_no_enabled_provider_after_limit_exclusions, SkippedProviderAttempt,
 };
 use oauth::{
     refresh_oauth_credential_after_401, resolve_effective_credential,
@@ -389,6 +393,26 @@ where
     }
 
     // --- Finalization ---
+    if should_finalize_as_no_enabled_provider_after_limit_exclusions(
+        &run_state.attempts,
+        counters.providers_tried,
+        counters.limit_exclusions,
+        counters.skipped_open,
+        counters.skipped_cooldown,
+    ) {
+        let resp = crate::gateway::proxy::handler::early_error::respond_no_enabled_provider_after_limit_exclusions(
+            &input,
+            counters.limit_exclusions,
+            run_state
+                .active_requested_model
+                .clone()
+                .or_else(|| input.requested_model.clone()),
+        )
+        .await;
+        abort_guard.disarm();
+        return resp;
+    }
+
     if should_finalize_as_all_providers_unavailable(&run_state.attempts)
         && !input.providers.is_empty()
     {
@@ -416,7 +440,7 @@ where
             earliest_available_unix: counters.earliest_available_unix,
             skipped_open: counters.skipped_open,
             skipped_cooldown: counters.skipped_cooldown,
-            skipped_limits: counters.skipped_limits,
+            limit_exclusions: counters.limit_exclusions,
             fingerprint_key: input.fingerprint_key,
             fingerprint_debug: input.fingerprint_debug.clone(),
             unavailable_fingerprint_key: input.unavailable_fingerprint_key,

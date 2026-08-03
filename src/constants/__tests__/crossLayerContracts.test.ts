@@ -77,12 +77,14 @@ function extractRustGatewayErrorCodes(source: string) {
 describe("cross-layer contracts", () => {
   it("keeps Tray provider mini native width aligned with its frontend tracks", () => {
     const nativeWidth = extractRustFloatConst(residentSource, "TRAY_PROVIDER_MINI_WIDTH");
-    const contractedWidth = 1 + 12 + 96 + 8 + 178 + 8 + 88 + 12 + 1;
+    const contractedWidth = 1 + 12 + 96 + 8 + 170 + 8 + 96 + 12 + 1;
 
     expect(nativeWidth).toBe(404);
     expect(nativeWidth).toBe(contractedWidth);
-    expect(trayProviderMiniAppSource).toContain("grid-cols-[96px_178px_88px]");
-    expect(trayProviderMiniAppSource).toContain("grid-cols-[12px_32px_12px_32px]");
+    expect(trayProviderMiniAppSource).toContain("grid-cols-[96px_170px_96px]");
+    expect(trayProviderMiniAppSource).toContain("grid-cols-[44px_1px_44px]");
+    expect(trayProviderMiniAppSource).toContain("grid-cols-[12px_32px]");
+    expect(trayProviderMiniAppSource).toContain("h-3 w-px bg-border/70");
     expect(trayProviderMiniAppSource).toContain("font-mono text-[9px]");
   });
 

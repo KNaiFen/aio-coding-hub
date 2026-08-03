@@ -37,11 +37,11 @@ buildRequestRouteMeta({
 
 ### 3. Contracts
 
-- Session binding owns reuse preference and ordering only. If the bound
-  provider remains in the eligible candidate set but its circuit currently
-  denies reuse, keep it in the list and let the later common gate decide. Clear
-  the binding only when the provider is no longer eligible for that candidate
-  set.
+- Session binding owns reuse preference and ordering only. Filter providers
+  with a known exhausted OAuth or spend-limit snapshot before resolving the
+  binding. If the bound provider is removed by that eligibility filter, clear
+  the binding; if it remains eligible but its circuit currently denies reuse,
+  keep it in the list and let the later common gate decide.
 - The provider-global `enabled` switch is the outer routing authority. Default
   routes, custom sort-mode membership, session reuse, forced candidate lists,
   and bridge source resolution must all exclude globally disabled providers;
@@ -78,10 +78,17 @@ buildRequestRouteMeta({
   error result that skips runtime invalidation. Keep result projection inside
   the write transaction, reserve the WAL writer before validation reads, and
   make commit the final fallible database step.
-- Every globally enabled route candidate reaches
-  `failover_loop/prepare/provider_checks::run_gates`. A circuit, cooldown, or
-  provider-limit denial creates one `outcome="skipped"` attempt with its stable
-  error/reason data and makes zero upstream calls.
+- OAuth and spend limits are route-eligibility constraints. After forced-route
+  narrowing and before session binding, evaluate every candidate with one
+  shared database connection and remove known-limited providers. They create
+  no attempt or route hop and consume no Ready-provider budget. A database or
+  blocking-pool failure is fail-open so infrastructure trouble does not
+  silently disable every route.
+- The send-time provider gate repeats the same limit decision to cover a quota
+  snapshot or spend total changing after selection. A limit denial there still
+  creates no skipped attempt. Circuit, cooldown, and runtime global-switch
+  denials remain common-gate decisions and create one `outcome="skipped"`
+  attempt with stable error/reason data and zero upstream calls.
 - `providers_tried` increments only after the common gates and preparation
   produce `Ready`. Therefore `failover_max_providers_to_try` caps Ready
   providers, not inspected candidates or skipped rows.
@@ -93,8 +100,9 @@ buildRequestRouteMeta({
 - The projected `route` is the source of provider-hop display. Derive
   `providerCount = route.length` for the complete audited chain. Derive
   `transitionCount` only from adjacent provider identity changes in
-  `route.filter(!skipped)`: a gate-only circuit/cooldown/limit hop made no
-  upstream request and is not an effective supplier switch. Keep
+  `route.filter(!skipped)`: a gate-only circuit/cooldown hop made no upstream
+  request and is not an effective supplier switch. Known limit exclusions do
+  not appear in the projected route at all. Keep
   `attempt_count` as the raw audit-row count and never relabel it as the number
   of upstream requests.
 - The Home compact route label derives operational counts from the projected
@@ -108,11 +116,13 @@ buildRequestRouteMeta({
   route content uses the current theme's semantic popover surface, suppresses
   only known duplicate internal reasons, preserves unknown reasons as wrapped
   text, and scrolls within the collision-bounded viewport height.
-- When all candidates are denied by gates, including the runtime global-switch
-  gate, return
-  `GW_ALL_PROVIDERS_UNAVAILABLE` / HTTP 503 and preserve every denied provider
-  in both attempts and route. Do not manufacture an upstream call to make the
-  failure observable.
+- When limit eligibility removes every candidate, return
+  `GW_NO_ENABLED_PROVIDER` / HTTP 503 with an empty attempts array and no
+  `Retry-After`; this is semantically identical to a route with no enabled
+  providers. When the remaining candidates are denied by circuit, cooldown,
+  or the runtime global-switch gate, return
+  `GW_ALL_PROVIDERS_UNAVAILABLE` / HTTP 503 and preserve those gate-denied
+  providers in attempts and route. Do not manufacture an upstream call.
 - Upstream 401 and 403 bodies are authentication material and must never enter
   console diagnostics, persisted attempt reasons, `attempts_json`, or
   `error_details_json`. The bounded body may remain in memory only as needed by
@@ -149,9 +159,12 @@ buildRequestRouteMeta({
 | `failover_max_providers_to_try > 20` | Reject with `SEC_INVALID_INPUT` |
 | attempts per provider x providers to try > 100 | Reject with `SEC_INVALID_INPUT` |
 | Eligible session-bound provider is circuit-open | Keep candidate; common gate records one skipped row |
+| Higher-priority provider has a known exhausted OAuth or spend limit | Remove it before session binding; the first usable provider is `provider_index=1` |
+| Session is bound to a lower-priority provider while a higher-priority provider is limited | Reuse the lower provider directly; record no limit attempt |
 | Candidate is gate-skipped | Zero upstream calls and no Ready-provider budget consumed |
 | Provider or bridge source is disabled after selection | Current admitted send may finish; every later send is skipped |
-| All candidates are gate-skipped | HTTP 503 with every candidate in attempts and route |
+| All candidates are limit-excluded | HTTP 503 `GW_NO_ENABLED_PROVIDER`, empty attempts, no `Retry-After` |
+| All remaining candidates are circuit/cooldown/global-switch skipped | HTTP 503 `GW_ALL_PROVIDERS_UNAVAILABLE` with every denial in attempts and route |
 | Ready-provider cap is reached | Stop before the next Ready provider |
 | Two Ready providers consume cap 2, then a circuit-open candidate follows | Record the third skipped attempt/route; make no third upstream call |
 | Route has 3 hops and 4 attempt rows | 3 providers, 2 transitions, 4 attempts |
@@ -164,23 +177,36 @@ buildRequestRouteMeta({
 
 ### 5. Good / Base / Bad Cases
 
-- Good: two circuit-open or limited candidates are skipped, then a third Ready
-  candidate succeeds with `failover_max_providers_to_try = 2`; the skips do
-  not consume either Ready slot and the effective route has zero switches.
+- Good: two known-limited candidates are removed, then a third Ready candidate
+  is sent as `provider_index=1`; the limit exclusions create no retries, route
+  hops, or Ready-slot consumption.
+- Good: two circuit-open candidates are skipped, then a third Ready candidate
+  succeeds with `failover_max_providers_to_try = 2`; the skips do not consume
+  either Ready slot and the effective route has zero switches.
 - Base: one Ready provider and one attempt render as a direct request with zero
   provider transitions.
 - Good: three gate-skipped candidates return 503, produce three route hops and
   three attempt rows, and call no upstream.
-- Bad: removing a temporarily denied session-bound provider before
-  `run_gates`; the request still fails quickly but loses the provider and skip
-  reason from its audit trail.
+- Bad: removing a circuit-open session-bound provider before `run_gates`; the
+  request loses the circuit denial from its audit trail.
+- Bad: retaining a known-limited provider until `run_gates`; it creates a fake
+  first attempt, turns the first real request into retry/provider index 2, and
+  suppresses legitimate session-reuse presentation.
 - Bad: rendering four attempt rows as "switched 4 times" when they include
   retries or gate-only candidates that never received an upstream request.
 
 ### 6. Tests Required
 
-- Unit-test selection so a temporarily denied bound provider stays in the
-  candidate list while reuse selection returns no bound provider.
+- Unit-test selection so a circuit-denied bound provider stays in the candidate
+  list while reuse selection returns no bound provider.
+- Route-test OAuth and spend-limit prefiltering: the limited provider gets zero
+  upstream calls and no attempt; a lower eligible provider is the only attempt
+  with `provider_index=1`.
+- Route-test an existing lower-provider session binding with a higher-priority
+  limited provider; require `session_reuse=true` and
+  `selection_method="session_reuse"` on the first real attempt.
+- Route-test all-limit behavior: HTTP 503 `GW_NO_ENABLED_PROVIDER`, empty
+  response and persisted attempts, no `Retry-After`, and stale binding clear.
 - Unit-test CLI and global route-generation invalidation, including clears that
   remove zero bindings, and prove stale reads/writes cannot affect a binding
   created under the current generation.
@@ -229,21 +255,21 @@ buildRequestRouteMeta({
 #### Wrong
 
 ```rust
-if !circuit.should_allow(bound_provider_id, created_at).allow {
-    providers.retain(|provider| provider.id != bound_provider_id);
+for provider in providers {
+    attempts.push(limit_gate(provider));
 }
 ```
 
-This makes session selection a second gate and silently drops observable
-failover evidence.
+This turns a provider that was already known to be ineligible into a fake
+request attempt and shifts retry/session-reuse indices.
 
 #### Correct
 
 ```rust
-if !circuit.should_allow(bound_provider_id, created_at).allow {
-    return None; // retain the candidate; the common gate records the skip
-}
+let providers = filter_known_limits(providers);
+let session_bound_provider = resolve_session_binding(&providers);
 ```
 
-Keep selection responsible for preference and make the common gate the single
-authoritative owner of deny decisions and skipped attempts.
+Filter known OAuth/spend exhaustion before session preference. Keep circuit,
+cooldown, and runtime enable checks in the common gate because those denials
+remain observable audit skips.

@@ -1,4 +1,4 @@
-//! Shared early-error infrastructure for handler middlewares.
+//! Shared early-error infrastructure for handler middlewares and the forwarder.
 //!
 //! Provides types and helpers for returning structured error responses before
 //! the request reaches the failover/forwarder stage.
@@ -178,6 +178,57 @@ pub(super) fn build_early_error_log_ctx<'a, R: tauri::Runtime>(
         created_at_ms: ctx.created_at_ms,
         created_at: ctx.created_at,
     }
+}
+
+fn build_early_error_log_ctx_from_request<'a, R: tauri::Runtime>(
+    ctx: &'a crate::gateway::proxy::request_context::RequestContext<R>,
+) -> EarlyErrorLogCtx<'a, R> {
+    EarlyErrorLogCtx {
+        state: &ctx.state,
+        trace_id: &ctx.trace_id,
+        cli_key: &ctx.cli_key,
+        method_hint: &ctx.method_hint,
+        forwarded_path: &ctx.forwarded_path,
+        observe: ctx.observe_request,
+        query: ctx.query.as_deref(),
+        duration_ms: ctx.started.elapsed().as_millis(),
+        created_at_ms: ctx.created_at_ms,
+        created_at: ctx.created_at,
+    }
+}
+
+pub(in crate::gateway::proxy) async fn respond_no_enabled_provider_after_limit_exclusions<
+    R: tauri::Runtime,
+>(
+    ctx: &crate::gateway::proxy::request_context::RequestContext<R>,
+    limit_exclusion_count: usize,
+    requested_model: Option<String>,
+) -> Response {
+    response_fixer::push_special_setting(
+        &ctx.special_settings,
+        serde_json::json!({
+            "type": "provider_selection_diagnostic",
+            "scope": "request",
+            "hit": true,
+            "reason": "no_enabled_provider",
+            "clearedReason": "all_candidates_limit_excluded_during_gate_recheck",
+            "cliKey": ctx.cli_key.as_str(),
+            "limitExclusionCount": limit_exclusion_count,
+        }),
+    );
+    let contract = early_error_contract(EarlyErrorKind::NoEnabledProvider);
+    let message = format!("no enabled provider for cli_key={}", ctx.cli_key);
+    let special_settings_json = response_fixer::special_settings_json(&ctx.special_settings);
+    let log_ctx = build_early_error_log_ctx_from_request(ctx);
+    respond_early_error_with_enqueue(
+        &log_ctx,
+        contract,
+        message,
+        special_settings_json,
+        ctx.session_id.clone(),
+        requested_model,
+    )
+    .await
 }
 
 // ---------------------------------------------------------------------------

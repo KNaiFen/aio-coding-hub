@@ -106,6 +106,20 @@ pub(super) fn should_finalize_as_all_providers_unavailable(attempts: &[FailoverA
     attempts.is_empty() || attempts.iter().all(is_gate_only_skipped_attempt)
 }
 
+pub(super) fn should_finalize_as_no_enabled_provider_after_limit_exclusions(
+    attempts: &[FailoverAttempt],
+    providers_tried: usize,
+    limit_exclusions: usize,
+    skipped_open: usize,
+    skipped_cooldown: usize,
+) -> bool {
+    attempts.is_empty()
+        && providers_tried == 0
+        && limit_exclusions > 0
+        && skipped_open == 0
+        && skipped_cooldown == 0
+}
+
 pub(super) fn apply_cx2cc_request_settings(
     responses_body: &mut serde_json::Value,
     cx2cc_settings: &crate::gateway::proxy::cx2cc::settings::Cx2ccSettings,
@@ -118,5 +132,21 @@ pub(super) fn apply_cx2cc_request_settings(
     }
     if cx2cc_settings.disable_response_storage {
         responses_body["store"] = serde_json::json!(false);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pure_limit_exclusion_is_no_enabled_provider() {
+        assert!(should_finalize_as_no_enabled_provider_after_limit_exclusions(&[], 0, 2, 0, 0));
+    }
+
+    #[test]
+    fn circuit_or_real_attempt_is_not_no_enabled_provider() {
+        assert!(!should_finalize_as_no_enabled_provider_after_limit_exclusions(&[], 0, 1, 1, 0));
+        assert!(!should_finalize_as_no_enabled_provider_after_limit_exclusions(&[], 1, 1, 0, 0));
     }
 }

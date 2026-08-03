@@ -151,7 +151,7 @@ describe("TrayProviderMiniApp", () => {
     const rows = container.querySelectorAll("header + div > .divide-y > div");
     expect(rows).toHaveLength(3);
     rows.forEach((row) => {
-      expect(row).toHaveClass("grid-cols-[96px_178px_88px]");
+      expect(row).toHaveClass("grid-cols-[96px_170px_96px]");
     });
 
     expect(screen.getByTitle(longChineseName)).toHaveClass("truncate");
@@ -166,9 +166,11 @@ describe("TrayProviderMiniApp", () => {
       screen.getByLabelText("总计 成功 123456，失败 4294967295"),
     ];
     totals.forEach((total) => {
-      expect(total).toHaveClass("grid-cols-[12px_32px_12px_32px]");
+      expect(total).toHaveClass("grid-cols-[44px_1px_44px]", "justify-between");
       expect(total).toHaveAttribute("role", "group");
       expect(within(total).getAllByText(/成|败|\d|万|亿/)).toHaveLength(4);
+      expect(total.querySelectorAll(":scope > div")).toHaveLength(2);
+      expect(total.children.item(1)).toHaveClass("h-3", "w-px", "bg-border/70");
       total.querySelectorAll("span[title]").forEach((value) => {
         expect(value).toHaveClass("font-mono", "text-[9px]", "whitespace-nowrap", "text-right");
       });
