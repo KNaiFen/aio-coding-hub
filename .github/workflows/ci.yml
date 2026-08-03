@@ -21,6 +21,39 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  change-scope:
+    runs-on: ubuntu-latest
+    outputs:
+      scope: ${{ steps.scope.outputs.scope }}
+      full_ci: ${{ steps.scope.outputs.full_ci }}
+      docs_checks: ${{ steps.scope.outputs.docs_checks }}
+      reason: ${{ steps.scope.outputs.reason }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - id: scope
+        name: Classify changed paths
+        shell: bash
+        env:
+          CI_EVENT_NAME: ${{ github.event_name }}
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          CI_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          CI_BEFORE_SHA: ${{ github.event.before || '' }}
+        run: >-
+          node scripts/ci-change-scope.mjs
+          --event "$CI_EVENT_NAME"
+          --base "$CI_BASE_SHA"
+          --head "$CI_HEAD_SHA"
+          --before "$CI_BEFORE_SHA"
+
   pr-title:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -37,7 +70,9 @@ jobs:
             exit 1
           }
 
-  support-contract:
+  docs-contract:
+    needs: change-scope
+    if: needs.change-scope.outputs.docs_checks == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -46,6 +81,33 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
+
+      - name: Validate plugin documentation
+        run: node scripts/check-plugin-system-docs.mjs
+
+      - name: Validate plugin API contract
+        run: node scripts/check-plugin-api-contract.mjs
+
+      - name: Validate Trellis spec links
+        run: node scripts/check-spec-links.mjs
+
+      - name: Validate standalone TUI release contract
+        run: node scripts/check-tui-release-contract.mjs
+
+  support-contract:
+    needs: change-scope
+    if: needs.change-scope.outputs.full_ci == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Validate CI change-scope classifier
+        run: node scripts/ci-change-scope.selftest.mjs
 
       - name: Reject local native-build entry points
         run: node scripts/check-local-build-entrypoints.mjs
@@ -57,7 +119,8 @@ jobs:
         run: node scripts/check-tui-release-contract.mjs
 
   frontend:
-    needs: support-contract
+    needs: [change-scope, support-contract]
+    if: needs.change-scope.outputs.full_ci == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -108,7 +171,8 @@ jobs:
         run: pnpm build
 
   rust:
-    needs: support-contract
+    needs: [change-scope, support-contract]
+    if: needs.change-scope.outputs.full_ci == 'true'
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -196,7 +260,9 @@ jobs:
         run: cargo audit --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195
 
   candidate-plan:
+    needs: change-scope
     if: >-
+      needs.change-scope.outputs.full_ci == 'true' &&
       github.repository == 'KNaiFen/aio-coding-hub' &&
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
@@ -533,7 +599,9 @@ jobs:
     name: ci-gate
     if: always()
     needs:
+      - change-scope
       - pr-title
+      - docs-contract
       - support-contract
       - frontend
       - rust
@@ -548,7 +616,12 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           EVENT_REF: ${{ github.ref }}
+          CHANGE_SCOPE_RESULT: ${{ needs.change-scope.result }}
+          SCOPE: ${{ needs.change-scope.outputs.scope }}
+          FULL_CI: ${{ needs.change-scope.outputs.full_ci }}
+          DOCS_CHECKS: ${{ needs.change-scope.outputs.docs_checks }}
           PR_TITLE_RESULT: ${{ needs.pr-title.result }}
+          DOCS_RESULT: ${{ needs.docs-contract.result }}
           SUPPORT_RESULT: ${{ needs.support-contract.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           RUST_RESULT: ${{ needs.rust.result }}
@@ -559,24 +632,53 @@ jobs:
           ASSEMBLE_RESULT: ${{ needs.assemble-release-candidate.result }}
         run: |
           set -euo pipefail
-          [[ "$SUPPORT_RESULT" == "success" ]]
-          [[ "$FRONTEND_RESULT" == "success" ]]
-          [[ "$RUST_RESULT" == "success" ]]
+          [[ "$CHANGE_SCOPE_RESULT" == "success" ]]
+          [[ "$FULL_CI" == "true" || "$FULL_CI" == "false" ]]
+          [[ "$DOCS_CHECKS" == "true" || "$DOCS_CHECKS" == "false" ]]
+
           if [[ "$EVENT_NAME" == "pull_request" ]]; then
             [[ "$PR_TITLE_RESULT" == "success" ]]
+          else
+            [[ "$PR_TITLE_RESULT" == "skipped" ]]
           fi
-          if [[ "$EVENT_REF" == "refs/heads/main" && ( "$EVENT_NAME" == "push" || "$EVENT_NAME" == "workflow_dispatch" ) ]]; then
-            [[ "$PLAN_RESULT" == "success" ]]
-            if [[ "$SHOULD_BUILD" == "true" ]]; then
-              [[ "$BUILD_RESULT" == "success" ]]
-              [[ "$TUI_BUILD_RESULT" == "success" ]]
-              [[ "$ASSEMBLE_RESULT" == "success" ]]
+
+          if [[ "$DOCS_CHECKS" == "true" ]]; then
+            [[ "$DOCS_RESULT" == "success" ]]
+          else
+            [[ "$DOCS_RESULT" == "skipped" ]]
+          fi
+
+          if [[ "$FULL_CI" == "true" ]]; then
+            [[ "$SCOPE" == "full" ]]
+            [[ "$SUPPORT_RESULT" == "success" ]]
+            [[ "$FRONTEND_RESULT" == "success" ]]
+            [[ "$RUST_RESULT" == "success" ]]
+            if [[ "$EVENT_REF" == "refs/heads/main" && ( "$EVENT_NAME" == "push" || "$EVENT_NAME" == "workflow_dispatch" ) ]]; then
+              [[ "$PLAN_RESULT" == "success" ]]
+              if [[ "$SHOULD_BUILD" == "true" ]]; then
+                [[ "$BUILD_RESULT" == "success" ]]
+                [[ "$TUI_BUILD_RESULT" == "success" ]]
+                [[ "$ASSEMBLE_RESULT" == "success" ]]
+              else
+                [[ "$BUILD_RESULT" == "skipped" ]]
+                [[ "$TUI_BUILD_RESULT" == "skipped" ]]
+                [[ "$ASSEMBLE_RESULT" == "skipped" ]]
+              fi
             else
+              [[ "$PLAN_RESULT" == "skipped" ]]
               [[ "$BUILD_RESULT" == "skipped" ]]
               [[ "$TUI_BUILD_RESULT" == "skipped" ]]
               [[ "$ASSEMBLE_RESULT" == "skipped" ]]
             fi
           else
+            if [[ "$DOCS_CHECKS" == "true" ]]; then
+              [[ "$SCOPE" == "checked-docs" ]]
+            else
+              [[ "$SCOPE" == "process-docs" ]]
+            fi
+            [[ "$SUPPORT_RESULT" == "skipped" ]]
+            [[ "$FRONTEND_RESULT" == "skipped" ]]
+            [[ "$RUST_RESULT" == "skipped" ]]
             [[ "$PLAN_RESULT" == "skipped" ]]
             [[ "$BUILD_RESULT" == "skipped" ]]
             [[ "$TUI_BUILD_RESULT" == "skipped" ]]

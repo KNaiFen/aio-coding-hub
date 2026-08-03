@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "processDocumentation": {
+    "exactPaths": ["AGENTS.md", "CHANGELOG.md", "PENDING.md", "PENDING_COMPLETED.md"],
+    "prefixRules": [
+      {
+        "prefix": ".trellis/tasks/",
+        "extensions": [".md", ".json", ".jsonl"]
+      },
+      {
+        "prefix": ".trellis/workspace/",
+        "extensions": [".md"]
+      },
+      {
+        "prefix": "omx_wiki/",
+        "extensions": [".md"]
+      }
+    ]
+  },
+  "checkedDocumentation": {
+    "exactPaths": ["README.md", "README_EN.md", ".trellis/workflow.md"],
+    "prefixRules": [
+      {
+        "prefix": ".trellis/agents/",
+        "extensions": [".md"]
+      },
+      {
+        "prefix": ".trellis/spec/",
+        "extensions": [".md"]
+      },
+      {
+        "prefix": "docs/",
+        "extensions": [".md"]
+      }
+    ]
+  }
+}
