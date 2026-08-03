@@ -52,6 +52,9 @@ TypeScript bindings, frontend adapters, and React UI.
 - [Tray provider mini geometry contract](./tray-provider-mini-contract.md):
   synchronized WebView row density, scroll ceiling, native logical geometry,
   scale-aware placement, and frozen-snapshot scrolling behavior.
+- [CI change-scope contract](./ci-change-scope-contract.md): explicit
+  documentation allowlists, rename-aware Git ranges, fail-closed suite
+  selection, and a stable required gate.
 
 ## Pre-Development Checklist
 
@@ -204,6 +207,14 @@ When changing task-complete notifications:
    snapshot result with the owning Session generation.
 3. Check backend active inference requests for the same CLI before notifying;
    snapshot failures must skip notification without affecting request handling.
+
+When changing CI scope selection or its policy:
+
+1. Read [CI change-scope contract](./ci-change-scope-contract.md).
+2. Trace every runtime, build, test, generation, packaging, and release consumer
+   before granting a path a documentation-only tier.
+3. Preserve the always-reporting `ci-gate`, rename/copy dual-path handling, and
+   complete-CI fallback for unknown or unsafe changes.
 
 ## Quality Check
 
