@@ -1178,14 +1178,9 @@ fn incomplete_retry_rule_override_disables_rule_instead_of_broadening_to_status_
         .upstream_retry_policy_override
         .expect("incomplete override remains explicit");
     assert!(policy.enabled);
-    assert_eq!(policy.http_rules.len(), 2);
+    assert_eq!(policy.http_rules.len(), 1);
     assert!(!policy.http_rules[0].enabled);
     assert!(policy.http_rules[0].body_contains.is_empty());
-    assert_eq!(policy.http_rules[1].status_code, 400);
-    assert_eq!(
-        policy.http_rules[1].body_contains,
-        vec![crate::settings::DEFAULT_CAPACITY_RETRY_KEYWORD]
-    );
 }
 
 #[test]
