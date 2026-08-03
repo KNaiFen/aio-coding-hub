@@ -89,4 +89,16 @@
 
 ## 主线差异审查
 
-合并前填写。此节未完成时不得合并 PR。
+### 第一次同步
+
+- 建分支基线：`ca15f02bd6b409df08f2892b5e5082bcc42aa3b3`。
+- 审查时 `origin/main`：`523256fc4108f03731bedb3962ff1d88acab01f4`。
+- 新增历史：`6dc8a96d`、`4b7d4c35` 和 PR #34 merge commit `523256fc`。
+- 变更范围：6 个 `.trellis/tasks/08-03-codex-stream-internal-error-retry` 文件，内容为完成证据、状态更新和 active 到 archive 的重命名。
+- 产品代码、GitHub Actions、依赖清单、共享 `.trellis/spec` 和本任务目录变化：0 个文件。
+- 与本分支直接重叠文件：0 个。
+- 业务影响：无新的运行时行为。归档文档描述的是已存在于基线 `ca15f02b` 的流内错误重试功能，不修改其代码或契约。
+- 冲突预演：`git merge-tree` 未发现文本冲突；不存在需要组合的业务语义。
+- 处理结果：通过普通 merge 合入，merge commit `b026cc6b9d71738572024dae8075571d97373d02`，未做冲突补丁。
+
+结论：第一次主线同步可接受。PR 最终合并前仍须重新 fetch；若 `origin/main` 再次移动，必须追加审查记录并重新验证，不能仅依据 CI 结果合并。
