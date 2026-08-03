@@ -16,7 +16,7 @@ const LIFECYCLE_INTENT_RESTART: u8 = 2;
 #[cfg(target_os = "macos")]
 const TRAY_PROVIDER_MINI_HIDE_DELAY_MS: u64 = 180;
 #[cfg(any(target_os = "macos", test))]
-const TRAY_PROVIDER_MINI_WIDTH: f64 = 440.0;
+const TRAY_PROVIDER_MINI_WIDTH: f64 = 404.0;
 #[cfg(any(target_os = "macos", test))]
 const TRAY_PROVIDER_MINI_HEADER_HEIGHT: f64 = 42.0;
 #[cfg(any(target_os = "macos", test))]
@@ -966,6 +966,7 @@ mod tests {
         assert!(placement.y >= 32.0);
         assert!(placement.x + placement.width <= 1_720.0);
         assert!(placement.y + placement.height <= 1_096.0);
+        assert_eq!(placement.width, 404.0);
         assert_eq!(placement.height, 284.0);
     }
 
@@ -979,10 +980,12 @@ mod tests {
     }
 
     #[test]
-    fn tray_provider_mini_placement_scales_density_height() {
+    fn tray_provider_mini_placement_scales_density_geometry() {
         let mut anchor = test_anchor();
         anchor.scale_factor = 2.0;
 
-        assert_eq!(tray_provider_mini_placement(anchor, 10).height, 568.0);
+        let placement = tray_provider_mini_placement(anchor, 10);
+        assert_eq!(placement.width, 808.0);
+        assert_eq!(placement.height, 568.0);
     }
 }
