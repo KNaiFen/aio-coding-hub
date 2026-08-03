@@ -4618,6 +4618,79 @@ INSERT INTO codex_managed_profiles(
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn managed_codex_alias_with_exhausted_limit_is_no_enabled_provider() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        settings::write(&app_handle, &settings::AppSettings::default())
+            .expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("managed-codex-limited.sqlite"))
+            .expect("init test db");
+        let response_body =
+            r#"{"id":"must-not-run","object":"response","model":"grok-4.5","output":[]}"#;
+        let (bound_url, bound_calls, bound_task) =
+            spawn_counting_status_upstream(StatusCode::OK, response_body).await;
+        let (other_url, other_calls, other_task) =
+            spawn_counting_status_upstream(StatusCode::OK, response_body).await;
+        let bound_provider_id =
+            insert_codex_provider_with_priority(&db, "Managed Limited", bound_url, 0);
+        let other_provider_id =
+            insert_codex_provider_with_priority(&db, "Managed Other", other_url, 1);
+        let canonical_model = insert_managed_codex_model(&db, bound_provider_id, "grok-4.5");
+        let _other_canonical = insert_managed_codex_model(&db, other_provider_id, "grok-4.5");
+        db.open_connection()
+            .expect("open database")
+            .execute(
+                "UPDATE providers SET limit_total_usd = 0.0 WHERE id = ?1",
+                rusqlite::params![bound_provider_id],
+            )
+            .expect("set exhausted total spend limit");
+
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(8);
+        let router = build_router(gateway_state(app_handle, db, log_tx));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/v1/responses")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::json!({
+                    "model": canonical_model,
+                    "stream": false,
+                    "input": "hello"
+                })
+                .to_string(),
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        let payload: Value = serde_json::from_slice(&body).expect("response JSON");
+        assert_eq!(
+            payload.get("error_code").and_then(Value::as_str),
+            Some(crate::gateway::proxy::GatewayErrorCode::NoEnabledProvider.as_str())
+        );
+        assert_eq!(bound_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(other_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+        let log = recv_terminal_request_log(&mut log_rx).await;
+        assert_eq!(log.attempts_json, "[]");
+        assert_eq!(log.requested_model.as_deref(), Some(canonical_model.as_str()));
+
+        bound_task.abort();
+        other_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn managed_codex_before_send_model_mutation_has_one_terminal_log_and_zero_upstream_calls()
     {
         let _env_lock = crate::test_support::test_env_lock();
@@ -6423,7 +6496,7 @@ INSERT INTO codex_managed_profiles(
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn mock_runtime_router_skips_exhausted_oauth_snapshot_without_opening_circuit() {
+    async fn mock_runtime_router_prefilters_exhausted_oauth_and_preserves_session_reuse() {
         let _env_lock = crate::test_support::test_env_lock();
         let home = tempfile::tempdir().expect("home dir");
         let _env = isolate_app_env(home.path());
@@ -6434,6 +6507,7 @@ INSERT INTO codex_managed_profiles(
         app_settings.failover_max_attempts_per_provider = 1;
         app_settings.failover_max_providers_to_try = 2;
         app_settings.provider_cooldown_seconds = 30;
+        app_settings.enable_session_reuse = true;
         settings::write(&app_handle, &app_settings).expect("write settings");
         crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
             .expect("enable codex cli proxy");
@@ -6462,20 +6536,31 @@ INSERT INTO codex_managed_profiles(
             None,
         ));
         let session = Arc::new(session_manager::SessionManager::new());
+        let session_id = "0190c0de-0000-7000-8000-000000000003";
+        let generation = session.capture_route_generation("codex");
+        assert!(session.bind_success(
+            "codex",
+            session_id,
+            generation,
+            success_provider_id,
+            None,
+            now,
+        ));
         let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
         let router = build_router(gateway_state_with_parts(
             app_handle,
             db,
             log_tx,
             circuit.clone(),
-            session,
+            session.clone(),
         ));
         let request = Request::builder()
             .method(Method::POST)
             .uri("/v1/chat/completions")
             .header(header::CONTENT_TYPE, "application/json")
+            .header("session_id", session_id)
             .body(Body::from(
-                r#"{"model":"gpt-route-oauth-quota","messages":[{"role":"user","content":"hello"}]}"#,
+                r#"{"model":"gpt-route-oauth-quota","messages":[{"role":"user","content":"hello"},{"role":"assistant","content":"hi"}]}"#,
             ))
             .expect("request");
 
@@ -6488,26 +6573,30 @@ INSERT INTO codex_managed_profiles(
 
         let attempts: Value = serde_json::from_str(&log.attempts_json).expect("attempts json");
         let attempts = attempts.as_array().expect("attempt array");
-        assert_eq!(attempts.len(), 2);
+        assert_eq!(attempts.len(), 1);
         assert_eq!(
             attempts[0].get("provider_id").and_then(Value::as_i64),
-            Some(oauth_provider_id)
-        );
-        assert_eq!(
-            attempts[0].get("outcome").and_then(Value::as_str),
-            Some("skipped")
-        );
-        assert_eq!(
-            attempts[0].get("error_code").and_then(Value::as_str),
-            Some(crate::gateway::proxy::GatewayErrorCode::ProviderRateLimited.as_str())
-        );
-        assert_eq!(
-            attempts[1].get("provider_id").and_then(Value::as_i64),
             Some(success_provider_id)
         );
         assert_eq!(
-            attempts[1].get("outcome").and_then(Value::as_str),
+            attempts[0].get("outcome").and_then(Value::as_str),
             Some("success")
+        );
+        assert_eq!(
+            attempts[0].get("provider_index").and_then(Value::as_u64),
+            Some(1)
+        );
+        assert_eq!(
+            attempts[0].get("retry_index").and_then(Value::as_u64),
+            Some(1)
+        );
+        assert_eq!(
+            attempts[0].get("session_reuse").and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            attempts[0].get("selection_method").and_then(Value::as_str),
+            Some("session_reuse")
         );
 
         let oauth_circuit_snapshot = circuit.snapshot(oauth_provider_id, 0);
@@ -6517,8 +6606,352 @@ INSERT INTO codex_managed_profiles(
         );
         assert_eq!(oauth_circuit_snapshot.failure_count, 0);
         assert!(oauth_circuit_snapshot.cooldown_until.is_none());
+        assert_eq!(
+            session.get_bound_provider("codex", session_id, generation, now),
+            Some(success_provider_id)
+        );
 
         success_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn mock_runtime_router_treats_all_limited_providers_as_no_enabled_provider() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.enable_session_reuse = true;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("gateway-route-all-limited.sqlite"))
+            .expect("init test db");
+        let now = crate::gateway::util::now_unix_seconds() as i64;
+        let first_id = insert_codex_oauth_provider_with_priority(&db, "First Limited", 0);
+        let second_id = insert_codex_oauth_provider_with_priority(&db, "Second Limited", 1);
+        for provider_id in [first_id, second_id] {
+            crate::domain::provider_oauth_limits::save_exhausted_snapshot(
+                &db,
+                provider_id,
+                Some(now + 3_600),
+            )
+            .expect("save oauth exhausted snapshot");
+        }
+
+        let session = Arc::new(session_manager::SessionManager::new());
+        let session_id = "0190c0de-0000-7000-8000-000000000004";
+        let generation = session.capture_route_generation("codex");
+        assert!(session.bind_success(
+            "codex", session_id, generation, first_id, None, now,
+        ));
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+        let router = build_router(gateway_state_with_parts(
+            app_handle,
+            db,
+            log_tx,
+            Arc::new(circuit_breaker::CircuitBreaker::new(
+                circuit_breaker::CircuitBreakerConfig::default(),
+                HashMap::new(),
+                None,
+            )),
+            session.clone(),
+        ));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/v1/chat/completions")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header("session_id", session_id)
+            .body(Body::from(
+                r#"{"model":"gpt-all-limited","messages":[{"role":"user","content":"hello"},{"role":"assistant","content":"hi"}]}"#,
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(response.headers().get(header::RETRY_AFTER).is_none());
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        let payload: Value = serde_json::from_slice(&body).expect("json body");
+        assert_eq!(
+            payload.get("error_code").and_then(Value::as_str),
+            Some(crate::gateway::proxy::GatewayErrorCode::NoEnabledProvider.as_str())
+        );
+        assert_eq!(
+            payload
+                .get("attempts")
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(0)
+        );
+
+        let log = recv_terminal_request_log(&mut log_rx).await;
+        assert_eq!(log.status, Some(503));
+        assert_eq!(
+            log.error_code.as_deref(),
+            Some(crate::gateway::proxy::GatewayErrorCode::NoEnabledProvider.as_str())
+        );
+        assert_eq!(log.attempts_json, "[]");
+        let special_settings: Value = serde_json::from_str(
+            log.special_settings_json
+                .as_deref()
+                .expect("provider selection diagnostics"),
+        )
+        .expect("special settings json");
+        assert!(special_settings.as_array().is_some_and(|settings| {
+            settings.iter().any(|setting| {
+                setting.get("clearedReason").and_then(Value::as_str)
+                    == Some("all_candidates_limit_excluded")
+            })
+        }));
+        assert_eq!(
+            session.get_bound_provider("codex", session_id, generation, now),
+            None
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn mixed_limit_and_circuit_denial_keeps_only_circuit_skip_auditable() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        settings::write(&app_handle, &settings::AppSettings::default())
+            .expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("gateway-route-limit-circuit.sqlite"))
+            .expect("init test db");
+        let unavailable_body = r#"{"error":{"message":"must not be called"}}"#;
+        let (limited_url, limited_calls, limited_task) =
+            spawn_counting_status_upstream(StatusCode::OK, unavailable_body).await;
+        let (circuit_url, circuit_calls, circuit_task) =
+            spawn_counting_status_upstream(StatusCode::OK, unavailable_body).await;
+        let limited_id =
+            insert_codex_provider_with_priority(&db, "Limit Excluded", limited_url, 0);
+        let circuit_id =
+            insert_codex_provider_with_priority(&db, "Circuit Audited", circuit_url, 1);
+        db.open_connection()
+            .expect("open database")
+            .execute(
+                "UPDATE providers SET limit_total_usd = 0.0 WHERE id = ?1",
+                rusqlite::params![limited_id],
+            )
+            .expect("set exhausted total spend limit");
+
+        let circuit = Arc::new(circuit_breaker::CircuitBreaker::new(
+            circuit_breaker::CircuitBreakerConfig {
+                failure_threshold: 1,
+                open_duration_secs: 3_600,
+            },
+            HashMap::new(),
+            None,
+        ));
+        let now = crate::gateway::util::now_unix_seconds() as i64;
+        circuit.record_failure(circuit_id, now, None);
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+        let router = build_router(gateway_state_with_parts(
+            app_handle,
+            db,
+            log_tx,
+            circuit,
+            Arc::new(session_manager::SessionManager::new()),
+        ));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/v1/chat/completions")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"model":"gpt-limit-circuit","messages":[{"role":"user","content":"hello"}]}"#,
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        let payload: Value = serde_json::from_slice(&body).expect("response JSON");
+        assert_eq!(
+            payload.get("error_code").and_then(Value::as_str),
+            Some(crate::gateway::proxy::GatewayErrorCode::AllProvidersUnavailable.as_str())
+        );
+        assert_eq!(limited_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(circuit_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+        let log = recv_terminal_request_log(&mut log_rx).await;
+        let attempts: Value = serde_json::from_str(&log.attempts_json).expect("attempts JSON");
+        let attempts = attempts.as_array().expect("attempt array");
+        assert_eq!(attempts.len(), 1);
+        assert_eq!(
+            attempts[0].get("provider_id").and_then(Value::as_i64),
+            Some(circuit_id)
+        );
+        assert_eq!(
+            attempts[0].get("reason_code").and_then(Value::as_str),
+            Some(crate::gateway::events::decision_chain::REASON_CIRCUIT_OPEN)
+        );
+
+        limited_task.abort();
+        circuit_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn mock_runtime_router_prefilters_exhausted_spend_limit_without_upstream_call() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 2;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("gateway-route-spend-limit.sqlite"))
+            .expect("init test db");
+        let (limited_url, limited_calls, limited_task) = spawn_counting_status_upstream(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            r#"{"error":{"message":"must not be called"}}"#,
+        )
+        .await;
+        let limited_id =
+            insert_codex_provider_with_priority(&db, "Spend Limited", limited_url, 0);
+        db.open_connection()
+            .expect("open database")
+            .execute(
+                "UPDATE providers SET limit_total_usd = 0.0 WHERE id = ?1",
+                rusqlite::params![limited_id],
+            )
+            .expect("set exhausted total spend limit");
+
+        let success_body = r#"{"id":"spend-ok","object":"chat.completion","choices":[]}"#;
+        let (success_url, success_calls, success_task) =
+            spawn_counting_status_upstream(StatusCode::OK, success_body).await;
+        let success_id =
+            insert_codex_provider_with_priority(&db, "Spend Fallback", success_url, 1);
+
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+        let router = build_router(gateway_state_with_parts(
+            app_handle,
+            db,
+            log_tx,
+            Arc::new(circuit_breaker::CircuitBreaker::new(
+                circuit_breaker::CircuitBreakerConfig::default(),
+                HashMap::new(),
+                None,
+            )),
+            Arc::new(session_manager::SessionManager::new()),
+        ));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/v1/chat/completions")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"model":"gpt-spend-limit","messages":[{"role":"user","content":"hello"}]}"#,
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(limited_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(success_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        let log = recv_terminal_request_log(&mut log_rx).await;
+        let attempts: Value = serde_json::from_str(&log.attempts_json).expect("attempts json");
+        let attempts = attempts.as_array().expect("attempt array");
+        assert_eq!(attempts.len(), 1);
+        assert_eq!(
+            attempts[0].get("provider_id").and_then(Value::as_i64),
+            Some(success_id)
+        );
+        assert_eq!(
+            attempts[0].get("provider_index").and_then(Value::as_u64),
+            Some(1)
+        );
+
+        limited_task.abort();
+        success_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn forced_limited_provider_does_not_fall_back_to_another_route_member() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        settings::write(&app_handle, &settings::AppSettings::default())
+            .expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("gateway-route-forced-limited.sqlite"))
+            .expect("init test db");
+        let response_body =
+            r#"{"id":"must-not-run","object":"chat.completion","choices":[]}"#;
+        let (limited_url, limited_calls, limited_task) =
+            spawn_counting_status_upstream(StatusCode::OK, response_body).await;
+        let (fallback_url, fallback_calls, fallback_task) =
+            spawn_counting_status_upstream(StatusCode::OK, response_body).await;
+        let limited_id =
+            insert_codex_provider_with_priority(&db, "Forced Limited", limited_url, 0);
+        let _fallback_id =
+            insert_codex_provider_with_priority(&db, "Forced Fallback", fallback_url, 1);
+        db.open_connection()
+            .expect("open database")
+            .execute(
+                "UPDATE providers SET limit_total_usd = 0.0 WHERE id = ?1",
+                rusqlite::params![limited_id],
+            )
+            .expect("set exhausted total spend limit");
+
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+        let router = build_router(gateway_state(app_handle, db, log_tx));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(format!(
+                "/codex/_aio/provider/{limited_id}/v1/chat/completions"
+            ))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"model":"gpt-forced-limited","messages":[{"role":"user","content":"hello"}]}"#,
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        let payload: Value = serde_json::from_slice(&body).expect("response JSON");
+        assert_eq!(
+            payload.get("error_code").and_then(Value::as_str),
+            Some(crate::gateway::proxy::GatewayErrorCode::NoEnabledProvider.as_str())
+        );
+        assert_eq!(limited_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(fallback_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+        let log = recv_terminal_request_log(&mut log_rx).await;
+        assert_eq!(log.attempts_json, "[]");
+
+        limited_task.abort();
+        fallback_task.abort();
     }
 
     #[tokio::test(flavor = "current_thread")]

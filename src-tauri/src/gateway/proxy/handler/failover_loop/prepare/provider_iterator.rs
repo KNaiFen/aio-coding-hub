@@ -57,7 +57,7 @@ pub(super) struct IterationCounters {
     pub(super) earliest_available_unix: Option<i64>,
     pub(super) skipped_open: usize,
     pub(super) skipped_cooldown: usize,
-    pub(super) skipped_limits: usize,
+    pub(super) limit_exclusions: usize,
 }
 
 impl IterationCounters {
@@ -68,7 +68,7 @@ impl IterationCounters {
             earliest_available_unix: None,
             skipped_open: 0,
             skipped_cooldown: 0,
-            skipped_limits: 0,
+            limit_exclusions: 0,
         }
     }
 

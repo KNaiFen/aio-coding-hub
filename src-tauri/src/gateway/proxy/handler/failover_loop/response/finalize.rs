@@ -42,7 +42,7 @@ pub(super) struct AllUnavailableInput<'a, R: tauri::Runtime = tauri::Wry> {
     pub(super) earliest_available_unix: Option<i64>,
     pub(super) skipped_open: usize,
     pub(super) skipped_cooldown: usize,
-    pub(super) skipped_limits: usize,
+    pub(super) limit_exclusions: usize,
     pub(super) fingerprint_key: u64,
     pub(super) fingerprint_debug: String,
     pub(super) unavailable_fingerprint_key: u64,
@@ -72,7 +72,7 @@ pub(super) async fn all_providers_unavailable<R: tauri::Runtime>(
         earliest_available_unix,
         skipped_open,
         skipped_cooldown,
-        skipped_limits,
+        limit_exclusions,
         fingerprint_key,
         fingerprint_debug,
         unavailable_fingerprint_key,
@@ -86,7 +86,7 @@ pub(super) async fn all_providers_unavailable<R: tauri::Runtime>(
         .map(|v| v as u64);
 
     let detailed_message = format!(
-        "no provider available (skipped: open={skipped_open}, cooldown={skipped_cooldown}, limits={skipped_limits}) for cli_key={cli_key}",
+        "no provider available (skipped: open={skipped_open}, cooldown={skipped_cooldown}, limits={limit_exclusions}) for cli_key={cli_key}",
     );
     let message = if verbose_provider_error {
         detailed_message
@@ -101,7 +101,7 @@ pub(super) async fn all_providers_unavailable<R: tauri::Runtime>(
         cli_key = %cli_key,
         skipped_open = skipped_open,
         skipped_cooldown = skipped_cooldown,
-        skipped_limits = skipped_limits,
+        limit_exclusions = limit_exclusions,
         "all providers unavailable"
     );
 

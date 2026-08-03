@@ -107,22 +107,8 @@ pub(super) fn run_gates<R: tauri::Runtime>(
         ctx,
         provider,
         earliest_available_unix: &mut counters.earliest_available_unix,
-        skipped_limits: &mut counters.skipped_limits,
+        limit_exclusions: &mut counters.limit_exclusions,
     }) {
-        push_skipped_provider_attempt(
-            attempts,
-            SkippedProviderAttempt {
-                provider_id: identity.provider_id,
-                provider_name: identity.provider_name_base,
-                base_url: identity.provider_base_url_display,
-                error_category: "rate_limit",
-                error_code: GatewayErrorCode::ProviderRateLimited.as_str(),
-                reason: "provider skipped by rate limit".to_string(),
-                reason_code: Some(dc::REASON_RATE_LIMITED),
-                attempt_started_ms: input.started.elapsed().as_millis(),
-                circuit: None,
-            },
-        );
         return None;
     }
 

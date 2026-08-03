@@ -40,6 +40,9 @@ mod provider_gate;
 mod provider_iterator;
 #[path = "prepare/provider_limits.rs"]
 mod provider_limits;
+pub(in crate::gateway::proxy::handler) use provider_limits::{
+    filter_routing_candidates, needs_limit_evaluation, LimitFilteredProviders,
+};
 #[path = "prepare/request_sanitizer.rs"]
 mod request_sanitizer;
 
@@ -73,6 +76,10 @@ mod thinking_signature_rectifier_400;
 #[path = "response/upstream_error.rs"]
 mod upstream_error;
 
+use super::early_error::{
+    build_early_error_log_ctx_from_request, early_error_contract, respond_early_error_with_enqueue,
+    EarlyErrorKind,
+};
 use crate::gateway::proxy::request_context::RequestContext;
 use attempt_record::{
     record_system_failure_and_decide, record_system_failure_and_decide_no_cooldown,
@@ -90,7 +97,8 @@ use event_helpers::{
 };
 use loop_helpers::{
     apply_cx2cc_request_settings, finalize_owned_from_input, push_skipped_provider_attempt,
-    should_finalize_as_all_providers_unavailable, SkippedProviderAttempt,
+    should_finalize_as_all_providers_unavailable,
+    should_finalize_as_no_enabled_provider_after_limit_exclusions, SkippedProviderAttempt,
 };
 use oauth::{
     refresh_oauth_credential_after_401, resolve_effective_credential,
@@ -389,6 +397,46 @@ where
     }
 
     // --- Finalization ---
+    if should_finalize_as_no_enabled_provider_after_limit_exclusions(
+        &run_state.attempts,
+        counters.providers_tried,
+        counters.limit_exclusions,
+        counters.skipped_open,
+        counters.skipped_cooldown,
+    ) {
+        response_fixer::push_special_setting(
+            &input.special_settings,
+            serde_json::json!({
+                "type": "provider_selection_diagnostic",
+                "scope": "request",
+                "hit": true,
+                "reason": "no_enabled_provider",
+                "clearedReason": "all_candidates_limit_excluded_during_gate_recheck",
+                "cliKey": input.cli_key.as_str(),
+                "limitExclusionCount": counters.limit_exclusions,
+            }),
+        );
+        let contract = early_error_contract(EarlyErrorKind::NoEnabledProvider);
+        let message = format!("no enabled provider for cli_key={}", input.cli_key);
+        let special_settings_json =
+            response_fixer::special_settings_json(&input.special_settings);
+        let log_ctx = build_early_error_log_ctx_from_request(&input);
+        let resp = respond_early_error_with_enqueue(
+            &log_ctx,
+            contract,
+            message,
+            special_settings_json,
+            input.session_id.clone(),
+            run_state
+                .active_requested_model
+                .clone()
+                .or_else(|| input.requested_model.clone()),
+        )
+        .await;
+        abort_guard.disarm();
+        return resp;
+    }
+
     if should_finalize_as_all_providers_unavailable(&run_state.attempts)
         && !input.providers.is_empty()
     {
@@ -416,7 +464,7 @@ where
             earliest_available_unix: counters.earliest_available_unix,
             skipped_open: counters.skipped_open,
             skipped_cooldown: counters.skipped_cooldown,
-            skipped_limits: counters.skipped_limits,
+            limit_exclusions: counters.limit_exclusions,
             fingerprint_key: input.fingerprint_key,
             fingerprint_debug: input.fingerprint_debug.clone(),
             unavailable_fingerprint_key: input.unavailable_fingerprint_key,

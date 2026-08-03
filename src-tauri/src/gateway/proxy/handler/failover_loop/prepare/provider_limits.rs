@@ -9,7 +9,18 @@ pub(super) struct ProviderLimitsInput<'a, R: tauri::Runtime = tauri::Wry> {
     pub(super) ctx: CommonCtx<'a, R>,
     pub(super) provider: &'a providers::ProviderForGateway,
     pub(super) earliest_available_unix: &'a mut Option<i64>,
-    pub(super) skipped_limits: &'a mut usize,
+    pub(super) limit_exclusions: &'a mut usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::gateway::proxy::handler) enum ProviderLimitDecision {
+    Allow,
+    Limited { reset_at: Option<i64> },
+}
+
+pub(in crate::gateway::proxy::handler) struct LimitFilteredProviders {
+    pub(in crate::gateway::proxy::handler) eligible: Vec<providers::ProviderForGateway>,
+    pub(in crate::gateway::proxy::handler) excluded_provider_ids: Vec<i64>,
 }
 
 const USD_FEMTO_DENOM: f64 = 1_000_000_000_000_000.0;
@@ -71,6 +82,12 @@ fn has_any_limit(provider: &providers::ProviderForGateway) -> bool {
         || provider.limit_weekly_usd.is_some()
         || provider.limit_monthly_usd.is_some()
         || provider.limit_total_usd.is_some()
+}
+
+pub(in crate::gateway::proxy::handler) fn needs_limit_evaluation(
+    provider: &providers::ProviderForGateway,
+) -> bool {
+    provider.auth_mode == "oauth" || has_any_limit(provider)
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -591,37 +608,24 @@ fn resolve_fixed_5h_start(
     Ok(now_unix)
 }
 
-pub(super) fn gate_provider<R: tauri::Runtime>(input: ProviderLimitsInput<'_, R>) -> bool {
-    let ProviderLimitsInput {
-        ctx,
-        provider,
-        earliest_available_unix,
-        skipped_limits,
-    } = input;
-
+pub(in crate::gateway::proxy::handler) fn evaluate_provider_limits(
+    conn: &Connection,
+    provider: &providers::ProviderForGateway,
+    now_unix: i64,
+) -> ProviderLimitDecision {
     let has_oauth_quota_gate = provider.auth_mode == "oauth";
     let has_spend_limit = has_any_limit(provider);
-    if !has_oauth_quota_gate && !has_spend_limit {
-        return true;
+    if !needs_limit_evaluation(provider) {
+        return ProviderLimitDecision::Allow;
     }
 
-    let conn = match ctx.state.db.open_connection() {
-        Ok(conn) => conn,
-        Err(_) => return true,
-    };
-
-    let now_unix = ctx.created_at;
     let end_unix = now_unix.saturating_add(1);
 
     if has_oauth_quota_gate {
-        match crate::domain::provider_oauth_limits::gate_snapshot(&conn, provider.id, now_unix) {
+        match crate::domain::provider_oauth_limits::gate_snapshot(conn, provider.id, now_unix) {
             Ok(crate::domain::provider_oauth_limits::OAuthLimitGate::Allow) => {}
             Ok(crate::domain::provider_oauth_limits::OAuthLimitGate::Limited { reset_at }) => {
-                *skipped_limits = skipped_limits.saturating_add(1);
-                if let Some(reset_at) = reset_at {
-                    update_earliest(earliest_available_unix, reset_at);
-                }
-                return false;
+                return ProviderLimitDecision::Limited { reset_at };
             }
             Err(err) => {
                 tracing::warn!(
@@ -634,14 +638,14 @@ pub(super) fn gate_provider<R: tauri::Runtime>(input: ProviderLimitsInput<'_, R>
     }
 
     if !has_spend_limit {
-        return true;
+        return ProviderLimitDecision::Allow;
     }
 
     // Use fixed window for 5h limit
     let start_5h = if provider.limit_5h_usd.is_some() {
-        match resolve_fixed_5h_start(&conn, provider.id, now_unix) {
+        match resolve_fixed_5h_start(conn, provider.id, now_unix) {
             Ok(ts) => Some(ts),
-            Err(_) => return true,
+            Err(_) => return ProviderLimitDecision::Allow,
         }
     } else {
         None
@@ -654,12 +658,12 @@ pub(super) fn gate_provider<R: tauri::Runtime>(input: ProviderLimitsInput<'_, R>
             }
             (Some(_), providers::DailyResetMode::Fixed) => {
                 let (start, next) = match compute_daily_fixed_bounds(
-                    &conn,
+                    conn,
                     now_unix,
                     provider.daily_reset_time.as_str(),
                 ) {
                     Ok(v) => v,
-                    Err(_) => return true,
+                    Err(_) => return ProviderLimitDecision::Allow,
                 };
                 (None, Some(start), Some(next))
             }
@@ -667,18 +671,18 @@ pub(super) fn gate_provider<R: tauri::Runtime>(input: ProviderLimitsInput<'_, R>
         };
 
     let (start_weekly, next_weekly) = if provider.limit_weekly_usd.is_some() {
-        match compute_weekly_bounds(&conn, now_unix) {
+        match compute_weekly_bounds(conn, now_unix) {
             Ok((start, next)) => (Some(start), Some(next)),
-            Err(_) => return true,
+            Err(_) => return ProviderLimitDecision::Allow,
         }
     } else {
         (None, None)
     };
 
     let (start_monthly, next_monthly) = if provider.limit_monthly_usd.is_some() {
-        match compute_monthly_bounds(&conn, now_unix) {
+        match compute_monthly_bounds(conn, now_unix) {
             Ok((start, next)) => (Some(start), Some(next)),
-            Err(_) => return true,
+            Err(_) => return ProviderLimitDecision::Allow,
         }
     } else {
         (None, None)
@@ -698,7 +702,7 @@ pub(super) fn gate_provider<R: tauri::Runtime>(input: ProviderLimitsInput<'_, R>
     };
 
     let sums = match sum_cost_usd_femto_windows(
-        &conn,
+        conn,
         provider.id,
         SpendQueryBounds {
             start_5h,
@@ -711,7 +715,7 @@ pub(super) fn gate_provider<R: tauri::Runtime>(input: ProviderLimitsInput<'_, R>
         },
     ) {
         Ok(v) => v,
-        Err(_) => return true,
+        Err(_) => return ProviderLimitDecision::Allow,
     };
 
     let mut exceeded = false;
@@ -770,7 +774,7 @@ pub(super) fn gate_provider<R: tauri::Runtime>(input: ProviderLimitsInput<'_, R>
     }
 
     if !exceeded {
-        return true;
+        return ProviderLimitDecision::Allow;
     }
 
     if need_rolling_5h || need_rolling_daily {
@@ -788,7 +792,7 @@ pub(super) fn gate_provider<R: tauri::Runtime>(input: ProviderLimitsInput<'_, R>
         }
 
         if let Some(buckets_start) = buckets_start {
-            if let Ok(buckets) = fetch_cost_buckets(&conn, provider.id, buckets_start, end_unix) {
+            if let Ok(buckets) = fetch_cost_buckets(conn, provider.id, buckets_start, end_unix) {
                 if need_rolling_5h {
                     if let (Some(start_5h), Some(limit_usd)) = (start_5h, provider.limit_5h_usd) {
                         if let Some(limit_femto) = limit_usd_to_femto(limit_usd) {
@@ -824,11 +828,66 @@ pub(super) fn gate_provider<R: tauri::Runtime>(input: ProviderLimitsInput<'_, R>
         }
     }
 
-    *skipped_limits = skipped_limits.saturating_add(1);
-    if let Some(next) = provider_next_available {
-        update_earliest(earliest_available_unix, next);
+    ProviderLimitDecision::Limited {
+        reset_at: provider_next_available,
     }
-    false
+}
+
+pub(in crate::gateway::proxy::handler) fn filter_routing_candidates(
+    conn: &Connection,
+    providers: Vec<providers::ProviderForGateway>,
+    now_unix: i64,
+) -> LimitFilteredProviders {
+    let mut eligible = Vec::with_capacity(providers.len());
+    let mut excluded_provider_ids = Vec::new();
+
+    for provider in providers {
+        match evaluate_provider_limits(conn, &provider, now_unix) {
+            ProviderLimitDecision::Allow => eligible.push(provider),
+            ProviderLimitDecision::Limited { .. } => excluded_provider_ids.push(provider.id),
+        }
+    }
+
+    LimitFilteredProviders {
+        eligible,
+        excluded_provider_ids,
+    }
+}
+
+pub(super) fn gate_provider<R: tauri::Runtime>(input: ProviderLimitsInput<'_, R>) -> bool {
+    let ProviderLimitsInput {
+        ctx,
+        provider,
+        earliest_available_unix,
+        limit_exclusions,
+    } = input;
+
+    if !needs_limit_evaluation(provider) {
+        return true;
+    }
+
+    let conn = match ctx.state.db.open_connection() {
+        Ok(conn) => conn,
+        Err(_) => return true,
+    };
+
+    match evaluate_provider_limits(&conn, provider, ctx.created_at) {
+        ProviderLimitDecision::Allow => true,
+        ProviderLimitDecision::Limited { reset_at } => {
+            *limit_exclusions = limit_exclusions.saturating_add(1);
+            if let Some(reset_at) = reset_at {
+                update_earliest(earliest_available_unix, reset_at);
+            }
+            tracing::debug!(
+                trace_id = %ctx.trace_id,
+                cli_key = %ctx.cli_key,
+                provider_id = provider.id,
+                provider_name = %provider.name,
+                "provider excluded because its configured limit is exhausted"
+            );
+            false
+        }
+    }
 }
 
 #[cfg(test)]

@@ -180,6 +180,23 @@ pub(super) fn build_early_error_log_ctx<'a, R: tauri::Runtime>(
     }
 }
 
+pub(super) fn build_early_error_log_ctx_from_request<'a, R: tauri::Runtime>(
+    ctx: &'a crate::gateway::proxy::request_context::RequestContext<R>,
+) -> EarlyErrorLogCtx<'a, R> {
+    EarlyErrorLogCtx {
+        state: &ctx.state,
+        trace_id: &ctx.trace_id,
+        cli_key: &ctx.cli_key,
+        method_hint: &ctx.method_hint,
+        forwarded_path: &ctx.forwarded_path,
+        observe: ctx.observe_request,
+        query: ctx.query.as_deref(),
+        duration_ms: ctx.started.elapsed().as_millis(),
+        created_at_ms: ctx.created_at_ms,
+        created_at: ctx.created_at,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Early-error response builders
 // ---------------------------------------------------------------------------

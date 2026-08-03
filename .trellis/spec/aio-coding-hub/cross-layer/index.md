@@ -15,8 +15,8 @@ TypeScript bindings, frontend adapters, and React UI.
   global and provider policies, original-model matching, final wire rewrites,
   authoritative target-model costing, and fail-open observations.
 - [Gateway failover route contract](./gateway-failover-route-contract.md):
-  common provider-gate ownership, Ready-provider limits, persisted attempts,
-  route hops, and UI count semantics.
+  pre-session limit eligibility, common circuit/runtime gates, Ready-provider
+  limits, persisted attempts, route hops, and UI count semantics.
 - [Provider account-usage query contract](./provider-account-usage-query-contract.md):
   one TanStack Query owner for automatic, timed, and forced manual refreshes,
   bounded NewAPI model-token/account protocols, private credential ownership,
