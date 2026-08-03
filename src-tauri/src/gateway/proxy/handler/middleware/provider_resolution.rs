@@ -6,9 +6,7 @@ use crate::gateway::proxy::handler::early_error::{
     push_special_setting, respond_early_error_with_enqueue, respond_invalid_cli_key_with_spawn,
     respond_provider_selection_failed_with_spawn, EarlyErrorKind,
 };
-use crate::gateway::proxy::handler::failover_loop::{
-    filter_routing_candidates, needs_limit_evaluation, LimitFilteredProviders,
-};
+use crate::gateway::proxy::forwarder::{filter_routing_candidates, needs_limit_evaluation};
 use crate::gateway::proxy::handler::provider_selection::{
     resolve_session_bound_provider_id, resolve_session_routing_decision,
     select_providers_with_session_binding, ProviderSelection,
@@ -146,10 +144,8 @@ impl ProviderResolutionMiddleware {
                             return Ok((providers_to_filter, Vec::new()));
                         }
                     };
-                    let LimitFilteredProviders {
-                        eligible,
-                        excluded_provider_ids,
-                    } = filter_routing_candidates(&conn, providers_to_filter, created_at);
+                    let (eligible, excluded_provider_ids) =
+                        filter_routing_candidates(&conn, providers_to_filter, created_at);
                     Ok((eligible, excluded_provider_ids))
                 },
             )

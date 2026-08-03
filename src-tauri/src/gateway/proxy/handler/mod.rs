@@ -25,7 +25,7 @@ use axum::{
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-mod early_error;
+pub(super) mod early_error;
 mod middleware;
 mod provider_order;
 mod provider_selection;

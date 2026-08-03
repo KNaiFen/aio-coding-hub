@@ -40,8 +40,8 @@ mod provider_gate;
 mod provider_iterator;
 #[path = "prepare/provider_limits.rs"]
 mod provider_limits;
-pub(in crate::gateway::proxy::handler) use provider_limits::{
-    filter_routing_candidates, needs_limit_evaluation, LimitFilteredProviders,
+pub(in crate::gateway::proxy) use provider_limits::{
+    filter_routing_candidates, needs_limit_evaluation,
 };
 #[path = "prepare/request_sanitizer.rs"]
 mod request_sanitizer;
@@ -76,10 +76,6 @@ mod thinking_signature_rectifier_400;
 #[path = "response/upstream_error.rs"]
 mod upstream_error;
 
-use super::early_error::{
-    build_early_error_log_ctx_from_request, early_error_contract, respond_early_error_with_enqueue,
-    EarlyErrorKind,
-};
 use crate::gateway::proxy::request_context::RequestContext;
 use attempt_record::{
     record_system_failure_and_decide, record_system_failure_and_decide_no_cooldown,
@@ -404,29 +400,9 @@ where
         counters.skipped_open,
         counters.skipped_cooldown,
     ) {
-        response_fixer::push_special_setting(
-            &input.special_settings,
-            serde_json::json!({
-                "type": "provider_selection_diagnostic",
-                "scope": "request",
-                "hit": true,
-                "reason": "no_enabled_provider",
-                "clearedReason": "all_candidates_limit_excluded_during_gate_recheck",
-                "cliKey": input.cli_key.as_str(),
-                "limitExclusionCount": counters.limit_exclusions,
-            }),
-        );
-        let contract = early_error_contract(EarlyErrorKind::NoEnabledProvider);
-        let message = format!("no enabled provider for cli_key={}", input.cli_key);
-        let special_settings_json =
-            response_fixer::special_settings_json(&input.special_settings);
-        let log_ctx = build_early_error_log_ctx_from_request(&input);
-        let resp = respond_early_error_with_enqueue(
-            &log_ctx,
-            contract,
-            message,
-            special_settings_json,
-            input.session_id.clone(),
+        let resp = crate::gateway::proxy::handler::early_error::respond_no_enabled_provider_after_limit_exclusions(
+            &input,
+            counters.limit_exclusions,
             run_state
                 .active_requested_model
                 .clone()

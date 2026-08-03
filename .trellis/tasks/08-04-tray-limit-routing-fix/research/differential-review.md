@@ -102,3 +102,12 @@
 - 处理结果：通过普通 merge 合入，merge commit `b026cc6b9d71738572024dae8075571d97373d02`，未做冲突补丁。
 
 结论：第一次主线同步可接受。PR 最终合并前仍须重新 fetch；若 `origin/main` 再次移动，必须追加审查记录并重新验证，不能仅依据 CI 结果合并。
+
+## 首次 CI 修补审查
+
+- PR：[#35](https://github.com/KNaiFen/aio-coding-hub/pull/35)，首次检查提交 `6b44a3c77844adaef57fb4f7a7304a58917103cf`。
+- 失败运行：PR CI `30836728899` 与 macOS arm64 dev-build `30836822141`。
+- 根因：`handler/failover_loop/mod.rs` 通过 `#[path]` 声明在 `forwarder` 模块树下，首次实现误按物理目录将限额辅助函数限制到 `handler`，并从不存在的逻辑父模块导入 `early_error`，导致 Rust 模块路径与可见性编译错误。
+- 业务影响：失败发生在编译期，没有生成或发布可运行制品；CI 日志未显示路由断言失败，因此不能据此证明业务语义，但也不存在失败制品进入用户路径的风险。
+- 修补边界：限额辅助函数改为经 `provider_limits -> failover_loop -> forwarder` 窄接口导出；纯限额竞态响应由 `handler::early_error` 的单一代理函数封装。未修改限额计算、候选顺序、Session 绑定、attempt 生成条件或错误契约。
+- 本地复核：模块树与调用路径经 CodeGraph 和逐文件 diff 检查；`git diff --check` 通过。依仓库政策仍不在本地运行 Rust 工具链，修补后的编译、格式和原生测试继续由新一轮 CI 验证。

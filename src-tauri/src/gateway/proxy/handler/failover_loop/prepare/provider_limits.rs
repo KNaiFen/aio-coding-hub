@@ -13,14 +13,9 @@ pub(super) struct ProviderLimitsInput<'a, R: tauri::Runtime = tauri::Wry> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::gateway::proxy::handler) enum ProviderLimitDecision {
+enum ProviderLimitDecision {
     Allow,
     Limited { reset_at: Option<i64> },
-}
-
-pub(in crate::gateway::proxy::handler) struct LimitFilteredProviders {
-    pub(in crate::gateway::proxy::handler) eligible: Vec<providers::ProviderForGateway>,
-    pub(in crate::gateway::proxy::handler) excluded_provider_ids: Vec<i64>,
 }
 
 const USD_FEMTO_DENOM: f64 = 1_000_000_000_000_000.0;
@@ -84,7 +79,7 @@ fn has_any_limit(provider: &providers::ProviderForGateway) -> bool {
         || provider.limit_total_usd.is_some()
 }
 
-pub(in crate::gateway::proxy::handler) fn needs_limit_evaluation(
+pub(in crate::gateway::proxy) fn needs_limit_evaluation(
     provider: &providers::ProviderForGateway,
 ) -> bool {
     provider.auth_mode == "oauth" || has_any_limit(provider)
@@ -608,7 +603,7 @@ fn resolve_fixed_5h_start(
     Ok(now_unix)
 }
 
-pub(in crate::gateway::proxy::handler) fn evaluate_provider_limits(
+fn evaluate_provider_limits(
     conn: &Connection,
     provider: &providers::ProviderForGateway,
     now_unix: i64,
@@ -833,11 +828,11 @@ pub(in crate::gateway::proxy::handler) fn evaluate_provider_limits(
     }
 }
 
-pub(in crate::gateway::proxy::handler) fn filter_routing_candidates(
+pub(in crate::gateway::proxy) fn filter_routing_candidates(
     conn: &Connection,
     providers: Vec<providers::ProviderForGateway>,
     now_unix: i64,
-) -> LimitFilteredProviders {
+) -> (Vec<providers::ProviderForGateway>, Vec<i64>) {
     let mut eligible = Vec::with_capacity(providers.len());
     let mut excluded_provider_ids = Vec::new();
 
@@ -848,10 +843,7 @@ pub(in crate::gateway::proxy::handler) fn filter_routing_candidates(
         }
     }
 
-    LimitFilteredProviders {
-        eligible,
-        excluded_provider_ids,
-    }
+    (eligible, excluded_provider_ids)
 }
 
 pub(super) fn gate_provider<R: tauri::Runtime>(input: ProviderLimitsInput<'_, R>) -> bool {
