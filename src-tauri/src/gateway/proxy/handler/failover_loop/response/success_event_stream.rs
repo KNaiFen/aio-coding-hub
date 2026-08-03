@@ -254,10 +254,12 @@ fn inspect_buffered_event_stream_prefix(
             if let Some(evidence) = usage::classify_codex_stream_internal_error(
                 &event_name,
                 &data,
-                config.retry_policy.enabled
-                    && config.retry_policy.stream_internal_errors.enabled,
+                config.retry_policy.enabled && config.retry_policy.stream_internal_errors.enabled,
                 &config.retry_policy.stream_internal_errors.retry_keywords,
-                &config.retry_policy.stream_internal_errors.non_retry_keywords,
+                &config
+                    .retry_policy
+                    .stream_internal_errors
+                    .non_retry_keywords,
                 "buffered_before_commit",
             ) {
                 if evidence.is_retryable() {

@@ -197,29 +197,27 @@ pub(super) fn emit_request_event_and_spawn_request_log<R: tauri::Runtime>(
     // When a stream error occurs, update the last attempt's outcome to reflect
     // the actual error instead of keeping the stale "success" recorded when the
     // stream initially started.
-    let (attempts, attempts_json) =
-        if completion.error_code.is_some() || completion.stream_internal_error.is_some() {
-            let mut attempts = ctx.attempts.clone();
-            if let Some(last) = attempts.last_mut() {
-                last.stream_internal_error = completion.stream_internal_error.clone();
-                if let Some(error_code) = completion
-                    .error_code
-                    .filter(|_| last.outcome == "success")
-                {
-                    last.outcome = format!("stream_error: code={error_code}");
-                    last.error_code = Some(error_code);
-                    last.error_category = effective_error_category.or(Some(
-                        crate::gateway::proxy::ErrorCategory::SystemError.as_str(),
-                    ));
-                    // Update duration to the full stream duration instead of the initial value.
-                    last.attempt_duration_ms = Some(duration_ms);
-                }
+    let (attempts, attempts_json) = if completion.error_code.is_some()
+        || completion.stream_internal_error.is_some()
+    {
+        let mut attempts = ctx.attempts.clone();
+        if let Some(last) = attempts.last_mut() {
+            last.stream_internal_error = completion.stream_internal_error.clone();
+            if let Some(error_code) = completion.error_code.filter(|_| last.outcome == "success") {
+                last.outcome = format!("stream_error: code={error_code}");
+                last.error_code = Some(error_code);
+                last.error_category = effective_error_category.or(Some(
+                    crate::gateway::proxy::ErrorCategory::SystemError.as_str(),
+                ));
+                // Update duration to the full stream duration instead of the initial value.
+                last.attempt_duration_ms = Some(duration_ms);
             }
-            let json = serde_json::to_string(&attempts).unwrap_or_else(|_| "[]".to_string());
-            (attempts, json)
-        } else {
-            (ctx.attempts.clone(), ctx.attempts_json.clone())
-        };
+        }
+        let json = serde_json::to_string(&attempts).unwrap_or_else(|_| "[]".to_string());
+        (attempts, json)
+    } else {
+        (ctx.attempts.clone(), ctx.attempts_json.clone())
+    };
 
     let (last_activity_ms, activity_details_json) = ctx
         .activity
