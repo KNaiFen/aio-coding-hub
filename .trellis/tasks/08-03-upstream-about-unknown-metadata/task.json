@@ -3,7 +3,7 @@
   "name": "upstream-about-unknown-metadata",
   "title": "隐藏 About 未知元数据",
   "description": "选择性移植 de09d645，隐藏未知 Bundle 与运行模式字段。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": "@aio-coding-hub",
   "package": "aio-coding-hub",
