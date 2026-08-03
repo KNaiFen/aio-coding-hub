@@ -253,7 +253,7 @@ extent_parts(min_ts, max_ts) AS (
   SELECT MIN(r.created_at), MAX(r.created_at)
   FROM trusted_bounds bounds
   CROSS JOIN query_args q
-  CROSS JOIN usage_events r
+  CROSS JOIN usage_ledger AS r INDEXED BY idx_usage_ledger_created_at
   WHERE r.created_at < bounds.first_start_ts
     AND (q.end_ts IS NULL OR r.created_at < q.end_ts)
     AND r.excluded_from_stats = 0
@@ -267,7 +267,7 @@ extent_parts(min_ts, max_ts) AS (
 
   SELECT MIN(r.created_at), MAX(r.created_at)
   FROM raw_intervals gap
-  JOIN usage_events r
+  CROSS JOIN usage_ledger AS r INDEXED BY idx_usage_ledger_created_at
     ON r.created_at >= gap.start_ts
    AND r.created_at < gap.end_ts
   CROSS JOIN query_args q
@@ -283,7 +283,7 @@ extent_parts(min_ts, max_ts) AS (
   SELECT MIN(r.created_at), MAX(r.created_at)
   FROM trusted_bounds bounds
   CROSS JOIN query_args q
-  CROSS JOIN usage_events r
+  CROSS JOIN usage_ledger AS r INDEXED BY idx_usage_ledger_created_at
   WHERE r.created_at >= bounds.last_end_ts
     AND (q.end_ts IS NULL OR r.created_at < q.end_ts)
     AND r.excluded_from_stats = 0
@@ -643,7 +643,7 @@ raw_intervals(start_ts, end_ts) AS MATERIALIZED (
 ),
 "#
             .to_string(),
-            "FROM usage_events r\nJOIN raw_intervals ri\n  ON r.created_at >= ri.start_ts\n AND r.created_at < ri.end_ts\nCROSS JOIN query_args q".to_string(),
+            "FROM raw_intervals ri\nCROSS JOIN usage_ledger AS r INDEXED BY idx_usage_ledger_created_at\n  ON r.created_at >= ri.start_ts\n AND r.created_at < ri.end_ts\nCROSS JOIN query_args q".to_string(),
         ),
     };
 

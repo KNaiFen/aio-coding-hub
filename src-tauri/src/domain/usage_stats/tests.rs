@@ -1638,6 +1638,9 @@ CREATE TABLE usage_provider_daily_rollup_backfill_state (
   updated_at INTEGER NOT NULL
 );
 
+CREATE TABLE usage_ledger AS SELECT * FROM usage_events;
+CREATE INDEX idx_usage_ledger_created_at ON usage_ledger(created_at);
+
 CREATE TABLE usage_ledger_backfill_state (
   id INTEGER PRIMARY KEY,
   status TEXT NOT NULL
