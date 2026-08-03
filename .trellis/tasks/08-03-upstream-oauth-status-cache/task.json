@@ -3,7 +3,7 @@
   "name": "upstream-oauth-status-cache",
   "title": "收敛 OAuth 状态缓存",
   "description": "选择性移植 84564a5b，修复 OAuth 刷新和断开后的 stale cache 竞态。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": "@aio-coding-hub",
   "package": "aio-coding-hub",

@@ -1,7 +1,9 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import type {
   ProviderAccountUsageResult,
+  ProviderOAuthStatusResult,
   ProviderRouteRow,
   ProviderSummary,
 } from "../../services/providers/providers";
@@ -46,6 +48,7 @@ import {
   useProviderUpsertMutation,
   useProvidersListQuery,
   useProvidersReorderMutation,
+  writeProviderOAuthStatusCache,
 } from "../providers";
 import { useProviderModelsRefreshMutation } from "../providerModels";
 import {
@@ -316,6 +319,77 @@ describe("query/providers", () => {
     expect(providerOAuthStatus).toHaveBeenCalledWith(9);
     expect(client.getQueryData(providersKeys.oauthStatus(9))).toEqual(status);
     expect(client.getQueryState(providersKeys.oauthStatus(Number.NaN))).toBeUndefined();
+  });
+
+  it("fetchProviderOAuthStatus bypasses a fresh cached status", async () => {
+    setTauriRuntime();
+
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 5 * 60 * 1000 } },
+    });
+    const stale: ProviderOAuthStatusResult = {
+      connected: true,
+      provider_type: "grok_oauth",
+      email: "user@example.com",
+      expires_at: 1_700_000_000,
+      has_refresh_token: true,
+    };
+    const fresh: ProviderOAuthStatusResult = { ...stale, expires_at: 1_800_000_000 };
+    client.setQueryData(providersKeys.oauthStatus(9), stale);
+    vi.mocked(providerOAuthStatus).mockResolvedValue(fresh);
+
+    await expect(fetchProviderOAuthStatus(client, 9)).resolves.toEqual(fresh);
+    expect(providerOAuthStatus).toHaveBeenCalledWith(9);
+    expect(client.getQueryData(providersKeys.oauthStatus(9))).toEqual(fresh);
+  });
+
+  it("fetchProviderOAuthStatus cancels an older request before fetching fresh status", async () => {
+    setTauriRuntime();
+
+    const client = createTestQueryClient();
+    const queryKey = providersKeys.oauthStatus(9);
+    const stale: ProviderOAuthStatusResult = {
+      connected: true,
+      provider_type: "grok_oauth",
+      email: "user@example.com",
+      expires_at: 1_700_000_000,
+      has_refresh_token: true,
+    };
+    const fresh: ProviderOAuthStatusResult = { ...stale, expires_at: 1_800_000_000 };
+    let resolveStale!: (value: ProviderOAuthStatusResult) => void;
+    vi.mocked(providerOAuthStatus)
+      .mockImplementationOnce(() => new Promise((resolve) => (resolveStale = resolve)))
+      .mockResolvedValueOnce(fresh);
+
+    const inflight = client
+      .fetchQuery({ queryKey, queryFn: () => providerOAuthStatus(9) })
+      .catch(() => null);
+    await expect(fetchProviderOAuthStatus(client, 9)).resolves.toEqual(fresh);
+
+    resolveStale(stale);
+    await inflight;
+    expect(client.getQueryData(queryKey)).toEqual(fresh);
+  });
+
+  it("writeProviderOAuthStatusCache writes, clears, and validates the cache key", () => {
+    const client = createTestQueryClient();
+    const status: ProviderOAuthStatusResult = {
+      connected: true,
+      provider_type: "grok_oauth",
+      email: "user@example.com",
+      expires_at: 1_800_000_000,
+      has_refresh_token: true,
+    };
+
+    writeProviderOAuthStatusCache(client, 9, status);
+    expect(client.getQueryData(providersKeys.oauthStatus(9))).toEqual(status);
+    writeProviderOAuthStatusCache(client, 9, null);
+    expect(client.getQueryData(providersKeys.oauthStatus(9))).toBeNull();
+    writeProviderOAuthStatusCache(client, null, status);
+    expect(client.getQueryCache().getAll()).toHaveLength(1);
+    expect(() => writeProviderOAuthStatusCache(client, Number.NaN, status)).toThrow(
+      "SEC_INVALID_INPUT"
+    );
   });
 
   it("normalizes OAuth limits providerId before cache reads, refreshes, and query calls", async () => {

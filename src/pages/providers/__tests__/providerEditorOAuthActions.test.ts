@@ -193,6 +193,7 @@ function makeCtx(overrides: Partial<OAuthActionContext> = {}) {
     oauthStatus: null,
     setOauthStatus: vi.fn(),
     refreshOauthStatus: vi.fn().mockResolvedValue(makeStatus()),
+    writeOauthStatusCache: vi.fn(),
     setOauthLoading: vi.fn(),
     oauthDeviceFlow: null,
     setOauthDeviceFlow: vi.fn(),
@@ -362,12 +363,12 @@ describe("providerEditorOAuthActions", () => {
     expect(staleLimits.ctx.setOauthLoading).not.toHaveBeenLastCalledWith(false);
   });
 
-  it("keeps login success but reports status and limit refresh failures", async () => {
+  it("writes the login result fallback to state and cache when status refresh fails", async () => {
     vi.mocked(providerOAuthStartFlow).mockResolvedValue({
       success: true,
       provider_id: 5,
       provider_type: "google",
-      expires_at: null,
+      expires_at: 1234,
     });
     vi.mocked(providerOAuthFetchLimits).mockRejectedValue(new Error("limits down"));
 
@@ -379,6 +380,15 @@ describe("providerEditorOAuthActions", () => {
 
     await handleOAuthLogin(ctx);
 
+    const fallback = {
+      connected: true,
+      provider_type: "google",
+      email: null,
+      expires_at: 1234,
+      has_refresh_token: null,
+    };
+    expect(ctx.setOauthStatus).toHaveBeenCalledWith(fallback);
+    expect(ctx.writeOauthStatusCache).toHaveBeenCalledWith(fallback, 5);
     expect(toast).toHaveBeenCalledWith("OAuth 登录成功，但读取连接状态失败，可稍后重试");
     expect(toast).toHaveBeenCalledWith("OAuth 登录成功，但获取用量失败，可稍后重试");
     expect(toast).toHaveBeenCalledWith("OAuth 登录成功");
@@ -560,6 +570,8 @@ describe("providerEditorOAuthActions", () => {
 
     expect(ctx.setOauthStatus).toHaveBeenCalledWith(makeStatus());
     expect(ctx.setOauthStatus).toHaveBeenCalledWith(null);
+    expect(ctx.writeOauthStatusCache).toHaveBeenCalledWith(null, 7);
+    expect(ctx.writeOauthStatusCache).toHaveBeenCalledTimes(1);
     expect(ctx.invalidateProviderModels).toHaveBeenCalledTimes(1);
     expect(ctx.invalidateProviderModels).toHaveBeenCalledWith(7, PROVIDER_UUID);
     expect(toast).toHaveBeenCalledWith("Token 刷新成功");

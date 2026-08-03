@@ -96,15 +96,31 @@ export function useProviderOAuthStatusQuery(
 }
 
 export async function fetchProviderOAuthStatus(
-  queryClient: ReturnType<typeof useQueryClient>,
+  queryClient: QueryClient,
   providerId: number | null
 ) {
   if (providerId == null) return null;
   const normalizedProviderId = validateProviderId(providerId);
+  const queryKey = providersKeys.oauthStatus(normalizedProviderId);
+  // Login and token refresh must bypass the five-minute global stale window.
+  // Cancel older work first so its late result cannot replace the new status.
+  await queryClient.cancelQueries({ queryKey });
   return queryClient.fetchQuery({
-    queryKey: providersKeys.oauthStatus(normalizedProviderId),
+    queryKey,
     queryFn: () => providerOAuthStatus(normalizedProviderId),
+    staleTime: 0,
   });
+}
+
+export function writeProviderOAuthStatusCache(
+  queryClient: QueryClient,
+  providerId: number | null,
+  status: Awaited<ReturnType<typeof providerOAuthStatus>> | null
+) {
+  if (providerId == null) return;
+  const queryKey = providersKeys.oauthStatus(validateProviderId(providerId));
+  void queryClient.cancelQueries({ queryKey });
+  queryClient.setQueryData(queryKey, status);
 }
 
 const EMPTY_OAUTH_LIMITS_RESULT: OAuthLimitsResult = {

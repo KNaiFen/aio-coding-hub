@@ -36,6 +36,7 @@ export type AuthActionContext = {
   oauthStatus: OAuthStatusValue;
   setOauthStatus: (v: OAuthStatusValue) => void;
   refreshOauthStatus: (providerId?: number | null) => Promise<OAuthStatusValue>;
+  writeOauthStatusCache: (status: OAuthStatusValue, providerId?: number | null) => void;
   oauthLoading: boolean;
   setOauthLoading: (v: boolean) => void;
   oauthDeviceFlow: ProviderOAuthDeviceCodeStartResult | null;
@@ -147,6 +148,7 @@ export type OAuthActionContext = ProviderActionContext &
     | "oauthStatus"
     | "setOauthStatus"
     | "refreshOauthStatus"
+    | "writeOauthStatusCache"
     | "setOauthLoading"
     | "oauthDeviceFlow"
     | "setOauthDeviceFlow"
