@@ -1802,6 +1802,9 @@ fn provider_metric_trend_matches_summary_formulas_and_sample_guards() {
     assert_eq!(row.granularity, UsageTrendGranularityV1::Hour);
     assert_eq!(row.requests_total, 4);
     assert_eq!(row.requests_success, 3);
+    assert_eq!(row.duration_samples, 3);
+    assert_eq!(row.ttfb_samples, 2);
+    assert_eq!(row.output_rate_samples, 1);
     assert_eq!(row.avg_duration_ms, summary.avg_duration_ms);
     assert_eq!(row.avg_ttfb_ms, summary.avg_ttfb_ms);
     assert_eq!(

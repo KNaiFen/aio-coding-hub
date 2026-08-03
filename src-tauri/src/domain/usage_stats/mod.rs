@@ -51,3 +51,5 @@ use tokens::{
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod trend_benchmark_tests;

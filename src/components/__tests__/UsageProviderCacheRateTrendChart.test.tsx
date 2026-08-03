@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { UsageProviderCacheRateTrendRowV1 } from "../../services/usage/usage";
 
@@ -47,11 +47,17 @@ vi.mock("../charts/lazyRecharts", () => {
   ];
 
   return {
-    CartesianGrid: () => <g data-testid="grid" />,
-    Legend: () => <div data-testid="legend" />,
-    Line: ({ dataKey }: any) => <path data-testid={`line-${dataKey}`} />,
-    LineChart: ({ children, data }: any) => (
-      <div data-testid="line-chart" data-points={data?.length ?? 0}>
+    CartesianGrid: () => <div data-testid="grid" />,
+    Line: ({ dataKey, hide }: any) => (
+      <div data-testid={`line-${dataKey}`} data-hidden={String(Boolean(hide))} />
+    ),
+    LineChart: ({ children, data, accessibilityLayer, ...props }: any) => (
+      <div
+        data-testid="line-chart"
+        data-points={data?.length ?? 0}
+        data-accessibility-layer={String(Boolean(accessibilityLayer))}
+        aria-label={props["aria-label"]}
+      >
         {children}
       </div>
     ),
@@ -87,6 +93,7 @@ import { UsageProviderCacheRateTrendChart } from "../UsageProviderCacheRateTrend
 const sampleRow: UsageProviderCacheRateTrendRowV1 = {
   day: "2026-02-20",
   hour: null,
+  granularity: "day",
   key: "openai",
   name: "OpenAI",
   denom_tokens: 200,
@@ -96,62 +103,73 @@ const sampleRow: UsageProviderCacheRateTrendRowV1 = {
 
 describe("components/UsageProviderCacheRateTrendChart", () => {
   it("renders without data", () => {
-    const { container } = render(
-      <UsageProviderCacheRateTrendChart rows={[]} period="weekly" customApplied={null} />
-    );
+    const { container } = render(<UsageProviderCacheRateTrendChart rows={[]} />);
     expect(container).toBeTruthy();
   });
 
-  it("renders with weekly data", () => {
+  it("renders backend-selected weekly buckets", () => {
     const rows: UsageProviderCacheRateTrendRowV1[] = [
-      sampleRow,
-      { ...sampleRow, day: "2026-02-21", cache_read_input_tokens: 200 },
-      { ...sampleRow, key: "anthropic", name: "Anthropic", day: "2026-02-20" },
+      { ...sampleRow, granularity: "week" },
+      { ...sampleRow, granularity: "week", day: "2026-02-27", cache_read_input_tokens: 200 },
+      { ...sampleRow, granularity: "week", key: "anthropic", name: "Anthropic" },
     ];
-    const { container } = render(
-      <UsageProviderCacheRateTrendChart rows={rows} period="weekly" customApplied={null} />
-    );
-    expect(container).toBeTruthy();
+    render(<UsageProviderCacheRateTrendChart rows={rows} />);
+    expect(screen.getByTestId("line-chart").getAttribute("data-points")).toBe("2");
+    expect(screen.getByTestId("x-axis").getAttribute("data-ticks")).toBe("02/20,02/27");
   });
 
-  it("renders with daily (hourly) period", () => {
+  it("keeps hourly buckets distinct across days", () => {
     const rows: UsageProviderCacheRateTrendRowV1[] = [
-      { ...sampleRow, hour: 10 },
-      { ...sampleRow, hour: 14 },
+      { ...sampleRow, granularity: "hour", hour: 10 },
+      { ...sampleRow, granularity: "hour", day: "2026-02-21", hour: 14 },
     ];
-    const { container } = render(
-      <UsageProviderCacheRateTrendChart rows={rows} period="daily" customApplied={null} />
-    );
-    expect(container).toBeTruthy();
+    render(<UsageProviderCacheRateTrendChart rows={rows} />);
+    expect(screen.getByTestId("x-axis").getAttribute("data-ticks")).toBe("02/20 10:00,02/21 14:00");
   });
 
-  it("renders with monthly period", () => {
-    const { container } = render(
-      <UsageProviderCacheRateTrendChart rows={[sampleRow]} period="monthly" customApplied={null} />
-    );
-    expect(container).toBeTruthy();
+  it("hides and restores a provider series from the legend", () => {
+    render(<UsageProviderCacheRateTrendChart rows={[sampleRow]} />);
+    const legendButton = screen.getByRole("button", { name: "OpenAI" });
+
+    expect(legendButton).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("line-openai")).toHaveAttribute("data-hidden", "false");
+    expect(screen.getByTestId("reference-area")).toBeTruthy();
+
+    fireEvent.click(legendButton);
+    expect(legendButton).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByTestId("line-openai")).toHaveAttribute("data-hidden", "true");
+    expect(screen.queryByTestId("reference-area")).toBeNull();
+
+    fireEvent.click(legendButton);
+    expect(legendButton).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("line-openai")).toHaveAttribute("data-hidden", "false");
+    expect(screen.getByTestId("reference-area")).toBeTruthy();
   });
 
-  it("renders with allTime period", () => {
-    const { container } = render(
-      <UsageProviderCacheRateTrendChart rows={[sampleRow]} period="allTime" customApplied={null} />
+  it("enables the chart accessibility layer and labels the legend group", () => {
+    render(<UsageProviderCacheRateTrendChart rows={[sampleRow]} />);
+    expect(screen.getByLabelText("供应商缓存命中率趋势图")).toHaveAttribute(
+      "data-accessibility-layer",
+      "true"
     );
-    expect(container).toBeTruthy();
+    expect(screen.getByRole("group", { name: "供应商图例" })).toBeTruthy();
   });
 
-  it("renders with custom date range", () => {
-    const { container } = render(
+  it("renders month buckets", () => {
+    render(
       <UsageProviderCacheRateTrendChart
-        rows={[sampleRow]}
-        period="custom"
-        customApplied={{
-          startDate: "2026-02-15",
-          endDate: "2026-02-25",
-          startTs: 1739577600,
-          endTs: 1740441600,
-        }}
+        rows={[{ ...sampleRow, granularity: "month", day: "2026-02" }]}
       />
     );
-    expect(container).toBeTruthy();
+    expect(screen.getByTestId("x-axis").getAttribute("data-ticks")).toBe("2026-02");
+  });
+
+  it("renders year buckets", () => {
+    render(
+      <UsageProviderCacheRateTrendChart
+        rows={[{ ...sampleRow, granularity: "year", day: "2026" }]}
+      />
+    );
+    expect(screen.getByTestId("x-axis").getAttribute("data-ticks")).toBe("2026");
   });
 });

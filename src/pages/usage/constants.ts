@@ -16,5 +16,12 @@ export const SCOPE_ITEMS: ScopeItem[] = [
 export const USAGE_TABLE_TAB_ITEMS = [
   { key: "usage", label: "用量" },
   { key: "cacheTrend", label: "缓存走势图" },
+  { key: "metricsTrend", label: "性能趋势" },
   { key: "availability", label: "可用率" },
 ] satisfies Array<TabListItem<UsageTableTab>>;
+
+export const USAGE_METRICS_TREND_ITEMS = [
+  { key: "duration", label: "耗时" },
+  { key: "ttfb", label: "TTFB" },
+  { key: "rate", label: "输出速率" },
+] satisfies Array<TabListItem<"duration" | "ttfb" | "rate">>;

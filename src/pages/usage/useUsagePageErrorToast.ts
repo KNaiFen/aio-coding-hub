@@ -14,7 +14,13 @@ export function useUsagePageErrorToast(errorText: string | null, tableTab: Usage
     if (lastRef.current === key) return;
 
     lastRef.current = key;
-    const label = tableTab === "cacheTrend" ? "缓存走势" : "用量";
+    const label = errorText.includes("汇总数据：")
+      ? "用量"
+      : tableTab === "cacheTrend"
+        ? "缓存走势"
+        : tableTab === "metricsTrend"
+          ? "性能趋势"
+          : "用量";
     toast(`加载${label}失败：请重试（详情见页面错误信息）`);
   }, [errorText, tableTab]);
 }

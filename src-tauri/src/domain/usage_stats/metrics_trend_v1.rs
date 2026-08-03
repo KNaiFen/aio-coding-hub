@@ -99,7 +99,8 @@ bucketed AS (
     SUM(CASE WHEN {success} AND {valid_ttfb} THEN r.ttfb_ms ELSE 0 END) AS success_ttfb_ms_sum,
     SUM(CASE WHEN {success} AND {valid_ttfb} THEN 1 ELSE 0 END) AS success_ttfb_ms_count,
     SUM(CASE WHEN {success} AND {valid_output_rate} THEN r.duration_ms - r.ttfb_ms ELSE 0 END) AS success_generation_ms_sum,
-    SUM(CASE WHEN {success} AND {valid_output_rate} THEN r.output_tokens ELSE 0 END) AS success_output_tokens_for_rate_sum
+    SUM(CASE WHEN {success} AND {valid_output_rate} THEN r.output_tokens ELSE 0 END) AS success_output_tokens_for_rate_sum,
+    SUM(CASE WHEN {success} AND {valid_output_rate} THEN 1 ELSE 0 END) AS success_output_rate_count
   FROM usage_events r
   JOIN top_providers tp
     ON tp.cli_key = r.cli_key
@@ -123,7 +124,8 @@ SELECT
   b.success_ttfb_ms_sum,
   b.success_ttfb_ms_count,
   b.success_generation_ms_sum,
-  b.success_output_tokens_for_rate_sum
+  b.success_output_tokens_for_rate_sum,
+  b.success_output_rate_count
 FROM bucketed b
 ORDER BY {order_by_fields}, b.requests_success DESC, b.cli_key ASC, b.provider_id ASC
 "#,
@@ -147,6 +149,7 @@ ORDER BY {order_by_fields}, b.requests_success DESC, b.cli_key ASC, b.provider_i
         success_ttfb_ms_count: i64,
         success_generation_ms_sum: i64,
         success_output_tokens_for_rate_sum: i64,
+        success_output_rate_count: i64,
     }
 
     let mut stmt = conn
@@ -184,6 +187,9 @@ ORDER BY {order_by_fields}, b.requests_success DESC, b.cli_key ASC, b.provider_i
                         .unwrap_or(0),
                     success_output_tokens_for_rate_sum: row
                         .get::<_, Option<i64>>("success_output_tokens_for_rate_sum")?
+                        .unwrap_or(0),
+                    success_output_rate_count: row
+                        .get::<_, Option<i64>>("success_output_rate_count")?
                         .unwrap_or(0),
                 })
             },
@@ -259,6 +265,9 @@ ORDER BY {order_by_fields}, b.requests_success DESC, b.cli_key ASC, b.provider_i
             provider_name,
             requests_total: row.requests_total,
             requests_success: row.requests_success,
+            duration_samples: row.requests_success,
+            ttfb_samples: row.success_ttfb_ms_count,
+            output_rate_samples: row.success_output_rate_count,
             avg_duration_ms,
             avg_ttfb_ms,
             avg_output_tokens_per_second,

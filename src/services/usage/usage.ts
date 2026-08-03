@@ -12,6 +12,7 @@ import {
   type UsageHourlyRow,
   type UsageLeaderboardRow,
   type UsageProviderCacheRateTrendRowV1,
+  type UsageProviderMetricTrendRowV1 as GeneratedUsageProviderMetricTrendRowV1,
   type UsageProviderRow as GeneratedUsageProviderRow,
   type UsageQueryParams as GeneratedUsageQueryParams,
   type UsageSummary,
@@ -39,7 +40,8 @@ export const USAGE_LEADERBOARD_V2_MAX_LIMIT = 200;
 export const USAGE_HOURLY_SERIES_MIN_DAYS = 1;
 export const USAGE_HOURLY_SERIES_MAX_DAYS = 60;
 export const USAGE_DAY_DETAIL_FOLDER_MAX_LIMIT = 50;
-export const USAGE_PROVIDER_CACHE_RATE_TREND_MAX_LIMIT = 200;
+export const USAGE_PROVIDER_TREND_MAX_LIMIT = 10;
+export const USAGE_PROVIDER_CACHE_RATE_TREND_MAX_LIMIT = USAGE_PROVIDER_TREND_MAX_LIMIT;
 
 export type UsageRange = "today" | "last7" | "last30" | "month" | "all";
 export type UsageScope = "cli" | "provider" | "model" | "day";
@@ -74,6 +76,8 @@ export type UsageProviderRow = Override<
   }
 >;
 
+export type UsageProviderMetricTrendRowV1 = GeneratedUsageProviderMetricTrendRowV1;
+
 export type UsageQueryInputV2 = Omit<
   OptionalNullableGeneratedFields<GeneratedUsageQueryParams>,
   "period"
@@ -96,12 +100,10 @@ export type UsageDayDetailInput = Override<
     cliKey?: CliKey | null;
   }
 >;
-export type UsageProviderCacheRateTrendInput = Omit<
-  UsageQueryInputV2,
-  "folderKeys" | "dayStartHour"
-> & {
+export type UsageProviderTrendInput = Omit<UsageQueryInputV2, "folderKeys" | "dayStartHour"> & {
   limit?: number | null;
 };
+export type UsageProviderCacheRateTrendInput = UsageProviderTrendInput;
 export type NormalizedUsageDayDetailInput = {
   day: string;
   cliKey: CliKey | null;
@@ -173,12 +175,16 @@ export function normalizeUsageDayDetailFolderLimit(limit?: number | null): numbe
   );
 }
 
-export function normalizeUsageProviderCacheRateTrendLimit(limit?: number | null): number | null {
+export function normalizeUsageProviderTrendLimit(limit?: number | null): number | null {
   return normalizeBoundedInteger(
-    "usage provider cache rate trend limit",
+    "usage provider trend limit",
     limit,
-    USAGE_PROVIDER_CACHE_RATE_TREND_MAX_LIMIT
+    USAGE_PROVIDER_TREND_MAX_LIMIT
   );
+}
+
+export function normalizeUsageProviderCacheRateTrendLimit(limit?: number | null): number | null {
+  return normalizeUsageProviderTrendLimit(limit);
 }
 
 export function validateUsageCliKey(cliKey?: string | null): CliKey | null {
@@ -551,6 +557,24 @@ export async function usageProviderCacheRateTrendV1(
       limit,
     },
     invoke: () => commands.usageProviderCacheRateTrendV1(params, limit),
+  });
+}
+
+export async function usageProviderMetricTrendV1(
+  period: UsagePeriod,
+  input?: UsageProviderTrendInput
+) {
+  const params = buildQueryParamsV2(period, { ...input, folderKeys: null, dayStartHour: null });
+  const limit = normalizeUsageProviderTrendLimit(input?.limit);
+
+  return invokeGeneratedIpc<UsageProviderMetricTrendRowV1[]>({
+    title: "读取供应商性能趋势失败",
+    cmd: "usage_provider_metric_trend_v1",
+    args: {
+      params,
+      limit,
+    },
+    invoke: () => commands.usageProviderMetricTrendV1(params, limit),
   });
 }
 

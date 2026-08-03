@@ -146,15 +146,19 @@ function UsageDataPanelSection({
       loading={model.loading}
       dataLoading={model.dataLoading}
       cacheTrendLoading={model.cacheTrendLoading}
+      metricsTrendLoading={model.metricsTrendLoading}
       dataStale={model.dataStale}
       cacheTrendStale={model.cacheTrendStale}
-      errorText={model.errorText}
+      metricsTrendStale={model.metricsTrendStale}
+      errorText={model.panelErrorText}
       tableTitle={tableTitleForScope(table.scope)}
       summary={model.summary}
       rows={model.rows}
       totalCostUsd={model.totalCostUsd}
       cacheTrendRows={model.cacheTrendRows}
       cacheTrendProviderCount={model.cacheTrendProviderCount}
+      metricsTrendRows={model.metricsTrendRows}
+      metricsTrendProviderCount={model.metricsTrendProviderCount}
       providerSelectValue={
         filters.providerId == null ? PROVIDER_FILTER_ALL : String(filters.providerId)
       }

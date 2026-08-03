@@ -1,7 +1,6 @@
-import { Suspense, useMemo, type ReactNode } from "react";
+import { Suspense, useMemo, useState, type ReactNode } from "react";
 import {
   CartesianGrid,
-  Legend,
   Line,
   LineChart,
   ReferenceArea,
@@ -11,23 +10,26 @@ import {
   XAxis,
   YAxis,
 } from "./charts/lazyRecharts";
-import type { CustomDateRangeApplied } from "../hooks/useCustomDateRange";
-import type { UsagePeriod, UsageProviderCacheRateTrendRowV1 } from "../services/usage/usage";
+import type { UsageProviderCacheRateTrendRowV1 } from "../services/usage/usage";
 import { useTheme } from "../hooks/useTheme";
 import { cn } from "../utils/cn";
-import { buildRecentDayKeys, dayKeyFromLocalDate } from "../utils/dateKeys";
-import { parseYyyyMmDd } from "../utils/localDate";
 import { formatInteger, formatPercent } from "../utils/formatters";
 import {
   pickPaletteColor,
   getAxisStyle,
   getGridLineStyle,
   getTooltipStyle,
-  getLegendStyle,
   getAxisLineStroke,
   CHART_ANIMATION,
   THRESHOLD_COLORS,
 } from "./charts/chartTheme";
+import {
+  buildProviderTrendTicks,
+  providerTrendBucketKey,
+  providerTrendBucketLabel,
+  providerTrendLabelContext,
+} from "./charts/providerTrendAxis";
+import { ProviderTrendLegend } from "./charts/ProviderTrendLegend";
 
 const WARN_THRESHOLD = 0.6;
 
@@ -176,57 +178,11 @@ function UsageProviderCacheRateTooltip({
       })}
       {hidden > 0 && (
         <div style={{ marginTop: 4, color: isDark ? "#94a3b8" : "#64748b" }}>
-          ... +{hidden}（可通过 legend 过滤）
+          ... +{hidden}（可通过图例过滤）
         </div>
       )}
     </div>
   );
-}
-
-function toMmDd(dayKey: string) {
-  const mmdd = dayKey.slice(5);
-  return mmdd.replace("-", "/");
-}
-
-function buildDayKeysInRangeInclusive(startDay: string, endDay: string): string[] {
-  const start = parseYyyyMmDd(startDay);
-  const end = parseYyyyMmDd(endDay);
-  if (!start || !end) return [];
-
-  const startDate = new Date(start.year, start.month - 1, start.day, 0, 0, 0, 0);
-  const endDate = new Date(end.year, end.month - 1, end.day, 0, 0, 0, 0);
-  if (!Number.isFinite(startDate.getTime()) || !Number.isFinite(endDate.getTime())) return [];
-
-  const out: string[] = [];
-  const d = new Date(startDate);
-  while (d.getTime() <= endDate.getTime()) {
-    out.push(dayKeyFromLocalDate(d));
-    d.setDate(d.getDate() + 1);
-  }
-  return out;
-}
-
-function buildMonthToTodayDayKeys(): string[] {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-  if (!Number.isFinite(start.getTime()) || !Number.isFinite(now.getTime())) return [];
-
-  const out: string[] = [];
-  const d = new Date(start);
-  while (d.getTime() <= now.getTime()) {
-    out.push(dayKeyFromLocalDate(d));
-    d.setDate(d.getDate() + 1);
-  }
-  return out;
-}
-
-function buildMonthKeysFromData(rows: UsageProviderCacheRateTrendRowV1[]): string[] {
-  const set = new Set<string>();
-  for (const row of rows) {
-    if (!row.day) continue;
-    if (/^\d{4}-\d{2}$/.test(row.day)) set.add(row.day);
-  }
-  return Array.from(set).sort();
 }
 
 type ProviderSeries = {
@@ -238,48 +194,23 @@ type ProviderSeries = {
 
 export function UsageProviderCacheRateTrendChart({
   rows,
-  period,
-  customApplied,
   className,
 }: {
   rows: UsageProviderCacheRateTrendRowV1[];
-  period: UsagePeriod;
-  customApplied: CustomDateRangeApplied | null;
   className?: string;
 }) {
   const { resolvedTheme } = useTheme();
+  const [hiddenProviders, setHiddenProviders] = useState<ReadonlySet<string>>(() => new Set());
   const isDark = resolvedTheme === "dark";
 
   const axisStyle = useMemo(() => getAxisStyle(isDark), [isDark]);
   const gridLineStyle = useMemo(() => getGridLineStyle(isDark), [isDark]);
   const tooltipStyle = useMemo(() => getTooltipStyle(isDark), [isDark]);
-  const legendStyle = useMemo(() => getLegendStyle(isDark), [isDark]);
   const axisLineStroke = getAxisLineStroke(isDark);
 
   const { xLabels, chartData, providers, warnRanges, yAxisRange } = useMemo(() => {
-    const isHourly = period === "daily";
-    const isAllTime = period === "allTime";
-
-    const xKeys = (() => {
-      if (isHourly) {
-        return Array.from({ length: 24 }).map((_, h) => String(h).padStart(2, "0"));
-      }
-      if (isAllTime) {
-        return buildMonthKeysFromData(rows);
-      }
-      if (period === "weekly") return buildRecentDayKeys(7);
-      if (period === "monthly") return buildMonthToTodayDayKeys();
-      if (period === "custom" && customApplied) {
-        return buildDayKeysInRangeInclusive(customApplied.startDate, customApplied.endDate);
-      }
-      return [];
-    })();
-
-    const xLabels = (() => {
-      if (isHourly) return xKeys;
-      if (isAllTime) return xKeys;
-      return xKeys.map(toMmDd);
-    })();
+    const labelContext = providerTrendLabelContext(rows);
+    const buckets = new Map<string, UsageProviderCacheRateTrendRowV1>();
 
     const byProvider = new Map<
       string,
@@ -293,21 +224,14 @@ export function UsageProviderCacheRateTrendChart({
     for (const row of rows) {
       const key = row.key;
       if (!key) continue;
+      const xKey = providerTrendBucketKey(row);
+      if (!xKey) continue;
+      buckets.set(xKey, row);
       const provider = byProvider.get(key) ?? {
         name: row.name || row.key,
         totalDenomTokens: 0,
         points: new Map(),
       };
-
-      const xKey = (() => {
-        if (isHourly) {
-          const h = row.hour == null ? NaN : Number(row.hour);
-          if (!Number.isFinite(h)) return null;
-          return String(h).padStart(2, "0");
-        }
-        return row.day || null;
-      })();
-      if (!xKey) continue;
 
       provider.name = row.name || provider.name;
       provider.totalDenomTokens += Number(row.denom_tokens) || 0;
@@ -325,12 +249,16 @@ export function UsageProviderCacheRateTrendChart({
         totalDenomTokens: provider.totalDenomTokens,
       }));
 
-    const warnAtX: boolean[] = Array.from({ length: xKeys.length }, () => false);
+    const bucketEntries = Array.from(buckets.entries()).sort(([left], [right]) =>
+      left.localeCompare(right)
+    );
+    const xLabels = bucketEntries.map(([, row]) => providerTrendBucketLabel(row, labelContext));
+    const warnAtX: boolean[] = Array.from({ length: bucketEntries.length }, () => false);
     let globalMin = Number.POSITIVE_INFINITY;
     let globalMax = Number.NEGATIVE_INFINITY;
 
-    const chartData: ChartDataPoint[] = xLabels.map((label, xIndex) => {
-      const xKey = xKeys[xIndex]!;
+    const chartData: ChartDataPoint[] = bucketEntries.map(([xKey], xIndex) => {
+      const label = xLabels[xIndex]!;
       const point: ChartDataPoint = { label };
 
       providers.forEach((provider) => {
@@ -347,9 +275,11 @@ export function UsageProviderCacheRateTrendChart({
         if (!Number.isFinite(rateRaw)) return;
 
         const value = Math.max(0, Math.min(1, rateRaw));
-        globalMin = Math.min(globalMin, value);
-        globalMax = Math.max(globalMax, value);
-        if (value < WARN_THRESHOLD) warnAtX[xIndex] = true;
+        if (!hiddenProviders.has(provider.key)) {
+          globalMin = Math.min(globalMin, value);
+          globalMax = Math.max(globalMax, value);
+          if (value < WARN_THRESHOLD) warnAtX[xIndex] = true;
+        }
 
         point[provider.key] = value;
         point[`${provider.key}_meta`] = {
@@ -419,8 +349,8 @@ export function UsageProviderCacheRateTrendChart({
       warnRanges.push({ x1: xLabels[start]!, x2: xLabels[warnAtX.length - 1]! });
     }
 
-    return { xKeys, xLabels, chartData, providers, warnRanges, yAxisRange };
-  }, [customApplied, period, rows]);
+    return { xLabels, chartData, providers, warnRanges, yAxisRange };
+  }, [hiddenProviders, rows]);
 
   const yAxisTicks = useMemo(() => {
     const ticks: number[] = [];
@@ -430,83 +360,94 @@ export function UsageProviderCacheRateTrendChart({
     return ticks;
   }, [yAxisRange]);
 
-  const xAxisTicks = useMemo(() => {
-    const isHourly = period === "daily";
-    const interval = isHourly ? 2 : 3;
-    return xLabels.filter((_, i) => i % interval === 0);
-  }, [xLabels, period]);
+  const xAxisTicks = useMemo(() => buildProviderTrendTicks(xLabels), [xLabels]);
 
   const lineWidth = providers.length > 25 ? 1.5 : 2;
 
+  const toggleProvider = (providerKey: string) => {
+    setHiddenProviders((current) => {
+      const next = new Set(current);
+      if (next.has(providerKey)) next.delete(providerKey);
+      else next.add(providerKey);
+      return next;
+    });
+  };
+
   return (
-    <div className={cn("h-full w-full", className)}>
-      <Suspense fallback={<div className="h-full w-full" />}>
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={chartData} margin={{ left: 0, right: 16, top: 56, bottom: 0 }}>
-            <CartesianGrid
-              vertical={false}
-              stroke={gridLineStyle.stroke}
-              strokeDasharray={gridLineStyle.strokeDasharray}
-            />
-            <XAxis
-              dataKey="label"
-              axisLine={{ stroke: axisLineStroke }}
-              tickLine={false}
-              tick={{ ...axisStyle }}
-              ticks={xAxisTicks}
-              interval="preserveStartEnd"
-            />
-            <YAxis
-              domain={[yAxisRange.min, yAxisRange.max]}
-              ticks={yAxisTicks}
-              axisLine={false}
-              tickLine={false}
-              tick={{ ...axisStyle }}
-              tickFormatter={(v: number) => formatPercent(v, 0)}
-              width={45}
-            />
-            <Tooltip
-              content={
-                <UsageProviderCacheRateTooltip isDark={isDark} tooltipStyle={tooltipStyle} />
-              }
-            />
-            <Legend
-              wrapperStyle={{
-                paddingTop: 8,
-                fontSize: legendStyle.fontSize,
-                color: legendStyle.color,
-              }}
-            />
-            <ReferenceLine
-              y={WARN_THRESHOLD}
-              stroke={THRESHOLD_COLORS.warningLine}
-              strokeDasharray="3 3"
-              strokeWidth={1}
-            />
-            {warnRanges.map((range) => (
-              <ReferenceArea
-                key={`${range.x1}:${range.x2}`}
-                x1={range.x1}
-                x2={range.x2}
-                fill={THRESHOLD_COLORS.warning}
-                fillOpacity={1}
+    <div className={cn("flex h-full min-h-0 w-full flex-col", className)}>
+      <ProviderTrendLegend
+        providers={providers}
+        hiddenProviders={hiddenProviders}
+        onToggle={toggleProvider}
+      />
+      <div className="min-h-0 flex-1">
+        <Suspense fallback={<div className="h-full w-full" />}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart
+              data={chartData}
+              margin={{ left: 0, right: 16, top: 12, bottom: 0 }}
+              accessibilityLayer
+              aria-label="供应商缓存命中率趋势图"
+            >
+              <CartesianGrid
+                vertical={false}
+                stroke={gridLineStyle.stroke}
+                strokeDasharray={gridLineStyle.strokeDasharray}
               />
-            ))}
-            {providers.map((provider) => (
-              <Line
-                key={provider.key}
-                type="monotone"
-                dataKey={provider.key}
-                name={provider.name}
-                stroke={provider.color}
-                strokeWidth={lineWidth}
-                dot={false}
-                animationDuration={CHART_ANIMATION.animationDuration}
+              <XAxis
+                dataKey="label"
+                axisLine={{ stroke: axisLineStroke }}
+                tickLine={false}
+                tick={{ ...axisStyle }}
+                ticks={xAxisTicks}
+                interval="preserveStartEnd"
               />
-            ))}
-          </LineChart>
-        </ResponsiveContainer>
-      </Suspense>
+              <YAxis
+                domain={[yAxisRange.min, yAxisRange.max]}
+                ticks={yAxisTicks}
+                axisLine={false}
+                tickLine={false}
+                tick={{ ...axisStyle }}
+                tickFormatter={(v: number) => formatPercent(v, 0)}
+                width={45}
+              />
+              <Tooltip
+                content={
+                  <UsageProviderCacheRateTooltip isDark={isDark} tooltipStyle={tooltipStyle} />
+                }
+              />
+              <ReferenceLine
+                y={WARN_THRESHOLD}
+                stroke={THRESHOLD_COLORS.warningLine}
+                strokeDasharray="3 3"
+                strokeWidth={1}
+              />
+              {warnRanges.map((range) => (
+                <ReferenceArea
+                  key={`${range.x1}:${range.x2}`}
+                  x1={range.x1}
+                  x2={range.x2}
+                  fill={THRESHOLD_COLORS.warning}
+                  fillOpacity={1}
+                />
+              ))}
+              {providers.map((provider) => (
+                <Line
+                  key={provider.key}
+                  type="monotone"
+                  dataKey={provider.key}
+                  name={provider.name}
+                  stroke={provider.color}
+                  strokeWidth={lineWidth}
+                  dot={false}
+                  hide={hiddenProviders.has(provider.key)}
+                  animationDuration={CHART_ANIMATION.animationDuration}
+                />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        </Suspense>
+      </div>
     </div>
   );
 }

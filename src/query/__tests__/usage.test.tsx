@@ -7,11 +7,13 @@ import {
   USAGE_LEADERBOARD_V2_DEFAULT_LIMIT,
   USAGE_LEADERBOARD_V2_MAX_LIMIT,
   USAGE_PROVIDER_CACHE_RATE_TREND_MAX_LIMIT,
+  USAGE_PROVIDER_TREND_MAX_LIMIT,
   usageDayDetailV1,
   usageFolderOptionsV1,
   usageHourlySeries,
   usageLeaderboardV2,
   usageProviderCacheRateTrendV1,
+  usageProviderMetricTrendV1,
   usageSummary,
   usageSummaryV2,
 } from "../../services/usage/usage";
@@ -24,6 +26,7 @@ import {
   useUsageFolderOptionsV1Query,
   useUsageLeaderboardV2Query,
   useUsageProviderCacheRateTrendV1Query,
+  useUsageProviderMetricTrendV1Query,
   useUsageSummaryQuery,
   useUsageSummaryV2Query,
 } from "../usage";
@@ -48,6 +51,7 @@ vi.mock("../../services/usage/usage", async () => {
     usageSummaryV2: vi.fn(),
     usageLeaderboardV2: vi.fn(),
     usageProviderCacheRateTrendV1: vi.fn(),
+    usageProviderMetricTrendV1: vi.fn(),
   };
 });
 
@@ -646,7 +650,7 @@ describe("query/usage", () => {
         endTs: 2,
         cliKey: "claude",
         providerId: 11,
-        limit: 20,
+        limit: 10,
         excludeCx2CcGatewayBridge: true,
       });
     });
@@ -717,5 +721,65 @@ describe("query/usage", () => {
     await Promise.resolve();
 
     expect(usageProviderCacheRateTrendV1).not.toHaveBeenCalled();
+  });
+
+  it("normalizes provider metric trend input for fetch and cache key", async () => {
+    setTauriRuntime();
+    vi.mocked(usageProviderMetricTrendV1).mockResolvedValue([]);
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+    const input = {
+      startTs: 1,
+      endTs: 2,
+      cliKey: " codex ",
+      providerId: 11,
+      limit: 999,
+      excludeCx2CcGatewayBridge: true,
+    } as never;
+    const normalizedInput = {
+      startTs: 1,
+      endTs: 2,
+      cliKey: "codex" as const,
+      providerId: 11,
+      limit: USAGE_PROVIDER_TREND_MAX_LIMIT,
+      excludeCx2CcGatewayBridge: true,
+    };
+
+    const { result } = renderHook(() => useUsageProviderMetricTrendV1Query("custom", input), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(usageProviderMetricTrendV1).toHaveBeenCalledWith("custom", normalizedInput);
+    expect(
+      client.getQueryState(usageKeys.providerMetricTrendV1("custom", normalizedInput))
+    ).toBeTruthy();
+    expect(client.getQueryState(usageKeys.providerMetricTrendV1("custom", input))).toBeUndefined();
+  });
+
+  it("does not call usageProviderMetricTrendV1 when disabled", async () => {
+    setTauriRuntime();
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+    renderHook(
+      () =>
+        useUsageProviderMetricTrendV1Query(
+          "daily",
+          {
+            startTs: 1,
+            endTs: 2,
+            cliKey: "codex",
+            providerId: null,
+            limit: 10,
+          },
+          { enabled: false }
+        ),
+      { wrapper }
+    );
+    await Promise.resolve();
+
+    expect(usageProviderMetricTrendV1).not.toHaveBeenCalled();
   });
 });

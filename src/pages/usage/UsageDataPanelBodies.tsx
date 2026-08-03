@@ -1,21 +1,42 @@
 import type { CustomDateRangeApplied } from "../../hooks/useCustomDateRange";
+import { useState } from "react";
 import type {
   UsageLeaderboardRow,
   UsagePeriod,
   UsageProviderCacheRateTrendRowV1,
+  UsageProviderMetricTrendRowV1,
   UsageSummary,
 } from "../../services/usage/usage";
 import { UsageProviderCacheRateTrendChart } from "../../components/UsageProviderCacheRateTrendChart";
+import {
+  UsageProviderMetricsTrendChart,
+  type UsageTrendMetric,
+} from "../../components/UsageProviderMetricsTrendChart";
 import { UsageLeaderboardTable } from "../../components/usage/UsageLeaderboardTable";
 import { UsageTableSkeleton } from "../../components/usage/UsageTableSkeleton";
+import { TabList } from "../../ui/TabList";
+import { USAGE_METRICS_TREND_ITEMS } from "./constants";
+
+function hasMetricSamples(
+  rows: readonly UsageProviderMetricTrendRowV1[],
+  metric: UsageTrendMetric
+): boolean {
+  return rows.some((row) => {
+    const value =
+      metric === "duration"
+        ? row.avg_duration_ms
+        : metric === "ttfb"
+          ? row.avg_ttfb_ms
+          : row.avg_output_tokens_per_second;
+    return value != null && Number.isFinite(Number(value));
+  });
+}
 
 export function CacheTrendBody({
   cacheTrendLoading,
   cacheTrendRows,
   errorText,
   customPending,
-  period,
-  customApplied,
 }: {
   cacheTrendLoading: boolean;
   cacheTrendRows: UsageProviderCacheRateTrendRowV1[];
@@ -43,16 +64,84 @@ export function CacheTrendBody({
   return (
     <>
       <div className="h-80">
-        <UsageProviderCacheRateTrendChart
-          rows={cacheTrendRows}
-          period={period}
-          customApplied={customApplied}
-          className="h-full"
-        />
+        <UsageProviderCacheRateTrendChart rows={cacheTrendRows} className="h-full" />
       </div>
       <div className="mt-3 text-xs text-muted-foreground">
         命中率=读取 /（有效输入 + 创建 + 读取）。有效输入：Codex/Gemini 做 input-cache_read
         纠偏；Claude 原样。预警阈值：60%（低于阈值的时间段会高亮背景）。
+      </div>
+    </>
+  );
+}
+
+export function MetricsTrendBody({
+  metricsTrendLoading,
+  metricsTrendRows,
+  errorText,
+  customPending,
+}: {
+  metricsTrendLoading: boolean;
+  metricsTrendRows: UsageProviderMetricTrendRowV1[];
+  errorText: string | null;
+  customPending: boolean;
+  period: UsagePeriod;
+  customApplied: CustomDateRangeApplied | null;
+}) {
+  const [metric, setMetric] = useState<UsageTrendMetric>("duration");
+
+  const toggle = (
+    <TabList
+      ariaLabel="指标切换"
+      items={USAGE_METRICS_TREND_ITEMS}
+      value={metric}
+      onChange={setMetric}
+      size="sm"
+      className="shrink-0"
+    />
+  );
+
+  if (metricsTrendLoading && metricsTrendRows.length === 0) {
+    return (
+      <>
+        <div className="mb-3">{toggle}</div>
+        <div className="h-80 animate-pulse rounded-lg bg-secondary dark:bg-secondary" />
+      </>
+    );
+  }
+
+  if (metricsTrendRows.length === 0) {
+    return (
+      <>
+        <div className="mb-3">{toggle}</div>
+        <div className="text-sm text-muted-foreground">
+          {errorText
+            ? '加载失败：暂无可展示的数据。请点击上方"重试"。'
+            : customPending
+              ? '自定义范围：请选择日期后点击"应用"。'
+              : "暂无可展示的指标数据。"}
+        </div>
+      </>
+    );
+  }
+
+  if (!hasMetricSamples(metricsTrendRows, metric)) {
+    return (
+      <>
+        <div className="mb-3">{toggle}</div>
+        <div className="text-sm text-muted-foreground">当前指标暂无有效样本。</div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <div className="mb-3">{toggle}</div>
+      <div className="h-80">
+        <UsageProviderMetricsTrendChart
+          rows={metricsTrendRows}
+          metric={metric}
+          className="h-full"
+        />
       </div>
     </>
   );

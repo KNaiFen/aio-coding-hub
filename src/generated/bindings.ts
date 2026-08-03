@@ -4761,6 +4761,9 @@ export type UsageProviderMetricTrendRowV1 = {
   provider_name: string;
   requests_total: number;
   requests_success: number;
+  duration_samples: number;
+  ttfb_samples: number;
+  output_rate_samples: number;
   avg_duration_ms: number | null;
   avg_ttfb_ms: number | null;
   avg_output_tokens_per_second: number | null;
