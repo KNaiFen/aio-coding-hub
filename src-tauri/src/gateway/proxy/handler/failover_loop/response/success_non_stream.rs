@@ -603,8 +603,6 @@ where
                     &provider_ctx_owned,
                     attempts.as_slice(),
                     status.as_u16(),
-                    None,
-                    None,
                     attempt_started,
                     false,
                 );
@@ -700,8 +698,6 @@ where
                     &provider_ctx_owned,
                     attempts.as_slice(),
                     status.as_u16(),
-                    None,
-                    None,
                     attempt_started,
                     false,
                 );

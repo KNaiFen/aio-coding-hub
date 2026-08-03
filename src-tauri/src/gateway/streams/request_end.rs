@@ -202,19 +202,17 @@ pub(super) fn emit_request_event_and_spawn_request_log<R: tauri::Runtime>(
             let mut attempts = ctx.attempts.clone();
             if let Some(last) = attempts.last_mut() {
                 last.stream_internal_error = completion.stream_internal_error.clone();
-                if last.outcome == "success" {
-                    if completion.error_code.is_some() {
-                        last.outcome = format!(
-                            "stream_error: code={}",
-                            completion.error_code.unwrap_or("unknown")
-                        );
-                        last.error_code = completion.error_code;
-                        last.error_category = effective_error_category.or(Some(
-                            crate::gateway::proxy::ErrorCategory::SystemError.as_str(),
-                        ));
-                        // Update duration to the full stream duration instead of the initial value.
-                        last.attempt_duration_ms = Some(duration_ms);
-                    }
+                if let Some(error_code) = completion
+                    .error_code
+                    .filter(|_| last.outcome == "success")
+                {
+                    last.outcome = format!("stream_error: code={error_code}");
+                    last.error_code = Some(error_code);
+                    last.error_category = effective_error_category.or(Some(
+                        crate::gateway::proxy::ErrorCategory::SystemError.as_str(),
+                    ));
+                    // Update duration to the full stream duration instead of the initial value.
+                    last.attempt_duration_ms = Some(duration_ms);
                 }
             }
             let json = serde_json::to_string(&attempts).unwrap_or_else(|_| "[]".to_string());

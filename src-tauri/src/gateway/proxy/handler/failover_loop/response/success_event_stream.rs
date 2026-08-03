@@ -199,22 +199,26 @@ impl BufferedStreamPrefixState {
     }
 }
 
-fn inspect_buffered_event_stream_prefix(
-    cli_key: &str,
-    path: &str,
+struct BufferedStreamPrefixConfig<'a> {
+    cli_key: &'a str,
+    path: &'a str,
     status: u16,
-    active_bridge_type: Option<&str>,
+    active_bridge_type: Option<&'a str>,
     provider_bridged: bool,
-    retry_policy: &crate::settings::UpstreamRetryPolicy,
+    retry_policy: &'a crate::settings::UpstreamRetryPolicy,
     guard: Duration,
+}
+
+fn inspect_buffered_event_stream_prefix(
+    config: &BufferedStreamPrefixConfig<'_>,
     state: &mut BufferedStreamPrefixState,
     raw: &[u8],
 ) -> BufferedStreamPrefixDecision {
     let inspect_empty_success = is_native_codex_responses_event_stream_path(
-        cli_key,
-        path,
-        active_bridge_type,
-        provider_bridged,
+        config.cli_key,
+        config.path,
+        config.active_bridge_type,
+        config.provider_bridged,
     );
     let buffer_cap_reached = if inspect_empty_success {
         raw.len() >= MAX_STREAM_INTERNAL_ERROR_GUARD_BYTES
@@ -250,9 +254,10 @@ fn inspect_buffered_event_stream_prefix(
             if let Some(evidence) = usage::classify_codex_stream_internal_error(
                 &event_name,
                 &data,
-                retry_policy.enabled && retry_policy.stream_internal_errors.enabled,
-                &retry_policy.stream_internal_errors.retry_keywords,
-                &retry_policy.stream_internal_errors.non_retry_keywords,
+                config.retry_policy.enabled
+                    && config.retry_policy.stream_internal_errors.enabled,
+                &config.retry_policy.stream_internal_errors.retry_keywords,
+                &config.retry_policy.stream_internal_errors.non_retry_keywords,
                 "buffered_before_commit",
             ) {
                 if evidence.is_retryable() {
@@ -283,10 +288,10 @@ fn inspect_buffered_event_stream_prefix(
     }
 
     if inspect_empty_success && state.completion_seen {
-        let mut tracker = usage::SseUsageTracker::new(cli_key);
+        let mut tracker = usage::SseUsageTracker::new(config.cli_key);
         tracker.ingest_chunk(raw);
         let usage = tracker.finalize();
-        if tracker.is_empty_success(path, status, usage.as_ref()) {
+        if tracker.is_empty_success(config.path, config.status, usage.as_ref()) {
             return BufferedStreamPrefixDecision::ProviderFailure {
                 error_code: GatewayErrorCode::EmptyResponse.as_str(),
                 evidence: None,
@@ -300,7 +305,7 @@ fn inspect_buffered_event_stream_prefix(
     if inspect_empty_success {
         if state
             .meaningful_output_started_at
-            .is_some_and(|started| started.elapsed() >= guard)
+            .is_some_and(|started| started.elapsed() >= config.guard)
         {
             return BufferedStreamPrefixDecision::StartStreaming {
                 guard_cap_reached: false,
@@ -1090,15 +1095,18 @@ where
             .map(|chunk| chunk.to_vec())
             .unwrap_or_default();
         let mut prefix_state = BufferedStreamPrefixState::default();
+        let prefix_config = BufferedStreamPrefixConfig {
+            cli_key: common.cli_key.as_str(),
+            path: common.forwarded_path.as_str(),
+            status: status.as_u16(),
+            active_bridge_type,
+            provider_bridged: provider_ctx_owned.provider_bridged,
+            retry_policy: &provider_ctx_owned.upstream_retry_policy,
+            guard: common.stream_internal_error_guard,
+        };
         loop {
             match inspect_buffered_event_stream_prefix(
-                common.cli_key.as_str(),
-                common.forwarded_path.as_str(),
-                status.as_u16(),
-                active_bridge_type,
-                provider_ctx_owned.provider_bridged,
-                &provider_ctx_owned.upstream_retry_policy,
-                common.stream_internal_error_guard,
+                &prefix_config,
                 &mut prefix_state,
                 buffered_prefix.as_slice(),
             ) {
@@ -1365,8 +1373,6 @@ where
             &provider_ctx_owned,
             attempts.as_slice(),
             status.as_u16(),
-            None,
-            None,
             attempt_started,
             is_native_codex_responses_event_stream_path(
                 common.cli_key.as_str(),
@@ -1528,10 +1534,25 @@ mod tests {
     use super::{
         inspect_buffered_event_stream_prefix, is_native_codex_responses_event_stream_path,
         resolve_effective_stream_idle_timeout, resolve_requested_model_for_log,
-        BufferedStreamPrefixDecision, BufferedStreamPrefixState,
+        BufferedStreamPrefixConfig, BufferedStreamPrefixDecision, BufferedStreamPrefixState,
         MAX_STREAM_INTERNAL_ERROR_GUARD_BYTES,
     };
     use std::time::Duration;
+
+    fn native_prefix_config(
+        retry_policy: &crate::settings::UpstreamRetryPolicy,
+        guard: Duration,
+    ) -> BufferedStreamPrefixConfig<'_> {
+        BufferedStreamPrefixConfig {
+            cli_key: "codex",
+            path: "/v1/responses",
+            status: 200,
+            active_bridge_type: None,
+            provider_bridged: false,
+            retry_policy,
+            guard,
+        }
+    }
 
     #[test]
     fn resolve_requested_model_for_log_prefers_fallback_model() {
@@ -1644,13 +1665,10 @@ mod tests {
         .as_bytes();
         let mut state = BufferedStreamPrefixState::default();
         let decision = inspect_buffered_event_stream_prefix(
-            "codex",
-            "/v1/responses",
-            200,
-            None,
-            false,
-            &crate::settings::UpstreamRetryPolicy::default(),
-            Duration::from_millis(500),
+            &native_prefix_config(
+                &crate::settings::UpstreamRetryPolicy::default(),
+                Duration::from_millis(500),
+            ),
             &mut state,
             raw,
         );
@@ -1680,13 +1698,10 @@ mod tests {
             let mut state = BufferedStreamPrefixState::default();
             assert!(matches!(
                 inspect_buffered_event_stream_prefix(
-                    "codex",
-                    "/v1/responses",
-                    200,
-                    None,
-                    false,
-                    &crate::settings::UpstreamRetryPolicy::default(),
-                    Duration::from_millis(500),
+                    &native_prefix_config(
+                        &crate::settings::UpstreamRetryPolicy::default(),
+                        Duration::from_millis(500),
+                    ),
                     &mut state,
                     raw.as_bytes(),
                 ),
@@ -1701,13 +1716,7 @@ mod tests {
         let mut disabled_state = BufferedStreamPrefixState::default();
         assert!(matches!(
             inspect_buffered_event_stream_prefix(
-                "codex",
-                "/v1/responses",
-                200,
-                None,
-                false,
-                &disabled_policy,
-                Duration::from_millis(500),
+                &native_prefix_config(&disabled_policy, Duration::from_millis(500)),
                 &mut disabled_state,
                 b"event: response.failed\ndata: {\"error\":{\"message\":\"Selected model is at capacity\"}}\n\n",
             ),
@@ -1731,13 +1740,10 @@ mod tests {
 
         assert!(matches!(
             inspect_buffered_event_stream_prefix(
-                "codex",
-                "/v1/responses",
-                200,
-                None,
-                false,
-                &crate::settings::UpstreamRetryPolicy::default(),
-                Duration::from_millis(500),
+                &native_prefix_config(
+                    &crate::settings::UpstreamRetryPolicy::default(),
+                    Duration::from_millis(500),
+                ),
                 &mut state,
                 raw.as_bytes(),
             ),
@@ -1756,13 +1762,10 @@ mod tests {
         let mut state = BufferedStreamPrefixState::default();
         assert!(matches!(
             inspect_buffered_event_stream_prefix(
-                "codex",
-                "/v1/responses",
-                200,
-                None,
-                false,
-                &crate::settings::UpstreamRetryPolicy::default(),
-                Duration::from_secs(5),
+                &native_prefix_config(
+                    &crate::settings::UpstreamRetryPolicy::default(),
+                    Duration::from_secs(5),
+                ),
                 &mut state,
                 raw.as_bytes(),
             ),
@@ -1778,13 +1781,7 @@ mod tests {
         let mut preamble_state = BufferedStreamPrefixState::default();
         assert!(matches!(
             inspect_buffered_event_stream_prefix(
-                "codex",
-                "/v1/responses",
-                200,
-                None,
-                false,
-                &policy,
-                Duration::ZERO,
+                &native_prefix_config(&policy, Duration::ZERO),
                 &mut preamble_state,
                 b": keepalive\n\n",
             ),
@@ -1796,13 +1793,7 @@ mod tests {
         guarded_prefix.extend_from_slice(meaningful);
         assert!(matches!(
             inspect_buffered_event_stream_prefix(
-                "codex",
-                "/v1/responses",
-                200,
-                None,
-                false,
-                &policy,
-                Duration::ZERO,
+                &native_prefix_config(&policy, Duration::ZERO),
                 &mut preamble_state,
                 &guarded_prefix,
             ),
@@ -1815,13 +1806,7 @@ mod tests {
         let oversized = vec![b' '; MAX_STREAM_INTERNAL_ERROR_GUARD_BYTES + 1];
         assert!(matches!(
             inspect_buffered_event_stream_prefix(
-                "codex",
-                "/v1/responses",
-                200,
-                None,
-                false,
-                &policy,
-                Duration::from_millis(500),
+                &native_prefix_config(&policy, Duration::from_millis(500)),
                 &mut cap_state,
                 &oversized,
             ),

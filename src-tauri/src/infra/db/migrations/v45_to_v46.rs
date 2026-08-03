@@ -108,11 +108,9 @@ fn add_stream_error_defaults(raw: &str) -> Result<Option<String>, String> {
     }
 
     let mut http_rules = http_rules_from_wire_default(object)?;
-    if !http_rules.iter().any(is_capacity_retry_intent) {
-        if http_rules.len() < 17 {
-            http_rules.push(capacity_http_rule());
-            changed = true;
-        }
+    if !http_rules.iter().any(is_capacity_retry_intent) && http_rules.len() < 17 {
+        http_rules.push(capacity_http_rule());
+        changed = true;
     }
     if object
         .get("http_rules")
