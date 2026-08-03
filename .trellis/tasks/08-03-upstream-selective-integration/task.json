@@ -28,6 +28,6 @@
   ],
   "parent": null,
   "relatedFiles": [],
-  "notes": "",
+  "notes": "实施期间 origin/main 前进到 dc311482c2af00177544c1b526dd173a2b7f20c9，并已完成 Tray/PENDING-015 与 0.60.46 发布。集成分支无冲突重放并保留远端结果，本批目标版本顺延为 0.60.47。UPA-004 因真实 Claude Pro/Max OAuth 门禁未完成而保持候选，不进入本次发布。",
   "meta": {}
 }
