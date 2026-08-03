@@ -117,3 +117,21 @@ merge-base；PR #36 的归档目录与主线逐字一致，功能范围和工作
 `origin/main@0f864415` 与候选业务语义兼容，且本轮主线漂移没有代码级
 交叉或隐含回归。候选可以更新 PR；合并前仍必须再次核验 main SHA，若再次前进，
 重复同样的逐提交业务审查、rebase 和完整 CI。
+
+## 首轮 PR CI 编译修复
+
+PR head `38785d9a` 的 CI run `30844374619` 中，frontend、文档合同、
+支持合同、依赖审计和 PR 标题检查全部通过；Rust job `91789036552` 在
+“Format Rust and generate bindings in the cloud”阶段编译导出绑定示例时失败，
+因此 Clippy、Rust tests 和百万行 benchmark 尚未执行。
+
+失败为 `trend_common.rs` 的 `E0282` / `E0308`：两条 SQLite
+标量查询没有明确结果类型，且第二条查询直接返回项目 `AppError`，与函数
+声明的 `Result<bool, String>` 不一致。修复保持现有公开错误合同和 SQL
+不变，只把两条标量结果显式声明为 `bool`，并让第二条查询通过 `?`
+使用既有 `From<AppError> for String` 转换后返回 `Ok(bool)`。
+
+现有混合趋势测试已覆盖缺少汇总表时纯 raw、完整 schema 时混合查询，以及
+ledger backfill 未完成时回退 raw；本修复没有新增分支或业务行为。下一轮 CI
+必须重新通过云端编译、格式/绑定漂移、Clippy、Rust tests、依赖审计和百万行
+benchmark 后才可合并。

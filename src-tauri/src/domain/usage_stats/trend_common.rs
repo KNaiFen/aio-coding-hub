@@ -81,7 +81,7 @@ fn base_query_params(query: TrendPlanQuery<'_>) -> Vec<Value> {
 }
 
 fn daily_rollup_schema_available(conn: &Connection) -> Result<bool, String> {
-    let tables_available = conn
+    let tables_available: bool = conn
         .query_row(
             r#"
 SELECT COUNT(*) = 4
@@ -102,8 +102,9 @@ WHERE type = 'table'
         return Ok(false);
     }
 
-    conn.query_row(
-        r#"
+    let backfill_ready: bool = conn
+        .query_row(
+            r#"
 SELECT EXISTS (
   SELECT 1
   FROM usage_provider_daily_rollup_backfill_state rollup_state
@@ -112,10 +113,12 @@ SELECT EXISTS (
     AND ledger_state.status = 'complete'
 )
 "#,
-        [],
-        |row| row.get(0),
-    )
-    .map_err(|error| db_err!("failed to inspect Provider daily rollup readiness: {error}"))
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| db_err!("failed to inspect Provider daily rollup readiness: {error}"))?;
+
+    Ok(backfill_ready)
 }
 
 fn extent_from_min_max(
