@@ -1,0 +1,2 @@
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"检查 WebView 内容高度与原生窗口高度一致。"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"检查未复制或偏离现有 Tray 行为。"}

@@ -1,0 +1,2 @@
+{"file":".trellis/spec/aio-coding-hub/cross-layer/provider-account-usage-query-contract.md","reason":"约束五秒消费者租约、手动 force 查询、失败时隐藏旧余额及路由隔离。"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"复用现有查询 helper，避免第二个缓存写入路径。"}

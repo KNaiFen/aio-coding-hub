@@ -1,0 +1,2 @@
+{"file":".trellis/spec/aio-coding-hub/cross-layer/provider-account-usage-query-contract.md","reason":"检查渲染修复未改变租约、force、失败和隔离合同。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"检查 React Query 与组件边界的状态所有权。"}
