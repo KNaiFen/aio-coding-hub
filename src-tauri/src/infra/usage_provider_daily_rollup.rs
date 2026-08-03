@@ -37,10 +37,7 @@ SELECT
     )
 }
 
-fn reset_invalid_calendar_projection(
-    tx: &Transaction<'_>,
-    now: i64,
-) -> rusqlite::Result<bool> {
+fn reset_invalid_calendar_projection(tx: &Transaction<'_>, now: i64) -> rusqlite::Result<bool> {
     let invalid = tx.query_row(
         r#"
 SELECT EXISTS (
@@ -95,11 +92,9 @@ WHERE id = 1
         .optional()?
         .flatten();
     if let Some(existing) = existing {
-        let valid = tx.query_row(
-            "SELECT COALESCE(date(?1) = ?1, 0)",
-            [&existing],
-            |row| row.get::<_, bool>(0),
-        )?;
+        let valid = tx.query_row("SELECT COALESCE(date(?1) = ?1, 0)", [&existing], |row| {
+            row.get::<_, bool>(0)
+        })?;
         if valid && existing.as_str() <= today {
             return Ok(existing);
         }
@@ -358,8 +353,10 @@ pub(crate) fn refresh_completed_days_batch(
     let mut report = DailyRollupRefreshReport::default();
     {
         let conn = db.open_connection()?;
-        report.ledger_backfill_complete = usage_ledger::is_backfill_complete(&conn)
-            .map_err(|error| db_err!("failed to read usage ledger state for daily rollup: {error}"))?;
+        report.ledger_backfill_complete =
+            usage_ledger::is_backfill_complete(&conn).map_err(|error| {
+                db_err!("failed to read usage ledger state for daily rollup: {error}")
+            })?;
     }
     if !report.ledger_backfill_complete {
         return Ok(report);
@@ -369,7 +366,9 @@ pub(crate) fn refresh_completed_days_batch(
         let mut conn = db.open_connection()?;
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|error| db_err!("failed to start Provider daily rollup transaction: {error}"))?;
+            .map_err(|error| {
+                db_err!("failed to start Provider daily rollup transaction: {error}")
+            })?;
         if reset_invalid_calendar_projection(&tx, now).map_err(|error| {
             db_err!("failed to validate Provider daily rollup calendar: {error}")
         })? {
@@ -390,15 +389,8 @@ pub(crate) fn refresh_completed_days_batch(
         let (day_start_ts, day_end_ts) = local_day_bounds(&tx, &day)
             .map_err(|error| db_err!("failed to resolve daily rollup bounds: {error}"))?;
         let source_rows = rebuild_day(&tx, &day, day_start_ts, day_end_ts, now)?;
-        advance_cursor_after_day(
-            &tx,
-            &cursor_day,
-            &day,
-            day_end_ts,
-            &today,
-            now,
-        )
-        .map_err(|error| db_err!("failed to advance daily rollup cursor: {error}"))?;
+        advance_cursor_after_day(&tx, &cursor_day, &day, day_end_ts, &today, now)
+            .map_err(|error| db_err!("failed to advance daily rollup cursor: {error}"))?;
         tx.commit().map_err(|error| {
             db_err!("failed to commit Provider daily rollup transaction: {error}")
         })?;
@@ -415,10 +407,7 @@ pub(crate) fn refresh_completed_days_batch(
 }
 
 #[cfg(test)]
-pub(crate) fn refresh_completed_days(
-    db: &db::Db,
-    now: i64,
-) -> AppResult<DailyRollupRefreshReport> {
+pub(crate) fn refresh_completed_days(db: &db::Db, now: i64) -> AppResult<DailyRollupRefreshReport> {
     refresh_completed_days_batch(db, now, usize::MAX)
 }
 
@@ -426,11 +415,7 @@ pub(crate) fn refresh_completed_days(
 mod tests {
     use super::*;
 
-    fn previous_local_day_fixture(
-        db: &db::Db,
-        now: i64,
-        days_ago: i64,
-    ) -> (String, i64, i64) {
+    fn previous_local_day_fixture(db: &db::Db, now: i64, days_ago: i64) -> (String, i64, i64) {
         let conn = db.open_connection().expect("open fixture database");
         let day = conn
             .query_row(

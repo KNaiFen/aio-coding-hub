@@ -4,8 +4,7 @@ use rusqlite::{params_from_iter, Connection};
 use std::collections::HashSet;
 
 use super::trend_common::{
-    build_trend_source_ctes, plan_trend, trend_query_params, validate_trend_budget,
-    TrendPlanQuery,
+    build_trend_source_ctes, plan_trend, trend_query_params, validate_trend_budget, TrendPlanQuery,
 };
 use super::{
     has_valid_provider_key, resolve_query_params, ProviderKey, UsageProviderMetricTrendRowV1,
@@ -26,13 +25,12 @@ pub(super) fn provider_metric_trend_v1_with_conn(
     conn: &Connection,
     query: ProviderMetricTrendQuery<'_>,
 ) -> Result<Vec<UsageProviderMetricTrendRowV1>, String> {
-    let tx = conn.unchecked_transaction().map_err(|error| {
-        db_err!("failed to start Provider metric trend read snapshot: {error}")
-    })?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|error| db_err!("failed to start Provider metric trend read snapshot: {error}"))?;
     let rows = provider_metric_trend_v1_in_snapshot(&tx, query)?;
-    tx.commit().map_err(|error| {
-        db_err!("failed to close Provider metric trend read snapshot: {error}")
-    })?;
+    tx.commit()
+        .map_err(|error| db_err!("failed to close Provider metric trend read snapshot: {error}"))?;
     Ok(rows)
 }
 

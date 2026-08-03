@@ -1924,7 +1924,9 @@ fn provider_trends_mix_complete_rollups_with_raw_gaps_without_overlap() {
         },
     )
     .expect("hybrid cache trend excluding CX2CC");
-    assert!(raw_excluded_metrics.iter().all(|row| row.provider_id != 900));
+    assert!(raw_excluded_metrics
+        .iter()
+        .all(|row| row.provider_id != 900));
     assert!(raw_excluded_cache.iter().all(|row| row.key != "claude:900"));
 
     let stale_day = local_day_key(&conn, calendar_start + 86_400);

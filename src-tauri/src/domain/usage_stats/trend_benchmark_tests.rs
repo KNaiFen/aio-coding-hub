@@ -194,9 +194,8 @@ FROM usage_provider_daily_rollups
     let cache_elapsed = cache_started.elapsed();
 
     let all_time_metric_started = std::time::Instant::now();
-    let all_time_metric_rows =
-        provider_metric_trend_v1_with_conn(&conn, all_time_metric_query)
-            .expect("benchmark all-time metric trend");
+    let all_time_metric_rows = provider_metric_trend_v1_with_conn(&conn, all_time_metric_query)
+        .expect("benchmark all-time metric trend");
     let all_time_metric_elapsed = all_time_metric_started.elapsed();
 
     let all_time_cache_started = std::time::Instant::now();

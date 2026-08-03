@@ -135,3 +135,17 @@ PR head `38785d9a` 的 CI run `30844374619` 中，frontend、文档合同、
 ledger backfill 未完成时回退 raw；本修复没有新增分支或业务行为。下一轮 CI
 必须重新通过云端编译、格式/绑定漂移、Clippy、Rust tests、依赖审计和百万行
 benchmark 后才可合并。
+
+第二轮 CI run `30845906061` 已成功完成 Rust 编译、格式化和绑定生成，
+证明上述类型修复可编译；随后仅在 generated-file drift 门禁失败，Clippy、
+Rust tests 和百万行 benchmark 仍因门禁顺序未执行。artifact
+`cloud-native-fixes-e1116cbb516e6160f7b614874bcf14cea1edfe0f-1`
+（ID `8868752325`，digest
+`sha256:f8abd6fbf867142818deb3a1e62c3aba33b7aee22ddc656b1fd674cb01282fe0`）
+已完整审查。
+
+artifact 只修改 8 个 Rust 文件，内容均为 `rustfmt` 的换行、缩进和 import
+排列；没有 SQL、控制流、字面量、业务断言、生成绑定或锁文件变化。补丁先通过
+路径白名单与 `git apply --check`，随后原样应用。下一轮 CI 必须确认
+generated-file drift 为零，并继续执行此前尚未运行的 Clippy、Rust tests、
+依赖审计和百万行 benchmark。

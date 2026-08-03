@@ -663,8 +663,7 @@ fn seed_sort_mode_provider_order(
     providers: &[(i64, bool, i64)],
 ) {
     let conn = db.open_connection().expect("open db");
-    for (sort_order, (provider_id, enabled, session_reuse_priority)) in
-        providers.iter().enumerate()
+    for (sort_order, (provider_id, enabled, session_reuse_priority)) in providers.iter().enumerate()
     {
         conn.execute(
             r#"

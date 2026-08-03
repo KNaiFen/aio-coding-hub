@@ -2978,7 +2978,10 @@ VALUES (1, 'trace-rollup-migration', 'codex', ?1)
             |row| row.get(0),
         )
         .expect("count dirty days");
-    assert_eq!(dirty_days, 2, "updates must dirty both old and new local days");
+    assert_eq!(
+        dirty_days, 2,
+        "updates must dirty both old and new local days"
+    );
 
     let invalid_ts = i64::MAX;
     conn.execute(

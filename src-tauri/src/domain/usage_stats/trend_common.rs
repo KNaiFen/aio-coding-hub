@@ -512,19 +512,14 @@ fn rollup_bucket_select_and_group(
     }
 }
 
-fn rollup_coverage(
-    conn: &Connection,
-    plan: TrendPlan,
-) -> Result<RollupCoverage, String> {
+fn rollup_coverage(conn: &Connection, plan: TrendPlan) -> Result<RollupCoverage, String> {
     let Some((start_ts, end_ts)) = plan.start_ts.zip(plan.end_ts) else {
         return Ok(RollupCoverage {
             use_rollups: false,
             raw_selection: RawSelection::Full,
         });
     };
-    if plan.granularity == UsageTrendGranularityV1::Hour
-        || !daily_rollup_schema_available(conn)?
-    {
+    if plan.granularity == UsageTrendGranularityV1::Hour || !daily_rollup_schema_available(conn)? {
         return Ok(RollupCoverage {
             use_rollups: false,
             raw_selection: RawSelection::Full,
@@ -667,7 +662,7 @@ raw_intervals(start_ts, end_ts) AS MATERIALIZED (
     };
 
     let raw_part = Some(format!(
-            r#"
+        r#"
 SELECT
   {raw_bucket_fields},
   r.cli_key AS cli_key,
@@ -697,10 +692,10 @@ WHERE r.excluded_from_stats = 0
   {raw_cx2cc}
 GROUP BY {raw_group_by}, r.cli_key, r.final_provider_id
 "#,
-            success = SUCCESS,
-            valid_ttfb = VALID_TTFB,
-            valid_output_rate = VALID_OUTPUT_RATE,
-        ));
+        success = SUCCESS,
+        valid_ttfb = VALID_TTFB,
+        valid_output_rate = VALID_OUTPUT_RATE,
+    ));
 
     let rollup_part = if coverage.use_rollups {
         let (rollup_bucket_fields, rollup_group_by) =
@@ -780,10 +775,7 @@ trend_source AS MATERIALIZED (
     ))
 }
 
-pub(super) fn trend_query_params(
-    plan: TrendPlan,
-    query: TrendPlanQuery<'_>,
-) -> Vec<Value> {
+pub(super) fn trend_query_params(plan: TrendPlan, query: TrendPlanQuery<'_>) -> Vec<Value> {
     vec![
         optional_i64_value(plan.start_ts),
         optional_i64_value(plan.end_ts),
