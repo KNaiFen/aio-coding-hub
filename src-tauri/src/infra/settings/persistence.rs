@@ -855,8 +855,13 @@ mod tests {
         assert_eq!(settings.upstream_retry_policy.http_rules[0].status_code, 0);
 
         assert!(repair_settings(&mut settings, schema_present, &raw).expect("repair damaged"));
-        assert!(settings.upstream_retry_policy.http_rules.is_empty());
-        assert!(!settings.upstream_retry_policy.enabled);
+        assert_eq!(settings.upstream_retry_policy.http_rules.len(), 1);
+        assert_eq!(settings.upstream_retry_policy.http_rules[0].status_code, 400);
+        assert_eq!(
+            settings.upstream_retry_policy.http_rules[0].body_contains,
+            vec![DEFAULT_CAPACITY_RETRY_KEYWORD]
+        );
+        assert!(settings.upstream_retry_policy.enabled);
     }
 
     #[test]
@@ -883,12 +888,17 @@ mod tests {
         );
 
         assert!(repair_settings(&mut settings, schema_present, &raw).expect("repair damaged"));
-        assert_eq!(settings.upstream_retry_policy.http_rules.len(), 1);
+        assert_eq!(settings.upstream_retry_policy.http_rules.len(), 2);
         assert!(!settings.upstream_retry_policy.http_rules[0].enabled);
         assert!(settings.upstream_retry_policy.http_rules[0]
             .body_contains
             .is_empty());
-        assert!(!settings.upstream_retry_policy.enabled);
+        assert_eq!(settings.upstream_retry_policy.http_rules[1].status_code, 400);
+        assert_eq!(
+            settings.upstream_retry_policy.http_rules[1].body_contains,
+            vec![DEFAULT_CAPACITY_RETRY_KEYWORD]
+        );
+        assert!(settings.upstream_retry_policy.enabled);
     }
 
     #[test]

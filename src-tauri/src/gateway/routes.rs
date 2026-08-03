@@ -4898,7 +4898,7 @@ INSERT INTO codex_managed_profiles(
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn managed_codex_alias_incomplete_sse_keeps_matched_route_observation() {
+    async fn managed_codex_alias_disabled_incomplete_sse_forwards_and_keeps_route_observation() {
         let _env_lock = crate::test_support::test_env_lock();
         let home = tempfile::tempdir().expect("home dir");
         let _env = isolate_app_env(home.path());
@@ -4941,15 +4941,13 @@ INSERT INTO codex_managed_profiles(
             .expect("request");
 
         let response = router.oneshot(request).await.expect("route response");
-        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        assert_eq!(response.status(), StatusCode::OK);
         let body = to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("response body");
-        let payload: Value = serde_json::from_slice(&body).expect("response JSON");
-        assert_eq!(
-            payload.get("error_code").and_then(Value::as_str),
-            Some("GW_FAKE_200")
-        );
+        let body_text = String::from_utf8_lossy(&body);
+        assert!(body_text.contains("response.incomplete"));
+        assert!(body_text.contains("resp-managed-incomplete"));
 
         let log = recv_terminal_request_log(&mut log_rx).await;
         assert_eq!(log.status, Some(502));
@@ -4964,6 +4962,14 @@ INSERT INTO codex_managed_profiles(
         assert_eq!(
             attempts[0].get("outcome").and_then(Value::as_str),
             Some("stream_error: code=GW_FAKE_200")
+        );
+        assert_eq!(
+            attempts[0]["stream_internal_error"]["classification"],
+            "disabled"
+        );
+        assert_eq!(
+            attempts[0]["stream_internal_error"]["disposition"],
+            "forwarded_after_commit"
         );
         assert_no_additional_terminal_request_log(&mut log_rx).await;
 
@@ -8910,7 +8916,7 @@ INSERT INTO codex_managed_profiles(
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn codex_responses_streams_created_event_before_completion() {
+    async fn codex_responses_buffers_created_event_until_completion() {
         let _env_lock = crate::test_support::test_env_lock();
         let home = tempfile::tempdir().expect("home dir");
         let _env = isolate_app_env(home.path());
@@ -8955,40 +8961,24 @@ INSERT INTO codex_managed_profiles(
             ))
             .expect("request");
 
-        let response = tokio::time::timeout(Duration::from_secs(2), router.oneshot(request))
+        let mut response_future = Box::pin(router.oneshot(request));
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), response_future.as_mut())
+                .await
+                .is_err(),
+            "metadata-only prefix must remain buffered before completion"
+        );
+        let response = tokio::time::timeout(Duration::from_secs(5), response_future)
             .await
-            .expect("response returned before delayed completion")
+            .expect("response returned after delayed completion")
             .expect("route response");
         assert_eq!(response.status(), StatusCode::OK);
 
-        let mut body_stream = Box::pin(response.into_body().into_data_stream());
-        let first = tokio::time::timeout(
-            Duration::from_secs(2),
-            std::future::poll_fn(|cx| body_stream.as_mut().poll_next(cx)),
-        )
-        .await
-        .expect("first stream chunk before completion timeout")
-        .expect("first stream chunk")
-        .expect("first stream chunk ok");
-        let first_text = String::from_utf8_lossy(&first);
-        assert!(first_text.contains("response.created"));
-        assert!(first_text.contains("resp-disabled-stream"));
-        assert!(!first_text.contains("response.completed"));
-
-        let mut full_body = first_text.to_string();
-        loop {
-            let next = tokio::time::timeout(
-                Duration::from_secs(5),
-                std::future::poll_fn(|cx| body_stream.as_mut().poll_next(cx)),
-            )
+        let body = to_bytes(response.into_body(), usize::MAX)
             .await
-            .expect("stream completion timeout");
-            let Some(chunk) = next else {
-                break;
-            };
-            let chunk = chunk.expect("stream chunk ok");
-            full_body.push_str(&String::from_utf8_lossy(&chunk));
-        }
+            .expect("response body");
+        let full_body = String::from_utf8_lossy(&body);
+        assert!(full_body.contains("response.created"));
         assert!(full_body.contains("response.completed"));
         assert!(full_body.contains("resp-disabled-stream"));
 

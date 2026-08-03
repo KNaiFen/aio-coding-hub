@@ -475,6 +475,8 @@ async fn record_buffered_provider_failure<R: tauri::Runtime>(
                 Some(change.after.failure_count),
                 Some(change.after.failure_threshold),
             )
+        } else if oauth_quota_exhausted {
+            (None, None, None)
         } else {
             (
                 None,
