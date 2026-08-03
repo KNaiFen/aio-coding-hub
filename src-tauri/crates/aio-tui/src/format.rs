@@ -431,7 +431,7 @@ pub fn request_card_lines(
         ),
         RequestCardLineKind::Status,
     )];
-    lines.extend(request_card_model_lines(request, &compaction, width));
+    lines.extend(request_card_model_lines(request, compaction, width));
     lines.extend([
         RequestCardLine::new(
             truncate_display(&format!("{}  {}", provider, folder), width),
@@ -481,10 +481,11 @@ fn request_card_model_lines(
             RequestCardLineKind::Model,
         )];
     };
-    let effort = route
-        .reasoning_effort_applied
-        .then(|| format!("·{}", route.reasoning_effort.as_deref().unwrap_or("未知")))
-        .unwrap_or_default();
+    let effort = if route.reasoning_effort_applied {
+        format!("·{}", route.reasoning_effort.as_deref().unwrap_or("未知"))
+    } else {
+        String::new()
+    };
     if !route.model_applied || route.source_model == route.effective_model {
         return vec![RequestCardLine::new(
             truncate_display(
