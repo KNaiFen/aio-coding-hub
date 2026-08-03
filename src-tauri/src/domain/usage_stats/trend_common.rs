@@ -251,9 +251,9 @@ raw_intervals(start_ts, end_ts) AS MATERIALIZED (
 ),
 extent_parts(min_ts, max_ts) AS (
   SELECT MIN(r.created_at), MAX(r.created_at)
-  FROM usage_events r
+  FROM trusted_bounds bounds
   CROSS JOIN query_args q
-  CROSS JOIN trusted_bounds bounds
+  CROSS JOIN usage_events r
   WHERE r.created_at < bounds.first_start_ts
     AND (q.end_ts IS NULL OR r.created_at < q.end_ts)
     AND r.excluded_from_stats = 0
@@ -281,9 +281,9 @@ extent_parts(min_ts, max_ts) AS (
   UNION ALL
 
   SELECT MIN(r.created_at), MAX(r.created_at)
-  FROM usage_events r
+  FROM trusted_bounds bounds
   CROSS JOIN query_args q
-  CROSS JOIN trusted_bounds bounds
+  CROSS JOIN usage_events r
   WHERE r.created_at >= bounds.last_end_ts
     AND (q.end_ts IS NULL OR r.created_at < q.end_ts)
     AND r.excluded_from_stats = 0
