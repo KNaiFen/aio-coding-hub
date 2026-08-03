@@ -49,6 +49,9 @@ TypeScript bindings, frontend adapters, and React UI.
 - [Task-complete notification contract](./task-complete-notification-contract.md):
   per-CLI quiet periods, generation ownership, backend active-request checks,
   and notification-only failure isolation.
+- [Tray provider mini geometry contract](./tray-provider-mini-contract.md):
+  synchronized WebView row density, scroll ceiling, native logical geometry,
+  scale-aware placement, and frozen-snapshot scrolling behavior.
 
 ## Pre-Development Checklist
 

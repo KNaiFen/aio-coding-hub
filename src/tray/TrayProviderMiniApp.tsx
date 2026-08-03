@@ -121,7 +121,7 @@ function ProviderRows({ providers }: { providers: TrayProviderMiniProvider[] }) 
       {providers.map((provider) => (
         <div
           key={provider.providerId}
-          className="grid h-9 grid-cols-[minmax(0,1fr)_216px_64px] items-center gap-2 px-3"
+          className="grid h-6 grid-cols-[minmax(0,1fr)_216px_64px] items-center gap-2 px-3"
         >
           <div className="flex min-w-0 items-center gap-1.5">
             <span
@@ -227,7 +227,7 @@ export function TrayProviderMiniApp() {
           {snapshot?.hours ?? 6}h
         </span>
       </header>
-      <div ref={scrollRef} className="max-h-[360px] overflow-y-auto overscroll-contain">
+      <div ref={scrollRef} className="max-h-[240px] overflow-y-auto overscroll-contain">
         {providers.length > 0 ? (
           <ProviderRows providers={providers} />
         ) : (

@@ -142,12 +142,23 @@ describe("TrayProviderMiniApp", () => {
     const { container } = render(<TrayProviderMiniApp />);
     await screen.findByText("供应商 12");
     const scroller = container.querySelector("header + div") as HTMLDivElement;
+    const rows = container.querySelectorAll("header + div > .divide-y > div");
+
+    expect(scroller).toHaveClass("max-h-[240px]");
+    expect(rows).toHaveLength(12);
+    rows.forEach((row) => expect(row).toHaveClass("h-6"));
+    expect(screen.getByText("供应商 12")).toBeInTheDocument();
     scroller.scrollTop = 160;
 
     act(() => {
-      snapshotHandler?.({ ...snapshot, generation: snapshot.generation + 1 });
+      snapshotHandler?.({
+        ...snapshot,
+        generation: snapshot.generation + 1,
+        providers: manyProviders,
+      });
     });
 
     expect(scroller.scrollTop).toBe(0);
+    expect(screen.getByText("供应商 12")).toBeInTheDocument();
   });
 });

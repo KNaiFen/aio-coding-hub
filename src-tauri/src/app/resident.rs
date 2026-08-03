@@ -20,7 +20,7 @@ const TRAY_PROVIDER_MINI_WIDTH: f64 = 440.0;
 #[cfg(any(target_os = "macos", test))]
 const TRAY_PROVIDER_MINI_HEADER_HEIGHT: f64 = 42.0;
 #[cfg(any(target_os = "macos", test))]
-const TRAY_PROVIDER_MINI_ROW_HEIGHT: f64 = 36.0;
+const TRAY_PROVIDER_MINI_ROW_HEIGHT: f64 = 24.0;
 #[cfg(any(target_os = "macos", test))]
 const TRAY_PROVIDER_MINI_EMPTY_HEIGHT: f64 = 68.0;
 #[cfg(any(target_os = "macos", test))]
@@ -966,6 +966,23 @@ mod tests {
         assert!(placement.y >= 32.0);
         assert!(placement.x + placement.width <= 1_720.0);
         assert!(placement.y + placement.height <= 1_096.0);
-        assert_eq!(placement.height, 404.0);
+        assert_eq!(placement.height, 284.0);
+    }
+
+    #[test]
+    fn tray_provider_mini_logical_height_caps_visible_rows() {
+        assert_eq!(tray_provider_mini_logical_height(0), 112.0);
+        assert_eq!(tray_provider_mini_logical_height(1), 68.0);
+        assert_eq!(tray_provider_mini_logical_height(5), 164.0);
+        assert_eq!(tray_provider_mini_logical_height(10), 284.0);
+        assert_eq!(tray_provider_mini_logical_height(20), 284.0);
+    }
+
+    #[test]
+    fn tray_provider_mini_placement_scales_density_height() {
+        let mut anchor = test_anchor();
+        anchor.scale_factor = 2.0;
+
+        assert_eq!(tray_provider_mini_placement(anchor, 10).height, 568.0);
     }
 }
