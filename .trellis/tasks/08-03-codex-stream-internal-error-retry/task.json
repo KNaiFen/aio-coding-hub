@@ -15,12 +15,12 @@
   "branch": "codex/feature-fake200",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": "957b649",
+  "commit": "ca15f02bd6b409df08f2892b5e5082bcc42aa3b3",
   "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/31",
   "subtasks": [],
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "PR #31；macos-arm64 dev-build：https://github.com/KNaiFen/aio-coding-hub/actions/runs/30822721768；已同步 PR CI 30822801043 报告的有界 rustfmt 漂移，等待新一轮 PR CI 与原生验证。",
+  "notes": "PR #31 已合并到 origin/main，合并提交 ca15f02bd6b409df08f2892b5e5082bcc42aa3b3；功能头 d8d23383c8ea380cab6c042b508be83f9f556162 已同步合并时最新主线 5a9b67eb。PR CI 30831184921 与合并后主线 CI 30832756330 全部通过；macos-arm64 dev-build 30822721768 通过。已审查主线新增的 37 个文件、唯一直接重叠测试文件、托盘统计语义、CI 分流和版本/候选发布路径，未发现需要补丁的业务冲突。",
   "meta": {}
 }
