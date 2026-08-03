@@ -26,6 +26,10 @@ const availabilityLabel: Record<TrayProviderMiniAvailabilityState, string> = {
   no_data: "无数据",
 };
 
+const EXACT_COUNT_MAX = 99_999;
+const TEN_THOUSAND = 10_000;
+const HUNDRED_MILLION = 100_000_000;
+
 const reasonPresentation: Record<
   TrayProviderMiniUnavailableReason,
   { marker: string; title: string; className: string }
@@ -56,6 +60,17 @@ function cliName(cliKey: string | null): string {
   return CLI_REGISTRY.find((cli) => cli.key === cliKey)?.name ?? cliKey ?? "CLI";
 }
 
+export function formatTrayProviderMiniCount(count: number): string {
+  if (count <= EXACT_COUNT_MAX) return String(count);
+
+  const divisor = count >= HUNDRED_MILLION ? HUNDRED_MILLION : TEN_THOUSAND;
+  const unit = divisor === HUNDRED_MILLION ? "亿" : "万";
+  const scaled = count / divisor;
+  const truncated =
+    scaled < 100 ? Math.floor((count * 10) / divisor) / 10 : Math.floor(count / divisor);
+  return `${truncated}${unit}`;
+}
+
 function ProviderReasonMarkers({ reasons }: { reasons: TrayProviderMiniUnavailableReason[] }) {
   const seen = new Set<string>();
   const markers = reasons.filter((reason) => {
@@ -67,7 +82,7 @@ function ProviderReasonMarkers({ reasons }: { reasons: TrayProviderMiniUnavailab
 
   return (
     <div
-      className="flex h-[18px] min-w-[18px] items-center justify-end gap-1"
+      className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-end gap-1"
       aria-label="供应商状态"
     >
       {markers.map((reason) => {
@@ -104,13 +119,35 @@ function AvailabilityCells({ provider }: { provider: TrayProviderMiniProvider })
 }
 
 function ProviderTotals({ provider }: { provider: TrayProviderMiniProvider }) {
+  const successText = formatTrayProviderMiniCount(provider.successCount);
+  const failureText = formatTrayProviderMiniCount(provider.failureCount);
+
   return (
     <div
-      className="flex items-center justify-end gap-1.5 text-[10px] font-medium tabular-nums"
+      className="grid grid-cols-[12px_32px_12px_32px] items-center text-[10px] font-medium tabular-nums"
+      role="group"
       aria-label={`总计 成功 ${provider.successCount}，失败 ${provider.failureCount}`}
     >
-      <span className="text-emerald-600 dark:text-emerald-300">成{provider.successCount}</span>
-      <span className="text-rose-600 dark:text-rose-300">败{provider.failureCount}</span>
+      <span className="whitespace-nowrap text-emerald-600 dark:text-emerald-300" aria-hidden="true">
+        成
+      </span>
+      <span
+        className="whitespace-nowrap text-right font-mono text-[9px] text-emerald-600 dark:text-emerald-300"
+        title={String(provider.successCount)}
+        aria-hidden="true"
+      >
+        {successText}
+      </span>
+      <span className="whitespace-nowrap text-rose-600 dark:text-rose-300" aria-hidden="true">
+        败
+      </span>
+      <span
+        className="whitespace-nowrap text-right font-mono text-[9px] text-rose-600 dark:text-rose-300"
+        title={String(provider.failureCount)}
+        aria-hidden="true"
+      >
+        {failureText}
+      </span>
     </div>
   );
 }
@@ -121,7 +158,7 @@ function ProviderRows({ providers }: { providers: TrayProviderMiniProvider[] }) 
       {providers.map((provider) => (
         <div
           key={provider.providerId}
-          className="grid h-6 grid-cols-[minmax(0,1fr)_216px_64px] items-center gap-2 px-3"
+          className="grid h-6 grid-cols-[96px_178px_88px] items-center gap-2 px-3"
         >
           <div className="flex min-w-0 items-center gap-1.5">
             <span

@@ -6,7 +6,7 @@ import {
   setTrayProviderMiniWindowHovered,
   type TrayProviderMiniSnapshot,
 } from "../../services/trayProviderMini";
-import { TrayProviderMiniApp } from "../TrayProviderMiniApp";
+import { formatTrayProviderMiniCount, TrayProviderMiniApp } from "../TrayProviderMiniApp";
 
 vi.mock("../../hooks/useTheme", () => ({
   useTheme: () => ({ theme: "system", resolvedTheme: "light", setTheme: vi.fn() }),
@@ -71,6 +71,25 @@ const snapshot: TrayProviderMiniSnapshot = {
   unavailable: false,
 };
 
+describe("formatTrayProviderMiniCount", () => {
+  it.each([
+    [0, "0"],
+    [9, "9"],
+    [1_034, "1034"],
+    [99_999, "99999"],
+    [100_000, "10万"],
+    [123_000, "12.3万"],
+    [123_456, "12.3万"],
+    [999_999, "99.9万"],
+    [1_000_000, "100万"],
+    [99_999_999, "9999万"],
+    [100_000_000, "1亿"],
+    [4_294_967_295, "42.9亿"],
+  ])("formats %i as %s without overstating the exact count", (count, expected) => {
+    expect(formatTrayProviderMiniCount(count)).toBe(expected);
+  });
+});
+
 describe("TrayProviderMiniApp", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -92,6 +111,70 @@ describe("TrayProviderMiniApp", () => {
     const timelines = screen.getAllByLabelText("供应商可用性");
     expect(within(timelines[0]!).getAllByTitle(/正常|异常|无数据/)).toHaveLength(18);
     expect(within(timelines[1]!).getAllByTitle("无数据")).toHaveLength(18);
+  });
+
+  it("keeps provider, availability, and exact total columns fixed", async () => {
+    const longChineseName = "这是一个很长很长的中文供应商名称";
+    const longEnglishName = "provider-with-a-very-long-english-display-name";
+    vi.mocked(getTrayProviderMiniSnapshot).mockResolvedValue({
+      ...snapshot,
+      providers: [
+        {
+          ...snapshot.providers[0]!,
+          providerName: longChineseName,
+          unavailableReasons: ["circuit_open", "cooldown", "spend_limit", "oauth_limit"],
+          successCount: 0,
+          failureCount: 9,
+        },
+        {
+          ...snapshot.providers[1]!,
+          providerName: longEnglishName,
+          unavailableReasons: [],
+          successCount: 1_034,
+          failureCount: 99_999,
+        },
+        {
+          ...snapshot.providers[0]!,
+          providerId: 3,
+          providerName: "超大计数",
+          unavailableReasons: [],
+          successCount: 123_456,
+          failureCount: 4_294_967_295,
+        },
+      ],
+    });
+
+    const { container } = render(<TrayProviderMiniApp />);
+    expect(await screen.findByText("12.3万")).toBeInTheDocument();
+    expect(screen.getByText("42.9亿")).toBeInTheDocument();
+
+    const rows = container.querySelectorAll("header + div > .divide-y > div");
+    expect(rows).toHaveLength(3);
+    rows.forEach((row) => {
+      expect(row).toHaveClass("grid-cols-[96px_178px_88px]");
+    });
+
+    expect(screen.getByTitle(longChineseName)).toHaveClass("truncate");
+    expect(screen.getByTitle(longEnglishName)).toHaveClass("truncate");
+    expect(screen.getByText("熔")).toBeInTheDocument();
+    expect(screen.getByText("冷")).toBeInTheDocument();
+    expect(screen.getAllByText("限")).toHaveLength(1);
+
+    const totals = [
+      screen.getByLabelText("总计 成功 0，失败 9"),
+      screen.getByLabelText("总计 成功 1034，失败 99999"),
+      screen.getByLabelText("总计 成功 123456，失败 4294967295"),
+    ];
+    totals.forEach((total) => {
+      expect(total).toHaveClass("grid-cols-[12px_32px_12px_32px]");
+      expect(total).toHaveAttribute("role", "group");
+      expect(within(total).getAllByText(/成|败|\d|万|亿/)).toHaveLength(4);
+      total.querySelectorAll("span[title]").forEach((value) => {
+        expect(value).toHaveClass("font-mono", "text-[9px]", "whitespace-nowrap", "text-right");
+      });
+    });
+    expect(screen.getByTitle("123456")).toHaveTextContent("12.3万");
+    expect(screen.getByTitle("4294967295")).toHaveTextContent("42.9亿");
   });
 
   it("reports pointer handoff without adding focusable controls", async () => {
