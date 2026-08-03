@@ -253,20 +253,6 @@ extent_parts(min_ts, max_ts) AS (
   SELECT MIN(r.created_at), MAX(r.created_at)
   FROM usage_events r
   CROSS JOIN query_args q
-  WHERE NOT EXISTS (SELECT 1 FROM trusted_days)
-    AND (q.end_ts IS NULL OR r.created_at < q.end_ts)
-    AND r.excluded_from_stats = 0
-    AND r.final_provider_id IS NOT NULL
-    AND r.final_provider_id > 0
-    AND (q.cli_key IS NULL OR r.cli_key = q.cli_key)
-    AND (q.provider_id IS NULL OR r.final_provider_id = q.provider_id)
-    {raw_cx2cc}
-
-  UNION ALL
-
-  SELECT MIN(r.created_at), MAX(r.created_at)
-  FROM usage_events r
-  CROSS JOIN query_args q
   CROSS JOIN trusted_bounds bounds
   WHERE r.created_at < bounds.first_start_ts
     AND (q.end_ts IS NULL OR r.created_at < q.end_ts)
