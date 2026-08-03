@@ -17,3 +17,9 @@
 
 - 检查代理复核 PRD、设计、实现清单及引用规范；发现并修复无效 `configured_model_route` 回退缺口，无开放阻塞项。
 - `git diff --check` 与 Trellis 全量上下文校验通过；Rust/Cargo、rustfmt、Clippy 和 Tauri 命令按仓库规则留给 GitHub Actions。
+
+## 交付证据（2026-08-03）
+
+- 实现提交 `cd8af240`，后续格式与 Clippy 修正提交 `25fe7681`、`c5b5c354`。
+- 功能 PR #24 合并提交 `52aca8daf4f8480c22db3033683afee1abe2efe1`，完整 CI `30795974057` 成功。
+- 已随 `aio-coding-hub-v0.60.45` 发布；精确 main 候选 CI `30799895208`、发布工作流 `30802809954` 与 Release 资产校验全部成功。
