@@ -15,8 +15,8 @@
   "branch": "codex/scope-aware-ci-gating",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": null,
-  "pr_url": null,
+  "commit": "131a4b92bab18bec7908523d74e65c77d22a066e",
+  "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/32",
   "subtasks": [],
   "children": [],
   "parent": null,
@@ -27,6 +27,11 @@
     "scripts/ci-change-scope.selftest.mjs",
     ".trellis/spec/aio-coding-hub/cross-layer/ci-change-scope-contract.md"
   ],
-  "notes": "",
-  "meta": {}
+  "notes": "功能提交 80c4cbd56f6b1f0171bcbe72658115273c68c35a 已通过 PR #32 合入 main；PR 完整 CI 30825901633 与 main 完整 CI 30827695672 均成功。纯流程文档轻量路由将在独立归档 PR 中验证。",
+  "meta": {
+    "implementation_commit": "80c4cbd56f6b1f0171bcbe72658115273c68c35a",
+    "merge_commit": "131a4b92bab18bec7908523d74e65c77d22a066e",
+    "implementation_ci_run": "https://github.com/KNaiFen/aio-coding-hub/actions/runs/30825901633",
+    "main_ci_run": "https://github.com/KNaiFen/aio-coding-hub/actions/runs/30827695672"
+  }
 }
