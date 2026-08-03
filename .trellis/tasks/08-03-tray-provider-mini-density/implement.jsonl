@@ -1,0 +1,2 @@
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"约束前端 CSS 与原生窗口几何同步。"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"保持现有 Tray 数据、渲染和生命周期路径不变。"}

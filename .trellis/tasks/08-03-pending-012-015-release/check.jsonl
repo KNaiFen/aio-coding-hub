@@ -1,0 +1,2 @@
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"检查跨子任务数据流与范围隔离。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/trellis-task-context-archive-contract.md","reason":"检查任务、PENDING 与发布证据归档。"}

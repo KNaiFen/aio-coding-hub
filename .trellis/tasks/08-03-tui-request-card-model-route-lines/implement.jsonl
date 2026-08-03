@@ -1,0 +1,2 @@
+{"file":".trellis/spec/aio-coding-hub/cross-layer/local-observer-tui-contract.md","reason":"约束请求卡、Statusline、详情页和只读 Observer 边界。"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"复用现有 Unicode 截断 helper，并保持单行格式所有权。"}

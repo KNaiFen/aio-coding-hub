@@ -1,0 +1,30 @@
+{
+  "id": "pending-012-015-release",
+  "name": "pending-012-015-release",
+  "title": "处理待办 012/014/015 并发布 0.60.45",
+  "description": "在一个补丁版本中完成 AIO-PENDING-012、014、015，经 origin PR 合并并发布 0.60.45。",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": "@aio-coding-hub",
+  "package": "aio-coding-hub",
+  "priority": "P2",
+  "creator": "KNaiFen",
+  "assignee": "KNaiFen",
+  "createdAt": "2026-08-03",
+  "completedAt": null,
+  "branch": "codex/pending-012-015-release",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-03-tui-request-card-model-route-lines",
+    "08-03-provider-account-usage-heartbeat-ui",
+    "08-03-tray-provider-mini-density"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

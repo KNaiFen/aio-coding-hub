@@ -58,6 +58,31 @@ impl StatusSegment {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestCardLineKind {
+    Status,
+    Model,
+    ModelTarget,
+    Provider,
+    Route,
+    Metrics,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestCardLine {
+    pub text: String,
+    pub kind: RequestCardLineKind,
+}
+
+impl RequestCardLine {
+    fn new(text: impl Into<String>, kind: RequestCardLineKind) -> Self {
+        Self {
+            text: text.into(),
+            kind,
+        }
+    }
+}
+
 pub fn status_segments(snapshot: &ObserverSnapshotV1, items: &[StatusItem]) -> Vec<StatusSegment> {
     items
         .iter()
@@ -342,7 +367,11 @@ fn push_status_text(output: &mut Vec<StatusSegment>, text: &str, tone: StatusTon
     }
 }
 
-pub fn request_card_lines(request: &ObserverRequest, now_ms: i64, width: usize) -> [String; 5] {
+pub fn request_card_lines(
+    request: &ObserverRequest,
+    now_ms: i64,
+    width: usize,
+) -> Vec<RequestCardLine> {
     let compaction = request
         .context_compaction
         .as_ref()
@@ -352,7 +381,6 @@ pub fn request_card_lines(request: &ObserverRequest, now_ms: i64, width: usize) 
             _ => " 压缩·未知",
         })
         .unwrap_or_default();
-    let model = request_model(request);
     let folder = request.folder_name.as_deref().unwrap_or("无目录");
     let provider = request.provider_name.as_deref().unwrap_or("未上游");
     let duration = request
@@ -392,7 +420,7 @@ pub fn request_card_lines(request: &ObserverRequest, now_ms: i64, width: usize) 
         ),
         None => format!("{}  {}", route_result(request), duration),
     };
-    [
+    let mut lines = vec![RequestCardLine::new(
         truncate_display(
             &format!(
                 "{}  {}",
@@ -401,23 +429,138 @@ pub fn request_card_lines(request: &ObserverRequest, now_ms: i64, width: usize) 
             ),
             width,
         ),
-        truncate_display(
-            &format!("{} / {}{}", cli_label(&request.cli_key), model, compaction),
-            width,
+        RequestCardLineKind::Status,
+    )];
+    lines.extend(request_card_model_lines(request, compaction, width));
+    lines.extend([
+        RequestCardLine::new(
+            truncate_display(&format!("{}  {}", provider, folder), width),
+            RequestCardLineKind::Provider,
         ),
-        truncate_display(&format!("{}  {}", provider, folder), width),
-        truncate_display(&route_summary, width),
-        truncate_display(
-            &format!(
-                "I {} O {} C {} {}",
-                input,
-                output,
-                format_tokens(cache),
-                cost
+        RequestCardLine::new(
+            truncate_display(&route_summary, width),
+            RequestCardLineKind::Route,
+        ),
+        RequestCardLine::new(
+            truncate_display(
+                &format!(
+                    "I {} O {} C {} {}",
+                    input,
+                    output,
+                    format_tokens(cache),
+                    cost
+                ),
+                width,
             ),
-            width,
+            RequestCardLineKind::Metrics,
         ),
+    ]);
+    lines
+}
+
+fn request_card_model_lines(
+    request: &ObserverRequest,
+    compaction: &str,
+    width: usize,
+) -> Vec<RequestCardLine> {
+    let Some(route) = request
+        .configured_model_route
+        .as_ref()
+        .filter(|route| configured_model_route_is_valid(route))
+    else {
+        return vec![RequestCardLine::new(
+            truncate_display(
+                &format!(
+                    "{} / {}{}",
+                    cli_label(&request.cli_key),
+                    request.model.as_deref().unwrap_or("—"),
+                    compaction
+                ),
+                width,
+            ),
+            RequestCardLineKind::Model,
+        )];
+    };
+    let effort = if route.reasoning_effort_applied {
+        format!("·{}", route.reasoning_effort.as_deref().unwrap_or("未知"))
+    } else {
+        String::new()
+    };
+    if !route.model_applied || route.source_model == route.effective_model {
+        return vec![RequestCardLine::new(
+            truncate_display(
+                &format!(
+                    "{} / {}{}{}",
+                    cli_label(&request.cli_key),
+                    route.source_model,
+                    effort,
+                    compaction
+                ),
+                width,
+            ),
+            RequestCardLineKind::Model,
+        )];
+    }
+
+    let source = truncate_with_trailing_arrow(
+        &format!("{} / {} ", cli_label(&request.cli_key), route.source_model),
+        width,
+    );
+    let target = right_align_display(
+        &format!("{}{}{}", route.effective_model, effort, compaction),
+        width,
+    );
+    vec![
+        RequestCardLine::new(source, RequestCardLineKind::Model),
+        RequestCardLine::new(target, RequestCardLineKind::ModelTarget),
     ]
+}
+
+fn configured_model_route_is_valid(
+    route: &aio_observer_protocol::ObserverConfiguredModelRoute,
+) -> bool {
+    display_width(route.source_model.trim()) > 0
+        && display_width(route.effective_model.trim()) > 0
+        && (!route.reasoning_effort_applied
+            || route
+                .reasoning_effort
+                .as_deref()
+                .is_some_and(|effort| display_width(effort.trim()) > 0))
+        && matches!(route.policy_source.as_str(), "global" | "provider")
+}
+
+fn truncate_with_trailing_arrow(lead: &str, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    if width == 1 {
+        return "→".to_string();
+    }
+    let lead = truncate_display_prefix(lead, width - 1);
+    format!("{lead}→")
+}
+
+fn right_align_display(value: &str, width: usize) -> String {
+    let rendered = truncate_display(value, width);
+    format!(
+        "{}{}",
+        " ".repeat(width.saturating_sub(display_width(&rendered))),
+        rendered
+    )
+}
+
+fn truncate_display_prefix(value: &str, max_width: usize) -> String {
+    let mut output = String::new();
+    let mut used = 0_usize;
+    for grapheme in value.graphemes(true) {
+        let next = grapheme.width();
+        if used.saturating_add(next) > max_width {
+            break;
+        }
+        output.push_str(grapheme);
+        used = used.saturating_add(next);
+    }
+    output
 }
 
 pub fn detail_lines(request: &ObserverRequest, now_ms: i64) -> Vec<String> {
@@ -533,7 +676,11 @@ pub fn detail_lines(request: &ObserverRequest, now_ms: i64) -> Vec<String> {
 }
 
 fn request_model(request: &ObserverRequest) -> String {
-    let Some(route) = request.configured_model_route.as_ref() else {
+    let Some(route) = request
+        .configured_model_route
+        .as_ref()
+        .filter(|route| configured_model_route_is_valid(route))
+    else {
         return request.model.as_deref().unwrap_or("—").to_string();
     };
     let model = if route.model_applied && route.source_model != route.effective_model {
@@ -751,8 +898,9 @@ fn display_width(value: &str) -> usize {
 mod tests {
     use super::*;
     use aio_observer_protocol::{
-        ObserverDominantProvider, ObserverGatewayStatus, ObserverPreferredProvider,
-        ObserverRequestUsage, ObserverSection, ObserverTodayUsage, OBSERVER_PROTOCOL_VERSION,
+        ObserverConfiguredModelRoute, ObserverContextCompaction, ObserverDominantProvider,
+        ObserverGatewayStatus, ObserverPreferredProvider, ObserverRequestUsage, ObserverSection,
+        ObserverTodayUsage, OBSERVER_PROTOCOL_VERSION,
     };
 
     fn request_with_route_counts(
@@ -975,9 +1123,14 @@ mod tests {
         });
 
         let lines = request_card_lines(&request, 60_001, 80);
-        assert_eq!(lines[2], "INPUT 大春  aio-coding-hub");
-        assert_eq!(lines[3], "直连  2.0s  133.3 t/s");
-        assert!(request_card_lines(&request, 60_001, 15)[2].starts_with("INPUT 大春"));
+        assert_eq!(lines.len(), 5);
+        assert_eq!(lines[1].kind, RequestCardLineKind::Model);
+        assert_eq!(lines[1].text, "Codex / gpt-5");
+        assert_eq!(lines[2].text, "INPUT 大春  aio-coding-hub");
+        assert_eq!(lines[3].text, "直连  2.0s  133.3 t/s");
+        assert!(request_card_lines(&request, 60_001, 15)[2]
+            .text
+            .starts_with("INPUT 大春"));
     }
 
     #[test]
@@ -1032,24 +1185,117 @@ mod tests {
     }
 
     #[test]
-    fn configured_model_route_keeps_original_and_effective_model_with_policy_source() {
+    fn configured_model_route_splits_request_card_but_keeps_statusline_and_detail_semantics() {
         let mut request = request_with_route_counts(1, 0, 0);
         request.model = Some("fable5".to_string());
-        request.configured_model_route =
-            Some(aio_observer_protocol::ObserverConfiguredModelRoute {
-                source_model: "fable5".to_string(),
-                effective_model: "opus4.8".to_string(),
-                reasoning_effort: Some("low".to_string()),
-                policy_source: "provider".to_string(),
-                model_applied: true,
-                reasoning_effort_applied: true,
-            });
+        request.context_compaction = Some(ObserverContextCompaction {
+            mode: "remote".to_string(),
+            implementation: "test".to_string(),
+            trigger: "test".to_string(),
+            reason: "test".to_string(),
+            phase: "test".to_string(),
+            strategy: "test".to_string(),
+        });
+        request.configured_model_route = Some(ObserverConfiguredModelRoute {
+            source_model: "fable5".to_string(),
+            effective_model: "opus4.8".to_string(),
+            reasoning_effort: Some("low".to_string()),
+            policy_source: "provider".to_string(),
+            model_applied: true,
+            reasoning_effort_applied: true,
+        });
 
-        assert!(request_card_lines(&request, 10, 80)
-            .iter()
-            .any(|line| line.contains("fable5→opus4.8·思考low")));
+        let lines = request_card_lines(&request, 10, 40);
+        let target = "opus4.8·low 压缩·远程";
+        assert_eq!(lines.len(), 6);
+        assert_eq!(lines[1].kind, RequestCardLineKind::Model);
+        assert_eq!(lines[1].text, "Codex / fable5 →");
+        assert_eq!(lines[2].kind, RequestCardLineKind::ModelTarget);
+        assert_eq!(
+            lines[2].text,
+            format!("{}{}", " ".repeat(40 - display_width(target)), target)
+        );
+        assert!(!lines[1].text.contains("思考"));
+        assert!(!lines[2].text.contains("思考"));
+        assert_eq!(request_model(&request), "fable5→opus4.8·思考low");
         assert!(detail_lines(&request, 10)
             .iter()
             .any(|line| line == "路由规则  供应商覆盖"));
+    }
+
+    #[test]
+    fn unchanged_model_route_keeps_one_model_line_with_compact_effort() {
+        let mut request = request_with_route_counts(1, 0, 0);
+        request.configured_model_route = Some(ObserverConfiguredModelRoute {
+            source_model: "gpt-5.6-sol".to_string(),
+            effective_model: "gpt-5.6-sol".to_string(),
+            reasoning_effort: Some("high".to_string()),
+            policy_source: "global".to_string(),
+            model_applied: false,
+            reasoning_effort_applied: true,
+        });
+
+        let lines = request_card_lines(&request, 10, 80);
+        assert_eq!(lines.len(), 5);
+        assert_eq!(lines[1].kind, RequestCardLineKind::Model);
+        assert_eq!(lines[1].text, "Codex / gpt-5.6-sol·high");
+        assert!(!lines[1].text.contains("思考"));
+    }
+
+    #[test]
+    fn route_model_lines_are_grapheme_safe_at_extreme_widths() {
+        let mut request = request_with_route_counts(1, 0, 0);
+        request.configured_model_route = Some(ObserverConfiguredModelRoute {
+            source_model: "超长源模型名称".to_string(),
+            effective_model: "目标模型名称非常长".to_string(),
+            reasoning_effort: Some("high".to_string()),
+            policy_source: "global".to_string(),
+            model_applied: true,
+            reasoning_effort_applied: true,
+        });
+
+        let zero = request_card_lines(&request, 10, 0);
+        assert_eq!(zero[1].text, "");
+        assert_eq!(zero[2].text, "");
+        let one = request_card_lines(&request, 10, 1);
+        assert_eq!(one[1].text, "→");
+        assert_eq!(one[2].text, "…");
+        for width in 0..=8 {
+            assert!(request_card_lines(&request, 10, width)
+                .iter()
+                .all(|line| display_width(&line.text) <= width));
+        }
+    }
+
+    #[test]
+    fn missing_route_falls_back_to_the_original_single_model_line() {
+        let mut request = request_with_route_counts(1, 0, 0);
+        request.model = Some("原始模型".to_string());
+
+        let lines = request_card_lines(&request, 10, 80);
+        assert_eq!(lines.len(), 5);
+        assert_eq!(lines[1].text, "Codex / 原始模型");
+        assert!(lines
+            .iter()
+            .all(|line| line.kind != RequestCardLineKind::ModelTarget));
+    }
+
+    #[test]
+    fn invalid_route_fields_fall_back_to_the_original_model() {
+        let mut request = request_with_route_counts(1, 0, 0);
+        request.model = Some("原始模型".to_string());
+        request.configured_model_route = Some(ObserverConfiguredModelRoute {
+            source_model: "\u{200b}".to_string(),
+            effective_model: "目标模型".to_string(),
+            reasoning_effort: Some("high".to_string()),
+            policy_source: "global".to_string(),
+            model_applied: true,
+            reasoning_effort_applied: true,
+        });
+
+        let lines = request_card_lines(&request, 10, 80);
+        assert_eq!(lines.len(), 5);
+        assert_eq!(lines[1].text, "Codex / 原始模型");
+        assert_eq!(request_model(&request), "原始模型");
     }
 }
