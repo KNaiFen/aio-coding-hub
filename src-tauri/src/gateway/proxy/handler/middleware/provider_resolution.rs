@@ -1,12 +1,12 @@
 //! Middleware: resolves session routing and selects providers with session binding.
 
 use super::{MiddlewareAction, ProxyContext};
+use crate::gateway::proxy::forwarder::{filter_routing_candidates, needs_limit_evaluation};
 use crate::gateway::proxy::handler::early_error::{
     build_early_error_log_ctx, early_error_contract, force_provider_if_requested,
     push_special_setting, respond_early_error_with_enqueue, respond_invalid_cli_key_with_spawn,
     respond_provider_selection_failed_with_spawn, EarlyErrorKind,
 };
-use crate::gateway::proxy::forwarder::{filter_routing_candidates, needs_limit_evaluation};
 use crate::gateway::proxy::handler::provider_selection::{
     resolve_session_bound_provider_id, resolve_session_routing_decision,
     select_providers_with_session_binding, ProviderSelection,

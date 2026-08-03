@@ -4625,8 +4625,7 @@ INSERT INTO codex_managed_profiles(
         let app = tauri::test::mock_app();
         let app_handle = app.handle().clone();
 
-        settings::write(&app_handle, &settings::AppSettings::default())
-            .expect("write settings");
+        settings::write(&app_handle, &settings::AppSettings::default()).expect("write settings");
         crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
             .expect("enable codex cli proxy");
 
@@ -4684,7 +4683,10 @@ INSERT INTO codex_managed_profiles(
 
         let log = recv_terminal_request_log(&mut log_rx).await;
         assert_eq!(log.attempts_json, "[]");
-        assert_eq!(log.requested_model.as_deref(), Some(canonical_model.as_str()));
+        assert_eq!(
+            log.requested_model.as_deref(),
+            Some(canonical_model.as_str())
+        );
 
         bound_task.abort();
         other_task.abort();
@@ -6646,9 +6648,7 @@ INSERT INTO codex_managed_profiles(
         let session = Arc::new(session_manager::SessionManager::new());
         let session_id = "0190c0de-0000-7000-8000-000000000004";
         let generation = session.capture_route_generation("codex");
-        assert!(session.bind_success(
-            "codex", session_id, generation, first_id, None, now,
-        ));
+        assert!(session.bind_success("codex", session_id, generation, first_id, None, now,));
         let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
         let router = build_router(gateway_state_with_parts(
             app_handle,
@@ -6723,8 +6723,7 @@ INSERT INTO codex_managed_profiles(
         let app = tauri::test::mock_app();
         let app_handle = app.handle().clone();
 
-        settings::write(&app_handle, &settings::AppSettings::default())
-            .expect("write settings");
+        settings::write(&app_handle, &settings::AppSettings::default()).expect("write settings");
         crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
             .expect("enable codex cli proxy");
 
@@ -6736,8 +6735,7 @@ INSERT INTO codex_managed_profiles(
             spawn_counting_status_upstream(StatusCode::OK, unavailable_body).await;
         let (circuit_url, circuit_calls, circuit_task) =
             spawn_counting_status_upstream(StatusCode::OK, unavailable_body).await;
-        let limited_id =
-            insert_codex_provider_with_priority(&db, "Limit Excluded", limited_url, 0);
+        let limited_id = insert_codex_provider_with_priority(&db, "Limit Excluded", limited_url, 0);
         let circuit_id =
             insert_codex_provider_with_priority(&db, "Circuit Audited", circuit_url, 1);
         db.open_connection()
@@ -6828,8 +6826,7 @@ INSERT INTO codex_managed_profiles(
             r#"{"error":{"message":"must not be called"}}"#,
         )
         .await;
-        let limited_id =
-            insert_codex_provider_with_priority(&db, "Spend Limited", limited_url, 0);
+        let limited_id = insert_codex_provider_with_priority(&db, "Spend Limited", limited_url, 0);
         db.open_connection()
             .expect("open database")
             .execute(
@@ -6841,8 +6838,7 @@ INSERT INTO codex_managed_profiles(
         let success_body = r#"{"id":"spend-ok","object":"chat.completion","choices":[]}"#;
         let (success_url, success_calls, success_task) =
             spawn_counting_status_upstream(StatusCode::OK, success_body).await;
-        let success_id =
-            insert_codex_provider_with_priority(&db, "Spend Fallback", success_url, 1);
+        let success_id = insert_codex_provider_with_priority(&db, "Spend Fallback", success_url, 1);
 
         let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
         let router = build_router(gateway_state_with_parts(
@@ -6895,22 +6891,19 @@ INSERT INTO codex_managed_profiles(
         let app = tauri::test::mock_app();
         let app_handle = app.handle().clone();
 
-        settings::write(&app_handle, &settings::AppSettings::default())
-            .expect("write settings");
+        settings::write(&app_handle, &settings::AppSettings::default()).expect("write settings");
         crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
             .expect("enable codex cli proxy");
 
         let db_dir = tempfile::tempdir().expect("db dir");
         let db = db::init_for_tests(&db_dir.path().join("gateway-route-forced-limited.sqlite"))
             .expect("init test db");
-        let response_body =
-            r#"{"id":"must-not-run","object":"chat.completion","choices":[]}"#;
+        let response_body = r#"{"id":"must-not-run","object":"chat.completion","choices":[]}"#;
         let (limited_url, limited_calls, limited_task) =
             spawn_counting_status_upstream(StatusCode::OK, response_body).await;
         let (fallback_url, fallback_calls, fallback_task) =
             spawn_counting_status_upstream(StatusCode::OK, response_body).await;
-        let limited_id =
-            insert_codex_provider_with_priority(&db, "Forced Limited", limited_url, 0);
+        let limited_id = insert_codex_provider_with_priority(&db, "Forced Limited", limited_url, 0);
         let _fallback_id =
             insert_codex_provider_with_priority(&db, "Forced Fallback", fallback_url, 1);
         db.open_connection()

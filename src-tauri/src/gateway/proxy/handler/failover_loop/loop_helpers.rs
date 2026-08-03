@@ -141,18 +141,12 @@ mod tests {
 
     #[test]
     fn pure_limit_exclusion_is_no_enabled_provider() {
-        assert!(
-            should_finalize_as_no_enabled_provider_after_limit_exclusions(&[], 0, 2, 0, 0)
-        );
+        assert!(should_finalize_as_no_enabled_provider_after_limit_exclusions(&[], 0, 2, 0, 0));
     }
 
     #[test]
     fn circuit_or_real_attempt_is_not_no_enabled_provider() {
-        assert!(!should_finalize_as_no_enabled_provider_after_limit_exclusions(
-            &[], 0, 1, 1, 0
-        ));
-        assert!(!should_finalize_as_no_enabled_provider_after_limit_exclusions(
-            &[], 1, 1, 0, 0
-        ));
+        assert!(!should_finalize_as_no_enabled_provider_after_limit_exclusions(&[], 0, 1, 1, 0));
+        assert!(!should_finalize_as_no_enabled_provider_after_limit_exclusions(&[], 1, 1, 0, 0));
     }
 }
