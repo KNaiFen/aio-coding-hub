@@ -308,9 +308,20 @@ where
         idle_timeout: Option<Duration>,
         initial_first_byte_ms: Option<u128>,
     ) -> Self {
+        let tracker = usage::SseUsageTracker::new(&ctx.cli_key);
+        let tracker = if ctx.detect_stream_internal_errors {
+            tracker.with_stream_internal_error_classifier(
+                ctx.upstream_retry_policy.enabled
+                    && ctx.upstream_retry_policy.stream_internal_errors.enabled,
+                &ctx.upstream_retry_policy.stream_internal_errors.retry_keywords,
+                &ctx.upstream_retry_policy.stream_internal_errors.non_retry_keywords,
+            )
+        } else {
+            tracker
+        };
         Self {
             upstream,
-            tracker: usage::SseUsageTracker::new(&ctx.cli_key),
+            tracker,
             ctx,
             first_byte_ms: initial_first_byte_ms,
             idle_timeout,
@@ -523,7 +534,8 @@ where
                 usage_metrics,
                 usage,
             )
-            .with_terminal_signal(terminal_signal),
+            .with_terminal_signal(terminal_signal)
+            .with_stream_internal_error(self.tracker.stream_internal_error_evidence().cloned()),
         );
     }
 }
@@ -1122,6 +1134,8 @@ mod tests {
             created_at: 1_700_000_000,
             provider_cooldown_secs: 0,
             upstream_first_byte_timeout_secs: 300,
+            upstream_retry_policy: crate::settings::UpstreamRetryPolicy::default(),
+            detect_stream_internal_errors: true,
             provider_id: 1,
             provider_name: "test-provider".to_string(),
             base_url: "https://upstream.example".to_string(),

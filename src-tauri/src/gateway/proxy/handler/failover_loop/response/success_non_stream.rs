@@ -578,6 +578,7 @@ where
                     circuit_recover_at_unix: None,
                     circuit_trigger_error_code: None,
                     timeout_secs: None,
+                    stream_internal_error: None,
                     requested_upstream_model: provider_ctx_owned.active_requested_model.clone(),
                 });
 
@@ -605,6 +606,7 @@ where
                     None,
                     None,
                     attempt_started,
+                    false,
                 );
 
                 if should_gunzip {
@@ -673,6 +675,7 @@ where
                     circuit_recover_at_unix: None,
                     circuit_trigger_error_code: None,
                     timeout_secs: None,
+                    stream_internal_error: None,
                     requested_upstream_model: provider_ctx_owned.active_requested_model.clone(),
                 });
 
@@ -700,6 +703,7 @@ where
                     None,
                     None,
                     attempt_started,
+                    false,
                 );
 
                 if should_gunzip {
@@ -1017,6 +1021,7 @@ where
             circuit_recover_at_unix: None,
             circuit_trigger_error_code: None,
             timeout_secs: None,
+            stream_internal_error: None,
             requested_upstream_model: provider_ctx_owned.active_requested_model.clone(),
         });
 
@@ -1235,6 +1240,7 @@ where
                 circuit_recover_at_unix: None,
                 circuit_trigger_error_code: None,
                 timeout_secs: None,
+                stream_internal_error: None,
                 requested_upstream_model: provider_ctx_owned.active_requested_model.clone(),
             });
 
@@ -1311,6 +1317,7 @@ where
         circuit_recover_at_unix: None,
         circuit_trigger_error_code: None,
         timeout_secs: None,
+        stream_internal_error: None,
         requested_upstream_model: provider_ctx_owned.active_requested_model.clone(),
     });
 

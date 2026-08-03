@@ -50,23 +50,32 @@ fn provider_max_attempts_for_request(
   transient retry capacity. A disabled effective policy reserves zero attempts,
   even if its stored `max_retries` is non-zero.
 - Configured transient capacity is policy-scoped, not rule-scoped. An enabled
-  HTTP rule match (status-only or status plus decoded-body content) and an
-  enabled transport match share the same `max_retries` reservation, backoff,
-  and circuit-accounting settings; rules do not add independent capacity.
-- Apply the configured `backoff_ms` before every configured HTTP or transport
-  retry that remains on the same Provider, including send errors, non-stream
-  body reads, and event-stream reads before the downstream response commits.
+  HTTP rule match (status-only or status plus decoded-body content), an enabled
+  transport match, and an enabled Codex stream-internal-error keyword match
+  share the same `max_retries` reservation, backoff, and circuit-accounting
+  settings; rules do not add independent capacity.
+- Apply the configured `backoff_ms` before every configured HTTP, transport, or
+  pre-commit Codex stream-internal-error retry that remains on the same
+  Provider, including send errors, non-stream body reads, and event-stream
+  reads before the downstream response commits.
   Circuit accounting must resolve the final decision first: a retry rewritten
   to switch/abort never waits, and cross-Provider failover adds no implicit
   delay.
-- `max_retries` counts actual configured HTTP/transport retries for the current
-  Provider, not the total attempt index. OAuth refresh, auth fallback,
+- `max_retries` counts actual configured HTTP/transport/stream-internal-error
+  retries for the current Provider, not the total attempt index. OAuth refresh, auth fallback,
   `previous_response_id` repair, thinking rectifiers, and generic baseline
   retries do not consume this counter; switching Provider resets it.
 - The transient reservation is available only after an HTTP/transport matcher
-  succeeds. An unmatched 5xx, 408/429, or other generic base decision is capped
-  by the same calculation with `configured_transient_retries = 0`; it cannot
-  consume the extra configured-retry slots.
+  or a positive Codex stream-internal-error keyword matcher succeeds. Disabled,
+  negative, or unknown in-band errors pass through without consuming capacity.
+  An unmatched 5xx, 408/429, or other generic base decision is capped by the
+  same calculation with `configured_transient_retries = 0`; it cannot consume
+  the extra configured-retry slots.
+- Build native Codex Responses around one decoded byte stream. First-byte
+  probing, the pre-commit guard, and downstream relay must consume that same
+  stream so an upstream gzip response is decoded exactly once and a compressed
+  `response.failed` cannot bypass classification. Preserve the legacy ordering
+  for other SSE protocols and decode them only in the downstream pipeline.
 - `circuit_breaker_failure_threshold` is not an input to the request budget.
   Circuit failures accumulate across requests; the threshold must never enlarge
   one request's configured attempt count.
@@ -118,6 +127,13 @@ fn provider_max_attempts_for_request(
   rewrites do not wait.
 - Route-test a baseline of one attempt with a non-matching configured HTTP rule
   and prove the transient reservation does not create a second upstream call.
+- Route-test a native Codex Responses stream whose metadata precedes a matched
+  `response.failed`: prove it shares the configured counter, backoff, circuit
+  policy, and Provider switch behavior. Negative, unknown, disabled, and
+  post-commit variants must not create a same-Provider retry.
+- Include a gzip route regression proving the pre-commit classifier sees the
+  decoded terminal event and the successful retry is the only body delivered
+  downstream.
 - Route-test an internal `previous_response_id` repair followed by a configured
   HTTP failure and prove the configured retry still runs within its independent
   policy counter.

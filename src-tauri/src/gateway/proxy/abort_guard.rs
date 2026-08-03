@@ -201,6 +201,7 @@ mod tests {
             circuit_trigger_error_code: None,
             provider_bridged: Some(true),
             timeout_secs: None,
+            stream_internal_error: None,
             requested_upstream_model: None,
         };
 

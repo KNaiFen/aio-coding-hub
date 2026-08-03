@@ -426,6 +426,12 @@ pub(crate) fn validate_bounds(settings: &AppSettings) -> AppResult<()> {
         )
         .into());
     }
+    if settings.stream_internal_error_guard_ms > MAX_STREAM_INTERNAL_ERROR_GUARD_MS {
+        return Err(format!(
+            "SEC_INVALID_INPUT: stream_internal_error_guard_ms must be <= {MAX_STREAM_INTERNAL_ERROR_GUARD_MS}"
+        )
+        .into());
+    }
     if settings.upstream_request_timeout_non_streaming_seconds
         > MAX_UPSTREAM_REQUEST_TIMEOUT_NON_STREAMING_SECONDS
     {

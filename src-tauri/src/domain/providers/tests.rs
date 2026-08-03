@@ -1199,6 +1199,7 @@ fn provider_retry_policy_override_writes_canonical_rules_and_rejects_invalid_dis
             description: " Temporary quota ".to_string(),
         }],
         transport_errors: Vec::new(),
+        stream_internal_errors: Default::default(),
         max_retries: 2,
         backoff_ms: 250,
         counts_toward_circuit_breaker: true,

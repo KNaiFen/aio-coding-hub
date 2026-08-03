@@ -77,6 +77,7 @@ pub(super) fn push_skipped_provider_attempt(
         circuit_trigger_error_code: circuit.and_then(|s| s.last_trigger_error_code),
         provider_bridged: None,
         timeout_secs: None,
+        stream_internal_error: None,
         requested_upstream_model: None,
     });
 }

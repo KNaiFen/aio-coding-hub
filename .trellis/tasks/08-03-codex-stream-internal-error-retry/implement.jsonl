@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/aio-coding-hub/backend/index.md", "reason": "后端入口与重试/错误响应检查清单"}
+{"file": ".trellis/spec/aio-coding-hub/backend/gateway-attempt-budget-contract.md", "reason": "共享瞬时重试预算、退避与熔断合同"}
+{"file": ".trellis/spec/aio-coding-hub/backend/upstream-error-response-rule-contract.md", "reason": "保持最终响应改写与重试职责分离"}
+{"file": ".trellis/spec/aio-coding-hub/cross-layer/index.md", "reason": "跨层设置、绑定与日志检查清单"}
+{"file": ".trellis/spec/aio-coding-hub/cross-layer/gateway-failover-route-contract.md", "reason": "持久化 attempt、供应商切换与敏感日志合同"}
+{"file": ".trellis/spec/aio-coding-hub/cross-layer/settings-ownership-rollback-contract.md", "reason": "普通设置字段所有权与锁内更新合同"}
+{"file": ".trellis/spec/aio-coding-hub/cross-layer/provider-share-contract.md", "reason": "供应商完整重试策略分享往返合同"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "统一后端到前端的结构化证据边界"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复用 SSE 解析、配置校验与日志投影"}

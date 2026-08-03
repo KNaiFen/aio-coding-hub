@@ -3122,7 +3122,18 @@ export type FailoverAttempt = {
   circuit_trigger_error_code?: string | null;
   provider_bridged: boolean | null;
   timeout_secs: number | null;
+  stream_internal_error?: StreamInternalErrorEvidence | null;
   requested_upstream_model: string | null;
+};
+export type StreamInternalErrorEvidence = {
+  event_type: string;
+  error_type: string | null;
+  error_code: string | null;
+  message: string | null;
+  classification: string;
+  matched_keyword: string | null;
+  disposition: string;
+  truncated: boolean;
 };
 export type FrontendErrorReportInput = {
   source: string;
@@ -4405,6 +4416,7 @@ export type SettingsUpdate = {
   providerBaseUrlPingCacheTtlSeconds: number | null;
   upstreamFirstByteTimeoutSeconds: number | null;
   upstreamStreamIdleTimeoutSeconds: number | null;
+  streamInternalErrorGuardMs: number | null;
   upstreamRequestTimeoutNonStreamingSeconds: number | null;
   enableCacheAnomalyMonitor: boolean | null;
   enableDebugLog: boolean | null;
@@ -4470,6 +4482,7 @@ export type SettingsView = {
   provider_base_url_ping_cache_ttl_seconds: number;
   upstream_first_byte_timeout_seconds: number;
   upstream_stream_idle_timeout_seconds: number;
+  stream_internal_error_guard_ms: number;
   upstream_request_timeout_non_streaming_seconds: number;
   update_releases_url: string;
   failover_max_attempts_per_provider: number;
@@ -4595,9 +4608,15 @@ export type UpstreamRetryPolicy = {
   enabled: boolean;
   http_rules: UpstreamHttpRetryRule[];
   transport_errors: UpstreamTransportRetryKind[];
+  stream_internal_errors: UpstreamStreamInternalErrorPolicy;
   max_retries: number;
   backoff_ms: number;
   counts_toward_circuit_breaker: boolean;
+};
+export type UpstreamStreamInternalErrorPolicy = {
+  enabled: boolean;
+  retry_keywords: string[];
+  non_retry_keywords: string[];
 };
 export type UpstreamTransportRetryKind = "connect" | "timeout" | "read";
 export type UsageAvailabilityBucketV1 = {

@@ -9,6 +9,7 @@ import { ingestTraceAttempt, ingestTraceRequest, ingestTraceStart } from "./trac
 import { ingestCacheAnomalyRequest, ingestCacheAnomalyRequestStart } from "./cacheAnomalyMonitor";
 import type { ClaudeModelMapping } from "./claudeModelMapping";
 import { MAX_ATTEMPTS_PER_TRACE } from "./traceLimits";
+import { parseStreamInternalErrorEvidence } from "./attemptsJson";
 import type {
   FailoverAttempt,
   GatewayAttemptEvent as GeneratedGatewayAttemptEvent,
@@ -34,6 +35,7 @@ export type GatewayAttempt = Pick<
   | "outcome"
   | "upstream_sent"
   | "status"
+  | "stream_internal_error"
   | "requested_upstream_model"
 >;
 
@@ -252,6 +254,7 @@ function normalizeGatewayAttempt(payload: unknown): GatewayAttempt | null {
     outcome: truncateString(payload.outcome, EVENT_STATE_MAX_LENGTH),
     upstream_sent: payload.upstream_sent === true,
     status: payload.status ?? null,
+    stream_internal_error: parseStreamInternalErrorEvidence(payload.stream_internal_error),
     requested_upstream_model:
       truncateNullableString(payload.requested_upstream_model, EVENT_SHORT_TEXT_MAX_LENGTH) ?? null,
   };

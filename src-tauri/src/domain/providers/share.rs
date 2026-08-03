@@ -172,6 +172,8 @@ pub(crate) struct ProviderShareRetryPolicyV2 {
     enabled: bool,
     http_rules: Vec<ProviderShareHttpRetryRuleV2>,
     transport_errors: Vec<crate::settings::UpstreamTransportRetryKind>,
+    #[serde(default)]
+    stream_internal_errors: crate::settings::UpstreamStreamInternalErrorPolicy,
     max_retries: u32,
     backoff_ms: u32,
     counts_toward_circuit_breaker: bool,
@@ -214,6 +216,7 @@ impl From<crate::settings::UpstreamRetryPolicy> for ProviderShareRetryPolicyV2 {
             enabled: value.enabled,
             http_rules: value.http_rules.into_iter().map(Into::into).collect(),
             transport_errors: value.transport_errors,
+            stream_internal_errors: value.stream_internal_errors,
             max_retries: value.max_retries,
             backoff_ms: value.backoff_ms,
             counts_toward_circuit_breaker: value.counts_toward_circuit_breaker,
@@ -231,6 +234,8 @@ impl From<ProviderShareRetryPolicyV1> for crate::settings::UpstreamRetryPolicy {
                 .map(crate::settings::UpstreamHttpRetryRule::status_only)
                 .collect(),
             transport_errors: value.transport_errors,
+            stream_internal_errors:
+                crate::settings::UpstreamStreamInternalErrorPolicy::default(),
             max_retries: value.max_retries,
             backoff_ms: value.backoff_ms,
             counts_toward_circuit_breaker: value.counts_toward_circuit_breaker,
@@ -244,6 +249,7 @@ impl From<ProviderShareRetryPolicyV2> for crate::settings::UpstreamRetryPolicy {
             enabled: value.enabled,
             http_rules: value.http_rules.into_iter().map(Into::into).collect(),
             transport_errors: value.transport_errors,
+            stream_internal_errors: value.stream_internal_errors,
             max_retries: value.max_retries,
             backoff_ms: value.backoff_ms,
             counts_toward_circuit_breaker: value.counts_toward_circuit_breaker,
@@ -2667,6 +2673,11 @@ mod tests {
                 },
             ],
             transport_errors: vec![crate::settings::UpstreamTransportRetryKind::Timeout],
+            stream_internal_errors: crate::settings::UpstreamStreamInternalErrorPolicy {
+                enabled: true,
+                retry_keywords: vec!["synthetic capacity".to_string()],
+                non_retry_keywords: vec!["synthetic policy".to_string()],
+            },
             max_retries: 2,
             backoff_ms: 321,
             counts_toward_circuit_breaker: true,
@@ -2752,6 +2763,11 @@ mod tests {
                     },
                 ],
                 transport_errors: vec![crate::settings::UpstreamTransportRetryKind::Timeout],
+                stream_internal_errors: crate::settings::UpstreamStreamInternalErrorPolicy {
+                    enabled: true,
+                    retry_keywords: vec!["synthetic capacity".to_string()],
+                    non_retry_keywords: vec!["synthetic policy".to_string()],
+                },
                 max_retries: 2,
                 backoff_ms: 321,
                 counts_toward_circuit_breaker: true,
