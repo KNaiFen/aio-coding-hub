@@ -15,10 +15,10 @@
 4. [x] 更新 Tray mini 跨层合同与 React 测试，覆盖长名称、原因标记、0/9/1034/99999/超大计数和多行稳定对齐。
 5. [x] 运行定向 Vitest，再运行 `vitest run src`、TypeScript、ESLint、Prettier、Vite build、规格链接、Trellis validate 与 `git diff --check`。
 6. [x] 启动前端 Vite mini 入口，通过可控 Tauri bridge fixture 生成 404px 的普通与 2x 截图，检查无换行、重叠、裁切和列位移。
-7. [ ] 完成差异审查与敏感信息检查，创建 origin 功能 PR；等待 GitHub Actions 的 Rust、原生几何、格式、绑定、Clippy、测试和审计全部通过后合并。
-8. [ ] 从最新 `origin/main` 创建独立版本 PR，将补丁版本提升到 `0.60.46`；只接受精确 main SHA 的成功 release-candidate。
-9. [ ] 创建并验证 `aio-coding-hub-v0.60.46`，核对标签 SHA、12 个资产、11 个校验和和 `latest.json`。
-10. [ ] 写回 PR、提交、CI、截图与 Release 证据，归档 AIO-PENDING-015 和父 Trellis 任务并提交最终归档 PR。
+7. [x] 完成差异审查与敏感信息检查，创建 origin 功能 PR；等待 GitHub Actions 的 Rust、原生几何、格式、绑定、Clippy、测试和审计全部通过后合并。
+8. [x] 从最新 `origin/main` 创建独立版本 PR，将补丁版本提升到 `0.60.46`；只接受精确 main SHA 的成功 release-candidate。
+9. [x] 创建并验证 `aio-coding-hub-v0.60.46`，核对标签 SHA、12 个资产、11 个校验和和 `latest.json`。
+10. [x] 写回 PR、提交、CI、截图与 Release 证据，归档 AIO-PENDING-015 和父 Trellis 任务并提交最终归档 PR。
 
 ## 回滚点
 
@@ -39,3 +39,10 @@
 - 全仓 `prettier --check .` 仍会报告未改动的 `src/query/__tests__/gateway.test.tsx` 既有格式差异，本任务未扩大范围改写该文件。
 - Playwright Tauri bridge fixture 在 404x284 逻辑视口验证 12 行数据：三列起点为 13/117/303，四个合计轨道起点为 303/315/347/359，所有计数均 `nowrap` 且 `scrollWidth <= 32`。
 - 截图保存为 `/private/tmp/aio-tray-mini-density-1x.png`（404x284）与 `/private/tmp/aio-tray-mini-density-2x.png`（808x568）；两个浏览器会话均为 0 errors、0 warnings。
+
+## 交付与发布证据
+
+- 功能实现提交为 `b6a5f973a31991d7261e4d682b4d84fd2d2eadc5`，验证证据提交为 `8ec0f90af5204bfe37c9c44eac215246dfa6ebb3`；功能 PR #27 以 `22917a9a69e2e719bf980672d0f2f06bb26c1dac` 合并，完整 CI `30810717682` 成功。
+- 版本 PR #28 以 `c1dca6b25b58c0307f54183d1319b7bb1316aca2` 合并；PR CI `30812790883` 成功，精确同 SHA 的 main 候选 CI `30814365441` 成功并生成 `release-candidate-c1dca6b25b58c0307f54183d1319b7bb1316aca2-30814365441-1`。
+- 注解标签 `aio-coding-hub-v0.60.46` 解引用到精确发布提交 `c1dca6b25b58c0307f54183d1319b7bb1316aca2`。标签触发运行 `30818031580` 仅因已知的 checkout `would clobber existing tag` 冲突失败；随后从 `main` 手动 dispatch 的发布工作流 `30818164026` 复用并验证上述精确候选后成功发布，没有重新构建。
+- 正式 Release 为 [`aio-coding-hub-v0.60.46`](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.46)；12 个资产均已上传，`SHA256SUMS.txt` 的 11 个有效载荷逐项通过校验，发布后的 `SHA256SUMS.txt` 与 `latest.json` 和候选产物逐字节一致。
