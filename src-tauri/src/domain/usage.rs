@@ -222,6 +222,12 @@ enum UsageSemantics {
 
 impl UsageSemantics {
     fn from_cli_key(cli_key: &str) -> Self {
+        match cli_key {
+            "openai_responses" | "openai_chat" => return Self::OpenAi,
+            "anthropic_messages" => return Self::Claude,
+            "gemini_generate_content" => return Self::Gemini,
+            _ => {}
+        }
         match CliKey::parse(cli_key) {
             Ok(CliKey::Codex | CliKey::Grok) => Self::OpenAi,
             Ok(CliKey::Claude) => Self::Claude,
@@ -766,6 +772,7 @@ pub struct SseUsageTracker {
     terminal_error_seen: bool,
     fake_200_detected: bool,
     meaningful_output_seen: bool,
+    output_delta_event_count: u64,
     stream_internal_error_classifier: Option<StreamInternalErrorClassifier>,
     stream_internal_error_evidence: Option<StreamInternalErrorEvidence>,
     #[cfg(test)]
@@ -946,6 +953,115 @@ pub(crate) fn has_codex_meaningful_output(data: &Value) -> bool {
         .any(|items| items.iter().any(is_meaningful_output_item))
 }
 
+fn value_has_generated_content(value: Option<&Value>) -> bool {
+    match value {
+        Some(Value::String(text)) => !text.trim().is_empty(),
+        Some(Value::Array(items)) => !items.is_empty(),
+        Some(Value::Object(fields)) => !fields.is_empty(),
+        Some(Value::Bool(_) | Value::Number(_)) => true,
+        Some(Value::Null) | None => false,
+    }
+}
+
+fn has_openai_output_delta(data: &Value) -> bool {
+    match data.get("type").and_then(Value::as_str) {
+        Some(
+            "response.output_text.delta"
+            | "response.refusal.delta"
+            | "response.reasoning_summary_text.delta"
+            | "response.function_call_arguments.delta",
+        ) if value_has_generated_content(data.get("delta")) => return true,
+        _ => {}
+    }
+
+    data.get("choices")
+        .and_then(Value::as_array)
+        .is_some_and(|choices| {
+            choices.iter().any(|choice| {
+                let delta = choice.get("delta").or_else(|| choice.get("message"));
+                delta.is_some_and(|delta| {
+                    [
+                        "content",
+                        "reasoning_content",
+                        "reasoning",
+                        "refusal",
+                        "tool_calls",
+                        "function_call",
+                    ]
+                    .into_iter()
+                    .any(|field| value_has_generated_content(delta.get(field)))
+                })
+            })
+        })
+}
+
+fn has_claude_output_delta(data: &Value) -> bool {
+    match data.get("type").and_then(Value::as_str) {
+        Some("content_block_delta") => {
+            let delta = data.get("delta");
+            delta.is_some_and(|delta| {
+                ["text", "thinking", "partial_json"]
+                    .into_iter()
+                    .any(|field| value_has_generated_content(delta.get(field)))
+            })
+        }
+        Some("content_block_start") => data.get("content_block").is_some_and(|block| {
+            ["text", "thinking", "input"]
+                .into_iter()
+                .any(|field| value_has_generated_content(block.get(field)))
+                || block
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .is_some_and(|kind| matches!(kind, "tool_use" | "server_tool_use"))
+        }),
+        _ => false,
+    }
+}
+
+fn has_gemini_output_delta(data: &Value) -> bool {
+    data.get("candidates")
+        .and_then(Value::as_array)
+        .is_some_and(|candidates| {
+            candidates.iter().any(|candidate| {
+                candidate
+                    .get("content")
+                    .and_then(|content| content.get("parts"))
+                    .and_then(Value::as_array)
+                    .is_some_and(|parts| {
+                        parts.iter().any(|part| {
+                            [
+                                "text",
+                                "thought",
+                                "functionCall",
+                                "function_call",
+                                "executableCode",
+                                "codeExecutionResult",
+                            ]
+                            .into_iter()
+                            .any(|field| value_has_generated_content(part.get(field)))
+                        })
+                    })
+            })
+        })
+}
+
+fn has_stream_output_delta_for_semantics(semantics: UsageSemantics, data: &Value) -> bool {
+    match semantics {
+        UsageSemantics::OpenAi => has_openai_output_delta(data),
+        UsageSemantics::Claude => has_claude_output_delta(data),
+        UsageSemantics::Gemini => has_gemini_output_delta(data),
+        UsageSemantics::Other => {
+            ["delta", "text", "content", "output"]
+                .into_iter()
+                .any(|field| value_has_generated_content(data.get(field)))
+        }
+    }
+}
+
+pub(crate) fn has_stream_output_delta(cli_key: &str, data: &Value) -> bool {
+    has_stream_output_delta_for_semantics(UsageSemantics::from_cli_key(cli_key), data)
+}
+
 impl SseUsageTracker {
     pub fn new(cli_key: &str) -> Self {
         Self {
@@ -964,6 +1080,7 @@ impl SseUsageTracker {
             terminal_error_seen: false,
             fake_200_detected: false,
             meaningful_output_seen: false,
+            output_delta_event_count: 0,
             stream_internal_error_classifier: None,
             stream_internal_error_evidence: None,
             #[cfg(test)]
@@ -1004,6 +1121,10 @@ impl SseUsageTracker {
     #[cfg(test)]
     pub fn meaningful_output_seen(&self) -> bool {
         self.meaningful_output_seen
+    }
+
+    pub fn output_delta_event_count(&self) -> u64 {
+        self.output_delta_event_count
     }
 
     pub fn is_empty_success(&self, path: &str, status: u16, usage: Option<&UsageExtract>) -> bool {
@@ -1186,6 +1307,9 @@ impl SseUsageTracker {
 
         if self.semantics == UsageSemantics::OpenAi && has_codex_meaningful_output(data) {
             self.meaningful_output_seen = true;
+        }
+        if has_stream_output_delta_for_semantics(self.semantics, data) {
+            self.output_delta_event_count = self.output_delta_event_count.saturating_add(1);
         }
 
         if is_completion_event_name(event) {

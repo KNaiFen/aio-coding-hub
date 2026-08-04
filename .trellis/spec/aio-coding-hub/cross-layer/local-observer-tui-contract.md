@@ -82,6 +82,10 @@ remote administration API.
   observation only when an applied provider-scoped marker is valid. Unknown,
   malformed, future, or mismatched-provider markers are omitted without making
   the request or snapshot unavailable.
+- Codex request projections may include a bounded optional requested reasoning
+  effort parsed from the request-scoped `codex_reasoning_effort` marker. Only
+  the fixed supported effort vocabulary is exposed; missing, malformed, or
+  future values are omitted and old snapshots remain valid.
 - The optional provider projection is capped at 512 rows. It contains only
   provider/CLI names, route rank and enable flags, authentication kind, fixed
   eligibility labels, non-mutating circuit snapshots, spend-window totals, and
@@ -133,14 +137,15 @@ remote administration API.
   retries the legacy snapshot and marks only the provider view unsupported.
 - Request cards use semantic status, model, target-model, provider, route, and
   metrics lines so dynamic model routing does not change color ownership. When
-  an applied configured route changes the model, the card renders `CLI / 源模型
-  →` followed by a display-width-right-aligned target line containing
-  `effective[·effort][ 压缩·模式]`; the source arrow remains visible at every
-  nonzero width. Requests without a model change retain one model line. This
-  card-only compact effort text omits the Chinese thinking label; Statusline and
-  request detail retain their existing `source→effective·思考effort` semantics.
-  Old observers or invalid optional route fields continue to render the ordinary
-  model safely.
+  an applied configured route changes a Codex model, the card renders
+  `Codex / source[-requested-effort] →` followed by a
+  display-width-right-aligned target line containing
+  `effective[-effective-effort][ 压缩·模式]`; the source arrow remains visible at
+  every nonzero width. Codex requests without a model change retain one line and
+  show the final effective effort. Statusline and request detail use the same
+  hyphenated source/effective evidence. Missing optional effort evidence omits
+  the suffix. Non-Codex route formatting remains unchanged. Old observers or
+  invalid optional route fields continue to render the ordinary model safely.
 - Provider availability detail converts bucket timestamps to the host system's
   local timezone at render time and displays `HH:MM-HH:MM` without a hard-coded
   timezone suffix.

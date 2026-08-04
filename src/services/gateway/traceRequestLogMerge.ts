@@ -16,6 +16,8 @@ export type RequestLogTraceMergeSource = Pick<
   | "duration_ms"
   | "ttfb_ms"
   | "visible_ttfb_ms"
+  | "upstream_stream_duration_ms"
+  | "upstream_stream_timing_version"
   | "input_tokens"
   | "effective_input_tokens"
   | "output_tokens"
@@ -115,6 +117,10 @@ export function mergeTraceWithRequestLog(
     duration_ms: requestLog.duration_ms ?? summary?.duration_ms ?? 0,
     ttfb_ms: requestLog.ttfb_ms ?? summary?.ttfb_ms ?? null,
     visible_ttfb_ms: requestLog.visible_ttfb_ms ?? summary?.visible_ttfb_ms ?? null,
+    upstream_stream_duration_ms:
+      requestLog.upstream_stream_duration_ms ?? summary?.upstream_stream_duration_ms ?? null,
+    upstream_stream_timing_version:
+      requestLog.upstream_stream_timing_version ?? summary?.upstream_stream_timing_version ?? 0,
     attempts: summary?.attempts ?? [],
     input_tokens: requestLog.input_tokens ?? summary?.input_tokens ?? null,
     effective_input_tokens:

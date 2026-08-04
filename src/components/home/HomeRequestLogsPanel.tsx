@@ -166,10 +166,16 @@ const RequestLogCard = memo(function RequestLogCard({
   const compactTextClass = compactMode ? "whitespace-normal break-all" : "truncate";
 
   const ttfbMs = sanitizeTtfbMs(log.ttfb_ms, log.duration_ms);
+  const hasSuccessfulTerminalResult =
+    !isInterrupted &&
+    log.status != null &&
+    log.status >= 200 &&
+    log.status < 300 &&
+    !log.error_code;
   const outputTokensPerSecond = computeOutputTokensPerSecond(
     log.output_tokens,
-    log.duration_ms,
-    ttfbMs
+    log.upstream_stream_duration_ms,
+    hasSuccessfulTerminalResult ? log.upstream_stream_timing_version : 0
   );
 
   const costMultiplier = log.cost_multiplier;

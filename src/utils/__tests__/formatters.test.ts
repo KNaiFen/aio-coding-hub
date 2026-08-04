@@ -63,34 +63,21 @@ describe("utils/formatters", () => {
   });
 
   it("tokens per second", () => {
-    expect(computeOutputTokensPerSecond(null, 1000, 100)).toBeNull();
+    expect(computeOutputTokensPerSecond(null, 1000, 1)).toBeNull();
     expect(computeOutputTokensPerSecond(10, 0, 1)).toBeNull();
-    expect(computeOutputTokensPerSecond(10, 1000, 1000)).toBeCloseTo(10 / 1.0);
-    expect(computeOutputTokensPerSecond(0, 1000, 1000)).toBeNull();
-    expect(computeOutputTokensPerSecond(10, 1100, 100)).toBeCloseTo(10 / 1.0);
+    expect(computeOutputTokensPerSecond(0, 1000, 1)).toBeNull();
+    expect(computeOutputTokensPerSecond(10, 1000, 1)).toBeCloseTo(10 / 1.0);
     expect(formatTokensPerSecond(1.23)).toContain("Token/秒");
   });
 
-  it("tokens per second falls back when TTFB is inflated by upstream buffering", () => {
-    // Extreme buffering case: naive rate > 5000 t/s triggers fallback
-    // 1000 tokens, 20000ms duration, 19800ms TTFB → naive rate = 1000/0.2 = 5000 t/s
-    // generationMs/durationMs = 200/20000 = 0.01 < 0.1, rate > 5000 → fallback
-    const rate = computeOutputTokensPerSecond(1200, 20000, 19800);
-    // Fallback: 1200 / (20000 / 1000) = 60 t/s
-    expect(rate).toBeCloseTo(1200 / (20000 / 1000), 1);
-    expect(rate).toBeLessThan(100);
+  it("tokens per second requires a confirmed final-upstream stream span", () => {
+    expect(computeOutputTokensPerSecond(1200, 200, 0)).toBeNull();
+    expect(computeOutputTokensPerSecond(1200, null, 1)).toBeNull();
   });
 
-  it("tokens per second does NOT fall back for legitimate fast generation", () => {
-    // 200 tokens, 2000ms duration, 500ms TTFB → generationMs = 1500ms → rate ≈ 133 t/s
-    // generationMs/durationMs = 0.75 > 0.1, no fallback
-    expect(computeOutputTokensPerSecond(200, 2000, 500)).toBeCloseTo(200 / 1.5, 0);
-  });
-
-  it("tokens per second does NOT fall back for small generation window with moderate rate", () => {
-    // 439 tokens, 29520ms duration, 29360ms TTFB → generationMs = 160ms → rate ≈ 2743 t/s
-    // generationMs/durationMs = 0.005 < 0.1, but rate 2743 < 5000 → no fallback
-    expect(computeOutputTokensPerSecond(439, 29520, 29360)).toBeCloseTo(439 / 0.16, 0);
+  it("tokens per second uses only the final upstream generation span", () => {
+    expect(computeOutputTokensPerSecond(200, 1500, 1)).toBeCloseTo(200 / 1.5, 0);
+    expect(computeOutputTokensPerSecond(439, 160, 1)).toBeCloseTo(439 / 0.16, 0);
   });
 
   it("USD formatting", () => {

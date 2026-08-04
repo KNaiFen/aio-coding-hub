@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo } from "react";
 import { gatewayEventNames } from "../constants/gatewayEvents";
 import {
   useActiveRequestLogsSnapshotQuery,
-  useRequestLogsPageAllQuery,
+  isRequestLogSnapshotExpiredError,
+  useRequestLogsSnapshotPageAllQuery,
 } from "../query/requestLogs";
 import { logToConsole } from "../services/consoleLog";
 import { subscribeGatewayEvent } from "../services/gateway/gatewayEventBus";
@@ -17,13 +18,16 @@ const ACTIVE_REQUEST_SIGNAL_REFRESH_WINDOW_MS = 200;
 
 type UseRequestLogsPageFeedOptions = {
   filters: RequestLogPageFilters;
-  cursor: string | null;
+  snapshotId: string | null;
+  page: number;
+  snapshotRevision: number;
   limit: number;
   enabled?: boolean;
   liveUpdatesEnabled?: boolean;
   liveUpdateWindowMs?: number;
   refreshOnForeground?: boolean;
   foregroundThrottleMs?: number;
+  onRefreshSnapshot: () => void;
 };
 
 function normalizeRefreshWindowMs(value: number | undefined) {
@@ -33,18 +37,28 @@ function normalizeRefreshWindowMs(value: number | undefined) {
 
 export function useRequestLogsPageFeed({
   filters,
-  cursor,
+  snapshotId,
+  page,
+  snapshotRevision,
   limit,
   enabled = true,
   liveUpdatesEnabled = false,
   liveUpdateWindowMs,
   refreshOnForeground = false,
   foregroundThrottleMs = 1000,
+  onRefreshSnapshot,
 }: UseRequestLogsPageFeedOptions) {
   const foregroundActive = useDocumentVisibility();
-  const pageQuery = useRequestLogsPageAllQuery(filters, cursor, limit, { enabled });
+  const pageQuery = useRequestLogsSnapshotPageAllQuery(
+    filters,
+    snapshotId,
+    page,
+    limit,
+    snapshotRevision,
+    { enabled }
+  );
   const activeRequestsQuery = useActiveRequestLogsSnapshotQuery({ enabled });
-  const latestPage = cursor == null;
+  const latestPage = page === 1;
   const signalSubscriptionEnabled = enabled && liveUpdatesEnabled;
   const liveRefreshEnabled = signalSubscriptionEnabled && foregroundActive;
   const pageLiveRefreshEnabled = liveRefreshEnabled && latestPage;
@@ -78,7 +92,7 @@ export function useRequestLogsPageFeed({
     enabled: pageLiveRefreshEnabled,
     delayMs: refreshWindowMs,
     task: async () => {
-      await refreshRequestLogs();
+      onRefreshSnapshot();
     },
     onError: (error) => {
       logToConsole("warn", "刷新请求日志当前页失败", { error: String(error) });
@@ -89,11 +103,10 @@ export function useRequestLogsPageFeed({
   const refreshForForeground = useCallback(() => {
     if (!enabled) return;
     if (latestPage) {
-      void refreshRequestLogs();
-      return;
+      onRefreshSnapshot();
     }
     void refreshActiveRequests();
-  }, [enabled, latestPage, refreshActiveRequests, refreshRequestLogs]);
+  }, [enabled, latestPage, onRefreshSnapshot, refreshActiveRequests]);
 
   useWindowForeground({
     enabled: enabled && refreshOnForeground,
@@ -153,13 +166,17 @@ export function useRequestLogsPageFeed({
 
   return {
     requestLogs,
-    nextCursor: pageQuery.isPlaceholderData ? null : (pageQuery.data?.nextCursor ?? null),
+    snapshotId: pageQuery.isPlaceholderData ? null : (pageQuery.data?.snapshotId ?? null),
+    totalCount: pageQuery.isPlaceholderData ? null : (pageQuery.data?.totalCount ?? null),
+    totalPages: pageQuery.isPlaceholderData ? null : (pageQuery.data?.totalPages ?? null),
+    page: pageQuery.isPlaceholderData ? null : (pageQuery.data?.page ?? null),
     activeRequests,
     activeRequestsAvailable,
     requestLogsLoading,
     requestLogsRefreshing,
     requestLogsPageFetching: pageQuery.isFetching,
     requestLogsAvailable,
+    requestLogsSnapshotExpired: isRequestLogSnapshotExpiredError(pageQuery.error),
     refreshActiveRequests,
     refreshRequestLogs,
   };

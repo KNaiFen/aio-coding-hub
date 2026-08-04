@@ -189,6 +189,9 @@ enum BufferedStreamPrefixDecision {
 struct BufferedStreamPrefixState {
     cursor: usize,
     meaningful_output_started_at: Option<Instant>,
+    output_delta_started_at: Option<Instant>,
+    output_delta_last_seen_at: Option<Instant>,
+    output_delta_event_count: u64,
     completion_seen: bool,
 }
 
@@ -197,10 +200,20 @@ impl BufferedStreamPrefixState {
         let started = self.meaningful_output_started_at?;
         Some(guard.saturating_sub(started.elapsed()))
     }
+
+    fn output_timing_ms(&self, attempt_started: Instant) -> (Option<u128>, Option<u128>) {
+        (
+            self.output_delta_started_at
+                .map(|started| started.saturating_duration_since(attempt_started).as_millis()),
+            self.output_delta_last_seen_at
+                .map(|last_seen| last_seen.saturating_duration_since(attempt_started).as_millis()),
+        )
+    }
 }
 
 struct BufferedStreamPrefixConfig<'a> {
     cli_key: &'a str,
+    upstream_protocol_key: &'a str,
     path: &'a str,
     status: u16,
     active_bridge_type: Option<&'a str>,
@@ -250,6 +263,12 @@ fn inspect_buffered_event_stream_prefix(
         let Some((event_name, data)) = crate::gateway::proxy::sse::parse_sse_frame(frame) else {
             continue;
         };
+        let observed_at = Instant::now();
+        if usage::has_stream_output_delta(config.upstream_protocol_key, &data) {
+            state.output_delta_started_at.get_or_insert(observed_at);
+            state.output_delta_last_seen_at = Some(observed_at);
+            state.output_delta_event_count = state.output_delta_event_count.saturating_add(1);
+        }
         if inspect_empty_success {
             if let Some(evidence) = usage::classify_codex_stream_internal_error(
                 &event_name,
@@ -272,10 +291,8 @@ fn inspect_buffered_event_stream_prefix(
                     guard_cap_reached: false,
                 };
             }
-            if usage::has_codex_meaningful_output(&data)
-                && state.meaningful_output_started_at.is_none()
-            {
-                state.meaningful_output_started_at = Some(Instant::now());
+            if usage::has_codex_meaningful_output(&data) {
+                state.meaningful_output_started_at.get_or_insert(observed_at);
             }
             state.completion_seen |= is_completion_sse_frame(&event_name, &data);
         } else if is_terminal_error_sse_frame(&event_name, &data) {
@@ -1094,6 +1111,10 @@ where
             .await;
         }
 
+        let upstream_protocol_key = match active_bridge_type.and_then(protocol_bridge::get_bridge) {
+            Some(bridge) => bridge.outbound.protocol(),
+            None => common.cli_key.as_str(),
+        };
         let mut buffered_prefix = first_chunk
             .take()
             .map(|chunk| chunk.to_vec())
@@ -1101,6 +1122,7 @@ where
         let mut prefix_state = BufferedStreamPrefixState::default();
         let prefix_config = BufferedStreamPrefixConfig {
             cli_key: common.cli_key.as_str(),
+            upstream_protocol_key,
             path: common.forwarded_path.as_str(),
             status: status.as_u16(),
             active_bridge_type,
@@ -1372,7 +1394,15 @@ where
             &common.special_settings,
         );
 
-        let ctx = build_stream_finalize_ctx(
+        let (buffered_output_started_ms, buffered_output_last_seen_ms) =
+            prefix_state.output_timing_ms(attempt_started);
+        let upstream_output_timing = UpstreamOutputTiming::from_buffered_prefix(
+            buffered_output_started_ms,
+            buffered_output_last_seen_ms,
+        );
+        let buffered_output_event_count = prefix_state.output_delta_event_count;
+
+        let mut ctx = build_stream_finalize_ctx(
             &common,
             &provider_ctx_owned,
             attempts.as_slice(),
@@ -1385,6 +1415,7 @@ where
                 provider_ctx_owned.provider_bridged,
             ),
         );
+        ctx.upstream_output_timing = upstream_output_timing.clone();
 
         let enable_response_fixer_for_this_response =
             enable_response_fixer && !has_non_identity_content_encoding(&response_headers);
@@ -1416,6 +1447,13 @@ where
             first_chunk,
             upstream,
             should_gunzip && !decode_gzip_before_guard,
+        );
+        let upstream = spawn_upstream_output_timing_stream(
+            upstream,
+            upstream_protocol_key,
+            upstream_output_timing.clone(),
+            attempt_started,
+            buffered_output_event_count,
         );
 
         let body = if enable_response_fixer_for_this_response {
@@ -1549,6 +1587,7 @@ mod tests {
     ) -> BufferedStreamPrefixConfig<'_> {
         BufferedStreamPrefixConfig {
             cli_key: "codex",
+            upstream_protocol_key: "codex",
             path: "/v1/responses",
             status: 200,
             active_bridge_type: None,

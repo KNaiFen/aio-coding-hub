@@ -2026,6 +2026,27 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async requestLogsSnapshotPageAll(
+    filters: RequestLogPageFilters,
+    snapshotId: string | null,
+    page: number,
+    limit: number | null
+  ): Promise<Result<RequestLogSnapshotPage, string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("request_logs_snapshot_page_all", {
+          filters,
+          snapshotId,
+          page,
+          limit,
+        }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async requestLogsListAfterId(
     cliKey: string,
     afterId: number,
@@ -3258,6 +3279,8 @@ export type GatewayRequestEvent = {
   duration_ms: number;
   ttfb_ms: number | null;
   visible_ttfb_ms: number | null;
+  upstream_stream_duration_ms: number | null;
+  upstream_stream_timing_version: number;
   attempts: FailoverAttempt[];
   input_tokens: number | null;
   output_tokens: number | null;
@@ -4301,6 +4324,8 @@ export type RequestLogDetail = {
   duration_ms: number;
   ttfb_ms: number | null;
   visible_ttfb_ms: number | null;
+  upstream_stream_duration_ms: number | null;
+  upstream_stream_timing_version: number;
   attempts_json: string;
   input_tokens: number | null;
   output_tokens: number | null;
@@ -4326,11 +4351,24 @@ export type RequestLogDetail = {
   created_at: number;
 };
 export type RequestLogPage = { items: RequestLogSummary[]; nextCursor: string | null };
+export type RequestLogErrorScope = "all" | "all_errors" | "stream_internal_error";
 export type RequestLogPageFilters = {
   cliKey: string | null;
   status: RequestLogStatusFilter | null;
   errorCodeContains: string | null;
   methodPathContains: string | null;
+  errorScope: RequestLogErrorScope;
+  createdAtMsFrom: number | null;
+  createdAtMsTo: number | null;
+};
+export type RequestLogSnapshotPage = {
+  items: RequestLogSummary[];
+  snapshotId: string;
+  totalCount: number;
+  totalPages: number;
+  page: number;
+  pageSize: number;
+  expiresAtMs: number;
 };
 export type RequestLogRouteHop = {
   provider_id: number;
@@ -4364,6 +4402,8 @@ export type RequestLogSummary = {
   duration_ms: number;
   ttfb_ms: number | null;
   visible_ttfb_ms: number | null;
+  upstream_stream_duration_ms: number | null;
+  upstream_stream_timing_version: number;
   attempt_count: number;
   has_failover: boolean;
   start_provider_id: number;

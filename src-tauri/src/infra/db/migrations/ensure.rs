@@ -1082,7 +1082,7 @@ fn ensure_provider_model_routing_policy(conn: &mut Connection) -> Result<(), Str
 
 // ---------------------------------------------------------------------------
 // ensure_request_logs_extended_columns
-// (provider_chain_json, error_details_json, visible_ttfb_ms, last_activity_ms, activity_details_json)
+// (provider_chain_json, error_details_json, request/stream timing, activity fields)
 // ---------------------------------------------------------------------------
 
 fn ensure_request_logs_extended_columns(conn: &mut Connection) -> Result<(), String> {
@@ -1125,6 +1125,8 @@ fn ensure_request_logs_extended_columns(conn: &mut Connection) -> Result<(), Str
             .map_err(|e| format!("failed to ensure request_logs.activity_details_json: {e}"))?;
     }
 
+    super::v47_to_v48::ensure_request_log_stream_timing_columns(conn)?;
+
     Ok(())
 }
 
@@ -1150,6 +1152,7 @@ fn ensure_usage_ledger(conn: &mut Connection) -> Result<(), String> {
         .transaction()
         .map_err(|error| format!("failed to start usage ledger ensure transaction: {error}"))?;
     super::v42_to_v43::create_usage_ledger_schema(&tx)?;
+    super::v47_to_v48::ensure_usage_ledger_stream_timing_columns(&tx)?;
 
     if !ledger_existed || !state_row_existed {
         let target_request_log_id: i64 = tx

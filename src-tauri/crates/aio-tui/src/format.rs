@@ -468,12 +468,13 @@ fn request_card_model_lines(
         .as_ref()
         .filter(|route| configured_model_route_is_valid(route))
     else {
+        let model = request_model_with_requested_effort(request);
         return vec![RequestCardLine::new(
             truncate_display(
                 &format!(
                     "{} / {}{}",
                     cli_label(&request.cli_key),
-                    request.model.as_deref().unwrap_or("—"),
+                    model,
                     compaction
                 ),
                 width,
@@ -481,33 +482,64 @@ fn request_card_model_lines(
             RequestCardLineKind::Model,
         )];
     };
-    let effort = if route.reasoning_effort_applied {
-        format!("·{}", route.reasoning_effort.as_deref().unwrap_or("未知"))
+    let is_codex = request.cli_key == "codex";
+    let requested_effort = if is_codex {
+        request.requested_reasoning_effort.as_deref()
     } else {
-        String::new()
+        None
+    };
+    let effective_effort = if is_codex {
+        if route.reasoning_effort_applied {
+            route.reasoning_effort.as_deref()
+        } else {
+            requested_effort
+        }
+    } else {
+        None
     };
     if !route.model_applied || route.source_model == route.effective_model {
+        let model = if is_codex {
+            model_with_effort(&route.source_model, effective_effort)
+        } else if route.reasoning_effort_applied {
+            format!(
+                "{}·{}",
+                route.source_model,
+                route.reasoning_effort.as_deref().unwrap_or("未知")
+            )
+        } else {
+            route.source_model.clone()
+        };
         return vec![RequestCardLine::new(
             truncate_display(
-                &format!(
-                    "{} / {}{}{}",
-                    cli_label(&request.cli_key),
-                    route.source_model,
-                    effort,
-                    compaction
-                ),
+                &format!("{} / {}{}", cli_label(&request.cli_key), model, compaction),
                 width,
             ),
             RequestCardLineKind::Model,
         )];
     }
 
+    let source_model = if is_codex {
+        model_with_effort(&route.source_model, requested_effort)
+    } else {
+        route.source_model.clone()
+    };
     let source = truncate_with_trailing_arrow(
-        &format!("{} / {} ", cli_label(&request.cli_key), route.source_model),
+        &format!("{} / {} ", cli_label(&request.cli_key), source_model),
         width,
     );
+    let target_model = if is_codex {
+        model_with_effort(&route.effective_model, effective_effort)
+    } else if route.reasoning_effort_applied {
+        format!(
+            "{}·{}",
+            route.effective_model,
+            route.reasoning_effort.as_deref().unwrap_or("未知")
+        )
+    } else {
+        route.effective_model.clone()
+    };
     let target = right_align_display(
-        &format!("{}{}{}", route.effective_model, effort, compaction),
+        &format!("{}{}", target_model, compaction),
         width,
     );
     vec![
@@ -681,21 +713,70 @@ fn request_model(request: &ObserverRequest) -> String {
         .as_ref()
         .filter(|route| configured_model_route_is_valid(route))
     else {
-        return request.model.as_deref().unwrap_or("—").to_string();
+        return request_model_with_requested_effort(request);
     };
-    let model = if route.model_applied && route.source_model != route.effective_model {
-        format!("{}→{}", route.source_model, route.effective_model)
+    if request.cli_key != "codex" {
+        let model = if route.model_applied && route.source_model != route.effective_model {
+            format!("{}→{}", route.source_model, route.effective_model)
+        } else {
+            route.source_model.clone()
+        };
+        return if route.reasoning_effort_applied {
+            format!(
+                "{}·思考{}",
+                model,
+                route.reasoning_effort.as_deref().unwrap_or("未知")
+            )
+        } else {
+            model
+        };
+    }
+
+    let requested_effort = request.requested_reasoning_effort.as_deref();
+    let effective_effort = if route.reasoning_effort_applied {
+        route.reasoning_effort.as_deref()
     } else {
-        route.source_model.clone()
+        requested_effort
     };
-    if route.reasoning_effort_applied {
+    let source = model_with_effort(&route.source_model, requested_effort);
+    if route.model_applied && route.source_model != route.effective_model {
         format!(
-            "{}·思考{}",
-            model,
-            route.reasoning_effort.as_deref().unwrap_or("未知")
+            "{}→{}",
+            source,
+            model_with_effort(&route.effective_model, effective_effort)
         )
     } else {
-        model
+        model_with_effort(&route.source_model, effective_effort)
+    }
+}
+
+fn request_model_with_requested_effort(request: &ObserverRequest) -> String {
+    let Some(model) = request.model.as_deref() else {
+        return "—".to_string();
+    };
+    if request.cli_key == "codex" {
+        model_with_effort(model, request.requested_reasoning_effort.as_deref())
+    } else {
+        model.to_string()
+    }
+}
+
+fn model_with_effort(model: &str, effort: Option<&str>) -> String {
+    let Some(effort) = effort.map(str::trim).filter(|effort| !effort.is_empty()) else {
+        return model.to_string();
+    };
+    let effort = effort.to_ascii_lowercase();
+    if !matches!(
+        effort.as_str(),
+        "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra"
+    ) {
+        return model.to_string();
+    }
+    let suffix = format!("-{effort}");
+    if model.to_ascii_lowercase().ends_with(&suffix) {
+        model.to_string()
+    } else {
+        format!("{model}-{effort}")
     }
 }
 
@@ -789,6 +870,8 @@ pub fn format_cost(value: f64) -> String {
 
 pub fn output_tokens_per_second(request: &ObserverRequest) -> Option<f64> {
     if request.state != ObserverRequestState::Terminal
+        || request.upstream_stream_timing_version != 1
+        || request.error_code.is_some()
         || !request
             .status
             .is_some_and(|status| (200..300).contains(&status))
@@ -796,19 +879,11 @@ pub fn output_tokens_per_second(request: &ObserverRequest) -> Option<f64> {
         return None;
     }
     let output_tokens = request.usage.as_ref()?.output_tokens?;
-    let duration_ms = request.duration_ms?;
-    let ttfb_ms = request.ttfb_ms?;
-    if output_tokens <= 0 || duration_ms <= 0 {
+    let upstream_stream_duration_ms = request.upstream_stream_duration_ms?;
+    if output_tokens <= 0 || upstream_stream_duration_ms <= 0 {
         return None;
     }
-    let generation_ms = duration_ms.saturating_sub(ttfb_ms);
-    if generation_ms <= 0 {
-        return Some(output_tokens as f64 / (duration_ms as f64 / 1_000.0));
-    }
-    let rate = output_tokens as f64 / (generation_ms as f64 / 1_000.0);
-    if (generation_ms as f64) / (duration_ms as f64) < 0.1 && rate > 5_000.0 {
-        return Some(output_tokens as f64 / (duration_ms as f64 / 1_000.0));
-    }
+    let rate = output_tokens as f64 / (upstream_stream_duration_ms as f64 / 1_000.0);
     rate.is_finite().then_some(rate)
 }
 
@@ -923,6 +998,9 @@ mod tests {
             last_activity_ms: 2,
             duration_ms: Some(1),
             ttfb_ms: Some(1),
+            visible_ttfb_ms: None,
+            upstream_stream_duration_ms: None,
+            upstream_stream_timing_version: 0,
             attempt_count,
             retry_count,
             provider_switch_count,
@@ -934,6 +1012,7 @@ mod tests {
             cost_usd: None,
             route: Vec::new(),
             context_compaction: None,
+            requested_reasoning_effort: None,
             configured_model_route: None,
         }
     }
@@ -1114,6 +1193,8 @@ mod tests {
         request.folder_name = Some("aio-coding-hub".to_string());
         request.duration_ms = Some(2_000);
         request.ttfb_ms = Some(500);
+        request.upstream_stream_duration_ms = Some(1_500);
+        request.upstream_stream_timing_version = 1;
         request.usage = Some(ObserverRequestUsage {
             input_tokens: Some(611),
             output_tokens: Some(200),
@@ -1134,10 +1215,12 @@ mod tests {
     }
 
     #[test]
-    fn output_rate_matches_desktop_fallbacks_and_visibility_rules() {
+    fn output_rate_uses_final_upstream_span_and_visibility_rules() {
         let mut request = request_with_route_counts(1, 0, 0);
         request.duration_ms = Some(20_000);
         request.ttfb_ms = Some(19_800);
+        request.upstream_stream_duration_ms = Some(200);
+        request.upstream_stream_timing_version = 1;
         request.usage = Some(ObserverRequestUsage {
             input_tokens: None,
             output_tokens: Some(1_200),
@@ -1145,11 +1228,12 @@ mod tests {
             cache_read_tokens: None,
             cache_creation_tokens: None,
         });
-        assert_eq!(output_tokens_per_second(&request), Some(60.0));
+        assert_eq!(output_tokens_per_second(&request), Some(6_000.0));
         assert_eq!(format_tokens_per_second_short(1_500.0), "1.5k t/s");
 
         request.duration_ms = Some(29_520);
         request.ttfb_ms = Some(29_360);
+        request.upstream_stream_duration_ms = Some(160);
         request.usage.as_mut().expect("usage").output_tokens = Some(439);
         assert!(output_tokens_per_second(&request).is_some_and(|rate| rate > 2_700.0));
 
@@ -1159,7 +1243,10 @@ mod tests {
         request.state = ObserverRequestState::Active;
         assert_eq!(output_tokens_per_second(&request), None);
         request.state = ObserverRequestState::Terminal;
-        request.ttfb_ms = None;
+        request.upstream_stream_duration_ms = None;
+        assert_eq!(output_tokens_per_second(&request), None);
+        request.upstream_stream_duration_ms = Some(160);
+        request.upstream_stream_timing_version = 0;
         assert_eq!(output_tokens_per_second(&request), None);
     }
 
@@ -1196,6 +1283,7 @@ mod tests {
             phase: "test".to_string(),
             strategy: "test".to_string(),
         });
+        request.requested_reasoning_effort = Some("max".to_string());
         request.configured_model_route = Some(ObserverConfiguredModelRoute {
             source_model: "fable5".to_string(),
             effective_model: "opus4.8".to_string(),
@@ -1206,10 +1294,10 @@ mod tests {
         });
 
         let lines = request_card_lines(&request, 10, 40);
-        let target = "opus4.8·low 压缩·远程";
+        let target = "opus4.8-low 压缩·远程";
         assert_eq!(lines.len(), 6);
         assert_eq!(lines[1].kind, RequestCardLineKind::Model);
-        assert_eq!(lines[1].text, "Codex / fable5 →");
+        assert_eq!(lines[1].text, "Codex / fable5-max →");
         assert_eq!(lines[2].kind, RequestCardLineKind::ModelTarget);
         assert_eq!(
             lines[2].text,
@@ -1217,7 +1305,7 @@ mod tests {
         );
         assert!(!lines[1].text.contains("思考"));
         assert!(!lines[2].text.contains("思考"));
-        assert_eq!(request_model(&request), "fable5→opus4.8·思考low");
+        assert_eq!(request_model(&request), "fable5-max→opus4.8-low");
         assert!(detail_lines(&request, 10)
             .iter()
             .any(|line| line == "路由规则  供应商覆盖"));
@@ -1226,6 +1314,7 @@ mod tests {
     #[test]
     fn unchanged_model_route_keeps_one_model_line_with_compact_effort() {
         let mut request = request_with_route_counts(1, 0, 0);
+        request.requested_reasoning_effort = Some("max".to_string());
         request.configured_model_route = Some(ObserverConfiguredModelRoute {
             source_model: "gpt-5.6-sol".to_string(),
             effective_model: "gpt-5.6-sol".to_string(),
@@ -1238,8 +1327,57 @@ mod tests {
         let lines = request_card_lines(&request, 10, 80);
         assert_eq!(lines.len(), 5);
         assert_eq!(lines[1].kind, RequestCardLineKind::Model);
-        assert_eq!(lines[1].text, "Codex / gpt-5.6-sol·high");
+        assert_eq!(lines[1].text, "Codex / gpt-5.6-sol-high");
         assert!(!lines[1].text.contains("思考"));
+    }
+
+    #[test]
+    fn model_only_route_inherits_requested_effort_on_both_model_lines() {
+        let mut request = request_with_route_counts(1, 0, 0);
+        request.model = Some("gpt-5.6-sol".to_string());
+        request.requested_reasoning_effort = Some("max".to_string());
+        request.configured_model_route = Some(ObserverConfiguredModelRoute {
+            source_model: "gpt-5.6-sol".to_string(),
+            effective_model: "gpt-5.6-terra".to_string(),
+            reasoning_effort: None,
+            policy_source: "global".to_string(),
+            model_applied: true,
+            reasoning_effort_applied: false,
+        });
+
+        let lines = request_card_lines(&request, 10, 32);
+        assert_eq!(lines[1].text, "Codex / gpt-5.6-sol-max →");
+        let target = "gpt-5.6-terra-max";
+        assert_eq!(
+            lines[2].text,
+            format!("{}{}", " ".repeat(32 - display_width(target)), target)
+        );
+        assert_eq!(request_model(&request), "gpt-5.6-sol-max→gpt-5.6-terra-max");
+    }
+
+    #[test]
+    fn non_codex_route_keeps_existing_effort_presentation() {
+        let mut request = request_with_route_counts(1, 0, 0);
+        request.cli_key = "claude".to_string();
+        request.model = Some("fable5".to_string());
+        request.requested_reasoning_effort = Some("max".to_string());
+        request.configured_model_route = Some(ObserverConfiguredModelRoute {
+            source_model: "fable5".to_string(),
+            effective_model: "opus4.8".to_string(),
+            reasoning_effort: Some("low".to_string()),
+            policy_source: "provider".to_string(),
+            model_applied: true,
+            reasoning_effort_applied: true,
+        });
+
+        let lines = request_card_lines(&request, 10, 32);
+        assert_eq!(lines[1].text, "Claude / fable5 →");
+        let target = "opus4.8·low";
+        assert_eq!(
+            lines[2].text,
+            format!("{}{}", " ".repeat(32 - display_width(target)), target)
+        );
+        assert_eq!(request_model(&request), "fable5→opus4.8·思考low");
     }
 
     #[test]
@@ -1271,10 +1409,12 @@ mod tests {
     fn missing_route_falls_back_to_the_original_single_model_line() {
         let mut request = request_with_route_counts(1, 0, 0);
         request.model = Some("原始模型".to_string());
+        request.requested_reasoning_effort = Some("max".to_string());
 
         let lines = request_card_lines(&request, 10, 80);
         assert_eq!(lines.len(), 5);
-        assert_eq!(lines[1].text, "Codex / 原始模型");
+        assert_eq!(lines[1].text, "Codex / 原始模型-max");
+        assert_eq!(request_model(&request), "原始模型-max");
         assert!(lines
             .iter()
             .all(|line| line.kind != RequestCardLineKind::ModelTarget));

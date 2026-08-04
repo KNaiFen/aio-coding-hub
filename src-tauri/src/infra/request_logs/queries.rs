@@ -9,8 +9,8 @@ use std::collections::{HashMap, HashSet};
 
 use super::costing::cost_usd_from_femto;
 use super::types::{
-    RequestLogDetail, RequestLogPage, RequestLogPageFilters, RequestLogRouteHop,
-    RequestLogStatusFilter, RequestLogStatusFilterOp, RequestLogSummary,
+    RequestLogDetail, RequestLogErrorScope, RequestLogPage, RequestLogPageFilters,
+    RequestLogRouteHop, RequestLogStatusFilter, RequestLogStatusFilterOp, RequestLogSummary,
 };
 
 const CLAUDE_VISIBLE_LOG_PATH: &str = "/v1/messages";
@@ -20,7 +20,37 @@ const REQUEST_LOG_PAGE_CURSOR_MAX_BYTES: usize = 512;
 const REQUEST_LOG_PAGE_MAX_LIMIT: usize = 200;
 const REQUEST_LOG_PAGE_ERROR_CODE_FILTER_MAX_BYTES: usize = 256;
 const REQUEST_LOG_PAGE_METHOD_PATH_FILTER_MAX_BYTES: usize = 512;
-
+const REQUEST_LOG_INTERRUPTED_CONDITION: &str = r#"
+(
+  (status IS NULL AND NULLIF(trim(COALESCE(error_code, '')), '') IS NULL)
+  OR status = 499
+  OR trim(COALESCE(error_code, '')) IN (
+    'GW_REQUEST_ABORTED',
+    'GW_STREAM_ABORTED',
+    'GW_REQUEST_INTERRUPTED_BY_RESTART',
+    'GW_REQUEST_INTERRUPTED_BY_GATEWAY_STOP'
+  )
+)
+"#;
+const REQUEST_LOG_STREAM_INTERNAL_ERROR_EXISTS: &str = r#"
+EXISTS (
+  SELECT 1
+  FROM json_each(
+    CASE
+      WHEN json_valid(COALESCE(attempts_json, '[]')) THEN attempts_json
+      ELSE '[]'
+    END
+  ) AS attempt
+  WHERE json_type(
+          CASE WHEN attempt.type = 'object' THEN attempt.value ELSE '{}' END,
+          '$.stream_internal_error'
+        ) IS NOT NULL
+    AND json_type(
+          CASE WHEN attempt.type = 'object' THEN attempt.value ELSE '{}' END,
+          '$.stream_internal_error'
+        ) != 'null'
+)
+"#;
 /// Common SELECT fields for request_logs queries (summary view).
 const REQUEST_LOG_SUMMARY_FIELDS: &str = "
   id,
@@ -37,6 +67,8 @@ const REQUEST_LOG_SUMMARY_FIELDS: &str = "
   duration_ms,
   ttfb_ms,
   visible_ttfb_ms,
+  upstream_stream_duration_ms,
+  upstream_stream_timing_version,
   attempts_json,
   input_tokens,
   output_tokens,
@@ -71,6 +103,8 @@ const REQUEST_LOG_DETAIL_FIELDS: &str = "
   duration_ms,
   ttfb_ms,
   visible_ttfb_ms,
+  upstream_stream_duration_ms,
+  upstream_stream_timing_version,
   attempts_json,
   input_tokens,
   output_tokens,
@@ -105,6 +139,9 @@ struct ValidatedPageFilters<'a> {
     status: Option<&'a RequestLogStatusFilter>,
     error_code_contains: Option<&'a str>,
     method_path_contains: Option<&'a str>,
+    error_scope: RequestLogErrorScope,
+    created_at_ms_from: Option<i64>,
+    created_at_ms_to: Option<i64>,
 }
 
 pub(super) fn validate_cli_key(cli_key: &str) -> Result<(), String> {
@@ -146,6 +183,27 @@ fn validate_page_filters(
             ));
         }
     }
+    if let Some(from) = filters.created_at_ms_from {
+        if from < 0 {
+            return Err(invalid_page_input(
+                "created_at_ms_from must be a non-negative millisecond timestamp",
+            ));
+        }
+    }
+    if let Some(to) = filters.created_at_ms_to {
+        if to < 0 {
+            return Err(invalid_page_input(
+                "created_at_ms_to must be a non-negative millisecond timestamp",
+            ));
+        }
+    }
+    if let (Some(from), Some(to)) = (filters.created_at_ms_from, filters.created_at_ms_to) {
+        if from >= to {
+            return Err(invalid_page_input(
+                "created_at_ms_from must be earlier than created_at_ms_to",
+            ));
+        }
+    }
 
     Ok(ValidatedPageFilters {
         cli_key: filters.cli_key.as_deref(),
@@ -160,7 +218,79 @@ fn validate_page_filters(
             "method_path_contains",
             REQUEST_LOG_PAGE_METHOD_PATH_FILTER_MAX_BYTES,
         )?,
+        error_scope: filters.error_scope,
+        created_at_ms_from: filters.created_at_ms_from,
+        created_at_ms_to: filters.created_at_ms_to,
     })
+}
+
+fn page_conditions_and_params(
+    filters: &RequestLogPageFilters,
+    excluded_trace_ids: &[String],
+    cursor: Option<&RequestLogPageCursor>,
+) -> crate::shared::error::AppResult<(Vec<String>, Vec<rusqlite::types::Value>)> {
+    let filters = validate_page_filters(filters)?;
+    let mut conditions = vec![CLAUDE_VISIBLE_LOG_CONDITION.to_string()];
+    let mut query_params = Vec::<rusqlite::types::Value>::new();
+
+    if let Some(cli_key) = filters.cli_key {
+        conditions.push("cli_key = ?".to_string());
+        query_params.push(cli_key.to_owned().into());
+    }
+    if let Some(status) = filters.status {
+        let condition = match status.op {
+            RequestLogStatusFilterOp::Eq => "status = ?",
+            RequestLogStatusFilterOp::Neq => "(status IS NULL OR status != ?)",
+            RequestLogStatusFilterOp::Gte => "status >= ?",
+            RequestLogStatusFilterOp::Lte => "status <= ?",
+        };
+        conditions.push(condition.to_string());
+        query_params.push(status.value.into());
+    }
+    if let Some(needle) = filters.error_code_contains {
+        conditions.push("instr(lower(COALESCE(error_code, '')), lower(?)) > 0".to_string());
+        query_params.push(needle.to_owned().into());
+    }
+    if let Some(needle) = filters.method_path_contains {
+        conditions.push("instr(lower(method || ' ' || path), lower(?)) > 0".to_string());
+        query_params.push(needle.to_owned().into());
+    }
+    match filters.error_scope {
+        RequestLogErrorScope::All => {}
+        RequestLogErrorScope::AllErrors => conditions.push(format!(
+            "NOT ({REQUEST_LOG_INTERRUPTED_CONDITION}) AND \
+             ((status IS NOT NULL AND (status < 200 OR status >= 300)) \
+              OR NULLIF(trim(COALESCE(error_code, '')), '') IS NOT NULL \
+              OR ({REQUEST_LOG_STREAM_INTERNAL_ERROR_EXISTS}))"
+        )),
+        RequestLogErrorScope::StreamInternalError => {
+            conditions.push(format!("({REQUEST_LOG_STREAM_INTERNAL_ERROR_EXISTS})"));
+        }
+    }
+    if let Some(from) = filters.created_at_ms_from {
+        conditions.push("created_at_ms >= ?".to_string());
+        query_params.push(from.into());
+    }
+    if let Some(to) = filters.created_at_ms_to {
+        conditions.push("created_at_ms < ?".to_string());
+        query_params.push(to.into());
+    }
+    if !excluded_trace_ids.is_empty() {
+        if let Ok(encoded_trace_ids) = serde_json::to_string(excluded_trace_ids) {
+            conditions.push(
+                "trace_id NOT IN (SELECT value FROM json_each(?) WHERE type = 'text')".to_string(),
+            );
+            query_params.push(encoded_trace_ids.into());
+        }
+    }
+    if let Some(cursor) = cursor {
+        conditions.push("(created_at_ms < ? OR (created_at_ms = ? AND id < ?))".to_string());
+        query_params.push(cursor.created_at_ms.into());
+        query_params.push(cursor.created_at_ms.into());
+        query_params.push(cursor.id.into());
+    }
+
+    Ok((conditions, query_params))
 }
 
 fn decode_page_cursor(
@@ -484,6 +614,11 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<RequestLogSummary, rusqlite
         duration_ms: row.get("duration_ms")?,
         ttfb_ms: row.get("ttfb_ms")?,
         visible_ttfb_ms: row.get("visible_ttfb_ms")?,
+        upstream_stream_duration_ms: row.get("upstream_stream_duration_ms")?,
+        upstream_stream_timing_version: row
+            .get::<_, Option<i64>>("upstream_stream_timing_version")?
+            .filter(|value| *value == 1)
+            .unwrap_or(0),
         attempt_count,
         has_failover,
         start_provider_id,
@@ -539,6 +674,11 @@ fn row_to_detail(row: &rusqlite::Row<'_>) -> Result<RequestLogDetail, rusqlite::
         duration_ms: row.get("duration_ms")?,
         ttfb_ms: row.get("ttfb_ms")?,
         visible_ttfb_ms: row.get("visible_ttfb_ms")?,
+        upstream_stream_duration_ms: row.get("upstream_stream_duration_ms")?,
+        upstream_stream_timing_version: row
+            .get::<_, Option<i64>>("upstream_stream_timing_version")?
+            .filter(|value| *value == 1)
+            .unwrap_or(0),
         attempts_json,
         input_tokens: row.get("input_tokens")?,
         output_tokens: row.get("output_tokens")?,
@@ -682,48 +822,9 @@ pub fn page_all_excluding_traces(
             "request logs page limit must be between 1 and 200",
         ));
     }
-    let filters = validate_page_filters(filters)?;
     let cursor = decode_page_cursor(cursor)?;
-
-    let mut conditions = vec![CLAUDE_VISIBLE_LOG_CONDITION.to_string()];
-    let mut query_params = Vec::<rusqlite::types::Value>::new();
-
-    if let Some(cli_key) = filters.cli_key {
-        conditions.push("cli_key = ?".to_string());
-        query_params.push(cli_key.to_owned().into());
-    }
-    if let Some(status) = filters.status {
-        let condition = match status.op {
-            RequestLogStatusFilterOp::Eq => "status = ?",
-            RequestLogStatusFilterOp::Neq => "(status IS NULL OR status != ?)",
-            RequestLogStatusFilterOp::Gte => "status >= ?",
-            RequestLogStatusFilterOp::Lte => "status <= ?",
-        };
-        conditions.push(condition.to_string());
-        query_params.push(status.value.into());
-    }
-    if let Some(needle) = filters.error_code_contains {
-        conditions.push("instr(lower(COALESCE(error_code, '')), lower(?)) > 0".to_string());
-        query_params.push(needle.to_owned().into());
-    }
-    if let Some(needle) = filters.method_path_contains {
-        conditions.push("instr(lower(method || ' ' || path), lower(?)) > 0".to_string());
-        query_params.push(needle.to_owned().into());
-    }
-    if !excluded_trace_ids.is_empty() {
-        if let Ok(encoded_trace_ids) = serde_json::to_string(excluded_trace_ids) {
-            conditions.push(
-                "trace_id NOT IN (SELECT value FROM json_each(?) WHERE type = 'text')".to_string(),
-            );
-            query_params.push(encoded_trace_ids.into());
-        }
-    }
-    if let Some(cursor) = cursor {
-        conditions.push("(created_at_ms < ? OR (created_at_ms = ? AND id < ?))".to_string());
-        query_params.push(cursor.created_at_ms.into());
-        query_params.push(cursor.created_at_ms.into());
-        query_params.push(cursor.id.into());
-    }
+    let (conditions, mut query_params) =
+        page_conditions_and_params(filters, excluded_trace_ids, cursor.as_ref())?;
 
     let query_limit = i64::try_from(limit + 1)
         .map_err(|_| invalid_page_input("request logs page limit is invalid"))?;
@@ -757,6 +858,83 @@ pub fn page_all_excluding_traces(
     };
 
     Ok(RequestLogPage { items, next_cursor })
+}
+
+pub fn snapshot_membership_excluding_traces(
+    db: &db::Db,
+    filters: &RequestLogPageFilters,
+    excluded_trace_ids: &[String],
+    max_memberships: usize,
+) -> crate::shared::error::AppResult<Vec<i64>> {
+    let (conditions, mut query_params) =
+        page_conditions_and_params(filters, excluded_trace_ids, None)?;
+    let query_limit = i64::try_from(max_memberships.saturating_add(1)).unwrap_or(i64::MAX);
+    query_params.push(query_limit.into());
+    let sql = format!(
+        "SELECT id FROM request_logs WHERE {} ORDER BY created_at_ms DESC, id DESC LIMIT ?",
+        conditions.join(" AND ")
+    );
+    let conn = db.open_connection()?;
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| db_err!("failed to prepare request-log snapshot membership query: {e}"))?;
+    let rows = stmt
+        .query_map(params_from_iter(query_params.iter()), |row| row.get::<_, i64>(0))
+        .map_err(|e| db_err!("failed to query request-log snapshot membership: {e}"))?;
+    let mut ids = Vec::new();
+    for row in rows {
+        ids.push(row.map_err(|e| db_err!("failed to read request-log snapshot member: {e}"))?);
+    }
+    if ids.len() > max_memberships {
+        return Err(crate::shared::error::AppError::new(
+            "REQUEST_LOG_SNAPSHOT_TOO_LARGE",
+            "narrow the request-log filters or time range",
+        ));
+    }
+    Ok(ids)
+}
+
+pub fn summaries_by_ids(
+    db: &db::Db,
+    ids: &[i64],
+) -> crate::shared::error::AppResult<Vec<RequestLogSummary>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    if ids.len() > REQUEST_LOG_PAGE_MAX_LIMIT {
+        return Err(invalid_page_input(
+            "request-log snapshot page exceeds the maximum page size",
+        ));
+    }
+    let conn = db.open_connection()?;
+    let placeholders = crate::db::sql_placeholders(ids.len());
+    let sql = format!(
+        "SELECT{}FROM request_logs WHERE id IN ({})",
+        REQUEST_LOG_SUMMARY_FIELDS, placeholders
+    );
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| db_err!("failed to prepare request-log snapshot page query: {e}"))?;
+    let rows = stmt
+        .query_map(params_from_iter(ids.iter()), row_to_summary)
+        .map_err(|e| db_err!("failed to query request-log snapshot page: {e}"))?;
+    let mut by_id = HashMap::new();
+    for row in rows {
+        let item = row.map_err(|e| db_err!("failed to read request-log snapshot page row: {e}"))?;
+        by_id.insert(item.id, item);
+    }
+    let mut items = Vec::with_capacity(ids.len());
+    for id in ids {
+        let Some(item) = by_id.remove(id) else {
+            return Err(crate::shared::error::AppError::new(
+                "REQUEST_LOG_SNAPSHOT_EXPIRED",
+                "a request-log row was removed while this snapshot was open",
+            ));
+        };
+        items.push(item);
+    }
+    attach_source_provider_info(&conn, &mut items)?;
+    Ok(items)
 }
 
 pub fn list_after_id(
@@ -912,11 +1090,13 @@ mod tests {
     use super::{
         final_provider_from_attempts, get_by_id, get_by_trace_id, list_after_id_all, list_recent,
         list_recent_all, load_source_provider_info_map, page_all, page_all_excluding_traces,
-        parse_attempts, route_from_attempts, start_provider_from_attempts, terminal_trace_ids,
+        parse_attempts, route_from_attempts, snapshot_membership_excluding_traces,
+        start_provider_from_attempts, summaries_by_ids, terminal_trace_ids,
     };
     use crate::db;
     use crate::request_logs::{
-        RequestLogPageFilters, RequestLogStatusFilter, RequestLogStatusFilterOp,
+        RequestLogErrorScope, RequestLogPageFilters, RequestLogStatusFilter,
+        RequestLogStatusFilterOp,
     };
     use base64::Engine as _;
     use rusqlite::Connection;
@@ -989,6 +1169,179 @@ INSERT INTO request_logs (
             vec!["trace-2", "trace-1"]
         );
         assert!(second.next_cursor.is_none());
+    }
+
+    #[test]
+    fn page_all_error_scopes_exclude_interruptions_and_respect_time_range() {
+        let dir = tempdir().expect("tempdir");
+        let db = db::init_for_tests(&dir.path().join("request-logs-error-scopes.db"))
+            .expect("initialize test db");
+        let conn = db.open_connection().expect("open db");
+        for id in 1..=8 {
+            seed_request_log(
+                &conn,
+                id,
+                &format!("trace-error-scope-{id}"),
+                "codex",
+                "/v1/responses",
+            );
+        }
+        conn.execute(
+            "UPDATE request_logs SET attempts_json = ?1 WHERE id = 1",
+            rusqlite::params![r#"[{"stream_internal_error":{"classification":"protocol"}}]"#],
+        )
+        .expect("add stream-internal error");
+        conn.execute(
+            "UPDATE request_logs SET status = 503, error_code = 'GW_UPSTREAM_TIMEOUT' WHERE id = 2",
+            [],
+        )
+        .expect("add upstream error");
+        conn.execute(
+            "UPDATE request_logs SET status = 499, error_code = 'GW_STREAM_ABORTED' WHERE id = 3",
+            [],
+        )
+        .expect("add interruption");
+        conn.execute(
+            "UPDATE request_logs SET status = NULL, attempts_json = ?1 WHERE id = 4",
+            rusqlite::params![r#"[{"stream_internal_error":{"classification":"protocol"}}]"#],
+        )
+        .expect("add unresolved interruption with stream evidence");
+        conn.execute("UPDATE request_logs SET status = 418 WHERE id = 5", [])
+            .expect("add status-only error");
+        for (id, attempts_json) in [
+            (6, "not-json"),
+            (7, r#"["legacy"]"#),
+            (8, r#"{"legacy":"value"}"#),
+        ] {
+            conn.execute(
+                "UPDATE request_logs SET attempts_json = ?1 WHERE id = ?2",
+                rusqlite::params![attempts_json, id],
+            )
+            .expect("add legacy attempts shape");
+        }
+        drop(conn);
+
+        let all_errors = page_all(
+            &db,
+            &RequestLogPageFilters {
+                error_scope: RequestLogErrorScope::AllErrors,
+                ..RequestLogPageFilters::default()
+            },
+            None,
+            50,
+        )
+        .expect("list all errors");
+        assert_eq!(
+            all_errors.items.iter().map(|item| item.id).collect::<Vec<_>>(),
+            vec![5, 2, 1],
+            "all errors includes real failures but excludes interruptions and user cancellation"
+        );
+
+        let stream_errors = page_all(
+            &db,
+            &RequestLogPageFilters {
+                error_scope: RequestLogErrorScope::StreamInternalError,
+                ..RequestLogPageFilters::default()
+            },
+            None,
+            50,
+        )
+        .expect("list stream internal errors");
+        assert_eq!(
+            stream_errors
+                .items
+                .iter()
+                .map(|item| item.id)
+                .collect::<Vec<_>>(),
+            vec![4, 1]
+        );
+
+        let bounded = page_all(
+            &db,
+            &RequestLogPageFilters {
+                error_scope: RequestLogErrorScope::AllErrors,
+                created_at_ms_from: Some(1_500),
+                created_at_ms_to: Some(5_500),
+                ..RequestLogPageFilters::default()
+            },
+            None,
+            50,
+        )
+        .expect("list bounded errors");
+        assert_eq!(
+            bounded.items.iter().map(|item| item.id).collect::<Vec<_>>(),
+            vec![5, 2]
+        );
+    }
+
+    #[test]
+    fn snapshot_membership_preserves_order_when_new_rows_arrive() {
+        let dir = tempdir().expect("tempdir");
+        let db = db::init_for_tests(&dir.path().join("request-logs-snapshot.db"))
+            .expect("initialize test db");
+        let conn = db.open_connection().expect("open db");
+        for id in 1..=7 {
+            seed_request_log(
+                &conn,
+                id,
+                &format!("trace-snapshot-{id}"),
+                "codex",
+                "/v1/responses",
+            );
+        }
+        drop(conn);
+
+        let membership = snapshot_membership_excluding_traces(
+            &db,
+            &RequestLogPageFilters::default(),
+            &[],
+            1_000_000,
+        )
+        .expect("capture membership");
+        assert_eq!(membership, vec![7, 6, 5, 4, 3, 2, 1]);
+
+        let conn = db.open_connection().expect("reopen db");
+        seed_request_log(&conn, 8, "trace-snapshot-8", "codex", "/v1/responses");
+        drop(conn);
+        let second_page = summaries_by_ids(&db, &membership[3..6]).expect("load snapshot page");
+        assert_eq!(
+            second_page.iter().map(|item| item.id).collect::<Vec<_>>(),
+            vec![4, 3, 2]
+        );
+
+        let conn = db.open_connection().expect("reopen db");
+        conn.execute("DELETE FROM request_logs WHERE id = 3", [])
+            .expect("delete snapshotted row");
+        drop(conn);
+        let error = summaries_by_ids(&db, &[4, 3]).unwrap_err();
+        assert_eq!(error.code(), "REQUEST_LOG_SNAPSHOT_EXPIRED");
+    }
+
+    #[test]
+    fn snapshot_membership_stops_after_the_configured_bound() {
+        let dir = tempdir().expect("tempdir");
+        let db = db::init_for_tests(&dir.path().join("request-logs-snapshot-limit.db"))
+            .expect("initialize test db");
+        let conn = db.open_connection().expect("open db");
+        for id in 1..=4 {
+            seed_request_log(
+                &conn,
+                id,
+                &format!("trace-snapshot-limit-{id}"),
+                "codex",
+                "/v1/responses",
+            );
+        }
+        drop(conn);
+
+        let error = snapshot_membership_excluding_traces(
+            &db,
+            &RequestLogPageFilters::default(),
+            &[],
+            3,
+        )
+        .expect_err("oversized membership must be rejected");
+        assert_eq!(error.code(), "REQUEST_LOG_SNAPSHOT_TOO_LARGE");
     }
 
     #[test]
@@ -1291,6 +1644,7 @@ INSERT INTO providers (id, name, source_provider_id, bridge_type) VALUES (12, 'C
                 }),
                 error_code_contains: Some("upstream".to_string()),
                 method_path_contains: Some("post /V1/RESPONSES".to_string()),
+                ..RequestLogPageFilters::default()
             },
             None,
             50,

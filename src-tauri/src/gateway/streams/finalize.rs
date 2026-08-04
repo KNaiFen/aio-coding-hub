@@ -179,6 +179,7 @@ mod tests {
                 1_700_000_000_000,
             ))),
             active_requests: Arc::new(ActiveRequestRegistry::default()),
+            upstream_output_timing: Default::default(),
         }
     }
 

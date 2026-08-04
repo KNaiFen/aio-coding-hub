@@ -105,11 +105,24 @@ function attemptTitle(event: GatewayAttemptEvent) {
 }
 
 function computeOutputTokensPerSecond(payload: GatewayRequestEvent) {
+  if (
+    payload.status == null ||
+    payload.status < 200 ||
+    payload.status >= 300 ||
+    payload.error_code != null
+  ) {
+    return null;
+  }
+
   return computeOutputTokensPerSecondRaw(
     payload.output_tokens,
-    payload.duration_ms,
-    payload.ttfb_ms ?? null
+    payload.upstream_stream_duration_ms ?? null,
+    payload.upstream_stream_timing_version
   );
+}
+
+function normalizeUpstreamStreamTimingVersion(value: unknown): number {
+  return value === 1 ? 1 : 0;
 }
 
 type GatewayEventGuard<TPayload> = (payload: unknown) => payload is TPayload;
@@ -417,6 +430,7 @@ export function normalizeGatewayRequestEvent(payload: unknown): GatewayRequestEv
     isNumber(payload.duration_ms) &&
     isNullableNumber(payload.ttfb_ms) &&
     isNullableNumber(payload.visible_ttfb_ms) &&
+    isNullableNumber(payload.upstream_stream_duration_ms) &&
     validAttempts.length === normalizedAttempts.length &&
     isNullableNumber(payload.input_tokens) &&
     isNullableNumber(payload.output_tokens) &&
@@ -446,6 +460,10 @@ export function normalizeGatewayRequestEvent(payload: unknown): GatewayRequestEv
       duration_ms: payload.duration_ms,
       ttfb_ms: payload.ttfb_ms ?? null,
       visible_ttfb_ms: payload.visible_ttfb_ms ?? null,
+      upstream_stream_duration_ms: payload.upstream_stream_duration_ms ?? null,
+      upstream_stream_timing_version: normalizeUpstreamStreamTimingVersion(
+        payload.upstream_stream_timing_version
+      ),
       attempts: validAttempts,
       input_tokens: payload.input_tokens ?? null,
       output_tokens: payload.output_tokens ?? null,
@@ -631,6 +649,8 @@ export async function listenGatewayEvents(): Promise<() => void> {
         duration_ms: payload.duration_ms,
         ttfb_ms: payload.ttfb_ms ?? null,
         visible_ttfb_ms: payload.visible_ttfb_ms ?? null,
+        upstream_stream_duration_ms: payload.upstream_stream_duration_ms ?? null,
+        upstream_stream_timing_version: payload.upstream_stream_timing_version,
         output_tokens_per_second: outputTokensPerSecond,
         input_tokens: payload.input_tokens,
         output_tokens: payload.output_tokens,

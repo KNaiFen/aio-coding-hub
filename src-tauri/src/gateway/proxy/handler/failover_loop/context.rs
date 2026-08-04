@@ -326,6 +326,7 @@ pub(super) fn build_stream_finalize_ctx<R: tauri::Runtime>(
             ),
         )),
         active_requests: ctx.state.active_requests.clone(),
+        upstream_output_timing: UpstreamOutputTiming::default(),
     }
 }
 

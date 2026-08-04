@@ -25,6 +25,7 @@ pub(crate) mod provider_account_usage_confirmation;
 pub(crate) mod provider_account_usage_runtime;
 pub(crate) mod provider_service;
 pub(crate) mod provider_share_service;
+pub(crate) mod request_log_snapshot_state;
 pub(crate) mod resident;
 pub(crate) mod settings_service;
 pub(crate) mod startup_gateway;

@@ -1,4 +1,4 @@
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { cn } from "../utils/cn";
 import { Popover as PopoverRoot, PopoverContent, PopoverTrigger } from "@/ui/shadcn/popover";
 
@@ -12,6 +12,7 @@ export type PopoverProps = {
   className?: string;
   contentClassName?: string;
   portalled?: boolean;
+  disabled?: boolean;
 };
 
 export function Popover({
@@ -24,6 +25,7 @@ export function Popover({
   className,
   contentClassName,
   portalled = true,
+  disabled = false,
 }: PopoverProps) {
   const [internalOpen, setInternalOpen] = useState(false);
 
@@ -32,16 +34,23 @@ export function Popover({
 
   const setOpen = useCallback(
     (next: boolean) => {
+      if (disabled && next) return;
       if (!isControlled) setInternalOpen(next);
       onOpenChange?.(next);
     },
-    [isControlled, onOpenChange]
+    [disabled, isControlled, onOpenChange]
   );
+
+  useEffect(() => {
+    if (!disabled || !open) return;
+    if (!isControlled) setInternalOpen(false);
+    onOpenChange?.(false);
+  }, [disabled, isControlled, onOpenChange, open]);
 
   return (
     <PopoverRoot open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button type="button" className={cn("inline-flex", className)}>
+        <button type="button" className={cn("inline-flex", className)} disabled={disabled}>
           {trigger}
         </button>
       </PopoverTrigger>

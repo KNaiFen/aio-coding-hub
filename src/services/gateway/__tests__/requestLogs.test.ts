@@ -15,6 +15,7 @@ import {
   normalizeRequestLogId,
   normalizeRequestLogTraceId,
   normalizeRequestLogsPageLimit,
+  normalizeRequestLogsSnapshotPage,
   normalizeRequestLogsLimit,
   requestAttemptLogsByTraceId,
   requestLogGet,
@@ -24,6 +25,7 @@ import {
   requestLogsListAfterIdAll,
   requestLogsListAll,
   requestLogsPageAll,
+  requestLogsSnapshotPageAll,
 } from "../requestLogs";
 
 vi.mock("../../../generated/bindings", async () => {
@@ -37,6 +39,7 @@ vi.mock("../../../generated/bindings", async () => {
       requestLogsList: vi.fn(),
       requestLogsListAll: vi.fn(),
       requestLogsPageAll: vi.fn(),
+      requestLogsSnapshotPageAll: vi.fn(),
       requestLogsListAfterId: vi.fn(),
       requestLogsListAfterIdAll: vi.fn(),
       requestLogGet: vi.fn(),
@@ -180,7 +183,61 @@ describe("services/gateway/requestLogs", () => {
       ],
       nextCursor: "opaque-next",
     });
-    expect(commands.requestLogsPageAll).toHaveBeenCalledWith(filters, "opaque-current", 100);
+    expect(commands.requestLogsPageAll).toHaveBeenCalledWith(
+      {
+        ...filters,
+        errorScope: "all",
+        createdAtMsFrom: null,
+        createdAtMsTo: null,
+      },
+      "opaque-current",
+      100
+    );
+  });
+
+  it("creates and reads a stable page snapshot with normalized filter defaults", async () => {
+    const filters: RequestLogPageFilters = {
+      cliKey: "codex",
+      status: null,
+      errorCodeContains: null,
+      methodPathContains: null,
+    };
+    vi.mocked(commands.requestLogsSnapshotPageAll).mockResolvedValueOnce({
+      status: "ok",
+      data: {
+        items: [createRequestLogSummary({ id: 9, cli_key: "codex" })],
+        snapshotId: "snapshot-1",
+        totalCount: 51,
+        totalPages: 2,
+        page: 2,
+        pageSize: 50,
+        expiresAtMs: 1_700_000_600_000,
+      },
+    });
+
+    await expect(requestLogsSnapshotPageAll(filters, "snapshot-1", 2, 50)).resolves.toEqual({
+      items: [expect.objectContaining({ id: 9, cli_key: "codex" })],
+      snapshotId: "snapshot-1",
+      totalCount: 51,
+      totalPages: 2,
+      page: 2,
+      pageSize: 50,
+      expiresAtMs: 1_700_000_600_000,
+    });
+    expect(commands.requestLogsSnapshotPageAll).toHaveBeenCalledWith(
+      {
+        ...filters,
+        errorScope: "all",
+        createdAtMsFrom: null,
+        createdAtMsTo: null,
+      },
+      "snapshot-1",
+      2,
+      50
+    );
+    expect(normalizeRequestLogsSnapshotPage(1)).toBe(1);
+    expect(() => normalizeRequestLogsSnapshotPage(0)).toThrow("SEC_INVALID_INPUT");
+    expect(() => normalizeRequestLogsSnapshotPage(1.5)).toThrow("SEC_INVALID_INPUT");
   });
 
   it("strictly validates request log page limits before ipc", async () => {

@@ -5,15 +5,17 @@ import {
   REQUEST_LOGS_PAGE_DEFAULT_LIMIT,
   requestAttemptLogsByTraceId,
   requestLogGet,
-  requestLogsPageAll,
   requestLogsListAfterIdAll,
   requestLogsListAll,
+  requestLogsPageAll,
+  requestLogsSnapshotPageAll,
   normalizeRequestAttemptLogsLimit,
   normalizeRequestLogTraceIdOrNull,
   normalizeRequestLogsPageLimit,
   normalizeRequestLogsLimit,
   type RequestLogPage,
   type RequestLogPageFilters,
+  type RequestLogSnapshotPage,
   type RequestLogSummary,
 } from "../services/gateway/requestLogs";
 import { activeRequestLogsSnapshot, type ActiveRequest } from "../services/gateway/activeRequests";
@@ -34,6 +36,10 @@ export const REQUEST_LOG_DETAIL_GC_TIME_MS = 60 * 1000;
 
 function isRequestLogsQueryEnabled(enabled: boolean | undefined) {
   return enabled ?? true;
+}
+
+export function isRequestLogSnapshotExpiredError(error: unknown) {
+  return String(error).includes("REQUEST_LOG_SNAPSHOT_EXPIRED:");
 }
 
 function sortRequestLogsDesc(a: RequestLogSummary, b: RequestLogSummary) {
@@ -107,6 +113,26 @@ export function useRequestLogsPageAllQuery(
     // The latest page is a moving head. Keep it stale so returning from a
     // stable history cursor fetches completions that arrived while inactive.
     ...(cursor == null ? { staleTime: 0 } : {}),
+  });
+}
+
+export function useRequestLogsSnapshotPageAllQuery(
+  filters: RequestLogPageFilters,
+  snapshotId: string | null,
+  page: number,
+  limit: number | null | undefined,
+  revision: number,
+  options?: { enabled?: boolean }
+) {
+  const enabled = isRequestLogsQueryEnabled(options?.enabled);
+  const normalizedLimit = normalizeRequestLogsPageLimit(limit) ?? REQUEST_LOGS_PAGE_DEFAULT_LIMIT;
+
+  return useQuery<RequestLogSnapshotPage>({
+    queryKey: requestLogsKeys.snapshotPageAll(filters, snapshotId, page, normalizedLimit, revision),
+    queryFn: () => requestLogsSnapshotPageAll(filters, snapshotId, page, normalizedLimit),
+    enabled,
+    placeholderData: keepPreviousData,
+    retry: false,
   });
 }
 

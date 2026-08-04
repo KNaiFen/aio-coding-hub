@@ -129,6 +129,8 @@ fn request_log_insert_from_args(
         duration_ms,
         ttfb_ms,
         visible_ttfb_ms,
+        upstream_stream_duration_ms,
+        upstream_stream_timing_version,
         attempts_json,
         requested_model,
         created_at_ms,
@@ -163,6 +165,19 @@ fn request_log_insert_from_args(
         }
         Some(v.min(i64::MAX as u128) as i64)
     });
+    let upstream_stream_duration_ms = upstream_stream_duration_ms.and_then(|value| {
+        if value == 0 || value > duration_ms as u128 {
+            return None;
+        }
+        Some(value.min(i64::MAX as u128) as i64)
+    });
+    let upstream_stream_timing_version = if upstream_stream_timing_version == 1
+        && upstream_stream_duration_ms.is_some()
+    {
+        1
+    } else {
+        0
+    };
 
     Some(request_logs::RequestLogInsert {
         trace_id,
@@ -181,6 +196,8 @@ fn request_log_insert_from_args(
         duration_ms,
         ttfb_ms,
         visible_ttfb_ms,
+        upstream_stream_duration_ms,
+        upstream_stream_timing_version,
         attempts_json: bound_attempts_json(attempts_json),
         input_tokens: metrics.input_tokens,
         output_tokens: metrics.output_tokens,
@@ -710,6 +727,8 @@ WHERE trace_id = ?1
             duration_ms: 10,
             ttfb_ms: None,
             visible_ttfb_ms: None,
+            upstream_stream_duration_ms: None,
+            upstream_stream_timing_version: 0,
             attempts_json: "[]".to_string(),
             requested_model: None,
             created_at_ms: 0,

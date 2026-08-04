@@ -54,6 +54,8 @@ function makeLog(
     ...overrides,
     is_interrupted: overrides.is_interrupted ?? false,
     effective_input_tokens: overrides.effective_input_tokens ?? null,
+    upstream_stream_duration_ms: overrides.upstream_stream_duration_ms ?? null,
+    upstream_stream_timing_version: overrides.upstream_stream_timing_version ?? 0,
   };
 }
 

@@ -108,6 +108,8 @@ describe("TrayProviderMiniApp", () => {
     expect(screen.getByText("熔")).toBeInTheDocument();
     expect(screen.getByLabelText("总计 成功 23，失败 1")).toBeInTheDocument();
     expect(screen.getByLabelText("总计 成功 0，失败 4")).toBeInTheDocument();
+    expect(screen.queryByText("成")).not.toBeInTheDocument();
+    expect(screen.queryByText("败")).not.toBeInTheDocument();
     const timelines = screen.getAllByLabelText("供应商可用性");
     expect(within(timelines[0]!).getAllByTitle(/正常|异常|无数据/)).toHaveLength(18);
     expect(within(timelines[1]!).getAllByTitle("无数据")).toHaveLength(18);
@@ -151,7 +153,7 @@ describe("TrayProviderMiniApp", () => {
     const rows = container.querySelectorAll("header + div > .divide-y > div");
     expect(rows).toHaveLength(3);
     rows.forEach((row) => {
-      expect(row).toHaveClass("grid-cols-[96px_170px_96px]");
+      expect(row).toHaveClass("grid-cols-[92px_198px_72px]");
     });
 
     expect(screen.getByTitle(longChineseName)).toHaveClass("truncate");
@@ -159,6 +161,9 @@ describe("TrayProviderMiniApp", () => {
     expect(screen.getByText("熔")).toBeInTheDocument();
     expect(screen.getByText("冷")).toBeInTheDocument();
     expect(screen.getAllByText("限")).toHaveLength(1);
+    screen
+      .getAllByLabelText("供应商状态")
+      .forEach((markers) => expect(markers).toHaveClass("min-w-[40px]", "shrink-0"));
 
     const totals = [
       screen.getByLabelText("总计 成功 0，失败 9"),
@@ -166,17 +171,18 @@ describe("TrayProviderMiniApp", () => {
       screen.getByLabelText("总计 成功 123456，失败 4294967295"),
     ];
     totals.forEach((total) => {
-      expect(total).toHaveClass("grid-cols-[44px_1px_44px]", "justify-between");
+      expect(total).toHaveClass("grid-cols-[32px_32px]", "gap-2");
       expect(total).toHaveAttribute("role", "group");
-      expect(within(total).getAllByText(/成|败|\d|万|亿/)).toHaveLength(4);
-      expect(total.querySelectorAll(":scope > div")).toHaveLength(2);
-      expect(total.children.item(1)).toHaveClass("h-3", "w-px", "bg-border/70");
+      expect(total.children).toHaveLength(2);
+      expect(within(total).queryByText("成")).not.toBeInTheDocument();
+      expect(within(total).queryByText("败")).not.toBeInTheDocument();
       total.querySelectorAll("span[title]").forEach((value) => {
         expect(value).toHaveClass("font-mono", "text-[9px]", "whitespace-nowrap", "text-right");
       });
     });
     expect(screen.getByTitle("123456")).toHaveTextContent("12.3万");
     expect(screen.getByTitle("4294967295")).toHaveTextContent("42.9亿");
+    expect(container.querySelector("main")).toHaveClass("tray-provider-mini-surface");
   });
 
   it("reports pointer handoff without adding focusable controls", async () => {

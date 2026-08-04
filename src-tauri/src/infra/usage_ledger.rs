@@ -44,7 +44,9 @@ SELECT
   r.cost_usd_femto,
   r.cost_multiplier,
   r.special_settings_json,
-  r.attempts_json
+  r.attempts_json,
+  r.upstream_stream_duration_ms,
+  r.upstream_stream_timing_version
 FROM request_logs r
 "#;
 
@@ -78,11 +80,14 @@ INSERT INTO usage_ledger (
   cost_multiplier,
   cost_basis_cli_key,
   cost_basis_model,
-  priority_service_tier_applied
+  priority_service_tier_applied,
+  upstream_stream_duration_ms,
+  upstream_stream_timing_version
 ) VALUES (
   ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
   ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
-  ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29
+  ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30,
+  ?31
 )
 ON CONFLICT(trace_id) DO UPDATE SET
   request_log_id = excluded.request_log_id,
@@ -115,7 +120,9 @@ ON CONFLICT(trace_id) DO UPDATE SET
   cost_multiplier = excluded.cost_multiplier,
   cost_basis_cli_key = excluded.cost_basis_cli_key,
   cost_basis_model = excluded.cost_basis_model,
-  priority_service_tier_applied = excluded.priority_service_tier_applied
+  priority_service_tier_applied = excluded.priority_service_tier_applied,
+  upstream_stream_duration_ms = excluded.upstream_stream_duration_ms,
+  upstream_stream_timing_version = excluded.upstream_stream_timing_version
 "#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -155,6 +162,8 @@ struct SourceRow {
     duration_ms: i64,
     ttfb_ms: Option<i64>,
     visible_ttfb_ms: Option<i64>,
+    upstream_stream_duration_ms: Option<i64>,
+    upstream_stream_timing_version: i64,
     requested_model: Option<String>,
     stored_final_provider_id: Option<i64>,
     input_tokens: Option<i64>,
@@ -217,6 +226,11 @@ impl SourceRow {
             cost_multiplier: row.get(23)?,
             special_settings_json: row.get(24)?,
             attempts_json: row.get(25)?,
+            upstream_stream_duration_ms: row.get(26)?,
+            upstream_stream_timing_version: row
+                .get::<_, Option<i64>>(27)?
+                .filter(|value| *value == 1)
+                .unwrap_or(0),
         })
     }
 }
@@ -464,6 +478,8 @@ fn project_source_row(conn: &Connection, source: &SourceRow) -> rusqlite::Result
             } else {
                 0_i64
             },
+            source.upstream_stream_duration_ms,
+            source.upstream_stream_timing_version,
         ],
     )?;
     Ok(())

@@ -1750,6 +1750,9 @@ mod tests {
             last_activity_ms: 2,
             duration_ms: Some(1),
             ttfb_ms: Some(1),
+            visible_ttfb_ms: None,
+            upstream_stream_duration_ms: None,
+            upstream_stream_timing_version: 0,
             attempt_count: 1,
             retry_count: 0,
             provider_switch_count: 0,
@@ -1761,6 +1764,7 @@ mod tests {
             cost_usd: None,
             route: Vec::new(),
             context_compaction: None,
+            requested_reasoning_effort: None,
             configured_model_route: None,
         }
     }

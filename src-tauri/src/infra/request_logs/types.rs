@@ -17,6 +17,8 @@ pub struct RequestLogInsert {
     pub duration_ms: i64,
     pub ttfb_ms: Option<i64>,
     pub visible_ttfb_ms: Option<i64>,
+    pub upstream_stream_duration_ms: Option<i64>,
+    pub upstream_stream_timing_version: i64,
     pub attempts_json: String,
     pub input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
@@ -78,6 +80,8 @@ pub struct RequestLogSummary {
     pub duration_ms: i64,
     pub ttfb_ms: Option<i64>,
     pub visible_ttfb_ms: Option<i64>,
+    pub upstream_stream_duration_ms: Option<i64>,
+    pub upstream_stream_timing_version: i64,
     pub attempt_count: i64,
     pub has_failover: bool,
     pub start_provider_id: i64,
@@ -116,6 +120,19 @@ pub struct RequestLogPageFilters {
     pub status: Option<RequestLogStatusFilter>,
     pub error_code_contains: Option<String>,
     pub method_path_contains: Option<String>,
+    #[serde(default)]
+    pub error_scope: RequestLogErrorScope,
+    pub created_at_ms_from: Option<i64>,
+    pub created_at_ms_to: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum RequestLogErrorScope {
+    #[default]
+    All,
+    AllErrors,
+    StreamInternalError,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, specta::Type)]
@@ -142,6 +159,18 @@ pub struct RequestLogPage {
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestLogSnapshotPage {
+    pub items: Vec<RequestLogSummary>,
+    pub snapshot_id: String,
+    pub total_count: i64,
+    pub total_pages: i64,
+    pub page: i64,
+    pub page_size: i64,
+    pub expires_at_ms: i64,
+}
+
+#[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct RequestLogDetail {
     pub id: i64,
     pub trace_id: String,
@@ -159,6 +188,8 @@ pub struct RequestLogDetail {
     pub duration_ms: i64,
     pub ttfb_ms: Option<i64>,
     pub visible_ttfb_ms: Option<i64>,
+    pub upstream_stream_duration_ms: Option<i64>,
+    pub upstream_stream_timing_version: i64,
     pub attempts_json: String,
     pub input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
@@ -197,7 +228,8 @@ pub struct SessionStatsAggregate {
 #[cfg(test)]
 mod tests {
     use super::{
-        RequestLogPage, RequestLogPageFilters, RequestLogStatusFilter, RequestLogStatusFilterOp,
+        RequestLogErrorScope, RequestLogPage, RequestLogPageFilters, RequestLogSnapshotPage,
+        RequestLogStatusFilter, RequestLogStatusFilterOp,
     };
 
     #[test]
@@ -210,6 +242,9 @@ mod tests {
             }),
             error_code_contains: Some("timeout".to_string()),
             method_path_contains: Some("post /responses".to_string()),
+            error_scope: RequestLogErrorScope::AllErrors,
+            created_at_ms_from: Some(1_700_000_000_000),
+            created_at_ms_to: Some(1_700_000_060_000),
         };
 
         assert_eq!(
@@ -218,7 +253,10 @@ mod tests {
                 "cliKey": "codex",
                 "status": {"op": "gte", "value": 500},
                 "errorCodeContains": "timeout",
-                "methodPathContains": "post /responses"
+                "methodPathContains": "post /responses",
+                "errorScope": "all_errors",
+                "createdAtMsFrom": 1700000000000_i64,
+                "createdAtMsTo": 1700000060000_i64
             })
         );
         assert_eq!(
@@ -228,6 +266,27 @@ mod tests {
             })
             .unwrap(),
             serde_json::json!({"items": [], "nextCursor": "cursor"})
+        );
+        assert_eq!(
+            serde_json::to_value(RequestLogSnapshotPage {
+                items: Vec::new(),
+                snapshot_id: "snapshot".to_string(),
+                total_count: 3,
+                total_pages: 2,
+                page: 1,
+                page_size: 2,
+                expires_at_ms: 1_700_000_600_000,
+            })
+            .unwrap(),
+            serde_json::json!({
+                "items": [],
+                "snapshotId": "snapshot",
+                "totalCount": 3,
+                "totalPages": 2,
+                "page": 1,
+                "pageSize": 2,
+                "expiresAtMs": 1700000600000_i64
+            })
         );
     }
 }

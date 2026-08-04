@@ -92,6 +92,8 @@ export function createRequestLogSummary(
     ...overrides,
     cli_key: cliKey,
     is_interrupted: isInterrupted,
+    upstream_stream_duration_ms: overrides.upstream_stream_duration_ms ?? null,
+    upstream_stream_timing_version: overrides.upstream_stream_timing_version ?? 0,
     created_at_ms: createdAtMs,
     created_at: createdAt,
     route: (overrides.route ?? []).map((routeItem) => createRequestLogRouteHop(routeItem)),
@@ -146,5 +148,7 @@ export function createRequestLogDetail(
     created_at: createdAt,
     ...overrides,
     is_interrupted: isInterrupted,
+    upstream_stream_duration_ms: overrides.upstream_stream_duration_ms ?? null,
+    upstream_stream_timing_version: overrides.upstream_stream_timing_version ?? 0,
   };
 }

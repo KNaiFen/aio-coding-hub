@@ -109,6 +109,8 @@ function summaryOf(traceId: string): TraceSummary {
     duration_ms: 500,
     ttfb_ms: null,
     visible_ttfb_ms: null,
+    upstream_stream_duration_ms: null,
+    upstream_stream_timing_version: 0,
     attempts: [],
     input_tokens: null,
     output_tokens: null,

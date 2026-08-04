@@ -13,6 +13,7 @@ const traceStoreState = vi.hoisted(() => ({
   traces: [] as TraceSession[],
 }));
 
+const originalLocalStorage = window.localStorage;
 const originalLocalStorageDescriptor = Object.getOwnPropertyDescriptor(window, "localStorage");
 const localStorageEntries = new Map<string, string>();
 const testLocalStorage: Storage = {
@@ -77,9 +78,7 @@ vi.mock("../../hooks/useRequestLogsPageFeed", () => ({
 }));
 
 vi.mock("../../services/gateway/traceStore", () => ({
-  useTraceStore: () => ({
-    traces: traceStoreState.traces,
-  }),
+  useTraceStore: () => ({ traces: traceStoreState.traces }),
 }));
 
 function renderWithProviders(element: ReactElement) {
@@ -108,19 +107,27 @@ function createTrace(traceId: string, overrides: Partial<TraceSession> = {}): Tr
 
 function mockPageFeed(overrides: Record<string, unknown> = {}) {
   const refreshRequestLogs = vi.fn().mockResolvedValue({ data: null });
-  vi.mocked(useRequestLogsPageFeed).mockReturnValue({
-    requestLogs: [],
-    nextCursor: null,
-    activeRequests: [],
-    activeRequestsAvailable: true,
-    requestLogsLoading: false,
-    requestLogsRefreshing: false,
-    requestLogsPageFetching: false,
-    requestLogsAvailable: true,
-    refreshActiveRequests: vi.fn(),
-    refreshRequestLogs,
-    ...overrides,
-  } as any);
+  vi.mocked(useRequestLogsPageFeed).mockImplementation((options) => {
+    const capturedSnapshotId =
+      options.snapshotId ?? (options.snapshotRevision === 0 ? "snapshot-1" : null);
+    return {
+      requestLogs: [],
+      snapshotId: capturedSnapshotId,
+      totalCount: 120,
+      totalPages: 3,
+      page: options.page,
+      activeRequests: [],
+      activeRequestsAvailable: true,
+      requestLogsLoading: false,
+      requestLogsRefreshing: false,
+      requestLogsPageFetching: false,
+      requestLogsAvailable: true,
+      requestLogsSnapshotExpired: false,
+      refreshActiveRequests: vi.fn(),
+      refreshRequestLogs,
+      ...overrides,
+    } as any;
+  });
   return refreshRequestLogs;
 }
 
@@ -142,7 +149,10 @@ describe("pages/LogsPage", () => {
       Object.defineProperty(window, "localStorage", originalLocalStorageDescriptor);
       return;
     }
-    Reflect.deleteProperty(window, "localStorage");
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: originalLocalStorage,
+    });
   });
 
   beforeEach(() => {
@@ -161,7 +171,7 @@ describe("pages/LogsPage", () => {
     traceStoreState.traces = [];
   });
 
-  it("disables filters when request logs are unavailable", () => {
+  it("disables request-log filters when request logs are unavailable", () => {
     mockPageFeed({ requestLogsAvailable: false });
     renderWithProviders(<LogsPage />);
 
@@ -169,6 +179,9 @@ describe("pages/LogsPage", () => {
     expect(screen.getByPlaceholderText("例：499 / 524 / !200 / >=400")).toBeDisabled();
     expect(screen.getByPlaceholderText("例：GW_UPSTREAM_TIMEOUT")).toBeDisabled();
     expect(screen.getByPlaceholderText("例：/v1/messages")).toBeDisabled();
+    expect(screen.getByRole("tab", { name: "Codex" })).toBeDisabled();
+    expect(screen.getByRole("tab", { name: "全部报错" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /全部时间/ })).toBeDisabled();
   });
 
   it("shows status validation immediately and does not apply an invalid expression", () => {
@@ -182,37 +195,22 @@ describe("pages/LogsPage", () => {
     expect(latestFeedOptions()?.filters.status).toBeNull();
   });
 
-  it("debounces text filters and resets a history cursor when they apply", () => {
+  it("debounces text filters and rebuilds the stable snapshot", () => {
     vi.useFakeTimers();
-    vi.mocked(useRequestLogsPageFeed).mockImplementation(({ cursor }) => {
-      return {
-        requestLogs: [],
-        nextCursor: cursor == null ? "opaque-next" : null,
-        activeRequests: [],
-        activeRequestsAvailable: true,
-        requestLogsLoading: false,
-        requestLogsRefreshing: false,
-        requestLogsPageFetching: false,
-        requestLogsAvailable: true,
-        refreshActiveRequests: vi.fn(),
-        refreshRequestLogs: vi.fn(),
-      } as any;
-    });
     renderWithProviders(<LogsPage />);
-
-    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
-    expect(latestFeedOptions()?.cursor).toBe("opaque-next");
+    const initialRevision = latestFeedOptions()?.snapshotRevision;
 
     fireEvent.change(screen.getByPlaceholderText("例：/v1/messages"), {
       target: { value: "messages" },
     });
     act(() => vi.advanceTimersByTime(299));
-    expect(latestFeedOptions()?.cursor).toBe("opaque-next");
     expect(latestFeedOptions()?.filters.methodPathContains).toBeNull();
 
     act(() => vi.advanceTimersByTime(1));
-    expect(latestFeedOptions()?.cursor).toBeNull();
     expect(latestFeedOptions()?.filters.methodPathContains).toBe("messages");
+    expect(latestFeedOptions()?.snapshotId).toBeNull();
+    expect(latestFeedOptions()?.page).toBe(1);
+    expect(latestFeedOptions()?.snapshotRevision).toBe((initialRevision ?? 0) + 1);
   });
 
   it("maps status expressions to the server DTO after the debounce", () => {
@@ -227,6 +225,64 @@ describe("pages/LogsPage", () => {
     expect(latestFeedOptions()?.filters.status).toEqual({ op: "neq", value: 200 });
   });
 
+  it("offers direct error scopes without status-code input", () => {
+    traceStoreState.traces = [
+      createTrace("trace-interrupted", {
+        summary: { status: 499, error_code: "GW_STREAM_ABORTED" } as any,
+      }),
+      createTrace("trace-upstream-error", {
+        summary: { status: 503, error_code: "GW_UPSTREAM_TIMEOUT" } as any,
+      }),
+    ];
+    renderWithProviders(<LogsPage />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "全部报错" }));
+    expect(latestFeedOptions()?.filters.errorScope).toBe("all_errors");
+    expect(latestFeedOptions()?.snapshotId).toBeNull();
+    expect(screen.getByTestId("trace-ids")).toHaveTextContent("trace-upstream-error");
+    expect(screen.getByTestId("trace-ids")).not.toHaveTextContent("trace-interrupted");
+
+    fireEvent.click(screen.getByRole("tab", { name: "流内错误" }));
+    expect(latestFeedOptions()?.filters.errorScope).toBe("stream_internal_error");
+  });
+
+  it("applies quick and custom minute-level time ranges", () => {
+    vi.useFakeTimers();
+    const now = new Date(2026, 7, 1, 10, 45, 37, 500);
+    vi.setSystemTime(now);
+    renderWithProviders(<LogsPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: /全部时间/ }));
+    fireEvent.click(screen.getByRole("button", { name: "1小时内" }));
+    const expectedEnd = new Date(2026, 7, 1, 10, 46).getTime();
+    expect(latestFeedOptions()?.filters.createdAtMsFrom).toBe(expectedEnd - 60 * 60 * 1000);
+    expect(latestFeedOptions()?.filters.createdAtMsTo).toBe(expectedEnd);
+    expect(latestFeedOptions()?.filters.createdAtMsTo).toBeGreaterThan(now.getTime());
+
+    vi.setSystemTime(new Date(2026, 7, 1, 23, 59, 37, 500));
+    fireEvent.click(screen.getByRole("button", { name: /1小时内/ }));
+    fireEvent.click(screen.getByRole("button", { name: "今天" }));
+    expect(latestFeedOptions()?.filters.createdAtMsFrom).toBe(new Date(2026, 7, 1, 0, 0).getTime());
+    expect(latestFeedOptions()?.filters.createdAtMsTo).toBe(new Date(2026, 7, 2, 0, 0).getTime());
+
+    fireEvent.change(screen.getByLabelText("开始时间"), { target: { value: "2026-08-01T09:15" } });
+    fireEvent.change(screen.getByLabelText("结束时间"), { target: { value: "2026-08-01T10:45" } });
+    fireEvent.click(screen.getByRole("button", { name: "应用" }));
+    expect(latestFeedOptions()?.filters.createdAtMsTo).toBeGreaterThan(
+      latestFeedOptions()?.filters.createdAtMsFrom ?? 0
+    );
+
+    fireEvent.change(screen.getByLabelText("开始时间"), { target: { value: "2026-08-01T11:00" } });
+    fireEvent.change(screen.getByLabelText("结束时间"), { target: { value: "2026-08-01T10:45" } });
+    const error = screen.getByRole("alert");
+    expect(error).toHaveTextContent("结束时间必须晚于开始时间");
+    expect(screen.getByLabelText("开始时间")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("结束时间")).toHaveAttribute(
+      "aria-describedby",
+      "logs-time-range-error"
+    );
+  });
+
   it("keeps null-status active requests for neq while exact status filters hide them", () => {
     vi.useFakeTimers();
     traceStoreState.traces = [
@@ -236,12 +292,7 @@ describe("pages/LogsPage", () => {
     ];
     mockPageFeed({
       activeRequests: [
-        {
-          trace_id: "active-live",
-          cli_key: "claude",
-          method: "POST",
-          path: "/v1/messages",
-        },
+        { trace_id: "active-live", cli_key: "claude", method: "POST", path: "/v1/messages" },
       ],
     });
     renderWithProviders(<LogsPage />);
@@ -261,43 +312,23 @@ describe("pages/LogsPage", () => {
     expect(screen.getByTestId("trace-ids")).toHaveTextContent("trace-ok");
   });
 
-  it("resets the cursor immediately when the CLI filter changes", () => {
-    vi.mocked(useRequestLogsPageFeed).mockImplementation(({ cursor }) => {
+  it("navigates by any page number within the captured snapshot and displays totals", () => {
+    vi.mocked(useRequestLogsPageFeed).mockImplementation((options) => {
+      const rows =
+        options.page === 1 ? [{ id: 9 }, { id: 7 }] : options.page === 3 ? [{ id: 1 }] : [];
       return {
-        requestLogs: [],
-        nextCursor: cursor == null ? "opaque-next" : null,
+        requestLogs: rows,
+        snapshotId: options.snapshotId ?? "snapshot-1",
+        totalCount: 5,
+        totalPages: 3,
+        page: options.page,
         activeRequests: [],
         activeRequestsAvailable: true,
         requestLogsLoading: false,
         requestLogsRefreshing: false,
         requestLogsPageFetching: false,
         requestLogsAvailable: true,
-        refreshActiveRequests: vi.fn(),
-        refreshRequestLogs: vi.fn(),
-      } as any;
-    });
-    renderWithProviders(<LogsPage />);
-
-    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
-    expect(latestFeedOptions()?.cursor).toBe("opaque-next");
-    fireEvent.click(screen.getByRole("tab", { name: "Codex" }));
-
-    expect(latestFeedOptions()?.cursor).toBeNull();
-    expect(latestFeedOptions()?.filters.cliKey).toBe("codex");
-  });
-
-  it("navigates with the opaque cursor stack and preserves server row order", () => {
-    vi.mocked(useRequestLogsPageFeed).mockImplementation(({ cursor }) => {
-      const latest = cursor == null;
-      return {
-        requestLogs: latest ? [{ id: 9 }, { id: 7 }] : [{ id: 5 }],
-        nextCursor: latest ? "opaque-next" : null,
-        activeRequests: [],
-        activeRequestsAvailable: true,
-        requestLogsLoading: false,
-        requestLogsRefreshing: false,
-        requestLogsPageFetching: false,
-        requestLogsAvailable: true,
+        requestLogsSnapshotExpired: false,
         refreshActiveRequests: vi.fn(),
         refreshRequestLogs: vi.fn(),
       } as any;
@@ -305,71 +336,46 @@ describe("pages/LogsPage", () => {
     renderWithProviders(<LogsPage />);
 
     expect(screen.getByTestId("page-log-ids")).toHaveTextContent("9,7");
-    expect(screen.getByTestId("summary")).toHaveTextContent("第 1 页 · 本页 2 条");
+    expect(screen.getByTestId("summary")).toHaveTextContent("第 1 / 3 页 · 共 5 条 · 本页 2 条");
     expect(screen.getByTestId("request-log-order")).toHaveTextContent("source");
 
-    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
-    expect(screen.getByTestId("page-log-ids")).toHaveTextContent("5");
-    expect(screen.getByTestId("summary")).toHaveTextContent("第 2 页 · 本页 1 条");
+    fireEvent.change(screen.getByRole("spinbutton", { name: "跳转页码" }), {
+      target: { value: "3" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "跳转" }));
+    expect(latestFeedOptions()?.page).toBe(3);
+    expect(latestFeedOptions()?.snapshotId).toBe("snapshot-1");
+    expect(screen.getByTestId("page-log-ids")).toHaveTextContent("1");
     expect(screen.getByRole("button", { name: "下一页" })).toBeDisabled();
 
     fireEvent.click(screen.getByRole("button", { name: "上一页" }));
-    expect(latestFeedOptions()?.cursor).toBeNull();
-    expect(screen.getByTestId("page-log-ids")).toHaveTextContent("9,7");
+    expect(latestFeedOptions()?.page).toBe(2);
   });
 
-  it("returns directly to the latest page from history", () => {
-    vi.mocked(useRequestLogsPageFeed).mockImplementation(({ cursor }) => {
-      return {
-        requestLogs: [],
-        nextCursor: cursor == null ? "opaque-next" : null,
-        activeRequests: [],
-        activeRequestsAvailable: true,
-        requestLogsLoading: false,
-        requestLogsRefreshing: false,
-        requestLogsPageFetching: false,
-        requestLogsAvailable: true,
-        refreshActiveRequests: vi.fn(),
-        refreshRequestLogs: vi.fn(),
-      } as any;
-    });
-    renderWithProviders(<LogsPage />);
-
-    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
-    fireEvent.click(screen.getByRole("button", { name: "回到最新" }));
-
-    expect(latestFeedOptions()?.cursor).toBeNull();
-    expect(screen.getByText("第 1 页", { selector: "span" })).toBeInTheDocument();
-  });
-
-  it("loads and persists the selected page size while resetting history", () => {
+  it("resets the snapshot when CLI, page size, or manual refresh changes", () => {
     window.localStorage.setItem(LOGS_PAGE_SIZE_STORAGE_KEY, "100");
-    vi.mocked(useRequestLogsPageFeed).mockImplementation(({ cursor }) => {
-      return {
-        requestLogs: [],
-        nextCursor: cursor == null ? "opaque-next" : null,
-        activeRequests: [],
-        activeRequestsAvailable: true,
-        requestLogsLoading: false,
-        requestLogsRefreshing: false,
-        requestLogsPageFetching: false,
-        requestLogsAvailable: true,
-        refreshActiveRequests: vi.fn(),
-        refreshRequestLogs: vi.fn(),
-      } as any;
-    });
     renderWithProviders(<LogsPage />);
-
     expect(screen.getByRole("combobox", { name: "每页条数" })).toHaveValue("100");
-    expect(latestFeedOptions()?.limit).toBe(100);
-    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    const initialRevision = latestFeedOptions()?.snapshotRevision ?? 0;
+
+    fireEvent.click(screen.getByRole("tab", { name: "Codex" }));
+    expect(latestFeedOptions()?.filters.cliKey).toBe("codex");
+    expect(latestFeedOptions()?.snapshotId).toBeNull();
+    expect(latestFeedOptions()?.snapshotRevision).toBe(initialRevision + 1);
 
     fireEvent.change(screen.getByRole("combobox", { name: "每页条数" }), {
       target: { value: "200" },
     });
     expect(latestFeedOptions()?.limit).toBe(200);
-    expect(latestFeedOptions()?.cursor).toBeNull();
+    expect(latestFeedOptions()?.snapshotRevision).toBe(initialRevision + 2);
     expect(window.localStorage.getItem(LOGS_PAGE_SIZE_STORAGE_KEY)).toBe("200");
+
+    fireEvent.click(screen.getByRole("button", { name: "刷新并重建分页" }));
+    expect(latestFeedOptions()?.snapshotRevision).toBe(initialRevision + 3);
+    fireEvent.click(screen.getByRole("button", { name: "刷新当前页" }));
+    expect(latestFeedOptions()?.snapshotRevision).toBe(initialRevision + 4);
+    act(() => latestFeedOptions()?.onRefreshSnapshot());
+    expect(latestFeedOptions()?.snapshotRevision).toBe(initialRevision + 5);
   });
 
   it("falls back to 50 when the stored page size is unsupported", () => {
@@ -380,35 +386,10 @@ describe("pages/LogsPage", () => {
     expect(latestFeedOptions()?.limit).toBe(50);
   });
 
-  it("manually refreshes the currently selected page", () => {
-    const latestRefresh = vi.fn();
-    const historyRefresh = vi.fn();
-    vi.mocked(useRequestLogsPageFeed).mockImplementation(({ cursor }) => {
-      return {
-        requestLogs: [],
-        nextCursor: cursor == null ? "opaque-next" : null,
-        activeRequests: [],
-        activeRequestsAvailable: true,
-        requestLogsLoading: false,
-        requestLogsRefreshing: false,
-        requestLogsPageFetching: false,
-        requestLogsAvailable: true,
-        refreshActiveRequests: vi.fn(),
-        refreshRequestLogs: cursor == null ? latestRefresh : historyRefresh,
-      } as any;
-    });
-    renderWithProviders(<LogsPage />);
-
-    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
-    fireEvent.click(screen.getByRole("button", { name: "刷新当前页" }));
-
-    expect(historyRefresh).toHaveBeenCalledTimes(1);
-    expect(latestRefresh).not.toHaveBeenCalled();
-  });
-
   it("keeps active cards separate from the persisted page-size count", () => {
     mockPageFeed({
       requestLogs: Array.from({ length: 50 }, (_, index) => ({ id: 100 - index })),
+      totalCount: 50,
       activeRequests: [{ trace_id: "active-1" }, { trace_id: "active-2" }],
     });
     renderWithProviders(<LogsPage />);
@@ -418,20 +399,30 @@ describe("pages/LogsPage", () => {
     expect(screen.getByTestId("summary")).toHaveTextContent("本页 50 条");
   });
 
-  it("filters live traces with the applied server filter semantics", () => {
+  it("filters live traces with path, time, and stream-internal-error semantics", () => {
     vi.useFakeTimers();
     traceStoreState.traces = [
-      createTrace("trace-messages"),
-      createTrace("trace-health", { method: "GET", path: "/health" }),
+      createTrace("trace-stream", {
+        first_seen_ms: new Date("2026-08-01T09:30").getTime(),
+        summary: {
+          status: 200,
+          attempts: [{ stream_internal_error: { event_type: "error" } }],
+        } as any,
+      }),
+      createTrace("trace-health", {
+        method: "GET",
+        path: "/health",
+        first_seen_ms: new Date("2026-08-01T09:45").getTime(),
+      }),
     ];
     renderWithProviders(<LogsPage />);
-    expect(screen.getByTestId("trace-ids")).toHaveTextContent("trace-messages,trace-health");
+    fireEvent.click(screen.getByRole("tab", { name: "流内错误" }));
+    expect(screen.getByTestId("trace-ids")).toHaveTextContent("trace-stream");
 
-    fireEvent.change(screen.getByPlaceholderText("例：/v1/messages"), {
-      target: { value: "messages" },
-    });
-    act(() => vi.advanceTimersByTime(300));
-
-    expect(screen.getByTestId("trace-ids")).toHaveTextContent("trace-messages");
+    fireEvent.click(screen.getByRole("button", { name: /全部时间/ }));
+    fireEvent.change(screen.getByLabelText("开始时间"), { target: { value: "2026-08-01T09:00" } });
+    fireEvent.change(screen.getByLabelText("结束时间"), { target: { value: "2026-08-01T10:00" } });
+    fireEvent.click(screen.getByRole("button", { name: "应用" }));
+    expect(screen.getByTestId("trace-ids")).toHaveTextContent("trace-stream");
   });
 });

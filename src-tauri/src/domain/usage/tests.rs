@@ -467,7 +467,51 @@ fn codex_output_text_delta_marks_meaningful_output() {
     let usage = tracker.finalize();
 
     assert!(tracker.meaningful_output_seen());
+    assert_eq!(tracker.output_delta_event_count(), 1);
     assert!(!tracker.is_empty_success("/v1/responses", 200, usage.as_ref()));
+}
+
+#[test]
+fn stream_output_delta_count_tracks_supported_protocols_without_counting_final_snapshots() {
+    let fixtures = [
+        (
+            "codex",
+            b"data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n".as_slice(),
+        ),
+        (
+            "claude",
+            b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\n".as_slice(),
+        ),
+        (
+            "gemini",
+            b"data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hello\"}]}}]}\n\n".as_slice(),
+        ),
+        (
+            "openai_responses",
+            b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n"
+                .as_slice(),
+        ),
+        (
+            "openai_chat",
+            b"data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n".as_slice(),
+        ),
+        (
+            "anthropic_messages",
+            b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\n".as_slice(),
+        ),
+    ];
+
+    for (cli_key, sse) in fixtures {
+        let mut tracker = SseUsageTracker::new(cli_key);
+        tracker.ingest_chunk(sse);
+        assert_eq!(tracker.output_delta_event_count(), 1, "cli={cli_key}");
+    }
+
+    let mut completed_snapshot = SseUsageTracker::new("codex");
+    completed_snapshot.ingest_chunk(
+        b"data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"done\"}]}]}}\n\n",
+    );
+    assert_eq!(completed_snapshot.output_delta_event_count(), 0);
 }
 
 #[test]

@@ -1,7 +1,7 @@
 //! Usage: Gateway stream adapters (gunzip, relays, usage/timing tees).
 
 mod types;
-pub(super) use types::{StreamActivityTracker, StreamFinalizeCtx};
+pub(super) use types::{StreamActivityTracker, StreamFinalizeCtx, UpstreamOutputTiming};
 
 mod finalize;
 mod request_end;
@@ -17,8 +17,8 @@ pub(super) use plugin_chunk::MaybePluginChunkStream;
 
 mod usage_tee;
 pub(super) use usage_tee::{
-    spawn_usage_sse_relay_body, UpstreamModelObserverStream, UsageBodyBufferTeeStream,
-    UsageSseTeeStream,
+    spawn_upstream_output_timing_stream, spawn_usage_sse_relay_body, UpstreamModelObserverStream,
+    UsageBodyBufferTeeStream, UsageSseTeeStream,
 };
 
 mod timing;

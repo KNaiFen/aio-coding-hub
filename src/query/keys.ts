@@ -84,6 +84,9 @@ type RequestLogPageKeyFilters = {
   status: { op: string; value: number } | null;
   errorCodeContains: string | null;
   methodPathContains: string | null;
+  errorScope?: string;
+  createdAtMsFrom?: number | null;
+  createdAtMsTo?: number | null;
 };
 
 export const requestLogsKeys = {
@@ -101,8 +104,35 @@ export const requestLogsKeys = {
       filters.status?.value ?? null,
       filters.errorCodeContains,
       filters.methodPathContains,
+      filters.errorScope ?? "all",
+      filters.createdAtMsFrom ?? null,
+      filters.createdAtMsTo ?? null,
       cursor,
       limit,
+    ] as const,
+  snapshotPageAll: (
+    filters: RequestLogPageKeyFilters,
+    snapshotId: string | null,
+    page: number,
+    limit: number | null,
+    revision: number
+  ) =>
+    [
+      ...requestLogsAllKey,
+      "snapshotPage",
+      "all",
+      filters.cliKey,
+      filters.status?.op ?? null,
+      filters.status?.value ?? null,
+      filters.errorCodeContains,
+      filters.methodPathContains,
+      filters.errorScope ?? "all",
+      filters.createdAtMsFrom ?? null,
+      filters.createdAtMsTo ?? null,
+      snapshotId,
+      page,
+      limit,
+      revision,
     ] as const,
   activeSnapshot: () => [...requestLogsAllKey, "activeSnapshot"] as const,
   detail: (logId: number | null) => [...requestLogsAllKey, "detail", logId] as const,

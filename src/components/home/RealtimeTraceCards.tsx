@@ -300,7 +300,6 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
         const cacheWrite = summary ? resolveCacheCreationDisplay(summary) : null;
 
         const ttfbMs = summary ? sanitizeTtfbMs(summary.ttfb_ms, summary.duration_ms) : null;
-
         const effectiveInputTokens = summary?.effective_input_tokens ?? null;
         const displayInputTokens = effectiveInputTokens ?? (isClientAbort ? 0 : null);
         const displayOutputTokens = summary?.output_tokens ?? (isClientAbort ? 0 : null);
@@ -320,10 +319,18 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
             : null;
 
         const outputTokensPerSecond = summary
-          ? computeOutputTokensPerSecond(displayOutputTokens, summary.duration_ms, ttfbMs)
+          ? computeOutputTokensPerSecond(
+              displayOutputTokens,
+              summary.upstream_stream_duration_ms,
+              summaryStatus != null &&
+                summaryStatus >= 200 &&
+                summaryStatus < 300 &&
+                !summaryErrorCode
+                ? summary.upstream_stream_timing_version
+                : 0
+            )
           : null;
-        const displayOutputTokensPerSecond =
-          outputTokensPerSecond ?? (isClientAbort && displayOutputTokens === 0 ? 0 : null);
+        const displayOutputTokensPerSecond = outputTokensPerSecond;
         const routeLabel = (() => {
           if (attemptRoute.segments.length === 0) return null;
           if (isInProgress) return "链路[进行中]";

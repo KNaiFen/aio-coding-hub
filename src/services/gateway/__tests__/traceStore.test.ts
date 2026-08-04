@@ -87,6 +87,8 @@ function makeRequestEvent(overrides: Partial<GatewayRequestEvent> = {}): Gateway
     effective_input_tokens: null,
     claude_model_mapping: null,
     ...overrides,
+    upstream_stream_duration_ms: overrides.upstream_stream_duration_ms ?? null,
+    upstream_stream_timing_version: overrides.upstream_stream_timing_version ?? 0,
   };
 }
 
