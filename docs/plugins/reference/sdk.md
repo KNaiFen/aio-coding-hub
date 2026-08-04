@@ -118,8 +118,8 @@ Extension Host 入口示例：
 
 ```js
 module.exports.activate = function(api) {
-  api.gateway.registerHook("gateway.request.afterBodyRead", function(context) {
-    const body = String(context?.request?.body ?? "");
+  api.gateway.registerHook("gateway.request.afterBodyRead", function(payload) {
+    const body = String(payload?.context?.request?.body ?? "");
     if (!body.includes("SECRET_TOKEN")) return { action: "continue" };
     return {
       action: "replace",

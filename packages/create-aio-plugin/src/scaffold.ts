@@ -95,8 +95,8 @@ function promptHelperExampleTemplate(id: string, name: string): ScaffoldFiles {
   return {
     "plugin.json": jsonFile(manifest),
     "dist/extension.js": `module.exports.activate = function(api) {
-  api.gateway.registerHook("${hook}", function(context) {
-    const body = String(context && context.request && context.request.body || "");
+  api.gateway.registerHook("${hook}", function(payload) {
+    const body = String(payload && payload.context && payload.context.request && payload.context.request.body || "");
     if (body.includes("CODEX_PROMPT_HELPER")) {
       return {
         action: "replace",
@@ -142,8 +142,8 @@ function redactorExampleTemplate(id: string, name: string): ScaffoldFiles {
     "dist/extension.js": `const secretPattern = /(api_key|token|password)=[A-Za-z0-9_-]+/gi;
 
 module.exports.activate = function(api) {
-  api.gateway.registerHook("${requestHook}", function(context) {
-    const body = String(context && context.request && context.request.body || "");
+  api.gateway.registerHook("${requestHook}", function(payload) {
+    const body = String(payload && payload.context && payload.context.request && payload.context.request.body || "");
     const redacted = body.replace(secretPattern, "[REDACTED]");
     if (redacted !== body) {
       return { action: "replace", requestBody: redacted };
@@ -151,8 +151,8 @@ module.exports.activate = function(api) {
     return { action: "pass" };
   });
 
-  api.gateway.registerHook("${logHook}", function(context) {
-    const message = String(context && context.log && context.log.message || "");
+  api.gateway.registerHook("${logHook}", function(payload) {
+    const message = String(payload && payload.context && payload.context.log && payload.context.log.message || "");
     const redacted = message.replace(secretPattern, "[REDACTED]");
     if (redacted !== message) {
       return { action: "replace", logMessage: redacted };
@@ -192,8 +192,8 @@ function responseGuardExampleTemplate(id: string, name: string): ScaffoldFiles {
     "dist/extension.js": `const riskyPattern = /(delete production|rm -rf|drop database)/i;
 
 module.exports.activate = function(api) {
-  api.gateway.registerHook("${hook}", function(context) {
-    const body = String(context && context.response && context.response.body || "");
+  api.gateway.registerHook("${hook}", function(payload) {
+    const body = String(payload && payload.context && payload.context.response && payload.context.response.body || "");
     if (riskyPattern.test(body)) {
       return {
         action: "replace",

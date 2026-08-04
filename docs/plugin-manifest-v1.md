@@ -268,8 +268,8 @@ Upgrade failure 会恢复 previous version、config snapshot、capabilities 和 
 
 ```js
 module.exports.activate = function(api) {
-  api.gateway.registerHook("gateway.request.afterBodyRead", function(context) {
-    const body = String(context?.request?.body ?? "");
+  api.gateway.registerHook("gateway.request.afterBodyRead", function(payload) {
+    const body = String(payload?.context?.request?.body ?? "");
     if (!body) return { action: "continue" };
     return {
       action: "replace",
@@ -279,7 +279,7 @@ module.exports.activate = function(api) {
 };
 ```
 
-这个示例不声明 `permissions`。Extension Host manifest 只能声明 `capabilities` 和 `contributes`；`context.request.body` 是否可见、`requestBody` mutation 是否被接受，都由宿主按当前 hook contract、capability 和 context/output budget 判断。插件必须在字段缺失或为空时继续运行。
+这个示例不声明 `permissions`。Extension Host manifest 只能声明 `capabilities` 和 `contributes`；`payload.context.request.body` 是否可见、`requestBody` mutation 是否被接受，都由宿主按当前 hook contract、capability 和 context/output budget 判断。插件必须在字段缺失或为空时继续运行。
 
 ## 12. Manifest 示例：Privacy Filter
 
