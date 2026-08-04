@@ -2,7 +2,7 @@
 // - Wraps useCliProxy with env-conflict checking logic before enabling a CLI proxy.
 // - Manages the pending confirmation dialog state for environment variable conflicts.
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { envConflictsCheck, type EnvConflict } from "../services/cli/envConflicts";
 import { logToConsole } from "../services/consoleLog";
 import type { CliKey } from "../services/providers/providers";
@@ -19,8 +19,9 @@ export type CliProxyControlsState = {
   cliProxyEnabled: Record<CliKey, boolean>;
   cliProxyAppliedToCurrentGateway: Record<CliKey, boolean | null>;
   cliProxyToggling: Record<CliKey, boolean>;
+  cliProxyEnableBusy: boolean;
   pendingCliProxyEnablePrompt: PendingCliProxyEnablePrompt | null;
-  setPendingCliProxyEnablePrompt: (v: PendingCliProxyEnablePrompt | null) => void;
+  cancelPendingCliProxyEnable: () => void;
   requestCliProxyEnabledSwitch: (cliKey: CliKey, next: boolean) => void;
   confirmPendingCliProxyEnable: () => void;
 };
@@ -31,12 +32,19 @@ export function useCliProxyControls(): CliProxyControlsState {
   const [pendingCliProxyEnablePrompt, setPendingCliProxyEnablePrompt] =
     useState<PendingCliProxyEnablePrompt | null>(null);
   const [checkingCliProxyCliKey, setCheckingCliProxyCliKey] = useState<CliKey | null>(null);
+  const checkingCliProxyCliKeyRef = useRef<CliKey | null>(null);
 
   const { setCliProxyEnabled } = cliProxy;
   const cliProxyToggling = useMemo<Record<CliKey, boolean>>(() => {
     if (!checkingCliProxyCliKey) return cliProxy.toggling;
     return { ...cliProxy.toggling, [checkingCliProxyCliKey]: true };
   }, [checkingCliProxyCliKey, cliProxy.toggling]);
+
+  const releaseCliProxyEnableLock = useCallback((cliKey: CliKey) => {
+    if (checkingCliProxyCliKeyRef.current !== cliKey) return;
+    checkingCliProxyCliKeyRef.current = null;
+    setCheckingCliProxyCliKey(null);
+  }, []);
 
   const requestCliProxyEnabledSwitch = useCallback(
     (cliKey: CliKey, next: boolean) => {
@@ -45,16 +53,19 @@ export function useCliProxyControls(): CliProxyControlsState {
         return;
       }
 
-      if (checkingCliProxyCliKey === cliKey) return;
+      if (checkingCliProxyCliKeyRef.current !== null) return;
+      checkingCliProxyCliKeyRef.current = cliKey;
       setCheckingCliProxyCliKey(cliKey);
 
       void (async () => {
+        let keepLockForPrompt = false;
         try {
           const conflicts = await envConflictsCheck(cliKey);
           if (!conflicts || conflicts.length === 0) {
             setCliProxyEnabled(cliKey, true);
             return;
           }
+          keepLockForPrompt = true;
           setPendingCliProxyEnablePrompt({ cliKey, conflicts });
         } catch (err) {
           logToConsole("error", "检查环境变量冲突失败，仍尝试开启 CLI 代理", {
@@ -63,19 +74,29 @@ export function useCliProxyControls(): CliProxyControlsState {
           });
           setCliProxyEnabled(cliKey, true);
         } finally {
-          setCheckingCliProxyCliKey(null);
+          if (!keepLockForPrompt) {
+            releaseCliProxyEnableLock(cliKey);
+          }
         }
       })();
     },
-    [checkingCliProxyCliKey, setCliProxyEnabled]
+    [releaseCliProxyEnableLock, setCliProxyEnabled]
   );
+
+  const cancelPendingCliProxyEnable = useCallback(() => {
+    const pending = pendingCliProxyEnablePrompt;
+    if (!pending) return;
+    setPendingCliProxyEnablePrompt(null);
+    releaseCliProxyEnableLock(pending.cliKey);
+  }, [pendingCliProxyEnablePrompt, releaseCliProxyEnableLock]);
 
   const confirmPendingCliProxyEnable = useCallback(() => {
     const pending = pendingCliProxyEnablePrompt;
     if (!pending) return;
     setPendingCliProxyEnablePrompt(null);
+    releaseCliProxyEnableLock(pending.cliKey);
     setCliProxyEnabled(pending.cliKey, true);
-  }, [pendingCliProxyEnablePrompt, setCliProxyEnabled]);
+  }, [pendingCliProxyEnablePrompt, releaseCliProxyEnableLock, setCliProxyEnabled]);
 
   return {
     cliProxyLoading: cliProxy.loading,
@@ -83,8 +104,9 @@ export function useCliProxyControls(): CliProxyControlsState {
     cliProxyEnabled: cliProxy.enabled,
     cliProxyAppliedToCurrentGateway: cliProxy.appliedToCurrentGateway,
     cliProxyToggling,
+    cliProxyEnableBusy: checkingCliProxyCliKey !== null,
     pendingCliProxyEnablePrompt,
-    setPendingCliProxyEnablePrompt,
+    cancelPendingCliProxyEnable,
     requestCliProxyEnabledSwitch,
     confirmPendingCliProxyEnable,
   };
