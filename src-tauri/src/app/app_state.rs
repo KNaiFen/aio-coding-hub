@@ -30,15 +30,10 @@ pub(crate) async fn ensure_db_ready<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: &DbInitState,
 ) -> AppResult<db::Db> {
-    ensure_db_ready_with(state, || {
-        blocking::run("db_init", move || db::init(&app))
-    })
-    .await
+    ensure_db_ready_with(state, || blocking::run("db_init", move || db::init(&app))).await
 }
 
-pub(crate) async fn prepare_db_reset<'a>(
-    state: &'a DbInitState,
-) -> MutexGuard<'a, Option<db::Db>> {
+pub(crate) async fn prepare_db_reset<'a>(state: &'a DbInitState) -> MutexGuard<'a, Option<db::Db>> {
     let mut guard = state.0.lock().await;
     // Hold the cache lock through file deletion so no concurrent command can
     // recreate the pool midway through a destructive reset.
@@ -62,7 +57,10 @@ mod tests {
 
         let first = ensure_db_ready_with(&state, || async {
             attempts.fetch_add(1, Ordering::SeqCst);
-            Err(AppError::new("DB_ERROR", "transient initialization failure"))
+            Err(AppError::new(
+                "DB_ERROR",
+                "transient initialization failure",
+            ))
         })
         .await;
         assert!(first.is_err());
