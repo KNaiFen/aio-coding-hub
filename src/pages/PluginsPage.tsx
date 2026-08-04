@@ -506,6 +506,10 @@ export function PluginsPage() {
   const detailQuery = usePluginQuery(effectiveSelectedPluginId, {
     enabled: Boolean(effectiveSelectedPluginId),
   });
+  const selectedDetail =
+    detailQuery.data?.summary.plugin_id === effectiveSelectedPluginId ? detailQuery.data : null;
+  const selectedDetailLoading =
+    detailQuery.isLoading || (detailQuery.isFetching && selectedDetail == null);
   const busy =
     previewInstallMutation.isPending ||
     previewUpdateMutation.isPending ||
@@ -682,21 +686,30 @@ export function PluginsPage() {
                 {detailQuery.isFetching ? <RefreshCw className="h-4 w-4 animate-spin" /> : null}
               </div>
               <PluginDetailPanel
-                detail={detailQuery.data}
-                loading={detailQuery.isLoading}
+                detail={selectedDetail}
+                loading={selectedDetailLoading}
                 savingConfig={saveConfigMutation.isPending}
                 busy={busy}
-                onUpdate={handleUpdate}
+                onUpdate={() => {
+                  if (!selectedDetail) return;
+                  void handleUpdate();
+                }}
                 onRollback={(version) => {
-                  if (!effectiveSelectedPluginId) return;
+                  if (!selectedDetail) return;
                   runPluginAction("回滚插件", () =>
-                    rollbackMutation.mutateAsync({ pluginId: effectiveSelectedPluginId, version })
+                    rollbackMutation.mutateAsync({
+                      pluginId: selectedDetail.summary.plugin_id,
+                      version,
+                    })
                   );
                 }}
                 onSaveConfig={(config) => {
-                  if (!effectiveSelectedPluginId) return;
+                  if (!selectedDetail) return;
                   runPluginAction("保存配置", () =>
-                    saveConfigMutation.mutateAsync({ pluginId: effectiveSelectedPluginId, config })
+                    saveConfigMutation.mutateAsync({
+                      pluginId: selectedDetail.summary.plugin_id,
+                      config,
+                    })
                   );
                 }}
               />
