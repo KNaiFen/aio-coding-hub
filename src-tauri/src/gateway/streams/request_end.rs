@@ -111,13 +111,12 @@ impl StreamRequestCompletion {
         version: i64,
     ) -> Self {
         self.upstream_stream_duration_ms = duration_ms.filter(|duration_ms| *duration_ms > 0);
-        self.upstream_stream_timing_version = if version == 1
-            && self.upstream_stream_duration_ms.is_some()
-        {
-            1
-        } else {
-            0
-        };
+        self.upstream_stream_timing_version =
+            if version == 1 && self.upstream_stream_duration_ms.is_some() {
+                1
+            } else {
+                0
+            };
         self
     }
 }

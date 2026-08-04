@@ -471,12 +471,7 @@ fn request_card_model_lines(
         let model = request_model_with_requested_effort(request);
         return vec![RequestCardLine::new(
             truncate_display(
-                &format!(
-                    "{} / {}{}",
-                    cli_label(&request.cli_key),
-                    model,
-                    compaction
-                ),
+                &format!("{} / {}{}", cli_label(&request.cli_key), model, compaction),
                 width,
             ),
             RequestCardLineKind::Model,
@@ -538,10 +533,7 @@ fn request_card_model_lines(
     } else {
         route.effective_model.clone()
     };
-    let target = right_align_display(
-        &format!("{}{}", target_model, compaction),
-        width,
-    );
+    let target = right_align_display(&format!("{}{}", target_model, compaction), width);
     vec![
         RequestCardLine::new(source, RequestCardLineKind::Model),
         RequestCardLine::new(target, RequestCardLineKind::ModelTarget),

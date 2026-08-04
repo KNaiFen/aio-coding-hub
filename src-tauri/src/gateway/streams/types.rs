@@ -80,8 +80,13 @@ impl UpstreamOutputTiming {
     ) -> Self {
         let timing = Self::default();
         if let Some(first_output_ms) = first_output_ms {
-            let last_output_ms = last_output_ms.unwrap_or(first_output_ms).max(first_output_ms);
-            let mut state = timing.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let last_output_ms = last_output_ms
+                .unwrap_or(first_output_ms)
+                .max(first_output_ms);
+            let mut state = timing
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             state.first_output_ms = Some(first_output_ms);
             state.last_output_ms = Some(last_output_ms);
         }
@@ -89,7 +94,10 @@ impl UpstreamOutputTiming {
     }
 
     pub(in crate::gateway) fn observe_output_at(&self, elapsed_ms: u128) {
-        let mut state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if state.first_output_ms.is_none() {
             state.first_output_ms = Some(elapsed_ms);
         }
@@ -109,18 +117,20 @@ impl UpstreamOutputTiming {
     }
 
     pub(in crate::gateway) fn duration_ms(&self) -> Option<u128> {
-        let state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         if state.contaminated {
             return None;
         }
-        state
-            .last_output_ms
-            .zip(state.first_output_ms)
-            .and_then(|(last_output_ms, first_output_ms)| {
+        state.last_output_ms.zip(state.first_output_ms).and_then(
+            |(last_output_ms, first_output_ms)| {
                 last_output_ms
                     .checked_sub(first_output_ms)
                     .filter(|duration_ms| *duration_ms > 0)
-            })
+            },
+        )
     }
 }
 

@@ -171,13 +171,12 @@ fn request_log_insert_from_args(
         }
         Some(value.min(i64::MAX as u128) as i64)
     });
-    let upstream_stream_timing_version = if upstream_stream_timing_version == 1
-        && upstream_stream_duration_ms.is_some()
-    {
-        1
-    } else {
-        0
-    };
+    let upstream_stream_timing_version =
+        if upstream_stream_timing_version == 1 && upstream_stream_duration_ms.is_some() {
+            1
+        } else {
+            0
+        };
 
     Some(request_logs::RequestLogInsert {
         trace_id,

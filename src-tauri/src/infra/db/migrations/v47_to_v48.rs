@@ -21,9 +21,7 @@ fn add_column_if_missing(
         .map_err(|error| format!("failed to add {table}.{column}: {error}"))
 }
 
-pub(super) fn ensure_request_log_stream_timing_columns(
-    conn: &Connection,
-) -> Result<(), String> {
+pub(super) fn ensure_request_log_stream_timing_columns(conn: &Connection) -> Result<(), String> {
     add_column_if_missing(
         conn,
         "request_logs",
@@ -38,9 +36,7 @@ pub(super) fn ensure_request_log_stream_timing_columns(
     )
 }
 
-pub(super) fn ensure_usage_ledger_stream_timing_columns(
-    conn: &Connection,
-) -> Result<(), String> {
+pub(super) fn ensure_usage_ledger_stream_timing_columns(conn: &Connection) -> Result<(), String> {
     add_column_if_missing(
         conn,
         "usage_ledger",

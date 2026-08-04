@@ -1337,7 +1337,9 @@ mod tests {
     #[test]
     fn current_status_cell_uses_last_success_even_when_failures_are_the_majority() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let db_path = temp.path().join("provider-availability-last-success.sqlite3");
+        let db_path = temp
+            .path()
+            .join("provider-availability-last-success.sqlite3");
         let db = crate::db::init_for_tests(&db_path).expect("init db");
         let provider =
             upsert(&db, default_provider_params("last-success")).expect("insert provider");
@@ -1364,11 +1366,7 @@ mod tests {
                 .pop()
                 .expect("provider timeline");
             assert_eq!(
-                timeline
-                    .buckets
-                    .last()
-                    .expect("current status cell")
-                    .state,
+                timeline.buckets.last().expect("current status cell").state,
                 ProviderAvailabilityState::Healthy,
                 "the last successful request must win for {bucket_count} buckets"
             );

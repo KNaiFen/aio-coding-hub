@@ -50,14 +50,7 @@ impl RequestLogSnapshotState {
         let now = Instant::now();
         let expires_at_ms = expiry_unix_ms();
         let mut store = lock_or_recover(&self.inner);
-        store.create(
-            filter_fingerprint,
-            page_size,
-            ids,
-            page,
-            now,
-            expires_at_ms,
-        )
+        store.create(filter_fingerprint, page_size, ids, page, now, expires_at_ms)
     }
 
     pub(crate) fn page(
@@ -135,7 +128,9 @@ impl RequestLogSnapshotStore {
             return Err(snapshot_expired_error());
         };
         if snapshot.filter_fingerprint != filter_fingerprint || snapshot.page_size != page_size {
-            return Err("SEC_INVALID_INPUT: request logs snapshot does not match this query".to_string());
+            return Err(
+                "SEC_INVALID_INPUT: request logs snapshot does not match this query".to_string(),
+            );
         }
         self.slice(snapshot_id, page, now, expires_at_ms)
     }
@@ -180,8 +175,7 @@ impl RequestLogSnapshotStore {
     fn evict_for(&mut self, incoming_count: usize) {
         while !self.snapshots.is_empty()
             && (self.snapshots.len() >= MAX_SNAPSHOTS
-                || self.total_memberships().saturating_add(incoming_count)
-                    > MAX_TOTAL_MEMBERSHIPS)
+                || self.total_memberships().saturating_add(incoming_count) > MAX_TOTAL_MEMBERSHIPS)
         {
             let Some(oldest_id) = self
                 .snapshots
@@ -196,7 +190,10 @@ impl RequestLogSnapshotStore {
     }
 
     fn total_memberships(&self) -> usize {
-        self.snapshots.values().map(|snapshot| snapshot.ids.len()).sum()
+        self.snapshots
+            .values()
+            .map(|snapshot| snapshot.ids.len())
+            .sum()
     }
 }
 
@@ -217,7 +214,9 @@ fn snapshot_expired_error() -> String {
 }
 
 fn lock_or_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 #[cfg(test)]
@@ -229,14 +228,7 @@ mod tests {
         let now = Instant::now();
         let mut store = RequestLogSnapshotStore::default();
         let first = store
-            .create(
-                "filters".to_string(),
-                2,
-                vec![7, 6, 5, 4, 3],
-                1,
-                now,
-                1,
-            )
+            .create("filters".to_string(), 2, vec![7, 6, 5, 4, 3], 1, now, 1)
             .expect("create snapshot");
         assert_eq!(first.ids, vec![7, 6]);
         assert_eq!(first.total_count, 5);
@@ -262,14 +254,7 @@ mod tests {
             .unwrap_err()
             .starts_with("SEC_INVALID_INPUT:"));
         assert!(store
-            .page(
-                &first.snapshot_id,
-                "filters",
-                2,
-                1,
-                now + SNAPSHOT_TTL,
-                2
-            )
+            .page(&first.snapshot_id, "filters", 2, 1, now + SNAPSHOT_TTL, 2)
             .unwrap_err()
             .starts_with("REQUEST_LOG_SNAPSHOT_EXPIRED:"));
     }

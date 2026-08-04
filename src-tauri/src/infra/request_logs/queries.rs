@@ -879,7 +879,9 @@ pub fn snapshot_membership_excluding_traces(
         .prepare(&sql)
         .map_err(|e| db_err!("failed to prepare request-log snapshot membership query: {e}"))?;
     let rows = stmt
-        .query_map(params_from_iter(query_params.iter()), |row| row.get::<_, i64>(0))
+        .query_map(params_from_iter(query_params.iter()), |row| {
+            row.get::<_, i64>(0)
+        })
         .map_err(|e| db_err!("failed to query request-log snapshot membership: {e}"))?;
     let mut ids = Vec::new();
     for row in rows {
@@ -1232,7 +1234,11 @@ INSERT INTO request_logs (
         )
         .expect("list all errors");
         assert_eq!(
-            all_errors.items.iter().map(|item| item.id).collect::<Vec<_>>(),
+            all_errors
+                .items
+                .iter()
+                .map(|item| item.id)
+                .collect::<Vec<_>>(),
             vec![5, 2, 1],
             "all errors includes real failures but excludes interruptions and user cancellation"
         );
@@ -1334,13 +1340,9 @@ INSERT INTO request_logs (
         }
         drop(conn);
 
-        let error = snapshot_membership_excluding_traces(
-            &db,
-            &RequestLogPageFilters::default(),
-            &[],
-            3,
-        )
-        .expect_err("oversized membership must be rejected");
+        let error =
+            snapshot_membership_excluding_traces(&db, &RequestLogPageFilters::default(), &[], 3)
+                .expect_err("oversized membership must be rejected");
         assert_eq!(error.code(), "REQUEST_LOG_SNAPSHOT_TOO_LARGE");
     }
 

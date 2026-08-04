@@ -203,10 +203,16 @@ impl BufferedStreamPrefixState {
 
     fn output_timing_ms(&self, attempt_started: Instant) -> (Option<u128>, Option<u128>) {
         (
-            self.output_delta_started_at
-                .map(|started| started.saturating_duration_since(attempt_started).as_millis()),
-            self.output_delta_last_seen_at
-                .map(|last_seen| last_seen.saturating_duration_since(attempt_started).as_millis()),
+            self.output_delta_started_at.map(|started| {
+                started
+                    .saturating_duration_since(attempt_started)
+                    .as_millis()
+            }),
+            self.output_delta_last_seen_at.map(|last_seen| {
+                last_seen
+                    .saturating_duration_since(attempt_started)
+                    .as_millis()
+            }),
         )
     }
 }
@@ -292,7 +298,9 @@ fn inspect_buffered_event_stream_prefix(
                 };
             }
             if usage::has_codex_meaningful_output(&data) {
-                state.meaningful_output_started_at.get_or_insert(observed_at);
+                state
+                    .meaningful_output_started_at
+                    .get_or_insert(observed_at);
             }
             state.completion_seen |= is_completion_sse_frame(&event_name, &data);
         } else if is_terminal_error_sse_frame(&event_name, &data) {

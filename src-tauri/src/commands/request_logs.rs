@@ -1,9 +1,9 @@
 //! Usage: Request logs and trace detail related Tauri commands.
 
-use crate::app_state::{ensure_db_ready, DbInitState};
 use crate::app::request_log_snapshot_state::{
     RequestLogSnapshotSlice, RequestLogSnapshotState, MAX_SNAPSHOT_MEMBERSHIPS,
 };
+use crate::app_state::{ensure_db_ready, DbInitState};
 use crate::commands::limit::normalize_limit;
 use crate::gateway_runtime_access::app_gateway_active_requests_snapshot;
 use crate::{blocking, request_attempt_logs, request_logs};
@@ -61,12 +61,14 @@ fn request_logs_snapshot_page_response(
         snapshot_id: slice.snapshot_id,
         total_count: i64::try_from(slice.total_count)
             .map_err(|_| "SYSTEM_ERROR: request logs snapshot count is too large".to_string())?,
-        total_pages: i64::try_from(slice.total_pages)
-            .map_err(|_| "SYSTEM_ERROR: request logs snapshot page count is too large".to_string())?,
+        total_pages: i64::try_from(slice.total_pages).map_err(|_| {
+            "SYSTEM_ERROR: request logs snapshot page count is too large".to_string()
+        })?,
         page: i64::try_from(slice.page)
             .map_err(|_| "SYSTEM_ERROR: request logs snapshot page is too large".to_string())?,
-        page_size: i64::try_from(slice.page_size)
-            .map_err(|_| "SYSTEM_ERROR: request logs snapshot page size is too large".to_string())?,
+        page_size: i64::try_from(slice.page_size).map_err(|_| {
+            "SYSTEM_ERROR: request logs snapshot page size is too large".to_string()
+        })?,
         expires_at_ms: slice.expires_at_ms,
     })
 }
@@ -149,7 +151,9 @@ pub(crate) async fn request_logs_snapshot_page_all(
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
 
     let slice = match snapshot_id.as_deref() {
-        Some(snapshot_id) => snapshot_state.page(snapshot_id, &filter_fingerprint, page_size, page)?,
+        Some(snapshot_id) => {
+            snapshot_state.page(snapshot_id, &filter_fingerprint, page_size, page)?
+        }
         None => {
             let active_trace_ids = app_gateway_active_requests_snapshot(&app)
                 .into_iter()

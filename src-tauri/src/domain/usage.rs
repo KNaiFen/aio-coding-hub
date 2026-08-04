@@ -1050,11 +1050,9 @@ fn has_stream_output_delta_for_semantics(semantics: UsageSemantics, data: &Value
         UsageSemantics::OpenAi => has_openai_output_delta(data),
         UsageSemantics::Claude => has_claude_output_delta(data),
         UsageSemantics::Gemini => has_gemini_output_delta(data),
-        UsageSemantics::Other => {
-            ["delta", "text", "content", "output"]
-                .into_iter()
-                .any(|field| value_has_generated_content(data.get(field)))
-        }
+        UsageSemantics::Other => ["delta", "text", "content", "output"]
+            .into_iter()
+            .any(|field| value_has_generated_content(data.get(field))),
     }
 }
 

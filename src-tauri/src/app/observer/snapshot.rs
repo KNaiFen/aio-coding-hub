@@ -939,9 +939,7 @@ fn project_terminal(
         duration_ms: Some(row.duration_ms.max(0)),
         ttfb_ms: row.ttfb_ms.filter(|value| *value >= 0),
         visible_ttfb_ms: row.visible_ttfb_ms.filter(|value| *value >= 0),
-        upstream_stream_duration_ms: row
-            .upstream_stream_duration_ms
-            .filter(|value| *value > 0),
+        upstream_stream_duration_ms: row.upstream_stream_duration_ms.filter(|value| *value > 0),
         upstream_stream_timing_version: row.upstream_stream_timing_version,
         attempt_count,
         retry_count,
@@ -1313,8 +1311,7 @@ mod tests {
             parse_requested_reasoning_effort(Some(raw)).as_deref(),
             Some("max")
         );
-        let legacy =
-            r#"[{"type":"codex_reasoning_effort","effort":null,"rawEffort":"Ultra"}]"#;
+        let legacy = r#"[{"type":"codex_reasoning_effort","effort":null,"rawEffort":"Ultra"}]"#;
         assert_eq!(
             parse_requested_reasoning_effort(Some(legacy)).as_deref(),
             Some("ultra")
