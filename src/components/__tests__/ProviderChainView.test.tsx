@@ -104,6 +104,35 @@ describe("components/ProviderChainView", () => {
     expect(screen.getByText("https://p99")).toBeInTheDocument();
   });
 
+  it("isolates malformed attempts_json when no compatible logs are available", () => {
+    render(<ProviderChainView attemptLogs={[]} attemptLogsLoading={false} attemptsJson="[null]" />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("尝试 JSON 解析失败");
+    expect(screen.queryByText("无故障切换尝试。")).not.toBeInTheDocument();
+  });
+
+  it("keeps compatible logs visible when attempts_json contains a malformed entry", () => {
+    render(
+      <ProviderChainView
+        attemptLogs={[
+          {
+            attempt_index: 1,
+            provider_id: 1,
+            provider_name: "P1",
+            base_url: "https://p1",
+            outcome: "success",
+            status: 200,
+          },
+        ]}
+        attemptLogsLoading={false}
+        attemptsJson="[null]"
+      />
+    );
+
+    expect(screen.getByText("尝试 JSON 解析失败")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /请求成功 P1 \(#1\)/ })).toBeInTheDocument();
+  });
+
   it("trims the snapshot name and keeps identity visible when an empty-url attempt is collapsed", () => {
     render(
       <ProviderChainView
