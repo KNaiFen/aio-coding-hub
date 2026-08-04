@@ -21,10 +21,8 @@ pub(crate) fn spawn(app_handle: tauri::AppHandle) -> bool {
 async fn run(app_handle: tauri::AppHandle) {
     let db_state = app_handle.state::<DbInitState>();
     let init_app = app_handle.clone();
-    let db = match initialize_db_stage(&app_handle, || {
-        ensure_db_ready(init_app, db_state.inner())
-    })
-    .await
+    let db = match initialize_db_stage(&app_handle, || ensure_db_ready(init_app, db_state.inner()))
+        .await
     {
         Some(db) => db,
         None => return,
@@ -137,7 +135,10 @@ mod tests {
         let first = initialize_db_stage(&app_handle, || {
             ensure_db_ready_with(&db_state, || async {
                 attempts.fetch_add(1, Ordering::SeqCst);
-                Err(AppError::new("DB_ERROR", "transient initialization failure"))
+                Err(AppError::new(
+                    "DB_ERROR",
+                    "transient initialization failure",
+                ))
             })
         })
         .await;
