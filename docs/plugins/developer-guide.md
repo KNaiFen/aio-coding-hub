@@ -168,8 +168,8 @@ acme.redactor/
 const secretPattern = /(api_key|token|password)=[A-Za-z0-9_-]+/gi;
 
 module.exports.activate = function(api) {
-  api.gateway.registerHook("gateway.request.afterBodyRead", function(context) {
-    const body = String(context?.request?.body ?? "");
+  api.gateway.registerHook("gateway.request.afterBodyRead", function(payload) {
+    const body = String(payload?.context?.request?.body ?? "");
     const redacted = body.replace(secretPattern, "$1=[REDACTED]");
     if (redacted === body) return { action: "continue" };
     return { action: "replace", requestBody: redacted };

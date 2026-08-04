@@ -2,6 +2,7 @@ import { createPublicKey, verify } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import { createPluginScaffold } from "./scaffold";
 import {
@@ -637,6 +638,96 @@ describe("create-aio-plugin scaffold", () => {
 });
 
 describe("create-aio-plugin example templates", () => {
+  it("runs prompt helper against the Extension Host payload shape", () => {
+    const files = createPluginScaffold({
+      id: "acme.prompt-helper",
+      name: "Prompt Helper",
+      template: "example:prompt-helper",
+    });
+    const handler = generatedGatewayHook(files, "gateway.request.afterBodyRead");
+
+    expect(
+      handler({
+        hook: "gateway.request.afterBodyRead",
+        traceId: "trace-prompt",
+        config: {},
+        context: { request: { body: "CODEX_PROMPT_HELPER: explain this patch." } },
+      })
+    ).toMatchObject({
+      action: "replace",
+      requestBody: "Keep answers concise. explain this patch.",
+    });
+    expect(
+      handler({
+        hook: "gateway.request.afterBodyRead",
+        traceId: "trace-pass",
+        config: {},
+        context: { request: { body: "Explain this patch." } },
+      })
+    ).toEqual({ action: "pass" });
+  });
+
+  it("runs redactor request and log hooks against the Extension Host payload shape", () => {
+    const files = createPluginScaffold({
+      id: "acme.redactor",
+      name: "Redactor",
+      template: "example:redactor",
+    });
+    const requestHandler = generatedGatewayHook(files, "gateway.request.beforeSend");
+    const logHandler = generatedGatewayHook(files, "log.beforePersist");
+
+    expect(
+      requestHandler({
+        hook: "gateway.request.beforeSend",
+        traceId: "trace-request",
+        config: {},
+        context: { request: { body: "POST /v1/chat api_key=secret payload=hello" } },
+      })
+    ).toEqual({ action: "replace", requestBody: "POST /v1/chat [REDACTED] payload=hello" });
+    expect(
+      logHandler({
+        hook: "log.beforePersist",
+        traceId: "trace-log",
+        config: {},
+        context: { log: { message: "provider retry used token=debug" } },
+      })
+    ).toEqual({ action: "replace", logMessage: "provider retry used [REDACTED]" });
+    expect(
+      requestHandler({
+        hook: "gateway.request.beforeSend",
+        traceId: "trace-request-pass",
+        config: {},
+        context: { request: { body: "POST /v1/chat payload=hello" } },
+      })
+    ).toEqual({ action: "pass" });
+  });
+
+  it("runs response guard against the Extension Host payload shape", () => {
+    const files = createPluginScaffold({
+      id: "acme.response-guard",
+      name: "Response Guard",
+      template: "example:response-guard",
+    });
+    const handler = generatedGatewayHook(files, "gateway.response.after");
+
+    expect(
+      handler({
+        hook: "gateway.response.after",
+        traceId: "trace-response",
+        config: {},
+        context: { response: { body: "Run rm -rf /tmp/cache." } },
+      })
+    ).toEqual({ action: "replace", responseBody: "Run [REVIEW_REQUIRED] /tmp/cache." });
+    expect(
+      handler({
+        hook: "gateway.response.after",
+        traceId: "trace-response-pass",
+        config: {},
+        context: { response: { body: "Review the diff and run tests." } },
+      })
+    ).toEqual({ action: "pass" });
+  });
+
   it.each([
     [
       "acme.prompt-helper",
@@ -751,6 +842,37 @@ describe("create-aio-plugin example templates", () => {
     expect(publishResult.checksum).toMatch(/^sha256:[a-f0-9]{64}$/);
   });
 });
+
+type GeneratedGatewayHook = (payload: unknown) => unknown;
+
+function generatedGatewayHook(
+  files: Record<string, string>,
+  hookName: string
+): GeneratedGatewayHook {
+  const hooks = new Map<string, GeneratedGatewayHook>();
+  const extensionModule: {
+    exports: {
+      activate?: (api: {
+        gateway: {
+          registerHook: (name: string, handler: GeneratedGatewayHook) => void;
+        };
+      }) => void;
+    };
+  } = { exports: {} };
+
+  runInNewContext(files["dist/extension.js"] ?? "", { module: extensionModule });
+  extensionModule.exports.activate?.({
+    gateway: {
+      registerHook: (name, handler) => {
+        hooks.set(name, handler);
+      },
+    },
+  });
+
+  const handler = hooks.get(hookName);
+  expect(handler).toBeTypeOf("function");
+  return handler as GeneratedGatewayHook;
+}
 
 function expectExampleCanPackAndPublishCheck(
   files: Record<string, string>,
