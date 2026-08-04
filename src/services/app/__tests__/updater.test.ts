@@ -123,6 +123,53 @@ describe("services/app/updater", () => {
     });
   });
 
+  it.each(["%ZZ", "%E0%A4%A"])(
+    "updaterCheck keeps the update when fallback tag %s cannot be decoded",
+    async (encodedTag) => {
+      const { updaterCheck } = await import("../updater");
+
+      setTauriRuntime();
+
+      const fallbackBody = `See release: ${AIO_REPO_URL}/releases/tag/${encodedTag}`;
+      vi.mocked(tauriInvoke).mockResolvedValueOnce({
+        rid: 5,
+        version: "0.60.0",
+        body: fallbackBody,
+      } as any);
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(updaterCheck()).resolves.toEqual({
+        rid: 5,
+        version: "0.60.0",
+        currentVersion: undefined,
+        date: undefined,
+        body: fallbackBody,
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it("updaterCheck decodes and re-encodes a valid fallback tag", async () => {
+    const { updaterCheck } = await import("../updater");
+
+    setTauriRuntime();
+
+    vi.mocked(tauriInvoke).mockResolvedValueOnce({
+      rid: 6,
+      version: "0.60.0",
+      body: `See release: ${AIO_REPO_URL}/releases/tag/release%2Fcandidate`,
+    } as any);
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(updaterCheck()).resolves.toMatchObject({ rid: 6 });
+    expect(fetchMock).toHaveBeenCalledWith(
+      `https://api.github.com/repos/${AIO_REPO_PATH[0]}/${AIO_REPO_PATH[1]}/releases/tags/release%2Fcandidate`,
+      expect.any(Object)
+    );
+  });
+
   it("updaterDownloadAndInstall maps events and supports timeout option", async () => {
     const { updaterDownloadAndInstall } = await import("../updater");
 
