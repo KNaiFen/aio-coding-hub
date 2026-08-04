@@ -94,10 +94,10 @@ describe("query/mcp", () => {
     });
   });
 
-  it("useMcpServerUpsertMutation inserts into cached list", async () => {
+  it("useMcpServerUpsertMutation invalidates the workspace list without replacing enabled", async () => {
     setTauriRuntime();
 
-    const created: McpServerSummary = {
+    const cached: McpServerSummary = {
       id: 1,
       server_key: "s1",
       name: "S1",
@@ -112,30 +112,34 @@ describe("query/mcp", () => {
       created_at: 0,
       updated_at: 0,
     };
+    const upserted = { ...cached, name: "Renamed", enabled: false };
 
-    vi.mocked(mcpServerUpsert).mockResolvedValue(created);
+    vi.mocked(mcpServerUpsert).mockResolvedValue(upserted);
 
     const client = createTestQueryClient();
-    client.setQueryData(mcpKeys.serversList(1), []);
+    client.setQueryData(mcpKeys.serversList(1), [cached]);
+    const invalidateSpy = vi.spyOn(client, "invalidateQueries");
     const wrapper = createQueryWrapper(client);
 
     const { result } = renderHook(() => useMcpServerUpsertMutation(1), { wrapper });
     await act(async () => {
       await result.current.mutateAsync({
-        serverId: null,
-        serverKey: created.server_key,
-        name: created.name,
-        transport: created.transport,
-        command: created.command,
-        args: created.args,
+        serverId: cached.id,
+        serverKey: cached.server_key,
+        name: upserted.name,
+        transport: cached.transport,
+        command: cached.command,
+        args: cached.args,
         env: {},
-        cwd: created.cwd,
-        url: created.url,
+        cwd: cached.cwd,
+        url: cached.url,
         headers: {},
       });
     });
 
-    expect(client.getQueryData(mcpKeys.serversList(1))).toEqual([created]);
+    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: mcpKeys.serversList(1) });
+    expect(client.getQueryData(mcpKeys.serversList(1))).toEqual([cached]);
   });
 
   it("useMcpServerSetEnabledMutation updates cached list row", async () => {
