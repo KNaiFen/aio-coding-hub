@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { envConflictsCheck } from "../../services/cli/envConflicts";
 import { logToConsole } from "../../services/consoleLog";
+import { createDeferred } from "../../test/utils/deferred";
 import { useCliProxy } from "../useCliProxy";
 import { useCliProxyControls } from "../useCliProxyControls";
 
@@ -86,12 +87,84 @@ describe("hooks/useCliProxyControls", () => {
     expect(result.current.cliProxyToggling.codex).toBe(false);
   });
 
+  it("serializes enable checks across cli keys in the same render", async () => {
+    const cliProxyState = makeCliProxyState();
+    const firstCheck = createDeferred<[]>();
+    vi.mocked(useCliProxy).mockReturnValue(cliProxyState as any);
+    vi.mocked(envConflictsCheck).mockReturnValueOnce(firstCheck.promise).mockResolvedValueOnce([]);
+
+    const { result } = renderHook(() => useCliProxyControls());
+
+    act(() => {
+      result.current.requestCliProxyEnabledSwitch("codex", true);
+      result.current.requestCliProxyEnabledSwitch("gemini", true);
+    });
+
+    expect(envConflictsCheck).toHaveBeenCalledTimes(1);
+    expect(envConflictsCheck).toHaveBeenCalledWith("codex");
+    expect(result.current.cliProxyEnableBusy).toBe(true);
+
+    await act(async () => {
+      firstCheck.resolve([]);
+      await firstCheck.promise;
+    });
+
+    await waitFor(() => expect(result.current.cliProxyEnableBusy).toBe(false));
+
+    act(() => {
+      result.current.requestCliProxyEnabledSwitch("gemini", true);
+    });
+
+    await waitFor(() => expect(envConflictsCheck).toHaveBeenCalledTimes(2));
+    expect(envConflictsCheck).toHaveBeenLastCalledWith("gemini");
+  });
+
+  it("holds the enable lock while a conflict prompt is open and releases it on cancel", async () => {
+    const cliProxyState = makeCliProxyState();
+    vi.mocked(useCliProxy).mockReturnValue(cliProxyState as any);
+    vi.mocked(envConflictsCheck)
+      .mockResolvedValueOnce([
+        { var_name: "OPENAI_API_KEY", source_type: "system", source_path: "Process Environment" },
+      ])
+      .mockResolvedValueOnce([]);
+
+    const { result } = renderHook(() => useCliProxyControls());
+
+    act(() => {
+      result.current.requestCliProxyEnabledSwitch("codex", true);
+    });
+
+    await waitFor(() => expect(result.current.pendingCliProxyEnablePrompt?.cliKey).toBe("codex"));
+    expect(result.current.cliProxyEnableBusy).toBe(true);
+
+    act(() => {
+      result.current.requestCliProxyEnabledSwitch("gemini", true);
+    });
+    expect(envConflictsCheck).toHaveBeenCalledTimes(1);
+    expect(result.current.pendingCliProxyEnablePrompt?.cliKey).toBe("codex");
+
+    act(() => {
+      result.current.cancelPendingCliProxyEnable();
+    });
+    expect(result.current.pendingCliProxyEnablePrompt).toBeNull();
+    expect(result.current.cliProxyEnableBusy).toBe(false);
+
+    act(() => {
+      result.current.requestCliProxyEnabledSwitch("gemini", true);
+    });
+
+    await waitFor(() => expect(envConflictsCheck).toHaveBeenCalledTimes(2));
+    expect(envConflictsCheck).toHaveBeenLastCalledWith("gemini");
+  });
+
   it("prompts for confirmation when env conflicts are found before enabling", async () => {
     const cliProxyState = makeCliProxyState();
     vi.mocked(useCliProxy).mockReturnValue(cliProxyState as any);
-    vi.mocked(envConflictsCheck).mockResolvedValueOnce([
-      { var_name: "OPENAI_API_KEY", source_type: "system", source_path: "Process Environment" },
-    ]);
+    vi.mocked(envConflictsCheck)
+      .mockResolvedValueOnce([
+        { var_name: "OPENAI_API_KEY", source_type: "system", source_path: "Process Environment" },
+      ])
+      .mockResolvedValueOnce([]);
 
     const { result } = renderHook(() => useCliProxyControls());
 
@@ -112,6 +185,7 @@ describe("hooks/useCliProxyControls", () => {
       })
     );
     expect(cliProxyState.setCliProxyEnabled).not.toHaveBeenCalled();
+    expect(result.current.cliProxyEnableBusy).toBe(true);
 
     act(() => {
       result.current.confirmPendingCliProxyEnable();
@@ -119,6 +193,16 @@ describe("hooks/useCliProxyControls", () => {
 
     expect(cliProxyState.setCliProxyEnabled).toHaveBeenCalledWith("codex", true);
     expect(result.current.pendingCliProxyEnablePrompt).toBeNull();
+    expect(result.current.cliProxyEnableBusy).toBe(false);
+
+    act(() => {
+      result.current.requestCliProxyEnabledSwitch("gemini", true);
+    });
+    expect(envConflictsCheck).toHaveBeenCalledTimes(2);
+    expect(envConflictsCheck).toHaveBeenLastCalledWith("gemini");
+    await waitFor(() =>
+      expect(cliProxyState.setCliProxyEnabled).toHaveBeenCalledWith("gemini", true)
+    );
   });
 
   it("logs and still enables the cli when env conflict checks fail", async () => {
@@ -140,5 +224,6 @@ describe("hooks/useCliProxyControls", () => {
       "检查环境变量冲突失败，仍尝试开启 CLI 代理",
       expect.objectContaining({ cli: "codex", error: "Error: env check boom" })
     );
+    expect(result.current.cliProxyEnableBusy).toBe(false);
   });
 });
