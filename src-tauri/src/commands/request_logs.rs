@@ -166,7 +166,7 @@ pub(crate) async fn request_logs_snapshot_page_all(
                 )
             })
             .await
-            .map_err(Into::into)?;
+            .map_err(|error| error.to_string())?;
             snapshot_state.create(filter_fingerprint, page_size, ids, page)?
         }
     };
