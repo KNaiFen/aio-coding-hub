@@ -15,13 +15,22 @@
 
 ## Acceptance Criteria
 
-- [ ] 注释标签已存在于本地且与远端同名时，发布源解析仍得到远端标签指向的提交。
-- [ ] 本地没有该标签时，手动触发路径仍能解析同一远端提交。
-- [ ] 无效、缺失或不属于 `origin/main` 的发布标签继续被拒绝。
-- [ ] 工作流语法、回归验证和适用的仓库合同检查通过。
-- [ ] PR 合并前复核最新 `origin/main` 的新增代码和业务影响，合并后 `main` CI 通过。
+- [x] 注释标签已存在于本地且与远端同名时，发布源解析仍得到远端标签指向的提交。
+- [x] 本地没有该标签时，手动触发路径仍能解析同一远端提交。
+- [x] 无效、缺失或不属于 `origin/main` 的发布标签继续被拒绝。
+- [x] 工作流语法、回归验证和适用的仓库合同检查通过。
+- [x] PR 合并前复核最新 `origin/main` 的新增代码和业务影响，合并后 `main` CI 通过。
 
 ## Notes
 
 - 真实失败证据：Release run `30876701787` 在 `Validate release source` 执行 `git fetch origin refs/tags/...:refs/tags/...` 时返回 `would clobber existing tag`。
 - 候选构建与版本内容均已通过；本任务只修复发布编排中的标签解析缺陷。
+
+## Verification Evidence
+
+- 实现提交：`3620595f5d91d30bc876dc469c74029560c9f4ef`。
+- 实现 PR：<https://github.com/KNaiFen/aio-coding-hub/pull/38>。
+- PR 完整 CI：<https://github.com/KNaiFen/aio-coding-hub/actions/runs/30878912487>。
+- 合并后的 `main` 提交：`7d4367d41de143508e399658a5179af7a88fecd8`。
+- 合并后的完整 `main` CI：<https://github.com/KNaiFen/aio-coding-hub/actions/runs/30880292937>。
+- `release-source.selftest.mjs` 使用临时 bare origin 同时覆盖同名本地标签、手动标签解析、缺失/无效标签和非 `origin/main` 祖先标签；云端 `support-contract` 在 PR 与 `main` 均成功执行该回归。
