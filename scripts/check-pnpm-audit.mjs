@@ -18,6 +18,7 @@ const logger = {
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(scriptDir);
+const AUDIT_SEVERITIES = Object.freeze(["info", "low", "moderate", "high", "critical"]);
 const BLOCKING_SEVERITIES = Object.freeze(["high", "critical"]);
 const AUDIT_EXCEPTIONS = Object.freeze([
   Object.freeze({
@@ -80,7 +81,33 @@ export function collectPackageVersions(projects) {
   return versionsByName;
 }
 
+export function validateAdvisoriesByPackage(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("[pnpm-audit] bulk advisory endpoint returned an unexpected payload shape.");
+  }
+
+  for (const advisories of Object.values(value)) {
+    if (!Array.isArray(advisories)) {
+      throw new Error("[pnpm-audit] bulk advisory endpoint returned an unexpected advisory list.");
+    }
+    for (const advisory of advisories) {
+      if (!advisory || typeof advisory !== "object" || Array.isArray(advisory)) {
+        throw new Error(
+          "[pnpm-audit] bulk advisory endpoint returned an unexpected advisory entry."
+        );
+      }
+      const severity = typeof advisory.severity === "string" ? advisory.severity.toLowerCase() : "";
+      if (!AUDIT_SEVERITIES.includes(severity)) {
+        throw new Error("[pnpm-audit] bulk advisory endpoint returned an unexpected severity.");
+      }
+    }
+  }
+
+  return value;
+}
+
 export function extractSeverityCounts(advisoriesByPackage) {
+  validateAdvisoriesByPackage(advisoriesByPackage);
   const counts = {
     info: 0,
     low: 0,
@@ -90,17 +117,9 @@ export function extractSeverityCounts(advisoriesByPackage) {
   };
 
   for (const advisories of Object.values(advisoriesByPackage)) {
-    if (!Array.isArray(advisories)) {
-      continue;
-    }
     for (const advisory of advisories) {
-      if (!advisory || typeof advisory !== "object") {
-        continue;
-      }
-      const severity = typeof advisory.severity === "string" ? advisory.severity.toLowerCase() : "";
-      if (severity in counts) {
-        counts[severity] += 1;
-      }
+      const severity = advisory.severity.toLowerCase();
+      counts[severity] += 1;
     }
   }
 
@@ -118,16 +137,11 @@ export function formatCounts(counts) {
 }
 
 function blockingAdvisoryEntries(advisoriesByPackage) {
+  validateAdvisoriesByPackage(advisoriesByPackage);
   const entries = [];
   for (const [name, advisories] of Object.entries(advisoriesByPackage)) {
-    if (!Array.isArray(advisories)) {
-      continue;
-    }
     for (const advisory of advisories) {
-      if (!advisory || typeof advisory !== "object") {
-        continue;
-      }
-      const severity = typeof advisory.severity === "string" ? advisory.severity.toLowerCase() : "";
+      const severity = advisory.severity.toLowerCase();
       if (BLOCKING_SEVERITIES.includes(severity)) {
         entries.push({ name, advisory, severity });
       }
@@ -285,14 +299,7 @@ async function main() {
       `[pnpm-audit] bulk advisory endpoint responded with ${response.status}: ${detail}`
     );
   }
-  const advisoriesByPackage = await response.json();
-  if (
-    !advisoriesByPackage ||
-    typeof advisoriesByPackage !== "object" ||
-    Array.isArray(advisoriesByPackage)
-  ) {
-    throw new Error("[pnpm-audit] bulk advisory endpoint returned an unexpected payload shape.");
-  }
+  const advisoriesByPackage = validateAdvisoriesByPackage(await response.json());
 
   // 1.3 统计各级别命中数，只要出现 blocking 漏洞就直接失败
   const counts = extractSeverityCounts(advisoriesByPackage);
