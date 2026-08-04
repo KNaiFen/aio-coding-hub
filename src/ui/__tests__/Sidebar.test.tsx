@@ -31,12 +31,12 @@ const themeRef = vi.hoisted(() => ({
 }));
 const cliProxyMocks = vi.hoisted(() => {
   const requestCliProxyEnabledSwitch = vi.fn();
-  const setPendingCliProxyEnablePrompt = vi.fn();
+  const cancelPendingCliProxyEnable = vi.fn();
   const confirmPendingCliProxyEnable = vi.fn();
 
   return {
     requestCliProxyEnabledSwitch,
-    setPendingCliProxyEnablePrompt,
+    cancelPendingCliProxyEnable,
     confirmPendingCliProxyEnable,
     current: {
       cliProxyLoading: false,
@@ -44,9 +44,10 @@ const cliProxyMocks = vi.hoisted(() => {
       cliProxyEnabled: { claude: true, codex: false, gemini: false, grok: false },
       cliProxyAppliedToCurrentGateway: { claude: true, codex: null, gemini: null, grok: null },
       cliProxyToggling: { claude: false, codex: false, gemini: false, grok: false },
+      cliProxyEnableBusy: false,
       pendingCliProxyEnablePrompt: null,
       requestCliProxyEnabledSwitch,
-      setPendingCliProxyEnablePrompt,
+      cancelPendingCliProxyEnable,
       confirmPendingCliProxyEnable,
     } as any,
   };
@@ -81,9 +82,10 @@ describe("ui/Sidebar", () => {
       cliProxyEnabled: { claude: true, codex: false, gemini: false, grok: false },
       cliProxyAppliedToCurrentGateway: { claude: true, codex: null, gemini: null, grok: null },
       cliProxyToggling: { claude: false, codex: false, gemini: false, grok: false },
+      cliProxyEnableBusy: false,
       pendingCliProxyEnablePrompt: null,
       requestCliProxyEnabledSwitch: cliProxyMocks.requestCliProxyEnabledSwitch,
-      setPendingCliProxyEnablePrompt: cliProxyMocks.setPendingCliProxyEnablePrompt,
+      cancelPendingCliProxyEnable: cliProxyMocks.cancelPendingCliProxyEnable,
       confirmPendingCliProxyEnable: cliProxyMocks.confirmPendingCliProxyEnable,
     };
     gatewayMetaRef.current = { gatewayAvailable: "checking", gateway: null, preferredPort: 37123 };
@@ -378,6 +380,24 @@ describe("ui/Sidebar", () => {
     expect(cliProxyMocks.requestCliProxyEnabledSwitch).toHaveBeenCalledWith("gemini", true);
   });
 
+  it("disables new proxy enables while an enable check is busy but keeps disable available", () => {
+    cliProxyMocks.current = {
+      ...cliProxyMocks.current,
+      cliProxyEnableBusy: true,
+    };
+
+    render(
+      <MemoryRouter>
+        <Sidebar />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByRole("switch", { name: "Claude 代理开关" })).not.toBeDisabled();
+    expect(screen.getByRole("switch", { name: "Codex 代理开关" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "Grok 代理开关" })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "Gemini 代理开关" })).toBeDisabled();
+  });
+
   it("orders brand icons above switches as Claude, Codex, Grok, Gemini", () => {
     render(
       <MemoryRouter>
@@ -440,6 +460,6 @@ describe("ui/Sidebar", () => {
     expect(cliProxyMocks.confirmPendingCliProxyEnable).toHaveBeenCalledTimes(1);
 
     fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
-    expect(cliProxyMocks.setPendingCliProxyEnablePrompt).toHaveBeenCalledWith(null);
+    expect(cliProxyMocks.cancelPendingCliProxyEnable).toHaveBeenCalledTimes(1);
   });
 });

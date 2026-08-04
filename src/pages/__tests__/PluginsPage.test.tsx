@@ -1289,6 +1289,107 @@ describe("pages/PluginsPage", () => {
     expect(screen.getByRole("button", { name: /更新/ })).toBeDisabled();
   });
 
+  it("does not expose stale detail actions while the next plugin detail is loading", async () => {
+    const pluginA = summary({
+      plugin_id: "community.plugin-a",
+      name: "Plugin A",
+      current_version: "1.1.0",
+    });
+    const pluginB = summary({
+      id: 2,
+      plugin_id: "community.plugin-b",
+      name: "Plugin B",
+      current_version: "2.0.0",
+    });
+    const baseManifest = detail().manifest;
+    const detailA = detail({
+      summary: pluginA,
+      manifest: {
+        ...baseManifest,
+        id: pluginA.plugin_id,
+        name: pluginA.name,
+        version: "1.1.0",
+        description: "Plugin A only detail",
+      },
+      config: { mode: "append_instruction" },
+      rollback_versions: ["1.0.0"],
+    });
+    const detailB = detail({
+      summary: pluginB,
+      manifest: {
+        ...baseManifest,
+        id: pluginB.plugin_id,
+        name: pluginB.name,
+        version: "2.0.0",
+        description: "Plugin B only detail",
+      },
+      config: { mode: "rewrite_system_message" },
+      rollback_versions: ["1.5.0"],
+    });
+    const saveConfigMutation = mutation();
+    const rollbackMutation = mutation();
+    let pluginBResolved = false;
+
+    vi.mocked(usePluginsListQuery).mockReturnValue({
+      data: [pluginA, pluginB],
+      isLoading: false,
+      isFetching: false,
+      error: null,
+    } as any);
+    vi.mocked(usePluginSaveConfigMutation).mockReturnValue(saveConfigMutation as any);
+    vi.mocked(usePluginRollbackMutation).mockReturnValue(rollbackMutation as any);
+    vi.mocked(usePluginQuery).mockImplementation((pluginId) => {
+      const waitingForPluginB = pluginId === pluginB.plugin_id && !pluginBResolved;
+      return {
+        data: pluginId === pluginB.plugin_id && pluginBResolved ? detailB : detailA,
+        isLoading: false,
+        isFetching: waitingForPluginB,
+        error: null,
+      } as any;
+    });
+
+    const { rerender } = renderWithProviders(<PluginsPage />);
+    expect(screen.getByText("Plugin A only detail")).toBeInTheDocument();
+
+    const pluginBRow = screen
+      .getAllByText("Plugin B")
+      .map((node) => node.closest("article"))
+      .find((row) => row && within(row).queryByRole("button", { name: "查看详情" }));
+    if (!pluginBRow) throw new Error("Plugin B row not found");
+    fireEvent.click(within(pluginBRow).getByRole("button", { name: "查看详情" }));
+
+    expect(screen.queryByText("Plugin A only detail")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "保存配置" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "回滚 1.0.0" })).not.toBeInTheDocument();
+    expect(saveConfigMutation.mutateAsync).not.toHaveBeenCalled();
+    expect(rollbackMutation.mutateAsync).not.toHaveBeenCalled();
+
+    pluginBResolved = true;
+    rerender(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <MemoryRouter>
+          <PluginsPage />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByText("Plugin B only detail")).toBeInTheDocument();
+    expect(screen.getByLabelText("mode")).toHaveValue("rewrite_system_message");
+    fireEvent.click(screen.getByRole("button", { name: "保存配置" }));
+    fireEvent.click(screen.getByRole("button", { name: "回滚 1.5.0" }));
+
+    await waitFor(() => {
+      expect(saveConfigMutation.mutateAsync).toHaveBeenCalledWith({
+        pluginId: pluginB.plugin_id,
+        config: { mode: "rewrite_system_message" },
+      });
+      expect(rollbackMutation.mutateAsync).toHaveBeenCalledWith({
+        pluginId: pluginB.plugin_id,
+        version: "1.5.0",
+      });
+    });
+  });
+
   it("uses the generic schema form for official plugin configuration", () => {
     vi.mocked(usePluginsListQuery).mockReturnValue({
       data: [

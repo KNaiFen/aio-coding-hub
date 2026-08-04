@@ -106,6 +106,52 @@ describe("services/gateway/attemptsJson", () => {
     expect(parseAttemptsJson('"plain"')).toBeNull();
   });
 
+  it.each([
+    ["null entry", [null]],
+    ["non-object entry", ["attempt"]],
+    ["missing required fields", [{}]],
+    [
+      "invalid required field type",
+      [
+        {
+          provider_id: "1",
+          provider_name: "Provider A",
+          base_url: "https://example.com",
+          outcome: "success",
+          status: 200,
+        },
+      ],
+    ],
+    [
+      "invalid optional field type",
+      [
+        {
+          provider_id: 1,
+          provider_name: "Provider A",
+          base_url: "https://example.com",
+          outcome: "success",
+          status: 200,
+          attempt_duration_ms: "20",
+        },
+      ],
+    ],
+    [
+      "mixed valid and invalid entries",
+      [
+        {
+          provider_id: 1,
+          provider_name: "Provider A",
+          base_url: "https://example.com",
+          outcome: "success",
+          status: 200,
+        },
+        null,
+      ],
+    ],
+  ])("returns null for a %s", (_caseName, entries) => {
+    expect(parseAttemptsJson(JSON.stringify(entries))).toBeNull();
+  });
+
   it("returns null for null, undefined, and empty input", () => {
     expect(parseAttemptsJson(null)).toBeNull();
     expect(parseAttemptsJson(undefined)).toBeNull();

@@ -382,12 +382,12 @@ describe("components/home/requestLogErrorDetails", () => {
     );
   });
 
-  it("keeps a null attempt failure summary for invalid attempts_json without throwing (AC3)", () => {
+  it("keeps a null attempt failure summary for an invalid attempts_json entry without throwing (AC3)", () => {
     const observation = resolveRequestLogErrorObservation(
       createRequestLogDetail({
         status: 502,
         error_code: "GW_UPSTREAM_5XX",
-        attempts_json: "not json",
+        attempts_json: "[null]",
       })
     );
 

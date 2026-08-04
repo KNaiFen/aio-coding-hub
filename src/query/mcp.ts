@@ -52,16 +52,8 @@ export function useMcpServerUpsertMutation(workspaceId: number) {
       url: string | null;
       headers?: McpSecretPatchInput;
     }) => mcpServerUpsert(input),
-    onSuccess: (next) => {
-      queryClient.setQueryData<McpServerSummary[]>(
-        mcpKeys.serversList(normalizedWorkspaceId),
-        (cur) => {
-          const prev = cur ?? [];
-          const exists = prev.some((s) => s.id === next.id);
-          if (exists) return prev.map((s) => (s.id === next.id ? next : s));
-          return [next, ...prev];
-        }
-      );
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: mcpKeys.serversList(normalizedWorkspaceId) });
     },
   });
 }

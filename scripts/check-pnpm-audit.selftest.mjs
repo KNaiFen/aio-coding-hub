@@ -116,16 +116,27 @@ import {
   assert.equal(collectPackageVersions([{ dependencies: { bad: null, noVersion: {} } }]).size, 0);
 }
 
-// 正常路径：按 advisory 逐条计数，大小写归一，忽略未知级别与非法条目。
+// 正常路径：按 advisory 逐条计数，并归一已知级别的大小写。
 {
   const advisoriesByPackage = {
     lodash: [{ severity: "high" }, { severity: "moderate" }],
-    minimatch: [{ severity: "HIGH" }, { severity: "unknown" }, null],
-    weird: "not-an-array",
+    minimatch: [{ severity: "HIGH" }],
   };
   const counts = extractSeverityCounts(advisoriesByPackage);
   assert.deepEqual(counts, { info: 0, low: 0, moderate: 1, high: 2, critical: 0 });
   assert.equal(hasBlockingVulnerabilities(counts), true);
+}
+
+// 安全边界：不能解释的成功响应必须 fail closed，不能静默计为零。
+{
+  assert.throws(() => extractSeverityCounts({ error: "registry unavailable" }), /unexpected/i);
+  assert.throws(() => extractSeverityCounts({ lodash: { severity: "critical" } }), /unexpected/i);
+  assert.throws(
+    () => extractSeverityCounts({ lodash: [{ severity: "future-critical" }] }),
+    /unexpected/i
+  );
+  assert.throws(() => extractSeverityCounts({ lodash: [null] }), /unexpected/i);
+  assert.throws(() => extractSeverityCounts({ lodash: [{}] }), /unexpected/i);
 }
 
 // 失败路径反例：只有低危不阻断。

@@ -180,6 +180,13 @@ export function ProviderChainView({
   }
 
   if (!attempts) {
+    if (attemptsJson && !parsedAttemptsJson.ok && attemptLogs.length === 0) {
+      return (
+        <div role="alert" className="mt-2 text-sm text-amber-700 dark:text-amber-400">
+          尝试 JSON 解析失败
+        </div>
+      );
+    }
     return <div className="mt-2 text-sm text-muted-foreground">无故障切换尝试。</div>;
   }
 

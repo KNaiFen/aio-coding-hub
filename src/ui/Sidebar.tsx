@@ -297,6 +297,7 @@ function CliProxyGrid({ cliProxyState }: { cliProxyState: CliProxyState }) {
         const drifted =
           isEnabled && cliProxyState.cliProxyAppliedToCurrentGateway[cliKey] === false;
         const toggling = !!cliProxyState.cliProxyToggling[cliKey];
+        const switchDisabled = toggling || (!isEnabled && cliProxyState.cliProxyEnableBusy);
         const label = cliShortLabel(cliKey);
 
         return (
@@ -322,7 +323,7 @@ function CliProxyGrid({ cliProxyState }: { cliProxyState: CliProxyState }) {
             />
             <Switch
               checked={isEnabled}
-              disabled={toggling}
+              disabled={switchDisabled}
               onCheckedChange={(next) => cliProxyState.requestCliProxyEnabledSwitch(cliKey, next)}
               size="sm"
               className="border-0"
@@ -331,7 +332,7 @@ function CliProxyGrid({ cliProxyState }: { cliProxyState: CliProxyState }) {
             {drifted ? (
               <button
                 type="button"
-                disabled={toggling}
+                disabled={toggling || cliProxyState.cliProxyEnableBusy}
                 onClick={() => cliProxyState.requestCliProxyEnabledSwitch(cliKey, true)}
                 className="absolute right-0.5 top-0.5 text-[8px] font-bold text-rose-500 hover:underline"
                 aria-label={`修复 ${label} 代理`}
@@ -520,7 +521,7 @@ export function Sidebar({ className }: SidebarProps) {
 
       <CliProxyConflictDialog
         prompt={pendingCliProxyEnablePrompt}
-        onCancel={() => cliProxyState.setPendingCliProxyEnablePrompt(null)}
+        onCancel={cliProxyState.cancelPendingCliProxyEnable}
         onConfirm={cliProxyState.confirmPendingCliProxyEnable}
       />
     </aside>

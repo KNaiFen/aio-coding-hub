@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { useMcpServerUpsertMutation } from "../../../query/mcp";
 import { logToConsole } from "../../../services/consoleLog";
 import {
+  MCP_PARSE_JSON_MAX_CHARS,
   mcpParseJson,
   type McpImportServer,
   type McpSecretPatchInput,
@@ -811,6 +812,10 @@ export function McpServerDialog({
     const trimmed = jsonText.trim();
     if (!trimmed) {
       toast("请先粘贴 JSON");
+      return;
+    }
+    if (trimmed.length > MCP_PARSE_JSON_MAX_CHARS) {
+      toast(`JSON 最多支持 ${MCP_PARSE_JSON_MAX_CHARS} 个字符`);
       return;
     }
 
