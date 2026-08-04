@@ -109,7 +109,7 @@ where
             );
             return None;
         }
-    }
+    };
 
     Some(db)
 }
