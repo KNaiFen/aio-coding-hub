@@ -1,0 +1,38 @@
+{
+  "id": "release-tag-fetch-collision",
+  "name": "release-tag-fetch-collision",
+  "title": "修复 Release 标签重复 fetch",
+  "description": "让 Release 工作流通过 FETCH_HEAD 解析远端标签，避免 checkout 已创建同名本地标签时的 fetch 覆盖失败。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "release-workflow",
+  "package": "aio-coding-hub",
+  "priority": "P2",
+  "creator": "KNaiFen",
+  "assignee": "KNaiFen",
+  "createdAt": "2026-08-04",
+  "completedAt": "2026-08-04",
+  "branch": "codex/fix-release-tag-fetch",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": "7d4367d41de143508e399658a5179af7a88fecd8",
+  "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/38",
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    ".github/workflows/release.yml",
+    ".github/workflows/ci.yml",
+    "scripts/release-source.selftest.mjs",
+    "package.json",
+    ".trellis/spec/aio-coding-hub/cross-layer/release-promotion-contract.md"
+  ],
+  "notes": "实现提交 3620595f5d91d30bc876dc469c74029560c9f4ef 已通过 PR #38 合入 main；PR 完整 CI 30878912487 与 main 完整 CI 30880292937 均成功。合并前两次抓取 origin/main，均确认从基线到合并时没有新增主线提交或业务冲突。",
+  "meta": {
+    "implementation_commit": "3620595f5d91d30bc876dc469c74029560c9f4ef",
+    "documentation_commit": "5ff7f6d7152f4f500ab0a8a38ed4849d49715f27",
+    "merge_commit": "7d4367d41de143508e399658a5179af7a88fecd8",
+    "implementation_ci_run": "https://github.com/KNaiFen/aio-coding-hub/actions/runs/30878912487",
+    "main_ci_run": "https://github.com/KNaiFen/aio-coding-hub/actions/runs/30880292937"
+  }
+}
