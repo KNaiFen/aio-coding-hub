@@ -113,6 +113,9 @@ jobs:
       - name: Validate release source resolution
         run: node scripts/release-source.selftest.mjs
 
+      - name: Validate release promotion integrity
+        run: node scripts/release-promotion.selftest.mjs
+
       - name: Reject local native-build entry points
         run: node scripts/check-local-build-entrypoints.mjs
 

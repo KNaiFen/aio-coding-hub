@@ -16,7 +16,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -27,6 +27,10 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Stage release promotion guard
+        shell: bash
+        run: cp scripts/release-promotion.mjs "$RUNNER_TEMP/release-promotion.mjs"
 
       - name: Setup Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -62,6 +66,10 @@ jobs:
         with:
           github-token: ${{ github.token }}
           script: |
+            const { pathToFileURL } = require('node:url');
+            const { selectReleaseCandidate } = await import(
+              pathToFileURL(`${process.env.RUNNER_TEMP}/release-promotion.mjs`).href,
+            );
             const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -75,9 +83,9 @@ jobs:
                 run.head_branch === 'main' &&
                 run.head_repository?.full_name === 'KNaiFen/aio-coding-hub' &&
                 ['push', 'workflow_dispatch'].includes(run.event) &&
-                run.conclusion === 'success')
-              .sort((left, right) => new Date(right.updated_at) - new Date(left.updated_at));
+                run.conclusion === 'success');
 
+            const candidateRuns = [];
             for (const run of eligible) {
               const artifacts = await github.paginate(
                 github.rest.actions.listWorkflowRunArtifacts,
@@ -88,18 +96,12 @@ jobs:
                   per_page: 100,
                 },
               );
-              const expected = `release-candidate-${process.env.SOURCE_SHA}-${run.id}-${run.run_attempt}`;
-              const matches = artifacts.filter(
-                (artifact) => artifact.name === expected && !artifact.expired,
-              );
-              if (matches.length === 1) {
-                core.setOutput('run_id', String(run.id));
-                core.setOutput('artifact_id', String(matches[0].id));
-                core.setOutput('artifact_name', expected);
-                return;
-              }
+              candidateRuns.push({ id: run.id, runAttempt: run.run_attempt, artifacts });
             }
-            core.setFailed(`No unexpired release candidate exists for ${process.env.SOURCE_SHA}.`);
+            const candidate = selectReleaseCandidate(candidateRuns, process.env.SOURCE_SHA);
+            core.setOutput('run_id', String(candidate.runId));
+            core.setOutput('artifact_id', String(candidate.artifactId));
+            core.setOutput('artifact_name', candidate.artifactName);
 
       - name: Download the exact CI candidate
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -136,7 +138,77 @@ jobs:
           (cd release-assets && sha256sum --check SHA256SUMS.txt)
           node -e "JSON.parse(require('fs').readFileSync('release-assets/latest.json', 'utf8'))"
 
+      - id: release-preflight
+        name: Verify existing release is immutable
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          RELEASE_TAG: ${{ steps.source.outputs.tag }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const { readFileSync, readdirSync } = require('node:fs');
+            const { join } = require('node:path');
+            const { pathToFileURL } = require('node:url');
+            const { assessExistingRelease, validateReleaseAssets } = await import(
+              pathToFileURL(`${process.env.RUNNER_TEMP}/release-promotion.mjs`).href,
+            );
+            const candidateDirectory = join(process.env.GITHUB_WORKSPACE, 'release-assets');
+            const candidateAssetNames = readdirSync(candidateDirectory, { withFileTypes: true })
+              .filter((entry) => entry.isFile())
+              .map((entry) => entry.name);
+            const candidateManifestText = readFileSync(
+              join(candidateDirectory, 'SHA256SUMS.txt'),
+              'utf8',
+            );
+            validateReleaseAssets({
+              assetNames: candidateAssetNames,
+              manifestText: candidateManifestText,
+              label: 'Candidate release',
+            });
+
+            let existingRelease;
+            try {
+              ({ data: existingRelease } = await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag: process.env.RELEASE_TAG,
+              }));
+            } catch (error) {
+              if (error.status === 404) {
+                core.setOutput('should_publish', 'true');
+                return;
+              }
+              throw error;
+            }
+
+            const checksumAsset = existingRelease.assets.find(
+              (asset) => asset.name === 'SHA256SUMS.txt',
+            );
+            if (!checksumAsset) {
+              throw new Error(`Existing release ${process.env.RELEASE_TAG} has no SHA256SUMS.txt`);
+            }
+            const { data: existingManifest } = await github.rest.repos.getReleaseAsset({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              asset_id: checksumAsset.id,
+              headers: { accept: 'application/octet-stream' },
+            });
+            const outcome = assessExistingRelease({
+              candidateAssetNames,
+              candidateManifestText,
+              existingAssetNames: existingRelease.assets.map((asset) => asset.name),
+              existingManifestText: Buffer.from(existingManifest).toString('utf8'),
+            });
+            if (!outcome.equivalent) {
+              throw new Error(
+                `Existing release ${process.env.RELEASE_TAG} is immutable: ${outcome.reason}`,
+              );
+            }
+            core.info(`Release ${process.env.RELEASE_TAG} already has the verified candidate assets.`);
+            core.setOutput('should_publish', 'false');
+
       - name: Publish release without rebuilding
+        if: steps.release-preflight.outputs.should_publish == 'true'
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -146,4 +218,4 @@ jobs:
           generate_release_notes: true
           files: release-assets/*
           fail_on_unmatched_files: true
-          overwrite_files: true
+          overwrite_files: false
