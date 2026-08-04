@@ -51,10 +51,17 @@ function parseGitHubReleaseFallbackBody(body?: string) {
     return null;
   }
 
+  let tag: string;
+  try {
+    tag = decodeURIComponent(encodedTag);
+  } catch {
+    return null;
+  }
+
   return {
     owner,
     repo,
-    tag: decodeURIComponent(encodedTag),
+    tag,
   };
 }
 
