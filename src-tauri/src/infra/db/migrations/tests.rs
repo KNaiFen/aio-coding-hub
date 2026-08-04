@@ -3198,6 +3198,50 @@ WHERE id = 1;
 }
 
 #[test]
+fn migrate_v47_to_v48_tolerates_missing_request_logs() {
+    let mut conn = Connection::open_in_memory().expect("open partial v47 migration db");
+    v42_to_v43::create_usage_ledger_schema(&conn).expect("create partial v47 ledger schema");
+    conn.pragma_update(None, "user_version", 47)
+        .expect("mark partial fixture as v47");
+
+    v47_to_v48::migrate_v47_to_v48(&mut conn).expect("migrate partial v47->v48");
+
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("read partial fixture version");
+    assert_eq!(version, 48);
+    let request_logs_exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'request_logs')",
+            [],
+            |row| row.get(0),
+        )
+        .expect("inspect request_logs table");
+    assert!(!request_logs_exists);
+    let usage_events_exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'view' AND name = 'usage_events')",
+            [],
+            |row| row.get(0),
+        )
+        .expect("inspect usage_events view");
+    assert!(!usage_events_exists);
+    for column in [
+        "upstream_stream_duration_ms",
+        "upstream_stream_timing_version",
+    ] {
+        let exists: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('usage_ledger') WHERE name = ?1)",
+                [column],
+                |row| row.get(0),
+            )
+            .expect("inspect usage ledger timing column");
+        assert!(exists, "missing usage_ledger.{column}");
+    }
+}
+
+#[test]
 fn ensure_repairs_missing_v48_stream_timing_columns_before_views_and_triggers() {
     let mut conn = Connection::open_in_memory().expect("open drifted v48 db");
     apply_migrations(&mut conn).expect("create current schema fixture");

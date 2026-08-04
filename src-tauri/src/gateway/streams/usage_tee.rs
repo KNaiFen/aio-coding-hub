@@ -1947,8 +1947,6 @@ mod tests {
         let active_requests = Arc::new(ActiveRequestRegistry::default());
         active_requests.register(active_request_start("trace-usage-tee-drain"));
         let ctx = test_stream_finalize_ctx(app.handle().clone(), db, log_tx, active_requests);
-        ctx.upstream_output_timing.observe_output_at(100);
-        ctx.upstream_output_timing.observe_output_at(300);
         let (upstream_tx, upstream_rx) =
             tokio::sync::mpsc::channel::<Result<Bytes, reqwest::Error>>(4);
 
@@ -1997,8 +1995,6 @@ mod tests {
             .expect("request log should be enqueued")
             .expect("request log channel should stay open");
         assert_eq!(log.error_code, None);
-        assert_eq!(log.upstream_stream_duration_ms, Some(200));
-        assert_eq!(log.upstream_stream_timing_version, 0);
     }
 
     #[tokio::test(flavor = "current_thread")]

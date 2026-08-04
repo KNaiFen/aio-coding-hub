@@ -2,6 +2,15 @@
 
 use rusqlite::Connection;
 
+fn table_exists(conn: &Connection, table: &str) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+        [table],
+        |row| row.get(0),
+    )
+    .map_err(|error| format!("failed to inspect table {table}: {error}"))
+}
+
 fn has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, String> {
     let sql = format!("SELECT EXISTS(SELECT 1 FROM pragma_table_info('{table}') WHERE name = ?1)");
     conn.query_row(&sql, [column], |row| row.get(0))
@@ -22,6 +31,10 @@ fn add_column_if_missing(
 }
 
 pub(super) fn ensure_request_log_stream_timing_columns(conn: &Connection) -> Result<(), String> {
+    if !table_exists(conn, "request_logs")? {
+        return Ok(());
+    }
+
     add_column_if_missing(
         conn,
         "request_logs",
@@ -59,7 +72,7 @@ pub(super) fn migrate_v47_to_v48(conn: &mut Connection) -> crate::shared::error:
     ensure_request_log_stream_timing_columns(&tx)?;
     ensure_usage_ledger_stream_timing_columns(&tx)?;
 
-    super::v42_to_v43::recreate_usage_events_view(&tx)?;
+    super::v42_to_v43::refresh_usage_events_view(&tx)?;
     super::v46_to_v47::create_provider_daily_rollup_schema(&tx)?;
 
     tx.execute("DELETE FROM usage_provider_daily_rollups", [])
