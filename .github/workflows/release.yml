@@ -45,8 +45,8 @@ jobs:
             exit 1
           fi
           tag_ref="refs/tags/$TAG_NAME"
-          git fetch --no-tags origin "$tag_ref:$tag_ref"
-          source_sha="$(git rev-parse "$tag_ref^{commit}")"
+          git fetch --no-tags origin "$tag_ref"
+          source_sha="$(git rev-parse --verify "FETCH_HEAD^{commit}")"
           git fetch --no-tags origin "refs/heads/main:refs/remotes/origin/main"
           git merge-base --is-ancestor "$source_sha" origin/main
           git checkout --detach "$source_sha"

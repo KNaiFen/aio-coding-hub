@@ -55,6 +55,9 @@ TypeScript bindings, frontend adapters, and React UI.
 - [CI change-scope contract](./ci-change-scope-contract.md): explicit
   documentation allowlists, rename-aware Git ranges, fail-closed suite
   selection, and a stable required gate.
+- [Release promotion contract](./release-promotion-contract.md): remote tag
+  identity, immutable main source commits, exact-SHA candidate reuse, and
+  trigger-parity regression coverage.
 
 ## Pre-Development Checklist
 
@@ -216,6 +219,14 @@ When changing CI scope selection or its policy:
 3. Preserve the always-reporting `ci-gate`, rename/copy dual-path handling, and
    complete-CI fallback for unknown or unsafe changes.
 
+When changing release source validation or candidate promotion:
+
+1. Read [Release promotion contract](./release-promotion-contract.md).
+2. Keep the remote tag, immutable source commit, successful main CI, and exact
+   candidate artifact bound to the same SHA.
+3. Verify annotated-tag push and manual dispatch paths without rewriting local
+   tag refs or rebuilding promoted assets.
+
 ## Quality Check
 
 - Regenerate and verify `src/generated/bindings.ts` from Rust source.
@@ -233,6 +244,8 @@ When changing CI scope selection or its policy:
   `pnpm check:generated-bindings`.
 - When changing gateway selection or failover, verify skipped candidates,
   Ready-provider limits, route projection, and attempt/transition labels together.
+- When changing release promotion, run the release-source collision self-test,
+  support contracts, workflow formatting checks, and exact-SHA candidate checks.
 - When changing configured model routing, verify exact case-sensitive matching,
   provider override/disable/inherit semantics, all four wire protocols, compact
   requests, auxiliary exclusions, target-model pricing, and malformed-marker
