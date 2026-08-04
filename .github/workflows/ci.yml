@@ -110,6 +110,9 @@ jobs:
       - name: Validate CI change-scope classifier
         run: node scripts/ci-change-scope.selftest.mjs
 
+      - name: Validate release source resolution
+        run: node scripts/release-source.selftest.mjs
+
       - name: Reject local native-build entry points
         run: node scripts/check-local-build-entrypoints.mjs
 
