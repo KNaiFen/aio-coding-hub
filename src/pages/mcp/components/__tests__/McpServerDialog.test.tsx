@@ -1,7 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { toast } from "sonner";
 import { describe, expect, it, vi } from "vitest";
 import { useMcpServerUpsertMutation } from "../../../../query/mcp";
-import { mcpParseJson } from "../../../../services/workspace/mcp";
+import { MCP_PARSE_JSON_MAX_CHARS, mcpParseJson } from "../../../../services/workspace/mcp";
 import {
   type McpImportServer,
   type McpParseResult,
@@ -325,6 +326,34 @@ describe("pages/mcp/components/McpServerDialog", () => {
       )
     );
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+  });
+
+  it("rejects oversized JSON before invoking service or fallback parsing", async () => {
+    mockUpsertMutation(createUpsertMutation());
+    vi.mocked(mcpParseJson).mockClear();
+    vi.mocked(toast).mockClear();
+
+    render(
+      <McpServerDialog workspaceId={1} open={true} editTarget={null} onOpenChange={vi.fn()} />
+    );
+
+    const oversizedJson = JSON.stringify({
+      type: "stdio",
+      name: "Oversized",
+      command: "x".repeat(MCP_PARSE_JSON_MAX_CHARS),
+    });
+    expect(oversizedJson.length).toBeGreaterThan(MCP_PARSE_JSON_MAX_CHARS);
+
+    fireEvent.change(screen.getByPlaceholderText(/示例：\{"type":"stdio"/), {
+      target: { value: oversizedJson },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "从 JSON 填充" }));
+
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith(`JSON 最多支持 ${MCP_PARSE_JSON_MAX_CHARS} 个字符`)
+    );
+    expect(mcpParseJson).not.toHaveBeenCalled();
+    expect(screen.getByPlaceholderText("例如：Fetch 工具")).toHaveValue("");
   });
 
   it("fills fields from JSON fallback parser when service returns empty", async () => {
