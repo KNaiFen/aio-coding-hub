@@ -11,6 +11,7 @@ import {
   requestAttemptLogsByTraceId,
   requestLogGet,
   requestLogsPageAll,
+  requestLogsSnapshotPageAll,
   requestLogsListAfterIdAll,
   requestLogsListAll,
   type RequestLogPageFilters,
@@ -33,6 +34,7 @@ import {
   useRequestLogsIncrementalRefreshMutation,
   useRequestLogsListAllQuery,
   useRequestLogsPageAllQuery,
+  useRequestLogsSnapshotPageAllQuery,
 } from "../requestLogs";
 
 vi.mock("../../services/gateway/requestLogs", async () => {
@@ -43,6 +45,7 @@ vi.mock("../../services/gateway/requestLogs", async () => {
     ...actual,
     requestLogsListAll: vi.fn(),
     requestLogsPageAll: vi.fn(),
+    requestLogsSnapshotPageAll: vi.fn(),
     requestLogsListAfterIdAll: vi.fn(),
     requestLogGet: vi.fn(),
     requestAttemptLogsByTraceId: vi.fn(),
@@ -176,6 +179,34 @@ describe("query/requestLogs", () => {
       null,
       REQUEST_LOGS_PAGE_DEFAULT_LIMIT
     );
+  });
+
+  it("loads a fixed snapshot page with its own cache key and total-page metadata", async () => {
+    setTauriRuntime();
+    vi.mocked(requestLogsSnapshotPageAll).mockResolvedValue({
+      items: [makeRequestLogSummary({ id: 8 }), makeRequestLogSummary({ id: 5 })],
+      snapshotId: "snapshot-1",
+      totalCount: 102,
+      totalPages: 3,
+      page: 2,
+      pageSize: 50,
+      expiresAtMs: 1_700_000_600_000,
+    });
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+    const { result } = renderHook(
+      () => useRequestLogsSnapshotPageAllQuery(PAGE_FILTERS, "snapshot-1", 2, 50, 4),
+      { wrapper }
+    );
+
+    await waitFor(() => {
+      expect(result.current.data?.items.map((row) => row.id)).toEqual([8, 5]);
+    });
+    expect(requestLogsSnapshotPageAll).toHaveBeenCalledWith(PAGE_FILTERS, "snapshot-1", 2, 50);
+    expect(
+      client.getQueryData(requestLogsKeys.snapshotPageAll(PAGE_FILTERS, "snapshot-1", 2, 50, 4))
+    ).toEqual(expect.objectContaining({ totalPages: 3, page: 2 }));
   });
 
   it("refetches the latest page after a completion arrives while history is active", async () => {

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { AppErrorCodes } from "../appErrorCodes";
 import { appEventNames } from "../appEvents";
@@ -27,6 +28,8 @@ import gatewayErrorCodeSource from "../../../src-tauri/src/gateway/proxy/error_c
 import settingsDefaultsSource from "../../../src-tauri/src/infra/settings/defaults.rs?raw";
 import trayProviderMiniAppSource from "../../tray/TrayProviderMiniApp.tsx?raw";
 import settingsPersistenceSource from "../../../src-tauri/src/infra/settings/persistence.rs?raw";
+
+const globalsSource = readFileSync("src/styles/globals.css", "utf8");
 
 function extractRustStringConst(source: string, constName: string) {
   const match = source.match(new RegExp(`const\\s+${constName}:\\s*&str\\s*=\\s*"([^"]+)"`));
@@ -77,15 +80,23 @@ function extractRustGatewayErrorCodes(source: string) {
 describe("cross-layer contracts", () => {
   it("keeps Tray provider mini native width aligned with its frontend tracks", () => {
     const nativeWidth = extractRustFloatConst(residentSource, "TRAY_PROVIDER_MINI_WIDTH");
-    const contractedWidth = 1 + 12 + 96 + 8 + 170 + 8 + 96 + 12 + 1;
+    const contractedWidth = 1 + 12 + 92 + 8 + 198 + 8 + 72 + 12 + 1;
 
     expect(nativeWidth).toBe(404);
     expect(nativeWidth).toBe(contractedWidth);
-    expect(trayProviderMiniAppSource).toContain("grid-cols-[96px_170px_96px]");
-    expect(trayProviderMiniAppSource).toContain("grid-cols-[44px_1px_44px]");
-    expect(trayProviderMiniAppSource).toContain("grid-cols-[12px_32px]");
-    expect(trayProviderMiniAppSource).toContain("h-3 w-px bg-border/70");
+    expect(trayProviderMiniAppSource).toContain("grid-cols-[92px_198px_72px]");
+    expect(trayProviderMiniAppSource).toContain("grid-cols-[32px_32px]");
+    expect(trayProviderMiniAppSource).toContain("min-w-[40px]");
     expect(trayProviderMiniAppSource).toContain("font-mono text-[9px]");
+  });
+
+  it("keeps the Tray provider mini window transparent behind its liquid surface", () => {
+    expect(residentSource).toContain(".transparent(true)");
+    expect(residentSource).toContain(".background_color(tauri::window::Color(0, 0, 0, 0))");
+    expect(globalsSource).toContain("html.tray-provider-mini-window");
+    expect(globalsSource).toContain("background: transparent;");
+    expect(globalsSource).toContain("background: hsl(var(--background) / 52%);");
+    expect(globalsSource).toContain("backdrop-filter: blur(26px) saturate(150%);");
   });
 
   it("keeps app event names aligned with Rust emitters", () => {

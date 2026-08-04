@@ -325,6 +325,8 @@ describe("services/gatewayEvents (coverage)", () => {
         error_code: null,
         duration_ms: 0,
         ttfb_ms: 1,
+        upstream_stream_duration_ms: 0,
+        upstream_stream_timing_version: 1,
         attempts: [],
         output_tokens: 10,
       },
@@ -342,6 +344,8 @@ describe("services/gatewayEvents (coverage)", () => {
         error_code: null,
         duration_ms: 10,
         ttfb_ms: null,
+        upstream_stream_duration_ms: 5,
+        upstream_stream_timing_version: 0,
         attempts: [],
         output_tokens: 10,
       },
@@ -359,6 +363,8 @@ describe("services/gatewayEvents (coverage)", () => {
         error_code: null,
         duration_ms: 10,
         ttfb_ms: 10,
+        upstream_stream_duration_ms: 5,
+        upstream_stream_timing_version: 1,
         attempts: [],
         output_tokens: 10,
       },
@@ -374,7 +380,7 @@ describe("services/gatewayEvents (coverage)", () => {
     expect(payloads.some((p) => p?.trace_id === "t2" && p?.output_tokens_per_second === null)).toBe(
       true
     );
-    expect(payloads.some((p) => p?.trace_id === "t3" && p?.output_tokens_per_second != null)).toBe(
+    expect(payloads.some((p) => p?.trace_id === "t3" && p?.output_tokens_per_second === 2000)).toBe(
       true
     );
 

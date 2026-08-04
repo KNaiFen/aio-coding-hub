@@ -924,6 +924,7 @@ pub fn timelines(
         .saturating_add(1)
         .saturating_mul(alignment_ms);
     let start_at_ms = end_at_ms.saturating_sub(bucket_ms.saturating_mul(bucket_count_i64));
+    let current_period_start_ms = end_at_ms.saturating_sub(alignment_ms);
 
     let empty_buckets = || {
         (0..bucket_count_i64)
@@ -956,18 +957,19 @@ pub fn timelines(
         .enumerate()
         .map(|(index, timeline)| (timeline.provider_id, index))
         .collect::<HashMap<_, _>>();
+    let mut current_last_success = vec![None; output.len()];
 
     let placeholders = std::iter::repeat_n("?", provider_ids.len())
         .collect::<Vec<_>>()
         .join(", ");
     let sql = format!(
         r#"
-SELECT provider_id, observed_at_ms, success
+SELECT provider_id, observed_at_ms, success, rowid
 FROM provider_availability_observations
 WHERE observed_at_ms >= ?
   AND observed_at_ms < ?
   AND provider_id IN ({placeholders})
-ORDER BY observed_at_ms ASC
+ORDER BY observed_at_ms ASC, rowid ASC
 "#
     );
     let mut values = Vec::<rusqlite::types::Value>::with_capacity(provider_ids.len() + 2);
@@ -984,11 +986,12 @@ ORDER BY observed_at_ms ASC
                 row.get::<_, i64>(0)?,
                 row.get::<_, i64>(1)?,
                 row.get::<_, i64>(2)? != 0,
+                row.get::<_, i64>(3)?,
             ))
         })
         .map_err(|error| db_err!("failed to query availability timeline: {error}"))?;
     for row in rows {
-        let (provider_id, observed_at_ms, success) =
+        let (provider_id, observed_at_ms, success, _rowid) =
             row.map_err(|error| db_err!("failed to read availability timeline row: {error}"))?;
         let Some(position) = positions.get(&provider_id).copied() else {
             continue;
@@ -1010,10 +1013,20 @@ ORDER BY observed_at_ms ASC
             bucket.failure_count = bucket.failure_count.saturating_add(1);
             timeline.failure_count = timeline.failure_count.saturating_add(1);
         }
+        if observed_at_ms >= current_period_start_ms {
+            current_last_success[position] = Some(success);
+        }
     }
-    for timeline in &mut output {
+    for (position, timeline) in output.iter_mut().enumerate() {
         for bucket in &mut timeline.buckets {
             bucket.state = bucket_state(bucket.success_count, bucket.failure_count);
+        }
+        if let Some(current) = timeline.buckets.last_mut() {
+            current.state = match current_last_success[position] {
+                Some(true) => ProviderAvailabilityState::Healthy,
+                Some(false) => ProviderAvailabilityState::Unhealthy,
+                None => ProviderAvailabilityState::NoData,
+            };
         }
     }
     Ok(output)
@@ -1241,7 +1254,23 @@ mod tests {
         );
         assert_eq!(current.start_at_ms, current_bucket_start);
         assert_eq!((current.success_count, current.failure_count), (3, 1));
-        assert_eq!(current.state, ProviderAvailabilityState::Healthy);
+        assert_eq!(current.state, ProviderAvailabilityState::Unhealthy);
+        assert_eq!(
+            desktop_timeline
+                .buckets
+                .last()
+                .expect("desktop current status cell")
+                .state,
+            ProviderAvailabilityState::Unhealthy
+        );
+        assert_eq!(
+            tray_timeline
+                .buckets
+                .last()
+                .expect("tray current status cell")
+                .state,
+            ProviderAvailabilityState::Unhealthy
+        );
         for (tui_bucket, desktop_buckets) in timeline
             .buckets
             .iter()
@@ -1265,6 +1294,33 @@ mod tests {
             );
         }
 
+        let rolled_now_ms = 10 * 60 * 60 * 1_000 + 31 * 60 * 1_000;
+        for bucket_count in [12, 18, 36] {
+            let rolled_timeline = timelines(&db, &[provider.id], 6, bucket_count, rolled_now_ms)
+                .expect("load rolled timeline")
+                .pop()
+                .expect("rolled provider timeline");
+            let rolled_historical = rolled_timeline
+                .buckets
+                .iter()
+                .find(|bucket| bucket.start_at_ms == current_bucket_start)
+                .expect("previous current period becomes historical");
+            assert_eq!(
+                rolled_historical.state,
+                ProviderAvailabilityState::Healthy,
+                "historical state must use the success ratio for {bucket_count} buckets"
+            );
+            assert_eq!(
+                rolled_timeline
+                    .buckets
+                    .last()
+                    .expect("new current bucket")
+                    .state,
+                ProviderAvailabilityState::NoData,
+                "new current state must stay empty for {bucket_count} buckets"
+            );
+        }
+
         assert_eq!(purge_expired_observations(&db, now_ms).expect("purge"), 1);
         let remaining: i64 = db
             .open_connection()
@@ -1276,6 +1332,91 @@ mod tests {
             )
             .expect("count cutoff row");
         assert_eq!(remaining, 1);
+    }
+
+    #[test]
+    fn current_status_cell_uses_last_success_even_when_failures_are_the_majority() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let db_path = temp
+            .path()
+            .join("provider-availability-last-success.sqlite3");
+        let db = crate::db::init_for_tests(&db_path).expect("init db");
+        let provider =
+            upsert(&db, default_provider_params("last-success")).expect("insert provider");
+        let now_ms: i64 = 10 * 60 * 60 * 1_000 + 17 * 60 * 1_000;
+        let current_period_start = 10 * 60 * 60 * 1_000;
+        let conn = db.open_connection().expect("open db");
+        for (trace, observed_at_ms, success) in [
+            ("failure-1", current_period_start + 1, 0_i64),
+            ("failure-2", current_period_start + 2, 0),
+            ("failure-3", current_period_start + 3, 0),
+            ("success-last", current_period_start + 4, 1),
+        ] {
+            conn.execute(
+                "INSERT INTO provider_availability_observations(trace_id, cli_key, provider_id, observed_at_ms, success) VALUES (?1, 'codex', ?2, ?3, ?4)",
+                params![trace, provider.id, observed_at_ms, success],
+            )
+            .expect("insert observation");
+        }
+        drop(conn);
+
+        for bucket_count in [12, 18, 36] {
+            let timeline = timelines(&db, &[provider.id], 6, bucket_count, now_ms)
+                .expect("load timeline")
+                .pop()
+                .expect("provider timeline");
+            assert_eq!(
+                timeline.buckets.last().expect("current status cell").state,
+                ProviderAvailabilityState::Healthy,
+                "the last successful request must win for {bucket_count} buckets"
+            );
+        }
+    }
+
+    #[test]
+    fn current_status_cell_uses_rowid_to_break_equal_timestamp_ties() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let db_path = temp.path().join("provider-availability-rowid.sqlite3");
+        let db = crate::db::init_for_tests(&db_path).expect("init db");
+        let success_last =
+            upsert(&db, default_provider_params("success-last")).expect("insert provider");
+        let failure_last =
+            upsert(&db, default_provider_params("failure-last")).expect("insert provider");
+        let now_ms: i64 = 10 * 60 * 60 * 1_000 + 17 * 60 * 1_000;
+        let observed_at_ms = 10 * 60 * 60 * 1_000 + 1;
+        let conn = db.open_connection().expect("open db");
+        for (trace, provider_id, success) in [
+            ("success-last-failure", success_last.id, 0_i64),
+            ("success-last-success", success_last.id, 1),
+            ("failure-last-success", failure_last.id, 1),
+            ("failure-last-failure", failure_last.id, 0),
+        ] {
+            conn.execute(
+                "INSERT INTO provider_availability_observations(trace_id, cli_key, provider_id, observed_at_ms, success) VALUES (?1, 'codex', ?2, ?3, ?4)",
+                params![trace, provider_id, observed_at_ms, success],
+            )
+            .expect("insert tied observation");
+        }
+        drop(conn);
+
+        let timelines = timelines(&db, &[success_last.id, failure_last.id], 6, 12, now_ms)
+            .expect("load timelines");
+        let state_for = |provider_id| {
+            timelines
+                .iter()
+                .find(|timeline| timeline.provider_id == provider_id)
+                .and_then(|timeline| timeline.buckets.last())
+                .map(|bucket| bucket.state)
+                .expect("current status")
+        };
+        assert_eq!(
+            state_for(success_last.id),
+            ProviderAvailabilityState::Healthy
+        );
+        assert_eq!(
+            state_for(failure_last.id),
+            ProviderAvailabilityState::Unhealthy
+        );
     }
 
     async fn response_from_request_capture(

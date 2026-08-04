@@ -1,5 +1,8 @@
 //! Usage: Request logs and trace detail related Tauri commands.
 
+use crate::app::request_log_snapshot_state::{
+    RequestLogSnapshotSlice, RequestLogSnapshotState, MAX_SNAPSHOT_MEMBERSHIPS,
+};
 use crate::app_state::{ensure_db_ready, DbInitState};
 use crate::commands::limit::normalize_limit;
 use crate::gateway_runtime_access::app_gateway_active_requests_snapshot;
@@ -32,6 +35,42 @@ fn request_logs_page_limit(limit: Option<i64>) -> Result<usize, String> {
         ));
     }
     Ok(limit as usize)
+}
+
+fn request_logs_snapshot_page_number(page: i64) -> Result<usize, String> {
+    if page < 1 {
+        return Err("SEC_INVALID_INPUT: request logs page must be at least 1".to_string());
+    }
+    usize::try_from(page)
+        .map_err(|_| "SEC_INVALID_INPUT: request logs page is out of range".to_string())
+}
+
+fn request_logs_snapshot_filter_fingerprint(
+    filters: &request_logs::RequestLogPageFilters,
+) -> Result<String, String> {
+    serde_json::to_string(filters)
+        .map_err(|error| format!("SYSTEM_ERROR: failed to encode request logs filters: {error}"))
+}
+
+fn request_logs_snapshot_page_response(
+    slice: RequestLogSnapshotSlice,
+    items: Vec<request_logs::RequestLogSummary>,
+) -> Result<request_logs::RequestLogSnapshotPage, String> {
+    Ok(request_logs::RequestLogSnapshotPage {
+        items,
+        snapshot_id: slice.snapshot_id,
+        total_count: i64::try_from(slice.total_count)
+            .map_err(|_| "SYSTEM_ERROR: request logs snapshot count is too large".to_string())?,
+        total_pages: i64::try_from(slice.total_pages).map_err(|_| {
+            "SYSTEM_ERROR: request logs snapshot page count is too large".to_string()
+        })?,
+        page: i64::try_from(slice.page)
+            .map_err(|_| "SYSTEM_ERROR: request logs snapshot page is too large".to_string())?,
+        page_size: i64::try_from(slice.page_size).map_err(|_| {
+            "SYSTEM_ERROR: request logs snapshot page size is too large".to_string()
+        })?,
+        expires_at_ms: slice.expires_at_ms,
+    })
 }
 
 #[tauri::command]
@@ -93,6 +132,64 @@ pub(crate) async fn request_logs_page_all(
     })
     .await
     .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn request_logs_snapshot_page_all(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    snapshot_state: tauri::State<'_, RequestLogSnapshotState>,
+    filters: request_logs::RequestLogPageFilters,
+    snapshot_id: Option<String>,
+    page: i64,
+    limit: Option<i64>,
+) -> Result<request_logs::RequestLogSnapshotPage, String> {
+    let page_size = request_logs_page_limit(limit)?;
+    let page = request_logs_snapshot_page_number(page)?;
+    let filter_fingerprint = request_logs_snapshot_filter_fingerprint(&filters)?;
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
+
+    let slice = match snapshot_id.as_deref() {
+        Some(snapshot_id) => {
+            snapshot_state.page(snapshot_id, &filter_fingerprint, page_size, page)?
+        }
+        None => {
+            let active_trace_ids = app_gateway_active_requests_snapshot(&app)
+                .into_iter()
+                .map(|item| item.trace_id)
+                .collect::<Vec<_>>();
+            let snapshot_filters = filters.clone();
+            let snapshot_db = db.clone();
+            let ids = blocking::run("request_logs_snapshot_membership", move || {
+                request_logs::snapshot_membership_excluding_traces(
+                    &snapshot_db,
+                    &snapshot_filters,
+                    &active_trace_ids,
+                    MAX_SNAPSHOT_MEMBERSHIPS,
+                )
+            })
+            .await
+            .map_err(|error| error.to_string())?;
+            snapshot_state.create(filter_fingerprint, page_size, ids, page)?
+        }
+    };
+
+    let snapshot_id = slice.snapshot_id.clone();
+    let snapshot_ids = slice.ids.clone();
+    let items = blocking::run("request_logs_snapshot_page", move || {
+        request_logs::summaries_by_ids(&db, &snapshot_ids)
+    })
+    .await
+    .map_err(|error| {
+        let message = error.to_string();
+        if message.starts_with("REQUEST_LOG_SNAPSHOT_EXPIRED:") {
+            snapshot_state.invalidate(&snapshot_id);
+        }
+        message
+    })?;
+
+    request_logs_snapshot_page_response(slice, items)
 }
 
 #[tauri::command]
@@ -207,7 +304,10 @@ pub(crate) async fn active_request_logs_snapshot(
 
 #[cfg(test)]
 mod tests {
-    use super::{request_attempt_logs_limit, request_logs_limit, request_logs_page_limit};
+    use super::{
+        request_attempt_logs_limit, request_logs_limit, request_logs_page_limit,
+        request_logs_snapshot_page_number,
+    };
 
     #[test]
     fn request_logs_limit_uses_default_and_clamps() {
@@ -233,6 +333,17 @@ mod tests {
         for limit in [-1, 0, 201, i64::MAX] {
             let error = request_logs_page_limit(Some(limit)).unwrap_err();
             assert!(error.starts_with("SEC_INVALID_INPUT:"));
+        }
+    }
+
+    #[test]
+    fn request_logs_snapshot_page_number_rejects_non_positive_values() {
+        assert_eq!(request_logs_snapshot_page_number(1), Ok(1));
+        assert_eq!(request_logs_snapshot_page_number(9), Ok(9));
+        for page in [-1, 0] {
+            assert!(request_logs_snapshot_page_number(page)
+                .unwrap_err()
+                .starts_with("SEC_INVALID_INPUT:"));
         }
     }
 }

@@ -8,7 +8,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::super::events::{emit_gateway_debug_log, emit_gateway_debug_log_lazy};
 use super::super::model_route_mapping;
@@ -20,7 +20,7 @@ use super::super::util::{
 };
 use super::plugin_chunk::PLUGIN_STREAM_ERROR_MARKER;
 use super::request_end::{emit_request_event_and_spawn_request_log, StreamRequestCompletion};
-use super::{RelayBodyStream, StreamFinalizeCtx};
+use super::{RelayBodyStream, StreamFinalizeCtx, UpstreamOutputTiming};
 
 pub(in crate::gateway) struct UpstreamModelObserverStream<S, B>
 where
@@ -138,6 +138,92 @@ where
     fn drop(&mut self) {
         self.finalize_observed_route();
     }
+}
+
+const UPSTREAM_TIMING_RELAY_BUFFER_CAPACITY: usize = 32;
+
+fn observe_new_output_events(
+    tracker: &usage::SseUsageTracker,
+    timing: &UpstreamOutputTiming,
+    attempt_started: Instant,
+    buffered_output_events_remaining: &mut u64,
+    before: u64,
+) {
+    let observed = tracker.output_delta_event_count().saturating_sub(before);
+    let buffered = observed.min(*buffered_output_events_remaining);
+    *buffered_output_events_remaining =
+        (*buffered_output_events_remaining).saturating_sub(buffered);
+    if observed > buffered {
+        timing.observe_output_at(attempt_started.elapsed().as_millis());
+    }
+}
+
+pub(in crate::gateway) fn spawn_upstream_output_timing_stream<S>(
+    mut upstream: S,
+    protocol_key: &str,
+    timing: UpstreamOutputTiming,
+    attempt_started: Instant,
+    mut buffered_output_events_remaining: u64,
+) -> RelayBodyStream
+where
+    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin + Send + 'static,
+{
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, reqwest::Error>>(
+        UPSTREAM_TIMING_RELAY_BUFFER_CAPACITY,
+    );
+    let protocol_key = protocol_key.to_string();
+
+    tokio::spawn(async move {
+        let mut tracker = usage::SseUsageTracker::new(&protocol_key);
+        while let Some(item) = next_item(&mut upstream).await {
+            if let Ok(chunk) = &item {
+                let before = tracker.output_delta_event_count();
+                tracker.ingest_chunk(chunk.as_ref());
+                observe_new_output_events(
+                    &tracker,
+                    &timing,
+                    attempt_started,
+                    &mut buffered_output_events_remaining,
+                    before,
+                );
+                if tracker.terminal_error_seen() {
+                    timing.invalidate();
+                }
+            } else {
+                timing.invalidate();
+            }
+
+            match tx.try_send(item) {
+                Ok(()) => {}
+                Err(tokio::sync::mpsc::error::TrySendError::Full(item)) => {
+                    // A full queue means later observations would include downstream pacing.
+                    timing.invalidate();
+                    if tx.send(item).await.is_err() {
+                        break;
+                    }
+                }
+                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                    timing.invalidate();
+                    break;
+                }
+            }
+        }
+
+        let before = tracker.output_delta_event_count();
+        let _ = tracker.finalize();
+        observe_new_output_events(
+            &tracker,
+            &timing,
+            attempt_started,
+            &mut buffered_output_events_remaining,
+            before,
+        );
+        if tracker.terminal_error_seen() {
+            timing.invalidate();
+        }
+    });
+
+    RelayBodyStream::new(rx)
 }
 
 fn is_codex_responses_path(cli_key: &str, path: &str) -> bool {
@@ -528,6 +614,15 @@ where
             .clone()
             .or(route_evidence.first_model);
 
+        let stream_error_seen = self.tracker.terminal_error_seen()
+            || self.tracker.stream_internal_error_evidence().is_some();
+        let upstream_stream_duration_ms = self.ctx.upstream_output_timing.duration_ms();
+        let upstream_stream_timing_version = i64::from(
+            effective_error_code.is_none()
+                && !stream_error_seen
+                && self.tracker.completion_seen()
+                && upstream_stream_duration_ms.is_some(),
+        );
         emit_request_event_and_spawn_request_log(
             &self.ctx,
             StreamRequestCompletion::from_error_code(
@@ -537,6 +632,10 @@ where
                 requested_model,
                 usage_metrics,
                 usage,
+            )
+            .with_upstream_stream_timing(
+                upstream_stream_duration_ms,
+                upstream_stream_timing_version,
             )
             .with_terminal_signal(terminal_signal)
             .with_stream_internal_error(self.tracker.stream_internal_error_evidence().cloned()),
@@ -1156,6 +1255,7 @@ mod tests {
                 1_700_000_000_000,
             ))),
             active_requests,
+            upstream_output_timing: Default::default(),
         }
     }
 

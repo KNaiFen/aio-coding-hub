@@ -1,0 +1,32 @@
+{
+  "id": "token-speed-semantics",
+  "name": "token-speed-semantics",
+  "title": "Token 速度口径调研与修正",
+  "description": "",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": null,
+  "package": "aio-coding-hub",
+  "priority": "P2",
+  "creator": "KNaiFen",
+  "assignee": "KNaiFen",
+  "createdAt": "2026-08-04",
+  "completedAt": null,
+  "branch": "feature/token-speed-visible-generation",
+  "base_branch": "main",
+  "worktree_path": "/Users/knaifen/Documents/Codex/aio-float-fix/.worktrees/token-speed-visible-generation",
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "08-04-request-observability-provider-status",
+  "relatedFiles": [
+    "src-tauri/src/gateway/streams/usage_tee.rs",
+    "src-tauri/src/gateway/streams/request_end.rs",
+    "src-tauri/src/infra/request_logs.rs",
+    "src/utils/formatters.ts",
+    "src-tauri/crates/aio-tui/src/format.rs"
+  ],
+  "notes": "",
+  "meta": {}
+}

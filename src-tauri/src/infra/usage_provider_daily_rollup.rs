@@ -197,7 +197,7 @@ ON CONFLICT(local_day) DO UPDATE SET
     let success = "r.status >= 200 AND r.status < 300 AND r.error_present = 0";
     let valid_ttfb = "r.ttfb_ms IS NOT NULL AND r.ttfb_ms < r.duration_ms";
     let valid_output_rate =
-        "r.output_tokens IS NOT NULL AND r.ttfb_ms IS NOT NULL AND r.ttfb_ms < r.duration_ms";
+        "r.output_tokens > 0 AND r.upstream_stream_timing_version = 1 AND r.upstream_stream_duration_ms IS NOT NULL AND r.upstream_stream_duration_ms > 0";
     let effective_input = effective_input_tokens_sql("r");
     let cache_denom = format!(
         "({effective_input}) + COALESCE(r.cache_creation_input_tokens, 0) + COALESCE(r.cache_read_input_tokens, 0)"
@@ -236,7 +236,7 @@ SELECT
   SUM(CASE WHEN {success} THEN r.duration_ms ELSE 0 END),
   SUM(CASE WHEN {success} AND {valid_ttfb} THEN r.ttfb_ms ELSE 0 END),
   SUM(CASE WHEN {success} AND {valid_ttfb} THEN 1 ELSE 0 END),
-  SUM(CASE WHEN {success} AND {valid_output_rate} THEN r.duration_ms - r.ttfb_ms ELSE 0 END),
+  SUM(CASE WHEN {success} AND {valid_output_rate} THEN r.upstream_stream_duration_ms ELSE 0 END),
   SUM(CASE WHEN {success} AND {valid_output_rate} THEN r.output_tokens ELSE 0 END),
   SUM(CASE WHEN {success} AND {valid_output_rate} THEN 1 ELSE 0 END),
   SUM(CASE WHEN {success} THEN {cache_denom} ELSE 0 END),
@@ -440,18 +440,27 @@ mod tests {
         ttfb_ms: Option<i64>,
     ) {
         let conn = db.open_connection().expect("open fixture database");
+        let upstream_stream_duration_ms = if (200..300).contains(&status) {
+            ttfb_ms
+                .and_then(|ttfb| duration_ms.checked_sub(ttfb))
+                .filter(|duration| *duration > 0)
+        } else {
+            None
+        };
+        let upstream_stream_timing_version = i64::from(upstream_stream_duration_ms.is_some());
         conn.execute(
             r#"
 INSERT INTO usage_ledger(
   request_log_id, trace_id, cli_key, created_at, created_at_ms, status,
   error_present, excluded_from_stats, duration_ms, ttfb_ms,
   final_provider_id, provider_name_snapshot, usage_present, input_tokens,
-  output_tokens, cache_read_input_tokens, cache_creation_input_tokens
+  output_tokens, cache_read_input_tokens, cache_creation_input_tokens,
+  upstream_stream_duration_ms, upstream_stream_timing_version
 ) VALUES (
   ?1, ?2, 'claude', ?3, ?4, ?5,
   0, 0, ?6, ?7,
   ?8, ?9, 1, 100,
-  20, 20, 5
+  20, 20, 5, ?10, ?11
 )
 "#,
             params![
@@ -464,6 +473,8 @@ INSERT INTO usage_ledger(
                 ttfb_ms,
                 provider_id,
                 provider_name,
+                upstream_stream_duration_ms,
+                upstream_stream_timing_version,
             ],
         )
         .expect("insert usage ledger fixture");

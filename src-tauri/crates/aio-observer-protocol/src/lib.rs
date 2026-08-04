@@ -291,6 +291,12 @@ pub struct ObserverRequest {
     pub last_activity_ms: i64,
     pub duration_ms: Option<i64>,
     pub ttfb_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visible_ttfb_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream_stream_duration_ms: Option<i64>,
+    #[serde(default)]
+    pub upstream_stream_timing_version: i64,
     pub attempt_count: u32,
     pub retry_count: u32,
     pub provider_switch_count: u32,
@@ -302,6 +308,8 @@ pub struct ObserverRequest {
     pub cost_usd: Option<f64>,
     pub route: Vec<ObserverRouteHop>,
     pub context_compaction: Option<ObserverContextCompaction>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_reasoning_effort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub configured_model_route: Option<ObserverConfiguredModelRoute>,
 }

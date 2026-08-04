@@ -8,7 +8,7 @@ use crate::gateway::proxy::gemini_oauth;
 use crate::gateway::proxy::upstream_error_response_rules::UpstreamErrorResponseRewrite;
 use crate::gateway::response_fixer;
 use crate::gateway::runtime::GatewayAppState;
-use crate::gateway::streams::StreamFinalizeCtx;
+use crate::gateway::streams::{StreamFinalizeCtx, UpstreamOutputTiming};
 use crate::session_manager::SessionRouteGeneration;
 use axum::response::Response;
 use std::collections::HashSet;
@@ -326,6 +326,7 @@ pub(super) fn build_stream_finalize_ctx<R: tauri::Runtime>(
             ),
         )),
         active_requests: ctx.state.active_requests.clone(),
+        upstream_output_timing: UpstreamOutputTiming::default(),
     }
 }
 

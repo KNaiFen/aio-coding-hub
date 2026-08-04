@@ -2,6 +2,27 @@
 
 use rusqlite::Connection;
 
+fn add_ledger_column_if_missing(
+    conn: &Connection,
+    column: &str,
+    definition: &str,
+) -> Result<(), String> {
+    let exists = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('usage_ledger') WHERE name = ?1)",
+            [column],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(|error| format!("failed to inspect usage_ledger.{column}: {error}"))?;
+    if !exists {
+        conn.execute_batch(&format!(
+            "ALTER TABLE usage_ledger ADD COLUMN {definition};"
+        ))
+        .map_err(|error| format!("failed to add usage_ledger.{column}: {error}"))?;
+    }
+    Ok(())
+}
+
 pub(super) fn create_provider_daily_rollup_schema(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
         r#"
@@ -136,6 +157,9 @@ AFTER UPDATE OF
   excluded_from_stats,
   duration_ms,
   ttfb_ms,
+  visible_ttfb_ms,
+  upstream_stream_duration_ms,
+  upstream_stream_timing_version,
   input_tokens,
   output_tokens,
   cache_read_input_tokens,
@@ -151,6 +175,9 @@ WHEN OLD.created_at IS NOT NEW.created_at
   OR OLD.excluded_from_stats IS NOT NEW.excluded_from_stats
   OR OLD.duration_ms IS NOT NEW.duration_ms
   OR OLD.ttfb_ms IS NOT NEW.ttfb_ms
+  OR OLD.visible_ttfb_ms IS NOT NEW.visible_ttfb_ms
+  OR OLD.upstream_stream_duration_ms IS NOT NEW.upstream_stream_duration_ms
+  OR OLD.upstream_stream_timing_version IS NOT NEW.upstream_stream_timing_version
   OR OLD.input_tokens IS NOT NEW.input_tokens
   OR OLD.output_tokens IS NOT NEW.output_tokens
   OR OLD.cache_read_input_tokens IS NOT NEW.cache_read_input_tokens
@@ -341,6 +368,19 @@ SELECT EXISTS(
     // ensure pass captures a new fixed high-water mark before retention can
     // remove the only surviving request-log facts.
     super::v42_to_v43::create_usage_ledger_schema(&tx)?;
+    // The canonical trigger is also reused by v48 and therefore references
+    // final-upstream timing columns. Existing v46 ledgers need those columns
+    // before the v47 trigger can be parsed; v48 will fill the request-log side.
+    add_ledger_column_if_missing(
+        &tx,
+        "upstream_stream_duration_ms",
+        "upstream_stream_duration_ms INTEGER",
+    )?;
+    add_ledger_column_if_missing(
+        &tx,
+        "upstream_stream_timing_version",
+        "upstream_stream_timing_version INTEGER NOT NULL DEFAULT 0 CHECK(upstream_stream_timing_version IN (0, 1))",
+    )?;
     if !ledger_existed {
         tx.execute("DELETE FROM usage_ledger_backfill_state", [])
             .map_err(|error| {

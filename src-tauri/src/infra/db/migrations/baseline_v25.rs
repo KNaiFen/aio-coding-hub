@@ -93,6 +93,9 @@ CREATE TABLE IF NOT EXISTS request_logs (
   usage_json TEXT,
   ttfb_ms INTEGER,
   visible_ttfb_ms INTEGER,
+  upstream_stream_duration_ms INTEGER,
+  upstream_stream_timing_version INTEGER NOT NULL DEFAULT 0
+    CHECK(upstream_stream_timing_version IN (0, 1)),
   requested_model TEXT,
   cost_usd_femto INTEGER,
   cost_multiplier REAL NOT NULL DEFAULT 1.0,

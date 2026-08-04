@@ -21,6 +21,9 @@ CREATE TABLE IF NOT EXISTS usage_ledger (
   duration_ms INTEGER NOT NULL DEFAULT 0,
   ttfb_ms INTEGER,
   visible_ttfb_ms INTEGER,
+  upstream_stream_duration_ms INTEGER,
+  upstream_stream_timing_version INTEGER NOT NULL DEFAULT 0
+    CHECK(upstream_stream_timing_version IN (0, 1)),
   requested_model TEXT,
   final_provider_id INTEGER,
   provider_name_snapshot TEXT,
@@ -383,6 +386,8 @@ SELECT
   ledger.duration_ms,
   ledger.ttfb_ms,
   ledger.visible_ttfb_ms,
+  ledger.upstream_stream_duration_ms,
+  ledger.upstream_stream_timing_version,
   ledger.requested_model,
   ledger.final_provider_id,
   ledger.provider_name_snapshot,
@@ -418,6 +423,8 @@ SELECT
   request.duration_ms,
   request.ttfb_ms,
   request.visible_ttfb_ms,
+  request.upstream_stream_duration_ms,
+  request.upstream_stream_timing_version,
   request.requested_model,
   request.effective_final_provider_id AS final_provider_id,
   CASE

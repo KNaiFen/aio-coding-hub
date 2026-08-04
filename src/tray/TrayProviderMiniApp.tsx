@@ -82,7 +82,7 @@ function ProviderReasonMarkers({ reasons }: { reasons: TrayProviderMiniUnavailab
 
   return (
     <div
-      className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-end gap-1"
+      className="flex h-[18px] min-w-[40px] shrink-0 items-center justify-end gap-1"
       aria-label="供应商状态"
     >
       {markers.map((reason) => {
@@ -124,38 +124,24 @@ function ProviderTotals({ provider }: { provider: TrayProviderMiniProvider }) {
 
   return (
     <div
-      className="grid grid-cols-[44px_1px_44px] items-center justify-between text-[10px] font-medium tabular-nums"
+      className="grid grid-cols-[32px_32px] items-center gap-2 font-medium tabular-nums"
       role="group"
       aria-label={`总计 成功 ${provider.successCount}，失败 ${provider.failureCount}`}
     >
-      <div className="grid grid-cols-[12px_32px] items-center">
-        <span
-          className="whitespace-nowrap text-emerald-600 dark:text-emerald-300"
-          aria-hidden="true"
-        >
-          成
-        </span>
-        <span
-          className="whitespace-nowrap text-right font-mono text-[9px] text-emerald-600 dark:text-emerald-300"
-          title={String(provider.successCount)}
-          aria-hidden="true"
-        >
-          {successText}
-        </span>
-      </div>
-      <span className="h-3 w-px bg-border/70" aria-hidden="true" />
-      <div className="grid grid-cols-[12px_32px] items-center">
-        <span className="whitespace-nowrap text-rose-600 dark:text-rose-300" aria-hidden="true">
-          败
-        </span>
-        <span
-          className="whitespace-nowrap text-right font-mono text-[9px] text-rose-600 dark:text-rose-300"
-          title={String(provider.failureCount)}
-          aria-hidden="true"
-        >
-          {failureText}
-        </span>
-      </div>
+      <span
+        className="whitespace-nowrap text-right font-mono text-[9px] text-emerald-600 dark:text-emerald-300"
+        title={String(provider.successCount)}
+        aria-hidden="true"
+      >
+        {successText}
+      </span>
+      <span
+        className="whitespace-nowrap text-right font-mono text-[9px] text-rose-600 dark:text-rose-300"
+        title={String(provider.failureCount)}
+        aria-hidden="true"
+      >
+        {failureText}
+      </span>
     </div>
   );
 }
@@ -166,7 +152,7 @@ function ProviderRows({ providers }: { providers: TrayProviderMiniProvider[] }) 
       {providers.map((provider) => (
         <div
           key={provider.providerId}
-          className="grid h-6 grid-cols-[96px_170px_96px] items-center gap-2 px-3"
+          className="grid h-6 grid-cols-[92px_198px_72px] items-center gap-2 px-3"
         >
           <div className="flex min-w-0 items-center gap-1.5">
             <span
@@ -250,7 +236,7 @@ export function TrayProviderMiniApp() {
 
   return (
     <main
-      className="isolate h-screen w-screen overflow-hidden rounded-[14px] border border-black/10 bg-background/80 text-foreground backdrop-blur-xl dark:border-white/10 dark:bg-background/70"
+      className="tray-provider-mini-surface isolate h-screen w-screen overflow-hidden rounded-[14px] text-foreground"
       onPointerEnter={() => reportHover(true)}
       onPointerLeave={() => reportHover(false)}
     >

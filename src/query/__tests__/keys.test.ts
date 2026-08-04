@@ -47,6 +47,9 @@ describe("query/keys", () => {
           status: { op: "gte", value: 400 },
           errorCodeContains: "timeout",
           methodPathContains: "POST /v1/responses",
+          errorScope: "all_errors",
+          createdAtMsFrom: 1_700_000_000_000,
+          createdAtMsTo: 1_700_000_060_000,
         },
         "opaque-cursor",
         100
@@ -60,8 +63,44 @@ describe("query/keys", () => {
       400,
       "timeout",
       "POST /v1/responses",
+      "all_errors",
+      1_700_000_000_000,
+      1_700_000_060_000,
       "opaque-cursor",
       100,
+    ]);
+    expect(
+      requestLogsKeys.snapshotPageAll(
+        {
+          cliKey: "codex",
+          status: { op: "gte", value: 400 },
+          errorCodeContains: "timeout",
+          methodPathContains: "POST /v1/responses",
+          errorScope: "stream_internal_error",
+          createdAtMsFrom: 1,
+          createdAtMsTo: 2,
+        },
+        "snapshot-1",
+        3,
+        100,
+        7
+      )
+    ).toEqual([
+      "requestLogs",
+      "snapshotPage",
+      "all",
+      "codex",
+      "gte",
+      400,
+      "timeout",
+      "POST /v1/responses",
+      "stream_internal_error",
+      1,
+      2,
+      "snapshot-1",
+      3,
+      100,
+      7,
     ]);
     expect(requestLogsKeys.activeSnapshot()).toEqual(["requestLogs", "activeSnapshot"]);
     expect(requestLogsKeys.detail(1)).toEqual(["requestLogs", "detail", 1]);

@@ -2,9 +2,11 @@ import {
   commands,
   type RequestAttemptLog as GeneratedRequestAttemptLog,
   type RequestLogDetail as GeneratedRequestLogDetail,
+  type RequestLogErrorScope as GeneratedRequestLogErrorScope,
   type RequestLogPage as GeneratedRequestLogPage,
   type RequestLogPageFilters as GeneratedRequestLogPageFilters,
   type RequestLogRouteHop as GeneratedRequestLogRouteHop,
+  type RequestLogSnapshotPage as GeneratedRequestLogSnapshotPage,
   type RequestLogStatusFilter as GeneratedRequestLogStatusFilter,
   type RequestLogStatusFilterOp as GeneratedRequestLogStatusFilterOp,
   type RequestLogSummary as GeneratedRequestLogSummary,
@@ -50,16 +52,27 @@ export type RequestAttemptLog = Override<
 
 export type RequestLogStatusFilterOp = GeneratedRequestLogStatusFilterOp;
 export type RequestLogStatusFilter = GeneratedRequestLogStatusFilter;
+export type RequestLogErrorScope = GeneratedRequestLogErrorScope;
 
 export type RequestLogPageFilters = Override<
   GeneratedRequestLogPageFilters,
   {
     cliKey: CliKey | null;
+    errorScope?: RequestLogErrorScope;
+    createdAtMsFrom?: number | null;
+    createdAtMsTo?: number | null;
   }
 >;
 
 export type RequestLogPage = Override<
   GeneratedRequestLogPage,
+  {
+    items: RequestLogSummary[];
+  }
+>;
+
+export type RequestLogSnapshotPage = Override<
+  GeneratedRequestLogSnapshotPage,
   {
     items: RequestLogSummary[];
   }
@@ -95,6 +108,13 @@ export function normalizeRequestLogsPageLimit(limit?: number | null): number | n
     throw new Error(`SEC_INVALID_INPUT: invalid request logs page limit=${limit}`);
   }
   return limit;
+}
+
+export function normalizeRequestLogsSnapshotPage(page: number): number {
+  if (!Number.isSafeInteger(page) || page < 1) {
+    throw new Error(`SEC_INVALID_INPUT: invalid request logs snapshot page=${page}`);
+  }
+  return page;
 }
 
 export function normalizeRequestAttemptLogsLimit(limit?: number | null): number | null {
@@ -166,6 +186,27 @@ function toRequestLogPage(value: GeneratedRequestLogPage): RequestLogPage {
   };
 }
 
+function toGeneratedRequestLogPageFilters(
+  filters: RequestLogPageFilters
+): GeneratedRequestLogPageFilters {
+  return {
+    cliKey: filters.cliKey,
+    status: filters.status,
+    errorCodeContains: filters.errorCodeContains,
+    methodPathContains: filters.methodPathContains,
+    errorScope: filters.errorScope ?? "all",
+    createdAtMsFrom: filters.createdAtMsFrom ?? null,
+    createdAtMsTo: filters.createdAtMsTo ?? null,
+  };
+}
+
+function toRequestLogSnapshotPage(value: GeneratedRequestLogSnapshotPage): RequestLogSnapshotPage {
+  return {
+    ...value,
+    items: value.items.map(toRequestLogSummary),
+  };
+}
+
 export async function requestLogsList(cliKey: CliKey, limit?: number | null) {
   const normalizedLimit = normalizeRequestLogsLimit(limit);
 
@@ -200,15 +241,48 @@ export async function requestLogsPageAll(
   limit?: number | null
 ) {
   const normalizedLimit = normalizeRequestLogsPageLimit(limit);
+  const generatedFilters = toGeneratedRequestLogPageFilters(filters);
 
   return invokeGeneratedIpc<RequestLogPage>({
     title: "分页读取全局请求日志失败",
     cmd: "request_logs_page_all",
-    args: { filters, cursor, limit: normalizedLimit },
+    args: { filters: generatedFilters, cursor, limit: normalizedLimit },
     invoke: async () =>
       mapGeneratedCommandResponse(
-        await commands.requestLogsPageAll(filters, cursor, normalizedLimit),
+        await commands.requestLogsPageAll(generatedFilters, cursor, normalizedLimit),
         toRequestLogPage
+      ),
+  });
+}
+
+export async function requestLogsSnapshotPageAll(
+  filters: RequestLogPageFilters,
+  snapshotId: string | null,
+  page: number,
+  limit?: number | null
+) {
+  const normalizedLimit = normalizeRequestLogsPageLimit(limit);
+  const normalizedPage = normalizeRequestLogsSnapshotPage(page);
+  const generatedFilters = toGeneratedRequestLogPageFilters(filters);
+
+  return invokeGeneratedIpc<RequestLogSnapshotPage>({
+    title: "稳定分页读取全局请求日志失败",
+    cmd: "request_logs_snapshot_page_all",
+    args: {
+      filters: generatedFilters,
+      snapshotId,
+      page: normalizedPage,
+      limit: normalizedLimit,
+    },
+    invoke: async () =>
+      mapGeneratedCommandResponse(
+        await commands.requestLogsSnapshotPageAll(
+          generatedFilters,
+          snapshotId,
+          normalizedPage,
+          normalizedLimit
+        ),
+        toRequestLogSnapshotPage
       ),
   });
 }

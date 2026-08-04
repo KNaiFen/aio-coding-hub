@@ -17,8 +17,9 @@ mod types;
 // when a non-test build has no direct Rust call site.
 #[allow(unused_imports)]
 pub use types::{
-    RequestLogDetail, RequestLogInsert, RequestLogPage, RequestLogPageFilters, RequestLogRouteHop,
-    RequestLogStatusFilter, RequestLogStatusFilterOp, RequestLogSummary, SessionStatsAggregate,
+    RequestLogDetail, RequestLogErrorScope, RequestLogInsert, RequestLogPage,
+    RequestLogPageFilters, RequestLogRouteHop, RequestLogSnapshotPage, RequestLogStatusFilter,
+    RequestLogStatusFilterOp, RequestLogSummary, SessionStatsAggregate,
 };
 
 mod costing;
@@ -30,7 +31,8 @@ mod queries;
 use queries::{final_provider_from_attempts, parse_attempts, validate_cli_key};
 pub use queries::{
     get_by_id, get_by_trace_id, list_after_id, list_after_id_all, list_recent, list_recent_all,
-    page_all_excluding_traces, terminal_trace_ids,
+    page_all_excluding_traces, snapshot_membership_excluding_traces, summaries_by_ids,
+    terminal_trace_ids,
 };
 
 const WRITE_BUFFER_CAPACITY: usize = 512;
@@ -779,6 +781,8 @@ fn insert_batch_once(
 		  duration_ms,
 		  ttfb_ms,
 		  visible_ttfb_ms,
+		  upstream_stream_duration_ms,
+		  upstream_stream_timing_version,
 		  attempts_json,
 		  input_tokens,
 		  output_tokens,
@@ -798,7 +802,7 @@ fn insert_batch_once(
 		  final_provider_id,
 		  provider_chain_json,
 		  error_details_json
-		) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32)
+		) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34)
 		ON CONFLICT(trace_id) DO UPDATE SET
 		  method = excluded.method,
 		  path = excluded.path,
@@ -810,6 +814,8 @@ fn insert_batch_once(
 	  duration_ms = excluded.duration_ms,
 	  ttfb_ms = excluded.ttfb_ms,
 	  visible_ttfb_ms = excluded.visible_ttfb_ms,
+	  upstream_stream_duration_ms = excluded.upstream_stream_duration_ms,
+	  upstream_stream_timing_version = excluded.upstream_stream_timing_version,
 	  attempts_json = excluded.attempts_json,
 	  input_tokens = excluded.input_tokens,
 	  output_tokens = excluded.output_tokens,
@@ -962,6 +968,8 @@ fn insert_batch_once(
                 item.duration_ms,
                 item.ttfb_ms,
                 item.visible_ttfb_ms,
+                item.upstream_stream_duration_ms,
+                item.upstream_stream_timing_version,
                 item.attempts_json,
                 item.input_tokens,
                 item.output_tokens,
@@ -1113,6 +1121,8 @@ mod tests {
             duration_ms: 10,
             ttfb_ms: Some(5),
             visible_ttfb_ms: Some(5),
+            upstream_stream_duration_ms: None,
+            upstream_stream_timing_version: 0,
             attempts_json: "[]".to_string(),
             input_tokens: None,
             output_tokens: None,

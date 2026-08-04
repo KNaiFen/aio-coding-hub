@@ -304,6 +304,38 @@ describe("components/home/RealtimeTraceCards", () => {
     expectMetric("缓存写入", "—");
   });
 
+  it("does not synthesize a token rate for interrupted requests", () => {
+    const baseTime = 1_700_000_000_000;
+    render(
+      <RealtimeTraceCards
+        folderLookupBySessionKey={new Map()}
+        cards={cards([
+          traceBase({
+            trace_id: "trace-interrupted-rate",
+            first_seen_ms: baseTime - 1_000,
+            last_seen_ms: baseTime,
+            summary: {
+              status: 499,
+              error_code: "GW_STREAM_ABORTED",
+              duration_ms: 1_000,
+              output_tokens: null,
+              upstream_stream_duration_ms: 900,
+              upstream_stream_timing_version: 1,
+            },
+          }),
+        ])}
+        nowMs={baseTime}
+        formatUnixSeconds={(ts) => String(ts)}
+        showCustomTooltip={false}
+      />
+    );
+
+    const rateMetric = screen.getByText("速率").parentElement;
+    expect(rateMetric).not.toBeNull();
+    expect(within(rateMetric as HTMLElement).getByText("—")).toBeInTheDocument();
+    expect(screen.queryByText("0.0 t/s")).not.toBeInTheDocument();
+  });
+
   it("keeps in-progress traces visible after five minutes without new events", () => {
     vi.useFakeTimers();
     const baseTime = 1_700_000_000_000;
@@ -422,6 +454,8 @@ describe("components/home/RealtimeTraceCards", () => {
         ttfb_ms: 100,
         input_tokens: 1000,
         output_tokens: 900,
+        upstream_stream_duration_ms: 900,
+        upstream_stream_timing_version: 1,
         cache_read_input_tokens: 100,
         cache_creation_input_tokens: 10,
         cost_usd: 1.23,

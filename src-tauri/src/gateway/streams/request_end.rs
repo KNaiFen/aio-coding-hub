@@ -12,6 +12,8 @@ pub(super) struct StreamRequestCompletion {
     pub(super) error_code: Option<&'static str>,
     pub(super) ttfb_ms: Option<u128>,
     pub(super) visible_ttfb_ms: Option<u128>,
+    pub(super) upstream_stream_duration_ms: Option<u128>,
+    pub(super) upstream_stream_timing_version: i64,
     pub(super) requested_model: Option<String>,
     pub(super) usage_metrics: Option<crate::usage::UsageMetrics>,
     pub(super) usage: Option<crate::usage::UsageExtract>,
@@ -31,6 +33,8 @@ impl StreamRequestCompletion {
             error_code: None,
             ttfb_ms,
             visible_ttfb_ms,
+            upstream_stream_duration_ms: None,
+            upstream_stream_timing_version: 0,
             requested_model,
             usage_metrics,
             usage,
@@ -51,6 +55,8 @@ impl StreamRequestCompletion {
             error_code: Some(error_code),
             ttfb_ms,
             visible_ttfb_ms,
+            upstream_stream_duration_ms: None,
+            upstream_stream_timing_version: 0,
             requested_model,
             usage_metrics,
             usage,
@@ -96,6 +102,21 @@ impl StreamRequestCompletion {
         evidence: Option<crate::usage::StreamInternalErrorEvidence>,
     ) -> Self {
         self.stream_internal_error = evidence;
+        self
+    }
+
+    pub(super) fn with_upstream_stream_timing(
+        mut self,
+        duration_ms: Option<u128>,
+        version: i64,
+    ) -> Self {
+        self.upstream_stream_duration_ms = duration_ms.filter(|duration_ms| *duration_ms > 0);
+        self.upstream_stream_timing_version =
+            if version == 1 && self.upstream_stream_duration_ms.is_some() {
+                1
+            } else {
+                0
+            };
         self
     }
 }
@@ -244,6 +265,8 @@ pub(super) fn emit_request_event_and_spawn_request_log<R: tauri::Runtime>(
         duration_ms,
         completion.ttfb_ms,
         completion.visible_ttfb_ms,
+        completion.upstream_stream_duration_ms,
+        completion.upstream_stream_timing_version,
         attempts,
         attempts_json,
         completion.requested_model,
@@ -372,6 +395,7 @@ mod tests {
                 1_700_000_000_000,
             ))),
             active_requests,
+            upstream_output_timing: Default::default(),
         }
     }
 

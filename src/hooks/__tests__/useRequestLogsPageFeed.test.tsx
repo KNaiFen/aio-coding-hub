@@ -2,8 +2,9 @@ import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { gatewayEventNames } from "../../constants/gatewayEvents";
 import {
+  isRequestLogSnapshotExpiredError,
   useActiveRequestLogsSnapshotQuery,
-  useRequestLogsPageAllQuery,
+  useRequestLogsSnapshotPageAllQuery,
 } from "../../query/requestLogs";
 import { subscribeGatewayEvent } from "../../services/gateway/gatewayEventBus";
 import type { RequestLogPageFilters } from "../../services/gateway/requestLogs";
@@ -12,8 +13,9 @@ import { useRequestLogsPageFeed } from "../useRequestLogsPageFeed";
 import { useWindowForeground } from "../useWindowForeground";
 
 vi.mock("../../query/requestLogs", () => ({
+  isRequestLogSnapshotExpiredError: vi.fn(() => false),
   useActiveRequestLogsSnapshotQuery: vi.fn(),
-  useRequestLogsPageAllQuery: vi.fn(),
+  useRequestLogsSnapshotPageAllQuery: vi.fn(),
 }));
 
 vi.mock("../../services/gateway/gatewayEventBus", () => ({
@@ -33,16 +35,32 @@ const FILTERS: RequestLogPageFilters = {
   status: null,
   errorCodeContains: null,
   methodPathContains: null,
+  errorScope: "all",
+  createdAtMsFrom: null,
+  createdAtMsTo: null,
 };
 
+function snapshotPage(items: unknown[] = []) {
+  return {
+    items,
+    snapshotId: "snapshot-1",
+    totalCount: items.length,
+    totalPages: 1,
+    page: 1,
+    pageSize: 50,
+    expiresAtMs: 1,
+  };
+}
+
 function mockQueries() {
-  const pageRefetch = vi.fn().mockResolvedValue({ data: { items: [], nextCursor: null } });
+  const pageRefetch = vi.fn().mockResolvedValue({ data: snapshotPage() });
   const activeRefetch = vi.fn().mockResolvedValue({ data: [] });
-  vi.mocked(useRequestLogsPageAllQuery).mockReturnValue({
-    data: { items: [], nextCursor: null },
+  vi.mocked(useRequestLogsSnapshotPageAllQuery).mockReturnValue({
+    data: snapshotPage(),
     isLoading: false,
     isFetching: false,
     isPlaceholderData: false,
+    error: null,
     refetch: pageRefetch,
   } as any);
   vi.mocked(useActiveRequestLogsSnapshotQuery).mockReturnValue({
@@ -64,6 +82,7 @@ describe("hooks/useRequestLogsPageFeed", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useRealTimers();
+    vi.mocked(isRequestLogSnapshotExpiredError).mockReturnValue(false);
     vi.mocked(useDocumentVisibility).mockReturnValue(true);
     vi.mocked(subscribeGatewayEvent).mockReturnValue({
       ready: Promise.resolve(),
@@ -71,13 +90,16 @@ describe("hooks/useRequestLogsPageFeed", () => {
     });
   });
 
-  it("manually refreshes the current persisted page and active snapshot together", async () => {
+  it("manually refreshes the persisted snapshot page and active snapshot together", async () => {
     const { activeRefetch, pageRefetch } = mockQueries();
     const { result } = renderHook(() =>
       useRequestLogsPageFeed({
         filters: FILTERS,
-        cursor: "opaque-history",
+        snapshotId: "snapshot-history",
+        page: 2,
+        snapshotRevision: 0,
         limit: 100,
+        onRefreshSnapshot: vi.fn(),
       })
     );
 
@@ -87,54 +109,66 @@ describe("hooks/useRequestLogsPageFeed", () => {
 
     expect(pageRefetch).toHaveBeenCalledTimes(1);
     expect(activeRefetch).toHaveBeenCalledTimes(1);
-    expect(useRequestLogsPageAllQuery).toHaveBeenCalledWith(FILTERS, "opaque-history", 100, {
-      enabled: true,
-    });
+    expect(useRequestLogsSnapshotPageAllQuery).toHaveBeenCalledWith(
+      FILTERS,
+      "snapshot-history",
+      2,
+      100,
+      0,
+      { enabled: true }
+    );
   });
 
-  it("hides placeholder rows and cursors while a replacement page is loading", () => {
+  it("hides placeholder rows and snapshot metadata while a replacement page is loading", () => {
     const { activeRefetch, pageRefetch } = mockQueries();
     const oldItem = { id: 1 };
-    vi.mocked(useRequestLogsPageAllQuery).mockReturnValue({
-      data: { items: [oldItem], nextCursor: "old-next" },
+    vi.mocked(useRequestLogsSnapshotPageAllQuery).mockReturnValue({
+      data: snapshotPage([oldItem]),
       isLoading: false,
       isFetching: false,
       isPlaceholderData: false,
+      error: null,
       refetch: pageRefetch,
     } as any);
     const { result, rerender } = renderHook(
-      ({ cursor }) =>
+      ({ page }) =>
         useRequestLogsPageFeed({
           filters: FILTERS,
-          cursor,
+          snapshotId: "snapshot-1",
+          page,
+          snapshotRevision: 0,
           limit: 50,
+          onRefreshSnapshot: vi.fn(),
         }),
-      { initialProps: { cursor: null as string | null } }
+      { initialProps: { page: 1 } }
     );
 
     expect(result.current.requestLogs).toEqual([oldItem]);
-    expect(result.current.nextCursor).toBe("old-next");
+    expect(result.current.snapshotId).toBe("snapshot-1");
 
-    vi.mocked(useRequestLogsPageAllQuery).mockReturnValue({
-      data: { items: [oldItem], nextCursor: "old-next" },
+    vi.mocked(useRequestLogsSnapshotPageAllQuery).mockReturnValue({
+      data: snapshotPage([oldItem]),
       isLoading: false,
       isFetching: true,
       isPlaceholderData: true,
+      error: null,
       refetch: pageRefetch,
     } as any);
-    rerender({ cursor: "opaque-history" });
+    rerender({ page: 2 });
 
     expect(result.current.requestLogs).toEqual([]);
-    expect(result.current.nextCursor).toBeNull();
+    expect(result.current.snapshotId).toBeNull();
+    expect(result.current.totalPages).toBeNull();
     expect(result.current.requestLogsLoading).toBe(true);
     expect(result.current.requestLogsRefreshing).toBe(false);
     expect(result.current.requestLogsAvailable).toBeNull();
     expect(activeRefetch).not.toHaveBeenCalled();
   });
 
-  it("refreshes the latest page on completion signals", async () => {
+  it("refreshes the first snapshot page on completion signals", async () => {
     vi.useFakeTimers();
     const { activeRefetch, pageRefetch } = mockQueries();
+    const refreshSnapshot = vi.fn();
     let eventHandler: ((payload: unknown) => void) | null = null;
     vi.mocked(subscribeGatewayEvent).mockImplementation((event, handler) => {
       expect(event).toBe(gatewayEventNames.requestSignal);
@@ -145,20 +179,18 @@ describe("hooks/useRequestLogsPageFeed", () => {
     renderHook(() =>
       useRequestLogsPageFeed({
         filters: FILTERS,
-        cursor: null,
+        snapshotId: "snapshot-1",
+        page: 1,
+        snapshotRevision: 0,
         limit: 50,
         liveUpdatesEnabled: true,
         liveUpdateWindowMs: 300,
+        onRefreshSnapshot: refreshSnapshot,
       })
     );
 
     act(() => {
-      eventHandler?.({
-        trace_id: "trace-start",
-        cli_key: "codex",
-        phase: "start",
-        ts: 1,
-      });
+      eventHandler?.({ trace_id: "trace-start", cli_key: "codex", phase: "start", ts: 1 });
     });
     await act(async () => {
       await vi.runOnlyPendingTimersAsync();
@@ -167,25 +199,20 @@ describe("hooks/useRequestLogsPageFeed", () => {
     expect(activeRefetch).toHaveBeenCalledTimes(1);
 
     act(() => {
-      eventHandler?.({
-        trace_id: "trace-complete",
-        cli_key: "codex",
-        phase: "complete",
-        ts: 2,
-      });
+      eventHandler?.({ trace_id: "trace-complete", cli_key: "codex", phase: "complete", ts: 2 });
     });
-    expect(pageRefetch).not.toHaveBeenCalled();
-
     await act(async () => {
       await vi.runOnlyPendingTimersAsync();
     });
-    expect(pageRefetch).toHaveBeenCalledTimes(1);
-    expect(activeRefetch).toHaveBeenCalledTimes(3);
+    expect(pageRefetch).not.toHaveBeenCalled();
+    expect(refreshSnapshot).toHaveBeenCalledTimes(1);
+    expect(activeRefetch).toHaveBeenCalledTimes(2);
   });
 
   it("keeps active snapshots live on history pages without refreshing persisted rows", async () => {
     vi.useFakeTimers();
     const { activeRefetch, pageRefetch } = mockQueries();
+    const refreshSnapshot = vi.fn();
     let eventHandler: ((payload: unknown) => void) | null = null;
     vi.mocked(subscribeGatewayEvent).mockImplementation((_event, handler) => {
       eventHandler = handler;
@@ -195,20 +222,18 @@ describe("hooks/useRequestLogsPageFeed", () => {
     renderHook(() =>
       useRequestLogsPageFeed({
         filters: FILTERS,
-        cursor: "opaque-history",
+        snapshotId: "snapshot-history",
+        page: 2,
+        snapshotRevision: 0,
         limit: 50,
         liveUpdatesEnabled: true,
         liveUpdateWindowMs: 300,
+        onRefreshSnapshot: refreshSnapshot,
       })
     );
 
     act(() => {
-      eventHandler?.({
-        trace_id: "trace-complete",
-        cli_key: "codex",
-        phase: "complete",
-        ts: 1,
-      });
+      eventHandler?.({ trace_id: "trace-complete", cli_key: "codex", phase: "complete", ts: 1 });
     });
     await act(async () => {
       await vi.runOnlyPendingTimersAsync();
@@ -216,16 +241,21 @@ describe("hooks/useRequestLogsPageFeed", () => {
 
     expect(activeRefetch).toHaveBeenCalledTimes(1);
     expect(pageRefetch).not.toHaveBeenCalled();
+    expect(refreshSnapshot).not.toHaveBeenCalled();
   });
 
   it("keeps foreground refresh independent from live signal updates", async () => {
     const latest = mockQueries();
+    const latestRefreshSnapshot = vi.fn();
     const latestRender = renderHook(() =>
       useRequestLogsPageFeed({
         filters: FILTERS,
-        cursor: null,
+        snapshotId: "snapshot-1",
+        page: 1,
+        snapshotRevision: 0,
         limit: 50,
         refreshOnForeground: true,
+        onRefreshSnapshot: latestRefreshSnapshot,
       })
     );
     const latestForeground = latestForegroundOptions();
@@ -234,17 +264,22 @@ describe("hooks/useRequestLogsPageFeed", () => {
       latestForeground?.onForeground();
       await Promise.resolve();
     });
-    expect(latest.pageRefetch).toHaveBeenCalledTimes(1);
+    expect(latest.pageRefetch).not.toHaveBeenCalled();
     expect(latest.activeRefetch).toHaveBeenCalledTimes(1);
+    expect(latestRefreshSnapshot).toHaveBeenCalledTimes(1);
     latestRender.unmount();
 
     const history = mockQueries();
+    const historyRefreshSnapshot = vi.fn();
     renderHook(() =>
       useRequestLogsPageFeed({
         filters: FILTERS,
-        cursor: "opaque-history",
+        snapshotId: "snapshot-history",
+        page: 2,
+        snapshotRevision: 0,
         limit: 50,
         refreshOnForeground: true,
+        onRefreshSnapshot: historyRefreshSnapshot,
       })
     );
     const historyForeground = latestForegroundOptions();
@@ -255,5 +290,24 @@ describe("hooks/useRequestLogsPageFeed", () => {
     });
     expect(history.pageRefetch).not.toHaveBeenCalled();
     expect(history.activeRefetch).toHaveBeenCalledTimes(1);
+    expect(historyRefreshSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("surfaces snapshot expiration for the page to rebuild", () => {
+    mockQueries();
+    vi.mocked(isRequestLogSnapshotExpiredError).mockReturnValue(true);
+
+    const { result } = renderHook(() =>
+      useRequestLogsPageFeed({
+        filters: FILTERS,
+        snapshotId: "snapshot-1",
+        page: 1,
+        snapshotRevision: 0,
+        limit: 50,
+        onRefreshSnapshot: vi.fn(),
+      })
+    );
+
+    expect(result.current.requestLogsSnapshotExpired).toBe(true);
   });
 });

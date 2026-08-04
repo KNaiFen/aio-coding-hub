@@ -61,6 +61,79 @@ impl StreamActivityTracker {
     }
 }
 
+#[derive(Debug, Default)]
+struct UpstreamOutputTimingState {
+    first_output_ms: Option<u128>,
+    last_output_ms: Option<u128>,
+    contaminated: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(in crate::gateway) struct UpstreamOutputTiming {
+    state: Arc<Mutex<UpstreamOutputTimingState>>,
+}
+
+impl UpstreamOutputTiming {
+    pub(in crate::gateway) fn from_buffered_prefix(
+        first_output_ms: Option<u128>,
+        last_output_ms: Option<u128>,
+    ) -> Self {
+        let timing = Self::default();
+        if let Some(first_output_ms) = first_output_ms {
+            let last_output_ms = last_output_ms
+                .unwrap_or(first_output_ms)
+                .max(first_output_ms);
+            let mut state = timing
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            state.first_output_ms = Some(first_output_ms);
+            state.last_output_ms = Some(last_output_ms);
+        }
+        timing
+    }
+
+    pub(in crate::gateway) fn observe_output_at(&self, elapsed_ms: u128) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.first_output_ms.is_none() {
+            state.first_output_ms = Some(elapsed_ms);
+        }
+        state.last_output_ms = Some(
+            state
+                .last_output_ms
+                .map_or(elapsed_ms, |last_output_ms| last_output_ms.max(elapsed_ms)),
+        );
+    }
+
+    pub(in crate::gateway) fn invalidate(&self) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.contaminated = true;
+    }
+
+    pub(in crate::gateway) fn duration_ms(&self) -> Option<u128> {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.contaminated {
+            return None;
+        }
+        state.last_output_ms.zip(state.first_output_ms).and_then(
+            |(last_output_ms, first_output_ms)| {
+                last_output_ms
+                    .checked_sub(first_output_ms)
+                    .filter(|duration_ms| *duration_ms > 0)
+            },
+        )
+    }
+}
+
 pub(in crate::gateway) struct StreamFinalizeCtx<R: tauri::Runtime = tauri::Wry> {
     pub(in crate::gateway) app: tauri::AppHandle<R>,
     pub(in crate::gateway) db: db::Db,
@@ -109,4 +182,33 @@ pub(in crate::gateway) struct StreamFinalizeCtx<R: tauri::Runtime = tauri::Wry> 
     pub(in crate::gateway) fake_200_quota_exhausted: bool,
     pub(in crate::gateway) activity: Arc<Mutex<StreamActivityTracker>>,
     pub(in crate::gateway) active_requests: Arc<ActiveRequestRegistry>,
+    pub(in crate::gateway) upstream_output_timing: UpstreamOutputTiming,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::UpstreamOutputTiming;
+
+    #[test]
+    fn upstream_output_timing_uses_buffered_prefix_and_latest_output() {
+        let timing = UpstreamOutputTiming::from_buffered_prefix(Some(120), Some(420));
+        assert_eq!(timing.duration_ms(), Some(300));
+
+        timing.observe_output_at(700);
+        assert_eq!(timing.duration_ms(), Some(580));
+    }
+
+    #[test]
+    fn upstream_output_timing_requires_distinct_first_and_last_events() {
+        let timing = UpstreamOutputTiming::default();
+        timing.observe_output_at(120);
+        assert_eq!(timing.duration_ms(), None);
+    }
+
+    #[test]
+    fn upstream_output_timing_is_unknown_after_backpressure_contamination() {
+        let timing = UpstreamOutputTiming::from_buffered_prefix(Some(120), Some(420));
+        timing.invalidate();
+        assert_eq!(timing.duration_ms(), None);
+    }
 }

@@ -97,6 +97,8 @@ function makeRequestLog(
     duration_ms: partial.duration_ms ?? 1000,
     ttfb_ms: partial.ttfb_ms ?? null,
     visible_ttfb_ms: partial.visible_ttfb_ms ?? null,
+    upstream_stream_duration_ms: partial.upstream_stream_duration_ms ?? null,
+    upstream_stream_timing_version: partial.upstream_stream_timing_version ?? 0,
     attempt_count: partial.attempt_count ?? 1,
     has_failover: partial.has_failover ?? false,
     start_provider_id: partial.start_provider_id ?? 0,

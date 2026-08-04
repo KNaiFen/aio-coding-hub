@@ -221,6 +221,7 @@ macro_rules! generated_command_registry {
             request_logs_list => crate::commands::request_logs::request_logs_list,
             request_logs_list_all => crate::commands::request_logs::request_logs_list_all,
             request_logs_page_all => crate::commands::request_logs::request_logs_page_all,
+            request_logs_snapshot_page_all => crate::commands::request_logs::request_logs_snapshot_page_all,
             request_logs_list_after_id => crate::commands::request_logs::request_logs_list_after_id,
             request_logs_list_after_id_all => crate::commands::request_logs::request_logs_list_after_id_all,
             request_log_get => crate::commands::request_logs::request_log_get,

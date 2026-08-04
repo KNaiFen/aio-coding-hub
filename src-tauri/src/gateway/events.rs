@@ -143,6 +143,8 @@ pub(crate) struct GatewayRequestEvent {
     duration_ms: u128,
     ttfb_ms: Option<u128>,
     visible_ttfb_ms: Option<u128>,
+    upstream_stream_duration_ms: Option<u128>,
+    upstream_stream_timing_version: i64,
     attempts: Vec<FailoverAttempt>,
     input_tokens: Option<i64>,
     output_tokens: Option<i64>,
@@ -593,6 +595,8 @@ pub(super) fn emit_request_event<R: tauri::Runtime>(
     duration_ms: u128,
     ttfb_ms: Option<u128>,
     visible_ttfb_ms: Option<u128>,
+    upstream_stream_duration_ms: Option<u128>,
+    upstream_stream_timing_version: i64,
     attempts: Vec<FailoverAttempt>,
     claude_model_mapping: Option<ClaudeModelMapping>,
     usage: Option<usage::UsageMetrics>,
@@ -628,6 +632,14 @@ pub(super) fn emit_request_event<R: tauri::Runtime>(
         duration_ms,
         ttfb_ms,
         visible_ttfb_ms,
+        upstream_stream_duration_ms,
+        upstream_stream_timing_version: if upstream_stream_timing_version == 1
+            && upstream_stream_duration_ms.is_some_and(|duration_ms| duration_ms > 0)
+        {
+            1
+        } else {
+            0
+        },
         attempts,
         input_tokens: usage.input_tokens,
         output_tokens: usage.output_tokens,
@@ -893,6 +905,8 @@ mod tests {
             duration_ms: 2350,
             ttfb_ms: Some(420),
             visible_ttfb_ms: Some(420),
+            upstream_stream_duration_ms: Some(1_500),
+            upstream_stream_timing_version: 1,
             attempts: vec![FailoverAttempt {
                 provider_id: 7,
                 provider_name: "Provider A".to_string(),
@@ -1331,6 +1345,8 @@ mod tests {
             duration_ms: 50,
             ttfb_ms: Some(10),
             visible_ttfb_ms: Some(10),
+            upstream_stream_duration_ms: None,
+            upstream_stream_timing_version: 0,
             attempts: Vec::new(),
             input_tokens: None,
             output_tokens: None,

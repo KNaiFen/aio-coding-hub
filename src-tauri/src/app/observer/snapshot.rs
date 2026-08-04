@@ -870,6 +870,9 @@ fn project_active(
         last_activity_ms: item.last_activity_ms.max(item.created_at_ms).max(0),
         duration_ms: Some(now_ms.saturating_sub(item.created_at_ms).max(0)),
         ttfb_ms: None,
+        visible_ttfb_ms: None,
+        upstream_stream_duration_ms: None,
+        upstream_stream_timing_version: 0,
         attempt_count,
         retry_count: attempt_count.saturating_sub(1),
         provider_switch_count: 0,
@@ -884,6 +887,11 @@ fn project_active(
         cost_usd: None,
         route,
         context_compaction: parse_context_compaction(item.special_settings_json.as_deref()),
+        requested_reasoning_effort: if item.cli_key == "codex" {
+            parse_requested_reasoning_effort(item.special_settings_json.as_deref())
+        } else {
+            None
+        },
         configured_model_route,
     }
 }
@@ -930,6 +938,9 @@ fn project_terminal(
         last_activity_ms: row.last_activity_ms.unwrap_or(row.created_at_ms).max(0),
         duration_ms: Some(row.duration_ms.max(0)),
         ttfb_ms: row.ttfb_ms.filter(|value| *value >= 0),
+        visible_ttfb_ms: row.visible_ttfb_ms.filter(|value| *value >= 0),
+        upstream_stream_duration_ms: row.upstream_stream_duration_ms.filter(|value| *value > 0),
+        upstream_stream_timing_version: row.upstream_stream_timing_version,
         attempt_count,
         retry_count,
         provider_switch_count,
@@ -949,6 +960,11 @@ fn project_terminal(
             .filter(|value| value.is_finite() && *value >= 0.0),
         route,
         context_compaction: parse_context_compaction(row.special_settings_json.as_deref()),
+        requested_reasoning_effort: if row.cli_key == "codex" {
+            parse_requested_reasoning_effort(row.special_settings_json.as_deref())
+        } else {
+            None
+        },
         configured_model_route: parse_configured_model_route(
             row.special_settings_json.as_deref(),
             Some(row.final_provider_id),
@@ -1132,6 +1148,44 @@ fn parse_configured_model_route(
     })
 }
 
+fn parse_requested_reasoning_effort(raw: Option<&str>) -> Option<String> {
+    let raw = raw?.trim();
+    if raw.is_empty() || raw.len() > SPECIAL_SETTINGS_MAX_BYTES {
+        return None;
+    }
+    let parsed = serde_json::from_str::<Value>(raw).ok()?;
+    let values = match &parsed {
+        Value::Array(items) => items.iter().collect::<Vec<_>>(),
+        Value::Object(_) => vec![&parsed],
+        _ => return None,
+    };
+    values.into_iter().rev().find_map(|value| {
+        let object = value.as_object()?;
+        if object.get("type")?.as_str()? != "codex_reasoning_effort" {
+            return None;
+        }
+        object
+            .get("effort")
+            .and_then(Value::as_str)
+            .and_then(normalize_reasoning_effort)
+            .or_else(|| {
+                object
+                    .get("rawEffort")
+                    .and_then(Value::as_str)
+                    .and_then(normalize_reasoning_effort)
+            })
+    })
+}
+
+fn normalize_reasoning_effort(value: &str) -> Option<String> {
+    let value = value.trim().to_ascii_lowercase();
+    matches!(
+        value.as_str(),
+        "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra"
+    )
+    .then_some(value)
+}
+
 fn known_value(value: &Value, allowed: &[&str]) -> Option<String> {
     let value = value.as_str()?;
     allowed.contains(&value).then(|| value.to_string())
@@ -1251,6 +1305,31 @@ mod tests {
     }
 
     #[test]
+    fn requested_reasoning_effort_projection_normalizes_and_fails_open() {
+        let raw = r#"[{"type":"codex_reasoning_effort","effort":" MAX ","rawEffort":"max"}]"#;
+        assert_eq!(
+            parse_requested_reasoning_effort(Some(raw)).as_deref(),
+            Some("max")
+        );
+        let legacy = r#"[{"type":"codex_reasoning_effort","effort":null,"rawEffort":"Ultra"}]"#;
+        assert_eq!(
+            parse_requested_reasoning_effort(Some(legacy)).as_deref(),
+            Some("ultra")
+        );
+        let invalid_normalized =
+            r#"[{"type":"codex_reasoning_effort","effort":"turbo","rawEffort":"high"}]"#;
+        assert_eq!(
+            parse_requested_reasoning_effort(Some(invalid_normalized)).as_deref(),
+            Some("high")
+        );
+        assert!(parse_requested_reasoning_effort(Some(
+            r#"[{"type":"codex_reasoning_effort","effort":"turbo"}]"#
+        ))
+        .is_none());
+        assert!(parse_requested_reasoning_effort(Some("not-json")).is_none());
+    }
+
+    #[test]
     fn dominant_provider_prefers_most_recent_on_tie() {
         let make = |id: i64, name: &str| request_logs::RequestLogSummary {
             id,
@@ -1268,6 +1347,8 @@ mod tests {
             duration_ms: 1,
             ttfb_ms: None,
             visible_ttfb_ms: None,
+            upstream_stream_duration_ms: None,
+            upstream_stream_timing_version: 0,
             attempt_count: 1,
             has_failover: false,
             start_provider_id: id,
