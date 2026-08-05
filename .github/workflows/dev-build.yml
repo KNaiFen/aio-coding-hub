@@ -115,12 +115,113 @@ jobs:
           --bundles ${{ needs.plan.outputs.bundles }}
           -- --locked
 
+      - name: Prepare Windows development artifact
+        if: inputs.target_id == 'windows-x64'
+        shell: pwsh
+        env:
+          TARGET: ${{ needs.plan.outputs.target }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $releaseRoot = "src-tauri/target/$env:TARGET/release"
+          $bundleRoot = Join-Path $releaseRoot "bundle"
+          $msiFiles = @(Get-ChildItem -Path $bundleRoot -Recurse -File -Filter *.msi)
+          $exeFiles = @(Get-ChildItem -Path $releaseRoot -File -Filter *.exe)
+          if ($msiFiles.Count -ne 1) {
+            throw "Expected exactly one MSI, found $($msiFiles.Count)"
+          }
+          if ($exeFiles.Count -ne 1) {
+            throw "Expected exactly one EXE, found $($exeFiles.Count)"
+          }
+          New-Item -ItemType Directory -Path "dev-build-artifact" | Out-Null
+          New-Item -ItemType Directory -Path "dev-build-artifact/bundle/msi" | Out-Null
+          Copy-Item -LiteralPath $msiFiles[0].FullName -Destination "dev-build-artifact/bundle/msi"
+          Copy-Item -LiteralPath $exeFiles[0].FullName -Destination "dev-build-artifact"
+
+      - name: Prepare macOS development artifact
+        if: startsWith(inputs.target_id, 'macos-')
+        shell: bash
+        env:
+          TARGET: ${{ needs.plan.outputs.target }}
+          TARGET_ID: ${{ inputs.target_id }}
+        run: |
+          set -euo pipefail
+          bundle_dir="src-tauri/target/$TARGET/release/bundle/macos"
+          app_count="$(find "$bundle_dir" -maxdepth 1 -type d -name '*.app' | wc -l | tr -d '[:space:]')"
+          [[ "$app_count" == "1" ]]
+          app_path="$(find "$bundle_dir" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          mkdir dev-build-artifact
+          archive_path="dev-build-artifact/aio-coding-hub-$TARGET_ID.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$app_path" "$archive_path"
+          [[ -s "$archive_path" ]]
+
+          verify_dir="$(mktemp -d)"
+          trap 'rm -rf "$verify_dir"' EXIT
+          ditto -x -k "$archive_path" "$verify_dir"
+          main_executable="$(find "$verify_dir" -path '*/Contents/MacOS/*' -type f -print -quit)"
+          [[ -n "$main_executable" ]]
+          [[ -x "$main_executable" ]]
+
+      - name: Prepare Linux development artifact
+        if: inputs.target_id == 'linux-x64'
+        shell: bash
+        env:
+          TARGET: ${{ needs.plan.outputs.target }}
+          TARGET_ID: ${{ inputs.target_id }}
+        run: |
+          set -euo pipefail
+          bundle_dir="src-tauri/target/$TARGET/release/bundle"
+          appimage_count="$(find "$bundle_dir" -type f -name '*.AppImage' | wc -l | tr -d '[:space:]')"
+          deb_count="$(find "$bundle_dir" -type f -name '*.deb' | wc -l | tr -d '[:space:]')"
+          [[ "$appimage_count" == "1" ]]
+          [[ "$deb_count" == "0" || "$deb_count" == "1" ]]
+          appimage_path="$(find "$bundle_dir" -type f -name '*.AppImage' -print -quit)"
+
+          stage_dir="$(mktemp -d)"
+          verify_dir="$(mktemp -d)"
+          trap 'rm -rf "$stage_dir" "$verify_dir"' EXIT
+          cp -p "$appimage_path" "$stage_dir/"
+          if [[ "$deb_count" == "1" ]]; then
+            deb_path="$(find "$bundle_dir" -type f -name '*.deb' -print -quit)"
+            cp -p "$deb_path" "$stage_dir/"
+          fi
+
+          mkdir dev-build-artifact
+          archive_path="dev-build-artifact/aio-coding-hub-$TARGET_ID.tar.gz"
+          tar -czf "$archive_path" -C "$stage_dir" .
+          [[ -s "$archive_path" ]]
+          tar -xzf "$archive_path" -C "$verify_dir"
+          extracted_appimage="$(find "$verify_dir" -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
+          [[ -n "$extracted_appimage" ]]
+          [[ -x "$extracted_appimage" ]]
+
+      - name: Summarize development artifact
+        shell: bash
+        env:
+          TARGET_ID: ${{ inputs.target_id }}
+        run: |
+          set -euo pipefail
+          case "$TARGET_ID" in
+            windows-x64) expected_files=2 ;;
+            macos-x64|macos-arm64|linux-x64) expected_files=1 ;;
+            *) exit 1 ;;
+          esac
+          payload_count="$(find dev-build-artifact -type f | wc -l | tr -d '[:space:]')"
+          [[ "$payload_count" == "$expected_files" ]]
+          {
+            echo "### Development artifact"
+            echo
+            echo "- Target: \`$TARGET_ID\`"
+            echo "- Artifact: \`dev-build-$TARGET_ID-$GITHUB_SHA\`"
+            echo "- Payload:"
+            find dev-build-artifact -type f -print | sort | while IFS= read -r payload; do
+              echo "  - \`${payload#dev-build-artifact/}\`"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload development artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dev-build-${{ inputs.target_id }}-${{ github.sha }}
-          path: |
-            src-tauri/target/${{ needs.plan.outputs.target }}/release/bundle/**
-            src-tauri/target/${{ needs.plan.outputs.target }}/release/*.exe
+          path: dev-build-artifact/*
           if-no-files-found: error
           retention-days: 7

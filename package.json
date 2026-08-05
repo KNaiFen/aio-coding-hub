@@ -23,6 +23,7 @@
     "lint:fix": "eslint src/ --fix",
     "audit:deps": "node scripts/check-pnpm-audit.selftest.mjs && node scripts/check-pnpm-audit.mjs",
     "check:local-build-entrypoints": "node scripts/check-local-build-entrypoints.mjs",
+    "check:dev-build-artifacts": "node scripts/check-dev-build-artifacts.selftest.mjs && node scripts/check-dev-build-artifacts.mjs",
     "check:sync-upstream-policy": "node scripts/check-sync-upstream-policy.selftest.mjs && node scripts/check-sync-upstream-policy.mjs",
     "check:no-instant-now-sub": "node scripts/check-no-instant-now-sub.selftest.mjs && node scripts/check-no-instant-now-sub.mjs",
     "check:ci-quality-gates": "node scripts/check-ci-quality-gates.selftest.mjs && node scripts/check-ci-quality-gates.mjs",

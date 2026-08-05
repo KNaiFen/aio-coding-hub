@@ -116,6 +116,9 @@ jobs:
       - name: Reject Instant subtraction underflow hazards
         run: node scripts/check-no-instant-now-sub.selftest.mjs && node scripts/check-no-instant-now-sub.mjs
 
+      - name: Validate dev-build artifact contract
+        run: node scripts/check-dev-build-artifacts.selftest.mjs && node scripts/check-dev-build-artifacts.mjs
+
       - name: Validate release source resolution
         run: node scripts/release-source.selftest.mjs
 
