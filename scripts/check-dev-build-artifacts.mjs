@@ -46,6 +46,10 @@ function requireToken(lines, token, message, failures) {
   if (!lines.some((line) => line.includes(token))) failures.push(message);
 }
 
+function requireCommand(lines, pattern, message, failures) {
+  if (!lines.some((line) => pattern.test(line))) failures.push(message);
+}
+
 function countToken(lines, token) {
   return lines.filter((line) => line.includes(token)).length;
 }
@@ -53,7 +57,7 @@ function countToken(lines, token) {
 function hasRunCommand(source, command) {
   return source.split(/\r?\n/).some((line) => {
     const run = line.match(/^\s*(?:-\s+)?run:\s*(.+)$/);
-    return run && !run[1].trimStart().startsWith("#") && run[1].includes(command);
+    return run && run[1].trim() === command;
   });
 }
 
@@ -128,15 +132,21 @@ export function validateDevBuildArtifacts({ devBuild, ci }) {
     "build job must have a macOS-only artifact preparation step",
     failures
   );
-  requireToken(
+  requireCommand(
     macos,
-    "ditto -c -k --sequesterRsrc --keepParent",
+    /^ditto -c -k --sequesterRsrc --keepParent "\$app_path" "\$archive_path"$/,
     "macOS app must be archived with ditto before upload",
     failures
   );
-  requireToken(
+  requireCommand(
     macos,
-    '[[ -x "$main_executable" ]]',
+    /^ditto -x -k "\$archive_path" "\$verify_dir"$/,
+    "macOS archive must be extracted before mode verification",
+    failures
+  );
+  requireCommand(
+    macos,
+    /^\[\[ -x "\$main_executable" \]\]$/,
     "macOS archive must verify the extracted main executable mode",
     failures
   );
@@ -146,21 +156,27 @@ export function validateDevBuildArtifacts({ devBuild, ci }) {
     "build job must have a Linux-only artifact preparation step",
     failures
   );
-  requireToken(
+  requireCommand(
     linux,
-    'cp -p "$appimage_path" "$stage_dir/"',
+    /^cp -p "\$appimage_path" "\$stage_dir\/"$/,
     "Linux preparation must preserve the AppImage mode before archiving",
     failures
   );
-  requireToken(
+  requireCommand(
     linux,
-    'tar -czf "$archive_path" -C "$stage_dir" .',
+    /^tar -czf "\$archive_path" -C "\$stage_dir" \.$/,
     "Linux payload must be archived with tar before upload",
     failures
   );
-  requireToken(
+  requireCommand(
     linux,
-    '[[ -x "$extracted_appimage" ]]',
+    /^tar -xzf "\$archive_path" -C "\$verify_dir"$/,
+    "Linux archive must be extracted before mode verification",
+    failures
+  );
+  requireCommand(
+    linux,
+    /^\[\[ -x "\$extracted_appimage" \]\]$/,
     "Linux archive must verify the extracted AppImage mode",
     failures
   );

@@ -45,12 +45,14 @@ jobs:
         if: startsWith(inputs.target_id, 'macos-')
         run: |
           ditto -c -k --sequesterRsrc --keepParent "$app_path" "$archive_path"
+          ditto -x -k "$archive_path" "$verify_dir"
           [[ -x "$main_executable" ]]
       - name: Prepare Linux development artifact
         if: inputs.target_id == 'linux-x64'
         run: |
           cp -p "$appimage_path" "$stage_dir/"
           tar -czf "$archive_path" -C "$stage_dir" .
+          tar -xzf "$archive_path" -C "$verify_dir"
           [[ -x "$extracted_appimage" ]]
       - name: Summarize development artifact
         run: |
@@ -104,6 +106,39 @@ expectRejected(
   /archived with ditto/
 );
 expectRejected(
+  "macOS archive command only echoed",
+  {
+    ...valid,
+    devBuild: devBuild.replace(
+      'ditto -c -k --sequesterRsrc --keepParent "$app_path" "$archive_path"',
+      'echo \'ditto -c -k --sequesterRsrc --keepParent "$app_path" "$archive_path"\''
+    ),
+  },
+  /archived with ditto/
+);
+expectRejected(
+  "macOS extraction command only echoed",
+  {
+    ...valid,
+    devBuild: devBuild.replace(
+      'ditto -x -k "$archive_path" "$verify_dir"',
+      'echo \'ditto -x -k "$archive_path" "$verify_dir"\''
+    ),
+  },
+  /extracted before mode verification/
+);
+expectRejected(
+  "macOS mode check only echoed",
+  {
+    ...valid,
+    devBuild: devBuild.replace(
+      '[[ -x "$main_executable" ]]',
+      "echo '[[ -x \"$main_executable\" ]]'"
+    ),
+  },
+  /verify the extracted main executable mode/
+);
+expectRejected(
   "Linux condition on unrelated step",
   {
     ...valid,
@@ -118,6 +153,39 @@ expectRejected(
   "missing Linux mode preservation",
   { ...valid, devBuild: devBuild.replace('cp -p "$appimage_path"', 'cp "$appimage_path"') },
   /preserve the AppImage mode/
+);
+expectRejected(
+  "Linux mode command only assigned",
+  {
+    ...valid,
+    devBuild: devBuild.replace(
+      'cp -p "$appimage_path" "$stage_dir/"',
+      'copy_command=\'cp -p "$appimage_path" "$stage_dir/"\''
+    ),
+  },
+  /preserve the AppImage mode/
+);
+expectRejected(
+  "Linux archive command only echoed",
+  {
+    ...valid,
+    devBuild: devBuild.replace(
+      'tar -czf "$archive_path" -C "$stage_dir" .',
+      'echo \'tar -czf "$archive_path" -C "$stage_dir" .\''
+    ),
+  },
+  /archived with tar/
+);
+expectRejected(
+  "Linux mode check only echoed",
+  {
+    ...valid,
+    devBuild: devBuild.replace(
+      '[[ -x "$extracted_appimage" ]]',
+      "echo '[[ -x \"$extracted_appimage\" ]]'"
+    ),
+  },
+  /verify the extracted AppImage mode/
 );
 expectRejected(
   "duplicate upload",
@@ -145,6 +213,17 @@ expectRejected(
     ci: ci.replace(
       "- run: node scripts/check-dev-build-artifacts.selftest.mjs",
       "# run: node scripts/check-dev-build-artifacts.selftest.mjs"
+    ),
+  },
+  /support-contract must execute/
+);
+expectRejected(
+  "support command only echoed",
+  {
+    ...valid,
+    ci: ci.replace(
+      "- run: node scripts/check-dev-build-artifacts.selftest.mjs && node scripts/check-dev-build-artifacts.mjs",
+      "- run: echo 'node scripts/check-dev-build-artifacts.selftest.mjs && node scripts/check-dev-build-artifacts.mjs'"
     ),
   },
   /support-contract must execute/
