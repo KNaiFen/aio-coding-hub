@@ -50,7 +50,7 @@ export function CodexBridgeSection({ form }: { form: UseProviderEditorFormReturn
       </FormField>
 
       <div className="space-y-4 rounded-lg border border-border bg-secondary/40 p-4">
-        <FormField label="上游端点">
+        <FormField label="上游端点" group>
           <TabList<CodexBridgeTarget>
             ariaLabel="上游端点"
             items={[
