@@ -59,10 +59,7 @@ where
             .upstream_output_timing
             .first_byte_ms()
             .or(self.first_byte_ms);
-        let final_attempt_duration_ms = self
-            .ctx
-            .upstream_output_timing
-            .final_attempt_duration_ms();
+        let final_attempt_duration_ms = self.ctx.upstream_output_timing.final_attempt_duration_ms();
         emit_request_event_and_spawn_request_log(
             &self.ctx,
             StreamRequestCompletion::from_error_code(

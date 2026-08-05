@@ -1206,8 +1206,7 @@ mod tests {
         let desktop_bucket_ms = 10 * 60 * 1_000;
         let current_bucket_start = now_ms.div_euclid(tui_bucket_ms) * tui_bucket_ms;
         let tray_current_bucket_start = now_ms.div_euclid(tray_bucket_ms) * tray_bucket_ms;
-        let desktop_current_bucket_start =
-            now_ms.div_euclid(desktop_bucket_ms) * desktop_bucket_ms;
+        let desktop_current_bucket_start = now_ms.div_euclid(desktop_bucket_ms) * desktop_bucket_ms;
         let cutoff = now_ms - AVAILABILITY_RETENTION_MS;
         let conn = db.open_connection().expect("open db");
         for (trace, observed_at_ms, success) in [
@@ -1215,7 +1214,11 @@ mod tests {
             ("success-2", current_bucket_start + 2, 1),
             ("success-3", current_bucket_start + 3, 1),
             ("failure-1", current_bucket_start + 4, 0),
-            ("desktop-current-success", desktop_current_bucket_start + 1, 1),
+            (
+                "desktop-current-success",
+                desktop_current_bucket_start + 1,
+                1,
+            ),
             ("expired", cutoff - 1, 0),
             ("at-cutoff", cutoff, 1),
         ] {
@@ -1263,17 +1266,19 @@ mod tests {
         assert_eq!((current.success_count, current.failure_count), (4, 1));
         assert_eq!(current.state, ProviderAvailabilityState::Healthy);
         assert_eq!(
-            desktop_timeline
-                .buckets
-                .last()
-                .map(|bucket| (bucket.success_count, bucket.failure_count, bucket.state)),
+            desktop_timeline.buckets.last().map(|bucket| (
+                bucket.success_count,
+                bucket.failure_count,
+                bucket.state
+            )),
             Some((1, 0, ProviderAvailabilityState::Healthy))
         );
         assert_eq!(
-            tray_timeline
-                .buckets
-                .last()
-                .map(|bucket| (bucket.success_count, bucket.failure_count, bucket.state)),
+            tray_timeline.buckets.last().map(|bucket| (
+                bucket.success_count,
+                bucket.failure_count,
+                bucket.state
+            )),
             Some((4, 1, ProviderAvailabilityState::Healthy))
         );
         assert_eq!(

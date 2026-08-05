@@ -645,11 +645,8 @@ where
                     ctx.upstream_output_timing.clone(),
                     attempt_started,
                 );
-                let stream = TimingOnlyTeeStream::new(
-                    upstream,
-                    ctx,
-                    upstream_request_timeout_non_streaming,
-                );
+                let stream =
+                    TimingOnlyTeeStream::new(upstream, ctx, upstream_request_timeout_non_streaming);
                 let body = Body::from_stream(stream);
                 abort_guard.disarm();
                 return LoopControl::Return(build_response(
@@ -789,7 +786,8 @@ where
     )
     .await;
 
-    let (mut body_bytes, provider_ttfb_ms, final_upstream_attempt_duration_ms) = match bytes_result {
+    let (mut body_bytes, provider_ttfb_ms, final_upstream_attempt_duration_ms) = match bytes_result
+    {
         Ok((b, first_byte_ms, final_attempt_duration_ms)) => {
             emit_gateway_debug_log_lazy(&state.app, || {
                 format!(
@@ -1704,16 +1702,15 @@ mod tests {
             .checked_sub(Duration::from_millis(25))
             .expect("test attempt start");
 
-        let (body, first_byte_ms, final_attempt_duration_ms) =
-            read_non_stream_body_with_limit(
-                response,
-                Instant::now(),
-                attempt_started,
-                Some(Duration::from_secs(2)),
-                64,
-            )
-            .await
-            .expect("read complete upstream body");
+        let (body, first_byte_ms, final_attempt_duration_ms) = read_non_stream_body_with_limit(
+            response,
+            Instant::now(),
+            attempt_started,
+            Some(Duration::from_secs(2)),
+            64,
+        )
+        .await
+        .expect("read complete upstream body");
 
         assert_eq!(body.as_ref(), expected.as_slice());
         assert!(first_byte_ms.is_some_and(|duration_ms| duration_ms >= 25));

@@ -198,13 +198,12 @@ impl RequestCompletion {
                         .log_ttfb_ms
                         .map_or(true, |ttfb_ms| *duration_ms >= ttfb_ms)
             });
-        self.final_upstream_attempt_timing_version = if version == 1
-            && self.final_upstream_attempt_duration_ms.is_some()
-        {
-            1
-        } else {
-            0
-        };
+        self.final_upstream_attempt_timing_version =
+            if version == 1 && self.final_upstream_attempt_duration_ms.is_some() {
+                1
+            } else {
+                0
+            };
         self
     }
 }
@@ -799,14 +798,14 @@ impl RequestLogEnqueueArgs {
         duration_ms: Option<u128>,
         version: i64,
     ) -> Self {
-        self.final_upstream_attempt_duration_ms = duration_ms.filter(|duration_ms| *duration_ms > 0);
-        self.final_upstream_attempt_timing_version = if version == 1
-            && self.final_upstream_attempt_duration_ms.is_some()
-        {
-            1
-        } else {
-            0
-        };
+        self.final_upstream_attempt_duration_ms =
+            duration_ms.filter(|duration_ms| *duration_ms > 0);
+        self.final_upstream_attempt_timing_version =
+            if version == 1 && self.final_upstream_attempt_duration_ms.is_some() {
+                1
+            } else {
+                0
+            };
         self
     }
 

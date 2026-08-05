@@ -137,18 +137,14 @@ impl StreamRequestCompletion {
             .then_some(duration_ms)
             .flatten()
             .filter(|duration_ms| {
-                *duration_ms > 0
-                    && self
-                        .ttfb_ms
-                        .map_or(true, |ttfb_ms| *duration_ms >= ttfb_ms)
+                *duration_ms > 0 && self.ttfb_ms.map_or(true, |ttfb_ms| *duration_ms >= ttfb_ms)
             });
-        self.final_upstream_attempt_timing_version = if version == 1
-            && self.final_upstream_attempt_duration_ms.is_some()
-        {
-            1
-        } else {
-            0
-        };
+        self.final_upstream_attempt_timing_version =
+            if version == 1 && self.final_upstream_attempt_duration_ms.is_some() {
+                1
+            } else {
+                0
+            };
         self
     }
 }

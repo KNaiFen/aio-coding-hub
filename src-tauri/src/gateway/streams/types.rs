@@ -154,7 +154,9 @@ impl UpstreamOutputTiming {
         if state.contaminated {
             return None;
         }
-        state.final_attempt_duration_ms.filter(|duration_ms| *duration_ms > 0)
+        state
+            .final_attempt_duration_ms
+            .filter(|duration_ms| *duration_ms > 0)
     }
 
     pub(in crate::gateway) fn duration_ms(&self) -> Option<u128> {

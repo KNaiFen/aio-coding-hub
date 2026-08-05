@@ -179,8 +179,8 @@ fn request_log_insert_from_args(
         } else {
             0
         };
-    let successful = error_code.is_none()
-        && status.is_some_and(|status| (200..300).contains(&status));
+    let successful =
+        error_code.is_none() && status.is_some_and(|status| (200..300).contains(&status));
     let final_upstream_attempt_duration_ms = successful
         .then_some(final_upstream_attempt_duration_ms)
         .flatten()

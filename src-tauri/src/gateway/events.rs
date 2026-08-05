@@ -619,8 +619,8 @@ pub(super) fn emit_request_event<R: tauri::Runtime>(
         return;
     }
 
-    let successful = error_code.is_none()
-        && status.is_some_and(|status| (200..300).contains(&status));
+    let successful =
+        error_code.is_none() && status.is_some_and(|status| (200..300).contains(&status));
     let final_upstream_attempt_duration_ms = successful
         .then_some(final_upstream_attempt_duration_ms)
         .flatten()
