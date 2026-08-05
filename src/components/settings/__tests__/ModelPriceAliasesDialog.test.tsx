@@ -120,6 +120,63 @@ describe("settings/ModelPriceAliasesDialog", () => {
     expect(onOpenChange).not.toHaveBeenCalled();
   });
 
+  it("blocks editing and offers retry when aliases cannot be loaded", async () => {
+    const aliasesRefetch = vi.fn().mockResolvedValue({ data: {} });
+    const failedAliasesQuery = {
+      data: {
+        version: 2,
+        rules: [
+          {
+            cli_key: "gemini",
+            match_type: "prefix",
+            pattern: "gemini-3",
+            target_model: "gemini-3-preview",
+            enabled: true,
+          },
+        ],
+      },
+      isFetching: false,
+      isError: true,
+      error: new Error("alias read failed"),
+      refetch: aliasesRefetch,
+    } as any;
+    const recoveredAliasesQuery = {
+      data: failedAliasesQuery.data,
+      isFetching: false,
+      isError: false,
+      error: null,
+      refetch: aliasesRefetch,
+    } as any;
+    let aliasesQuery = failedAliasesQuery;
+    vi.mocked(useModelPriceAliasesQuery).mockImplementation(() => aliasesQuery);
+    vi.mocked(useModelPricesListQuery).mockReturnValue({
+      data: [],
+      isFetching: false,
+      refetch: vi.fn(),
+    } as any);
+    const mutateAsync = vi.fn();
+    vi.mocked(useModelPriceAliasesSetMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync,
+    } as any);
+
+    const { rerender } = render(<ModelPriceAliasesDialog open={true} onOpenChange={vi.fn()} />);
+
+    expect(screen.getByText("加载失败")).toBeInTheDocument();
+    expect(screen.getByText("alias read failed")).toBeInTheDocument();
+    expect(screen.queryByText("规则 #1")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "新增规则" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "保存" })).toBeDisabled();
+    expect(mutateAsync).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    expect(aliasesRefetch).toHaveBeenCalledTimes(1);
+
+    aliasesQuery = recoveredAliasesQuery;
+    rerender(<ModelPriceAliasesDialog open={true} onOpenChange={vi.fn()} />);
+    expect(screen.getByText("规则 #1")).toBeInTheDocument();
+  });
+
   it("supports add/edit/delete and save flows", async () => {
     const onOpenChange = vi.fn();
 
