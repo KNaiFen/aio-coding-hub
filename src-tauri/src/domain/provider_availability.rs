@@ -910,21 +910,13 @@ pub fn timelines(
     let bucket_ms = range_ms
         .checked_div(bucket_count_i64)
         .ok_or_else(|| "SEC_INVALID_INPUT: invalid availability range".to_string())?;
-    let alignment_bucket_count = if bucket_count == DESKTOP_PROVIDER_AVAILABILITY_BUCKETS {
-        TUI_PROVIDER_AVAILABILITY_BUCKETS
-    } else {
-        bucket_count
-    };
-    let alignment_ms = range_ms
-        .checked_div(i64::from(alignment_bucket_count))
-        .ok_or_else(|| "SEC_INVALID_INPUT: invalid availability alignment".to_string())?;
     let now_ms = now_ms.max(0);
     let end_at_ms = now_ms
-        .div_euclid(alignment_ms)
+        .div_euclid(bucket_ms)
         .saturating_add(1)
-        .saturating_mul(alignment_ms);
+        .saturating_mul(bucket_ms);
     let start_at_ms = end_at_ms.saturating_sub(bucket_ms.saturating_mul(bucket_count_i64));
-    let current_period_start_ms = end_at_ms.saturating_sub(alignment_ms);
+    let current_period_start_ms = end_at_ms.saturating_sub(bucket_ms);
 
     let empty_buckets = || {
         (0..bucket_count_i64)
@@ -1209,8 +1201,13 @@ mod tests {
         let provider =
             upsert(&db, default_provider_params("timeline-provider")).expect("insert provider");
         let now_ms: i64 = 10 * 60 * 60 * 1_000 + 17 * 60 * 1_000;
-        let bucket_ms = 30 * 60 * 1_000;
-        let current_bucket_start = now_ms.div_euclid(bucket_ms) * bucket_ms;
+        let tui_bucket_ms = 30 * 60 * 1_000;
+        let tray_bucket_ms = 20 * 60 * 1_000;
+        let desktop_bucket_ms = 10 * 60 * 1_000;
+        let current_bucket_start = now_ms.div_euclid(tui_bucket_ms) * tui_bucket_ms;
+        let tray_current_bucket_start = now_ms.div_euclid(tray_bucket_ms) * tray_bucket_ms;
+        let desktop_current_bucket_start =
+            now_ms.div_euclid(desktop_bucket_ms) * desktop_bucket_ms;
         let cutoff = now_ms - AVAILABILITY_RETENTION_MS;
         let conn = db.open_connection().expect("open db");
         for (trace, observed_at_ms, success) in [
@@ -1218,6 +1215,7 @@ mod tests {
             ("success-2", current_bucket_start + 2, 1),
             ("success-3", current_bucket_start + 3, 1),
             ("failure-1", current_bucket_start + 4, 0),
+            ("desktop-current-success", desktop_current_bucket_start + 1, 1),
             ("expired", cutoff - 1, 0),
             ("at-cutoff", cutoff, 1),
         ] {
@@ -1244,58 +1242,55 @@ mod tests {
         let current = timeline.buckets.last().expect("current bucket");
         assert_eq!(timeline.bucket_minutes, 30);
         assert_eq!(tray_timeline.bucket_minutes, 20);
+        assert_eq!(desktop_timeline.bucket_minutes, 10);
+        assert_eq!(current.start_at_ms, current_bucket_start);
         assert_eq!(
             tray_timeline
                 .buckets
                 .last()
                 .expect("tray current bucket")
                 .start_at_ms,
-            10 * 60 * 60 * 1_000
+            tray_current_bucket_start
         );
-        assert_eq!(current.start_at_ms, current_bucket_start);
-        assert_eq!((current.success_count, current.failure_count), (3, 1));
-        assert_eq!(current.state, ProviderAvailabilityState::Unhealthy);
         assert_eq!(
             desktop_timeline
                 .buckets
                 .last()
-                .expect("desktop current status cell")
-                .state,
-            ProviderAvailabilityState::Unhealthy
+                .expect("desktop current bucket")
+                .start_at_ms,
+            desktop_current_bucket_start
+        );
+        assert_eq!((current.success_count, current.failure_count), (4, 1));
+        assert_eq!(current.state, ProviderAvailabilityState::Healthy);
+        assert_eq!(
+            desktop_timeline
+                .buckets
+                .last()
+                .map(|bucket| (bucket.success_count, bucket.failure_count, bucket.state)),
+            Some((1, 0, ProviderAvailabilityState::Healthy))
         );
         assert_eq!(
             tray_timeline
                 .buckets
                 .last()
-                .expect("tray current status cell")
-                .state,
-            ProviderAvailabilityState::Unhealthy
+                .map(|bucket| (bucket.success_count, bucket.failure_count, bucket.state)),
+            Some((4, 1, ProviderAvailabilityState::Healthy))
         );
-        for (tui_bucket, desktop_buckets) in timeline
-            .buckets
-            .iter()
-            .zip(desktop_timeline.buckets.chunks_exact(3))
-        {
-            assert_eq!(tui_bucket.start_at_ms, desktop_buckets[0].start_at_ms);
-            assert_eq!(tui_bucket.end_at_ms, desktop_buckets[2].end_at_ms);
-            assert_eq!(
-                tui_bucket.success_count,
-                desktop_buckets
-                    .iter()
-                    .map(|bucket| bucket.success_count)
-                    .sum::<u32>()
-            );
-            assert_eq!(
-                tui_bucket.failure_count,
-                desktop_buckets
-                    .iter()
-                    .map(|bucket| bucket.failure_count)
-                    .sum::<u32>()
-            );
-        }
+        assert_eq!(
+            desktop_timeline
+                .buckets
+                .iter()
+                .find(|bucket| bucket.start_at_ms == current_bucket_start)
+                .map(|bucket| (bucket.success_count, bucket.failure_count, bucket.state)),
+            Some((3, 1, ProviderAvailabilityState::Healthy))
+        );
 
         let rolled_now_ms = 10 * 60 * 60 * 1_000 + 31 * 60 * 1_000;
-        for bucket_count in [12, 18, 36] {
+        for (bucket_count, expected_current_start) in [
+            (12, 10 * 60 * 60 * 1_000 + 30 * 60 * 1_000),
+            (18, 10 * 60 * 60 * 1_000 + 20 * 60 * 1_000),
+            (36, 10 * 60 * 60 * 1_000 + 30 * 60 * 1_000),
+        ] {
             let rolled_timeline = timelines(&db, &[provider.id], 6, bucket_count, rolled_now_ms)
                 .expect("load rolled timeline")
                 .pop()
@@ -1310,12 +1305,10 @@ mod tests {
                 ProviderAvailabilityState::Healthy,
                 "historical state must use the success ratio for {bucket_count} buckets"
             );
+            let rolled_current = rolled_timeline.buckets.last().expect("new current bucket");
+            assert_eq!(rolled_current.start_at_ms, expected_current_start);
             assert_eq!(
-                rolled_timeline
-                    .buckets
-                    .last()
-                    .expect("new current bucket")
-                    .state,
+                rolled_current.state,
                 ProviderAvailabilityState::NoData,
                 "new current state must stay empty for {bucket_count} buckets"
             );
@@ -1344,7 +1337,7 @@ mod tests {
         let provider =
             upsert(&db, default_provider_params("last-success")).expect("insert provider");
         let now_ms: i64 = 10 * 60 * 60 * 1_000 + 17 * 60 * 1_000;
-        let current_period_start = 10 * 60 * 60 * 1_000;
+        let current_period_start = 10 * 60 * 60 * 1_000 + 10 * 60 * 1_000;
         let conn = db.open_connection().expect("open db");
         for (trace, observed_at_ms, success) in [
             ("failure-1", current_period_start + 1, 0_i64),
@@ -1383,7 +1376,7 @@ mod tests {
         let failure_last =
             upsert(&db, default_provider_params("failure-last")).expect("insert provider");
         let now_ms: i64 = 10 * 60 * 60 * 1_000 + 17 * 60 * 1_000;
-        let observed_at_ms = 10 * 60 * 60 * 1_000 + 1;
+        let observed_at_ms = 10 * 60 * 60 * 1_000 + 10 * 60 * 1_000 + 1;
         let conn = db.open_connection().expect("open db");
         for (trace, provider_id, success) in [
             ("success-last-failure", success_last.id, 0_i64),
@@ -1399,24 +1392,34 @@ mod tests {
         }
         drop(conn);
 
-        let timelines = timelines(&db, &[success_last.id, failure_last.id], 6, 12, now_ms)
+        for bucket_count in [12, 18, 36] {
+            let timelines = timelines(
+                &db,
+                &[success_last.id, failure_last.id],
+                6,
+                bucket_count,
+                now_ms,
+            )
             .expect("load timelines");
-        let state_for = |provider_id| {
-            timelines
-                .iter()
-                .find(|timeline| timeline.provider_id == provider_id)
-                .and_then(|timeline| timeline.buckets.last())
-                .map(|bucket| bucket.state)
-                .expect("current status")
-        };
-        assert_eq!(
-            state_for(success_last.id),
-            ProviderAvailabilityState::Healthy
-        );
-        assert_eq!(
-            state_for(failure_last.id),
-            ProviderAvailabilityState::Unhealthy
-        );
+            let state_for = |provider_id| {
+                timelines
+                    .iter()
+                    .find(|timeline| timeline.provider_id == provider_id)
+                    .and_then(|timeline| timeline.buckets.last())
+                    .map(|bucket| bucket.state)
+                    .expect("current status")
+            };
+            assert_eq!(
+                state_for(success_last.id),
+                ProviderAvailabilityState::Healthy,
+                "the later rowid must win for {bucket_count} buckets"
+            );
+            assert_eq!(
+                state_for(failure_last.id),
+                ProviderAvailabilityState::Unhealthy,
+                "the later rowid must win for {bucket_count} buckets"
+            );
+        }
     }
 
     async fn response_from_request_capture(
