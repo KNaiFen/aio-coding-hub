@@ -297,7 +297,7 @@ jobs:
 
       - name: Dependency audit
         working-directory: src-tauri
-        run: cargo audit --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195
+        run: cargo audit
 
   candidate-plan:
     needs: change-scope
