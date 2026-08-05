@@ -1,4 +1,44 @@
 use super::*;
+use std::ffi::OsString;
+
+struct ScopedEnvVar {
+    key: &'static str,
+    value: Option<OsString>,
+}
+
+impl ScopedEnvVar {
+    fn set(key: &'static str, value: impl Into<OsString>) -> Self {
+        let previous = std::env::var_os(key);
+        std::env::set_var(key, value.into());
+        Self {
+            key,
+            value: previous,
+        }
+    }
+}
+
+impl Drop for ScopedEnvVar {
+    fn drop(&mut self) {
+        match self.value.take() {
+            Some(previous) => std::env::set_var(self.key, previous),
+            None => std::env::remove_var(self.key),
+        }
+    }
+}
+
+fn read_fixture_error(bytes: &[u8]) -> String {
+    let _guard = crate::test_support::test_env_lock();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let _home = ScopedEnvVar::set("AIO_CODING_HUB_TEST_HOME", temp.path());
+    let app = tauri::test::mock_app();
+    let handle = app.handle().clone();
+    let path = aliases_path(&handle).expect("aliases path");
+    std::fs::write(path, bytes).expect("write aliases fixture");
+
+    read(&handle)
+        .expect_err("strict aliases read must reject invalid content")
+        .to_string()
+}
 
 #[test]
 fn wildcard_single_star_matches_prefix_suffix() {
@@ -155,4 +195,25 @@ fn write_json_atomically_rejects_oversized_aliases_file() {
 
     assert!(err.contains("price aliases file too large"));
     assert!(!path.exists());
+}
+
+#[test]
+fn strict_read_rejects_malformed_json() {
+    let err = read_fixture_error(b"{invalid json");
+
+    assert!(err.contains("failed to parse aliases"));
+}
+
+#[test]
+fn strict_read_rejects_invalid_utf8() {
+    let err = read_fixture_error(&[0xff, 0xfe, 0xfd]);
+
+    assert!(err.contains("invalid price aliases UTF-8"));
+}
+
+#[test]
+fn strict_read_rejects_oversized_file() {
+    let err = read_fixture_error(&vec![b'x'; ALIASES_FILE_MAX_BYTES + 1]);
+
+    assert!(err.contains("too large"));
 }
