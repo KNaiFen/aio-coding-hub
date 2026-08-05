@@ -16,6 +16,7 @@ import {
   useSettingsCircuitBreakerNoticeSetMutation,
   useSettingsCodexSessionIdCompletionSetMutation,
   useSettingsGatewayRectifierSetMutation,
+  useSettingsPatchMutation,
   useSettingsQuery,
   useSettingsSessionReuseSetMutation,
   useSettingsSetMutation,
@@ -198,6 +199,149 @@ describe("query/settings", () => {
 
     expect(client.getQueryData(settingsKeys.get())).toEqual(initial);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: settingsKeys.get() });
+  });
+
+  it("serializes independent settings patches and merges from the confirmed cache", async () => {
+    setTauriRuntime();
+    vi.mocked(settingsSet).mockReset();
+
+    const initial = createTestAppSettings({
+      provider_cooldown_seconds: 30,
+      wsl_auto_config: false,
+    });
+    const firstUpdated = createTestAppSettings({
+      provider_cooldown_seconds: 41,
+      wsl_auto_config: false,
+    });
+    const secondUpdated = createTestAppSettings({
+      provider_cooldown_seconds: 41,
+      wsl_auto_config: true,
+    });
+    const gatewayStatus: GatewayStatus = {
+      running: false,
+      port: initial.preferred_port,
+      base_url: `http://127.0.0.1:${initial.preferred_port}`,
+      listen_addr: `127.0.0.1:${initial.preferred_port}`,
+    };
+    const mutationResult = (settings: typeof initial) => ({
+      settings,
+      runtime: {
+        gateway_rebound: false,
+        cli_proxy_synced: false,
+        wsl_auto_sync_triggered: false,
+        gateway_status: gatewayStatus,
+      },
+    });
+    let resolveFirst!: (value: ReturnType<typeof mutationResult>) => void;
+    const firstResponse = new Promise<ReturnType<typeof mutationResult>>((resolve) => {
+      resolveFirst = resolve;
+    });
+    vi.mocked(settingsSet)
+      .mockImplementationOnce(() => firstResponse)
+      .mockResolvedValueOnce(mutationResult(secondUpdated));
+
+    const client = createTestQueryClient();
+    client.setQueryData(settingsKeys.get(), initial);
+    const wrapper = createQueryWrapper(client);
+    const { result } = renderHook(
+      () => ({
+        common: useSettingsPatchMutation(),
+        wsl: useSettingsPatchMutation(),
+      }),
+      { wrapper }
+    );
+
+    let firstMutation!: Promise<unknown>;
+    let secondMutation!: Promise<unknown>;
+    act(() => {
+      firstMutation = result.current.common.mutateAsync({ provider_cooldown_seconds: 41 });
+      secondMutation = result.current.wsl.mutateAsync({ wsl_auto_config: true });
+    });
+
+    await waitFor(() => expect(settingsSet).toHaveBeenCalledTimes(1));
+    resolveFirst(mutationResult(firstUpdated));
+    await act(async () => {
+      await Promise.all([firstMutation, secondMutation]);
+    });
+
+    expect(settingsSet).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(settingsSet).mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({
+        providerCooldownSeconds: 41,
+        wslAutoConfig: true,
+      })
+    );
+    expect(client.getQueryData(settingsKeys.get())).toEqual(secondUpdated);
+  });
+
+  it("continues queued settings patches after an earlier write fails", async () => {
+    setTauriRuntime();
+    vi.mocked(settingsSet).mockReset();
+
+    const initial = createTestAppSettings({
+      provider_cooldown_seconds: 30,
+      wsl_auto_config: false,
+    });
+    const secondUpdated = createTestAppSettings({
+      provider_cooldown_seconds: 30,
+      wsl_auto_config: true,
+    });
+    const gatewayStatus: GatewayStatus = {
+      running: false,
+      port: initial.preferred_port,
+      base_url: `http://127.0.0.1:${initial.preferred_port}`,
+      listen_addr: `127.0.0.1:${initial.preferred_port}`,
+    };
+    let rejectFirst!: (reason: Error) => void;
+    const firstResponse = new Promise<never>((_resolve, reject) => {
+      rejectFirst = reject;
+    });
+    vi.mocked(settingsSet)
+      .mockImplementationOnce(() => firstResponse)
+      .mockResolvedValueOnce({
+        settings: secondUpdated,
+        runtime: {
+          gateway_rebound: false,
+          cli_proxy_synced: false,
+          wsl_auto_sync_triggered: false,
+          gateway_status: gatewayStatus,
+        },
+      });
+
+    const client = createTestQueryClient();
+    client.setQueryData(settingsKeys.get(), initial);
+    const wrapper = createQueryWrapper(client);
+    const { result } = renderHook(
+      () => ({
+        common: useSettingsPatchMutation(),
+        wsl: useSettingsPatchMutation(),
+      }),
+      { wrapper }
+    );
+
+    let firstMutation!: Promise<unknown>;
+    let secondMutation!: Promise<unknown>;
+    act(() => {
+      firstMutation = result.current.common.mutateAsync({ provider_cooldown_seconds: 41 });
+      void firstMutation.catch(() => undefined);
+      secondMutation = result.current.wsl.mutateAsync({ wsl_auto_config: true });
+    });
+
+    await waitFor(() => expect(settingsSet).toHaveBeenCalledTimes(1));
+    rejectFirst(new Error("settings write failed"));
+    await act(async () => {
+      await expect(firstMutation).rejects.toThrow("settings write failed");
+      await secondMutation;
+    });
+
+    expect(settingsSet).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(settingsSet).mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({
+        providerCooldownSeconds: 30,
+        wslAutoConfig: true,
+      })
+    );
+    expect(client.getQueryData(settingsKeys.get())).toEqual(secondUpdated);
   });
 
   it("useSettingsGatewayRectifierSetMutation updates cache", async () => {
