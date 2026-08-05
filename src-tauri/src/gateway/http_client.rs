@@ -1296,23 +1296,29 @@ mod tests {
         ));
     }
 
-    #[tokio::test(flavor = "current_thread")]
-    async fn test_gateway_target_detection_resolves_local_aliases() {
+    #[test]
+    fn test_gateway_target_detection_resolves_local_aliases() {
         let _guard = crate::test_support::test_env_lock();
-        clear_gateway_target_resolution_cache();
-        let context = GatewaySelfCheckContext {
-            gateway_port: 37123,
-            hosts: BTreeSet::from(["127.0.0.1".to_string(), "::1".to_string()]),
-        };
-        let resolved_alias = Url::parse("http://localhost:37123/v1").unwrap();
-        let different_port = Url::parse("http://localhost:37124/v1").unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        runtime.block_on(async {
+            clear_gateway_target_resolution_cache();
+            let context = GatewaySelfCheckContext {
+                gateway_port: 37123,
+                hosts: BTreeSet::from(["127.0.0.1".to_string(), "::1".to_string()]),
+            };
+            let resolved_alias = Url::parse("http://localhost:37123/v1").unwrap();
+            let different_port = Url::parse("http://localhost:37124/v1").unwrap();
 
-        assert!(url_resolves_to_gateway_with_context(&resolved_alias, &context).await);
-        assert_eq!(
-            cached_gateway_target_resolution("localhost", &context),
-            Some(true)
-        );
-        assert!(!url_resolves_to_gateway_with_context(&different_port, &context).await);
+            assert!(url_resolves_to_gateway_with_context(&resolved_alias, &context).await);
+            assert_eq!(
+                cached_gateway_target_resolution("localhost", &context),
+                Some(true)
+            );
+            assert!(!url_resolves_to_gateway_with_context(&different_port, &context).await);
+        });
     }
 
     #[test]
