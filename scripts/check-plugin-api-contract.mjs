@@ -99,6 +99,29 @@ function functionBody(text, functionName) {
   return null;
 }
 
+function objectTypeBody(text, typeName) {
+  const signature = new RegExp(`export\\s+type\\s+${escapeRegex(typeName)}\\s*=\\s*\\{`).exec(text);
+  if (!signature) return null;
+  const openBrace = text.indexOf("{", signature.index);
+  if (openBrace === -1) return null;
+
+  let depth = 0;
+  for (let index = openBrace; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === "{") depth += 1;
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return text
+          .slice(openBrace + 1, index)
+          .replace(/\s+/g, " ")
+          .trim();
+      }
+    }
+  }
+  return null;
+}
+
 function requireObject(path, value) {
   if (value == null || typeof value !== "object" || Array.isArray(value)) {
     failures.push(`${path} must be an object`);
@@ -234,6 +257,28 @@ if (contract) {
       failures.push(`${contractPath}.capabilities must include ${capability}`);
     }
   }
+  const extensionHostCapabilityApis =
+    requireObject(
+      `${contractPath}.extensionHostCapabilityApis`,
+      contract.extensionHostCapabilityApis
+    ) ?? {};
+  const expectedExtensionHostCapabilityApis = {
+    "storage.plugin": ["api.storage.get", "api.storage.set"],
+    "diagnostics.read": ["api.diagnostics.getRuntimeReports"],
+    "privacy.redact": ["api.privacy.redactText", "api.privacy.redactRequestBody"],
+  };
+  requireArrayEquals(
+    `${contractPath}.extensionHostCapabilityApis keys`,
+    Object.keys(extensionHostCapabilityApis),
+    Object.keys(expectedExtensionHostCapabilityApis)
+  );
+  for (const [capability, methods] of Object.entries(expectedExtensionHostCapabilityApis)) {
+    requireArrayEquals(
+      `${contractPath}.extensionHostCapabilityApis.${capability}`,
+      extensionHostCapabilityApis[capability],
+      methods
+    );
+  }
   const contributionPoints = requireArray(
     `${contractPath}.contributionPoints`,
     contract.contributionPoints
@@ -342,7 +387,23 @@ if (contract) {
   }
 
   const sdk = readText("packages/plugin-sdk/src/index.ts");
+  const extensionHostWorker = readText("src-tauri/src/app/plugins/extension_host_worker.rs");
+  const extensionHost = readText("src-tauri/src/app/plugins/extension_host.rs");
   const generatedBindings = readText("src/generated/bindings.ts");
+  const sdkRuntimeReport = objectTypeBody(sdk, "PluginExtensionExecutionReport");
+  const generatedRuntimeReport = objectTypeBody(
+    generatedBindings,
+    "PluginExtensionExecutionReport"
+  );
+  if (sdkRuntimeReport == null || generatedRuntimeReport == null) {
+    failures.push(
+      "PluginExtensionExecutionReport must exist in both the Plugin SDK and generated bindings"
+    );
+  } else if (sdkRuntimeReport !== generatedRuntimeReport) {
+    failures.push(
+      "Plugin SDK PluginExtensionExecutionReport must match the generated Rust binding"
+    );
+  }
   requireIncludes(
     "src/generated/bindings.ts",
     generatedBindings,
@@ -416,11 +477,45 @@ if (contract) {
       "export type GatewayHookContribution",
       "export type ProtocolBridgeContribution",
       "export type PrivacyApi",
+      "export type StorageApi",
+      "export type DiagnosticsApi",
+      "export type PluginExtensionExecutionReport",
+      "get(key: string): JsonValue",
+      "set(key: string, value: JsonValue): void",
+      "getRuntimeReports(limit?: number): PluginExtensionExecutionReport[]",
+      "storage?: StorageApi",
+      "diagnostics?: DiagnosticsApi",
       "gatewayHooks?: GatewayHookContribution[]",
       "protocolBridges?: ProtocolBridgeContribution[]",
       "validateCapabilityDependencies",
     ],
     "Extension Host SDK contract"
+  );
+  requireIncludes(
+    "src-tauri/src/app/plugins/extension_host_worker.rs",
+    extensionHostWorker,
+    [
+      'capabilities.contains("storage.plugin")',
+      '"storage.get"',
+      '"storage.set"',
+      'api.set("storage", storage)',
+      'capabilities.contains("diagnostics.read")',
+      '"diagnostics.getRuntimeReports"',
+      'api.set("diagnostics", diagnostics)',
+    ],
+    "capability-gated Extension Host worker API"
+  );
+  requireIncludes(
+    "src-tauri/src/app/plugins/extension_host.rs",
+    extensionHost,
+    [
+      '"storage.get" => self.storage_get(params)',
+      '"storage.set" => self.storage_set(params)',
+      '"diagnostics.getRuntimeReports" => self.diagnostics_get_runtime_reports(params)',
+      'self.require_capability("storage.plugin")?',
+      'self.require_capability("diagnostics.read")?',
+    ],
+    "capability-gated Extension Host method route"
   );
   const capabilityDependencyBody = functionBody(sdk, "validateCapabilityDependencies");
   if (capabilityDependencyBody == null) {

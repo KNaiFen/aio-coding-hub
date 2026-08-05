@@ -241,6 +241,39 @@ export type PluginHookResult =
       audit?: JsonValue[];
     };
 
+export type PluginExtensionExecutionReport = {
+  id: number;
+  pluginId: string;
+  contributionType: string;
+  contributionId: string;
+  commandOrHook: string | null;
+  traceId: string | null;
+  status: string;
+  startedAtMs: number;
+  durationMs: number;
+  failureKind: string | null;
+  errorCode: string | null;
+  inputBudget: JsonValue;
+  outputBudget: JsonValue;
+  mutationSummary: JsonValue;
+  replayable: boolean;
+  createdAt: number;
+};
+
+/** Available only when the plugin declares the `storage.plugin` capability. */
+export type StorageApi = {
+  /** Returns `null` when the key has no stored value. */
+  get(key: string): JsonValue;
+  /** Persists a JSON value in this plugin's host-managed storage. */
+  set(key: string, value: JsonValue): void;
+};
+
+/** Available only when the plugin declares the `diagnostics.read` capability. */
+export type DiagnosticsApi = {
+  /** Returns this plugin's newest runtime reports. The host applies its own limit bounds. */
+  getRuntimeReports(limit?: number): PluginExtensionExecutionReport[];
+};
+
 export type PrivacyRedactionOptions = {
   sensitiveTypes?: string[];
   redactionScopes?: string[];
@@ -272,8 +305,10 @@ export type CommandsApi = {
 
 export type PluginApi = {
   commands?: CommandsApi;
+  diagnostics?: DiagnosticsApi;
   gateway?: GatewayApi;
   privacy?: PrivacyApi;
+  storage?: StorageApi;
 };
 
 export type ValidationResult =

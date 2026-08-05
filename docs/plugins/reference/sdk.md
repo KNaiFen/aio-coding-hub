@@ -148,7 +148,9 @@ SDK 认识全部 `UiContributionSlot` 名称，Rust 也会校验已知插槽和�
 
 `privacy.redact` 是宿主提供的脱敏 API capability。声明后，Extension Host 入口可以通过 `api.privacy.redactText` 和 `api.privacy.redactRequestBody` 调用宿主脱敏服务；它不自动声明 gateway hook，仍需要和 `gateway.hooks`、`contributes.gatewayHooks` 配合使用。
 
-`storage.plugin` 是当前 Extension Host storage API 能力。它通过 `api.storage` 暴露给插件，但持久化实现仍写入插件配置 JSON 的顶层 `storage` 字段，并有 64 KiB storage JSON 限制。`plugin.storage` 是内部/未来宿主中介标签，不是 active manifest capability。
+`storage.plugin` 是当前 Extension Host storage API 能力。声明后，插件可同步调用 `api.storage.get(key)` 与 `api.storage.set(key, value)`；缺失 key 返回 `null`，写入值必须是 SDK `JsonValue`。持久化实现仍写入插件配置 JSON 的顶层 `storage` 字段，并有 64 KiB storage JSON 限制。`plugin.storage` 是内部/未来宿主中介标签，不是 active manifest capability。
+
+`diagnostics.read` 声明后，插件可同步调用 `api.diagnostics.getRuntimeReports(limit?)`，读取当前插件最新的 `PluginExtensionExecutionReport[]`。省略 limit 时宿主使用 20，显式值会收敛到 1 至 100；该 API 不会返回其他插件的报告。`storage` 与 `diagnostics` 属性只在对应 capability 获准时注入，因此 SDK 将它们声明为可选命名空间。
 
 ## SDK 边界
 
