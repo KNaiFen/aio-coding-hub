@@ -227,10 +227,7 @@ pub(crate) struct ExtensionHostInstanceRegistry {
 
 impl ExtensionHostInstanceRegistry {
     pub(crate) fn new_shared(db: db::Db) -> Arc<Self> {
-        Self::new_shared_with_privacy_redaction(
-            db,
-            Arc::new(PrivacyRedactionService::default()),
-        )
+        Self::new_shared_with_privacy_redaction(db, Arc::new(PrivacyRedactionService::default()))
     }
 
     pub(crate) fn new_shared_with_privacy_redaction(
@@ -655,18 +652,12 @@ impl ExtensionHostInstanceRegistry {
     }
 }
 
-fn start_idle_sweeper(
-    registry: &Arc<ExtensionHostInstanceRegistry>,
-    sweep_interval: Duration,
-) {
+fn start_idle_sweeper(registry: &Arc<ExtensionHostInstanceRegistry>, sweep_interval: Duration) {
     let registry = Arc::downgrade(registry);
     tauri::async_runtime::spawn(run_idle_sweeper(registry, sweep_interval));
 }
 
-async fn run_idle_sweeper(
-    registry: Weak<ExtensionHostInstanceRegistry>,
-    sweep_interval: Duration,
-) {
+async fn run_idle_sweeper(registry: Weak<ExtensionHostInstanceRegistry>, sweep_interval: Duration) {
     let mut interval = tokio::time::interval(sweep_interval);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     interval.tick().await;
