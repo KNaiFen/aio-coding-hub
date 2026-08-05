@@ -256,7 +256,7 @@ fn collect_replayable_items(expanded_input: &[Value], output: &[Value]) -> Optio
     Some(
         replayable_refs
             .into_iter()
-            .filter_map(|item| strip_item_id(item))
+            .filter_map(strip_item_id)
             .collect(),
     )
 }
@@ -264,20 +264,6 @@ fn collect_replayable_items(expanded_input: &[Value], output: &[Value]) -> Optio
 fn is_replayable_input_item(item: &Value) -> bool {
     !(item.get("type").and_then(Value::as_str) == Some("reasoning")
         && item.get("encrypted_content").is_some())
-}
-
-pub(crate) fn replayable_input_item(item: &Value) -> Option<Value> {
-    if !is_replayable_input_item(item) {
-        return None;
-    }
-    strip_item_id(item)
-}
-
-pub(crate) fn replayable_output_item(item: &Value) -> Option<Value> {
-    if !is_tool_call_context_item(item) {
-        return None;
-    }
-    strip_item_id(item)
 }
 
 pub(crate) fn strip_item_id(item: &Value) -> Option<Value> {
