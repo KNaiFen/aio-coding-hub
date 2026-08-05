@@ -480,13 +480,22 @@ fn validate_managed_wire_model(
     Ok(())
 }
 
+fn build_target_url_for_attempt(
+    base_url: &str,
+    forwarded_path: &str,
+    query: Option<&str>,
+) -> Result<reqwest::Url, String> {
+    let url = build_target_url(base_url, forwarded_path, query).map_err(|e| e.to_string())?;
+    crate::gateway::http_client::validate_gateway_target(&url)?;
+    Ok(url)
+}
+
 fn try_build_url(prepared: &PreparedProvider) -> Result<reqwest::Url, String> {
-    build_target_url(
+    build_target_url_for_attempt(
         &prepared.provider_base_url_base,
         &prepared.upstream_forwarded_path,
         prepared.upstream_query.as_deref(),
     )
-    .map_err(|e| e.to_string())
 }
 
 fn apply_body_sanitizer_outcome(
@@ -725,6 +734,40 @@ fn emit_started_event<R: tauri::Runtime>(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn target_url_builder_rejects_current_gateway_and_allows_other_targets() {
+        let _guard = crate::test_support::test_env_lock();
+        crate::gateway::http_client::sync_runtime_context(37123, "127.0.0.1", "localhost");
+
+        let error = build_target_url_for_attempt(
+            "http://LOCALHOST:37123/v1",
+            "/v1/responses",
+            Some("stream=true"),
+        )
+        .expect_err("current gateway target must be rejected before send");
+
+        assert_eq!(
+            error,
+            "Provider URL points to the gateway itself (self-loop detected)"
+        );
+
+        let different_port = build_target_url_for_attempt(
+            "http://localhost:37124/v1",
+            "/v1/responses",
+            None,
+        )
+        .expect("same host on a different port is a separate upstream");
+        let external = build_target_url_for_attempt(
+            "https://api.example.com/v1",
+            "/v1/responses",
+            None,
+        )
+        .expect("external Provider target must remain allowed");
+
+        assert_eq!(different_port.port(), Some(37124));
+        assert_eq!(external.host_str(), Some("api.example.com"));
+    }
 
     #[test]
     fn final_wire_model_sync_is_scoped_to_codex_or_managed_routes() {
