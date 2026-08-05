@@ -338,17 +338,24 @@ fn load_provider_candidates(
         .filter(provider_limit_usage::ProviderLimitUsageRow::is_limit_reached)
         .map(|row| row.provider_id)
         .collect::<HashSet<_>>();
-    let conn = db.open_connection()?;
-    for provider in providers
+    let oauth_provider_ids = providers
         .iter()
         .filter(|provider| provider.auth_mode == "oauth")
+        .map(|provider| provider.id)
+        .collect::<Vec<_>>();
+    for provider_ids in oauth_provider_ids
+        .chunks(crate::domain::provider_oauth_limits::MAX_DISPLAY_PROVIDER_IDS)
     {
-        if matches!(
-            crate::domain::provider_oauth_limits::gate_snapshot(&conn, provider.id, now_unix)?,
-            crate::domain::provider_oauth_limits::OAuthLimitGate::Limited { .. }
-        ) {
-            limited_provider_ids.insert(provider.id);
-        }
+        limited_provider_ids.extend(
+            crate::domain::provider_oauth_limits::list_display_snapshots(
+                db,
+                provider_ids,
+                now_unix,
+            )?
+            .into_iter()
+            .filter(|snapshot| snapshot.limited)
+            .map(|snapshot| snapshot.provider_id),
+        );
     }
     let providers = providers
         .into_iter()
@@ -1467,8 +1474,8 @@ mod tests {
         .expect("set route order");
         let conn = db.open_connection().expect("open db");
         conn.execute(
-            "UPDATE providers SET auth_mode = 'oauth' WHERE id = ?1",
-            [oauth_limited],
+            "UPDATE providers SET auth_mode = 'oauth' WHERE id IN (?1, ?2)",
+            rusqlite::params![oauth_limited, ready],
         )
         .expect("mark oauth provider");
         drop(conn);
@@ -1512,7 +1519,9 @@ mod tests {
         assert!(observed[1].oauth_limited);
         assert!(observed[1].oauth_quota.is_some());
         assert!(!observed[2].spend_limited);
+        assert_eq!(observed[2].auth_kind, "oauth");
         assert!(!observed[2].oauth_limited);
+        assert!(observed[2].oauth_quota.is_none());
     }
 
     #[test]
