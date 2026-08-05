@@ -1,3 +1,3 @@
 {"file": ".trellis/spec/aio-coding-hub/backend/index.md", "reason": "复核重试和失败路径不污染计时"}
 {"file": ".trellis/spec/aio-coding-hub/cross-layer/request-log-usage-ledger-pagination-contract.md", "reason": "复核日志、ledger、聚合完整性"}
-{"file": ".trellis/tasks/08-05-final-attempt-token-speed/research/sub2api-token-rate.md", "reason": "复核新口径与参考实现一致"}
+{"file": ".trellis/tasks/archive/2026-08/08-05-final-attempt-token-speed/research/sub2api-token-rate.md", "reason": "复核新口径与参考实现一致"}

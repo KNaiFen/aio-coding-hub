@@ -1,0 +1,38 @@
+{
+  "id": "observability-correctness-release",
+  "name": "observability-correctness-release",
+  "title": "修复可观测性正确性并发布 0.60.49",
+  "description": "统一修复 Token 速度、请求日志刷新和供应商状态条，并完成 PR 与补丁发版。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "aio-coding-hub",
+  "package": "aio-coding-hub",
+  "priority": "P0",
+  "creator": "KNaiFen",
+  "assignee": "KNaiFen",
+  "createdAt": "2026-08-05",
+  "completedAt": "2026-08-06",
+  "branch": "codex/fix-observability-refresh-status",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": "2a79978c7170871acbbf5179ce6f35d5ec8128c3",
+  "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/73",
+  "subtasks": [],
+  "children": [
+    "08-05-final-attempt-token-speed",
+    "08-05-buffered-request-log-refresh",
+    "08-05-provider-status-natural-buckets"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "PR #73 已 squash merge；精确合并 SHA 的 main CI 生成唯一候选，aio-coding-hub-v0.60.49 已发布并完成资产、签名、校验和与 updater manifest 验证。",
+  "meta": {
+    "pr_ci_run": 31032716470,
+    "main_ci_run": 31036095938,
+    "release_candidate_artifact_id": 8944530737,
+    "release_candidate_name": "release-candidate-2a79978c7170871acbbf5179ce6f35d5ec8128c3-31036095938-1",
+    "release_tag": "aio-coding-hub-v0.60.49",
+    "release_run": 31041339318,
+    "release_url": "https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.49"
+  }
+}
