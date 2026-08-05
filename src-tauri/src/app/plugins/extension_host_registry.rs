@@ -17,12 +17,13 @@ use std::collections::{BTreeMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{Arc, Mutex as StdMutex, Weak};
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, RwLock};
 
 const DEFAULT_MAX_WARM_INSTANCES: usize = 8;
 const DEFAULT_IDLE_RECYCLE: Duration = Duration::from_secs(120);
+const DEFAULT_IDLE_SWEEP_INTERVAL: Duration = Duration::from_secs(5);
 
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -72,6 +73,7 @@ trait ExtensionHostProcess: Send {
         context: Value,
     ) -> BoxFuture<'a, AppResult<Value>>;
     fn is_running(&mut self) -> bool;
+    fn recycle_if_idle<'a>(&'a mut self) -> BoxFuture<'a, AppResult<bool>>;
     fn dispose<'a>(&'a mut self) -> BoxFuture<'a, ()>;
 }
 
@@ -138,6 +140,10 @@ impl ExtensionHostProcess for RealExtensionHostProcess {
         self.host.is_running()
     }
 
+    fn recycle_if_idle<'a>(&'a mut self) -> BoxFuture<'a, AppResult<bool>> {
+        Box::pin(async move { self.host.recycle_if_idle().await })
+    }
+
     fn dispose<'a>(&'a mut self) -> BoxFuture<'a, ()> {
         Box::pin(async move {
             self.host.dispose().await;
@@ -198,6 +204,10 @@ impl ManagedExtensionHostInstance {
         self.process.lock().await.dispose().await;
     }
 
+    async fn recycle_if_idle(&self) -> AppResult<bool> {
+        self.process.lock().await.recycle_if_idle().await
+    }
+
     fn last_used(&self) -> Instant {
         *self
             .last_used
@@ -216,6 +226,22 @@ pub(crate) struct ExtensionHostInstanceRegistry {
 }
 
 impl ExtensionHostInstanceRegistry {
+    pub(crate) fn new_shared(db: db::Db) -> Arc<Self> {
+        Self::new_shared_with_privacy_redaction(
+            db,
+            Arc::new(PrivacyRedactionService::default()),
+        )
+    }
+
+    pub(crate) fn new_shared_with_privacy_redaction(
+        db: db::Db,
+        privacy_redaction: Arc<PrivacyRedactionService>,
+    ) -> Arc<Self> {
+        let registry = Arc::new(Self::new_with_privacy_redaction(db, privacy_redaction));
+        start_idle_sweeper(&registry, DEFAULT_IDLE_SWEEP_INTERVAL);
+        registry
+    }
+
     #[allow(dead_code)]
     pub(crate) fn new(db: db::Db) -> Self {
         Self::new_with_privacy_redaction(db, Arc::new(PrivacyRedactionService::default()))
@@ -451,9 +477,28 @@ impl ExtensionHostInstanceRegistry {
         }
     }
 
-    #[allow(dead_code)]
-    pub(crate) async fn dispose_idle(&self, now: Instant) {
+    async fn recycle_idle_processes(&self) {
         let _operation_guard = self.operation_gate.read().await;
+        let instances = {
+            let instances = self.instances.lock().await;
+            instances
+                .iter()
+                .map(|(key, instance)| (key.plugin_id.clone(), instance.clone()))
+                .collect::<Vec<_>>()
+        };
+        for (plugin_id, instance) in instances {
+            if let Err(error) = instance.recycle_if_idle().await {
+                tracing::warn!(
+                    plugin_id,
+                    error = %error,
+                    "failed to recycle idle extension host child"
+                );
+            }
+        }
+    }
+
+    pub(crate) async fn dispose_idle(&self, now: Instant) {
+        let _operation_guard = self.operation_gate.write().await;
         let disposals = {
             let mut instances = self.instances.lock().await;
             remove_idle_locked(&mut instances, self.limits.idle_recycle, now)
@@ -610,6 +655,31 @@ impl ExtensionHostInstanceRegistry {
     }
 }
 
+fn start_idle_sweeper(
+    registry: &Arc<ExtensionHostInstanceRegistry>,
+    sweep_interval: Duration,
+) {
+    let registry = Arc::downgrade(registry);
+    tauri::async_runtime::spawn(run_idle_sweeper(registry, sweep_interval));
+}
+
+async fn run_idle_sweeper(
+    registry: Weak<ExtensionHostInstanceRegistry>,
+    sweep_interval: Duration,
+) {
+    let mut interval = tokio::time::interval(sweep_interval);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    interval.tick().await;
+    loop {
+        interval.tick().await;
+        let Some(registry) = registry.upgrade() else {
+            return;
+        };
+        registry.recycle_idle_processes().await;
+        registry.dispose_idle(Instant::now()).await;
+    }
+}
+
 pub(crate) struct ExtensionHostInstanceLifecycleRegistry {
     registry: Arc<ExtensionHostInstanceRegistry>,
 }
@@ -711,7 +781,7 @@ impl ExtensionHostRuntimeState {
         if let Some(registry) = guard.as_ref() {
             return Ok(registry.clone());
         }
-        let registry = Arc::new(ExtensionHostInstanceRegistry::new(db));
+        let registry = ExtensionHostInstanceRegistry::new_shared(db);
         *guard = Some(registry.clone());
         Ok(registry)
     }
@@ -1059,6 +1129,7 @@ mod tests {
         starts: Vec<u64>,
         start_timeouts: Vec<Duration>,
         executions: Vec<u64>,
+        recycle_checks: Vec<u64>,
         disposals: Vec<u64>,
     }
 
@@ -1127,6 +1198,10 @@ mod tests {
 
         fn disposed_instance_ids(&self) -> Vec<u64> {
             self.state.lock().unwrap().disposals.clone()
+        }
+
+        fn recycle_check_count(&self) -> usize {
+            self.state.lock().unwrap().recycle_checks.len()
         }
 
         fn start_timeouts(&self) -> Vec<Duration> {
@@ -1203,6 +1278,13 @@ mod tests {
             self.running
         }
 
+        fn recycle_if_idle<'a>(&'a mut self) -> BoxFuture<'a, AppResult<bool>> {
+            Box::pin(async move {
+                self.state.lock().unwrap().recycle_checks.push(self.id);
+                Ok(false)
+            })
+        }
+
         fn dispose<'a>(&'a mut self) -> BoxFuture<'a, ()> {
             Box::pin(async move {
                 self.running = false;
@@ -1272,6 +1354,10 @@ mod tests {
 
         fn is_running(&mut self) -> bool {
             self.running
+        }
+
+        fn recycle_if_idle<'a>(&'a mut self) -> BoxFuture<'a, AppResult<bool>> {
+            Box::pin(async { Ok(false) })
         }
 
         fn dispose<'a>(&'a mut self) -> BoxFuture<'a, ()> {
@@ -1687,6 +1773,111 @@ mod tests {
 
         assert_eq!(factory.disposed_instance_ids(), vec![1]);
         assert_eq!(registry.instance_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn idle_sweeper_disposes_without_follow_up_call() {
+        let factory = Arc::new(FakeExtensionHostFactory::default());
+        let registry = Arc::new(ExtensionHostInstanceRegistry::new_for_tests(
+            factory.clone(),
+            ExtensionHostRegistryLimits {
+                max_warm_instances: 8,
+                idle_recycle: Duration::from_millis(30),
+            },
+        ));
+
+        registry
+            .execute_command_with_now(
+                plugin_detail("acme.echo", "idle-sweeper"),
+                "acme.echo",
+                json!({}),
+                Instant::now(),
+            )
+            .await
+            .expect("first command");
+        let sweeper = tokio::spawn(run_idle_sweeper(
+            Arc::downgrade(&registry),
+            Duration::from_millis(5),
+        ));
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if factory.recycle_check_count() > 0 && factory.dispose_count() == 1 {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("idle sweeper should recycle and dispose without another command");
+
+        assert_eq!(registry.instance_count().await, 0);
+        drop(registry);
+        tokio::time::timeout(Duration::from_secs(1), sweeper)
+            .await
+            .expect("weak sweeper should stop after registry drop")
+            .expect("sweeper task should finish cleanly");
+    }
+
+    #[tokio::test]
+    async fn idle_sweeper_waits_for_active_call_before_disposal() {
+        let factory = Arc::new(BlockingExtensionHostFactory::default());
+        let registry = Arc::new(ExtensionHostInstanceRegistry::new_for_tests(
+            factory.clone(),
+            ExtensionHostRegistryLimits {
+                max_warm_instances: 8,
+                idle_recycle: Duration::ZERO,
+            },
+        ));
+        registry
+            .execute_command_with_now(
+                plugin_detail("acme.race", "active-sweeper"),
+                "warm",
+                json!({}),
+                Instant::now(),
+            )
+            .await
+            .expect("warm command");
+        let command_registry = registry.clone();
+        let command = tokio::spawn(async move {
+            command_registry
+                .execute_command_with_now(
+                    plugin_detail("acme.race", "active-sweeper"),
+                    "race",
+                    json!({}),
+                    Instant::now(),
+                )
+                .await
+        });
+        factory.wait_for_command_start_count(1).await;
+        let sweeper = tokio::spawn(run_idle_sweeper(
+            Arc::downgrade(&registry),
+            Duration::from_millis(5),
+        ));
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(factory.dispose_count(), 0);
+        assert_eq!(registry.instance_count().await, 1);
+
+        factory.slow_command.release.notify_one();
+        tokio::time::timeout(Duration::from_secs(1), command)
+            .await
+            .expect("active command should finish after release")
+            .expect("command task join")
+            .expect("active command should finish before disposal");
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while factory.dispose_count() == 0 {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("idle sweeper should dispose after active command finishes");
+
+        drop(registry);
+        tokio::time::timeout(Duration::from_secs(1), sweeper)
+            .await
+            .expect("weak sweeper should stop after registry drop")
+            .expect("sweeper task should finish cleanly");
     }
 
     #[tokio::test]

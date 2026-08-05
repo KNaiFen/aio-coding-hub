@@ -286,6 +286,13 @@ impl ExtensionHostInstance {
         self.runtime.is_running()
     }
 
+    pub(crate) async fn recycle_if_idle(&mut self) -> AppResult<bool> {
+        self.runtime
+            .recycle_if_idle()
+            .await
+            .map_err(map_extension_host_process_error)
+    }
+
     #[allow(dead_code)]
     pub(crate) async fn dispose(&mut self) {
         let _ = self

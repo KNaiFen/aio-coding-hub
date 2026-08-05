@@ -29,12 +29,12 @@ impl RuntimeGatewayPluginExecutor {
     pub(crate) fn with_db(db: db::Db) -> Self {
         let privacy_redaction = Arc::new(PrivacyRedactionService::default());
         Self::with_extension_host_registry(
-            Some(Arc::new(
-                ExtensionHostInstanceRegistry::new_with_privacy_redaction(
+            Some(
+                ExtensionHostInstanceRegistry::new_shared_with_privacy_redaction(
                     db,
                     privacy_redaction.clone(),
                 ),
-            )),
+            ),
             privacy_redaction,
         )
     }
