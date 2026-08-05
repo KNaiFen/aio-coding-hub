@@ -460,6 +460,34 @@ WHERE plugin_id = ?1 AND version = ?2
     .ok_or_else(|| crate::shared::error::AppError::new("DB_NOT_FOUND", "plugin version not found"))
 }
 
+pub(crate) fn plugin_version_exists(
+    db: &db::Db,
+    plugin_id: &str,
+    version: &str,
+) -> AppResult<bool> {
+    let conn = db.open_connection()?;
+    let exists = conn
+        .query_row(
+            r#"
+SELECT CASE WHEN
+  EXISTS(
+    SELECT 1
+    FROM plugins
+    WHERE plugin_id = ?1 AND current_version = ?2
+  ) OR EXISTS(
+    SELECT 1
+    FROM plugin_versions
+    WHERE plugin_id = ?1 AND version = ?2
+  )
+THEN 1 ELSE 0 END
+"#,
+            params![plugin_id, version],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|e| db_err!("failed to query plugin version existence: {e}"))?;
+    Ok(exists != 0)
+}
+
 pub(crate) fn save_plugin_config(
     db: &db::Db,
     plugin_id: &str,
@@ -1132,6 +1160,36 @@ mod tests {
                 .unwrap();
             assert_eq!(count, 0, "{table} rows should roll back");
         }
+    }
+
+    #[test]
+    fn plugin_version_exists_checks_current_and_historical_versions() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::init_for_tests(&dir.path().join("plugins.db")).unwrap();
+        let v1 = test_manifest("version.exists", "1.0.0");
+
+        assert!(!plugin_version_exists(&db, "version.exists", "1.0.0").unwrap());
+        insert_plugin(
+            &db,
+            InsertPluginInput {
+                manifest: v1,
+                install_source: PluginInstallSource::Local,
+                status: PluginStatus::Disabled,
+                installed_dir: Some("/tmp/plugin-v1".to_string()),
+            },
+        )
+        .unwrap();
+        assert!(plugin_version_exists(&db, "version.exists", "1.0.0").unwrap());
+
+        update_plugin_manifest(
+            &db,
+            test_manifest("version.exists", "1.1.0"),
+            Some("/tmp/plugin-v2".to_string()),
+        )
+        .unwrap();
+        assert!(plugin_version_exists(&db, "version.exists", "1.0.0").unwrap());
+        assert!(plugin_version_exists(&db, "version.exists", "1.1.0").unwrap());
+        assert!(!plugin_version_exists(&db, "version.exists", "2.0.0").unwrap());
     }
 
     #[test]
