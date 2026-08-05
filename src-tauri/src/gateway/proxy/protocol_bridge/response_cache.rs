@@ -102,10 +102,7 @@ fn serialized_size_with_limit<T: serde::Serialize + ?Sized>(
     Some(writer.bytes_written)
 }
 
-fn serialize_with_limit<T: serde::Serialize + ?Sized>(
-    value: &T,
-    limit: usize,
-) -> Option<Vec<u8>> {
+fn serialize_with_limit<T: serde::Serialize + ?Sized>(value: &T, limit: usize) -> Option<Vec<u8>> {
     let mut writer = BoundedVecWriter {
         bytes: Vec::new(),
         limit,
@@ -194,9 +191,7 @@ fn prune_expired_locked(cache: &mut HashMap<ResponsesCacheKey, CacheEntry>, now:
     cache.retain(|_, entry| now.duration_since(entry.created_at) <= CACHE_TTL);
 }
 
-fn total_serialized_bytes_locked(
-    cache: &HashMap<ResponsesCacheKey, CacheEntry>,
-) -> usize {
+fn total_serialized_bytes_locked(cache: &HashMap<ResponsesCacheKey, CacheEntry>) -> usize {
     cache.values().fold(0, |total, entry| {
         total.saturating_add(entry.items_json.len())
     })
@@ -415,10 +410,7 @@ mod tests {
                     key.clone(),
                     items_with_serialized_size(CACHE_MAX_BYTES_PER_ENTRY),
                 );
-                set_age_for_tests(
-                    &key,
-                    Duration::from_secs((entry_count - index) as u64),
-                );
+                set_age_for_tests(&key, Duration::from_secs((entry_count - index) as u64));
                 key
             })
             .collect()
@@ -538,11 +530,13 @@ mod tests {
 
         cache_completed_response("bridge:source=1:session=a", &input, &response);
 
-        let key =
-            ResponsesCacheKey::new("bridge:source=1:session=a", "resp_latest_items").unwrap();
+        let key = ResponsesCacheKey::new("bridge:source=1:session=a", "resp_latest_items").unwrap();
         let cached = get(&key).expect("bounded cached items");
         assert_eq!(cached.len(), CACHE_MAX_ITEMS_PER_ENTRY);
-        assert_eq!(cached.first().and_then(|item| item["index"].as_u64()), Some(6));
+        assert_eq!(
+            cached.first().and_then(|item| item["index"].as_u64()),
+            Some(6)
+        );
         assert_eq!(
             cached.last().and_then(|item| item["index"].as_u64()),
             Some((CACHE_MAX_ITEMS_PER_ENTRY + 5) as u64)
@@ -587,7 +581,8 @@ mod tests {
         let existing_keys = fill_cache_to_byte_budget();
         let oldest = existing_keys.first().expect("oldest cache key").clone();
         let survivor = existing_keys.get(1).expect("surviving cache key").clone();
-        let incoming = ResponsesCacheKey::new("bridge:source=1:session=a", "resp_incoming").unwrap();
+        let incoming =
+            ResponsesCacheKey::new("bridge:source=1:session=a", "resp_incoming").unwrap();
         let item = json!({"type": "function_call", "call_id": "call_1"});
 
         set(incoming.clone(), vec![item]);
@@ -629,7 +624,10 @@ mod tests {
 
         let cached = get(&key).expect("bounded cached items");
         assert_eq!(cached.len(), CACHE_MAX_ITEMS_PER_ENTRY);
-        assert_eq!(cached.first().and_then(|item| item["index"].as_u64()), Some(5));
+        assert_eq!(
+            cached.first().and_then(|item| item["index"].as_u64()),
+            Some(5)
+        );
         assert_eq!(
             cached.last().and_then(|item| item["index"].as_u64()),
             Some((CACHE_MAX_ITEMS_PER_ENTRY + 4) as u64)
