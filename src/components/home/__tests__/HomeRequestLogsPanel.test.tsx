@@ -123,6 +123,63 @@ describe("components/home/HomeRequestLogsPanel", () => {
     expect(screen.queryByText("当前并发")).not.toBeInTheDocument();
   });
 
+  it("reports the reading position and lets buffered request updates return to the top", () => {
+    const onRequestLogsTopChange = vi.fn();
+    const onShowNewRequestLogs = vi.fn();
+    const virtualizedRequestLogs = makeRequestLogs(
+      Array.from({ length: 35 }, (_, index) => ({
+        id: 35 - index,
+        trace_id: `trace-${35 - index}`,
+        requested_model: `model-${35 - index}`,
+      }))
+    );
+    const renderPanel = (presentationResetKey = 0) => (
+      <MemoryRouter>
+        <HomeRequestLogsPanel
+          traces={[]}
+          activeRequests={[]}
+          requestLogs={virtualizedRequestLogs}
+          requestLogsLoading={false}
+          requestLogsRefreshing={false}
+          requestLogsAvailable={true}
+          pendingNewRequestCount={3}
+          onRequestLogsTopChange={onRequestLogsTopChange}
+          onShowNewRequestLogs={onShowNewRequestLogs}
+          presentationResetKey={presentationResetKey}
+          onRefreshRequestLogs={vi.fn()}
+          selectedLogId={null}
+          onSelectLogId={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+    const view = render(renderPanel());
+    const scrollContainer = screen.getByTestId("request-logs-scroll-container");
+    onRequestLogsTopChange.mockClear();
+
+    scrollContainer.scrollTop = 5;
+    fireEvent.scroll(scrollContainer);
+    expect(onRequestLogsTopChange).toHaveBeenLastCalledWith(false);
+
+    scrollContainer.scrollTop = 4;
+    fireEvent.scroll(scrollContainer);
+    expect(onRequestLogsTopChange).toHaveBeenLastCalledWith(true);
+
+    scrollContainer.scrollTop = 12;
+    fireEvent.scroll(scrollContainer);
+    onRequestLogsTopChange.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "有 3 条新请求" }));
+    expect(scrollContainer.scrollTop).toBe(0);
+    expect(onRequestLogsTopChange).toHaveBeenCalledWith(true);
+    expect(onShowNewRequestLogs).toHaveBeenCalledTimes(1);
+
+    scrollContainer.scrollTop = 12;
+    fireEvent.scroll(scrollContainer);
+    onRequestLogsTopChange.mockClear();
+    view.rerender(renderPanel(1));
+    expect(scrollContainer.scrollTop).toBe(0);
+    expect(onRequestLogsTopChange).toHaveBeenCalledWith(true);
+  });
+
   it("shows the Codex system request badge only for a valid structured marker", () => {
     render(
       <MemoryRouter>
@@ -1580,7 +1637,7 @@ describe("components/home/HomeRequestLogsPanel", () => {
       },
     ]);
 
-    render(
+    const renderPanel = (activityClockNowMs?: number) => (
       <MemoryRouter>
         <HomeRequestLogsPanel
           displayOptions={{ customTooltip: true }}
@@ -1589,8 +1646,8 @@ describe("components/home/HomeRequestLogsPanel", () => {
           activeRequests={[
             activeRequest({
               trace_id: "t-live-provider",
-              created_at_ms: Date.now() - 6500,
-              last_activity_ms: Date.now() - 100,
+              created_at_ms: traces[0].first_seen_ms,
+              last_activity_ms: traces[0].last_seen_ms,
               requested_model: "claude-3-opus",
             }),
           ]}
@@ -1598,12 +1655,14 @@ describe("components/home/HomeRequestLogsPanel", () => {
           requestLogsLoading={false}
           requestLogsRefreshing={false}
           requestLogsAvailable={true}
+          activityClockNowMs={activityClockNowMs}
           onRefreshRequestLogs={vi.fn()}
           selectedLogId={null}
           onSelectLogId={vi.fn()}
         />
       </MemoryRouter>
     );
+    const view = render(renderPanel());
 
     expect(screen.getAllByText("Provider Live").length).toBeGreaterThan(0);
     expect(screen.getByText("6.50s")).toBeInTheDocument();
@@ -1612,6 +1671,12 @@ describe("components/home/HomeRequestLogsPanel", () => {
       vi.advanceTimersByTime(1000);
     });
 
+    expect(screen.getByText("7.50s")).toBeInTheDocument();
+
+    view.rerender(renderPanel(Date.now()));
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
     expect(screen.getByText("7.50s")).toBeInTheDocument();
   });
 

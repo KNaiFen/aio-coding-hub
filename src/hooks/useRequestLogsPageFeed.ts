@@ -27,8 +27,11 @@ type UseRequestLogsPageFeedOptions = {
   liveUpdateWindowMs?: number;
   refreshOnForeground?: boolean;
   foregroundThrottleMs?: number;
-  onRefreshSnapshot: () => void;
+  preservePlaceholderPageData?: boolean;
+  onRefreshSnapshot: (reason: RequestLogsPageAutomaticRefreshReason) => void;
 };
+
+export type RequestLogsPageAutomaticRefreshReason = "live" | "foreground";
 
 function normalizeRefreshWindowMs(value: number | undefined) {
   if (!Number.isFinite(value) || value == null) return 400;
@@ -46,6 +49,7 @@ export function useRequestLogsPageFeed({
   liveUpdateWindowMs,
   refreshOnForeground = false,
   foregroundThrottleMs = 1000,
+  preservePlaceholderPageData = false,
   onRefreshSnapshot,
 }: UseRequestLogsPageFeedOptions) {
   const foregroundActive = useDocumentVisibility();
@@ -92,7 +96,7 @@ export function useRequestLogsPageFeed({
     enabled: pageLiveRefreshEnabled,
     delayMs: refreshWindowMs,
     task: async () => {
-      onRefreshSnapshot();
+      onRefreshSnapshot("live");
     },
     onError: (error) => {
       logToConsole("warn", "刷新请求日志当前页失败", { error: String(error) });
@@ -103,7 +107,7 @@ export function useRequestLogsPageFeed({
   const refreshForForeground = useCallback(() => {
     if (!enabled) return;
     if (latestPage) {
-      onRefreshSnapshot();
+      onRefreshSnapshot("foreground");
     }
     void refreshActiveRequests();
   }, [enabled, latestPage, onRefreshSnapshot, refreshActiveRequests]);
@@ -143,10 +147,14 @@ export function useRequestLogsPageFeed({
     };
   }, [scheduleActiveRequestsRefresh, schedulePageRefresh, signalSubscriptionEnabled]);
 
-  const pageTransitionLoading = pageQuery.isLoading || pageQuery.isPlaceholderData;
+  const preservePlaceholder =
+    preservePlaceholderPageData && pageQuery.isPlaceholderData && pageQuery.data != null;
+  const pageTransitionLoading =
+    pageQuery.isLoading || (pageQuery.isPlaceholderData && !preservePlaceholder);
   const requestLogs = useMemo(
-    () => (pageQuery.isPlaceholderData ? [] : (pageQuery.data?.items ?? [])),
-    [pageQuery.data, pageQuery.isPlaceholderData]
+    () =>
+      pageQuery.isPlaceholderData && !preservePlaceholder ? [] : (pageQuery.data?.items ?? []),
+    [pageQuery.data, pageQuery.isPlaceholderData, preservePlaceholder]
   );
   const activeRequests = useMemo(() => activeRequestsQuery.data ?? [], [activeRequestsQuery.data]);
   const activeRequestsAvailable: boolean | null = !enabled
@@ -166,10 +174,19 @@ export function useRequestLogsPageFeed({
 
   return {
     requestLogs,
+    // A preserved placeholder is still the previous snapshot. Keep its rows visible,
+    // but do not let the page capture the old ID as though the replacement had loaded.
     snapshotId: pageQuery.isPlaceholderData ? null : (pageQuery.data?.snapshotId ?? null),
-    totalCount: pageQuery.isPlaceholderData ? null : (pageQuery.data?.totalCount ?? null),
-    totalPages: pageQuery.isPlaceholderData ? null : (pageQuery.data?.totalPages ?? null),
-    page: pageQuery.isPlaceholderData ? null : (pageQuery.data?.page ?? null),
+    totalCount:
+      pageQuery.isPlaceholderData && !preservePlaceholder
+        ? null
+        : (pageQuery.data?.totalCount ?? null),
+    totalPages:
+      pageQuery.isPlaceholderData && !preservePlaceholder
+        ? null
+        : (pageQuery.data?.totalPages ?? null),
+    page:
+      pageQuery.isPlaceholderData && !preservePlaceholder ? null : (pageQuery.data?.page ?? null),
     activeRequests,
     activeRequestsAvailable,
     requestLogsLoading,

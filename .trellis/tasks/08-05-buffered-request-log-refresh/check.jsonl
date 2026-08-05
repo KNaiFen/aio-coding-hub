@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/aio-coding-hub/cross-layer/request-log-usage-ledger-pagination-contract.md", "reason": "复核快照、分页和实时 feed 不回归"}
+{"file": ".trellis/tasks/08-05-buffered-request-log-refresh/research/refresh-root-cause.md", "reason": "复核闪烁与滚动根因已被覆盖"}

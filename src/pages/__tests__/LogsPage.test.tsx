@@ -46,6 +46,11 @@ vi.mock("../../components/home/HomeRequestLogsPanel", () => ({
     traces,
     requestLogOrder,
     onRefreshRequestLogs,
+    pendingNewRequestCount,
+    onRequestLogsTopChange,
+    onShowNewRequestLogs,
+    presentationResetKey,
+    activityClockNowMs,
   }: {
     requestLogs: Array<{ id: number }>;
     activeRequests: Array<{ trace_id: string }>;
@@ -54,16 +59,36 @@ vi.mock("../../components/home/HomeRequestLogsPanel", () => ({
     traces: TraceSession[];
     requestLogOrder?: string;
     onRefreshRequestLogs: () => void;
+    pendingNewRequestCount?: number;
+    onRequestLogsTopChange?: (atTop: boolean) => void;
+    onShowNewRequestLogs?: () => void;
+    presentationResetKey?: number;
+    activityClockNowMs?: number;
   }) => (
     <div data-testid="home-request-logs-panel">
       <span data-testid="page-log-ids">{requestLogs.map((log) => log.id).join(",")}</span>
       <span data-testid="active-count">{activeRequests.length}</span>
+      <span data-testid="active-ids">
+        {activeRequests.map((request) => request.trace_id).join(",")}
+      </span>
       <span data-testid="summary">{summaryTextOverride ?? ""}</span>
       <span data-testid="empty-title">{emptyStateTitle ?? ""}</span>
       <span data-testid="trace-ids">{traces.map((trace) => trace.trace_id).join(",")}</span>
       <span data-testid="request-log-order">{requestLogOrder ?? ""}</span>
+      <span data-testid="pending-new-request-count">{pendingNewRequestCount ?? 0}</span>
+      <span data-testid="presentation-reset-key">{presentationResetKey ?? 0}</span>
+      <span data-testid="activity-clock-now">{activityClockNowMs ?? ""}</span>
       <button type="button" onClick={onRefreshRequestLogs}>
         刷新当前页
+      </button>
+      <button type="button" onClick={() => onRequestLogsTopChange?.(false)}>
+        模拟离顶
+      </button>
+      <button type="button" onClick={() => onRequestLogsTopChange?.(true)}>
+        模拟回顶
+      </button>
+      <button type="button" onClick={onShowNewRequestLogs}>
+        显示新请求
       </button>
     </div>
   ),
@@ -357,25 +382,114 @@ describe("pages/LogsPage", () => {
     renderWithProviders(<LogsPage />);
     expect(screen.getByRole("combobox", { name: "每页条数" })).toHaveValue("100");
     const initialRevision = latestFeedOptions()?.snapshotRevision ?? 0;
+    const initialPresentationResetKey = Number(
+      screen.getByTestId("presentation-reset-key").textContent
+    );
 
     fireEvent.click(screen.getByRole("tab", { name: "Codex" }));
     expect(latestFeedOptions()?.filters.cliKey).toBe("codex");
     expect(latestFeedOptions()?.snapshotId).toBeNull();
     expect(latestFeedOptions()?.snapshotRevision).toBe(initialRevision + 1);
+    expect(screen.getByTestId("presentation-reset-key")).toHaveTextContent(
+      String(initialPresentationResetKey + 1)
+    );
 
     fireEvent.change(screen.getByRole("combobox", { name: "每页条数" }), {
       target: { value: "200" },
     });
     expect(latestFeedOptions()?.limit).toBe(200);
     expect(latestFeedOptions()?.snapshotRevision).toBe(initialRevision + 2);
+    expect(screen.getByTestId("presentation-reset-key")).toHaveTextContent(
+      String(initialPresentationResetKey + 2)
+    );
     expect(window.localStorage.getItem(LOGS_PAGE_SIZE_STORAGE_KEY)).toBe("200");
 
     fireEvent.click(screen.getByRole("button", { name: "刷新并重建分页" }));
     expect(latestFeedOptions()?.snapshotRevision).toBe(initialRevision + 3);
+    expect(screen.getByTestId("presentation-reset-key")).toHaveTextContent(
+      String(initialPresentationResetKey + 3)
+    );
     fireEvent.click(screen.getByRole("button", { name: "刷新当前页" }));
     expect(latestFeedOptions()?.snapshotRevision).toBe(initialRevision + 4);
-    act(() => latestFeedOptions()?.onRefreshSnapshot());
+    expect(screen.getByTestId("presentation-reset-key")).toHaveTextContent(
+      String(initialPresentationResetKey + 4)
+    );
+    act(() => latestFeedOptions()?.onRefreshSnapshot("live"));
     expect(latestFeedOptions()?.snapshotRevision).toBe(initialRevision + 5);
+    expect(latestFeedOptions()?.preservePlaceholderPageData).toBe(true);
+    expect(screen.getByTestId("presentation-reset-key")).toHaveTextContent(
+      String(initialPresentationResetKey + 4)
+    );
+  });
+
+  it("freezes the complete reading projection away from the top and reveals buffered requests", () => {
+    let feedState: {
+      requestLogs: Array<{ id: number }>;
+      totalCount: number;
+      activeRequests: Array<{
+        trace_id: string;
+        cli_key: string;
+        method: string;
+        path: string;
+      }>;
+    } = {
+      requestLogs: [{ id: 120 }],
+      totalCount: 120,
+      activeRequests: [
+        { trace_id: "active-old", cli_key: "claude", method: "POST", path: "/v1/messages" },
+      ],
+    };
+    traceStoreState.traces = [createTrace("trace-old")];
+    vi.mocked(useRequestLogsPageFeed).mockImplementation(
+      (options) =>
+        ({
+          requestLogs: feedState.requestLogs,
+          snapshotId: options.snapshotId ?? "snapshot-live",
+          totalCount: feedState.totalCount,
+          totalPages: 3,
+          page: options.page,
+          activeRequests: feedState.activeRequests,
+          activeRequestsAvailable: true,
+          requestLogsLoading: false,
+          requestLogsRefreshing: false,
+          requestLogsPageFetching: false,
+          requestLogsAvailable: true,
+          requestLogsSnapshotExpired: false,
+          refreshActiveRequests: vi.fn(),
+          refreshRequestLogs: vi.fn(),
+        }) as any
+    );
+    renderWithProviders(<LogsPage />);
+    const initialRevision = latestFeedOptions()?.snapshotRevision ?? 0;
+
+    fireEvent.click(screen.getByRole("button", { name: "模拟离顶" }));
+    expect(screen.getByTestId("activity-clock-now").textContent).not.toBe("");
+
+    feedState = {
+      requestLogs: [{ id: 123 }, { id: 122 }],
+      totalCount: 123,
+      activeRequests: [
+        { trace_id: "active-new", cli_key: "codex", method: "POST", path: "/v1/responses" },
+      ],
+    };
+    traceStoreState.traces = [createTrace("trace-new", { cli_key: "codex" })];
+    act(() => latestFeedOptions()?.onRefreshSnapshot("live"));
+
+    expect(latestFeedOptions()?.snapshotRevision).toBe(initialRevision + 1);
+    expect(screen.getByTestId("page-log-ids")).toHaveTextContent("120");
+    expect(screen.getByTestId("active-ids")).toHaveTextContent("active-old");
+    expect(screen.getByTestId("trace-ids")).toHaveTextContent("trace-old");
+    expect(screen.getByTestId("pending-new-request-count")).toHaveTextContent("3");
+
+    fireEvent.click(screen.getByRole("button", { name: "显示新请求" }));
+
+    expect(latestFeedOptions()?.snapshotRevision).toBe(initialRevision + 2);
+    expect(latestFeedOptions()?.snapshotId).toBe("snapshot-live");
+    expect(screen.getByTestId("page-log-ids")).toHaveTextContent("123,122");
+    expect(screen.getByTestId("active-ids")).toHaveTextContent("active-new");
+    expect(screen.getByTestId("trace-ids")).toHaveTextContent("trace-new");
+    expect(screen.getByTestId("pending-new-request-count")).toHaveTextContent("0");
+    expect(screen.getByTestId("activity-clock-now")).toHaveTextContent("");
   });
 
   it("falls back to 50 when the stored page size is unsupported", () => {

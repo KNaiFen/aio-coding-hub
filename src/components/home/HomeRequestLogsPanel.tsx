@@ -2,7 +2,7 @@
 // - Render as the right side column in `HomeOverviewPanel` to show realtime traces + request logs list.
 // - Selection state is controlled by parent; the detail dialog is rendered outside the grid layout.
 
-import { memo, useId, useRef, useMemo, useState } from "react";
+import { memo, useCallback, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { cliBadgeToneStatic, cliShortLabel } from "../../constants/clis";
@@ -56,7 +56,15 @@ import {
   resolveClaudeModelMappingFromSpecialSettings,
 } from "./requestLogSpecialSettings";
 import { getErrorCodeLabel } from "./requestLogErrorLabels";
-import { Clock, CheckCircle2, XCircle, Server, RefreshCw, ArrowUpRight } from "lucide-react";
+import {
+  ArrowUp,
+  ArrowUpRight,
+  CheckCircle2,
+  Clock,
+  RefreshCw,
+  Server,
+  XCircle,
+} from "lucide-react";
 import {
   CodexContextCompactionBadge,
   RealtimeTraceCards,
@@ -540,6 +548,7 @@ const DEFAULT_HOME_REQUEST_LOGS_DISPLAY_OPTIONS: HomeRequestLogsDisplayOptions =
 };
 
 const CURRENT_CONCURRENCY_DESCRIPTION = "按活跃模型推理请求统计；同一会话与子代理的每个请求均计 1";
+const REQUEST_LOGS_TOP_THRESHOLD_PX = 4;
 
 export type HomeRequestLogsPanelProps = {
   displayOptions?: Partial<HomeRequestLogsDisplayOptions>;
@@ -560,6 +569,11 @@ export type HomeRequestLogsPanelProps = {
   requestLogsAvailable: boolean | null;
   requestLogOrder?: RequestLogProjectionOrder;
   onRefreshRequestLogs: () => void;
+  pendingNewRequestCount?: number;
+  onRequestLogsTopChange?: (atTop: boolean) => void;
+  onShowNewRequestLogs?: () => void;
+  presentationResetKey?: number;
+  activityClockNowMs?: number;
 
   selectedLogId: number | null;
   onSelectLogId: (id: number | null) => void;
@@ -582,6 +596,11 @@ export function HomeRequestLogsPanel({
   requestLogsAvailable,
   requestLogOrder = "activity",
   onRefreshRequestLogs,
+  pendingNewRequestCount = 0,
+  onRequestLogsTopChange,
+  onShowNewRequestLogs,
+  presentationResetKey = 0,
+  activityClockNowMs,
   selectedLogId,
   onSelectLogId,
 }: HomeRequestLogsPanelProps) {
@@ -647,14 +666,16 @@ export function HomeRequestLogsPanel({
     displayedActiveRequestsAvailable === true
       ? countActiveInferenceRequests(displayedActiveRequests)
       : null;
-  const wallClockNowMs = Date.now();
-  const clockEnabled = shouldTickRequestActivityClock({
-    requestLogs: displayedRequestLogs,
-    activeRequests: displayedActiveRequests,
-    traces: displayedTraces,
-    nowMs: wallClockNowMs,
-    requestLogOrder,
-  });
+  const wallClockNowMs = activityClockNowMs ?? Date.now();
+  const clockEnabled =
+    activityClockNowMs == null &&
+    shouldTickRequestActivityClock({
+      requestLogs: displayedRequestLogs,
+      activeRequests: displayedActiveRequests,
+      traces: displayedTraces,
+      nowMs: wallClockNowMs,
+      requestLogOrder,
+    });
   const tickingNowMs = useNowMs(clockEnabled, 250);
   const nowMs = clockEnabled ? tickingNowMs : wallClockNowMs;
   const activityProjection = useMemo(
@@ -802,6 +823,10 @@ export function HomeRequestLogsPanel({
           requestRows={activityProjection.requestRows}
           requestLogsLoading={requestLogsLoading}
           emptyStateTitle={emptyStateTitle}
+          pendingNewRequestCount={pendingNewRequestCount}
+          onRequestLogsTopChange={onRequestLogsTopChange}
+          onShowNewRequestLogs={onShowNewRequestLogs}
+          presentationResetKey={presentationResetKey}
           selectedLogId={selectedLogId}
           onSelectLogId={onSelectLogId}
         />
@@ -822,6 +847,10 @@ type RequestLogsListProps = {
   requestRows: ProjectedRequestLogRow[];
   requestLogsLoading: boolean;
   emptyStateTitle: string;
+  pendingNewRequestCount: number;
+  onRequestLogsTopChange?: (atTop: boolean) => void;
+  onShowNewRequestLogs?: () => void;
+  presentationResetKey: number;
   selectedLogId: number | null;
   onSelectLogId: (id: number | null) => void;
 };
@@ -837,12 +866,46 @@ const RequestLogsList = memo(function RequestLogsList({
   requestRows,
   requestLogsLoading,
   emptyStateTitle,
+  pendingNewRequestCount,
+  onRequestLogsTopChange,
+  onShowNewRequestLogs,
+  presentationResetKey,
   selectedLogId,
   onSelectLogId,
 }: RequestLogsListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const lastAtTopRef = useRef<boolean | null>(null);
+  const onRequestLogsTopChangeRef = useRef(onRequestLogsTopChange);
+  onRequestLogsTopChangeRef.current = onRequestLogsTopChange;
   const hasRealtimeCards = realtimeCards.length > 0;
   const useVirtual = requestRows.length >= VIRTUALIZATION_THRESHOLD;
+
+  const notifyAtTop = useCallback((atTop: boolean) => {
+    if (lastAtTopRef.current === atTop) return;
+    lastAtTopRef.current = atTop;
+    onRequestLogsTopChangeRef.current?.(atTop);
+  }, []);
+  const reportScrollPosition = useCallback(() => {
+    const scrollTop = Math.max(0, scrollRef.current?.scrollTop ?? 0);
+    notifyAtTop(scrollTop <= REQUEST_LOGS_TOP_THRESHOLD_PX);
+  }, [notifyAtTop]);
+  const showNewRequestLogs = useCallback(() => {
+    const scrollElement = scrollRef.current;
+    if (scrollElement) scrollElement.scrollTop = 0;
+    notifyAtTop(true);
+    onShowNewRequestLogs?.();
+  }, [notifyAtTop, onShowNewRequestLogs]);
+
+  useLayoutEffect(() => {
+    reportScrollPosition();
+  }, [reportScrollPosition]);
+
+  useLayoutEffect(() => {
+    const scrollElement = scrollRef.current;
+    if (!scrollElement) return;
+    scrollElement.scrollTop = 0;
+    notifyAtTop(true);
+  }, [notifyAtTop, presentationResetKey]);
 
   const virtualizer = useVirtualizer({
     count: requestRows.length,
@@ -881,7 +944,29 @@ const RequestLogsList = memo(function RequestLogsList({
   );
 
   return (
-    <div ref={scrollRef} className="scrollbar-overlay flex-1 overflow-auto pr-1 py-2">
+    <div
+      ref={scrollRef}
+      data-testid="request-logs-scroll-container"
+      className="scrollbar-overlay relative flex-1 overflow-auto pr-1 py-2"
+      onScroll={reportScrollPosition}
+    >
+      {pendingNewRequestCount > 0 && onShowNewRequestLogs ? (
+        <div
+          className="pointer-events-none sticky top-2 z-20 flex h-0 justify-center px-2"
+          aria-live="polite"
+        >
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="pointer-events-auto h-8 gap-1.5 border border-indigo-500/25 bg-surface shadow-lg hover:border-indigo-500/40"
+            onClick={showNewRequestLogs}
+          >
+            <ArrowUp className="h-3.5 w-3.5" />有 {pendingNewRequestCount} 条新请求
+          </Button>
+        </div>
+      ) : null}
+
       {/* Wrapper isolates trace exit animations from the log list below,
           preventing layout shifts when multiple traces collapse simultaneously. */}
       <div className="will-change-[height]">
