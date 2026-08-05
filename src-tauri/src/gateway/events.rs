@@ -627,7 +627,7 @@ pub(super) fn emit_request_event<R: tauri::Runtime>(
         .filter(|final_duration_ms| {
             *final_duration_ms > 0
                 && *final_duration_ms <= duration_ms
-                && ttfb_ms.map_or(true, |ttfb_ms| *final_duration_ms >= ttfb_ms)
+                && ttfb_ms.is_none_or(|ttfb_ms| *final_duration_ms >= ttfb_ms)
         });
     let usage = usage.unwrap_or_default();
     let effective_input_tokens = request_event_effective_input_tokens(&cli_key, &attempts, &usage);
