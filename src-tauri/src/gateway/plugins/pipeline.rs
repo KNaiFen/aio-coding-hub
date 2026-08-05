@@ -436,11 +436,16 @@ impl GatewayPluginPipeline {
                         replay_export_reason: None,
                     },
                 ));
-                return Err(attach_plugin_diagnostics(
-                    err,
-                    audit_events,
-                    execution_reports,
-                ));
+                let fail_closed =
+                    failure_policy(plugin, input.hook_name) == FailurePolicy::FailClosed;
+                if fail_closed {
+                    return Err(attach_plugin_diagnostics(
+                        err,
+                        audit_events,
+                        execution_reports,
+                    ));
+                }
+                continue;
             }
             if let Some(next_body) = result.request_body.as_ref() {
                 body = Bytes::from(next_body.clone());
@@ -675,11 +680,16 @@ impl GatewayPluginPipeline {
                         replay_export_reason: None,
                     },
                 ));
-                return Err(attach_plugin_diagnostics(
-                    err,
-                    audit_events,
-                    execution_reports,
-                ));
+                let fail_closed =
+                    failure_policy(plugin, input.hook_name) == FailurePolicy::FailClosed;
+                if fail_closed {
+                    return Err(attach_plugin_diagnostics(
+                        err,
+                        audit_events,
+                        execution_reports,
+                    ));
+                }
+                continue;
             }
             if let Some(next_body) = result.response_body.as_ref() {
                 body = Bytes::from(next_body.clone());
@@ -1643,6 +1653,10 @@ fn apply_header_patch(
     headers: &mut HeaderMap,
     patch: &std::collections::BTreeMap<String, String>,
 ) -> Result<(), GatewayPluginError> {
+    if patch.is_empty() {
+        return Ok(());
+    }
+    let mut patched_headers = headers.clone();
     for (name, value) in patch {
         if is_reserved_gateway_header(name) {
             return Err(GatewayPluginError::new(
@@ -1662,8 +1676,9 @@ fn apply_header_patch(
                 format!("invalid header value from plugin result: {err}"),
             )
         })?;
-        headers.insert(header_name, header_value);
+        patched_headers.insert(header_name, header_value);
     }
+    *headers = patched_headers;
     Ok(())
 }
 
@@ -2723,6 +2738,66 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn gateway_plugin_pipeline_fail_open_rejects_header_patch_atomically() {
+        let executor =
+            InMemoryGatewayPluginExecutor::new().with_request_handler("plugin.headers", |_ctx| {
+                let mut result = GatewayHookResult {
+                    request_body: Some("mutated request".to_string()),
+                    ..GatewayHookResult::continue_unchanged()
+                };
+                result
+                    .headers
+                    .insert("a-plugin-safe".to_string(), "partial".to_string());
+                result
+                    .headers
+                    .insert("x-aio-provider-id".to_string(), "spoofed".to_string());
+                result
+            });
+        let pipeline = GatewayPluginPipeline::for_tests(
+            vec![plugin(
+                "plugin.headers",
+                10,
+                vec![
+                    "request.header.read",
+                    "request.header.write",
+                    "request.body.read",
+                    "request.body.write",
+                ],
+            )],
+            Arc::new(executor),
+            GatewayPluginPipelineConfig::default(),
+        );
+        let mut input = request_input();
+        input.headers.insert(
+            "x-existing",
+            "kept".parse().expect("valid existing header"),
+        );
+
+        let output = pipeline
+            .run_request_hook(input)
+            .await
+            .expect("fail-open rejected header patch should preserve request");
+
+        assert_eq!(output.body.as_ref(), b"hello");
+        assert_eq!(
+            output
+                .headers
+                .get("x-existing")
+                .and_then(|value| value.to_str().ok()),
+            Some("kept")
+        );
+        assert!(!output.headers.contains_key("a-plugin-safe"));
+        assert!(output.audit_events.iter().any(|event| {
+            event.plugin_id == "plugin.headers" && event.event_type == "plugin.hook.failed"
+        }));
+        assert!(output.execution_reports.iter().any(|report| {
+            report.plugin_id == "plugin.headers"
+                && report.status == "policyRejected"
+                && report.error_code.as_deref() == Some("PLUGIN_RESERVED_HEADER")
+        }));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn gateway_plugin_pipeline_rejects_internal_header_writes() {
         let executor =
             InMemoryGatewayPluginExecutor::new().with_request_handler("plugin.headers", |_ctx| {
@@ -2750,12 +2825,14 @@ mod tests {
                     .insert("transfer-encoding".to_string(), "chunked".to_string());
                 result
             });
+        let mut plugin = plugin(
+            "plugin.headers",
+            10,
+            vec!["request.header.read", "request.header.write"],
+        );
+        gateway_hook_mut(&mut plugin).failure_policy = Some("fail-closed".to_string());
         let pipeline = GatewayPluginPipeline::for_tests(
-            vec![plugin(
-                "plugin.headers",
-                10,
-                vec!["request.header.read", "request.header.write"],
-            )],
+            vec![plugin],
             Arc::new(executor),
             GatewayPluginPipelineConfig {
                 circuit_failure_threshold: 1,
@@ -2794,12 +2871,14 @@ mod tests {
                     result
                 },
             );
+            let mut plugin = plugin(
+                "plugin.headers",
+                10,
+                vec!["request.header.read", "request.header.write"],
+            );
+            gateway_hook_mut(&mut plugin).failure_policy = Some("fail-closed".to_string());
             let pipeline = GatewayPluginPipeline::for_tests(
-                vec![plugin(
-                    "plugin.headers",
-                    10,
-                    vec!["request.header.read", "request.header.write"],
-                )],
+                vec![plugin],
                 Arc::new(executor),
                 GatewayPluginPipelineConfig::default(),
             );
@@ -2817,6 +2896,70 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn gateway_plugin_response_pipeline_fail_open_rejects_header_patch_atomically() {
+        let executor = InMemoryGatewayPluginExecutor::new().with_response_handler(
+            "plugin.response",
+            |_ctx| {
+                let mut result = GatewayHookResult {
+                    response_body: Some("mutated response".to_string()),
+                    ..GatewayHookResult::continue_unchanged()
+                };
+                result
+                    .headers
+                    .insert("a-plugin-safe".to_string(), "partial".to_string());
+                result
+                    .headers
+                    .insert("x-invalid:name".to_string(), "invalid".to_string());
+                result
+            },
+        );
+        let mut plugin = plugin(
+            "plugin.response",
+            10,
+            vec![
+                "response.header.read",
+                "response.header.write",
+                "response.body.read",
+                "response.body.write",
+            ],
+        );
+        gateway_hook_mut(&mut plugin).name = "gateway.response.after".to_string();
+        let pipeline = GatewayPluginPipeline::for_tests(
+            vec![plugin],
+            Arc::new(executor),
+            GatewayPluginPipelineConfig::default(),
+        );
+        let mut input = response_input();
+        input.headers.insert(
+            "x-existing",
+            "kept".parse().expect("valid existing header"),
+        );
+
+        let output = pipeline
+            .run_response_hook(input)
+            .await
+            .expect("fail-open rejected header patch should preserve response");
+
+        assert_eq!(output.body.as_ref(), b"secret response");
+        assert_eq!(
+            output
+                .headers
+                .get("x-existing")
+                .and_then(|value| value.to_str().ok()),
+            Some("kept")
+        );
+        assert!(!output.headers.contains_key("a-plugin-safe"));
+        assert!(output.audit_events.iter().any(|event| {
+            event.plugin_id == "plugin.response" && event.event_type == "plugin.hook.failed"
+        }));
+        assert!(output.execution_reports.iter().any(|report| {
+            report.plugin_id == "plugin.response"
+                && report.status == "policyRejected"
+                && report.error_code.as_deref() == Some("PLUGIN_INVALID_HEADER")
+        }));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn gateway_plugin_response_pipeline_rejects_reserved_header_without_resetting_circuit() {
         let executor =
             InMemoryGatewayPluginExecutor::new().with_response_handler("plugin.response", |_ctx| {
@@ -2831,7 +2974,9 @@ mod tests {
             10,
             vec!["response.header.read", "response.header.write"],
         );
-        gateway_hook_mut(&mut plugin).name = "gateway.response.after".to_string();
+        let hook = gateway_hook_mut(&mut plugin);
+        hook.name = "gateway.response.after".to_string();
+        hook.failure_policy = Some("fail-closed".to_string());
         let pipeline = GatewayPluginPipeline::for_tests(
             vec![plugin],
             Arc::new(executor),
