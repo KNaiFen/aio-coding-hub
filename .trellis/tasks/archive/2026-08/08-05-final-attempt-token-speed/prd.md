@@ -15,12 +15,12 @@
 
 ## Acceptance Criteria
 
-- [ ] 新增带版本的最终尝试耗时字段，并贯通日志、ledger、usage view、IPC 与生成绑定。
-- [ ] SQLite schema 48 升至 49；旧行字段为 `NULL/0`，迁移和 ensure 路径均受测试保护。
-- [ ] 单事件流式和非流式成功请求可计算速度；失败、中断或污染请求显示未知。
-- [ ] 重试、退避和路由切换不进入分母，上游 EOF 后的下游读取延迟不进入分母。
-- [ ] 聚合使用 `SUM(output_tokens) * 1000 / SUM(duration_ms)`，不混入旧口径。
-- [ ] 不设置人为上限或伪造缺失值。
+- [x] 新增带版本的最终尝试耗时字段，并贯通日志、ledger、usage view、IPC 与生成绑定。
+- [x] SQLite schema 48 升至 49；旧行字段为 `NULL/0`，迁移和 ensure 路径均受测试保护。
+- [x] 单事件流式和非流式成功请求可计算速度；失败、中断或污染请求显示未知。
+- [x] 重试、退避和路由切换不进入分母，上游 EOF 后的下游读取延迟不进入分母。
+- [x] 聚合使用 `SUM(output_tokens) * 1000 / SUM(duration_ms)`，不混入旧口径。
+- [x] 不设置人为上限或伪造缺失值。
 
 ## Notes
 

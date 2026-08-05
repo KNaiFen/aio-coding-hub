@@ -3,7 +3,7 @@
   "name": "final-attempt-token-speed",
   "title": "按最终成功上游尝试计算 Token 速度",
   "description": "新增最终成功上游尝试计时并替换单请求与聚合速度口径。",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": null,
   "scope": "aio-coding-hub",
   "package": "aio-coding-hub",
@@ -11,16 +11,20 @@
   "creator": "KNaiFen",
   "assignee": "KNaiFen",
   "createdAt": "2026-08-05",
-  "completedAt": null,
+  "completedAt": "2026-08-06",
   "branch": "codex/fix-observability-refresh-status",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": null,
-  "pr_url": null,
+  "commit": "2a79978c7170871acbbf5179ce6f35d5ec8128c3",
+  "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/73",
   "subtasks": [],
   "children": [],
   "parent": "08-05-observability-correctness-release",
   "relatedFiles": [],
-  "notes": "",
-  "meta": {}
+  "notes": "最终成功上游尝试计时、schema 49、严格未知语义和加权聚合已合并；PR 与 main 原生 CI 全绿，并随 0.60.49 发布。",
+  "meta": {
+    "implementation_commit": "fe9b0f24",
+    "merge_commit": "2a79978c7170871acbbf5179ce6f35d5ec8128c3",
+    "release_tag": "aio-coding-hub-v0.60.49"
+  }
 }

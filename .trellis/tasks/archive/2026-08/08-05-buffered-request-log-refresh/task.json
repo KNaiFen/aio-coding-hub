@@ -3,7 +3,7 @@
   "name": "buffered-request-log-refresh",
   "title": "缓冲请求日志实时刷新",
   "description": "顶部无闪烁实时更新，离顶冻结展示并提示新请求。",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": null,
   "scope": "aio-coding-hub",
   "package": "aio-coding-hub",
@@ -11,12 +11,12 @@
   "creator": "KNaiFen",
   "assignee": "KNaiFen",
   "createdAt": "2026-08-05",
-  "completedAt": null,
+  "completedAt": "2026-08-06",
   "branch": "codex/fix-observability-refresh-status",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": null,
-  "pr_url": null,
+  "commit": "2a79978c7170871acbbf5179ce6f35d5ec8128c3",
+  "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/73",
   "subtasks": [],
   "children": [],
   "parent": "08-05-observability-correctness-release",
@@ -28,6 +28,10 @@
     "src/pages/__tests__/LogsPage.test.tsx",
     "src/components/home/__tests__/HomeRequestLogsPanel.test.tsx"
   ],
-  "notes": "实现与定向前端验证完成；等待三项集成验证、PR、合并与发版证据。",
-  "meta": {}
+  "notes": "顶部原子刷新、离顶完整投影冻结和待展示计数已合并；本地 2812 项前端测试与云端 CI 通过，并随 0.60.49 发布。",
+  "meta": {
+    "implementation_commit": "ebf3486f",
+    "merge_commit": "2a79978c7170871acbbf5179ce6f35d5ec8128c3",
+    "release_tag": "aio-coding-hub-v0.60.49"
+  }
 }

@@ -14,11 +14,11 @@
 
 ## Acceptance Criteria
 
-- [ ] 三个子任务各自满足验收条件，并通过一次全量跨层审查。
-- [ ] 前端 lint、typecheck、单测和 Vite build 本地通过，原生 CI 全绿。
-- [ ] ready PR 合并到 `origin/main`，合并 SHA 的 main CI 生成唯一 release candidate。
-- [ ] `aio-coding-hub-v0.60.49` 指向该合并 SHA，Release 资产、签名、校验和与 updater manifest 完整。
-- [ ] 本地最终回到已快进的 `main`，任务记录包含 PR、提交和 Release 证据。
+- [x] 三个子任务各自满足验收条件，并通过一次全量跨层审查。
+- [x] 前端 lint、typecheck、单测和 Vite build 本地通过，原生 CI 全绿。
+- [x] ready PR 合并到 `origin/main`，合并 SHA 的 main CI 生成唯一 release candidate。
+- [x] `aio-coding-hub-v0.60.49` 指向该合并 SHA，Release 资产、签名、校验和与 updater manifest 完整。
+- [x] 本地最终回到已快进的 `main`，任务记录包含 PR、提交和 Release 证据。
 
 ## Notes
 

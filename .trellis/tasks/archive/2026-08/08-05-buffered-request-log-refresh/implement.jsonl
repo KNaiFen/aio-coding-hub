@@ -1,3 +1,3 @@
 {"file": ".trellis/spec/aio-coding-hub/cross-layer/index.md", "reason": "跨 Rust/IPC/query/UI 边界规范"}
 {"file": ".trellis/spec/aio-coding-hub/cross-layer/request-log-usage-ledger-pagination-contract.md", "reason": "稳定快照与分页合同"}
-{"file": ".trellis/tasks/08-05-buffered-request-log-refresh/research/refresh-root-cause.md", "reason": "实时刷新根因和限定修复面"}
+{"file": ".trellis/tasks/archive/2026-08/08-05-buffered-request-log-refresh/research/refresh-root-cause.md", "reason": "实时刷新根因和限定修复面"}
