@@ -8,12 +8,12 @@ use crate::{gateway::listen, wsl};
 use if_addrs::get_if_addrs;
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 use reqwest::{Client, ClientBuilder, StatusCode, Url};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::error::Error as StdError;
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::sync::{OnceLock, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Global HTTP client instance.
 static GLOBAL_CLIENT: OnceLock<RwLock<Client>> = OnceLock::new();
@@ -27,12 +27,21 @@ static CURRENT_RAW_PROXY_URL: OnceLock<RwLock<Option<String>>> = OnceLock::new()
 /// Current gateway self-loop context.
 static GATEWAY_SELF_CONTEXT: OnceLock<RwLock<GatewaySelfCheckContext>> = OnceLock::new();
 
+/// Short-lived DNS results used only by the gateway self-loop guard.
+static GATEWAY_TARGET_RESOLUTION_CACHE: OnceLock<
+    RwLock<BTreeMap<String, GatewayTargetResolutionCacheEntry>>,
+> = OnceLock::new();
+
 /// Default connection timeout for upstream requests.
 const UPSTREAM_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const PROXY_TEST_TIMEOUT: Duration = Duration::from_secs(8);
 const PROXY_TEST_URL: &str = "https://ifconfig.me/";
 const PROXY_EXIT_IP_URL: &str = "https://ifconfig.me/ip";
 const PROXY_EXIT_IP_RESPONSE_BODY_LIMIT: usize = 4 * 1024;
+const GATEWAY_TARGET_RESOLUTION_TIMEOUT: Duration = Duration::from_millis(750);
+const GATEWAY_TARGET_POSITIVE_CACHE_TTL: Duration = Duration::from_secs(30);
+const GATEWAY_TARGET_NEGATIVE_CACHE_TTL: Duration = Duration::from_secs(5);
+const GATEWAY_TARGET_RESOLUTION_CACHE_LIMIT: usize = 128;
 
 #[cfg(test)]
 static TEST_PROXY_TEST_URL_OVERRIDE: OnceLock<RwLock<Option<String>>> = OnceLock::new();
@@ -43,6 +52,13 @@ static TEST_PROXY_EXIT_IP_URL_OVERRIDE: OnceLock<RwLock<Option<String>>> = OnceL
 pub(crate) struct GatewaySelfCheckContext {
     gateway_port: u16,
     hosts: BTreeSet<String>,
+}
+
+#[derive(Clone)]
+struct GatewayTargetResolutionCacheEntry {
+    context: GatewaySelfCheckContext,
+    checked_at: Instant,
+    resolves_to_gateway: bool,
 }
 
 #[derive(Clone, Default)]
@@ -680,6 +696,8 @@ fn set_gateway_self_context(context: GatewaySelfCheckContext) {
     } else {
         let _ = GATEWAY_SELF_CONTEXT.set(RwLock::new(context));
     }
+
+    clear_gateway_target_resolution_cache();
 }
 
 fn current_self_context() -> GatewaySelfCheckContext {
@@ -688,6 +706,65 @@ fn current_self_context() -> GatewaySelfCheckContext {
         .and_then(|lock| lock.read().ok())
         .map(|ctx| ctx.clone())
         .unwrap_or_else(default_self_check_context)
+}
+
+fn gateway_target_resolution_cache(
+) -> &'static RwLock<BTreeMap<String, GatewayTargetResolutionCacheEntry>> {
+    GATEWAY_TARGET_RESOLUTION_CACHE.get_or_init(|| RwLock::new(BTreeMap::new()))
+}
+
+fn clear_gateway_target_resolution_cache() {
+    if let Some(cache) = GATEWAY_TARGET_RESOLUTION_CACHE.get() {
+        cache
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
+    }
+}
+
+fn gateway_target_resolution_cache_ttl(resolves_to_gateway: bool) -> Duration {
+    if resolves_to_gateway {
+        GATEWAY_TARGET_POSITIVE_CACHE_TTL
+    } else {
+        GATEWAY_TARGET_NEGATIVE_CACHE_TTL
+    }
+}
+
+fn cached_gateway_target_resolution(host: &str, context: &GatewaySelfCheckContext) -> Option<bool> {
+    let cache = gateway_target_resolution_cache()
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    cache.get(host).and_then(|entry| {
+        let ttl = gateway_target_resolution_cache_ttl(entry.resolves_to_gateway);
+        (entry.context.eq(context) && entry.checked_at.elapsed() <= ttl)
+            .then_some(entry.resolves_to_gateway)
+    })
+}
+
+fn cache_gateway_target_resolution(
+    host: String,
+    context: &GatewaySelfCheckContext,
+    resolves_to_gateway: bool,
+) {
+    let mut cache = gateway_target_resolution_cache()
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    cache.retain(|_, entry| {
+        entry.checked_at.elapsed() <= gateway_target_resolution_cache_ttl(entry.resolves_to_gateway)
+    });
+    if cache.len() >= GATEWAY_TARGET_RESOLUTION_CACHE_LIMIT && !cache.contains_key(&host) {
+        if let Some(first_key) = cache.keys().next().cloned() {
+            cache.remove(&first_key);
+        }
+    }
+    cache.insert(
+        host,
+        GatewayTargetResolutionCacheEntry {
+            context: context.clone(),
+            checked_at: Instant::now(),
+            resolves_to_gateway,
+        },
+    );
 }
 
 fn default_self_check_context() -> GatewaySelfCheckContext {
@@ -770,10 +847,7 @@ fn extend_self_hosts(targets: &mut BTreeSet<String>, host: &str, local_hosts: &L
         return;
     }
 
-    targets.insert(normalized.clone());
-    if local_hosts.all.contains(&normalized) {
-        targets.extend(resolve_host_tokens(&normalized, local_hosts));
-    }
+    targets.extend(resolve_host_tokens(&normalized, local_hosts));
 }
 
 fn resolve_host_tokens(host: &str, local_hosts: &LocalHostTokens) -> BTreeSet<String> {
@@ -877,26 +951,75 @@ fn system_proxy_points_to_gateway() -> bool {
         .any(|value| proxy_points_to_gateway_with_context(&value, &context))
 }
 
-fn proxy_points_to_gateway_with_context(value: &str, context: &GatewaySelfCheckContext) -> bool {
-    fn matches_host_and_port(parsed: &Url, context: &GatewaySelfCheckContext) -> bool {
-        let Some(host) = parsed.host_str() else {
-            return false;
-        };
-
-        let Some(normalized) = normalize_host_token(host) else {
-            return false;
-        };
-
-        parsed.port() == Some(context.gateway_port) && context.hosts.contains(&normalized)
+pub(crate) async fn validate_gateway_target(url: &Url) -> Result<(), String> {
+    let context = current_self_context();
+    if url_points_to_gateway_with_context(url, &context)
+        || url_resolves_to_gateway_with_context(url, &context).await
+    {
+        return Err("Provider URL points to the gateway itself (self-loop detected)".to_string());
     }
 
+    Ok(())
+}
+
+fn url_points_to_gateway_with_context(url: &Url, context: &GatewaySelfCheckContext) -> bool {
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+
+    let Some(normalized) = normalize_host_token(host) else {
+        return false;
+    };
+
+    url.port_or_known_default() == Some(context.gateway_port) && context.hosts.contains(&normalized)
+}
+
+async fn url_resolves_to_gateway_with_context(
+    url: &Url,
+    context: &GatewaySelfCheckContext,
+) -> bool {
+    if url.port_or_known_default() != Some(context.gateway_port) {
+        return false;
+    }
+
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+
+    let Some(normalized) = normalize_host_token(host) else {
+        return false;
+    };
+    if normalized.parse::<IpAddr>().is_ok() {
+        return false;
+    }
+    if let Some(cached) = cached_gateway_target_resolution(&normalized, context) {
+        return cached;
+    }
+
+    let resolves_to_gateway = match tokio::time::timeout(
+        GATEWAY_TARGET_RESOLUTION_TIMEOUT,
+        tokio::net::lookup_host((normalized.as_str(), 0u16)),
+    )
+    .await
+    {
+        Ok(Ok(mut addrs)) => addrs.any(|addr| {
+            normalize_host_token(&addr.ip().to_string())
+                .is_some_and(|resolved| context.hosts.contains(&resolved))
+        }),
+        Ok(Err(_)) | Err(_) => false,
+    };
+    cache_gateway_target_resolution(normalized, context, resolves_to_gateway);
+    resolves_to_gateway
+}
+
+fn proxy_points_to_gateway_with_context(value: &str, context: &GatewaySelfCheckContext) -> bool {
     if let Ok(parsed) = Url::parse(value) {
-        return matches_host_and_port(&parsed, context);
+        return url_points_to_gateway_with_context(&parsed, context);
     }
 
     let with_scheme = format!("http://{value}");
     if let Ok(parsed) = Url::parse(&with_scheme) {
-        return matches_host_and_port(&parsed, context);
+        return url_points_to_gateway_with_context(&parsed, context);
     }
 
     false
@@ -1078,6 +1201,10 @@ mod tests {
             37123,
             &["192.168.1.10".to_string(), "devbox.internal".to_string()],
         );
+        let http_context =
+            build_self_check_context(80, &["127.0.0.1".to_string(), "localhost".to_string()]);
+        let https_context =
+            build_self_check_context(443, &["127.0.0.1".to_string(), "localhost".to_string()]);
 
         assert!(proxy_points_to_gateway_with_context(
             "http://127.0.0.1:37123",
@@ -1095,6 +1222,14 @@ mod tests {
             "https://devbox.internal:37123",
             &custom_context
         ));
+        assert!(proxy_points_to_gateway_with_context(
+            "http://localhost/v1",
+            &http_context
+        ));
+        assert!(proxy_points_to_gateway_with_context(
+            "https://localhost/v1",
+            &https_context
+        ));
 
         assert!(!proxy_points_to_gateway_with_context(
             "http://127.0.0.1:7890",
@@ -1104,6 +1239,86 @@ mod tests {
             "socks5://localhost:1080",
             &wildcard_context
         ));
+    }
+
+    #[test]
+    fn test_custom_hostname_expands_to_local_interface_tokens() {
+        let local_hosts = LocalHostTokens {
+            all: BTreeSet::from(["127.0.0.1".to_string(), "::1".to_string()]),
+            loopback: BTreeSet::from(["127.0.0.1".to_string(), "::1".to_string()]),
+        };
+        let mut targets = BTreeSet::new();
+
+        extend_self_hosts(&mut targets, "localhost", &local_hosts);
+
+        assert!(targets.contains("localhost"));
+        assert!(targets.contains("127.0.0.1") || targets.contains("::1"));
+    }
+
+    #[test]
+    fn test_gateway_target_detection_uses_full_url_and_runtime_hosts() {
+        let loopback_context =
+            build_self_check_context(37123, &["127.0.0.1".to_string(), "localhost".to_string()]);
+        let custom_context = build_self_check_context(
+            37123,
+            &["192.168.1.10".to_string(), "devbox.internal".to_string()],
+        );
+        let ipv6_context = build_self_check_context(37123, &["::1".to_string()]);
+
+        for value in [
+            "http://127.0.0.1:37123/v1/messages",
+            "http://LOCALHOST:37123/v1/responses?stream=true",
+        ] {
+            let url = Url::parse(value).unwrap();
+            assert!(url_points_to_gateway_with_context(&url, &loopback_context));
+        }
+
+        for value in [
+            "http://192.168.1.10:37123/v1",
+            "https://DEVBOX.INTERNAL:37123/v1",
+        ] {
+            let url = Url::parse(value).unwrap();
+            assert!(url_points_to_gateway_with_context(&url, &custom_context));
+        }
+
+        let ipv6_url = Url::parse("http://[::1]:37123/v1").unwrap();
+        assert!(url_points_to_gateway_with_context(&ipv6_url, &ipv6_context));
+
+        let different_port = Url::parse("http://localhost:37124/v1").unwrap();
+        let external_host = Url::parse("https://api.example.com:37123/v1").unwrap();
+        assert!(!url_points_to_gateway_with_context(
+            &different_port,
+            &loopback_context
+        ));
+        assert!(!url_points_to_gateway_with_context(
+            &external_host,
+            &loopback_context
+        ));
+    }
+
+    #[test]
+    fn test_gateway_target_detection_resolves_local_aliases() {
+        let _guard = crate::test_support::test_env_lock();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        runtime.block_on(async {
+            clear_gateway_target_resolution_cache();
+            let context = GatewaySelfCheckContext {
+                gateway_port: 37123,
+                hosts: BTreeSet::from(["127.0.0.1".to_string(), "::1".to_string()]),
+            };
+            let resolved_alias = Url::parse("http://localhost:37123/v1").unwrap();
+            let different_port = Url::parse("http://localhost:37124/v1").unwrap();
+
+            assert!(url_resolves_to_gateway_with_context(&resolved_alias, &context).await);
+            assert_eq!(
+                cached_gateway_target_resolution("localhost", &context),
+                Some(true)
+            );
+            assert!(!url_resolves_to_gateway_with_context(&different_port, &context).await);
+        });
     }
 
     #[test]
