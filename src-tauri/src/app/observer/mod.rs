@@ -683,8 +683,14 @@ mod tests {
 
     #[test]
     fn snapshot_cache_uses_active_and_idle_ttls() {
-        assert_eq!(snapshot_cache_ttl(&snapshot(CliScope::Codex, true)), ACTIVE_CACHE_TTL);
-        assert_eq!(snapshot_cache_ttl(&snapshot(CliScope::Codex, false)), IDLE_CACHE_TTL);
+        assert_eq!(
+            snapshot_cache_ttl(&snapshot(CliScope::Codex, true)),
+            ACTIVE_CACHE_TTL
+        );
+        assert_eq!(
+            snapshot_cache_ttl(&snapshot(CliScope::Codex, false)),
+            IDLE_CACHE_TTL
+        );
     }
 
     #[test]
@@ -727,7 +733,9 @@ mod tests {
             );
         }
         let replacement_time = start
-            .checked_add(Duration::from_millis(OBSERVER_SNAPSHOT_CACHE_MAX_ENTRIES as u64))
+            .checked_add(Duration::from_millis(
+                OBSERVER_SNAPSHOT_CACHE_MAX_ENTRIES as u64,
+            ))
             .expect("replacement time");
         insert_cached_snapshot(
             &mut cache,
@@ -746,14 +754,12 @@ mod tests {
         );
         assert_eq!(cache.len(), OBSERVER_SNAPSHOT_CACHE_MAX_ENTRIES);
         assert!(get_cached_snapshot(&mut cache, cache_key(1), replacement_time).is_none());
-        assert!(
-            get_cached_snapshot(
-                &mut cache,
-                cache_key(OBSERVER_SNAPSHOT_CACHE_MAX_ENTRIES),
-                replacement_time,
-            )
-            .is_some()
-        );
+        assert!(get_cached_snapshot(
+            &mut cache,
+            cache_key(OBSERVER_SNAPSHOT_CACHE_MAX_ENTRIES),
+            replacement_time,
+        )
+        .is_some());
     }
 
     #[tokio::test]
