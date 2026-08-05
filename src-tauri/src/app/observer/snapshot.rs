@@ -343,8 +343,8 @@ fn load_provider_candidates(
         .filter(|provider| provider.auth_mode == "oauth")
         .map(|provider| provider.id)
         .collect::<Vec<_>>();
-    for provider_ids in oauth_provider_ids
-        .chunks(crate::domain::provider_oauth_limits::MAX_DISPLAY_PROVIDER_IDS)
+    for provider_ids in
+        oauth_provider_ids.chunks(crate::domain::provider_oauth_limits::MAX_DISPLAY_PROVIDER_IDS)
     {
         limited_provider_ids.extend(
             crate::domain::provider_oauth_limits::list_display_snapshots(
