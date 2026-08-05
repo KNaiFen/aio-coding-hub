@@ -140,6 +140,9 @@ jobs:
       - name: Validate standalone TUI release contract
         run: node scripts/check-tui-release-contract.mjs
 
+      - name: Validate release signing secret scope
+        run: node scripts/check-release-signing-secret-scope.selftest.mjs && node scripts/check-release-signing-secret-scope.mjs
+
   frontend:
     needs: [change-scope, support-contract]
     if: needs.change-scope.outputs.full_ci == 'true'
@@ -414,12 +417,13 @@ jobs:
             echo "Required updater signing password is unavailable." >&2
             exit 1
           }
+          umask 077
+          key_path="$RUNNER_TEMP/tauri-updater.key"
+          rm -f "$key_path"
           temp_dir="$(mktemp -d)"
           trap 'rm -rf "$temp_dir"' EXIT
-          key_path="$temp_dir/tauri-updater.key"
           test_path="$temp_dir/signing-probe.txt"
           printf '::add-mask::%s\n' "$normalized_key"
-          printf 'TAURI_SIGNING_PRIVATE_KEY=%s\n' "$normalized_key" >> "$GITHUB_ENV"
           printf '%s' "$normalized_key" > "$key_path"
           chmod 600 "$key_path"
           printf '%s\n' 'signing-probe' > "$test_path"
@@ -433,11 +437,17 @@ jobs:
         uses: tauri-apps/tauri-action@fce9c6108b31ea247710505d3aaaa893ee6768d4 # v0
         env:
           APPLE_SIGNING_IDENTITY: ${{ startsWith(matrix.updater_platform, 'darwin-') && '-' || '' }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ runner.temp }}/tauri-updater.key
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tauriScript: pnpm exec tauri
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} -- --locked
           includeUpdaterJson: false
+
+      - name: Delete updater signing key
+        if: always()
+        shell: bash
+        run: rm -f "$RUNNER_TEMP/tauri-updater.key"
 
       - name: Prepare updater assets
         shell: bash
