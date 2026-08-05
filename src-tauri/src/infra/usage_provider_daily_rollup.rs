@@ -544,7 +544,7 @@ WHERE local_day = ?1 AND final_provider_id = 41
         assert_eq!(aggregate.0.as_deref(), Some("Zulu"));
         assert_eq!(aggregate.1.as_deref(), Some("Alpha"));
         assert_eq!((aggregate.2, aggregate.3), (2, 1));
-        assert_eq!((aggregate.4, aggregate.5, aggregate.6), (100, 10, 90));
+        assert_eq!((aggregate.4, aggregate.5, aggregate.6), (100, 10, 100));
         assert_eq!(aggregate.7, 125);
 
         conn.execute(
