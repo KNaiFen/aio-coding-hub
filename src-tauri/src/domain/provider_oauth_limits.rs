@@ -9,7 +9,7 @@ use std::collections::HashSet;
 const TEXT_MAX_CHARS: usize = 96;
 const SHORT_LABEL_MAX_CHARS: usize = 32;
 const FALLBACK_COOLDOWN_SECS: i64 = 5 * 60;
-const MAX_DISPLAY_PROVIDER_IDS: usize = 512;
+pub(crate) const MAX_DISPLAY_PROVIDER_IDS: usize = 512;
 const DISPLAY_QUERY_BATCH_SIZE: usize = 300;
 
 #[derive(Debug, Clone)]
