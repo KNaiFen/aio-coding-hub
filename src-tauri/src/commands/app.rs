@@ -15,8 +15,7 @@ static FRONTEND_ERROR_AUTHORIZATION_RE: LazyLock<Regex> = LazyLock::new(|| {
     .expect("valid frontend-error authorization regex")
 });
 static FRONTEND_ERROR_BEARER_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)(\bbearer\s+)([^\s,;\"']+)"#)
-        .expect("valid frontend-error bearer regex")
+    Regex::new(r#"(?i)(\bbearer\s+)([^\s,;\"']+)"#).expect("valid frontend-error bearer regex")
 });
 static FRONTEND_ERROR_SECRET_ASSIGNMENT_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
@@ -42,8 +41,10 @@ fn sanitize_text(input: Option<String>, max_len: usize) -> Option<String> {
 
 fn normalize_frontend_error_url(value: &str) -> Option<(String, bool)> {
     let mut url = reqwest::Url::parse(value.trim()).ok()?;
-    let removed_sensitive_parts =
-        !url.username().is_empty() || url.password().is_some() || url.query().is_some() || url.fragment().is_some();
+    let removed_sensitive_parts = !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some();
     let _ = url.set_username("");
     let _ = url.set_password(None);
     url.set_query(None);
@@ -62,8 +63,7 @@ fn redact_frontend_error_text(value: &str) -> String {
     });
     let authorization = FRONTEND_ERROR_AUTHORIZATION_RE.replace_all(&urls, "$1[REDACTED]");
     let bearer = FRONTEND_ERROR_BEARER_RE.replace_all(&authorization, "$1[REDACTED]");
-    let assigned =
-        FRONTEND_ERROR_SECRET_ASSIGNMENT_RE.replace_all(&bearer, "$1[REDACTED]");
+    let assigned = FRONTEND_ERROR_SECRET_ASSIGNMENT_RE.replace_all(&bearer, "$1[REDACTED]");
     FRONTEND_ERROR_KEYLIKE_RE
         .replace_all(&assigned, "[REDACTED]")
         .into_owned()
@@ -290,13 +290,11 @@ mod tests {
     fn frontend_error_diagnostics_redact_secrets_before_tracing() {
         let secret = "sentinel-0123456789abcdef0123456789abcdef";
         let source = normalize_frontend_error_source(format!("Authorization: Bearer {secret}"));
-        let message = sanitize_frontend_error_text(
-            Some(format!("Authorization: Bearer {secret}")),
-            4096,
-        )
-        .expect("message");
-        let stack = sanitize_frontend_error_text(Some(format!("api_key={secret}")), 16_384)
-            .expect("stack");
+        let message =
+            sanitize_frontend_error_text(Some(format!("Authorization: Bearer {secret}")), 4096)
+                .expect("message");
+        let stack =
+            sanitize_frontend_error_text(Some(format!("api_key={secret}")), 16_384).expect("stack");
         let details = sanitize_frontend_error_text(
             Some(format!(
                 r#"{{"password":"{secret}","token":"{secret}","session_token":"{secret}"}}"#
@@ -304,11 +302,9 @@ mod tests {
             16_384,
         )
         .expect("details");
-        let user_agent = sanitize_frontend_error_text(
-            Some(format!("test-agent secret={secret}")),
-            1024,
-        )
-        .expect("user agent");
+        let user_agent =
+            sanitize_frontend_error_text(Some(format!("test-agent secret={secret}")), 1024)
+                .expect("user agent");
         let href = sanitize_frontend_error_href(
             Some(format!(
                 "https://user:{secret}@example.test/path?token={secret}#{secret}"
