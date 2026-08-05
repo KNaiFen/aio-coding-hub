@@ -3,7 +3,7 @@ import path from "node:path";
 
 const ROOT = process.cwd();
 const TARGET_DIR = path.join(ROOT, "src-tauri", "src");
-const PATTERN = /Instant::now\(\)\s*-\s*/;
+const NEEDLE = "Instant::now()";
 
 function isRustSource(filePath) {
   return filePath.endsWith(".rs");
@@ -23,14 +23,60 @@ function walk(dirPath, out) {
   }
 }
 
+function skipRustTrivia(text, start) {
+  let cursor = start;
+  while (cursor < text.length) {
+    if (/\s/.test(text[cursor])) {
+      cursor += 1;
+      continue;
+    }
+    if (text.startsWith("//", cursor)) {
+      const newline = text.indexOf("\n", cursor + 2);
+      cursor = newline === -1 ? text.length : newline + 1;
+      continue;
+    }
+    if (text.startsWith("/*", cursor)) {
+      let depth = 1;
+      cursor += 2;
+      while (cursor < text.length && depth > 0) {
+        if (text.startsWith("/*", cursor)) {
+          depth += 1;
+          cursor += 2;
+        } else if (text.startsWith("*/", cursor)) {
+          depth -= 1;
+          cursor += 2;
+        } else {
+          cursor += 1;
+        }
+      }
+      continue;
+    }
+    break;
+  }
+  return cursor;
+}
+
+function sourceLine(text, offset) {
+  const lineStart = text.lastIndexOf("\n", offset - 1) + 1;
+  const lineEnd = text.indexOf("\n", offset);
+  return {
+    lineNumber: text.slice(0, lineStart).split("\n").length,
+    line: text.slice(lineStart, lineEnd === -1 ? text.length : lineEnd),
+  };
+}
+
 function findViolations(filePath) {
   const text = fs.readFileSync(filePath, "utf8");
-  const lines = text.split(/\r?\n/);
   const hits = [];
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (!PATTERN.test(line)) continue;
-    hits.push({ lineNumber: i + 1, line });
+  let searchFrom = 0;
+  while (searchFrom < text.length) {
+    const matchStart = text.indexOf(NEEDLE, searchFrom);
+    if (matchStart === -1) break;
+    const operator = skipRustTrivia(text, matchStart + NEEDLE.length);
+    if (text[operator] === "-") {
+      hits.push(sourceLine(text, matchStart));
+    }
+    searchFrom = matchStart + NEEDLE.length;
   }
   return hits;
 }

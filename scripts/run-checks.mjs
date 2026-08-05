@@ -12,14 +12,16 @@ import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const modulePath = fileURLToPath(import.meta.url);
+const repoRoot = resolve(dirname(modulePath), "..");
 
-const CHECKS = {
+export const CHECKS = {
   "format-check": "pnpm format:check",
   "local-build-entrypoints": "pnpm check:local-build-entrypoints",
   lint: "pnpm lint",
   typecheck: "pnpm typecheck",
   "no-instant-now-sub": "pnpm check:no-instant-now-sub",
+  "ci-quality-gates": "pnpm check:ci-quality-gates",
   "spec-links": "pnpm check:spec-links",
   "homebrew-cask": "pnpm check:homebrew-cask",
   "tui-release-contract": "pnpm check:tui-release-contract",
@@ -29,6 +31,7 @@ const CHECKS = {
   "plugin-sdk-typecheck": "pnpm plugin-sdk:typecheck",
   "plugin-sdk-test": "pnpm plugin-sdk:test",
   "create-aio-plugin-test": "pnpm create-aio-plugin:test",
+  "create-aio-plugin-typecheck": "pnpm create-aio-plugin:typecheck",
   "unit-coverage-shards": "pnpm test:unit:coverage:shards",
 };
 
@@ -37,15 +40,18 @@ const PREPUSH_STATIC = [
   "local-build-entrypoints",
   "lint",
   "typecheck",
+  "no-instant-now-sub",
+  "ci-quality-gates",
   "homebrew-cask",
   "tui-release-contract",
   "gateway-error-codes",
   "plugin-system-docs",
   "plugin-api-contract",
   "plugin-sdk-typecheck",
+  "create-aio-plugin-typecheck",
 ];
 
-const STAGES = {
+export const STAGES = {
   precommit: PRECOMMIT_SRC,
   "precommit-full": [
     "format-check",
@@ -56,7 +62,12 @@ const STAGES = {
     "gateway-error-codes",
   ],
   prepush: [...PREPUSH_STATIC, "unit-coverage-shards", "plugin-sdk-test", "create-aio-plugin-test"],
-  "plugin-hardening": ["plugin-api-contract", "plugin-sdk-test", "plugin-sdk-typecheck"],
+  "plugin-hardening": [
+    "plugin-api-contract",
+    "plugin-sdk-test",
+    "plugin-sdk-typecheck",
+    "create-aio-plugin-typecheck",
+  ],
 };
 
 function listStages() {
@@ -98,4 +109,6 @@ function main() {
   console.log(`[checks] stage "${arg}" passed (${ids.length} checks)`);
 }
 
-main();
+if (process.argv[1] && resolve(process.argv[1]) === modulePath) {
+  main();
+}
