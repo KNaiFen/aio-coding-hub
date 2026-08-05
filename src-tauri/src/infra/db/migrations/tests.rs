@@ -3018,6 +3018,22 @@ ALTER TABLE usage_ledger DROP COLUMN upstream_stream_duration_ms;
     .expect("remove stream timing schema from drift fixture");
 }
 
+fn remove_final_attempt_timing_schema_for_drift_fixture(conn: &Connection) {
+    conn.execute_batch(
+        r#"
+DROP VIEW IF EXISTS usage_events;
+DROP TRIGGER IF EXISTS trg_usage_ledger_daily_rollup_insert;
+DROP TRIGGER IF EXISTS trg_usage_ledger_daily_rollup_update;
+DROP TRIGGER IF EXISTS trg_usage_ledger_daily_rollup_delete;
+ALTER TABLE request_logs DROP COLUMN final_upstream_attempt_timing_version;
+ALTER TABLE request_logs DROP COLUMN final_upstream_attempt_duration_ms;
+ALTER TABLE usage_ledger DROP COLUMN final_upstream_attempt_timing_version;
+ALTER TABLE usage_ledger DROP COLUMN final_upstream_attempt_duration_ms;
+"#,
+    )
+    .expect("remove final-attempt timing schema from drift fixture");
+}
+
 #[test]
 fn migrate_v47_to_v48_adds_stream_timing_and_invalidates_old_rollups() {
     let mut conn = Connection::open_in_memory().expect("open v47 migration db");
@@ -3239,6 +3255,265 @@ fn migrate_v47_to_v48_tolerates_missing_request_logs() {
             .expect("inspect usage ledger timing column");
         assert!(exists, "missing usage_ledger.{column}");
     }
+}
+
+#[test]
+fn migrate_v48_to_v49_adds_final_attempt_timing_without_backfilling_old_samples() {
+    let mut conn = Connection::open_in_memory().expect("open v48 migration db");
+    apply_migrations(&mut conn).expect("create current schema fixture");
+    let created_at = 1_700_000_000_i64;
+
+    conn.execute(
+        r#"
+INSERT INTO request_logs(
+  trace_id,
+  cli_key,
+  method,
+  path,
+  duration_ms,
+  created_at,
+  upstream_stream_duration_ms,
+  upstream_stream_timing_version
+) VALUES (
+  'trace-v48-final-attempt',
+  'codex',
+  'POST',
+  '/v1/responses',
+  30000,
+  ?1,
+  1000,
+  1
+)
+"#,
+        [created_at],
+    )
+    .expect("insert v48 request log fixture");
+    conn.execute(
+        r#"
+INSERT INTO usage_ledger(
+  request_log_id,
+  trace_id,
+  cli_key,
+  created_at,
+  status,
+  error_present,
+  excluded_from_stats,
+  duration_ms,
+  final_provider_id,
+  provider_name_snapshot,
+  upstream_stream_duration_ms,
+  upstream_stream_timing_version
+) VALUES (
+  1,
+  'trace-v48-final-attempt',
+  'codex',
+  ?1,
+  200,
+  0,
+  0,
+  30000,
+  7,
+  'Provider',
+  1000,
+  1
+)
+"#,
+        [created_at],
+    )
+    .expect("insert v48 usage ledger fixture");
+    conn.execute_batch(
+        r#"
+UPDATE usage_provider_daily_rollup_days
+SET status = 'complete', source_row_count = 1, updated_at = 1;
+INSERT INTO usage_provider_daily_rollups(
+  local_day,
+  cli_key,
+  final_provider_id,
+  provider_name_all_snapshot,
+  provider_name_success_snapshot,
+  created_at_min,
+  created_at_max,
+  requests_total,
+  requests_success,
+  success_duration_ms_sum,
+  success_ttfb_ms_sum,
+  success_ttfb_ms_count,
+  success_generation_ms_sum,
+  success_output_tokens_for_rate_sum,
+  success_output_rate_count,
+  cache_denom_tokens,
+  cache_read_input_tokens
+)
+SELECT
+  local_day,
+  'codex',
+  7,
+  'Provider',
+  'Provider',
+  day_start_ts,
+  day_start_ts,
+  1,
+  1,
+  30000,
+  100,
+  1,
+  1000,
+  100,
+  1,
+  1,
+  0
+FROM usage_provider_daily_rollup_days;
+UPDATE usage_provider_daily_rollup_backfill_state
+SET next_local_day = '2023-01-01', updated_at = 1
+WHERE id = 1;
+"#,
+    )
+    .expect("seed stale v48 rollup state");
+
+    remove_final_attempt_timing_schema_for_drift_fixture(&conn);
+    conn.pragma_update(None, "user_version", 48)
+        .expect("mark fixture as v48");
+
+    v48_to_v49::migrate_v48_to_v49(&mut conn).expect("migrate v48->v49");
+
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("read v49 version");
+    assert_eq!(version, 49);
+    for table in ["request_logs", "usage_ledger"] {
+        for column in [
+            "final_upstream_attempt_duration_ms",
+            "final_upstream_attempt_timing_version",
+        ] {
+            let exists: bool = conn
+                .query_row(
+                    &format!(
+                        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('{table}') WHERE name = ?1)"
+                    ),
+                    [column],
+                    |row| row.get(0),
+                )
+                .expect("inspect v49 timing column");
+            assert!(exists, "missing {table}.{column}");
+        }
+    }
+
+    let request_timing: (Option<i64>, i64) = conn
+        .query_row(
+            "SELECT final_upstream_attempt_duration_ms, final_upstream_attempt_timing_version FROM request_logs WHERE trace_id = 'trace-v48-final-attempt'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("read migrated request timing");
+    let ledger_timing: (Option<i64>, i64) = conn
+        .query_row(
+            "SELECT final_upstream_attempt_duration_ms, final_upstream_attempt_timing_version FROM usage_ledger WHERE trace_id = 'trace-v48-final-attempt'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("read migrated ledger timing");
+    let view_timing: (Option<i64>, i64) = conn
+        .query_row(
+            "SELECT final_upstream_attempt_duration_ms, final_upstream_attempt_timing_version FROM usage_events WHERE trace_id = 'trace-v48-final-attempt'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("read migrated usage view timing");
+    assert_eq!(request_timing, (None, 0));
+    assert_eq!(ledger_timing, (None, 0));
+    assert_eq!(view_timing, (None, 0));
+
+    let stale_rollups: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM usage_provider_daily_rollups",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count stale rollups");
+    let day_status: String = conn
+        .query_row(
+            "SELECT status FROM usage_provider_daily_rollup_days LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read invalidated rollup day");
+    let cursor: Option<String> = conn
+        .query_row(
+            "SELECT next_local_day FROM usage_provider_daily_rollup_backfill_state WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read reset rollup cursor");
+    assert_eq!(stale_rollups, 0);
+    assert_eq!(day_status, "dirty");
+    assert_eq!(cursor, None);
+
+    conn.execute(
+        "UPDATE usage_provider_daily_rollup_days SET status = 'complete', updated_at = 1",
+        [],
+    )
+    .expect("mark migrated day complete");
+    conn.execute(
+        "UPDATE usage_ledger SET final_upstream_attempt_duration_ms = 30000, final_upstream_attempt_timing_version = 1 WHERE request_log_id = 1",
+        [],
+    )
+    .expect("update migrated final-attempt timing fields");
+    let updated_day_status: String = conn
+        .query_row(
+            "SELECT status FROM usage_provider_daily_rollup_days LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read day after final-attempt timing update");
+    assert_eq!(updated_day_status, "dirty");
+}
+
+#[test]
+fn ensure_repairs_missing_v49_final_attempt_timing_columns_before_views_and_triggers() {
+    let mut conn = Connection::open_in_memory().expect("open drifted v49 db");
+    apply_migrations(&mut conn).expect("create current schema fixture");
+    remove_final_attempt_timing_schema_for_drift_fixture(&conn);
+
+    apply_migrations(&mut conn).expect("repair drifted v49 schema");
+
+    let timing_columns: i64 = conn
+        .query_row(
+            r#"
+SELECT
+  (SELECT COUNT(*) FROM pragma_table_info('request_logs')
+   WHERE name IN (
+     'final_upstream_attempt_duration_ms',
+     'final_upstream_attempt_timing_version'
+   ))
+  +
+  (SELECT COUNT(*) FROM pragma_table_info('usage_ledger')
+   WHERE name IN (
+     'final_upstream_attempt_duration_ms',
+     'final_upstream_attempt_timing_version'
+   ))
+"#,
+            [],
+            |row| row.get(0),
+        )
+        .expect("count repaired final-attempt timing columns");
+    assert_eq!(timing_columns, 4);
+    let repaired_objects: i64 = conn
+        .query_row(
+            r#"
+SELECT COUNT(*)
+FROM sqlite_master
+WHERE (type = 'view' AND name = 'usage_events')
+   OR (type = 'trigger' AND name IN (
+     'trg_usage_ledger_daily_rollup_insert',
+     'trg_usage_ledger_daily_rollup_update',
+     'trg_usage_ledger_daily_rollup_delete'
+   ))
+"#,
+            [],
+            |row| row.get(0),
+        )
+        .expect("count repaired view and triggers");
+    assert_eq!(repaired_objects, 4);
 }
 
 #[test]

@@ -63,8 +63,10 @@ impl StreamActivityTracker {
 
 #[derive(Debug, Default)]
 struct UpstreamOutputTimingState {
+    first_byte_ms: Option<u128>,
     first_output_ms: Option<u128>,
     last_output_ms: Option<u128>,
+    final_attempt_duration_ms: Option<u128>,
     contaminated: bool,
 }
 
@@ -74,6 +76,23 @@ pub(in crate::gateway) struct UpstreamOutputTiming {
 }
 
 impl UpstreamOutputTiming {
+    pub(in crate::gateway) fn observe_first_byte_at(&self, elapsed_ms: u128) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.first_byte_ms.is_none() {
+            state.first_byte_ms = Some(elapsed_ms);
+        }
+    }
+
+    pub(in crate::gateway) fn first_byte_ms(&self) -> Option<u128> {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .first_byte_ms
+    }
+
     pub(in crate::gateway) fn from_buffered_prefix(
         first_output_ms: Option<u128>,
         last_output_ms: Option<u128>,
@@ -114,6 +133,28 @@ impl UpstreamOutputTiming {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         state.contaminated = true;
+    }
+
+    pub(in crate::gateway) fn observe_clean_eof_at(&self, elapsed_ms: u128) {
+        if elapsed_ms == 0 {
+            return;
+        }
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.final_attempt_duration_ms = Some(elapsed_ms);
+    }
+
+    pub(in crate::gateway) fn final_attempt_duration_ms(&self) -> Option<u128> {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.contaminated {
+            return None;
+        }
+        state.final_attempt_duration_ms.filter(|duration_ms| *duration_ms > 0)
     }
 
     pub(in crate::gateway) fn duration_ms(&self) -> Option<u128> {
@@ -208,7 +249,19 @@ mod tests {
     #[test]
     fn upstream_output_timing_is_unknown_after_backpressure_contamination() {
         let timing = UpstreamOutputTiming::from_buffered_prefix(Some(120), Some(420));
+        timing.observe_clean_eof_at(900);
         timing.invalidate();
         assert_eq!(timing.duration_ms(), None);
+        assert_eq!(timing.final_attempt_duration_ms(), None);
+    }
+
+    #[test]
+    fn final_attempt_timing_runs_from_send_until_clean_upstream_eof() {
+        let timing = UpstreamOutputTiming::default();
+        timing.observe_first_byte_at(120);
+        timing.observe_first_byte_at(240);
+        timing.observe_clean_eof_at(900);
+        assert_eq!(timing.first_byte_ms(), Some(120));
+        assert_eq!(timing.final_attempt_duration_ms(), Some(900));
     }
 }

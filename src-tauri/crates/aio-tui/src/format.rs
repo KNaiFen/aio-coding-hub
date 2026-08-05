@@ -862,7 +862,7 @@ pub fn format_cost(value: f64) -> String {
 
 pub fn output_tokens_per_second(request: &ObserverRequest) -> Option<f64> {
     if request.state != ObserverRequestState::Terminal
-        || request.upstream_stream_timing_version != 1
+        || request.final_upstream_attempt_timing_version != 1
         || request.error_code.is_some()
         || !request
             .status
@@ -871,11 +871,11 @@ pub fn output_tokens_per_second(request: &ObserverRequest) -> Option<f64> {
         return None;
     }
     let output_tokens = request.usage.as_ref()?.output_tokens?;
-    let upstream_stream_duration_ms = request.upstream_stream_duration_ms?;
-    if output_tokens <= 0 || upstream_stream_duration_ms <= 0 {
+    let final_upstream_attempt_duration_ms = request.final_upstream_attempt_duration_ms?;
+    if output_tokens <= 0 || final_upstream_attempt_duration_ms <= 0 {
         return None;
     }
-    let rate = output_tokens as f64 / (upstream_stream_duration_ms as f64 / 1_000.0);
+    let rate = output_tokens as f64 / (final_upstream_attempt_duration_ms as f64 / 1_000.0);
     rate.is_finite().then_some(rate)
 }
 
@@ -993,6 +993,8 @@ mod tests {
             visible_ttfb_ms: None,
             upstream_stream_duration_ms: None,
             upstream_stream_timing_version: 0,
+            final_upstream_attempt_duration_ms: None,
+            final_upstream_attempt_timing_version: 0,
             attempt_count,
             retry_count,
             provider_switch_count,
@@ -1185,8 +1187,8 @@ mod tests {
         request.folder_name = Some("aio-coding-hub".to_string());
         request.duration_ms = Some(2_000);
         request.ttfb_ms = Some(500);
-        request.upstream_stream_duration_ms = Some(1_500);
-        request.upstream_stream_timing_version = 1;
+        request.final_upstream_attempt_duration_ms = Some(2_000);
+        request.final_upstream_attempt_timing_version = 1;
         request.usage = Some(ObserverRequestUsage {
             input_tokens: Some(611),
             output_tokens: Some(200),
@@ -1200,19 +1202,21 @@ mod tests {
         assert_eq!(lines[1].kind, RequestCardLineKind::Model);
         assert_eq!(lines[1].text, "Codex / gpt-5");
         assert_eq!(lines[2].text, "INPUT 大春  aio-coding-hub");
-        assert_eq!(lines[3].text, "直连  2.0s  133.3 t/s");
+        assert_eq!(lines[3].text, "直连  2.0s  100.0 t/s");
         assert!(request_card_lines(&request, 60_001, 15)[2]
             .text
             .starts_with("INPUT 大春"));
     }
 
     #[test]
-    fn output_rate_uses_final_upstream_span_and_visibility_rules() {
+    fn output_rate_uses_final_upstream_attempt_and_visibility_rules() {
         let mut request = request_with_route_counts(1, 0, 0);
         request.duration_ms = Some(20_000);
         request.ttfb_ms = Some(19_800);
         request.upstream_stream_duration_ms = Some(200);
         request.upstream_stream_timing_version = 1;
+        request.final_upstream_attempt_duration_ms = Some(20_000);
+        request.final_upstream_attempt_timing_version = 1;
         request.usage = Some(ObserverRequestUsage {
             input_tokens: None,
             output_tokens: Some(1_200),
@@ -1220,14 +1224,15 @@ mod tests {
             cache_read_tokens: None,
             cache_creation_tokens: None,
         });
-        assert_eq!(output_tokens_per_second(&request), Some(6_000.0));
+        assert_eq!(output_tokens_per_second(&request), Some(60.0));
         assert_eq!(format_tokens_per_second_short(1_500.0), "1.5k t/s");
 
         request.duration_ms = Some(29_520);
         request.ttfb_ms = Some(29_360);
         request.upstream_stream_duration_ms = Some(160);
+        request.final_upstream_attempt_duration_ms = Some(29_520);
         request.usage.as_mut().expect("usage").output_tokens = Some(439);
-        assert!(output_tokens_per_second(&request).is_some_and(|rate| rate > 2_700.0));
+        assert!(output_tokens_per_second(&request).is_some_and(|rate| rate < 15.0));
 
         request.status = Some(500);
         assert_eq!(output_tokens_per_second(&request), None);
@@ -1235,10 +1240,10 @@ mod tests {
         request.state = ObserverRequestState::Active;
         assert_eq!(output_tokens_per_second(&request), None);
         request.state = ObserverRequestState::Terminal;
-        request.upstream_stream_duration_ms = None;
+        request.final_upstream_attempt_duration_ms = None;
         assert_eq!(output_tokens_per_second(&request), None);
-        request.upstream_stream_duration_ms = Some(160);
-        request.upstream_stream_timing_version = 0;
+        request.final_upstream_attempt_duration_ms = Some(29_520);
+        request.final_upstream_attempt_timing_version = 0;
         assert_eq!(output_tokens_per_second(&request), None);
     }
 

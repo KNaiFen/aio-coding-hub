@@ -174,8 +174,8 @@ const RequestLogCard = memo(function RequestLogCard({
     !log.error_code;
   const outputTokensPerSecond = computeOutputTokensPerSecond(
     log.output_tokens,
-    log.upstream_stream_duration_ms,
-    hasSuccessfulTerminalResult ? log.upstream_stream_timing_version : 0
+    log.final_upstream_attempt_duration_ms,
+    hasSuccessfulTerminalResult ? log.final_upstream_attempt_timing_version : 0
   );
 
   const costMultiplier = log.cost_multiplier;

@@ -14,6 +14,8 @@ pub(super) struct StreamRequestCompletion {
     pub(super) visible_ttfb_ms: Option<u128>,
     pub(super) upstream_stream_duration_ms: Option<u128>,
     pub(super) upstream_stream_timing_version: i64,
+    pub(super) final_upstream_attempt_duration_ms: Option<u128>,
+    pub(super) final_upstream_attempt_timing_version: i64,
     pub(super) requested_model: Option<String>,
     pub(super) usage_metrics: Option<crate::usage::UsageMetrics>,
     pub(super) usage: Option<crate::usage::UsageExtract>,
@@ -35,6 +37,8 @@ impl StreamRequestCompletion {
             visible_ttfb_ms,
             upstream_stream_duration_ms: None,
             upstream_stream_timing_version: 0,
+            final_upstream_attempt_duration_ms: None,
+            final_upstream_attempt_timing_version: 0,
             requested_model,
             usage_metrics,
             usage,
@@ -57,6 +61,8 @@ impl StreamRequestCompletion {
             visible_ttfb_ms,
             upstream_stream_duration_ms: None,
             upstream_stream_timing_version: 0,
+            final_upstream_attempt_duration_ms: None,
+            final_upstream_attempt_timing_version: 0,
             requested_model,
             usage_metrics,
             usage,
@@ -117,6 +123,32 @@ impl StreamRequestCompletion {
             } else {
                 0
             };
+        self
+    }
+
+    pub(super) fn with_final_upstream_attempt_timing(
+        mut self,
+        duration_ms: Option<u128>,
+        version: i64,
+    ) -> Self {
+        self.final_upstream_attempt_duration_ms = self
+            .error_code
+            .is_none()
+            .then_some(duration_ms)
+            .flatten()
+            .filter(|duration_ms| {
+                *duration_ms > 0
+                    && self
+                        .ttfb_ms
+                        .map_or(true, |ttfb_ms| *duration_ms >= ttfb_ms)
+            });
+        self.final_upstream_attempt_timing_version = if version == 1
+            && self.final_upstream_attempt_duration_ms.is_some()
+        {
+            1
+        } else {
+            0
+        };
         self
     }
 }
@@ -275,6 +307,10 @@ pub(super) fn emit_request_event_and_spawn_request_log<R: tauri::Runtime>(
         activity_details_json,
         ctx.created_at,
         completion.usage,
+    );
+    let log_args = log_args.with_final_upstream_attempt_timing(
+        completion.final_upstream_attempt_duration_ms,
+        completion.final_upstream_attempt_timing_version,
     );
 
     ctx.active_requests.finish(
@@ -436,6 +472,37 @@ mod tests {
         assert_eq!(completion.requested_model.as_deref(), Some("gpt-5"));
         assert!(completion.usage_metrics.is_some());
         assert!(completion.usage.is_none());
+    }
+
+    #[test]
+    fn stream_final_attempt_timing_requires_a_successful_nonzero_sample() {
+        let success = StreamRequestCompletion::success(None, None, None, None, None)
+            .with_final_upstream_attempt_timing(Some(1_250), 1);
+        assert_eq!(success.final_upstream_attempt_duration_ms, Some(1_250));
+        assert_eq!(success.final_upstream_attempt_timing_version, 1);
+
+        let failure = StreamRequestCompletion::failure(
+            GatewayErrorCode::StreamError.as_str(),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .with_final_upstream_attempt_timing(Some(1_250), 1);
+        assert_eq!(failure.final_upstream_attempt_duration_ms, None);
+        assert_eq!(failure.final_upstream_attempt_timing_version, 0);
+
+        let zero = StreamRequestCompletion::success(None, None, None, None, None)
+            .with_final_upstream_attempt_timing(Some(0), 1);
+        assert_eq!(zero.final_upstream_attempt_duration_ms, None);
+        assert_eq!(zero.final_upstream_attempt_timing_version, 0);
+
+        let shorter_than_ttft =
+            StreamRequestCompletion::success(Some(50), Some(50), None, None, None)
+                .with_final_upstream_attempt_timing(Some(20), 1);
+        assert_eq!(shorter_than_ttft.final_upstream_attempt_duration_ms, None);
+        assert_eq!(shorter_than_ttft.final_upstream_attempt_timing_version, 0);
     }
 
     #[test]

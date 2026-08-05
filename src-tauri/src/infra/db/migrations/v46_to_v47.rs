@@ -24,6 +24,7 @@ fn add_ledger_column_if_missing(
 }
 
 pub(super) fn create_provider_daily_rollup_schema(conn: &Connection) -> Result<(), String> {
+    super::v48_to_v49::ensure_usage_ledger_final_attempt_timing_columns(conn)?;
     conn.execute_batch(
         r#"
 CREATE TABLE IF NOT EXISTS usage_provider_daily_rollup_days (
@@ -160,6 +161,8 @@ AFTER UPDATE OF
   visible_ttfb_ms,
   upstream_stream_duration_ms,
   upstream_stream_timing_version,
+  final_upstream_attempt_duration_ms,
+  final_upstream_attempt_timing_version,
   input_tokens,
   output_tokens,
   cache_read_input_tokens,
@@ -178,6 +181,8 @@ WHEN OLD.created_at IS NOT NEW.created_at
   OR OLD.visible_ttfb_ms IS NOT NEW.visible_ttfb_ms
   OR OLD.upstream_stream_duration_ms IS NOT NEW.upstream_stream_duration_ms
   OR OLD.upstream_stream_timing_version IS NOT NEW.upstream_stream_timing_version
+  OR OLD.final_upstream_attempt_duration_ms IS NOT NEW.final_upstream_attempt_duration_ms
+  OR OLD.final_upstream_attempt_timing_version IS NOT NEW.final_upstream_attempt_timing_version
   OR OLD.input_tokens IS NOT NEW.input_tokens
   OR OLD.output_tokens IS NOT NEW.output_tokens
   OR OLD.cache_read_input_tokens IS NOT NEW.cache_read_input_tokens

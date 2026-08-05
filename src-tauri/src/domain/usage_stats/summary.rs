@@ -94,18 +94,18 @@ pub(super) fn summary_query(
 	    CASE WHEN (
 	      status >= 200 AND status < 300 AND error_present = 0 AND
 	      output_tokens > 0 AND
-      upstream_stream_timing_version = 1 AND
-      upstream_stream_duration_ms IS NOT NULL AND
-      upstream_stream_duration_ms > 0
-	    ) THEN upstream_stream_duration_ms ELSE 0 END
+      final_upstream_attempt_timing_version = 1 AND
+      final_upstream_attempt_duration_ms IS NOT NULL AND
+      final_upstream_attempt_duration_ms > 0
+	    ) THEN final_upstream_attempt_duration_ms ELSE 0 END
 	  ) AS success_generation_ms_sum,
 	  SUM(
 	    CASE WHEN (
 	      status >= 200 AND status < 300 AND error_present = 0 AND
 	      output_tokens > 0 AND
-      upstream_stream_timing_version = 1 AND
-      upstream_stream_duration_ms IS NOT NULL AND
-      upstream_stream_duration_ms > 0
+      final_upstream_attempt_timing_version = 1 AND
+      final_upstream_attempt_duration_ms IS NOT NULL AND
+      final_upstream_attempt_duration_ms > 0
 	    ) THEN output_tokens ELSE 0 END
 	  ) AS success_output_tokens_for_rate_sum,
 	  SUM({effective_input_expr}) AS input_tokens,

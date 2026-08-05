@@ -99,6 +99,9 @@ function makeRequestLog(
     visible_ttfb_ms: partial.visible_ttfb_ms ?? null,
     upstream_stream_duration_ms: partial.upstream_stream_duration_ms ?? null,
     upstream_stream_timing_version: partial.upstream_stream_timing_version ?? 0,
+    final_upstream_attempt_duration_ms: partial.final_upstream_attempt_duration_ms ?? null,
+    final_upstream_attempt_timing_version:
+      partial.final_upstream_attempt_timing_version ?? 0,
     attempt_count: partial.attempt_count ?? 1,
     has_failover: partial.has_failover ?? false,
     start_provider_id: partial.start_provider_id ?? 0,

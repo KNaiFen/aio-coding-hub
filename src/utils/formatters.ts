@@ -87,20 +87,20 @@ export function formatPercent(value: number | null | undefined, digits = 1) {
 
 export function computeOutputTokensPerSecond(
   outputTokens: number | null | undefined,
-  upstreamStreamDurationMs: number | null | undefined,
-  upstreamStreamTimingVersion: number | null | undefined
+  finalUpstreamAttemptDurationMs: number | null | undefined,
+  finalUpstreamAttemptTimingVersion: number | null | undefined
 ) {
-  if (upstreamStreamTimingVersion !== 1) return null;
+  if (finalUpstreamAttemptTimingVersion !== 1) return null;
   if (outputTokens == null || !Number.isFinite(outputTokens)) return null;
   if (
-    upstreamStreamDurationMs == null ||
-    !Number.isFinite(upstreamStreamDurationMs) ||
-    upstreamStreamDurationMs <= 0
+    finalUpstreamAttemptDurationMs == null ||
+    !Number.isFinite(finalUpstreamAttemptDurationMs) ||
+    finalUpstreamAttemptDurationMs <= 0
   ) {
     return null;
   }
   if (outputTokens <= 0) return null;
-  const rate = outputTokens / (upstreamStreamDurationMs / 1000);
+  const rate = outputTokens / (finalUpstreamAttemptDurationMs / 1000);
   return Number.isFinite(rate) ? rate : null;
 }
 

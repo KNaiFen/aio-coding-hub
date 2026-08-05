@@ -1,0 +1,30 @@
+{
+  "id": "observability-correctness-release",
+  "name": "observability-correctness-release",
+  "title": "修复可观测性正确性并发布 0.60.49",
+  "description": "统一修复 Token 速度、请求日志刷新和供应商状态条，并完成 PR 与补丁发版。",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": "aio-coding-hub",
+  "package": "aio-coding-hub",
+  "priority": "P0",
+  "creator": "KNaiFen",
+  "assignee": "KNaiFen",
+  "createdAt": "2026-08-05",
+  "completedAt": null,
+  "branch": "codex/fix-observability-refresh-status",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-05-final-attempt-token-speed",
+    "08-05-buffered-request-log-refresh",
+    "08-05-provider-status-natural-buckets"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

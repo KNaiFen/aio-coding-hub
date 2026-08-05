@@ -873,6 +873,8 @@ fn project_active(
         visible_ttfb_ms: None,
         upstream_stream_duration_ms: None,
         upstream_stream_timing_version: 0,
+        final_upstream_attempt_duration_ms: None,
+        final_upstream_attempt_timing_version: 0,
         attempt_count,
         retry_count: attempt_count.saturating_sub(1),
         provider_switch_count: 0,
@@ -941,6 +943,10 @@ fn project_terminal(
         visible_ttfb_ms: row.visible_ttfb_ms.filter(|value| *value >= 0),
         upstream_stream_duration_ms: row.upstream_stream_duration_ms.filter(|value| *value > 0),
         upstream_stream_timing_version: row.upstream_stream_timing_version,
+        final_upstream_attempt_duration_ms: row
+            .final_upstream_attempt_duration_ms
+            .filter(|value| *value > 0),
+        final_upstream_attempt_timing_version: row.final_upstream_attempt_timing_version,
         attempt_count,
         retry_count,
         provider_switch_count,
@@ -1349,6 +1355,8 @@ mod tests {
             visible_ttfb_ms: None,
             upstream_stream_duration_ms: None,
             upstream_stream_timing_version: 0,
+            final_upstream_attempt_duration_ms: None,
+            final_upstream_attempt_timing_version: 0,
             attempt_count: 1,
             has_failover: false,
             start_provider_id: id,

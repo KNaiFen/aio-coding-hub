@@ -783,6 +783,8 @@ fn insert_batch_once(
 		  visible_ttfb_ms,
 		  upstream_stream_duration_ms,
 		  upstream_stream_timing_version,
+		  final_upstream_attempt_duration_ms,
+		  final_upstream_attempt_timing_version,
 		  attempts_json,
 		  input_tokens,
 		  output_tokens,
@@ -802,7 +804,12 @@ fn insert_batch_once(
 		  final_provider_id,
 		  provider_chain_json,
 		  error_details_json
-		) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34)
+		) VALUES (
+		  ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
+		  ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
+		  ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30,
+		  ?31, ?32, ?33, ?34, ?35, ?36
+		)
 		ON CONFLICT(trace_id) DO UPDATE SET
 		  method = excluded.method,
 		  path = excluded.path,
@@ -816,6 +823,8 @@ fn insert_batch_once(
 	  visible_ttfb_ms = excluded.visible_ttfb_ms,
 	  upstream_stream_duration_ms = excluded.upstream_stream_duration_ms,
 	  upstream_stream_timing_version = excluded.upstream_stream_timing_version,
+	  final_upstream_attempt_duration_ms = excluded.final_upstream_attempt_duration_ms,
+	  final_upstream_attempt_timing_version = excluded.final_upstream_attempt_timing_version,
 	  attempts_json = excluded.attempts_json,
 	  input_tokens = excluded.input_tokens,
 	  output_tokens = excluded.output_tokens,
@@ -970,6 +979,8 @@ fn insert_batch_once(
                 item.visible_ttfb_ms,
                 item.upstream_stream_duration_ms,
                 item.upstream_stream_timing_version,
+                item.final_upstream_attempt_duration_ms,
+                item.final_upstream_attempt_timing_version,
                 item.attempts_json,
                 item.input_tokens,
                 item.output_tokens,
@@ -1123,6 +1134,8 @@ mod tests {
             visible_ttfb_ms: Some(5),
             upstream_stream_duration_ms: None,
             upstream_stream_timing_version: 0,
+            final_upstream_attempt_duration_ms: None,
+            final_upstream_attempt_timing_version: 0,
             attempts_json: "[]".to_string(),
             input_tokens: None,
             output_tokens: None,

@@ -321,6 +321,8 @@ describe("components/home/RealtimeTraceCards", () => {
               output_tokens: null,
               upstream_stream_duration_ms: 900,
               upstream_stream_timing_version: 1,
+              final_upstream_attempt_duration_ms: 1_000,
+              final_upstream_attempt_timing_version: 1,
             },
           }),
         ])}
@@ -456,6 +458,8 @@ describe("components/home/RealtimeTraceCards", () => {
         output_tokens: 900,
         upstream_stream_duration_ms: 900,
         upstream_stream_timing_version: 1,
+        final_upstream_attempt_duration_ms: 1_000,
+        final_upstream_attempt_timing_version: 1,
         cache_read_input_tokens: 100,
         cache_creation_input_tokens: 10,
         cost_usd: 1.23,

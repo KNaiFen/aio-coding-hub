@@ -96,6 +96,9 @@ CREATE TABLE IF NOT EXISTS request_logs (
   upstream_stream_duration_ms INTEGER,
   upstream_stream_timing_version INTEGER NOT NULL DEFAULT 0
     CHECK(upstream_stream_timing_version IN (0, 1)),
+  final_upstream_attempt_duration_ms INTEGER,
+  final_upstream_attempt_timing_version INTEGER NOT NULL DEFAULT 0
+    CHECK(final_upstream_attempt_timing_version IN (0, 1)),
   requested_model TEXT,
   cost_usd_femto INTEGER,
   cost_multiplier REAL NOT NULL DEFAULT 1.0,

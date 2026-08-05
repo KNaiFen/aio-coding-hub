@@ -11,7 +11,7 @@ pub(super) const TREND_MAX_ROWS: usize = TREND_MAX_PROVIDERS * TREND_MAX_BUCKETS
 const SUCCESS: &str = "r.status >= 200 AND r.status < 300 AND r.error_present = 0";
 const VALID_TTFB: &str = "r.ttfb_ms IS NOT NULL AND r.ttfb_ms < r.duration_ms";
 const VALID_OUTPUT_RATE: &str =
-    "r.output_tokens > 0 AND r.upstream_stream_timing_version = 1 AND r.upstream_stream_duration_ms IS NOT NULL AND r.upstream_stream_duration_ms > 0";
+    "r.output_tokens > 0 AND r.final_upstream_attempt_timing_version = 1 AND r.final_upstream_attempt_duration_ms IS NOT NULL AND r.final_upstream_attempt_duration_ms > 0";
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct TrendPlan {
@@ -662,7 +662,7 @@ SELECT
   SUM(CASE WHEN {success} THEN r.duration_ms ELSE 0 END) AS success_duration_ms_sum,
   SUM(CASE WHEN {success} AND {valid_ttfb} THEN r.ttfb_ms ELSE 0 END) AS success_ttfb_ms_sum,
   SUM(CASE WHEN {success} AND {valid_ttfb} THEN 1 ELSE 0 END) AS success_ttfb_ms_count,
-  SUM(CASE WHEN {success} AND {valid_output_rate} THEN r.upstream_stream_duration_ms ELSE 0 END) AS success_generation_ms_sum,
+  SUM(CASE WHEN {success} AND {valid_output_rate} THEN r.final_upstream_attempt_duration_ms ELSE 0 END) AS success_generation_ms_sum,
   SUM(CASE WHEN {success} AND {valid_output_rate} THEN r.output_tokens ELSE 0 END) AS success_output_tokens_for_rate_sum,
   SUM(CASE WHEN {success} AND {valid_output_rate} THEN 1 ELSE 0 END) AS success_output_rate_count,
   SUM(CASE WHEN {success} THEN {cache_denom_expr} ELSE 0 END) AS cache_denom_tokens,

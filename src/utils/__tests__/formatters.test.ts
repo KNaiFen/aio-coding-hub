@@ -70,14 +70,14 @@ describe("utils/formatters", () => {
     expect(formatTokensPerSecond(1.23)).toContain("Token/秒");
   });
 
-  it("tokens per second requires a confirmed final-upstream stream span", () => {
+  it("tokens per second requires a confirmed final-upstream attempt", () => {
     expect(computeOutputTokensPerSecond(1200, 200, 0)).toBeNull();
     expect(computeOutputTokensPerSecond(1200, null, 1)).toBeNull();
   });
 
-  it("tokens per second uses only the final upstream generation span", () => {
-    expect(computeOutputTokensPerSecond(200, 1500, 1)).toBeCloseTo(200 / 1.5, 0);
-    expect(computeOutputTokensPerSecond(439, 160, 1)).toBeCloseTo(439 / 0.16, 0);
+  it("tokens per second includes TTFT in the final upstream attempt", () => {
+    expect(computeOutputTokensPerSecond(200, 2000, 1)).toBeCloseTo(100, 0);
+    expect(computeOutputTokensPerSecond(439, 29520, 1)).toBeCloseTo(439 / 29.52, 1);
   });
 
   it("USD formatting", () => {

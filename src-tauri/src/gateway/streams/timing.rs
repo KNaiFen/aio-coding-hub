@@ -54,15 +54,28 @@ where
         }
         self.finalized = true;
 
+        let first_byte_ms = self
+            .ctx
+            .upstream_output_timing
+            .first_byte_ms()
+            .or(self.first_byte_ms);
+        let final_attempt_duration_ms = self
+            .ctx
+            .upstream_output_timing
+            .final_attempt_duration_ms();
         emit_request_event_and_spawn_request_log(
             &self.ctx,
             StreamRequestCompletion::from_error_code(
                 error_code,
-                self.first_byte_ms,
-                self.first_byte_ms,
+                first_byte_ms,
+                first_byte_ms,
                 self.ctx.requested_model.clone(),
                 None,
                 None,
+            )
+            .with_final_upstream_attempt_timing(
+                final_attempt_duration_ms,
+                i64::from(error_code.is_none() && final_attempt_duration_ms.is_some()),
             ),
         );
     }
@@ -125,6 +138,7 @@ where
 {
     fn drop(&mut self) {
         if !self.finalized {
+            self.ctx.upstream_output_timing.invalidate();
             self.finalize(Some(GatewayErrorCode::StreamAborted.as_str()));
         }
     }

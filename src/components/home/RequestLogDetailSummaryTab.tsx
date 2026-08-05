@@ -151,12 +151,12 @@ export function RequestLogDetailSummaryTab({
               value={(() => {
                 const rate = computeOutputTokensPerSecond(
                   selectedLog.output_tokens,
-                  selectedLog.upstream_stream_duration_ms,
+                  selectedLog.final_upstream_attempt_duration_ms,
                   selectedLog.status != null &&
                     selectedLog.status >= 200 &&
                     selectedLog.status < 300 &&
                     !selectedLog.error_code
-                    ? selectedLog.upstream_stream_timing_version
+                    ? selectedLog.final_upstream_attempt_timing_version
                     : 0
                 );
                 return rate != null ? formatTokensPerSecond(rate) : "—";
