@@ -110,6 +110,12 @@ jobs:
       - name: Validate CI change-scope classifier
         run: node scripts/ci-change-scope.selftest.mjs
 
+      - name: Validate CI quality gate matrix
+        run: node scripts/check-ci-quality-gates.selftest.mjs && node scripts/check-ci-quality-gates.mjs
+
+      - name: Reject Instant subtraction underflow hazards
+        run: node scripts/check-no-instant-now-sub.selftest.mjs && node scripts/check-no-instant-now-sub.mjs
+
       - name: Validate release source resolution
         run: node scripts/release-source.selftest.mjs
 
@@ -167,6 +173,9 @@ jobs:
 
       - name: Plugin TypeScript SDK typecheck
         run: pnpm plugin-sdk:typecheck
+
+      - name: Plugin scaffolder TypeScript typecheck
+        run: pnpm create-aio-plugin:typecheck
 
       - name: Plugin TypeScript SDK tests
         run: pnpm plugin-sdk:test
