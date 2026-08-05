@@ -730,10 +730,7 @@ fn gateway_target_resolution_cache_ttl(resolves_to_gateway: bool) -> Duration {
     }
 }
 
-fn cached_gateway_target_resolution(
-    host: &str,
-    context: &GatewaySelfCheckContext,
-) -> Option<bool> {
+fn cached_gateway_target_resolution(host: &str, context: &GatewaySelfCheckContext) -> Option<bool> {
     let cache = gateway_target_resolution_cache()
         .read()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -753,8 +750,7 @@ fn cache_gateway_target_resolution(
         .write()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     cache.retain(|_, entry| {
-        entry.checked_at.elapsed()
-            <= gateway_target_resolution_cache_ttl(entry.resolves_to_gateway)
+        entry.checked_at.elapsed() <= gateway_target_resolution_cache_ttl(entry.resolves_to_gateway)
     });
     if cache.len() >= GATEWAY_TARGET_RESOLUTION_CACHE_LIMIT && !cache.contains_key(&host) {
         if let Some(first_key) = cache.keys().next().cloned() {
