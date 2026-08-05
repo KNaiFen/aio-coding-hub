@@ -3,8 +3,10 @@ import contract from "../../../docs/plugins/plugin-api-v1-contract.json";
 import {
   type ActivationEvent,
   type GatewayHookName,
+  type JsonValue,
   type PluginCapability,
   type PluginContributes,
+  type PluginExtensionExecutionReport,
   type PluginHookContext,
   type PluginHookResult,
   type PluginApi,
@@ -771,7 +773,26 @@ describe("PluginHookContext", () => {
 });
 
 describe("PluginApi", () => {
-  it("represents the host command, gateway, and privacy APIs", () => {
+  it("represents every active Extension Host API namespace", () => {
+    const runtimeReport: PluginExtensionExecutionReport = {
+      id: 1,
+      pluginId: "acme.openrouter",
+      contributionType: "command",
+      contributionId: "acme.openrouter.refreshModels",
+      commandOrHook: "acme.openrouter.refreshModels",
+      traceId: "trace-sdk",
+      status: "completed",
+      startedAtMs: 100,
+      durationMs: 5,
+      failureKind: null,
+      errorCode: null,
+      inputBudget: { bytes: 10 },
+      outputBudget: { bytes: 20 },
+      mutationSummary: {},
+      replayable: false,
+      createdAt: 1,
+    };
+    const storage = new Map<string, JsonValue>();
     const api: PluginApi = {
       commands: {
         registerCommand: (_command, _handler) => undefined,
@@ -783,11 +804,23 @@ describe("PluginApi", () => {
         redactText: (text) => ({ hit: true, count: 1, redacted: text.replace("secret", "[密钥]") }),
         redactRequestBody: (body) => ({ hit: false, count: 0, redacted: body }),
       },
+      storage: {
+        get: (key) => storage.get(key) ?? null,
+        set: (key, value) => {
+          storage.set(key, value);
+        },
+      },
+      diagnostics: {
+        getRuntimeReports: (limit) => (limit === 1 ? [runtimeReport] : []),
+      },
     };
 
+    api.storage?.set("lastReport", { id: runtimeReport.id });
     expect(api.commands).toBeDefined();
     expect(api.gateway).toBeDefined();
     expect(api.privacy?.redactText("secret").redacted).toBe("[密钥]");
+    expect(api.storage?.get("lastReport")).toEqual({ id: 1 });
+    expect(api.diagnostics?.getRuntimeReports(1)[0]?.pluginId).toBe("acme.openrouter");
   });
 });
 

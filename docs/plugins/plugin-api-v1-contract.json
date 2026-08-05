@@ -37,6 +37,11 @@
     "protocol.bridge",
     "gateway.hooks"
   ],
+  "extensionHostCapabilityApis": {
+    "storage.plugin": ["api.storage.get", "api.storage.set"],
+    "diagnostics.read": ["api.diagnostics.getRuntimeReports"],
+    "privacy.redact": ["api.privacy.redactText", "api.privacy.redactRequestBody"]
+  },
   "uiContributionSlots": [
     "app.sidebar.items",
     "home.overview.cards",
