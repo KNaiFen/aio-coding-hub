@@ -25,8 +25,7 @@ use tokio::sync::{oneshot, Mutex, OwnedSemaphorePermit, Semaphore};
 
 const OBSERVER_MAX_CONCURRENT_REQUESTS: usize = 2;
 const OBSERVER_MAX_CONCURRENT_PROBES: usize = 2;
-const OBSERVER_PROBE_TIMEOUT: Duration =
-    Duration::from_millis(OBSERVER_PROVIDER_PROBE_TIMEOUT_MS);
+const OBSERVER_PROBE_TIMEOUT: Duration = Duration::from_millis(OBSERVER_PROVIDER_PROBE_TIMEOUT_MS);
 const ACTIVE_CACHE_TTL: Duration = Duration::from_millis(400);
 const IDLE_CACHE_TTL: Duration = Duration::from_millis(1500);
 const DB_QUERY_PERMIT_TIMEOUT: Duration = Duration::from_millis(1600);

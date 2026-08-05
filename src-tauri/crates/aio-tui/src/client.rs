@@ -1,7 +1,6 @@
 use aio_observer_protocol::{
     CliScope, ObserverDescriptorV1, ObserverProviderAvailabilityTestResult, ObserverSnapshotV1,
-    OBSERVER_DESCRIPTOR_FILE_NAME, OBSERVER_PROTOCOL_VERSION,
-    OBSERVER_PROVIDER_PROBE_TIMEOUT_MS,
+    OBSERVER_DESCRIPTOR_FILE_NAME, OBSERVER_PROTOCOL_VERSION, OBSERVER_PROVIDER_PROBE_TIMEOUT_MS,
 };
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -349,9 +348,7 @@ mod tests {
             let mut request = [0_u8; 1024];
             let _ = stream.read(&mut request).expect("read request");
             stream
-                .write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\nabc",
-                )
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\nabc")
                 .expect("write partial response");
             stream.flush().expect("flush partial response");
             std::thread::sleep(Duration::from_millis(1200));
