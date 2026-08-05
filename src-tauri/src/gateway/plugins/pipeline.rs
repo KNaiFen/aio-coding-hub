@@ -2768,10 +2768,9 @@ mod tests {
             GatewayPluginPipelineConfig::default(),
         );
         let mut input = request_input();
-        input.headers.insert(
-            "x-existing",
-            "kept".parse().expect("valid existing header"),
-        );
+        input
+            .headers
+            .insert("x-existing", "kept".parse().expect("valid existing header"));
 
         let output = pipeline
             .run_request_hook(input)
@@ -2897,9 +2896,8 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn gateway_plugin_response_pipeline_fail_open_rejects_header_patch_atomically() {
-        let executor = InMemoryGatewayPluginExecutor::new().with_response_handler(
-            "plugin.response",
-            |_ctx| {
+        let executor =
+            InMemoryGatewayPluginExecutor::new().with_response_handler("plugin.response", |_ctx| {
                 let mut result = GatewayHookResult {
                     response_body: Some("mutated response".to_string()),
                     ..GatewayHookResult::continue_unchanged()
@@ -2911,8 +2909,7 @@ mod tests {
                     .headers
                     .insert("x-invalid:name".to_string(), "invalid".to_string());
                 result
-            },
-        );
+            });
         let mut plugin = plugin(
             "plugin.response",
             10,
@@ -2930,10 +2927,9 @@ mod tests {
             GatewayPluginPipelineConfig::default(),
         );
         let mut input = response_input();
-        input.headers.insert(
-            "x-existing",
-            "kept".parse().expect("valid existing header"),
-        );
+        input
+            .headers
+            .insert("x-existing", "kept".parse().expect("valid existing header"));
 
         let output = pipeline
             .run_response_hook(input)
