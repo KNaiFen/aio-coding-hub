@@ -28,6 +28,7 @@ const OBSERVER_MAX_CONCURRENT_PROBES: usize = 2;
 const OBSERVER_PROBE_TIMEOUT: Duration = Duration::from_millis(OBSERVER_PROVIDER_PROBE_TIMEOUT_MS);
 const ACTIVE_CACHE_TTL: Duration = Duration::from_millis(400);
 const IDLE_CACHE_TTL: Duration = Duration::from_millis(1500);
+const OBSERVER_SNAPSHOT_CACHE_MAX_ENTRIES: usize = 64;
 const DB_QUERY_PERMIT_TIMEOUT: Duration = Duration::from_millis(1600);
 const DB_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 const STOP_TIMEOUT: Duration = Duration::from_secs(1);
@@ -312,13 +313,8 @@ async fn snapshot_handler(
         query.include_providers,
     )
     .await;
-    state.cache.lock().await.insert(
-        key,
-        CachedSnapshot {
-            created_at: Instant::now(),
-            snapshot: snapshot.clone(),
-        },
-    );
+    let mut cache = state.cache.lock().await;
+    insert_cached_snapshot(&mut cache, key, snapshot.clone(), Instant::now());
     secured(Json(snapshot).into_response())
 }
 
@@ -492,21 +488,63 @@ async fn read_only_db(state: &ObserverHttpState) -> Option<crate::db::Db> {
 }
 
 async fn cached_snapshot(state: &ObserverHttpState, key: CacheKey) -> Option<ObserverSnapshotV1> {
-    let cache = state.cache.lock().await;
-    let cached = cache.get(&key)?;
-    let active = cached.snapshot.active_inference_count > 0
-        || cached
-            .snapshot
+    let mut cache = state.cache.lock().await;
+    get_cached_snapshot(&mut cache, key, Instant::now())
+}
+
+fn snapshot_cache_ttl(snapshot: &ObserverSnapshotV1) -> Duration {
+    let active = snapshot.active_inference_count > 0
+        || snapshot
             .active_requests
             .value
             .as_ref()
             .is_some_and(|items| !items.is_empty());
-    let ttl = if active {
+    if active {
         ACTIVE_CACHE_TTL
     } else {
         IDLE_CACHE_TTL
-    };
-    (cached.created_at.elapsed() < ttl).then(|| cached.snapshot.clone())
+    }
+}
+
+fn prune_expired_snapshots(cache: &mut HashMap<CacheKey, CachedSnapshot>, now: Instant) {
+    cache.retain(|_, cached| {
+        now.checked_duration_since(cached.created_at)
+            .is_some_and(|age| age < snapshot_cache_ttl(&cached.snapshot))
+    });
+}
+
+fn get_cached_snapshot(
+    cache: &mut HashMap<CacheKey, CachedSnapshot>,
+    key: CacheKey,
+    now: Instant,
+) -> Option<ObserverSnapshotV1> {
+    prune_expired_snapshots(cache, now);
+    cache.get(&key).map(|cached| cached.snapshot.clone())
+}
+
+fn insert_cached_snapshot(
+    cache: &mut HashMap<CacheKey, CachedSnapshot>,
+    key: CacheKey,
+    snapshot: ObserverSnapshotV1,
+    created_at: Instant,
+) {
+    prune_expired_snapshots(cache, created_at);
+    if !cache.contains_key(&key) && cache.len() >= OBSERVER_SNAPSHOT_CACHE_MAX_ENTRIES {
+        if let Some(oldest_key) = cache
+            .iter()
+            .min_by_key(|(_, cached)| cached.created_at)
+            .map(|(key, _)| *key)
+        {
+            cache.remove(&oldest_key);
+        }
+    }
+    cache.insert(
+        key,
+        CachedSnapshot {
+            created_at,
+            snapshot,
+        },
+    );
 }
 
 fn authorized(headers: &HeaderMap, expected: &str) -> bool {
@@ -564,6 +602,36 @@ fn secured(mut response: Response) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aio_observer_protocol::{ObserverGatewayStatus, ObserverSection, ObserverTodayUsage};
+
+    fn snapshot(scope: CliScope, active: bool) -> ObserverSnapshotV1 {
+        ObserverSnapshotV1 {
+            protocol_version: OBSERVER_PROTOCOL_VERSION,
+            app_version: "0.60.48".to_string(),
+            generated_at_ms: 1,
+            scope,
+            gateway: ObserverGatewayStatus {
+                running: true,
+                port: Some(37123),
+            },
+            preferred_provider: ObserverSection::empty(),
+            last_request: ObserverSection::empty(),
+            dominant_provider: ObserverSection::empty(),
+            active_inference_count: if active { 1 } else { 0 },
+            today: ObserverSection::<ObserverTodayUsage>::empty(),
+            active_requests: ObserverSection::empty(),
+            recent_requests: ObserverSection::empty(),
+            providers: None,
+        }
+    }
+
+    fn cache_key(index: usize) -> CacheKey {
+        CacheKey {
+            scope: CliScope::VALUES[index % CliScope::VALUES.len()],
+            history_limit: (index / 10) as u16,
+            include_providers: index.is_multiple_of(2),
+        }
+    }
 
     #[test]
     fn bearer_comparison_requires_exact_bytes() {
@@ -611,6 +679,87 @@ mod tests {
             OBSERVER_PROBE_TIMEOUT,
             Duration::from_millis(aio_observer_protocol::OBSERVER_PROVIDER_PROBE_TIMEOUT_MS)
         );
+    }
+
+    #[test]
+    fn snapshot_cache_uses_active_and_idle_ttls() {
+        assert_eq!(
+            snapshot_cache_ttl(&snapshot(CliScope::Codex, true)),
+            ACTIVE_CACHE_TTL
+        );
+        assert_eq!(
+            snapshot_cache_ttl(&snapshot(CliScope::Codex, false)),
+            IDLE_CACHE_TTL
+        );
+    }
+
+    #[test]
+    fn snapshot_cache_removes_expired_entries_on_access() {
+        let now = Instant::now();
+        let mut cache = HashMap::new();
+        let idle_key = cache_key(0);
+        let active_key = cache_key(1);
+        cache.insert(
+            idle_key,
+            CachedSnapshot {
+                created_at: now.checked_sub(IDLE_CACHE_TTL).expect("idle time"),
+                snapshot: snapshot(CliScope::Codex, false),
+            },
+        );
+        cache.insert(
+            active_key,
+            CachedSnapshot {
+                created_at: now.checked_sub(ACTIVE_CACHE_TTL).expect("active time"),
+                snapshot: snapshot(CliScope::Codex, true),
+            },
+        );
+
+        assert!(get_cached_snapshot(&mut cache, idle_key, now).is_none());
+        assert!(cache.is_empty());
+    }
+
+    #[test]
+    fn snapshot_cache_caps_entries_and_preserves_replacements() {
+        let start = Instant::now();
+        let mut cache = HashMap::new();
+        for index in 0..OBSERVER_SNAPSHOT_CACHE_MAX_ENTRIES {
+            insert_cached_snapshot(
+                &mut cache,
+                cache_key(index),
+                snapshot(CliScope::Codex, false),
+                start
+                    .checked_add(Duration::from_millis(index as u64))
+                    .expect("cache time"),
+            );
+        }
+        let replacement_time = start
+            .checked_add(Duration::from_millis(
+                OBSERVER_SNAPSHOT_CACHE_MAX_ENTRIES as u64,
+            ))
+            .expect("replacement time");
+        insert_cached_snapshot(
+            &mut cache,
+            cache_key(0),
+            snapshot(CliScope::Codex, true),
+            replacement_time,
+        );
+        assert_eq!(cache.len(), OBSERVER_SNAPSHOT_CACHE_MAX_ENTRIES);
+        assert!(get_cached_snapshot(&mut cache, cache_key(1), replacement_time).is_some());
+
+        insert_cached_snapshot(
+            &mut cache,
+            cache_key(OBSERVER_SNAPSHOT_CACHE_MAX_ENTRIES),
+            snapshot(CliScope::Grok, false),
+            replacement_time,
+        );
+        assert_eq!(cache.len(), OBSERVER_SNAPSHOT_CACHE_MAX_ENTRIES);
+        assert!(get_cached_snapshot(&mut cache, cache_key(1), replacement_time).is_none());
+        assert!(get_cached_snapshot(
+            &mut cache,
+            cache_key(OBSERVER_SNAPSHOT_CACHE_MAX_ENTRIES),
+            replacement_time,
+        )
+        .is_some());
     }
 
     #[tokio::test]
