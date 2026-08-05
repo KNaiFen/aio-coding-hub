@@ -20,6 +20,8 @@ import { gatewayKeys, settingsKeys } from "./keys";
 export const SETTINGS_READONLY_MESSAGE =
   "设置文件读取失败，已进入只读保护。请先修复或恢复 settings.json 后刷新页面。";
 
+const ORDINARY_SETTINGS_MUTATION_SCOPE = { id: "ordinary-settings-write" } as const;
+
 export type SettingsReadProtection = {
   settingsReadErrorMessage: string | null;
   settingsWriteBlocked: boolean;
@@ -65,6 +67,7 @@ export function useSettingsSetMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    scope: ORDINARY_SETTINGS_MUTATION_SCOPE,
     mutationFn: (input: SettingsSetInput) => settingsSet(input),
     onSuccess: (result) => syncSettingsMutationCaches(queryClient, result),
     onSettled: () => {
@@ -86,6 +89,7 @@ export function useSettingsPatchMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    scope: ORDINARY_SETTINGS_MUTATION_SCOPE,
     mutationFn: async (patch: AppSettingsPatch) => {
       const current = queryClient.getQueryData<AppSettings | null>(settingsKeys.get());
       if (!current) {
