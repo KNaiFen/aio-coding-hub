@@ -483,6 +483,7 @@ pub(crate) fn install_plugin_manifest(
     Ok(detail)
 }
 
+#[cfg(test)]
 pub(crate) fn install_plugin_from_local_package(
     db: &crate::db::Db,
     package_path: &Path,
