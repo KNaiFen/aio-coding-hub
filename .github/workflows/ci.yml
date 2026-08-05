@@ -248,8 +248,6 @@ jobs:
           set -euo pipefail
           cargo fmt --manifest-path src-tauri/Cargo.toml --all
           cargo update --manifest-path src-tauri/Cargo.toml --workspace
-          cargo update --manifest-path src-tauri/Cargo.toml -p plist --precise 1.10.0
-          cargo update --manifest-path src-tauri/Cargo.toml -p wayland-scanner --precise 0.31.11
           cargo run --manifest-path src-tauri/Cargo.toml --locked --example export-bindings
           pnpm exec prettier --write src/generated/bindings.ts
           if git diff --quiet -- src-tauri src/generated/bindings.ts; then
