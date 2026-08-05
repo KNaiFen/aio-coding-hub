@@ -1126,6 +1126,7 @@ fn ensure_request_logs_extended_columns(conn: &mut Connection) -> Result<(), Str
     }
 
     super::v47_to_v48::ensure_request_log_stream_timing_columns(conn)?;
+    super::v48_to_v49::ensure_request_log_final_attempt_timing_columns(conn)?;
 
     Ok(())
 }
@@ -1153,6 +1154,7 @@ fn ensure_usage_ledger(conn: &mut Connection) -> Result<(), String> {
         .map_err(|error| format!("failed to start usage ledger ensure transaction: {error}"))?;
     super::v42_to_v43::create_usage_ledger_schema(&tx)?;
     super::v47_to_v48::ensure_usage_ledger_stream_timing_columns(&tx)?;
+    super::v48_to_v49::ensure_usage_ledger_final_attempt_timing_columns(&tx)?;
 
     if !ledger_existed || !state_row_existed {
         let target_request_log_id: i64 = tx

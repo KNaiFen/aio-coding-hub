@@ -4,16 +4,21 @@
 //   `request_attempt_logs_by_trace_id`.
 
 import { CalendarClock, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useMemo, useReducer } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { HomeRequestLogsPanel } from "../components/home/HomeRequestLogsPanel";
 import { RequestLogDetailDialog } from "../components/home/RequestLogDetailDialog";
 import { cliFilterItemsWith, type CliFilterKey } from "../constants/clis";
 import { GatewayErrorCodes } from "../constants/gatewayErrorCodes";
-import { useRequestLogsPageFeed } from "../hooks/useRequestLogsPageFeed";
+import {
+  useRequestLogsPageFeed,
+  type RequestLogsPageAutomaticRefreshReason,
+} from "../hooks/useRequestLogsPageFeed";
+import type { ActiveRequestSnapshotItem } from "../services/gateway/requestActivityProjection";
 import { useTraceStore, type TraceSession } from "../services/gateway/traceStore";
 import type {
   RequestLogErrorScope,
   RequestLogPageFilters,
+  RequestLogSummary,
   RequestLogStatusFilter,
 } from "../services/gateway/requestLogs";
 import { Button } from "../ui/Button";
@@ -66,7 +71,26 @@ type LogsPageState = {
   pageInput: string;
   snapshotId: string | null;
   snapshotRevision: number;
+  preservePlaceholderPageData: boolean;
+  presentationResetKey: number;
   selectedLogId: number | null;
+};
+
+type LogsPresentation = {
+  requestLogs: RequestLogSummary[];
+  activeRequests: ActiveRequestSnapshotItem[];
+  activeRequestsAvailable: boolean | null;
+  traces: TraceSession[];
+  requestLogsAvailable: boolean | null;
+  totalCount: number;
+  presentationResetKey: number;
+};
+
+type FrozenLogsPresentation = LogsPresentation & { frozenAtMs: number };
+
+type FreshSnapshotOptions = {
+  preservePlaceholderPageData?: boolean;
+  resetPresentation?: boolean;
 };
 
 type LogsPageAction =
@@ -91,7 +115,11 @@ type LogsPageAction =
   | { type: "setPageInput"; pageInput: string }
   | { type: "captureSnapshot"; snapshotId: string }
   | { type: "goToPage"; page: number; snapshotId: string }
-  | { type: "refreshSnapshot" }
+  | {
+      type: "refreshSnapshot";
+      preservePlaceholderPageData: boolean;
+      resetPresentation: boolean;
+    }
   | { type: "setSelectedLogId"; selectedLogId: number | null }
   | { type: "resetFilters" };
 
@@ -138,13 +166,16 @@ function createInitialLogsPageState(): LogsPageState {
     pageInput: "1",
     snapshotId: null,
     snapshotRevision: 0,
+    preservePlaceholderPageData: false,
+    presentationResetKey: 0,
     selectedLogId: null,
   };
 }
 
 function withFreshSnapshot(
   state: LogsPageState,
-  updates: Partial<LogsPageState> = {}
+  updates: Partial<LogsPageState> = {},
+  options: FreshSnapshotOptions = {}
 ): LogsPageState {
   return {
     ...state,
@@ -153,6 +184,9 @@ function withFreshSnapshot(
     pageInput: "1",
     snapshotId: null,
     snapshotRevision: state.snapshotRevision + 1,
+    preservePlaceholderPageData: options.preservePlaceholderPageData ?? false,
+    presentationResetKey:
+      state.presentationResetKey + (options.resetPresentation === false ? 0 : 1),
   };
 }
 
@@ -206,16 +240,20 @@ function logsPageReducer(state: LogsPageState, action: LogsPageAction): LogsPage
     case "setPageInput":
       return { ...state, pageInput: action.pageInput };
     case "captureSnapshot":
-      return state.snapshotId == null ? { ...state, snapshotId: action.snapshotId } : state;
+      return state.snapshotId == null
+        ? { ...state, snapshotId: action.snapshotId, preservePlaceholderPageData: false }
+        : state;
     case "goToPage":
       return {
         ...state,
         page: action.page,
         pageInput: String(action.page),
         snapshotId: action.snapshotId,
+        preservePlaceholderPageData: false,
+        presentationResetKey: state.presentationResetKey + 1,
       };
     case "refreshSnapshot":
-      return withFreshSnapshot(state);
+      return withFreshSnapshot(state, {}, action);
     case "setSelectedLogId":
       return { ...state, selectedLogId: action.selectedLogId };
     case "resetFilters":
@@ -410,6 +448,8 @@ export function LogsPage() {
     pageInput,
     snapshotId,
     snapshotRevision,
+    preservePlaceholderPageData,
+    presentationResetKey,
     selectedLogId,
   } = state;
   const setSelectedLogId = (nextSelectedLogId: number | null) =>
@@ -447,8 +487,22 @@ export function LogsPage() {
       errorScope,
     ]
   );
-  const refreshSnapshot = useCallback(() => {
-    dispatch({ type: "refreshSnapshot" });
+  const refreshSnapshotAutomatically = useCallback(
+    (_reason: RequestLogsPageAutomaticRefreshReason) => {
+      dispatch({
+        type: "refreshSnapshot",
+        preservePlaceholderPageData: true,
+        resetPresentation: false,
+      });
+    },
+    []
+  );
+  const refreshSnapshotManually = useCallback(() => {
+    dispatch({
+      type: "refreshSnapshot",
+      preservePlaceholderPageData: false,
+      resetPresentation: true,
+    });
   }, []);
   const {
     requestLogs,
@@ -472,7 +526,8 @@ export function LogsPage() {
     liveUpdatesEnabled: autoRefresh,
     liveUpdateWindowMs: AUTO_REFRESH_INTERVAL_MS,
     refreshOnForeground: autoRefresh,
-    onRefreshSnapshot: refreshSnapshot,
+    preservePlaceholderPageData,
+    onRefreshSnapshot: refreshSnapshotAutomatically,
   });
 
   useEffect(() => {
@@ -516,7 +571,11 @@ export function LogsPage() {
 
   useEffect(() => {
     if (snapshotId != null && requestLogsSnapshotExpired) {
-      dispatch({ type: "refreshSnapshot" });
+      dispatch({
+        type: "refreshSnapshot",
+        preservePlaceholderPageData: true,
+        resetPresentation: false,
+      });
     }
   }, [requestLogsSnapshotExpired, snapshotId]);
 
@@ -576,9 +635,72 @@ export function LogsPage() {
     traces,
   ]);
 
+  const latestPresentation = useMemo<LogsPresentation>(
+    () => ({
+      requestLogs,
+      activeRequests: filteredActiveRequests,
+      activeRequestsAvailable,
+      traces: filteredTraces,
+      requestLogsAvailable,
+      totalCount: totalCount ?? 0,
+      presentationResetKey,
+    }),
+    [
+      activeRequestsAvailable,
+      filteredActiveRequests,
+      filteredTraces,
+      presentationResetKey,
+      requestLogs,
+      requestLogsAvailable,
+      totalCount,
+    ]
+  );
+  const latestPresentationRef = useRef(latestPresentation);
+  latestPresentationRef.current = latestPresentation;
+  const [frozenPresentation, setFrozenPresentation] = useState<FrozenLogsPresentation | null>(null);
+  const activeFrozenPresentation =
+    frozenPresentation?.presentationResetKey === presentationResetKey ? frozenPresentation : null;
+  const displayedPresentation = activeFrozenPresentation ?? latestPresentation;
+
+  useEffect(() => {
+    setFrozenPresentation((current) =>
+      current?.presentationResetKey === presentationResetKey ? current : null
+    );
+  }, [presentationResetKey]);
+
+  const handleRequestLogsTopChange = useCallback((atTop: boolean) => {
+    if (atTop) {
+      setFrozenPresentation(null);
+      return;
+    }
+    setFrozenPresentation((current) => {
+      const latest = latestPresentationRef.current;
+      if (current?.presentationResetKey === latest.presentationResetKey) return current;
+      return {
+        ...latest,
+        requestLogs: [...latest.requestLogs],
+        activeRequests: [...latest.activeRequests],
+        traces: [...latest.traces],
+        frozenAtMs: Date.now(),
+      };
+    });
+  }, []);
+
+  const handleShowNewRequestLogs = useCallback(() => {
+    setFrozenPresentation(null);
+    dispatch({
+      type: "refreshSnapshot",
+      preservePlaceholderPageData: true,
+      resetPresentation: false,
+    });
+  }, []);
+
   const totalPageCount = Math.max(1, loadedTotalPages ?? 1);
   const displayedPage = loadedPage ?? page;
   const totalLogCount = totalCount ?? 0;
+  const pendingNewRequestCount = activeFrozenPresentation
+    ? Math.max(0, totalLogCount - activeFrozenPresentation.totalCount)
+    : 0;
   const pageInputTarget = parsePageInput(pageInput, totalPageCount);
   const availableSnapshotId = loadedSnapshotId ?? snapshotId;
   const pageOptions = useMemo(
@@ -592,7 +714,7 @@ export function LogsPage() {
         ? "加载中…"
         : requestLogsRefreshing
           ? `更新中… · 第 ${displayedPage} / ${totalPageCount} 页 · 共 ${totalLogCount} 条`
-          : `第 ${displayedPage} / ${totalPageCount} 页 · 共 ${totalLogCount} 条 · 本页 ${requestLogs.length} 条`;
+          : `第 ${displayedPage} / ${totalPageCount} 页 · 共 ${totalLogCount} 条 · 本页 ${displayedPresentation.requestLogs.length} 条`;
 
   function goToPage(target: number | null) {
     if (target == null || !availableSnapshotId) return;
@@ -865,7 +987,7 @@ export function LogsPage() {
               size="icon"
               aria-label="刷新并重建分页"
               title="刷新并重建分页"
-              onClick={() => dispatch({ type: "refreshSnapshot" })}
+              onClick={refreshSnapshotManually}
               disabled={requestLogsPageFetching || requestLogsAvailable === false}
             >
               <RefreshCw className="h-4 w-4" />
@@ -945,15 +1067,20 @@ export function LogsPage() {
         summaryTextOverride={logsSummaryText}
         compactModeOverride={false}
         emptyStateTitle={activeFilterCount > 0 ? "没有符合筛选条件的代理记录" : "当前没有代理记录"}
-        traces={filteredTraces}
-        activeRequests={filteredActiveRequests}
-        activeRequestsAvailable={activeRequestsAvailable}
-        requestLogs={requestLogs}
+        traces={displayedPresentation.traces}
+        activeRequests={displayedPresentation.activeRequests}
+        activeRequestsAvailable={displayedPresentation.activeRequestsAvailable}
+        requestLogs={displayedPresentation.requestLogs}
         requestLogsLoading={requestLogsLoading}
         requestLogsRefreshing={requestLogsRefreshing}
-        requestLogsAvailable={requestLogsAvailable}
+        requestLogsAvailable={displayedPresentation.requestLogsAvailable}
         requestLogOrder="source"
-        onRefreshRequestLogs={() => dispatch({ type: "refreshSnapshot" })}
+        onRefreshRequestLogs={refreshSnapshotManually}
+        pendingNewRequestCount={pendingNewRequestCount}
+        onRequestLogsTopChange={handleRequestLogsTopChange}
+        onShowNewRequestLogs={handleShowNewRequestLogs}
+        presentationResetKey={presentationResetKey}
+        activityClockNowMs={activeFrozenPresentation?.frozenAtMs}
         selectedLogId={selectedLogId}
         onSelectLogId={setSelectedLogId}
       />

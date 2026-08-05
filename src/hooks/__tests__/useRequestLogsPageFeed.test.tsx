@@ -165,6 +165,39 @@ describe("hooks/useRequestLogsPageFeed", () => {
     expect(activeRefetch).not.toHaveBeenCalled();
   });
 
+  it("keeps the previous page visible while an automatic refresh replaces its snapshot", () => {
+    const { pageRefetch } = mockQueries();
+    const oldItem = { id: 1 };
+    vi.mocked(useRequestLogsSnapshotPageAllQuery).mockReturnValue({
+      data: snapshotPage([oldItem]),
+      isLoading: false,
+      isFetching: true,
+      isPlaceholderData: true,
+      error: null,
+      refetch: pageRefetch,
+    } as any);
+
+    const { result } = renderHook(() =>
+      useRequestLogsPageFeed({
+        filters: FILTERS,
+        snapshotId: null,
+        page: 1,
+        snapshotRevision: 1,
+        limit: 50,
+        preservePlaceholderPageData: true,
+        onRefreshSnapshot: vi.fn(),
+      })
+    );
+
+    expect(result.current.requestLogs).toEqual([oldItem]);
+    expect(result.current.snapshotId).toBeNull();
+    expect(result.current.totalCount).toBe(1);
+    expect(result.current.totalPages).toBe(1);
+    expect(result.current.requestLogsLoading).toBe(false);
+    expect(result.current.requestLogsRefreshing).toBe(true);
+    expect(result.current.requestLogsAvailable).toBe(true);
+  });
+
   it("refreshes the first snapshot page on completion signals", async () => {
     vi.useFakeTimers();
     const { activeRefetch, pageRefetch } = mockQueries();
@@ -205,7 +238,7 @@ describe("hooks/useRequestLogsPageFeed", () => {
       await vi.runOnlyPendingTimersAsync();
     });
     expect(pageRefetch).not.toHaveBeenCalled();
-    expect(refreshSnapshot).toHaveBeenCalledTimes(1);
+    expect(refreshSnapshot).toHaveBeenCalledWith("live");
     expect(activeRefetch).toHaveBeenCalledTimes(2);
   });
 
@@ -266,7 +299,7 @@ describe("hooks/useRequestLogsPageFeed", () => {
     });
     expect(latest.pageRefetch).not.toHaveBeenCalled();
     expect(latest.activeRefetch).toHaveBeenCalledTimes(1);
-    expect(latestRefreshSnapshot).toHaveBeenCalledTimes(1);
+    expect(latestRefreshSnapshot).toHaveBeenCalledWith("foreground");
     latestRender.unmount();
 
     const history = mockQueries();

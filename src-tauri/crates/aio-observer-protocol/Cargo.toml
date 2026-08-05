@@ -1,6 +1,6 @@
 [package]
 name = "aio-observer-protocol"
-version = "0.60.48"
+version = "0.60.49"
 edition = "2021"
 publish = false
 

@@ -29,18 +29,23 @@ export const REQUEST_LOG_TRACE_ID_MAX_LENGTH = 256;
 
 export type RequestLogRouteHop = GeneratedRequestLogRouteHop;
 
+type FinalUpstreamAttemptTiming = {
+  final_upstream_attempt_duration_ms: number | null;
+  final_upstream_attempt_timing_version: number;
+};
+
 export type RequestLogSummary = Override<
   GeneratedRequestLogSummary,
   {
     cli_key: CliKey;
-  }
+  } & FinalUpstreamAttemptTiming
 >;
 
 export type RequestLogDetail = Override<
   GeneratedRequestLogDetail,
   {
     cli_key: CliKey;
-  }
+  } & FinalUpstreamAttemptTiming
 >;
 
 export type RequestAttemptLog = Override<
@@ -159,16 +164,24 @@ export function normalizeRequestLogTraceIdOrNull(
 }
 
 function toRequestLogSummary(value: GeneratedRequestLogSummary): RequestLogSummary {
+  const timing = value as GeneratedRequestLogSummary & Partial<FinalUpstreamAttemptTiming>;
   return {
     ...value,
     cli_key: toCliKey(value.cli_key, "request_logs_list.cli_key"),
+    final_upstream_attempt_duration_ms: timing.final_upstream_attempt_duration_ms ?? null,
+    final_upstream_attempt_timing_version:
+      timing.final_upstream_attempt_timing_version === 1 ? 1 : 0,
   };
 }
 
 function toRequestLogDetail(value: GeneratedRequestLogDetail): RequestLogDetail {
+  const timing = value as GeneratedRequestLogDetail & Partial<FinalUpstreamAttemptTiming>;
   return {
     ...value,
     cli_key: toCliKey(value.cli_key, "request_log_get.cli_key"),
+    final_upstream_attempt_duration_ms: timing.final_upstream_attempt_duration_ms ?? null,
+    final_upstream_attempt_timing_version:
+      timing.final_upstream_attempt_timing_version === 1 ? 1 : 0,
   };
 }
 

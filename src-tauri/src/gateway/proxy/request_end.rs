@@ -49,6 +49,8 @@ pub(super) struct RequestCompletion {
     pub(super) event_visible_ttfb_ms: Option<u128>,
     pub(super) log_ttfb_ms: Option<u128>,
     pub(super) log_visible_ttfb_ms: Option<u128>,
+    pub(super) final_upstream_attempt_duration_ms: Option<u128>,
+    pub(super) final_upstream_attempt_timing_version: i64,
     pub(super) usage_metrics: Option<crate::usage::UsageMetrics>,
     pub(super) log_usage_metrics: Option<crate::usage::UsageMetrics>,
     pub(super) usage: Option<crate::usage::UsageExtract>,
@@ -70,6 +72,8 @@ impl RequestCompletion {
             event_visible_ttfb_ms: ttfb_ms,
             log_ttfb_ms: ttfb_ms,
             log_visible_ttfb_ms: ttfb_ms,
+            final_upstream_attempt_duration_ms: None,
+            final_upstream_attempt_timing_version: 0,
             usage_metrics,
             log_usage_metrics,
             usage,
@@ -92,6 +96,8 @@ impl RequestCompletion {
             event_visible_ttfb_ms: visible_ttfb_ms,
             log_ttfb_ms: ttfb_ms,
             log_visible_ttfb_ms: visible_ttfb_ms,
+            final_upstream_attempt_duration_ms: None,
+            final_upstream_attempt_timing_version: 0,
             usage_metrics,
             log_usage_metrics,
             usage,
@@ -111,6 +117,8 @@ impl RequestCompletion {
             event_visible_ttfb_ms: None,
             log_ttfb_ms: None,
             log_visible_ttfb_ms: None,
+            final_upstream_attempt_duration_ms: None,
+            final_upstream_attempt_timing_version: 0,
             usage_metrics: None,
             log_usage_metrics: None,
             usage: None,
@@ -147,6 +155,8 @@ impl RequestCompletion {
             event_visible_ttfb_ms: visible_ttfb_ms,
             log_ttfb_ms: ttfb_ms,
             log_visible_ttfb_ms: visible_ttfb_ms,
+            final_upstream_attempt_duration_ms: None,
+            final_upstream_attempt_timing_version: 0,
             usage_metrics: None,
             log_usage_metrics: None,
             usage: None,
@@ -162,10 +172,39 @@ impl RequestCompletion {
             event_visible_ttfb_ms: None,
             log_ttfb_ms: None,
             log_visible_ttfb_ms: None,
+            final_upstream_attempt_duration_ms: None,
+            final_upstream_attempt_timing_version: 0,
             usage_metrics: None,
             log_usage_metrics: None,
             usage: None,
         }
+    }
+
+    pub(super) fn with_final_upstream_attempt_timing(
+        mut self,
+        duration_ms: Option<u128>,
+        version: i64,
+    ) -> Self {
+        let successful = self.error_code.is_none()
+            && self
+                .status
+                .is_some_and(|status| (200..300).contains(&status));
+        self.final_upstream_attempt_duration_ms = successful
+            .then_some(duration_ms)
+            .flatten()
+            .filter(|duration_ms| {
+                *duration_ms > 0
+                    && self
+                        .log_ttfb_ms
+                        .is_none_or(|ttfb_ms| *duration_ms >= ttfb_ms)
+            });
+        self.final_upstream_attempt_timing_version =
+            if version == 1 && self.final_upstream_attempt_duration_ms.is_some() {
+                1
+            } else {
+                0
+            };
+        self
     }
 }
 
@@ -204,6 +243,8 @@ pub(super) struct RequestEndArgs<'a, R: tauri::Runtime = tauri::Wry> {
     event_visible_ttfb_ms: Option<u128>,
     log_ttfb_ms: Option<u128>,
     log_visible_ttfb_ms: Option<u128>,
+    final_upstream_attempt_duration_ms: Option<u128>,
+    final_upstream_attempt_timing_version: i64,
     attempts: &'a [FailoverAttempt],
     special_settings_json: Option<String>,
     session_id: Option<String>,
@@ -234,6 +275,8 @@ impl<'a, R: tauri::Runtime> RequestEndArgs<'a, R> {
             event_visible_ttfb_ms: None,
             log_ttfb_ms: None,
             log_visible_ttfb_ms: None,
+            final_upstream_attempt_duration_ms: None,
+            final_upstream_attempt_timing_version: 0,
             attempts: context.attempts,
             special_settings_json: context.special_settings_json,
             session_id: context.session_id,
@@ -254,6 +297,9 @@ impl<'a, R: tauri::Runtime> RequestEndArgs<'a, R> {
         self.event_visible_ttfb_ms = completion.event_visible_ttfb_ms;
         self.log_ttfb_ms = completion.log_ttfb_ms;
         self.log_visible_ttfb_ms = completion.log_visible_ttfb_ms;
+        self.final_upstream_attempt_duration_ms = completion.final_upstream_attempt_duration_ms;
+        self.final_upstream_attempt_timing_version =
+            completion.final_upstream_attempt_timing_version;
         self.usage_metrics = completion.usage_metrics;
         self.log_usage_metrics = completion.log_usage_metrics;
         self.usage = completion.usage;
@@ -729,6 +775,8 @@ fn build_request_end_payload(
         visible_ttfb_ms,
         upstream_stream_duration_ms,
         upstream_stream_timing_version,
+        final_upstream_attempt_duration_ms: None,
+        final_upstream_attempt_timing_version: 0,
         attempts_json,
         requested_model,
         created_at_ms,
@@ -745,6 +793,22 @@ fn build_request_end_payload(
 }
 
 impl RequestLogEnqueueArgs {
+    pub(in crate::gateway) fn with_final_upstream_attempt_timing(
+        mut self,
+        duration_ms: Option<u128>,
+        version: i64,
+    ) -> Self {
+        self.final_upstream_attempt_duration_ms =
+            duration_ms.filter(|duration_ms| *duration_ms > 0);
+        self.final_upstream_attempt_timing_version =
+            if version == 1 && self.final_upstream_attempt_duration_ms.is_some() {
+                1
+            } else {
+                0
+            };
+        self
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(in crate::gateway) fn from_proxy_request_end_parts(
         trace_id: &str,
@@ -888,6 +952,8 @@ impl RequestLogEnqueueArgs {
             event_visible_ttfb_ms,
             self.upstream_stream_duration_ms,
             self.upstream_stream_timing_version,
+            self.final_upstream_attempt_duration_ms,
+            self.final_upstream_attempt_timing_version,
             attempts,
             claude_model_mapping,
             usage_metrics,
@@ -918,6 +984,10 @@ fn prepare_request_end<R: tauri::Runtime>(
         args.created_at,
         args.log_usage_metrics,
         args.usage,
+    );
+    let log_args = log_args.with_final_upstream_attempt_timing(
+        args.final_upstream_attempt_duration_ms,
+        args.final_upstream_attempt_timing_version,
     );
 
     PreparedRequestEnd {
@@ -1142,6 +1212,33 @@ mod tests {
             special_settings_json: None,
             created_at_ms: 1_700_000_000_000,
         }
+    }
+
+    #[test]
+    fn proxy_final_attempt_timing_requires_a_successful_nonzero_sample() {
+        let success = RequestCompletion::success(200, None, None, None, None)
+            .with_final_upstream_attempt_timing(Some(1_250), 1);
+        assert_eq!(success.final_upstream_attempt_duration_ms, Some(1_250));
+        assert_eq!(success.final_upstream_attempt_timing_version, 1);
+
+        let failed_status = RequestCompletion::success(500, None, None, None, None)
+            .with_final_upstream_attempt_timing(Some(1_250), 1);
+        assert_eq!(failed_status.final_upstream_attempt_duration_ms, None);
+        assert_eq!(failed_status.final_upstream_attempt_timing_version, 0);
+
+        let shorter_than_ttft = RequestCompletion::success(200, Some(50), None, None, None)
+            .with_final_upstream_attempt_timing(Some(20), 1);
+        assert_eq!(shorter_than_ttft.final_upstream_attempt_duration_ms, None);
+        assert_eq!(shorter_than_ttft.final_upstream_attempt_timing_version, 0);
+
+        let failure = RequestCompletion::failure(
+            502,
+            Some(ErrorCategory::SystemError.as_str()),
+            GatewayErrorCode::Upstream5xx.as_str(),
+        )
+        .with_final_upstream_attempt_timing(Some(1_250), 1);
+        assert_eq!(failure.final_upstream_attempt_duration_ms, None);
+        assert_eq!(failure.final_upstream_attempt_timing_version, 0);
     }
 
     #[test]

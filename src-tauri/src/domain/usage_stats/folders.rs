@@ -279,18 +279,18 @@ SELECT
     CASE WHEN (
       r.status >= 200 AND r.status < 300 AND r.error_present = 0 AND
       r.output_tokens > 0 AND
-      r.upstream_stream_timing_version = 1 AND
-      r.upstream_stream_duration_ms IS NOT NULL AND
-      r.upstream_stream_duration_ms > 0
-    ) THEN r.upstream_stream_duration_ms ELSE 0 END
+      r.final_upstream_attempt_timing_version = 1 AND
+      r.final_upstream_attempt_duration_ms IS NOT NULL AND
+      r.final_upstream_attempt_duration_ms > 0
+    ) THEN r.final_upstream_attempt_duration_ms ELSE 0 END
   ) AS success_generation_ms_sum,
   SUM(
     CASE WHEN (
       r.status >= 200 AND r.status < 300 AND r.error_present = 0 AND
       r.output_tokens > 0 AND
-      r.upstream_stream_timing_version = 1 AND
-      r.upstream_stream_duration_ms IS NOT NULL AND
-      r.upstream_stream_duration_ms > 0
+      r.final_upstream_attempt_timing_version = 1 AND
+      r.final_upstream_attempt_duration_ms IS NOT NULL AND
+      r.final_upstream_attempt_duration_ms > 0
     ) THEN r.output_tokens ELSE 0 END
   ) AS success_output_tokens_for_rate_sum
 FROM usage_events r

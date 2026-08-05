@@ -357,7 +357,7 @@ async fn read_non_stream_body_with_limit(
     attempt_started: Instant,
     timeout: Option<std::time::Duration>,
     limit_bytes: usize,
-) -> Result<(Bytes, Option<u128>), NonStreamBodyReadError> {
+) -> Result<(Bytes, Option<u128>, Option<u128>), NonStreamBodyReadError> {
     if resp
         .content_length()
         .is_some_and(|len| len > limit_bytes as u64)
@@ -388,7 +388,12 @@ async fn read_non_stream_body_with_limit(
         }?;
 
         let Some(chunk) = chunk_result else {
-            return Ok((Bytes::from(out), first_byte_ms));
+            let final_attempt_duration_ms = attempt_started.elapsed().as_millis();
+            return Ok((
+                Bytes::from(out),
+                first_byte_ms,
+                (final_attempt_duration_ms > 0).then_some(final_attempt_duration_ms),
+            ));
         };
         if first_byte_ms.is_none() {
             first_byte_ms = Some(attempt_started.elapsed().as_millis());
@@ -614,7 +619,12 @@ where
                 }
 
                 if should_gunzip {
-                    let upstream = GunzipStream::new(resp.bytes_stream());
+                    let upstream = spawn_upstream_body_timing_stream(
+                        resp.bytes_stream(),
+                        ctx.upstream_output_timing.clone(),
+                        attempt_started,
+                    );
+                    let upstream = GunzipStream::new(upstream);
                     let stream = TimingOnlyTeeStream::new(
                         upstream,
                         ctx,
@@ -630,11 +640,13 @@ where
                     ));
                 }
 
-                let stream = TimingOnlyTeeStream::new(
+                let upstream = spawn_upstream_body_timing_stream(
                     resp.bytes_stream(),
-                    ctx,
-                    upstream_request_timeout_non_streaming,
+                    ctx.upstream_output_timing.clone(),
+                    attempt_started,
                 );
+                let stream =
+                    TimingOnlyTeeStream::new(upstream, ctx, upstream_request_timeout_non_streaming);
                 let body = Body::from_stream(stream);
                 abort_guard.disarm();
                 return LoopControl::Return(build_response(
@@ -709,7 +721,12 @@ where
                 }
 
                 let body = if should_gunzip {
-                    let upstream = GunzipStream::new(resp.bytes_stream());
+                    let upstream = spawn_upstream_body_timing_stream(
+                        resp.bytes_stream(),
+                        ctx.upstream_output_timing.clone(),
+                        attempt_started,
+                    );
+                    let upstream = GunzipStream::new(upstream);
                     let stream = UsageBodyBufferTeeStream::new(
                         upstream,
                         ctx,
@@ -718,8 +735,13 @@ where
                     );
                     Body::from_stream(stream)
                 } else {
-                    let stream = UsageBodyBufferTeeStream::new(
+                    let upstream = spawn_upstream_body_timing_stream(
                         resp.bytes_stream(),
+                        ctx.upstream_output_timing.clone(),
+                        attempt_started,
+                    );
+                    let stream = UsageBodyBufferTeeStream::new(
+                        upstream,
                         ctx,
                         MAX_NON_SSE_BODY_BYTES,
                         upstream_request_timeout_non_streaming,
@@ -764,8 +786,9 @@ where
     )
     .await;
 
-    let (mut body_bytes, provider_ttfb_ms) = match bytes_result {
-        Ok((b, first_byte_ms)) => {
+    let (mut body_bytes, provider_ttfb_ms, final_upstream_attempt_duration_ms) = match bytes_result
+    {
+        Ok((b, first_byte_ms, final_attempt_duration_ms)) => {
             emit_gateway_debug_log_lazy(&state.app, || {
                 format!(
                     "[RESP_BODY] trace_id={} body({} bytes)={}",
@@ -774,7 +797,7 @@ where
                     lossy_utf8_preview(&b, MAX_DEBUG_BODY_PREVIEW_BYTES),
                 )
             });
-            (b, first_byte_ms)
+            (b, first_byte_ms, final_attempt_duration_ms)
         }
         Err(kind) => {
             let error_code = kind.error_code();
@@ -1495,14 +1518,17 @@ where
             created_at_ms,
             created_at,
         })
-        .with_completion(RequestCompletion::success_with_visible_ttfb(
-            status.as_u16(),
-            provider_ttfb_ms,
-            Some(duration_ms),
-            usage_metrics,
-            None,
-            usage,
-        )),
+        .with_completion(
+            RequestCompletion::success_with_visible_ttfb(
+                status.as_u16(),
+                provider_ttfb_ms,
+                Some(duration_ms),
+                usage_metrics,
+                None,
+                usage,
+            )
+            .with_final_upstream_attempt_timing(final_upstream_attempt_duration_ms, 1),
+        ),
     )
     .await;
     abort_guard.disarm();
@@ -1666,6 +1692,30 @@ mod tests {
 
         assert_eq!(err, NonStreamBodyReadError::TooLarge);
         task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn read_non_stream_body_records_final_attempt_at_clean_eof() {
+        let expected = b"{\"ok\":true}".to_vec();
+        let (response, task) = unknown_length_response(expected.clone()).await;
+        let attempt_started = Instant::now()
+            .checked_sub(Duration::from_millis(25))
+            .expect("test attempt start");
+
+        let (body, first_byte_ms, final_attempt_duration_ms) = read_non_stream_body_with_limit(
+            response,
+            Instant::now(),
+            attempt_started,
+            Some(Duration::from_secs(2)),
+            64,
+        )
+        .await
+        .expect("read complete upstream body");
+
+        assert_eq!(body.as_ref(), expected.as_slice());
+        assert!(first_byte_ms.is_some_and(|duration_ms| duration_ms >= 25));
+        assert!(final_attempt_duration_ms.is_some_and(|duration_ms| duration_ms >= 25));
+        task.await.expect("upstream task");
     }
 
     #[test]

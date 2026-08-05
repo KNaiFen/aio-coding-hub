@@ -321,12 +321,12 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
         const outputTokensPerSecond = summary
           ? computeOutputTokensPerSecond(
               displayOutputTokens,
-              summary.upstream_stream_duration_ms,
+              summary.final_upstream_attempt_duration_ms,
               summaryStatus != null &&
                 summaryStatus >= 200 &&
                 summaryStatus < 300 &&
                 !summaryErrorCode
-                ? summary.upstream_stream_timing_version
+                ? summary.final_upstream_attempt_timing_version
                 : 0
             )
           : null;

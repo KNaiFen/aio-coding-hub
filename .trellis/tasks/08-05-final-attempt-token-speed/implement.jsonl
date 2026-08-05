@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/aio-coding-hub/backend/index.md", "reason": "网关尝试、失败重试和原生验证约束"}
+{"file": ".trellis/spec/aio-coding-hub/cross-layer/request-log-usage-ledger-pagination-contract.md", "reason": "请求日志到 usage ledger 的持久化合同"}
+{"file": ".trellis/spec/aio-coding-hub/cross-layer/local-observer-tui-contract.md", "reason": "桌面与 TUI 观测字段一致性"}
+{"file": ".trellis/tasks/08-05-final-attempt-token-speed/research/sub2api-token-rate.md", "reason": "最终成功 attempt 速率参考"}

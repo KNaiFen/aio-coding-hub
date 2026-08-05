@@ -156,6 +156,8 @@ pub(super) struct RequestLogEnqueueArgs {
     pub(super) visible_ttfb_ms: Option<u128>,
     pub(super) upstream_stream_duration_ms: Option<u128>,
     pub(super) upstream_stream_timing_version: i64,
+    pub(super) final_upstream_attempt_duration_ms: Option<u128>,
+    pub(super) final_upstream_attempt_timing_version: i64,
     pub(super) attempts_json: String,
     pub(super) requested_model: Option<String>,
     pub(super) created_at_ms: i64,

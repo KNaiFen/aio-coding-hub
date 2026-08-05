@@ -1,0 +1,28 @@
+{
+  "id": "provider-status-natural-buckets",
+  "name": "provider-status-natural-buckets",
+  "title": "按自然粒度推进供应商状态格",
+  "description": "桌面 36 格独立推进，保持 TUI 与托盘粒度不变。",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": "aio-coding-hub",
+  "package": "aio-coding-hub",
+  "priority": "P1",
+  "creator": "KNaiFen",
+  "assignee": "KNaiFen",
+  "createdAt": "2026-08-05",
+  "completedAt": null,
+  "branch": "codex/fix-observability-refresh-status",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "08-05-observability-correctness-release",
+  "relatedFiles": [
+    "src-tauri/src/domain/provider_availability.rs"
+  ],
+  "notes": "实现、前端合同测试与独立静态审阅完成；等待 GitHub Actions 原生验证及 PR/发版证据。",
+  "meta": {}
+}

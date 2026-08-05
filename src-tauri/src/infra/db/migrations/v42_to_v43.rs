@@ -24,6 +24,9 @@ CREATE TABLE IF NOT EXISTS usage_ledger (
   upstream_stream_duration_ms INTEGER,
   upstream_stream_timing_version INTEGER NOT NULL DEFAULT 0
     CHECK(upstream_stream_timing_version IN (0, 1)),
+  final_upstream_attempt_duration_ms INTEGER,
+  final_upstream_attempt_timing_version INTEGER NOT NULL DEFAULT 0
+    CHECK(final_upstream_attempt_timing_version IN (0, 1)),
   requested_model TEXT,
   final_provider_id INTEGER,
   provider_name_snapshot TEXT,
@@ -75,6 +78,8 @@ CREATE TABLE IF NOT EXISTS usage_ledger_backfill_state (
 }
 
 pub(super) fn recreate_usage_events_view(conn: &Connection) -> Result<(), String> {
+    super::v48_to_v49::ensure_request_log_final_attempt_timing_columns(conn)?;
+    super::v48_to_v49::ensure_usage_ledger_final_attempt_timing_columns(conn)?;
     conn.execute_batch(
         r#"
 DROP VIEW IF EXISTS usage_events;
@@ -388,6 +393,8 @@ SELECT
   ledger.visible_ttfb_ms,
   ledger.upstream_stream_duration_ms,
   ledger.upstream_stream_timing_version,
+  ledger.final_upstream_attempt_duration_ms,
+  ledger.final_upstream_attempt_timing_version,
   ledger.requested_model,
   ledger.final_provider_id,
   ledger.provider_name_snapshot,
@@ -425,6 +432,8 @@ SELECT
   request.visible_ttfb_ms,
   request.upstream_stream_duration_ms,
   request.upstream_stream_timing_version,
+  request.final_upstream_attempt_duration_ms,
+  request.final_upstream_attempt_timing_version,
   request.requested_model,
   request.effective_final_provider_id AS final_provider_id,
   CASE

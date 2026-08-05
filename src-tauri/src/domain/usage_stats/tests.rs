@@ -40,8 +40,8 @@ fn setup_conn() -> Connection {
 		  duration_ms INTEGER NOT NULL,
 		  ttfb_ms INTEGER,
 		  visible_ttfb_ms INTEGER,
-		  upstream_stream_duration_ms INTEGER,
-		  upstream_stream_timing_version INTEGER NOT NULL DEFAULT 0,
+		  final_upstream_attempt_duration_ms INTEGER,
+		  final_upstream_attempt_timing_version INTEGER NOT NULL DEFAULT 0,
 	  input_tokens INTEGER,
 	  output_tokens INTEGER,
 	  total_tokens INTEGER,
@@ -183,8 +183,8 @@ struct TestUsageLog<'a> {
     error_code: Option<&'a str>,
     duration_ms: i64,
     ttfb_ms: Option<i64>,
-    upstream_stream_duration_ms: Option<i64>,
-    upstream_stream_timing_version: i64,
+    final_upstream_attempt_duration_ms: Option<i64>,
+    final_upstream_attempt_timing_version: i64,
     input_tokens: Option<i64>,
     output_tokens: Option<i64>,
     total_tokens: Option<i64>,
@@ -206,8 +206,8 @@ fn base_usage_log(created_at: i64) -> TestUsageLog<'static> {
         error_code: None,
         duration_ms: 1000,
         ttfb_ms: Some(100),
-        upstream_stream_duration_ms: Some(900),
-        upstream_stream_timing_version: 1,
+        final_upstream_attempt_duration_ms: Some(900),
+        final_upstream_attempt_timing_version: 1,
         input_tokens: Some(100),
         output_tokens: Some(20),
         total_tokens: None,
@@ -237,8 +237,8 @@ INSERT INTO usage_events (
   duration_ms,
   ttfb_ms,
   visible_ttfb_ms,
-  upstream_stream_duration_ms,
-  upstream_stream_timing_version,
+  final_upstream_attempt_duration_ms,
+  final_upstream_attempt_timing_version,
   input_tokens,
   output_tokens,
   total_tokens,
@@ -263,8 +263,8 @@ INSERT INTO usage_events (
             log.duration_ms,
             log.ttfb_ms,
             log.ttfb_ms,
-            log.upstream_stream_duration_ms,
-            log.upstream_stream_timing_version,
+            log.final_upstream_attempt_duration_ms,
+            log.final_upstream_attempt_timing_version,
             log.input_tokens,
             log.output_tokens,
             log.total_tokens,
@@ -1715,7 +1715,7 @@ INSERT INTO usage_provider_daily_rollup_days(
     let success = "r.status >= 200 AND r.status < 300 AND r.error_present = 0";
     let valid_ttfb = "r.ttfb_ms IS NOT NULL AND r.ttfb_ms < r.duration_ms";
     let valid_output_rate =
-        "r.output_tokens > 0 AND r.upstream_stream_timing_version = 1 AND r.upstream_stream_duration_ms IS NOT NULL AND r.upstream_stream_duration_ms > 0";
+        "r.output_tokens > 0 AND r.final_upstream_attempt_timing_version = 1 AND r.final_upstream_attempt_duration_ms IS NOT NULL AND r.final_upstream_attempt_duration_ms > 0";
     let effective_input = sql_effective_input_tokens_expr_with_alias("r");
     let cache_denom = format!(
         "({effective_input}) + COALESCE(r.cache_creation_input_tokens, 0) + COALESCE(r.cache_read_input_tokens, 0)"
@@ -1754,7 +1754,7 @@ SELECT
   SUM(CASE WHEN {success} THEN r.duration_ms ELSE 0 END),
   SUM(CASE WHEN {success} AND {valid_ttfb} THEN r.ttfb_ms ELSE 0 END),
   SUM(CASE WHEN {success} AND {valid_ttfb} THEN 1 ELSE 0 END),
-  SUM(CASE WHEN {success} AND {valid_output_rate} THEN r.upstream_stream_duration_ms ELSE 0 END),
+  SUM(CASE WHEN {success} AND {valid_output_rate} THEN r.final_upstream_attempt_duration_ms ELSE 0 END),
   SUM(CASE WHEN {success} AND {valid_output_rate} THEN r.output_tokens ELSE 0 END),
   SUM(CASE WHEN {success} AND {valid_output_rate} THEN 1 ELSE 0 END),
   SUM(CASE WHEN {success} THEN {cache_denom} ELSE 0 END),
@@ -2141,7 +2141,7 @@ fn provider_metric_trend_matches_summary_formulas_and_sample_guards() {
             provider_name: "Formula Provider",
             duration_ms: 1000,
             ttfb_ms: Some(200),
-            upstream_stream_duration_ms: Some(800),
+            final_upstream_attempt_duration_ms: Some(800),
             output_tokens: Some(300),
             created_at: bucket_ts,
             ..base_usage_log(bucket_ts)
@@ -2153,8 +2153,8 @@ fn provider_metric_trend_matches_summary_formulas_and_sample_guards() {
             provider_name: "Formula Provider",
             duration_ms: 2000,
             ttfb_ms: Some(5000),
-            upstream_stream_duration_ms: Some(500),
-            upstream_stream_timing_version: 0,
+            final_upstream_attempt_duration_ms: Some(500),
+            final_upstream_attempt_timing_version: 0,
             output_tokens: Some(999),
             created_at: bucket_ts + 1,
             ..base_usage_log(bucket_ts + 1)
@@ -2239,7 +2239,7 @@ fn provider_metric_trend_matches_summary_formulas_and_sample_guards() {
 }
 
 #[test]
-fn output_rate_uses_final_upstream_span_instead_of_retry_elapsed_time() {
+fn output_rate_uses_final_successful_attempt_instead_of_retry_elapsed_time() {
     let conn = setup_conn();
     conn.execute(
         "INSERT INTO providers (id, name) VALUES (?1, ?2)",
@@ -2254,9 +2254,9 @@ fn output_rate_uses_final_upstream_span_instead_of_retry_elapsed_time() {
         TestUsageLog {
             provider_name: "Retry Provider",
             duration_ms: 60_000,
-            ttfb_ms: Some(59_000),
-            upstream_stream_duration_ms: Some(200),
-            upstream_stream_timing_version: 1,
+            ttfb_ms: Some(19_800),
+            final_upstream_attempt_duration_ms: Some(20_000),
+            final_upstream_attempt_timing_version: 1,
             output_tokens: Some(1_200),
             created_at: bucket_ts,
             ..base_usage_log(bucket_ts)
@@ -2268,8 +2268,8 @@ fn output_rate_uses_final_upstream_span_instead_of_retry_elapsed_time() {
             provider_name: "Retry Provider",
             duration_ms: 100,
             ttfb_ms: Some(1),
-            upstream_stream_duration_ms: Some(1),
-            upstream_stream_timing_version: 0,
+            final_upstream_attempt_duration_ms: Some(1),
+            final_upstream_attempt_timing_version: 0,
             output_tokens: Some(9_999),
             created_at: bucket_ts + 1,
             ..base_usage_log(bucket_ts + 1)
@@ -2281,8 +2281,8 @@ fn output_rate_uses_final_upstream_span_instead_of_retry_elapsed_time() {
             provider_name: "Retry Provider",
             duration_ms: 10_000,
             ttfb_ms: Some(10),
-            upstream_stream_duration_ms: Some(9_000),
-            upstream_stream_timing_version: 1,
+            final_upstream_attempt_duration_ms: Some(9_000),
+            final_upstream_attempt_timing_version: 1,
             output_tokens: Some(0),
             created_at: bucket_ts + 2,
             ..base_usage_log(bucket_ts + 2)
@@ -2322,12 +2322,12 @@ fn output_rate_uses_final_upstream_span_instead_of_retry_elapsed_time() {
     )
     .expect("provider leaderboard");
 
-    assert_eq!(summary.avg_output_tokens_per_second, Some(6_000.0));
+    assert_eq!(summary.avg_output_tokens_per_second, Some(60.0));
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].output_rate_samples, 1);
-    assert_eq!(rows[0].avg_output_tokens_per_second, Some(6_000.0));
+    assert_eq!(rows[0].avg_output_tokens_per_second, Some(60.0));
     assert_eq!(leaderboard.len(), 1);
-    assert_eq!(leaderboard[0].avg_output_tokens_per_second, Some(6_000.0));
+    assert_eq!(leaderboard[0].avg_output_tokens_per_second, Some(60.0));
 }
 
 #[test]

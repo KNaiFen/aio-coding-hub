@@ -1,0 +1,100 @@
+//! Usage: SQLite migration v48->v49 - final successful upstream-attempt timing.
+
+use rusqlite::Connection;
+
+fn table_exists(conn: &Connection, table: &str) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+        [table],
+        |row| row.get(0),
+    )
+    .map_err(|error| format!("failed to inspect table {table}: {error}"))
+}
+
+fn has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, String> {
+    let sql = format!("SELECT EXISTS(SELECT 1 FROM pragma_table_info('{table}') WHERE name = ?1)");
+    conn.query_row(&sql, [column], |row| row.get(0))
+        .map_err(|error| format!("failed to inspect {table}.{column}: {error}"))
+}
+
+fn add_column_if_missing(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<(), String> {
+    if has_column(conn, table, column)? {
+        return Ok(());
+    }
+    conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {definition};"))
+        .map_err(|error| format!("failed to add {table}.{column}: {error}"))
+}
+
+pub(super) fn ensure_request_log_final_attempt_timing_columns(
+    conn: &Connection,
+) -> Result<(), String> {
+    if !table_exists(conn, "request_logs")? {
+        return Ok(());
+    }
+    add_column_if_missing(
+        conn,
+        "request_logs",
+        "final_upstream_attempt_duration_ms",
+        "final_upstream_attempt_duration_ms INTEGER",
+    )?;
+    add_column_if_missing(
+        conn,
+        "request_logs",
+        "final_upstream_attempt_timing_version",
+        "final_upstream_attempt_timing_version INTEGER NOT NULL DEFAULT 0 CHECK(final_upstream_attempt_timing_version IN (0, 1))",
+    )
+}
+
+pub(super) fn ensure_usage_ledger_final_attempt_timing_columns(
+    conn: &Connection,
+) -> Result<(), String> {
+    if !table_exists(conn, "usage_ledger")? {
+        return Ok(());
+    }
+    add_column_if_missing(
+        conn,
+        "usage_ledger",
+        "final_upstream_attempt_duration_ms",
+        "final_upstream_attempt_duration_ms INTEGER",
+    )?;
+    add_column_if_missing(
+        conn,
+        "usage_ledger",
+        "final_upstream_attempt_timing_version",
+        "final_upstream_attempt_timing_version INTEGER NOT NULL DEFAULT 0 CHECK(final_upstream_attempt_timing_version IN (0, 1))",
+    )
+}
+
+pub(super) fn migrate_v48_to_v49(conn: &mut Connection) -> crate::shared::error::AppResult<()> {
+    let tx = conn
+        .transaction()
+        .map_err(|error| format!("failed to start v48->v49 transaction: {error}"))?;
+
+    ensure_request_log_final_attempt_timing_columns(&tx)?;
+    ensure_usage_ledger_final_attempt_timing_columns(&tx)?;
+    super::v42_to_v43::refresh_usage_events_view(&tx)?;
+    super::v46_to_v47::create_provider_daily_rollup_schema(&tx)?;
+
+    tx.execute("DELETE FROM usage_provider_daily_rollups", [])
+        .map_err(|error| format!("failed to clear stale provider daily rollups: {error}"))?;
+    tx.execute(
+        "UPDATE usage_provider_daily_rollup_days SET status = 'dirty', source_row_count = 0, updated_at = CAST(strftime('%s', 'now') AS INTEGER)",
+        [],
+    )
+    .map_err(|error| format!("failed to mark provider daily rollups dirty: {error}"))?;
+    tx.execute(
+        "UPDATE usage_provider_daily_rollup_backfill_state SET next_local_day = NULL, updated_at = CAST(strftime('%s', 'now') AS INTEGER) WHERE id = 1",
+        [],
+    )
+    .map_err(|error| format!("failed to reset provider daily rollup backfill state: {error}"))?;
+
+    super::set_user_version(&tx, 49)?;
+    tx.commit()
+        .map_err(|error| format!("failed to commit v48->v49 transaction: {error}"))?;
+    Ok(())
+}

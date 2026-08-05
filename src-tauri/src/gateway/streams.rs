@@ -17,8 +17,9 @@ pub(super) use plugin_chunk::MaybePluginChunkStream;
 
 mod usage_tee;
 pub(super) use usage_tee::{
-    spawn_upstream_output_timing_stream, spawn_usage_sse_relay_body, UpstreamModelObserverStream,
-    UsageBodyBufferTeeStream, UsageSseTeeStream,
+    spawn_upstream_body_timing_stream, spawn_upstream_output_timing_stream,
+    spawn_usage_sse_relay_body, UpstreamModelObserverStream, UsageBodyBufferTeeStream,
+    UsageSseTeeStream,
 };
 
 mod timing;

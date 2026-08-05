@@ -175,7 +175,12 @@ where
 
     tokio::spawn(async move {
         let mut tracker = usage::SseUsageTracker::new(&protocol_key);
-        while let Some(item) = next_item(&mut upstream).await {
+        let mut upstream_ended_normally = false;
+        loop {
+            let Some(item) = next_item(&mut upstream).await else {
+                upstream_ended_normally = true;
+                break;
+            };
             if let Ok(chunk) = &item {
                 let before = tracker.output_delta_event_count();
                 tracker.ingest_chunk(chunk.as_ref());
@@ -220,6 +225,53 @@ where
         );
         if tracker.terminal_error_seen() {
             timing.invalidate();
+        } else if upstream_ended_normally {
+            timing.observe_clean_eof_at(attempt_started.elapsed().as_millis());
+        }
+    });
+
+    RelayBodyStream::new(rx)
+}
+
+pub(in crate::gateway) fn spawn_upstream_body_timing_stream<S>(
+    mut upstream: S,
+    timing: UpstreamOutputTiming,
+    attempt_started: Instant,
+) -> RelayBodyStream
+where
+    S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin + Send + 'static,
+{
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, reqwest::Error>>(
+        UPSTREAM_TIMING_RELAY_BUFFER_CAPACITY,
+    );
+
+    tokio::spawn(async move {
+        loop {
+            let Some(item) = next_item(&mut upstream).await else {
+                timing.observe_clean_eof_at(attempt_started.elapsed().as_millis());
+                break;
+            };
+            match &item {
+                Ok(chunk) if !chunk.is_empty() => {
+                    timing.observe_first_byte_at(attempt_started.elapsed().as_millis());
+                }
+                Ok(_) => {}
+                Err(_) => timing.invalidate(),
+            }
+
+            match tx.try_send(item) {
+                Ok(()) => {}
+                Err(tokio::sync::mpsc::error::TrySendError::Full(item)) => {
+                    timing.invalidate();
+                    if tx.send(item).await.is_err() {
+                        break;
+                    }
+                }
+                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                    timing.invalidate();
+                    break;
+                }
+            }
         }
     });
 
@@ -623,6 +675,14 @@ where
                 && self.tracker.completion_seen()
                 && upstream_stream_duration_ms.is_some(),
         );
+        let final_upstream_attempt_duration_ms =
+            self.ctx.upstream_output_timing.final_attempt_duration_ms();
+        let final_upstream_attempt_timing_version = i64::from(
+            effective_error_code.is_none()
+                && !stream_error_seen
+                && self.tracker.completion_seen()
+                && final_upstream_attempt_duration_ms.is_some(),
+        );
         emit_request_event_and_spawn_request_log(
             &self.ctx,
             StreamRequestCompletion::from_error_code(
@@ -636,6 +696,10 @@ where
             .with_upstream_stream_timing(
                 upstream_stream_duration_ms,
                 upstream_stream_timing_version,
+            )
+            .with_final_upstream_attempt_timing(
+                final_upstream_attempt_duration_ms,
+                final_upstream_attempt_timing_version,
             )
             .with_terminal_signal(terminal_signal)
             .with_stream_internal_error(self.tracker.stream_internal_error_evidence().cloned()),
@@ -700,6 +764,7 @@ where
 {
     fn drop(&mut self) {
         if !self.finalized {
+            self.ctx.upstream_output_timing.invalidate();
             // Best-effort flush for trailing partial SSE data before deciding abort/success.
             let usage = self.tracker.finalize();
             let usage_seen = usage.is_some();
@@ -824,6 +889,7 @@ where
                 // 这里通过监听 rx 端被 drop 来更早感知断开，避免误记 GW_STREAM_ABORTED。
                 // 如果断开和 idle timeout 同时 ready，断开应优先进入 Codex drain。
                 _ = tx.closed() => {
+                    tee.ctx.upstream_output_timing.invalidate();
                     client_abort_detected_by = Some("rx_closed");
                     downstream_closed = true;
                     if is_codex_responses {
@@ -842,20 +908,37 @@ where
                         Ok(chunk) => {
                             let chunk_len = chunk.len().min(i64::MAX as usize) as i64;
 
-                            if tx.send(Ok(chunk)).await.is_err() {
-                                client_abort_detected_by = Some("send_failed");
-                                downstream_closed = true;
-                                if is_codex_responses {
-                                    drain_deadline = Some(tokio::time::Instant::now() + drain_grace);
-                                    continue;
+                            match tx.try_send(Ok(chunk)) {
+                                Ok(()) => {}
+                                Err(tokio::sync::mpsc::error::TrySendError::Full(item)) => {
+                                    tee.ctx.upstream_output_timing.invalidate();
+                                    if tx.send(item).await.is_err() {
+                                        client_abort_detected_by = Some("send_failed");
+                                        downstream_closed = true;
+                                        if is_codex_responses {
+                                            drain_deadline = Some(tokio::time::Instant::now() + drain_grace);
+                                            continue;
+                                        }
+                                        break;
+                                    }
                                 }
-                                break;
+                                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                                    tee.ctx.upstream_output_timing.invalidate();
+                                    client_abort_detected_by = Some("send_failed");
+                                    downstream_closed = true;
+                                    if is_codex_responses {
+                                        drain_deadline = Some(tokio::time::Instant::now() + drain_grace);
+                                        continue;
+                                    }
+                                    break;
+                                }
                             }
 
                             forwarded_chunks = forwarded_chunks.saturating_add(1);
                             forwarded_bytes = forwarded_bytes.saturating_add(chunk_len);
                         }
                         Err(err) => {
+                            tee.ctx.upstream_output_timing.invalidate();
                             // 尽力把流错误透传给客户端
                             let _ = tx.send(Err(err)).await;
                             break;
@@ -1070,15 +1153,25 @@ where
             }
         });
 
+        let first_byte_ms = self
+            .ctx
+            .upstream_output_timing
+            .first_byte_ms()
+            .or(self.first_byte_ms);
+        let final_attempt_duration_ms = self.ctx.upstream_output_timing.final_attempt_duration_ms();
         emit_request_event_and_spawn_request_log(
             &self.ctx,
             StreamRequestCompletion::from_error_code(
                 effective_error_code,
-                self.first_byte_ms,
-                self.first_byte_ms,
+                first_byte_ms,
+                first_byte_ms,
                 requested_model,
                 usage_metrics,
                 usage,
+            )
+            .with_final_upstream_attempt_timing(
+                final_attempt_duration_ms,
+                i64::from(effective_error_code.is_none() && final_attempt_duration_ms.is_some()),
             ),
         );
     }
@@ -1150,6 +1243,7 @@ where
 {
     fn drop(&mut self) {
         if !self.finalized {
+            self.ctx.upstream_output_timing.invalidate();
             let usage_seen = !self.truncated
                 && !self.buffer.is_empty()
                 && usage::parse_usage_from_json_or_sse_bytes(&self.ctx.cli_key, &self.buffer)

@@ -76,6 +76,8 @@ fn build_in_progress_request_log_args<R: tauri::Runtime>(
         visible_ttfb_ms: None,
         upstream_stream_duration_ms: None,
         upstream_stream_timing_version: 0,
+        final_upstream_attempt_duration_ms: None,
+        final_upstream_attempt_timing_version: 0,
         attempts_json: "[]".to_string(),
         requested_model: ctx.requested_model.as_deref().map(str::to_string),
         created_at_ms: ctx.created_at_ms,

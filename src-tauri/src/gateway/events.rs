@@ -145,6 +145,8 @@ pub(crate) struct GatewayRequestEvent {
     visible_ttfb_ms: Option<u128>,
     upstream_stream_duration_ms: Option<u128>,
     upstream_stream_timing_version: i64,
+    final_upstream_attempt_duration_ms: Option<u128>,
+    final_upstream_attempt_timing_version: i64,
     attempts: Vec<FailoverAttempt>,
     input_tokens: Option<i64>,
     output_tokens: Option<i64>,
@@ -597,6 +599,8 @@ pub(super) fn emit_request_event<R: tauri::Runtime>(
     visible_ttfb_ms: Option<u128>,
     upstream_stream_duration_ms: Option<u128>,
     upstream_stream_timing_version: i64,
+    final_upstream_attempt_duration_ms: Option<u128>,
+    final_upstream_attempt_timing_version: i64,
     attempts: Vec<FailoverAttempt>,
     claude_model_mapping: Option<ClaudeModelMapping>,
     usage: Option<usage::UsageMetrics>,
@@ -615,6 +619,16 @@ pub(super) fn emit_request_event<R: tauri::Runtime>(
         return;
     }
 
+    let successful =
+        error_code.is_none() && status.is_some_and(|status| (200..300).contains(&status));
+    let final_upstream_attempt_duration_ms = successful
+        .then_some(final_upstream_attempt_duration_ms)
+        .flatten()
+        .filter(|final_duration_ms| {
+            *final_duration_ms > 0
+                && *final_duration_ms <= duration_ms
+                && ttfb_ms.is_none_or(|ttfb_ms| *final_duration_ms >= ttfb_ms)
+        });
     let usage = usage.unwrap_or_default();
     let effective_input_tokens = request_event_effective_input_tokens(&cli_key, &attempts, &usage);
     let payload = GatewayRequestEvent {
@@ -635,6 +649,14 @@ pub(super) fn emit_request_event<R: tauri::Runtime>(
         upstream_stream_duration_ms,
         upstream_stream_timing_version: if upstream_stream_timing_version == 1
             && upstream_stream_duration_ms.is_some_and(|duration_ms| duration_ms > 0)
+        {
+            1
+        } else {
+            0
+        },
+        final_upstream_attempt_duration_ms,
+        final_upstream_attempt_timing_version: if final_upstream_attempt_timing_version == 1
+            && final_upstream_attempt_duration_ms.is_some_and(|duration_ms| duration_ms > 0)
         {
             1
         } else {
@@ -907,6 +929,8 @@ mod tests {
             visible_ttfb_ms: Some(420),
             upstream_stream_duration_ms: Some(1_500),
             upstream_stream_timing_version: 1,
+            final_upstream_attempt_duration_ms: Some(1_920),
+            final_upstream_attempt_timing_version: 1,
             attempts: vec![FailoverAttempt {
                 provider_id: 7,
                 provider_name: "Provider A".to_string(),
@@ -1347,6 +1371,8 @@ mod tests {
             visible_ttfb_ms: Some(10),
             upstream_stream_duration_ms: None,
             upstream_stream_timing_version: 0,
+            final_upstream_attempt_duration_ms: None,
+            final_upstream_attempt_timing_version: 0,
             attempts: Vec::new(),
             input_tokens: None,
             output_tokens: None,

@@ -94,6 +94,9 @@ export function createRequestLogSummary(
     is_interrupted: isInterrupted,
     upstream_stream_duration_ms: overrides.upstream_stream_duration_ms ?? null,
     upstream_stream_timing_version: overrides.upstream_stream_timing_version ?? 0,
+    final_upstream_attempt_duration_ms: overrides.final_upstream_attempt_duration_ms ?? null,
+    final_upstream_attempt_timing_version:
+      overrides.final_upstream_attempt_timing_version ?? 0,
     created_at_ms: createdAtMs,
     created_at: createdAt,
     route: (overrides.route ?? []).map((routeItem) => createRequestLogRouteHop(routeItem)),
@@ -150,5 +153,8 @@ export function createRequestLogDetail(
     is_interrupted: isInterrupted,
     upstream_stream_duration_ms: overrides.upstream_stream_duration_ms ?? null,
     upstream_stream_timing_version: overrides.upstream_stream_timing_version ?? 0,
+    final_upstream_attempt_duration_ms: overrides.final_upstream_attempt_duration_ms ?? null,
+    final_upstream_attempt_timing_version:
+      overrides.final_upstream_attempt_timing_version ?? 0,
   };
 }
