@@ -1,19 +1,16 @@
 # Homebrew Cask Release Notes
 
-This project generates the Homebrew Cask from the release support matrix, then optionally syncs it to a separate tap repository during the release workflow.
+This repository can generate an Apple Silicon-only Homebrew Cask after a GitHub Release is published. The Cask uses the validated release candidate's `aio-coding-hub-macos-arm.zip` asset.
 
-## One-time setup
+The release workflow does not generate or push a Cask. Updating a tap is a separate, manual publication step.
 
-Create the fork tap repository expected by the release workflow default:
+## Tap setup
+
+Create or choose a tap repository. For example:
 
 ```bash
-gh repo create FingerCaster/homebrew-aio-coding-hub --public
+gh repo create KNaiFen/homebrew-aio-coding-hub --public
 ```
-
-Then configure this repository:
-
-- Secret `HOMEBREW_TAP_TOKEN`: a token that can push to the tap repository.
-- Optional variable `HOMEBREW_TAP_REPOSITORY`: defaults to `FingerCaster/homebrew-aio-coding-hub`.
 
 The tap repository should contain the generated file at:
 
@@ -21,25 +18,45 @@ The tap repository should contain the generated file at:
 Casks/aio-coding-hub.rb
 ```
 
-## Manual generation
+No Homebrew tap token or repository variable is required in the source repository because `.github/workflows/release.yml` does not publish to the tap.
 
-Use the latest release asset digests:
+## Generate after release
+
+Download the published Apple Silicon ZIP and calculate its SHA-256:
 
 ```bash
-node scripts/support-matrix.mjs homebrew-cask \
-  --tag aio-coding-hub-v0.60.4 \
+RELEASE_TAG=aio-coding-hub-v0.60.49
+RELEASE_DIR=/tmp/aio-coding-hub-homebrew
+TAP_DIR=/absolute/path/to/homebrew-aio-coding-hub
+
+mkdir -p "$RELEASE_DIR"
+gh release download "$RELEASE_TAG" \
   --repo KNaiFen/aio-coding-hub \
-  --macos-arm-sha256 6b126f39ec625e97d182301fafcbfff81ce6f332e297880aef2b0eab0a3c0c4a \
-  --macos-intel-sha256 18f376bc6266e8cef4fb3978240ba0247c56b703370f6a95269443c2adbbbcc6 \
-  --output Casks/aio-coding-hub.rb
+  --pattern aio-coding-hub-macos-arm.zip \
+  --dir "$RELEASE_DIR"
+
+ARM_ZIP_SHA256="$(shasum -a 256 "$RELEASE_DIR/aio-coding-hub-macos-arm.zip" | awk '{print $1}')"
+
+node scripts/support-matrix.mjs homebrew-cask \
+  --tag "$RELEASE_TAG" \
+  --repo KNaiFen/aio-coding-hub \
+  --macos-arm-sha256 "$ARM_ZIP_SHA256" \
+  --output "$TAP_DIR/Casks/aio-coding-hub.rb"
 ```
 
-Validate before pushing to the tap:
+The formal Release does not include a macOS Intel desktop asset. Do not use the unsigned `dev-build` Intel artifact to populate this Cask.
+
+Validate and then commit the generated file in the tap checkout:
 
 ```bash
-brew style --cask Casks/aio-coding-hub.rb
+brew style --cask "$TAP_DIR/Casks/aio-coding-hub.rb"
+git -C "$TAP_DIR" add Casks/aio-coding-hub.rb
+git -C "$TAP_DIR" commit -m "chore(cask): update AIO Coding Hub to ${RELEASE_TAG#aio-coding-hub-v}"
+git -C "$TAP_DIR" push origin HEAD
 ```
 
 ## Release behavior
 
-The release workflow is intentionally manual-only. After a local MSI has been tested and publication is explicitly approved, `.github/workflows/release.yml` reads the two macOS zip asset digests from GitHub, generates `Casks/aio-coding-hub.rb`, and pushes it to the tap when `HOMEBREW_TAP_TOKEN` is configured. If the token is missing, the release still succeeds and prints a skip message.
+`.github/workflows/release.yml` promotes an immutable, previously validated release candidate. It verifies and publishes `aio-coding-hub-macos-arm.zip`, but it deliberately does not update an external tap. Generate and push the Cask only after that Release succeeds so its URL and checksum refer to a published asset.
+
+See the [Homebrew Cask Cookbook](https://docs.brew.sh/Cask-Cookbook) for the current Cask syntax and validation rules.

@@ -20,6 +20,10 @@ const RELEASE_TARGETS = Object.freeze([
     kind: "tarball",
     assetName: "aio-coding-hub-macos-arm.tar.gz",
     signatureName: "aio-coding-hub-macos-arm.tar.gz.sig",
+    homebrewCask: {
+      arch: "arm64",
+      assetName: "aio-coding-hub-macos-arm.zip",
+    },
   },
 ]);
 
@@ -213,30 +217,36 @@ function normalizeSha256(value, label) {
   return normalized;
 }
 
-function buildHomebrewCask({ tag, repo, macosArmSha256, macosIntelSha256 }) {
+function homebrewCaskTarget() {
+  const targets = RELEASE_TARGETS.filter((target) => target.homebrewCask);
+  if (targets.length !== 1) {
+    throw new Error(`Expected exactly one Homebrew Cask release target; found ${targets.length}`);
+  }
+  return targets[0];
+}
+
+function buildHomebrewCask({ tag, repo, macosArmSha256 }) {
+  const target = homebrewCaskTarget();
   const version = normalizedVersion(tag, repo);
   if (!tag.includes(version)) throw new Error(`Release tag does not contain ${version}`);
   const tagTemplate = tag.replace(version, "#{version}");
   const armSha256 = normalizeSha256(macosArmSha256, "macOS Apple Silicon zip");
-  const intelSha256 = normalizeSha256(macosIntelSha256, "macOS Intel zip");
 
   return [
     `# This file is generated from ${repo}.`,
     "# Update it by running `node scripts/support-matrix.mjs homebrew-cask` in the source repo.",
     `cask "${HOMEBREW_CASK.token}" do`,
-    '  arch arm: "arm", intel: "intel"',
-    "",
     `  version "${version}"`,
-    `  sha256 arm:   "${armSha256}",`,
-    `         intel: "${intelSha256}"`,
+    `  sha256 "${armSha256}"`,
     "",
-    `  url "https://github.com/${repo}/releases/download/${tagTemplate}/aio-coding-hub-macos-#{arch}.zip"`,
+    `  url "https://github.com/${repo}/releases/download/${tagTemplate}/${target.homebrewCask.assetName}"`,
     `  name "${HOMEBREW_CASK.name}"`,
     `  desc "${HOMEBREW_CASK.desc}"`,
     `  homepage "${HOMEBREW_CASK.homepage}"`,
     "",
     "  auto_updates true",
     "  depends_on :macos",
+    `  depends_on arch: :${target.homebrewCask.arch}`,
     "",
     `  app "${HOMEBREW_CASK.appName}"`,
     "",
@@ -252,11 +262,15 @@ function buildHomebrewCask({ tag, repo, macosArmSha256, macosIntelSha256 }) {
 }
 
 function writeHomebrewCask(args) {
+  if (args.has("macos-intel-sha256")) {
+    throw new Error(
+      "Unsupported argument: --macos-intel-sha256; formal Release excludes macOS Intel desktop assets"
+    );
+  }
   const cask = buildHomebrewCask({
     tag: requireArg(args, "tag"),
     repo: requireArg(args, "repo"),
     macosArmSha256: requireArg(args, "macos-arm-sha256"),
-    macosIntelSha256: requireArg(args, "macos-intel-sha256"),
   });
   const output = args.get("output");
   if (!output) {
