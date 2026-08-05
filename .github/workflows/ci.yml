@@ -113,6 +113,12 @@ jobs:
       - name: Validate release source resolution
         run: node scripts/release-source.selftest.mjs
 
+      - name: Validate upstream sync policy self-test
+        run: node scripts/check-sync-upstream-policy.selftest.mjs
+
+      - name: Enforce upstream sync manual-review policy
+        run: node scripts/check-sync-upstream-policy.mjs
+
       - name: Validate release promotion integrity
         run: node scripts/release-promotion.selftest.mjs
 
