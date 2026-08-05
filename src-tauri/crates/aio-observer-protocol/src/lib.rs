@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub const OBSERVER_PROTOCOL_VERSION: u16 = 1;
 pub const OBSERVER_DESCRIPTOR_FILE_NAME: &str = "observer-v1.json";
 pub const OBSERVER_HISTORY_LIMIT_MAX: u16 = 50;
+pub const OBSERVER_PROVIDER_PROBE_TIMEOUT_MS: u64 = 20_000;
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
@@ -401,5 +402,10 @@ mod tests {
         let snapshot = serde_json::from_value::<ObserverSnapshotV1>(value)
             .expect("deserialize legacy v1 snapshot");
         assert!(snapshot.providers.is_none());
+    }
+
+    #[test]
+    fn provider_probe_timeout_is_an_explicit_protocol_contract() {
+        assert_eq!(OBSERVER_PROVIDER_PROBE_TIMEOUT_MS, 20_000);
     }
 }

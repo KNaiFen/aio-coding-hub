@@ -1,6 +1,6 @@
 use aio_observer_protocol::{
     CliScope, ObserverDescriptorV1, ObserverProviderAvailabilityTestResult, ObserverSnapshotV1,
-    OBSERVER_DESCRIPTOR_FILE_NAME, OBSERVER_PROTOCOL_VERSION,
+    OBSERVER_DESCRIPTOR_FILE_NAME, OBSERVER_PROTOCOL_VERSION, OBSERVER_PROVIDER_PROBE_TIMEOUT_MS,
 };
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -9,12 +9,14 @@ const DESCRIPTOR_MAX_BYTES: usize = 4 * 1024;
 const DESCRIPTOR_TOKEN_MIN_BYTES: usize = 32;
 const RESPONSE_MAX_BYTES: usize = 4 * 1024 * 1024;
 const PROBE_RESPONSE_MAX_BYTES: usize = 128 * 1024;
+const PROVIDER_PROBE_TIMEOUT_GRACE: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OfflineReason {
     MissingDescriptor,
     InvalidDescriptor,
     Unreachable,
+    Timeout,
     Unauthorized,
     Busy,
     ProtocolMismatch,
@@ -27,6 +29,7 @@ impl OfflineReason {
             Self::MissingDescriptor => "AIO 未运行",
             Self::InvalidDescriptor => "连接信息无效",
             Self::Unreachable => "AIO 暂不可达",
+            Self::Timeout => "请求超时",
             Self::Unauthorized => "本地认证已失效",
             Self::Busy => "观测繁忙",
             Self::ProtocolMismatch => "协议版本不兼容",
@@ -96,13 +99,10 @@ impl ObserverClient {
             "http://127.0.0.1:{}/api/observer/v1/providers/{provider_id}/test-availability",
             descriptor.port
         );
-        let mut response = self
-            .http
-            .post(url)
-            .bearer_auth(&descriptor.token)
+        let mut response = provider_probe_request(&self.http, &url, &descriptor.token)
             .send()
             .await
-            .map_err(|_| OfflineReason::Unreachable)?;
+            .map_err(|error| request_error_reason(&error, OfflineReason::Unreachable))?;
         if let Some(reason) = response_failure_reason(response.status()) {
             return Err(reason);
         }
@@ -137,7 +137,7 @@ impl ObserverClient {
             .bearer_auth(&descriptor.token)
             .send()
             .await
-            .map_err(|_| OfflineReason::Unreachable)?;
+            .map_err(|error| request_error_reason(&error, OfflineReason::Unreachable))?;
         if include_providers && response.status() == reqwest::StatusCode::BAD_REQUEST {
             return Ok(SnapshotFetch::ProviderQueryUnsupported);
         }
@@ -154,6 +154,20 @@ impl ObserverClient {
     }
 }
 
+fn provider_probe_timeout() -> Duration {
+    Duration::from_millis(OBSERVER_PROVIDER_PROBE_TIMEOUT_MS) + PROVIDER_PROBE_TIMEOUT_GRACE
+}
+
+fn provider_probe_request(
+    http: &reqwest::Client,
+    url: &str,
+    token: &str,
+) -> reqwest::RequestBuilder {
+    http.post(url)
+        .bearer_auth(token)
+        .timeout(provider_probe_timeout())
+}
+
 async fn read_bounded_response(
     response: &mut reqwest::Response,
     max_bytes: usize,
@@ -168,7 +182,7 @@ async fn read_bounded_response(
     while let Some(chunk) = response
         .chunk()
         .await
-        .map_err(|_| OfflineReason::InvalidResponse)?
+        .map_err(|error| request_error_reason(&error, OfflineReason::InvalidResponse))?
     {
         if bytes.len().saturating_add(chunk.len()) > max_bytes {
             return Err(OfflineReason::InvalidResponse);
@@ -178,10 +192,19 @@ async fn read_bounded_response(
     Ok(bytes)
 }
 
+fn request_error_reason(error: &reqwest::Error, fallback: OfflineReason) -> OfflineReason {
+    if error.is_timeout() {
+        OfflineReason::Timeout
+    } else {
+        fallback
+    }
+}
+
 fn response_failure_reason(status: reqwest::StatusCode) -> Option<OfflineReason> {
     match status {
         reqwest::StatusCode::UNAUTHORIZED => Some(OfflineReason::Unauthorized),
         reqwest::StatusCode::TOO_MANY_REQUESTS => Some(OfflineReason::Busy),
+        reqwest::StatusCode::GATEWAY_TIMEOUT => Some(OfflineReason::Timeout),
         status if !status.is_success() => Some(OfflineReason::InvalidResponse),
         _ => None,
     }
@@ -284,7 +307,66 @@ mod tests {
             response_failure_reason(reqwest::StatusCode::INTERNAL_SERVER_ERROR),
             Some(OfflineReason::InvalidResponse)
         );
+        assert_eq!(
+            response_failure_reason(reqwest::StatusCode::GATEWAY_TIMEOUT),
+            Some(OfflineReason::Timeout)
+        );
         assert_eq!(response_failure_reason(reqwest::StatusCode::OK), None);
+    }
+
+    #[test]
+    fn provider_probe_request_overrides_the_snapshot_timeout() {
+        let http = reqwest::Client::builder()
+            .timeout(Duration::from_millis(3500))
+            .build()
+            .expect("build test client");
+        let request = provider_probe_request(
+            &http,
+            "http://127.0.0.1:37124/api/observer/v1/providers/1/test-availability",
+            "token",
+        )
+        .build()
+        .expect("build provider probe request");
+
+        assert_eq!(request.timeout().copied(), Some(provider_probe_timeout()));
+        assert_eq!(
+            provider_probe_timeout(),
+            Duration::from_millis(OBSERVER_PROVIDER_PROBE_TIMEOUT_MS)
+                + PROVIDER_PROBE_TIMEOUT_GRACE
+        );
+    }
+
+    #[tokio::test]
+    async fn response_body_timeout_is_explicit() {
+        use std::io::{Read, Write};
+
+        let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .expect("bind delayed response server");
+        let address = listener.local_addr().expect("read delayed server address");
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request).expect("read request");
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\nabc")
+                .expect("write partial response");
+            stream.flush().expect("flush partial response");
+            std::thread::sleep(Duration::from_millis(1200));
+        });
+        let http = reqwest::Client::builder()
+            .timeout(Duration::from_millis(500))
+            .no_proxy()
+            .build()
+            .expect("build timeout client");
+        let mut response = http
+            .get(format!("http://{address}/"))
+            .send()
+            .await
+            .expect("receive response headers");
+
+        let result = read_bounded_response(&mut response, 1024).await;
+        server.join().expect("join delayed response server");
+        assert_eq!(result, Err(OfflineReason::Timeout));
     }
 
     #[test]

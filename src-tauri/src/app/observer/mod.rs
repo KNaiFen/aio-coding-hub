@@ -6,7 +6,7 @@ mod snapshot;
 use aio_observer_protocol::{
     CliScope, ObserverApiError, ObserverApiErrorResponse, ObserverHealthV1,
     ObserverProviderAvailabilityTestResult, ObserverSnapshotV1, OBSERVER_HISTORY_LIMIT_MAX,
-    OBSERVER_PROTOCOL_VERSION,
+    OBSERVER_PROTOCOL_VERSION, OBSERVER_PROVIDER_PROBE_TIMEOUT_MS,
 };
 use axum::extract::rejection::{PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
@@ -25,7 +25,7 @@ use tokio::sync::{oneshot, Mutex, OwnedSemaphorePermit, Semaphore};
 
 const OBSERVER_MAX_CONCURRENT_REQUESTS: usize = 2;
 const OBSERVER_MAX_CONCURRENT_PROBES: usize = 2;
-const OBSERVER_PROBE_TIMEOUT: Duration = Duration::from_secs(20);
+const OBSERVER_PROBE_TIMEOUT: Duration = Duration::from_millis(OBSERVER_PROVIDER_PROBE_TIMEOUT_MS);
 const ACTIVE_CACHE_TTL: Duration = Duration::from_millis(400);
 const IDLE_CACHE_TTL: Duration = Duration::from_millis(1500);
 const DB_QUERY_PERMIT_TIMEOUT: Duration = Duration::from_millis(1600);
@@ -603,6 +603,14 @@ mod tests {
         assert_eq!(bounded.chars().count(), 10);
         assert!(!bounded.chars().any(char::is_control));
         assert!(!bounded.contains('\u{202e}'));
+    }
+
+    #[test]
+    fn provider_probe_timeout_matches_the_protocol_contract() {
+        assert_eq!(
+            OBSERVER_PROBE_TIMEOUT,
+            Duration::from_millis(aio_observer_protocol::OBSERVER_PROVIDER_PROBE_TIMEOUT_MS)
+        );
     }
 
     #[tokio::test]
