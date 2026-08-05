@@ -2540,7 +2540,10 @@ fn promote_new_dir(src: &Path, dst: &Path) -> AppResult<()> {
     if dst.exists() {
         return Err(AppError::new(
             PLUGIN_VERSION_ALREADY_INSTALLED,
-            format!("plugin version install directory already exists: {}", dst.display()),
+            format!(
+                "plugin version install directory already exists: {}",
+                dst.display()
+            ),
         ));
     }
     match std::fs::rename(src, dst) {
@@ -5834,12 +5837,7 @@ INSERT INTO plugin_market_sources(
             env!("CARGO_PKG_VERSION"),
         )
         .unwrap();
-        save_plugin_config(
-            &db,
-            "local.immutable",
-            serde_json::json!({"enabled": true}),
-        )
-        .unwrap();
+        save_plugin_config(&db, "local.immutable", serde_json::json!({"enabled": true})).unwrap();
         let v1_dir = installed_dir.join("local.immutable").join("1.0.0");
         let original_v1_manifest = std::fs::read(v1_dir.join("plugin.json")).unwrap();
         let before = get_plugin_detail(&db, "local.immutable").unwrap();
@@ -5874,9 +5872,18 @@ INSERT INTO plugin_market_sources(
         assert_eq!(after_current_rejections.config["enabled"], true);
         assert!(after_current_rejections.granted_permissions.is_empty());
         assert!(after_current_rejections.pending_permissions.is_empty());
-        assert_eq!(after_current_rejections.audit_logs.len(), before_audit_count);
-        assert_eq!(std::fs::read(v1_dir.join("plugin.json")).unwrap(), original_v1_manifest);
-        assert_eq!(std::fs::read_dir(&cache_dir).unwrap().count(), before_cache_count);
+        assert_eq!(
+            after_current_rejections.audit_logs.len(),
+            before_audit_count
+        );
+        assert_eq!(
+            std::fs::read(v1_dir.join("plugin.json")).unwrap(),
+            original_v1_manifest
+        );
+        assert_eq!(
+            std::fs::read_dir(&cache_dir).unwrap().count(),
+            before_cache_count
+        );
 
         update_plugin_from_local_package(
             &db,
@@ -5900,21 +5907,33 @@ INSERT INTO plugin_market_sources(
         assert_eq!(historical_error.code(), "PLUGIN_VERSION_ALREADY_INSTALLED");
         let after_historical_rejection = get_plugin_detail(&db, "local.immutable").unwrap();
         assert_eq!(
-            after_historical_rejection.summary.current_version.as_deref(),
+            after_historical_rejection
+                .summary
+                .current_version
+                .as_deref(),
             Some("1.1.0")
         );
         assert_eq!(
             after_historical_rejection.audit_logs.len(),
             before_historical_rejection.audit_logs.len()
         );
-        assert_eq!(std::fs::read(v1_dir.join("plugin.json")).unwrap(), original_v1_manifest);
+        assert_eq!(
+            std::fs::read(v1_dir.join("plugin.json")).unwrap(),
+            original_v1_manifest
+        );
         let (recorded_v1, _) =
             repository::get_plugin_version(&db, "local.immutable", "1.0.0").unwrap();
         assert_eq!(recorded_v1.description.as_deref(), Some("original v1"));
 
         let rolled_back = rollback_plugin_to_version(&db, "local.immutable", "1.0.0").unwrap();
-        assert_eq!(rolled_back.manifest.description.as_deref(), Some("original v1"));
-        assert_eq!(std::fs::read(v1_dir.join("plugin.json")).unwrap(), original_v1_manifest);
+        assert_eq!(
+            rolled_back.manifest.description.as_deref(),
+            Some("original v1")
+        );
+        assert_eq!(
+            std::fs::read(v1_dir.join("plugin.json")).unwrap(),
+            original_v1_manifest
+        );
     }
 
     #[test]
@@ -5952,10 +5971,8 @@ INSERT INTO plugin_market_sources(
         .unwrap();
 
         assert_eq!(v2.summary.current_version.as_deref(), Some("1.1.0"));
-        assert!(repository::plugin_version_exists(&db, "local.import-version", "1.0.0")
-            .unwrap());
-        assert!(repository::plugin_version_exists(&db, "local.import-version", "1.1.0")
-            .unwrap());
+        assert!(repository::plugin_version_exists(&db, "local.import-version", "1.0.0").unwrap());
+        assert!(repository::plugin_version_exists(&db, "local.import-version", "1.1.0").unwrap());
     }
 
     #[test]
