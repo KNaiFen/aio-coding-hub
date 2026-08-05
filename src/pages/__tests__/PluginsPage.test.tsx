@@ -1558,7 +1558,10 @@ describe("pages/PluginsPage", () => {
 
     await waitFor(() => {
       expect(previewMutation.mutateAsync).toHaveBeenCalledWith("/tmp/plugin.json");
-      expect(importMutation.mutateAsync).toHaveBeenCalledWith("/tmp/plugin.json");
+      expect(importMutation.mutateAsync).toHaveBeenCalledWith({
+        filePath: "/tmp/plugin.json",
+        expectedChecksum: "sha256-install",
+      });
       expect(installOfficialMutation.mutateAsync).toHaveBeenCalledWith("official.privacy-filter");
       expect(enableMutation.mutateAsync).toHaveBeenCalledWith("community.prompt-helper");
       expect(toast.success).toHaveBeenCalled();
@@ -1599,7 +1602,10 @@ describe("pages/PluginsPage", () => {
 
     await waitFor(() => {
       expect(previewMutation.mutateAsync).toHaveBeenCalledWith("/tmp/prompt-helper.aio-plugin");
-      expect(importMutation.mutateAsync).toHaveBeenCalledWith("/tmp/prompt-helper.aio-plugin");
+      expect(importMutation.mutateAsync).toHaveBeenCalledWith({
+        filePath: "/tmp/prompt-helper.aio-plugin",
+        expectedChecksum: "sha256-install",
+      });
       expect(toast.success).toHaveBeenCalledWith("导入插件成功");
     });
   });
@@ -1791,9 +1797,10 @@ describe("pages/PluginsPage", () => {
       expect(previewUpdateMutation.mutateAsync).toHaveBeenCalledWith(
         "/tmp/community-redactor-1.1.0.aio-plugin"
       );
-      expect(updateMutation.mutateAsync).toHaveBeenCalledWith(
-        "/tmp/community-redactor-1.1.0.aio-plugin"
-      );
+      expect(updateMutation.mutateAsync).toHaveBeenCalledWith({
+        filePath: "/tmp/community-redactor-1.1.0.aio-plugin",
+        expectedChecksum: "sha256-update",
+      });
       expect(rollbackMutation.mutateAsync).toHaveBeenCalledWith({
         pluginId: "community.redactor",
         version: "1.0.0",
@@ -1858,9 +1865,10 @@ describe("pages/PluginsPage", () => {
       expect(previewUpdateMutation.mutateAsync).toHaveBeenCalledWith(
         "/tmp/prompt-helper-1.1.0.aio-plugin"
       );
-      expect(updateMutation.mutateAsync).toHaveBeenCalledWith(
-        "/tmp/prompt-helper-1.1.0.aio-plugin"
-      );
+      expect(updateMutation.mutateAsync).toHaveBeenCalledWith({
+        filePath: "/tmp/prompt-helper-1.1.0.aio-plugin",
+        expectedChecksum: "sha256-update",
+      });
       expect(toast.success).toHaveBeenCalledWith("更新插件成功");
     });
   });

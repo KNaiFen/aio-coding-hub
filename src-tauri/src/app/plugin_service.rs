@@ -1577,10 +1577,9 @@ pub(crate) fn install_plugin_from_local_package_with_policy(
     let cache_package_path = unique_cache_package_path(cache_dir, &plugin_id, &version);
 
     let result = (|| -> AppResult<PluginDetail> {
-        std::fs::copy(package_path, &cache_package_path).map_err(|e| {
+        std::fs::write(&cache_package_path, &extracted.package_bytes).map_err(|e| {
             format!(
-                "failed to copy plugin package {} -> {}: {e}",
-                package_path.display(),
+                "failed to write validated plugin package to {}: {e}",
                 cache_package_path.display()
             )
         })?;
@@ -4074,6 +4073,13 @@ INSERT INTO plugins (
         "sha256:0000000000000000000000000000000000000000000000000000000000000000".to_string()
     }
 
+    fn package_checksum(package_path: &Path) -> String {
+        use sha2::Digest;
+
+        let package_bytes = std::fs::read(package_path).expect("read package for checksum");
+        format!("sha256:{:x}", sha2::Sha256::digest(&package_bytes))
+    }
+
     #[test]
     fn plugin_local_install_preview_rejects_legacy_wasm_runtime() {
         let dir = tempfile::tempdir().unwrap();
@@ -4811,6 +4817,7 @@ INSERT INTO plugins (
         let db = crate::db::init_for_tests(&dir.path().join("plugins.db")).unwrap();
         let package_path = dir.path().join("local-safe.aio-plugin");
         write_local_package(&package_path, local_package_manifest("local.safe", "1.0.0"));
+        let package_bytes = std::fs::read(&package_path).unwrap();
         let cache_dir = dir.path().join("plugins/cache");
         let installed_dir = dir.path().join("plugins/installed");
 
@@ -4836,8 +4843,12 @@ INSERT INTO plugins (
             .join("1.0.0")
             .join("rules/main.json")
             .exists());
-        let cached_packages: Vec<_> = std::fs::read_dir(&cache_dir).unwrap().collect();
+        let cached_packages: Vec<_> = std::fs::read_dir(&cache_dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
         assert_eq!(cached_packages.len(), 1);
+        assert_eq!(std::fs::read(&cached_packages[0]).unwrap(), package_bytes);
         assert!(detail
             .audit_logs
             .iter()
@@ -5002,6 +5013,11 @@ INSERT INTO plugins (
             &package_path,
             local_package_manifest("local.checksum", "1.0.0"),
         );
+        let expected_checksum = package_checksum(&package_path);
+        let mut replaced_manifest = local_package_manifest("local.checksum", "1.0.0");
+        replaced_manifest["description"] =
+            serde_json::json!("package content changed after preview");
+        write_local_package(&package_path, replaced_manifest);
         let cache_dir = dir.path().join("plugins/cache");
         let installed_dir = dir.path().join("plugins/installed");
 
@@ -5012,7 +5028,7 @@ INSERT INTO plugins (
             &installed_dir,
             env!("CARGO_PKG_VERSION"),
             LocalPackageInstallPolicy {
-                expected_checksum: Some(invalid_checksum()),
+                expected_checksum: Some(expected_checksum),
                 developer_mode: true,
                 ..LocalPackageInstallPolicy::default()
             },
@@ -5559,6 +5575,64 @@ INSERT INTO plugin_market_sources(
         assert_eq!(updated.config["enabled"], true);
         assert!(updated.granted_permissions.is_empty());
         assert!(updated.pending_permissions.is_empty());
+    }
+
+    #[test]
+    fn plugin_update_rejects_package_changed_after_preview_and_keeps_current_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::init_for_tests(&dir.path().join("plugins.db")).unwrap();
+        let cache_dir = dir.path().join("plugins/cache");
+        let installed_dir = dir.path().join("plugins/installed");
+        let v1_package = dir.path().join("plugin-v1.aio-plugin");
+        write_local_package(
+            &v1_package,
+            local_package_manifest("local.checksum-update", "1.0.0"),
+        );
+        install_plugin_from_local_package(
+            &db,
+            &v1_package,
+            &cache_dir,
+            &installed_dir,
+            env!("CARGO_PKG_VERSION"),
+        )
+        .unwrap();
+
+        let v2_package = dir.path().join("plugin-v2.aio-plugin");
+        write_local_package(
+            &v2_package,
+            local_package_manifest("local.checksum-update", "1.1.0"),
+        );
+        let expected_checksum = package_checksum(&v2_package);
+        let mut replaced_manifest = local_package_manifest("local.checksum-update", "1.1.0");
+        replaced_manifest["description"] =
+            serde_json::json!("update content changed after preview");
+        write_local_package(&v2_package, replaced_manifest);
+
+        let err = update_plugin_from_local_package(
+            &db,
+            &v2_package,
+            &cache_dir,
+            &installed_dir,
+            env!("CARGO_PKG_VERSION"),
+            LocalPackageInstallPolicy {
+                expected_checksum: Some(expected_checksum),
+                ..LocalPackageInstallPolicy::default()
+            },
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().starts_with("PLUGIN_CHECKSUM_MISMATCH:"));
+        let current = get_plugin_detail(&db, "local.checksum-update").unwrap();
+        assert_eq!(current.summary.current_version.as_deref(), Some("1.0.0"));
+        assert!(installed_dir
+            .join("local.checksum-update")
+            .join("1.0.0")
+            .exists());
+        assert!(!installed_dir
+            .join("local.checksum-update")
+            .join("1.1.0")
+            .exists());
+        assert!(!cache_dir.join("staging").exists());
     }
 
     #[test]
