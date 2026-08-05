@@ -629,7 +629,7 @@ mod tests {
         CacheKey {
             scope: CliScope::VALUES[index % CliScope::VALUES.len()],
             history_limit: (index / 10) as u16,
-            include_providers: index % 2 == 0,
+            include_providers: index.is_multiple_of(2),
         }
     }
 
