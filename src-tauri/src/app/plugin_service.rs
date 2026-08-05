@@ -21,10 +21,13 @@ use std::cmp::Ordering;
 use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+use std::sync::{Mutex, MutexGuard};
 
 const OFFICIAL_PRIVACY_FILTER_ID: &str = "official.privacy-filter";
+const PLUGIN_VERSION_ALREADY_INSTALLED: &str = "PLUGIN_VERSION_ALREADY_INSTALLED";
 const UNSUPPORTED_LEGACY_RUNTIME_ERROR: &str =
     "Unsupported pre-release plugin runtime; reinstall an Extension Host version";
+static PLUGIN_PACKAGE_MUTATION_LOCK: Mutex<()> = Mutex::new(());
 static PLUGIN_WORK_PATH_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn list_plugins(db: &crate::db::Db) -> AppResult<Vec<crate::plugins::PluginSummary>> {
@@ -416,6 +419,8 @@ pub(crate) fn install_official_plugin(
         plugin_id,
         official_resource_root,
     )?;
+    let _mutation_guard = plugin_package_mutation_guard();
+    ensure_plugin_version_is_new(db, plugin_id, &fixture.manifest.version)?;
     let installed_dir = crate::app::plugins::official_assets::materialize_official_plugin(
         plugin_id,
         &fixture.root_dir,
@@ -553,6 +558,32 @@ fn lifecycle_notice(
         code: code.to_string(),
         message: message.into(),
     }
+}
+
+fn plugin_package_mutation_guard() -> MutexGuard<'static, ()> {
+    PLUGIN_PACKAGE_MUTATION_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn plugin_version_already_installed_error(plugin_id: &str, version: &str) -> AppError {
+    AppError::new(
+        PLUGIN_VERSION_ALREADY_INSTALLED,
+        format!(
+            "plugin {plugin_id} version {version} is already installed; use rollback to switch to a recorded version"
+        ),
+    )
+}
+
+fn ensure_plugin_version_is_new(
+    db: &crate::db::Db,
+    plugin_id: &str,
+    version: &str,
+) -> AppResult<()> {
+    if repository::plugin_version_exists(db, plugin_id, version)? {
+        return Err(plugin_version_already_installed_error(plugin_id, version));
+    }
+    Ok(())
 }
 
 fn cleanup_staging_dir(staging_root: &Path, staging_dir: &Path) {
@@ -1002,6 +1033,14 @@ fn build_install_preview(
             app_error_message(&error),
         ));
     }
+    if repository::plugin_version_exists(db, &manifest.id, &manifest.version)? {
+        let error = plugin_version_already_installed_error(&manifest.id, &manifest.version);
+        blocking_reasons.push(lifecycle_notice(
+            "error",
+            error.code(),
+            app_error_message(&error),
+        ));
+    }
 
     let existing = repository::get_plugin(db, &manifest.id).ok();
     let existing_status = existing.as_ref().map(|detail| detail.summary.status);
@@ -1102,6 +1141,14 @@ fn build_update_diff(
         ));
     }
     if let Err(error) = validate_reserved_builtin_source(manifest, PluginInstallSource::Local) {
+        blocking_reasons.push(lifecycle_notice(
+            "error",
+            error.code(),
+            app_error_message(&error),
+        ));
+    }
+    if repository::plugin_version_exists(db, &manifest.id, &manifest.version)? {
+        let error = plugin_version_already_installed_error(&manifest.id, &manifest.version);
         blocking_reasons.push(lifecycle_notice(
             "error",
             error.code(),
@@ -1576,8 +1623,11 @@ pub(crate) fn install_plugin_from_local_package_with_policy(
         .join(crate::app_paths::plugin_id_path_segment(&plugin_id)?)
         .join(crate::app_paths::plugin_id_path_segment(&version)?);
     let cache_package_path = unique_cache_package_path(cache_dir, &plugin_id, &version);
+    let _mutation_guard = plugin_package_mutation_guard();
+    let mut installed_dir_promoted = false;
 
     let result = (|| -> AppResult<PluginDetail> {
+        ensure_plugin_version_is_new(db, &plugin_id, &version)?;
         std::fs::write(&cache_package_path, &extracted.package_bytes).map_err(|e| {
             format!(
                 "failed to write validated plugin package to {}: {e}",
@@ -1585,7 +1635,8 @@ pub(crate) fn install_plugin_from_local_package_with_policy(
             )
         })?;
 
-        replace_dir(&extracted.root_dir, &installed_dir)?;
+        promote_new_dir(&extracted.root_dir, &installed_dir)?;
+        installed_dir_promoted = true;
         let detail = repository::with_plugin_transaction(db, |tx| {
             repository::insert_plugin_with_tx(
                 tx,
@@ -1630,8 +1681,10 @@ pub(crate) fn install_plugin_from_local_package_with_policy(
 
     let _ = std::fs::remove_dir_all(&staging_dir);
     let _ = std::fs::remove_dir(&staging_root);
-    if result.is_err() {
+    if result.is_err() && installed_dir_promoted {
         let _ = std::fs::remove_dir_all(&installed_dir);
+    }
+    if result.is_err() {
         let _ = std::fs::remove_file(&cache_package_path);
     }
     result
@@ -1900,15 +1953,20 @@ pub(crate) fn update_plugin_from_local_package(
     };
 
     let plugin_id = extracted.manifest.id.clone();
-    let current = repository::get_plugin(db, &plugin_id)?;
+    let version = extracted.manifest.version.clone();
     let installed_dir = installed_root
         .join(crate::app_paths::plugin_id_path_segment(&plugin_id)?)
         .join(crate::app_paths::plugin_id_path_segment(
             &extracted.manifest.version,
         )?);
+    let _mutation_guard = plugin_package_mutation_guard();
+    let mut installed_dir_promoted = false;
 
     let result = (|| -> AppResult<PluginDetail> {
-        replace_dir(&extracted.root_dir, &installed_dir)?;
+        ensure_plugin_version_is_new(db, &plugin_id, &version)?;
+        let current = repository::get_plugin(db, &plugin_id)?;
+        promote_new_dir(&extracted.root_dir, &installed_dir)?;
+        installed_dir_promoted = true;
         let (granted, pending) = reconcile_permissions_for_manifest(&current, &extracted.manifest);
         let next_config = config_for_manifest_version(&current, &extracted.manifest);
         let detail = repository::with_plugin_transaction(db, |tx| {
@@ -1953,7 +2011,7 @@ pub(crate) fn update_plugin_from_local_package(
 
     let _ = std::fs::remove_dir_all(&staging_dir);
     let _ = std::fs::remove_dir(&staging_root);
-    if result.is_err() {
+    if result.is_err() && installed_dir_promoted {
         let _ = std::fs::remove_dir_all(&installed_dir);
     }
     result
@@ -1964,6 +2022,7 @@ pub(crate) fn rollback_plugin_to_version(
     plugin_id: &str,
     version: &str,
 ) -> AppResult<PluginDetail> {
+    let _mutation_guard = plugin_package_mutation_guard();
     let (manifest, installed_dir) = repository::get_plugin_version(db, plugin_id, version)?;
     let installed_dir_value = installed_dir.as_deref().ok_or_else(|| {
         AppError::new(
@@ -2469,7 +2528,7 @@ fn append_audit_with_tx(
     Ok(())
 }
 
-fn replace_dir(src: &Path, dst: &Path) -> AppResult<()> {
+fn promote_new_dir(src: &Path, dst: &Path) -> AppResult<()> {
     let Some(parent) = dst.parent() else {
         return Err(AppError::new(
             "PLUGIN_INSTALL_FAILED",
@@ -2479,16 +2538,45 @@ fn replace_dir(src: &Path, dst: &Path) -> AppResult<()> {
     std::fs::create_dir_all(parent)
         .map_err(|e| format!("failed to create {}: {e}", parent.display()))?;
     if dst.exists() {
-        std::fs::remove_dir_all(dst)
-            .map_err(|e| format!("failed to remove existing {}: {e}", dst.display()))?;
+        return Err(AppError::new(
+            PLUGIN_VERSION_ALREADY_INSTALLED,
+            format!(
+                "plugin version install directory already exists: {}",
+                dst.display()
+            ),
+        ));
     }
     match std::fs::rename(src, dst) {
         Ok(()) => Ok(()),
-        Err(_) => {
-            copy_dir_recursive(src, dst)?;
-            std::fs::remove_dir_all(src)
-                .map_err(|e| format!("failed to remove staging {}: {e}", src.display()))?;
-            Ok(())
+        Err(rename_error) => {
+            if let Err(create_error) = std::fs::create_dir(dst) {
+                if create_error.kind() == std::io::ErrorKind::AlreadyExists {
+                    return Err(AppError::new(
+                        PLUGIN_VERSION_ALREADY_INSTALLED,
+                        format!(
+                            "plugin version install directory already exists: {}",
+                            dst.display()
+                        ),
+                    ));
+                }
+                return Err(AppError::new(
+                    "PLUGIN_INSTALL_FAILED",
+                    format!(
+                        "failed to create {} after rename failed ({rename_error}): {create_error}",
+                        dst.display()
+                    ),
+                ));
+            }
+            let result = (|| -> AppResult<()> {
+                copy_dir_recursive(src, dst)?;
+                std::fs::remove_dir_all(src)
+                    .map_err(|e| format!("failed to remove staging {}: {e}", src.display()))?;
+                Ok(())
+            })();
+            if result.is_err() {
+                let _ = std::fs::remove_dir_all(dst);
+            }
+            result
         }
     }
 }
@@ -3257,6 +3345,71 @@ mod tests {
 
         let uninstalled = uninstall_plugin(&db, "official.privacy-filter").unwrap();
         assert_eq!(uninstalled.summary.status, PluginStatus::Uninstalled);
+    }
+
+    #[test]
+    fn official_plugin_install_preserves_an_already_recorded_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::init_for_tests(&dir.path().join("official-immutable.db")).unwrap();
+        let installed_root = dir.path().join("installed");
+        let official_root = dir.path().join("official");
+        let source_dir = official_root.join("privacy-filter");
+        let packaged_root = crate::app::plugins::official::official_resource_root_for_tests();
+        copy_dir_recursive(&packaged_root.join("privacy-filter"), &source_dir).unwrap();
+
+        let installed = install_official_plugin(
+            &db,
+            "official.privacy-filter",
+            &official_root,
+            env!("CARGO_PKG_VERSION"),
+            &installed_root,
+        )
+        .unwrap();
+        let installed_dir = PathBuf::from(installed.installed_dir.as_deref().unwrap());
+        let installed_manifest_path = installed_dir.join("plugin.json");
+        let original_installed_manifest = std::fs::read(&installed_manifest_path).unwrap();
+        let before = get_plugin_detail(&db, "official.privacy-filter").unwrap();
+        let before_version = repository::get_plugin_version(
+            &db,
+            "official.privacy-filter",
+            before.summary.current_version.as_deref().unwrap(),
+        )
+        .unwrap();
+
+        let source_manifest_path = source_dir.join("plugin.json");
+        let mut replacement_manifest: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&source_manifest_path).unwrap()).unwrap();
+        replacement_manifest["description"] = serde_json::json!("replacement official build");
+        std::fs::write(
+            &source_manifest_path,
+            serde_json::to_vec_pretty(&replacement_manifest).unwrap(),
+        )
+        .unwrap();
+
+        let error = install_official_plugin(
+            &db,
+            "official.privacy-filter",
+            &official_root,
+            env!("CARGO_PKG_VERSION"),
+            &installed_root,
+        )
+        .unwrap_err();
+        assert_eq!(error.code(), "PLUGIN_VERSION_ALREADY_INSTALLED");
+        assert_eq!(
+            std::fs::read(&installed_manifest_path).unwrap(),
+            original_installed_manifest
+        );
+
+        let after = get_plugin_detail(&db, "official.privacy-filter").unwrap();
+        assert_eq!(after.config, before.config);
+        assert_eq!(after.audit_logs.len(), before.audit_logs.len());
+        let after_version = repository::get_plugin_version(
+            &db,
+            "official.privacy-filter",
+            after.summary.current_version.as_deref().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(after_version, before_version);
     }
 
     #[test]
@@ -4157,6 +4310,84 @@ INSERT INTO plugins (
         );
         assert!(preview.blocking_reasons.is_empty());
         assert!(repository::get_plugin(&db, "local.preview-safe").is_err());
+    }
+
+    #[test]
+    fn plugin_package_previews_block_current_and_historical_versions() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::init_for_tests(&dir.path().join("plugins.db")).unwrap();
+        let cache_dir = dir.path().join("plugins/cache");
+        let installed_dir = dir.path().join("plugins/installed");
+        let v1_package = dir.path().join("immutable-v1.aio-plugin");
+        let v2_package = dir.path().join("immutable-v2.aio-plugin");
+        write_local_package(
+            &v1_package,
+            local_package_manifest("local.immutable-preview", "1.0.0"),
+        );
+        write_local_package(
+            &v2_package,
+            local_package_manifest("local.immutable-preview", "1.1.0"),
+        );
+        install_plugin_from_local_package(
+            &db,
+            &v1_package,
+            &cache_dir,
+            &installed_dir,
+            env!("CARGO_PKG_VERSION"),
+        )
+        .unwrap();
+
+        for preview in [
+            preview_plugin_from_local_package_with_policy(
+                &db,
+                &v1_package,
+                &cache_dir,
+                env!("CARGO_PKG_VERSION"),
+                LocalPackageInstallPolicy::default(),
+            )
+            .unwrap()
+            .blocking_reasons,
+            preview_plugin_update_from_local_package(
+                &db,
+                &v1_package,
+                &cache_dir,
+                env!("CARGO_PKG_VERSION"),
+                LocalPackageInstallPolicy::default(),
+            )
+            .unwrap()
+            .blocking_reasons,
+        ] {
+            assert!(preview
+                .iter()
+                .any(|notice| notice.code == "PLUGIN_VERSION_ALREADY_INSTALLED"));
+        }
+
+        update_plugin_from_local_package(
+            &db,
+            &v2_package,
+            &cache_dir,
+            &installed_dir,
+            env!("CARGO_PKG_VERSION"),
+            LocalPackageInstallPolicy::default(),
+        )
+        .unwrap();
+
+        let historical_preview = preview_plugin_update_from_local_package(
+            &db,
+            &v1_package,
+            &cache_dir,
+            env!("CARGO_PKG_VERSION"),
+            LocalPackageInstallPolicy::default(),
+        )
+        .unwrap();
+        assert!(historical_preview
+            .blocking_reasons
+            .iter()
+            .any(|notice| notice.code == "PLUGIN_VERSION_ALREADY_INSTALLED"));
+        assert!(historical_preview
+            .warnings
+            .iter()
+            .any(|notice| notice.code == "PLUGIN_UPDATE_DOWNGRADE"));
     }
 
     #[test]
@@ -5576,6 +5807,172 @@ INSERT INTO plugin_market_sources(
         assert_eq!(updated.config["enabled"], true);
         assert!(updated.granted_permissions.is_empty());
         assert!(updated.pending_permissions.is_empty());
+    }
+
+    #[test]
+    fn plugin_package_mutations_preserve_recorded_version_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::init_for_tests(&dir.path().join("plugins.db")).unwrap();
+        let cache_dir = dir.path().join("plugins/cache");
+        let installed_dir = dir.path().join("plugins/installed");
+        let v1_package = dir.path().join("immutable-v1.aio-plugin");
+        let v2_package = dir.path().join("immutable-v2.aio-plugin");
+        let conflicting_v1_package = dir.path().join("immutable-v1-conflict.aio-plugin");
+        let mut v1_manifest = local_package_manifest("local.immutable", "1.0.0");
+        v1_manifest["description"] = serde_json::json!("original v1");
+        let mut conflicting_v1_manifest = local_package_manifest("local.immutable", "1.0.0");
+        conflicting_v1_manifest["description"] = serde_json::json!("replacement v1");
+        write_local_package(&v1_package, v1_manifest);
+        write_local_package(
+            &v2_package,
+            local_package_manifest("local.immutable", "1.1.0"),
+        );
+        write_local_package(&conflicting_v1_package, conflicting_v1_manifest);
+
+        install_plugin_from_local_package(
+            &db,
+            &v1_package,
+            &cache_dir,
+            &installed_dir,
+            env!("CARGO_PKG_VERSION"),
+        )
+        .unwrap();
+        save_plugin_config(&db, "local.immutable", serde_json::json!({"enabled": true})).unwrap();
+        let v1_dir = installed_dir.join("local.immutable").join("1.0.0");
+        let original_v1_manifest = std::fs::read(v1_dir.join("plugin.json")).unwrap();
+        let before = get_plugin_detail(&db, "local.immutable").unwrap();
+        let before_audit_count = before.audit_logs.len();
+        let before_cache_count = std::fs::read_dir(&cache_dir).unwrap().count();
+
+        let install_error = install_plugin_from_local_package(
+            &db,
+            &conflicting_v1_package,
+            &cache_dir,
+            &installed_dir,
+            env!("CARGO_PKG_VERSION"),
+        )
+        .unwrap_err();
+        assert_eq!(install_error.code(), "PLUGIN_VERSION_ALREADY_INSTALLED");
+        let update_error = update_plugin_from_local_package(
+            &db,
+            &conflicting_v1_package,
+            &cache_dir,
+            &installed_dir,
+            env!("CARGO_PKG_VERSION"),
+            LocalPackageInstallPolicy::default(),
+        )
+        .unwrap_err();
+        assert_eq!(update_error.code(), "PLUGIN_VERSION_ALREADY_INSTALLED");
+
+        let after_current_rejections = get_plugin_detail(&db, "local.immutable").unwrap();
+        assert_eq!(
+            after_current_rejections.summary.current_version.as_deref(),
+            Some("1.0.0")
+        );
+        assert_eq!(after_current_rejections.config["enabled"], true);
+        assert!(after_current_rejections.granted_permissions.is_empty());
+        assert!(after_current_rejections.pending_permissions.is_empty());
+        assert_eq!(
+            after_current_rejections.audit_logs.len(),
+            before_audit_count
+        );
+        assert_eq!(
+            std::fs::read(v1_dir.join("plugin.json")).unwrap(),
+            original_v1_manifest
+        );
+        assert_eq!(
+            std::fs::read_dir(&cache_dir).unwrap().count(),
+            before_cache_count
+        );
+
+        update_plugin_from_local_package(
+            &db,
+            &v2_package,
+            &cache_dir,
+            &installed_dir,
+            env!("CARGO_PKG_VERSION"),
+            LocalPackageInstallPolicy::default(),
+        )
+        .unwrap();
+        let before_historical_rejection = get_plugin_detail(&db, "local.immutable").unwrap();
+        let historical_error = update_plugin_from_local_package(
+            &db,
+            &conflicting_v1_package,
+            &cache_dir,
+            &installed_dir,
+            env!("CARGO_PKG_VERSION"),
+            LocalPackageInstallPolicy::default(),
+        )
+        .unwrap_err();
+        assert_eq!(historical_error.code(), "PLUGIN_VERSION_ALREADY_INSTALLED");
+        let after_historical_rejection = get_plugin_detail(&db, "local.immutable").unwrap();
+        assert_eq!(
+            after_historical_rejection
+                .summary
+                .current_version
+                .as_deref(),
+            Some("1.1.0")
+        );
+        assert_eq!(
+            after_historical_rejection.audit_logs.len(),
+            before_historical_rejection.audit_logs.len()
+        );
+        assert_eq!(
+            std::fs::read(v1_dir.join("plugin.json")).unwrap(),
+            original_v1_manifest
+        );
+        let (recorded_v1, _) =
+            repository::get_plugin_version(&db, "local.immutable", "1.0.0").unwrap();
+        assert_eq!(recorded_v1.description.as_deref(), Some("original v1"));
+
+        let rolled_back = rollback_plugin_to_version(&db, "local.immutable", "1.0.0").unwrap();
+        assert_eq!(
+            rolled_back.manifest.description.as_deref(),
+            Some("original v1")
+        );
+        assert_eq!(
+            std::fs::read(v1_dir.join("plugin.json")).unwrap(),
+            original_v1_manifest
+        );
+    }
+
+    #[test]
+    fn plugin_install_keeps_allowing_an_unrecorded_version_for_an_existing_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::init_for_tests(&dir.path().join("plugins.db")).unwrap();
+        let cache_dir = dir.path().join("plugins/cache");
+        let installed_dir = dir.path().join("plugins/installed");
+        let v1_package = dir.path().join("import-v1.aio-plugin");
+        let v2_package = dir.path().join("import-v2.aio-plugin");
+        write_local_package(
+            &v1_package,
+            local_package_manifest("local.import-version", "1.0.0"),
+        );
+        write_local_package(
+            &v2_package,
+            local_package_manifest("local.import-version", "1.1.0"),
+        );
+
+        install_plugin_from_local_package(
+            &db,
+            &v1_package,
+            &cache_dir,
+            &installed_dir,
+            env!("CARGO_PKG_VERSION"),
+        )
+        .unwrap();
+        let v2 = install_plugin_from_local_package(
+            &db,
+            &v2_package,
+            &cache_dir,
+            &installed_dir,
+            env!("CARGO_PKG_VERSION"),
+        )
+        .unwrap();
+
+        assert_eq!(v2.summary.current_version.as_deref(), Some("1.1.0"));
+        assert!(repository::plugin_version_exists(&db, "local.import-version", "1.0.0").unwrap());
+        assert!(repository::plugin_version_exists(&db, "local.import-version", "1.1.0").unwrap());
     }
 
     #[test]
