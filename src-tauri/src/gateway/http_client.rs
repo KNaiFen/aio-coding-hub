@@ -879,9 +879,7 @@ fn system_proxy_points_to_gateway() -> bool {
 
 pub(crate) fn validate_gateway_target(url: &Url) -> Result<(), String> {
     if url_points_to_gateway_with_context(url, &current_self_context()) {
-        return Err(
-            "Provider URL points to the gateway itself (self-loop detected)".to_string(),
-        );
+        return Err("Provider URL points to the gateway itself (self-loop detected)".to_string());
     }
 
     Ok(())
@@ -896,8 +894,7 @@ fn url_points_to_gateway_with_context(url: &Url, context: &GatewaySelfCheckConte
         return false;
     };
 
-    url.port_or_known_default() == Some(context.gateway_port)
-        && context.hosts.contains(&normalized)
+    url.port_or_known_default() == Some(context.gateway_port) && context.hosts.contains(&normalized)
 }
 
 fn proxy_points_to_gateway_with_context(value: &str, context: &GatewaySelfCheckContext) -> bool {
@@ -1131,10 +1128,8 @@ mod tests {
 
     #[test]
     fn test_gateway_target_detection_uses_full_url_and_runtime_hosts() {
-        let loopback_context = build_self_check_context(
-            37123,
-            &["127.0.0.1".to_string(), "localhost".to_string()],
-        );
+        let loopback_context =
+            build_self_check_context(37123, &["127.0.0.1".to_string(), "localhost".to_string()]);
         let custom_context = build_self_check_context(
             37123,
             &["192.168.1.10".to_string(), "devbox.internal".to_string()],
@@ -1146,10 +1141,7 @@ mod tests {
             "http://LOCALHOST:37123/v1/responses?stream=true",
         ] {
             let url = Url::parse(value).unwrap();
-            assert!(url_points_to_gateway_with_context(
-                &url,
-                &loopback_context
-            ));
+            assert!(url_points_to_gateway_with_context(&url, &loopback_context));
         }
 
         for value in [
@@ -1161,10 +1153,7 @@ mod tests {
         }
 
         let ipv6_url = Url::parse("http://[::1]:37123/v1").unwrap();
-        assert!(url_points_to_gateway_with_context(
-            &ipv6_url,
-            &ipv6_context
-        ));
+        assert!(url_points_to_gateway_with_context(&ipv6_url, &ipv6_context));
 
         let different_port = Url::parse("http://localhost:37124/v1").unwrap();
         let external_host = Url::parse("https://api.example.com:37123/v1").unwrap();

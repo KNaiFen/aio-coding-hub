@@ -752,18 +752,12 @@ mod tests {
             "Provider URL points to the gateway itself (self-loop detected)"
         );
 
-        let different_port = build_target_url_for_attempt(
-            "http://localhost:37124/v1",
-            "/v1/responses",
-            None,
-        )
-        .expect("same host on a different port is a separate upstream");
-        let external = build_target_url_for_attempt(
-            "https://api.example.com/v1",
-            "/v1/responses",
-            None,
-        )
-        .expect("external Provider target must remain allowed");
+        let different_port =
+            build_target_url_for_attempt("http://localhost:37124/v1", "/v1/responses", None)
+                .expect("same host on a different port is a separate upstream");
+        let external =
+            build_target_url_for_attempt("https://api.example.com/v1", "/v1/responses", None)
+                .expect("external Provider target must remain allowed");
 
         assert_eq!(different_port.port(), Some(37124));
         assert_eq!(external.host_str(), Some("api.example.com"));
