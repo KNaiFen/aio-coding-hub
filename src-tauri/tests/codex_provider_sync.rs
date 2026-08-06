@@ -283,16 +283,14 @@ fn codex_provider_sync_updates_only_active_sessions_and_writes_v2_backup() {
     let archived_rollout = home.join("archived_sessions/2025/rollout-archived.jsonl");
     write_rollout(&archived_rollout, "aio", "thread-archived");
     let archived_bytes = fs::read(&archived_rollout).expect("snapshot archived rollout");
-    let invalid_archived_rollout =
-        home.join("archived_sessions/2024/rollout-invalid-utf8.jsonl");
+    let invalid_archived_rollout = home.join("archived_sessions/2024/rollout-invalid-utf8.jsonl");
     fs::create_dir_all(
         invalid_archived_rollout
             .parent()
             .expect("invalid archived parent"),
     )
     .expect("create invalid archived parent");
-    fs::write(&invalid_archived_rollout, b"\xFF\xFE\xFD")
-        .expect("write invalid archived rollout");
+    fs::write(&invalid_archived_rollout, b"\xFF\xFE\xFD").expect("write invalid archived rollout");
     let invalid_archived_bytes =
         fs::read(&invalid_archived_rollout).expect("snapshot invalid archived rollout");
 
@@ -307,10 +305,10 @@ fn codex_provider_sync_updates_only_active_sessions_and_writes_v2_backup() {
     );
     write_sqlite_sidecars(&sqlite_path);
     let original_threads = read_threads_db(&sqlite_path);
-    let original_wal = fs::read(format!("{}-wal", sqlite_path.to_string_lossy()))
-        .expect("snapshot sqlite wal");
-    let original_shm = fs::read(format!("{}-shm", sqlite_path.to_string_lossy()))
-        .expect("snapshot sqlite shm");
+    let original_wal =
+        fs::read(format!("{}-wal", sqlite_path.to_string_lossy())).expect("snapshot sqlite wal");
+    let original_shm =
+        fs::read(format!("{}-shm", sqlite_path.to_string_lossy())).expect("snapshot sqlite shm");
 
     let global_state_path = home.join(".codex-global-state.json");
     write_global_state(&global_state_path, "aio");
@@ -326,8 +324,14 @@ fn codex_provider_sync_updates_only_active_sessions_and_writes_v2_backup() {
     assert_eq!(support::json_str(&result, "status"), "synced");
     assert_eq!(support::json_str(&result, "target_provider"), "OpenAI");
     assert_eq!(support::json_str(&result, "trigger"), "config_save");
-    assert_eq!(support::json_u64(&result, "sqlite_provider_rows_updated"), 0);
-    assert_eq!(support::json_u64(&result, "sqlite_user_event_rows_updated"), 0);
+    assert_eq!(
+        support::json_u64(&result, "sqlite_provider_rows_updated"),
+        0
+    );
+    assert_eq!(
+        support::json_u64(&result, "sqlite_user_event_rows_updated"),
+        0
+    );
     assert_eq!(support::json_u64(&result, "sqlite_cwd_rows_updated"), 0);
 
     let changed_session_files = result
@@ -348,7 +352,10 @@ fn codex_provider_sync_updates_only_active_sessions_and_writes_v2_backup() {
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    assert!(updated_workspace_roots.is_empty(), "{updated_workspace_roots:?}");
+    assert!(
+        updated_workspace_roots.is_empty(),
+        "{updated_workspace_roots:?}"
+    );
 
     let config_text = read_codex_config(&handle);
     assert!(
