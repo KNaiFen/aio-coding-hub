@@ -216,9 +216,9 @@ mod tests {
         PluginPermissionRisk, PluginRuntime, PluginStatus, PluginSummary,
     };
     use crate::gateway::plugins::context::{
-        GatewayHookResult, GatewayPluginHookName, GatewayRequestHookInput,
-        GatewayVisibleHookContext, GatewayVisibleLogContext, GatewayVisibleRequestContext,
-        GatewayVisibleResponseContext, GatewayVisibleStreamContext,
+        GatewayHookResult, GatewayNormalizedMessage, GatewayPluginHookName,
+        GatewayRequestHookInput, GatewayVisibleHookContext, GatewayVisibleLogContext,
+        GatewayVisibleRequestContext, GatewayVisibleResponseContext, GatewayVisibleStreamContext,
     };
     use crate::gateway::plugins::pipeline::{GatewayPluginPipeline, GatewayPluginPipelineConfig};
     use axum::body::Bytes;
@@ -277,6 +277,62 @@ mod tests {
             .expect("extension host gateway hook executes");
 
         assert_eq!(result.request_body.as_deref(), Some(r#"{"messages":[]}"#));
+    }
+
+    #[tokio::test]
+    async fn runtime_executor_extension_host_exposes_canonical_and_legacy_context_fields() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        write_gateway_extension_plugin(
+            temp.path(),
+            "gateway.request.afterBodyRead",
+            r#"(() => {
+                const payload = arguments[0];
+                const context = payload.context;
+                const request = context.request;
+                const aliasesMatch =
+                  context.hook_name === payload.hook &&
+                  context.trace_id === payload.traceId &&
+                  request.cliKey === request.cli_key &&
+                  request.bodyTruncated === request.body_truncated &&
+                  request.normalizedMessages === request.normalized_messages &&
+                  request.normalizedMessagesTruncated === request.normalized_messages_truncated &&
+                  request.requestedModel === request.requested_model &&
+                  context.response.bodyTruncated === context.response.body_truncated &&
+                  context.stream.chunkTruncated === context.stream.chunk_truncated &&
+                  context.log.messageTruncated === context.log.message_truncated;
+                const aliasesRemainEnumerable =
+                  Object.keys(context).includes("hook_name") &&
+                  Object.keys(request).includes("normalized_messages");
+                if (!aliasesMatch || !aliasesRemainEnumerable) {
+                  return { action: "block", reason: "context compatibility aliases mismatch" };
+                }
+                return { action: "replace", requestBody: "aliases-ok" };
+            })()"#,
+        );
+        let plugin = extension_host_plugin_detail_with_root("example.extension", temp.path());
+        let mut context = hook_context(
+            "gateway.request.afterBodyRead",
+            "trace-context-compatibility",
+        );
+        context.request.cli_key = Some("codex".to_string());
+        context.request.body_truncated = true;
+        context.request.normalized_messages = vec![GatewayNormalizedMessage {
+            role: "user".to_string(),
+            text: "hello".to_string(),
+            source: "openai.responses.input_text".to_string(),
+        }];
+        context.request.normalized_messages_truncated = true;
+        context.request.requested_model = Some("gpt-test".to_string());
+        context.response.body_truncated = true;
+        context.stream.chunk_truncated = true;
+        context.log.message_truncated = true;
+
+        let result = executor()
+            .execute_request_hook(&plugin, context, test_hook_timeout())
+            .await
+            .expect("extension host should receive canonical fields and legacy aliases");
+
+        assert_eq!(result.request_body.as_deref(), Some("aliases-ok"));
     }
 
     #[tokio::test]

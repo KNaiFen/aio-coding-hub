@@ -776,6 +776,7 @@ describe("PluginHookContext", () => {
       config: {},
       context: {
         request: {
+          bodyTruncated: false,
           normalizedMessages: [
             {
               role: "user",
@@ -783,11 +784,20 @@ describe("PluginHookContext", () => {
               source: "openai.responses.input_text",
             },
           ],
+          normalizedMessagesTruncated: false,
         },
+        response: { bodyTruncated: true },
+        stream: { chunkTruncated: true },
+        log: { messageTruncated: true },
       },
     };
 
     expect(context.context.request?.normalizedMessages?.[0]?.text).toBe("hello from codex");
+    expect(context.context.request?.bodyTruncated).toBe(false);
+    expect(context.context.request?.normalizedMessagesTruncated).toBe(false);
+    expect(context.context.response?.bodyTruncated).toBe(true);
+    expect(context.context.stream?.chunkTruncated).toBe(true);
+    expect(context.context.log?.messageTruncated).toBe(true);
   });
 });
 

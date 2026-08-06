@@ -194,7 +194,9 @@ export type GatewayVisibleRequestContext = {
   query?: string;
   headers?: Record<string, JsonValue>;
   body?: string;
+  bodyTruncated?: boolean;
   normalizedMessages?: GatewayNormalizedMessage[];
+  normalizedMessagesTruncated?: boolean;
   requestedModel?: string;
 };
 
@@ -202,15 +204,18 @@ export type GatewayVisibleResponseContext = {
   status?: number;
   headers?: Record<string, JsonValue>;
   body?: string;
+  bodyTruncated?: boolean;
 };
 
 export type GatewayVisibleStreamContext = {
   sequence?: number;
   chunk?: string;
+  chunkTruncated?: boolean;
 };
 
 export type GatewayVisibleLogContext = {
   message?: string;
+  messageTruncated?: boolean;
 };
 
 export type GatewayVisibleHookContext = {
