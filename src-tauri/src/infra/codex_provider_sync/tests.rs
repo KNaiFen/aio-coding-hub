@@ -163,12 +163,7 @@ fn backup_pruning_keeps_current_v2_and_preserves_unmanaged_entries() {
     .unwrap_or(false);
 
     let managed_with_symlink = root.join("managed-with-symlink");
-    write_managed_manifest(
-        &managed_with_symlink,
-        1,
-        "5",
-        PROVIDER_SYNC_MANAGED_BY,
-    );
+    write_managed_manifest(&managed_with_symlink, 1, "5", PROVIDER_SYNC_MANAGED_BY);
     let outside = home.join("outside");
     std::fs::create_dir_all(&outside).expect("create outside dir");
     let child_symlink_created = symlink_test_dir(&outside, &managed_with_symlink.join("external"))
@@ -197,7 +192,10 @@ fn backup_pruning_keeps_current_v2_and_preserves_unmanaged_entries() {
         invalid_created_at.exists(),
         "invalid ownership metadata is unmanaged"
     );
-    assert!(future_version.exists(), "future manifest version is unmanaged");
+    assert!(
+        future_version.exists(),
+        "future manifest version is unmanaged"
+    );
     if manifest_symlink_created {
         assert!(
             manifest_symlink.exists(),
@@ -237,8 +235,7 @@ fn backup_removal_revalidates_an_entry_replaced_after_classification() {
     let displaced_managed = root.join("displaced-managed");
     std::fs::rename(&candidate, &displaced_managed).expect("replace candidate");
     std::fs::create_dir_all(&candidate).expect("create replacement directory");
-    std::fs::write(candidate.join("user-notes.txt"), b"keep me")
-        .expect("write replacement data");
+    std::fs::write(candidate.join("user-notes.txt"), b"keep me").expect("write replacement data");
 
     let warning = remove_managed_backup_candidate(&root, &candidate, expected)
         .expect("safe candidate removal");
@@ -293,14 +290,18 @@ fn second_session_write_failure_restores_config_and_first_session() {
     let backup_dir = create_backup(home, &context, &change_set).expect("create diagnostic backup");
 
     let mut writes = 0usize;
-    let err = apply_file_changes_with(&config_path, &change_set, |path, bytes| -> AppResult<bool> {
-        writes += 1;
-        if writes == 3 {
-            return Err("injected second session write failure".into());
-        }
-        std::fs::write(path, bytes).map_err(|error| format!("test write failed: {error}"))?;
-        Ok(true)
-    })
+    let err = apply_file_changes_with(
+        &config_path,
+        &change_set,
+        |path, bytes| -> AppResult<bool> {
+            writes += 1;
+            if writes == 3 {
+                return Err("injected second session write failure".into());
+            }
+            std::fs::write(path, bytes).map_err(|error| format!("test write failed: {error}"))?;
+            Ok(true)
+        },
+    )
     .expect_err("second session write should fail");
 
     assert!(err.to_string().contains("injected second session"), "{err}");
@@ -319,8 +320,7 @@ fn second_session_write_failure_restores_config_and_first_session() {
     );
     assert!(backup_dir.join("provider-sync.json").exists());
     assert_eq!(
-        std::fs::read(backup_dir.join("sessions/rollout-first.jsonl"))
-            .expect("read first backup"),
+        std::fs::read(backup_dir.join("sessions/rollout-first.jsonl")).expect("read first backup"),
         first_original.to_vec()
     );
 }
