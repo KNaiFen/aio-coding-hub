@@ -125,6 +125,15 @@
     "defaultTimeoutMs": 5000,
     "timeoutMs": "positive integer milliseconds; omitted hooks use defaultHookTimeoutMs"
   },
+  "gatewayHookResourceBudgets": {
+    "contextBodyBytes": 1048576,
+    "mutationBodyBytes": 1048576,
+    "streamBytes": 65536,
+    "logBytes": 65536,
+    "normalizedMessageLimit": 64,
+    "normalizedMessageTextBytes": 8192,
+    "failClosedDirectContentTruncation": "Visible limits apply after invalid UTF-8 replacement as well as to raw input bytes; replacement expansion is capped and marks the field truncated. The host returns PLUGIN_CONTEXT_TRUNCATED before Extension Host execution when a visible request body, response body, stream chunk, or log message is truncated. Normalized-message-only truncation does not trigger this rejection."
+  },
   "hostRenderedSchema": {
     "schemaTypes": ["section", "panel", "badge"],
     "fieldTypes": ["text", "password", "number", "boolean", "select", "textarea", "info", "button"],
