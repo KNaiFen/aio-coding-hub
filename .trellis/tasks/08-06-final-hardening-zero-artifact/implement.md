@@ -1,7 +1,7 @@
 # 最终修复与本地零产物：实施清单
 
-- [ ] 建立并合并 AUD-054：云端验证与本地零产物合同。
-- [ ] 合并后核验并清理精确的 `src-tauri/target*`、仓库内 `node_modules` 和已知前端缓存。
+- [x] 建立并合并 AUD-054：云端验证与本地零产物合同。
+- [x] 合并后核验并清理精确的 `src-tauri/target*`、仓库内 `node_modules` 和已知前端缓存。
 - [ ] 建立并合并 AUD-055：Provider Sync session-only 单代快照。
 - [ ] 建立并合并 AUD-056：请求日志与运行日志留存。
 - [ ] 建立并合并 AUD-016：非回环 Gateway Bearer Token。

@@ -3,7 +3,7 @@
   "name": "cloud-only-zero-artifact-contract",
   "title": "AUD-054 云端验证与本地零产物合同",
   "description": "移除仓库受控的本地依赖与构建入口，建立零依赖本地合同检查和 GitHub Actions 完整质量门。",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": "cross-layer",
   "scope": "ci-cd",
   "package": "aio-coding-hub",
@@ -11,12 +11,12 @@
   "creator": "KNaiFen",
   "assignee": "KNaiFen",
   "createdAt": "2026-08-06",
-  "completedAt": null,
+  "completedAt": "2026-08-06",
   "branch": "codex/cloud-only-zero-artifact-contract",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": null,
-  "pr_url": null,
+  "commit": "d32106c3706edc7535ea074d4c352c6b7e701dbf",
+  "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/86",
   "subtasks": [],
   "children": [],
   "parent": "08-06-final-hardening-zero-artifact",
@@ -42,6 +42,6 @@
     "scripts/check-ci-quality-gates.selftest.mjs",
     "scripts/run-checks.mjs"
   ],
-  "notes": "本批第 1 项；首个 PR 同时纳入审计报告、PENDING 和全部父子 Trellis 任务。",
+  "notes": "本批第 1 项；PR #86 与精确 workflow_dispatch 全绿后 squash 合并，合并后已完成约 10.2 GiB 的精确仓库产物清理。",
   "meta": {}
 }
