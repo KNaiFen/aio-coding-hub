@@ -483,10 +483,7 @@ fn ensure_safe_operational_dir(path: &Path, label: &str) -> AppResult<()> {
     Ok(())
 }
 
-fn collect_session_changes(
-    home: &Path,
-    target_provider: &str,
-) -> AppResult<Vec<SessionChange>> {
+fn collect_session_changes(home: &Path, target_provider: &str) -> AppResult<Vec<SessionChange>> {
     let mut changes = Vec::new();
     let canonical_home = fs::canonicalize(home)
         .map_err(|e| format!("failed to canonicalize Codex home {}: {e}", home.display()))?;
@@ -832,10 +829,7 @@ fn managed_backup_version(path: &Path) -> AppResult<Option<ManagedBackupVersion>
     if manifest_metadata.file_type().is_symlink() || !manifest_metadata.is_file() {
         return Ok(None);
     }
-    let Some(bytes) = read_optional_file_with_max_len(
-        &manifest_path,
-        PROVIDER_SYNC_MAX_BYTES,
-    )?
+    let Some(bytes) = read_optional_file_with_max_len(&manifest_path, PROVIDER_SYNC_MAX_BYTES)?
     else {
         return Ok(None);
     };
@@ -867,8 +861,7 @@ fn managed_backup_version(path: &Path) -> AppResult<Option<ManagedBackupVersion>
             Ok(Some(ManagedBackupVersion::V1))
         }
         Some(version) if version == u64::from(PROVIDER_SYNC_BACKUP_VERSION) => {
-            if manifest.get("scope").and_then(Value::as_str)
-                != Some(PROVIDER_SYNC_BACKUP_SCOPE)
+            if manifest.get("scope").and_then(Value::as_str) != Some(PROVIDER_SYNC_BACKUP_SCOPE)
                 || manifest.get("sqlite_files").is_some()
                 || manifest.get("global_state_path").is_some()
             {
@@ -1015,9 +1008,8 @@ fn backup_tree_is_safe_to_remove(root: &Path) -> AppResult<bool> {
         for entry in fs::read_dir(&dir)
             .map_err(|e| format!("failed to inspect managed backup {}: {e}", dir.display()))?
         {
-            let entry = entry.map_err(|e| {
-                format!("failed to inspect managed backup {}: {e}", dir.display())
-            })?;
+            let entry = entry
+                .map_err(|e| format!("failed to inspect managed backup {}: {e}", dir.display()))?;
             let path = entry.path();
             let file_type = entry.file_type().map_err(|e| {
                 format!(
