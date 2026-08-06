@@ -18,6 +18,7 @@
 
 - **状态**：`planned`
 - **日期**：2026-08-06
+- **待执行交付**：代码已在 `codex/provider-sync-session-only-backup` 提交并推送，当前 head `59ea823513c995abf7820577c1c5d76e8a9742eb`，草稿 PR [#87](https://github.com/KNaiFen/aio-coding-hub/pull/87)。Actions `31117924101` 在 Rust tests 编译中被平台取消，`31117791366` attempt 2 在下载 Action 时返回 `Service Unavailable`，`31119433802` 的入口 job 被平台取消；均发生于 GitHub Actions `major_outage`，尚无产品测试失败证据。待平台恢复后重跑精确 head 的全量 CI、转 Ready、完成主线门与合并；在此之前保持 `planned`，不标记 `done`。
 - **观察问题**：Provider Sync 当前扫描并备份 `archived_sessions`、SQLite 与全局状态，且旧格式 managed backup 最多保留五代，造成与恢复目标无关的空间增长。
 - **锁定决策**：新格式只处理活动 `sessions`，不再扫描、改写或备份 `archived_sessions`；只保留最新一代新格式 managed backup；只删除 manifest 精确证明所有权的旧格式 managed backup。
 - **拟议方向**：引入 v2 session-only manifest 和严格 managed/unmanaged 分类，在首次成功创建 v2 后迁移清理 v1，并保留同步失败的完整回滚。

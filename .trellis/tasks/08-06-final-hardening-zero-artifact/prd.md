@@ -7,11 +7,12 @@
 ## Requirements
 
 - 固定实施顺序：AUD-054、AUD-055、AUD-056、AUD-016、AUD-008、AUD-002、AUD-035、AUD-033。
-- 每项使用独立短分支和 PR；合并后才开始下一项，并在下一候选分支补记前一项证据。
+- 每项保持独立、可提取的原子提交。自 2026-08-07 起，PR、CI 或合并不可用时先记录待执行交付并继续下一项代码；平台恢复后再按固定顺序重建或更新独立 PR、验证和合并。
 - 本地不得安装依赖、启动开发服务、运行 pnpm/Cargo/Tauri、格式化、类型检查、Lint、测试或构建。
 - 本地只允许运行无依赖 Node 源码合同检查、源文件解析检查和 `git diff --check`。
 - Rust、bindings、Clippy、测试、前端质量门和原生制品均由 GitHub Actions 负责。
 - 每个 PR 前与合并前重新 fetch `origin/main`，核对主线和开放 PR 的功能、接口、实现和最终效果。
+- 代码堆叠期间不得把未通过 CI 或未合并的条目标记为 `done`/`resolved`；本地仍只执行零产物合同。
 - 不纳入旧 worktree 的其他未跟踪任务、缓存或产物，不操作 `upstream`。
 - 第八项合并后另建纯文档 PR，收口报告、PENDING 和 Trellis 证据。
 

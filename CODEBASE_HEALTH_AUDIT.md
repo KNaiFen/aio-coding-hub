@@ -56,6 +56,7 @@
 - 最终治理批次基线：2026-08-06 以已核验的 `origin/main@735cec12` 建立隔离候选。加入新问题前，索引的正确现状为 48 项 `resolved`、5 项 `confirmed`；旧的 47 resolved / 5 confirmed / 1 pr_open 统计未吸收 PR #85 终态，现已纠正。新增 `AUD-054` 至 `AUD-056` 后，用户锁定按 054、055、056、016、008、002、035、033 的顺序逐项实施，八项全部转为 `planned`。
 - 最终治理批次本地约束：禁止依赖安装、dev、类型检查、Lint、测试、构建、Cargo、Tauri 及任何会生成 Node/Rust 产物的仓库脚本；本地只运行零依赖 Node 源码合同/解析检查和 `git diff --check`。完整前端、rustfmt、bindings、Clippy、Rust tests、audit 与原生制品验证由 GitHub Actions 负责。
 - 最终治理 AUD-054（`resolved`）：候选 `2334403b` 的 PR run `31103175487` 与 workflow_dispatch run `31103187154` 全绿，Ready PR #86 squash 合并为 `d32106c3`，候选与合并树一致。合并后按精确绝对路径删除 24 个仓库级依赖/构建目录，回收约 10.2 GiB；仓库内 pnpm store、全局缓存、受控 fixture 与其他项目均未触碰。
+- 最终治理 AUD-055（代码完成、交付待执行）：分支 `codex/provider-sync-session-only-backup` 已提交并推送至 `59ea8235`，草稿 PR #87。Actions `31117924101` 在 Rust tests 编译中被平台取消，`31117791366` attempt 2 下载 Action 时返回 `Service Unavailable`，`31119433802` 的入口 job 被平台取消；当时 GitHub Actions 官方状态为 `major_outage`，没有产品测试失败证据。按用户 2026-08-07 决定，AUD-055 保持 `planned`，待平台恢复后重跑 CI、转 Ready、主线门和合并；后续六项先在独立堆叠分支完成代码，不再被 PR/CI 阻塞。
 
 ## 1. 扫描进度与覆盖模块
 
@@ -1071,6 +1072,7 @@ Rust 运行时状态 / 请求日志
 - 实际影响与根因：大体量归档会话被重复读写和复制，失败回滚面扩大；多代 backup 长期占用用户磁盘，且按目录/时间清理若证据不足可能误删非受管内容。根因是同步变更集、备份 manifest 和清理策略没有围绕“活动 sessions + 一代 managed backup”建立明确格式合同。
 - 最小修复建议：引入显式 v2 session-only manifest；只枚举活动 sessions 与必要 config，按 manifest 精确分类 v2 managed、可迁移 v1 managed 和 unmanaged。成功建立 v2 后删除旧 v1 managed，最多保留一代 v2；无/损坏 manifest、marker 不匹配、symlink 或非受管目录一律不删除。保留现有失败快照与回滚语义。
 - 验证及回归测试：云端 Rust 覆盖 archived session 不扫描/不改写、v1→v2 迁移、单代保留、替换与回滚；故意制造缺失/损坏 manifest、symlink 和非受管目录，断言原样保留；任一 config/session 写失败时断言活动文件恢复且归档不变。
+- 2026-08-07 代码与交付状态：实现提交 `356fe90a`，云端 rustfmt 补丁 `40612a90`，symlink root 与 SQLite sidecar 测试顺序修正 `59ea8235`；分支已推送并建立草稿 PR #87。本地零依赖合同、源码断言、Trellis JSON 与 `git diff --check` 通过。三次 Actions 均因 GitHub Actions `major_outage` 取消或 `Service Unavailable`，未得到完整 Rust tests 终态；因此保持 `planned`，将精确 head CI 重跑、Ready、最终主线门和合并列入待执行交付。
 
 ### AUD-056：请求日志永久留存与运行日志无容量软上限
 
