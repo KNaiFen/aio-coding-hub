@@ -24,7 +24,7 @@ import {
 import { Clock, Server, CheckCircle2, XCircle } from "lucide-react";
 import { computeStatusBadge, resolveCacheCreationDisplay } from "./requestLogPresentation";
 import { FolderBadge, FreeBadge, SessionReuseBadge } from "./LogBadges";
-import { formatClaudeModelMappingText } from "./requestLogSpecialSettings";
+import { formatModelRedirectText } from "./requestLogSpecialSettings";
 import { CliBrandIcon } from "./CliBrandIcon";
 import { getErrorCodeLabel } from "./requestLogErrorLabels";
 
@@ -185,8 +185,9 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
             : `${attemptRoute.startProvider} → ${attemptRoute.endProvider}${extra}`;
         })();
 
-        const modelText = formatClaudeModelMappingText(
+        const modelText = formatModelRedirectText(
           trace.requested_model,
+          trace.model_redirect,
           trace.claude_model_mapping
         );
         const cliLabel = cliShortLabel(trace.cli_key);

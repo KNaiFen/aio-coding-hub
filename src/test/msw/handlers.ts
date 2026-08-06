@@ -253,6 +253,15 @@ export const handlers = [
       source_provider_id:
         typeof input.sourceProviderId === "number" ? input.sourceProviderId : null,
       bridge_type: typeof input.bridgeType === "string" ? input.bridgeType : null,
+      model_policy_status:
+        input.modelPolicy && typeof input.modelPolicy === "object"
+          ? "ready"
+          : (existing?.model_policy_status ?? (cliKey === "claude" ? "legacy" : "ready")),
+      model_policy:
+        input.modelPolicy && typeof input.modelPolicy === "object"
+          ? (input.modelPolicy as ProviderSummary["model_policy"])
+          : (existing?.model_policy ??
+            (cliKey === "claude" ? null : { version: 1, mode: "all", rules: [] })),
       api_key_configured:
         input.authMode === "oauth"
           ? false

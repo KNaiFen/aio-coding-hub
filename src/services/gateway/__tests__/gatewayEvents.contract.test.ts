@@ -53,6 +53,41 @@ describe("gateway event payload contract (shared fixtures)", () => {
     expect(normalized?.claude_model_mapping).toBeNull();
   });
 
+  it("accepts a valid generic model redirect and rejects malformed steps", () => {
+    const normalized = normalizeGatewayRequestEvent({
+      ...requestFixture,
+      model_redirect: {
+        steps: [
+          {
+            stage: "provider",
+            providerId: 7,
+            providerName: "Provider A",
+            sourceModel: "gpt-original",
+            targetModel: "gpt-upstream",
+          },
+        ],
+      },
+    });
+    expect(normalized?.model_redirect?.steps).toEqual([
+      {
+        stage: "provider",
+        providerId: 7,
+        providerName: "Provider A",
+        sourceModel: "gpt-original",
+        targetModel: "gpt-upstream",
+      },
+    ]);
+
+    expect(
+      normalizeGatewayRequestEvent({
+        ...requestFixture,
+        model_redirect: {
+          steps: [{ stage: "provider", providerId: "7" }],
+        },
+      })
+    ).toBeNull();
+  });
+
   it("accepts the gateway:request_start fixture", () => {
     const normalized = normalizeGatewayRequestStartEvent(requestStartFixture);
     expect(normalized).not.toBeNull();

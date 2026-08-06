@@ -3,6 +3,7 @@ import {
   hasClaudeModelMappingSpecialSetting,
   hasCodexSystemRequestSpecialSetting,
   resolveClaudeModelMappingFromSpecialSettings,
+  resolveModelRedirectFromSpecialSettings,
 } from "../requestLogSpecialSettings";
 
 describe("services/gateway/requestLogSpecialSettings", () => {
@@ -38,7 +39,59 @@ describe("services/gateway/requestLogSpecialSettings", () => {
       applied: true,
     });
     expect(resolveClaudeModelMappingFromSpecialSettings(settings, 99)?.providerId).toBe(2);
+    expect(resolveModelRedirectFromSpecialSettings(settings, 2)).toEqual({
+      steps: [
+        {
+          stage: "legacy",
+          providerId: 2,
+          providerName: "Provider B",
+          sourceModel: "claude-sonnet",
+          targetModel: "gpt-5.4",
+        },
+      ],
+    });
     expect(hasClaudeModelMappingSpecialSetting(settings)).toBe(true);
+  });
+
+  it("resolves generic model redirect with final provider preference", () => {
+    const settings = JSON.stringify([
+      {
+        type: "model_redirect",
+        steps: [
+          {
+            stage: "provider",
+            providerId: 1,
+            providerName: "Provider A",
+            sourceModel: "gpt-original",
+            targetModel: "model-a",
+          },
+        ],
+      },
+      {
+        type: "model_redirect",
+        steps: [
+          {
+            stage: "provider",
+            providerId: 2,
+            providerName: "Provider B",
+            sourceModel: "gpt-original",
+            targetModel: "model-b",
+          },
+        ],
+      },
+    ]);
+
+    expect(resolveModelRedirectFromSpecialSettings(settings, 2)).toEqual({
+      steps: [
+        {
+          stage: "provider",
+          providerId: 2,
+          providerName: "Provider B",
+          sourceModel: "gpt-original",
+          targetModel: "model-b",
+        },
+      ],
+    });
   });
 
   it("ignores invalid, unapplied, and identity mappings", () => {

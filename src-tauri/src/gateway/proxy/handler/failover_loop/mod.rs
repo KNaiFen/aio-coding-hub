@@ -38,6 +38,8 @@ mod provider_gate;
 mod provider_iterator;
 #[path = "prepare/provider_limits.rs"]
 mod provider_limits;
+#[path = "prepare/provider_model_policy.rs"]
+mod provider_model_policy;
 #[path = "prepare/request_sanitizer.rs"]
 mod request_sanitizer;
 

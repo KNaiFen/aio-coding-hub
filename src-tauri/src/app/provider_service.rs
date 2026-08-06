@@ -16,6 +16,7 @@ pub(crate) struct ProviderUpsertInput {
     pub cost_multiplier: f64,
     pub priority: Option<i64>,
     pub claude_models: Option<providers::ClaudeModels>,
+    pub model_policy: Option<providers::ProviderModelPolicyV1>,
     #[serde(rename = "limit5hUsd", alias = "limit5HUsd")]
     #[specta(rename = "limit5hUsd")]
     pub limit_5h_usd: Option<f64>,
@@ -101,7 +102,9 @@ fn provider_runtime_reset_decision(
         || previous.auth_mode != next.auth_mode
         || submitted_api_key_changed(previous_api_key, submitted_api_key)
         || previous.source_provider_id != next.source_provider_id
-        || previous.bridge_type != next.bridge_type;
+        || previous.bridge_type != next.bridge_type
+        || previous.model_policy != next.model_policy
+        || previous.model_policy_status != next.model_policy_status;
 
     ProviderRuntimeResetDecision {
         clear_route_runtime_state: sensitive_config_changed,
@@ -138,6 +141,7 @@ pub(crate) async fn provider_upsert(
         cost_multiplier,
         priority,
         claude_models,
+        model_policy,
         limit_5h_usd,
         limit_daily_usd,
         daily_reset_mode,
@@ -185,6 +189,7 @@ pub(crate) async fn provider_upsert(
                 cost_multiplier,
                 priority,
                 claude_models,
+                model_policy,
                 limit_5h_usd,
                 limit_daily_usd,
                 daily_reset_mode,
@@ -257,6 +262,11 @@ pub(crate) async fn provider_duplicate(
             providers::get_by_id(&conn, provider_id)?
         };
         let siblings = providers::list_by_cli(&db, &source.cli_key)?;
+        if source.model_policy_status == providers::ProviderModelPolicyStatus::Invalid {
+            return Err(crate::shared::error::AppError::from(
+                "SEC_INVALID_INPUT: reset the invalid provider model policy before duplicating",
+            ));
+        }
         let api_key = if source.auth_mode == "api_key" && source.source_provider_id.is_none() {
             Some(providers::get_api_key_plaintext(&db, provider_id)?)
         } else {
@@ -281,6 +291,7 @@ pub(crate) async fn provider_duplicate(
                 cost_multiplier: source.cost_multiplier,
                 priority: None,
                 claude_models: Some(source.claude_models.clone()),
+                model_policy: source.model_policy.clone(),
                 limit_5h_usd: source.limit_5h_usd,
                 limit_daily_usd: source.limit_daily_usd,
                 daily_reset_mode: Some(source.daily_reset_mode),
@@ -529,6 +540,8 @@ mod tests {
             base_urls: vec!["https://api.example.com".to_string()],
             base_url_mode: providers::ProviderBaseUrlMode::Order,
             claude_models: Default::default(),
+            model_policy: Some(providers::ProviderModelPolicyV1::all()),
+            model_policy_status: providers::ProviderModelPolicyStatus::Ready,
             enabled: true,
             priority: 1,
             cost_multiplier: 1.0,
@@ -614,6 +627,8 @@ mod tests {
             base_urls: vec!["https://api.old.example.com".to_string()],
             base_url_mode: providers::ProviderBaseUrlMode::Order,
             claude_models: Default::default(),
+            model_policy: Some(providers::ProviderModelPolicyV1::all()),
+            model_policy_status: providers::ProviderModelPolicyStatus::Ready,
             enabled: true,
             priority: 1,
             cost_multiplier: 1.0,
@@ -645,6 +660,32 @@ mod tests {
 
         assert_eq!(
             provider_runtime_reset_decision(Some(&previous), Some("sk-old"), &next, None),
+            ProviderRuntimeResetDecision {
+                clear_route_runtime_state: true,
+            }
+        );
+
+        let mut policy_changed = previous.clone();
+        policy_changed.model_policy = Some(providers::ProviderModelPolicyV1 {
+            version: 1,
+            mode: providers::ProviderModelMode::Selected,
+            rules: vec![providers::ProviderModelRule {
+                source: "claude-sonnet-*".to_string(),
+                target: None,
+            }],
+        });
+        assert_eq!(
+            provider_runtime_reset_decision(Some(&previous), Some("sk-old"), &policy_changed, None,),
+            ProviderRuntimeResetDecision {
+                clear_route_runtime_state: true,
+            }
+        );
+
+        let mut legacy = previous.clone();
+        legacy.model_policy = None;
+        legacy.model_policy_status = providers::ProviderModelPolicyStatus::Legacy;
+        assert_eq!(
+            provider_runtime_reset_decision(Some(&legacy), Some("sk-old"), &previous, None),
             ProviderRuntimeResetDecision {
                 clear_route_runtime_state: true,
             }

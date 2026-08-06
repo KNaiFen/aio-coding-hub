@@ -105,6 +105,8 @@ function makeProvider(partial: Partial<ProviderSummary> = {}): ProviderSummary {
     oauth_last_error: partial.oauth_last_error ?? null,
     source_provider_id: partial.source_provider_id ?? null,
     bridge_type: partial.bridge_type ?? null,
+    model_policy_status: partial.model_policy_status ?? "ready",
+    model_policy: partial.model_policy ?? { version: 1, mode: "all", rules: [] },
     api_key_configured: partial.api_key_configured ?? false,
     stream_idle_timeout_seconds: partial.stream_idle_timeout_seconds ?? null,
     extension_values: partial.extension_values ?? [],
@@ -143,6 +145,8 @@ function makeCtx(overrides: Partial<OAuthActionContext> = {}) {
     baseUrlRows: [],
     tags: [],
     claudeModels: {},
+    modelPolicyStatus: "ready",
+    modelPolicy: { version: 1, mode: "all", rules: [] },
     streamIdleTimeoutSeconds: "",
     apiKeyConfigured: false,
     isCodexGatewaySource: false,
@@ -220,7 +224,7 @@ describe("providerEditorOAuthActions", () => {
     expect(providerOAuthFetchLimits).toHaveBeenCalledWith(9);
     expect(toast).toHaveBeenCalledWith("OAuth 登录成功");
     expect(ctx.onSaved).toHaveBeenCalledWith("claude");
-    expect(ctx.onOpenChange).toHaveBeenCalledWith(false);
+    expect(ctx.onOpenChange).toHaveBeenCalledWith(false, { bypassDirty: true });
     expect(ctx.removeProvider).not.toHaveBeenCalled();
     expect(ctx.setOauthLoading).toHaveBeenLastCalledWith(false);
   });

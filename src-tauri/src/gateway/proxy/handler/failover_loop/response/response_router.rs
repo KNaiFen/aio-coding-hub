@@ -78,6 +78,7 @@ where
         session_reuse: prepared.session_reuse,
         stream_idle_timeout_seconds: prepared.stream_idle_timeout_seconds,
         claude_model_mapping: prepared.claude_model_mapping.as_ref(),
+        model_redirect: prepared.model_redirect.as_ref(),
     };
 
     emit_gateway_debug_log_lazy(&ctx.state.app, || {
@@ -179,6 +180,7 @@ where
         session_reuse: prepared.session_reuse,
         stream_idle_timeout_seconds: prepared.stream_idle_timeout_seconds,
         claude_model_mapping: prepared.claude_model_mapping.as_ref(),
+        model_redirect: prepared.model_redirect.as_ref(),
     };
 
     // --- Non-success upstream error handling ---

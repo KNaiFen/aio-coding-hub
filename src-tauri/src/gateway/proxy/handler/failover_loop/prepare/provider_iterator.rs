@@ -4,7 +4,7 @@
 
 use super::provider_checks;
 use super::*;
-use crate::gateway::events::ClaudeModelMapping;
+use crate::gateway::events::{ClaudeModelMapping, ModelRedirect};
 use crate::gateway::proxy::gemini_oauth::GeminiOAuthResponseMode;
 use std::collections::HashSet;
 
@@ -40,6 +40,7 @@ pub(super) struct PreparedProvider {
     pub(super) anthropic_stream_requested: bool,
     pub(super) stream_idle_timeout_seconds: Option<u32>,
     pub(super) claude_model_mapping: Option<ClaudeModelMapping>,
+    pub(super) model_redirect: Option<ModelRedirect>,
 }
 
 /// Counters accumulated across all providers in the iteration loop.
@@ -283,10 +284,26 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
         session_reuse,
         stream_idle_timeout_seconds: provider.stream_idle_timeout_seconds,
         claude_model_mapping: None,
+        model_redirect: None,
     };
 
     let mut claude_model_mapping = None;
-    if should_apply_claude_model_mapping(cx2cc_active, &upstream_forwarded_path) {
+    let model_redirect = provider_model_policy::apply_if_needed(
+        ctx,
+        provider,
+        provider_ctx,
+        input.requested_model_location,
+        provider_model_policy::UpstreamRequestMut {
+            forwarded_path: &mut upstream_forwarded_path,
+            query: &mut upstream_query,
+            body_bytes: &mut upstream_body_bytes,
+            strip_request_content_encoding: &mut strip_request_content_encoding,
+        },
+    );
+
+    if provider.model_policy_status == crate::providers::ProviderModelPolicyStatus::Legacy
+        && should_apply_claude_model_mapping(cx2cc_active, &upstream_forwarded_path)
+    {
         claude_model_mapping = claude_model_mapping::apply_if_needed(
             ctx,
             provider,
@@ -354,6 +371,7 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
         anthropic_stream_requested,
         stream_idle_timeout_seconds: provider.stream_idle_timeout_seconds,
         claude_model_mapping,
+        model_redirect,
     }))
 }
 

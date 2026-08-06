@@ -6,6 +6,10 @@ import {
   type ProviderAvailabilityResult,
   type ProviderBaseUrlMode as GeneratedProviderBaseUrlMode,
   type ProviderExtensionValuesInput,
+  type ProviderModelMode as GeneratedProviderModelMode,
+  type ProviderModelPolicyStatus as GeneratedProviderModelPolicyStatus,
+  type ProviderModelPolicyV1 as GeneratedProviderModelPolicyV1,
+  type ProviderModelRule as GeneratedProviderModelRule,
   type ProviderOAuthDeviceCodeCancelResult as GeneratedProviderOAuthDeviceCodeCancelResult,
   type ProviderOAuthDeviceCodePollResult as GeneratedProviderOAuthDeviceCodePollResult,
   type ProviderOAuthDeviceCodeStartResult as GeneratedProviderOAuthDeviceCodeStartResult,
@@ -53,6 +57,10 @@ export type ClaudeModels = GeneratedClaudeModels;
 export type DailyResetMode = GeneratedDailyResetMode;
 export type ProviderAuthMode = GeneratedProviderAuthMode;
 export type ProviderBaseUrlMode = GeneratedProviderBaseUrlMode;
+export type ProviderModelMode = GeneratedProviderModelMode;
+export type ProviderModelPolicyStatus = GeneratedProviderModelPolicyStatus;
+export type ProviderModelPolicyV1 = GeneratedProviderModelPolicyV1;
+export type ProviderModelRule = GeneratedProviderModelRule;
 
 const CLI_KEY_VALUES = CLI_KEYS;
 const PROVIDER_AUTH_MODE_VALUES = [
@@ -91,6 +99,7 @@ type ProviderUpsertFieldMap = {
   costMultiplier: "costMultiplier";
   priority: "priority";
   claudeModels: "claudeModels";
+  modelPolicy: "modelPolicy";
   limit5hUsd: "limit5hUsd";
   limitDailyUsd: "limitDailyUsd";
   dailyResetMode: "dailyResetMode";
@@ -125,8 +134,9 @@ export type ProviderUpsertInput = Omit<
 
 type ProviderUpsertTransportInput = Omit<
   GeneratedProviderUpsertInput,
-  "streamIdleTimeoutSeconds"
+  "modelPolicy" | "streamIdleTimeoutSeconds"
 > & {
+  modelPolicy?: GeneratedProviderUpsertInput["modelPolicy"];
   streamIdleTimeoutSeconds?: GeneratedProviderUpsertInput["streamIdleTimeoutSeconds"];
 };
 
@@ -193,16 +203,20 @@ function toProviderUpsertPayload(input: ProviderUpsertInput): ProviderUpsertTran
     sourceProviderId,
     bridgeType: input.bridgeType ?? null,
     extensionValues: input.extensionValues ?? null,
-  } satisfies Omit<GeneratedProviderUpsertInput, "streamIdleTimeoutSeconds">;
+  } satisfies Omit<GeneratedProviderUpsertInput, "modelPolicy" | "streamIdleTimeoutSeconds">;
+
+  const payloadWithModelPolicy = Object.prototype.hasOwnProperty.call(input, "modelPolicy")
+    ? { ...payloadBase, modelPolicy: input.modelPolicy ?? null }
+    : payloadBase;
 
   if (Object.prototype.hasOwnProperty.call(input, "streamIdleTimeoutSeconds")) {
     return {
-      ...payloadBase,
+      ...payloadWithModelPolicy,
       streamIdleTimeoutSeconds: input.streamIdleTimeoutSeconds ?? 0,
     } satisfies ProviderUpsertTransportInput;
   }
 
-  return payloadBase;
+  return payloadWithModelPolicy;
 }
 
 function validateOrderedProviderIds(orderedProviderIds: number[]) {

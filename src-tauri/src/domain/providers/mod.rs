@@ -1,9 +1,14 @@
 //! Usage: Provider configuration persistence and gateway selection helpers.
 
+mod model_policy;
 mod queries;
 mod types;
 mod validation;
 
+#[allow(unused_imports)]
+pub use model_policy::{
+    ProviderModelMode, ProviderModelPolicyStatus, ProviderModelPolicyV1, ProviderModelRule,
+};
 pub use types::{
     ClaudeModels, DailyResetMode, ProviderAuthMode, ProviderBaseUrlMode,
     ProviderExtensionValuesInput, ProviderSummary, ProviderUpsertParams,

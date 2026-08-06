@@ -1,10 +1,128 @@
-use super::{resolve_session_bound_provider_id, SessionBoundResult};
+use super::{
+    filter_providers_by_model_policy, resolve_session_bound_provider_id, ModelPolicyFilterResult,
+    SessionBoundResult,
+};
 use crate::circuit_breaker;
 use crate::{providers, session_manager};
 use std::collections::HashMap;
 
 fn ids(items: &[providers::ProviderForGateway]) -> Vec<i64> {
     items.iter().map(|p| p.id).collect()
+}
+
+fn gateway_provider(
+    id: i64,
+    policy: Option<providers::ProviderModelPolicyV1>,
+    status: providers::ProviderModelPolicyStatus,
+) -> providers::ProviderForGateway {
+    providers::ProviderForGateway {
+        id,
+        name: format!("P{id}"),
+        base_urls: vec!["https://example.com".to_string()],
+        base_url_mode: providers::ProviderBaseUrlMode::Order,
+        api_key_plaintext: String::new(),
+        claude_models: providers::ClaudeModels::default(),
+        model_policy: policy,
+        model_policy_status: status,
+        limit_5h_usd: None,
+        limit_daily_usd: None,
+        daily_reset_mode: providers::DailyResetMode::Fixed,
+        daily_reset_time: "00:00:00".to_string(),
+        limit_weekly_usd: None,
+        limit_monthly_usd: None,
+        limit_total_usd: None,
+        auth_mode: "api_key".to_string(),
+        oauth_provider_type: None,
+        source_provider_id: None,
+        bridge_type: None,
+        stream_idle_timeout_seconds: None,
+        extension_values: vec![],
+    }
+}
+
+fn selected_policy(source: &str) -> providers::ProviderModelPolicyV1 {
+    providers::ProviderModelPolicyV1 {
+        version: 1,
+        mode: providers::ProviderModelMode::Selected,
+        rules: vec![providers::ProviderModelRule {
+            source: source.to_string(),
+            target: None,
+        }],
+    }
+}
+
+#[test]
+fn model_policy_filter_preserves_order_and_recomputes_from_full_candidates() {
+    let mut providers = vec![
+        gateway_provider(
+            1,
+            Some(providers::ProviderModelPolicyV1::all()),
+            providers::ProviderModelPolicyStatus::Ready,
+        ),
+        gateway_provider(
+            2,
+            Some(selected_policy("gpt-5.4")),
+            providers::ProviderModelPolicyStatus::Ready,
+        ),
+        gateway_provider(
+            3,
+            Some(selected_policy("gpt-5.5")),
+            providers::ProviderModelPolicyStatus::Ready,
+        ),
+    ];
+
+    let first = filter_providers_by_model_policy(&mut providers, Some("gpt-5.4"));
+    assert_eq!(ids(&providers), vec![1, 2]);
+    assert_eq!(
+        first,
+        ModelPolicyFilterResult {
+            original_provider_ids: vec![1, 2, 3],
+            ineligible_provider_ids: vec![3],
+            invalid_provider_ids: vec![],
+        }
+    );
+
+    providers = vec![
+        gateway_provider(
+            1,
+            Some(providers::ProviderModelPolicyV1::all()),
+            providers::ProviderModelPolicyStatus::Ready,
+        ),
+        gateway_provider(
+            2,
+            Some(selected_policy("gpt-5.4")),
+            providers::ProviderModelPolicyStatus::Ready,
+        ),
+        gateway_provider(
+            3,
+            Some(selected_policy("gpt-5.5")),
+            providers::ProviderModelPolicyStatus::Ready,
+        ),
+    ];
+    filter_providers_by_model_policy(&mut providers, Some("gpt-5.5"));
+    assert_eq!(ids(&providers), vec![1, 3]);
+}
+
+#[test]
+fn model_policy_filter_is_neutral_without_model_and_fails_closed_for_invalid_rows() {
+    let mut providers = vec![
+        gateway_provider(1, None, providers::ProviderModelPolicyStatus::Legacy),
+        gateway_provider(
+            2,
+            Some(selected_policy("gpt-*")),
+            providers::ProviderModelPolicyStatus::Invalid,
+        ),
+    ];
+
+    let result = filter_providers_by_model_policy(&mut providers, None);
+    assert_eq!(ids(&providers), vec![1, 2]);
+    assert_eq!(result.original_provider_ids, vec![1, 2]);
+    assert!(result.ineligible_provider_ids.is_empty());
+    assert!(result.invalid_provider_ids.is_empty());
+
+    let result = filter_providers_by_model_policy(&mut providers, Some("gpt-5.4"));
+    assert_eq!(ids(&providers), vec![1]);
+    assert_eq!(result.invalid_provider_ids, vec![2]);
 }
 
 fn insert_provider(db: &crate::db::Db, name: &str, enabled: bool) -> providers::ProviderSummary {
@@ -22,6 +140,7 @@ fn insert_provider(db: &crate::db::Db, name: &str, enabled: bool) -> providers::
             cost_multiplier: 1.0,
             priority: Some(100),
             claude_models: None,
+            model_policy: None,
             limit_5h_usd: None,
             limit_daily_usd: None,
             daily_reset_mode: Some(providers::DailyResetMode::Fixed),

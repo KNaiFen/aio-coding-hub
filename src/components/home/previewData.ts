@@ -484,6 +484,7 @@ export function buildPreviewTraces(nowMs = Date.now()): TraceSession[] {
           circuit_failure_count: null,
           circuit_failure_threshold: null,
           claude_model_mapping: null,
+          model_redirect: null,
         } satisfies GatewayAttemptEvent,
       ],
     },
@@ -521,6 +522,7 @@ export function buildPreviewTraces(nowMs = Date.now()): TraceSession[] {
           circuit_failure_count: null,
           circuit_failure_threshold: null,
           claude_model_mapping: claudeFailoverMapping,
+          model_redirect: null,
         } satisfies GatewayAttemptEvent,
         {
           trace_id: "preview-running-claude-failover",
@@ -544,6 +546,7 @@ export function buildPreviewTraces(nowMs = Date.now()): TraceSession[] {
           circuit_failure_count: null,
           circuit_failure_threshold: null,
           claude_model_mapping: claudeFailoverMapping,
+          model_redirect: null,
         } satisfies GatewayAttemptEvent,
       ],
     },

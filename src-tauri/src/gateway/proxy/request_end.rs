@@ -4,7 +4,9 @@ use super::logging::enqueue_request_log_with_backpressure_and_plugins;
 use super::status_override;
 use super::{spawn_enqueue_request_log_with_backpressure, RequestLogEnqueueArgs};
 use crate::gateway::active_requests::{ActiveRequestFinishReason, ActiveRequestRegistry};
-use crate::gateway::events::{emit_request_event, ClaudeModelMapping, FailoverAttempt};
+use crate::gateway::events::{
+    emit_request_event, ClaudeModelMapping, FailoverAttempt, ModelRedirect, ModelRedirectStep,
+};
 use crate::gateway::plugins::pipeline::GatewayPluginPipeline;
 use crate::{db, request_logs};
 use serde_json::Value;
@@ -397,6 +399,84 @@ fn select_claude_model_mapping(
     mappings.pop()
 }
 
+fn parse_model_redirect_step(value: &Value) -> Option<ModelRedirectStep> {
+    let obj = value.as_object()?;
+    let stage = obj
+        .get("stage")
+        .and_then(Value::as_str)
+        .and_then(non_empty_text)?;
+    let provider_name = obj
+        .get("providerName")
+        .and_then(Value::as_str)
+        .and_then(non_empty_text)?;
+    let source_model = obj
+        .get("sourceModel")
+        .and_then(Value::as_str)
+        .and_then(non_empty_text)?;
+    let target_model = obj
+        .get("targetModel")
+        .and_then(Value::as_str)
+        .and_then(non_empty_text)?;
+    if source_model == target_model {
+        return None;
+    }
+
+    Some(ModelRedirectStep {
+        stage: stage.to_string(),
+        provider_id: obj.get("providerId").and_then(Value::as_i64)?,
+        provider_name: provider_name.to_string(),
+        source_model: source_model.to_string(),
+        target_model: target_model.to_string(),
+    })
+}
+
+fn parse_model_redirect_setting(value: &Value) -> Option<ModelRedirect> {
+    let obj = value.as_object()?;
+    if obj.get("type").and_then(Value::as_str) != Some("model_redirect") {
+        return None;
+    }
+    let steps: Vec<ModelRedirectStep> = obj
+        .get("steps")?
+        .as_array()?
+        .iter()
+        .filter_map(parse_model_redirect_step)
+        .collect();
+    (!steps.is_empty()).then_some(ModelRedirect { steps })
+}
+
+fn select_model_redirect(
+    special_settings_json: Option<&str>,
+    attempts: &[FailoverAttempt],
+) -> Option<ModelRedirect> {
+    let parsed: Value = serde_json::from_str(special_settings_json?.trim()).ok()?;
+    let mut redirects: Vec<ModelRedirect> = match &parsed {
+        Value::Array(items) => items
+            .iter()
+            .filter_map(parse_model_redirect_setting)
+            .collect(),
+        Value::Object(_) => parse_model_redirect_setting(&parsed).into_iter().collect(),
+        _ => Vec::new(),
+    };
+
+    if let Some(success_provider_id) = attempts
+        .iter()
+        .rev()
+        .find(|attempt| attempt.outcome == "success")
+        .map(|attempt| attempt.provider_id)
+    {
+        if let Some(redirect) = redirects.iter().rev().find(|redirect| {
+            redirect
+                .steps
+                .iter()
+                .any(|step| step.provider_id == success_provider_id)
+        }) {
+            return Some(redirect.clone());
+        }
+    }
+
+    redirects.pop()
+}
+
 fn select_error_observation_attempt(attempts: &[FailoverAttempt]) -> Option<&FailoverAttempt> {
     attempts
         .iter()
@@ -754,6 +834,8 @@ impl RequestLogEnqueueArgs {
     ) {
         let claude_model_mapping =
             select_claude_model_mapping(self.special_settings_json.as_deref(), &attempts);
+        let model_redirect =
+            select_model_redirect(self.special_settings_json.as_deref(), &attempts);
         emit_request_event(
             app,
             self.trace_id.clone(),
@@ -770,6 +852,7 @@ impl RequestLogEnqueueArgs {
             event_ttfb_ms,
             attempts,
             claude_model_mapping,
+            model_redirect,
             usage_metrics,
         );
     }
@@ -1515,6 +1598,53 @@ mod tests {
 
         assert_eq!(mapping.provider_id, 2);
         assert_eq!(mapping.effective_model, "gpt-5.4");
+    }
+
+    #[test]
+    fn select_model_redirect_prefers_success_provider() {
+        let mut failed_attempt = sample_attempt();
+        failed_attempt.provider_id = 1;
+        failed_attempt.outcome = "failed".to_string();
+        failed_attempt.status = Some(500);
+
+        let mut success_attempt = sample_attempt();
+        success_attempt.provider_id = 2;
+        success_attempt.provider_name = "Provider B".to_string();
+
+        let special_settings_json = json!([
+            {
+                "type": "model_redirect",
+                "steps": [{
+                    "stage": "provider",
+                    "providerId": 1,
+                    "providerName": "Provider A",
+                    "sourceModel": "gpt-original",
+                    "targetModel": "model-a"
+                }]
+            },
+            {
+                "type": "model_redirect",
+                "steps": [{
+                    "stage": "provider",
+                    "providerId": 2,
+                    "providerName": "Provider B",
+                    "sourceModel": "gpt-original",
+                    "targetModel": "model-b"
+                }]
+            }
+        ])
+        .to_string();
+
+        let redirect = select_model_redirect(
+            Some(special_settings_json.as_str()),
+            &[failed_attempt, success_attempt],
+        )
+        .expect("selected redirect");
+
+        assert_eq!(redirect.steps.len(), 1);
+        assert_eq!(redirect.steps[0].provider_id, 2);
+        assert_eq!(redirect.steps[0].source_model, "gpt-original");
+        assert_eq!(redirect.steps[0].target_model, "model-b");
     }
 
     #[test]

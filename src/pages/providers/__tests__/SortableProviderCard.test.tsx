@@ -70,6 +70,8 @@ function makeProvider(partial: Partial<ProviderSummary> = {}): ProviderSummary {
     oauth_last_error: null,
     source_provider_id: null,
     bridge_type: null,
+    model_policy_status: "ready",
+    model_policy: { version: 1, mode: "all", rules: [] },
     api_key_configured: partial.api_key_configured ?? false,
     ...partial,
     stream_idle_timeout_seconds: partial.stream_idle_timeout_seconds ?? null,

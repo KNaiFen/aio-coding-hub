@@ -52,5 +52,6 @@
     "providerId": 7,
     "providerName": "Provider A",
     "applied": true
-  }
+  },
+  "model_redirect": null
 }

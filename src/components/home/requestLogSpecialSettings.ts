@@ -6,10 +6,12 @@ import {
   normalizeClaudeModelMapping,
   type ClaudeModelMapping,
 } from "../../services/gateway/claudeModelMapping";
+import { normalizeModelRedirect, type ModelRedirect } from "../../services/gateway/modelRedirect";
 
 export {
   hasClaudeModelMappingSpecialSetting,
   resolveClaudeModelMappingFromSpecialSettings,
+  resolveModelRedirectFromSpecialSettings,
 } from "../../services/gateway/requestLogSpecialSettings";
 
 export function formatClaudeModelMappingText(
@@ -23,6 +25,20 @@ export function formatClaudeModelMappingText(
 
   const fallback = requestedModel?.trim();
   return fallback || "未知";
+}
+
+export function formatModelRedirectText(
+  requestedModel: string | null | undefined,
+  redirect: ModelRedirect | null | undefined,
+  legacyMapping?: ClaudeModelMapping | null | undefined
+) {
+  const normalizedRedirect = normalizeModelRedirect(redirect);
+  if (normalizedRedirect) {
+    const first = normalizedRedirect.steps[0];
+    const last = normalizedRedirect.steps[normalizedRedirect.steps.length - 1];
+    return `${first.sourceModel} → ${last.targetModel}`;
+  }
+  return formatClaudeModelMappingText(requestedModel, legacyMapping);
 }
 
 type CodexServiceTierResultSetting = {

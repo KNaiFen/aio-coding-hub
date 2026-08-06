@@ -1,4 +1,9 @@
 import { normalizeClaudeModelMapping, type ClaudeModelMapping } from "./claudeModelMapping";
+import {
+  modelRedirectFromClaudeModelMapping,
+  normalizeModelRedirect,
+  type ModelRedirect,
+} from "./modelRedirect";
 
 export type ParsedRequestLogSpecialSetting = {
   type?: string;
@@ -72,6 +77,32 @@ export function resolveClaudeModelMappingFromSpecialSettings(
   }
 
   return mappings[mappings.length - 1] ?? null;
+}
+
+export function resolveModelRedirectFromSpecialSettings(
+  specialSettingsJson: string | null | undefined,
+  finalProviderId?: number | null
+): ModelRedirect | null {
+  const settings = parseRequestLogSpecialSettings(specialSettingsJson);
+  const redirects = settings
+    .filter((setting) => setting.type === "model_redirect")
+    .map(normalizeModelRedirect)
+    .filter((redirect): redirect is ModelRedirect => redirect !== null);
+
+  if (redirects.length > 0) {
+    if (finalProviderId != null) {
+      const finalProviderRedirect = redirects
+        .slice()
+        .reverse()
+        .find((redirect) => redirect.steps.some((step) => step.providerId === finalProviderId));
+      if (finalProviderRedirect) return finalProviderRedirect;
+    }
+    return redirects[redirects.length - 1] ?? null;
+  }
+
+  return modelRedirectFromClaudeModelMapping(
+    resolveClaudeModelMappingFromSpecialSettings(specialSettingsJson, finalProviderId)
+  );
 }
 
 export function hasClaudeModelMappingSpecialSetting(

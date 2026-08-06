@@ -226,6 +226,68 @@ fn validate_bundle_schema_version_rejects_mismatch() {
 }
 
 #[test]
+fn config_export_uses_typed_model_policy_ownership_and_rejects_invalid() {
+    let test_app = ConfigMigrateTestApp::new();
+    let app = test_app.handle();
+    let conn = test_app.db.open_connection().expect("open db");
+    conn.execute_batch(
+        r#"
+INSERT INTO providers(
+  cli_key, name, base_url, api_key_plaintext, claude_models_json,
+  model_policy_json, created_at, updated_at
+) VALUES
+  ('claude', 'legacy-policy-export', 'https://example.com', 'sk', '{"main_model":"legacy-main"}', NULL, 1, 1),
+  ('codex', 'ready-policy-export', 'https://example.com', 'sk', '{}', '{"version":1,"mode":"selected","rules":[{"source":"gpt-*","target":"upstream-*"}]}', 1, 1);
+        "#,
+    )
+    .expect("insert policy providers");
+    drop(conn);
+
+    let bundle = config_export(&app, &test_app.db).expect("export policies");
+    let legacy = bundle
+        .providers
+        .iter()
+        .find(|provider| provider.name == "legacy-policy-export")
+        .expect("legacy export");
+    assert!(legacy.model_policy.is_none());
+    assert_eq!(
+        legacy
+            .claude_models
+            .as_ref()
+            .and_then(|models| models.main_model.as_deref()),
+        Some("legacy-main")
+    );
+
+    let ready = bundle
+        .providers
+        .iter()
+        .find(|provider| provider.name == "ready-policy-export")
+        .expect("ready export");
+    assert_eq!(
+        ready
+            .model_policy
+            .as_ref()
+            .and_then(|policy| policy.resolve("gpt-5")),
+        Some("upstream-5".to_string())
+    );
+    assert!(ready.claude_models.is_none());
+
+    let conn = test_app.db.open_connection().expect("open db");
+    conn.execute(
+        "UPDATE providers SET model_policy_json = ?1 WHERE name = 'ready-policy-export'",
+        params![r#"{"version":99,"mode":"all","rules":[]}"#],
+    )
+    .expect("corrupt policy");
+    drop(conn);
+    let Err(error) = config_export(&app, &test_app.db) else {
+        panic!("invalid policy must fail export");
+    };
+    assert_eq!(error.code(), "PROVIDER_MODEL_POLICY_INVALID");
+    assert!(error.to_string().contains("ready-policy-export"));
+    assert!(error.to_string().contains("reset and save"));
+}
+
+#[test]
 fn config_import_rejects_invalid_workspace_boundary_values() {
     {
         let test_app = ConfigMigrateTestApp::new();
@@ -441,6 +503,8 @@ fn config_import_v2_restores_full_prompt_and_skill_payload() {
             oauth_last_refreshed_at: Some(1_999_999_999),
             oauth_last_error: Some("last error".to_string()),
             claude_models_json: "{\"main\":\"gpt-5.4\"}".to_string(),
+            claude_models: None,
+            model_policy: None,
             supported_models_json: "{\"gpt-5.4\":true}".to_string(),
             model_mapping_json: "{\"gpt-5.4\":\"gpt-5.4\"}".to_string(),
             enabled: true,
@@ -525,7 +589,7 @@ fn config_import_v2_restores_full_prompt_and_skill_payload() {
                 },
             ],
         }]),
-        ..make_test_bundle(CONFIG_BUNDLE_SCHEMA_VERSION)
+        ..make_test_bundle(CONFIG_BUNDLE_SCHEMA_VERSION_V2)
     };
 
     let result = config_import(&app, &test_app.db, bundle).expect("config import");
@@ -548,6 +612,18 @@ fn config_import_v2_restores_full_prompt_and_skill_payload() {
         )
         .expect("oauth id token");
     assert_eq!(oauth_id_token.as_deref(), Some("id-token"));
+
+    let model_policy_json: Option<String> = conn
+        .query_row(
+            "SELECT model_policy_json FROM providers WHERE name = 'oauth-provider'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("model policy");
+    assert_eq!(
+        model_policy_json.as_deref(),
+        Some(r#"{"version":1,"mode":"all","rules":[]}"#)
+    );
 
     let skill_enabled_count: i64 = conn
         .query_row("SELECT COUNT(1) FROM workspace_skill_enabled", [], |row| {

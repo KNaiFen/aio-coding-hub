@@ -1,6 +1,81 @@
 use super::*;
 
 #[test]
+fn migrate_v37_to_v38_adds_model_policy_without_clearing_legacy_fields() {
+    let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
+    conn.execute_batch(
+        r#"
+CREATE TABLE providers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  cli_key TEXT NOT NULL,
+  name TEXT NOT NULL,
+  base_url TEXT NOT NULL,
+  api_key_plaintext TEXT NOT NULL,
+  claude_models_json TEXT NOT NULL DEFAULT '{}',
+  supported_models_json TEXT NOT NULL DEFAULT '{}',
+  model_mapping_json TEXT NOT NULL DEFAULT '{}',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+INSERT INTO providers(
+  cli_key, name, base_url, api_key_plaintext, claude_models_json,
+  supported_models_json, model_mapping_json, created_at, updated_at
+) VALUES
+  ('claude', 'legacy', 'https://example.com', 'sk', '{"main_model":"legacy-main"}', '{"legacy":1}', '{"legacy":2}', 1, 1),
+  ('codex', 'default', 'https://example.com', 'sk', '{}', '{"legacy":3}', '{"legacy":4}', 1, 1);
+PRAGMA user_version = 37;
+        "#,
+    )
+    .expect("insert v37 providers");
+
+    v37_to_v38::migrate_v37_to_v38(&mut conn).expect("migrate v37->v38");
+
+    let rows: Vec<(String, Option<String>, String, String)> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT cli_key, model_policy_json, supported_models_json, model_mapping_json FROM providers ORDER BY id DESC LIMIT 2",
+            )
+            .expect("prepare policy rows");
+        stmt.query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
+        .expect("query policy rows")
+        .collect::<Result<_, _>>()
+        .expect("read policy rows")
+    };
+    assert_eq!(rows[0].0, "codex");
+    assert_eq!(
+        rows[0].1.as_deref(),
+        Some(r#"{"version":1,"mode":"all","rules":[]}"#)
+    );
+    assert_eq!(rows[0].2, r#"{"legacy":3}"#);
+    assert_eq!(rows[0].3, r#"{"legacy":4}"#);
+    assert_eq!(rows[1].0, "claude");
+    assert!(rows[1].1.is_none());
+    assert_eq!(rows[1].2, r#"{"legacy":1}"#);
+    assert_eq!(rows[1].3, r#"{"legacy":2}"#);
+
+    conn.execute(
+        "INSERT INTO providers(cli_key, name, base_url, api_key_plaintext, created_at, updated_at) VALUES ('gemini', 'new', 'https://example.com', 'sk', 1, 1)",
+        [],
+    )
+    .expect("insert provider using v38 model policy default");
+    let default_policy: Option<String> = conn
+        .query_row(
+            "SELECT model_policy_json FROM providers WHERE name = 'new'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read v38 model policy default");
+    assert_eq!(
+        default_policy.as_deref(),
+        Some(r#"{"version":1,"mode":"all","rules":[]}"#)
+    );
+
+    v37_to_v38::migrate_v37_to_v38(&mut conn).expect("migrate v37->v38 twice");
+}
+
+#[test]
 fn migrate_v32_to_v33_backfills_pool_and_default_route_orders() {
     let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
     conn.execute_batch(

@@ -121,6 +121,22 @@ pub(super) struct ClaudeModelMapping {
     pub(super) applied: bool,
 }
 
+#[derive(Debug, Serialize, Clone, PartialEq, Eq, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ModelRedirectStep {
+    pub(super) stage: String,
+    pub(super) provider_id: i64,
+    pub(super) provider_name: String,
+    pub(super) source_model: String,
+    pub(super) target_model: String,
+}
+
+#[derive(Debug, Serialize, Clone, PartialEq, Eq, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ModelRedirect {
+    pub(super) steps: Vec<ModelRedirectStep>,
+}
+
 #[derive(Debug, Serialize, Clone, specta::Type)]
 pub(crate) struct GatewayRequestEvent {
     trace_id: String,
@@ -147,6 +163,7 @@ pub(crate) struct GatewayRequestEvent {
     // frontend never re-derives the formula (single source of truth).
     effective_input_tokens: Option<i64>,
     claude_model_mapping: Option<ClaudeModelMapping>,
+    model_redirect: Option<ModelRedirect>,
 }
 
 #[derive(Debug, Serialize, Clone, specta::Type)]
@@ -194,6 +211,7 @@ pub(crate) struct GatewayAttemptEvent {
     pub(super) circuit_failure_count: Option<u32>,
     pub(super) circuit_failure_threshold: Option<u32>,
     pub(super) claude_model_mapping: Option<ClaudeModelMapping>,
+    pub(super) model_redirect: Option<ModelRedirect>,
 }
 
 #[derive(Debug, Serialize, Clone, specta::Type)]
@@ -333,6 +351,25 @@ fn bound_optional_claude_model_mapping(
     mapping.map(bound_claude_model_mapping)
 }
 
+fn bound_model_redirect(mut redirect: ModelRedirect) -> ModelRedirect {
+    for step in &mut redirect.steps {
+        step.stage = truncate_chars(std::mem::take(&mut step.stage), EVENT_STATE_MAX_CHARS);
+        step.provider_name = truncate_chars(
+            std::mem::take(&mut step.provider_name),
+            EVENT_SHORT_TEXT_MAX_CHARS,
+        );
+        step.source_model = truncate_chars(
+            std::mem::take(&mut step.source_model),
+            EVENT_SHORT_TEXT_MAX_CHARS,
+        );
+        step.target_model = truncate_chars(
+            std::mem::take(&mut step.target_model),
+            EVENT_SHORT_TEXT_MAX_CHARS,
+        );
+    }
+    redirect
+}
+
 fn bound_failover_attempt(mut attempt: FailoverAttempt) -> FailoverAttempt {
     attempt.provider_name = truncate_chars(attempt.provider_name, EVENT_SHORT_TEXT_MAX_CHARS);
     attempt.base_url = truncate_chars(attempt.base_url, EVENT_URL_MAX_CHARS);
@@ -361,6 +398,7 @@ fn bound_request_event(mut payload: GatewayRequestEvent) -> GatewayRequestEvent 
     payload.attempts = trim_request_event_attempts(payload.attempts);
     payload.claude_model_mapping =
         bound_optional_claude_model_mapping(payload.claude_model_mapping);
+    payload.model_redirect = payload.model_redirect.map(bound_model_redirect);
     payload
 }
 
@@ -409,6 +447,7 @@ pub(super) fn bound_attempt_event(mut payload: GatewayAttemptEvent) -> GatewayAt
     payload.outcome = truncate_chars(payload.outcome, EVENT_STATE_MAX_CHARS);
     payload.claude_model_mapping =
         bound_optional_claude_model_mapping(payload.claude_model_mapping);
+    payload.model_redirect = payload.model_redirect.map(bound_model_redirect);
     payload
 }
 
@@ -442,6 +481,7 @@ pub(super) fn emit_request_event<R: tauri::Runtime>(
     ttfb_ms: Option<u128>,
     attempts: Vec<FailoverAttempt>,
     claude_model_mapping: Option<ClaudeModelMapping>,
+    model_redirect: Option<ModelRedirect>,
     usage: Option<usage::UsageMetrics>,
 ) {
     emit_request_signal(
@@ -483,6 +523,7 @@ pub(super) fn emit_request_event<R: tauri::Runtime>(
         cache_creation_1h_input_tokens: usage.cache_creation_1h_input_tokens,
         effective_input_tokens,
         claude_model_mapping,
+        model_redirect,
     };
 
     gated_emit(
@@ -607,6 +648,18 @@ mod tests {
             provider_id: 7,
             provider_name: "Provider A".to_string(),
             applied: true,
+        }
+    }
+
+    fn sample_redirect() -> ModelRedirect {
+        ModelRedirect {
+            steps: vec![ModelRedirectStep {
+                stage: "provider".to_string(),
+                provider_id: 7,
+                provider_name: "Provider A".to_string(),
+                source_model: "gpt-original".to_string(),
+                target_model: "gpt-upstream".to_string(),
+            }],
         }
     }
 
@@ -767,6 +820,7 @@ mod tests {
             // claude + non-bridged provider: effective input == raw input.
             effective_input_tokens: Some(1200),
             claude_model_mapping: Some(fixture_mapping()),
+            model_redirect: None,
         };
 
         assert_matches_fixture(
@@ -839,6 +893,7 @@ mod tests {
             circuit_failure_count: Some(0),
             circuit_failure_threshold: Some(5),
             claude_model_mapping: Some(fixture_mapping()),
+            model_redirect: None,
         };
 
         assert_matches_fixture(
@@ -1012,6 +1067,7 @@ mod tests {
                 provider_name: repeated_ascii(EVENT_SHORT_TEXT_MAX_CHARS + 1),
                 applied: true,
             }),
+            model_redirect: None,
         };
 
         let bounded = bound_attempt_event(payload);
@@ -1075,6 +1131,7 @@ mod tests {
             circuit_failure_count: None,
             circuit_failure_threshold: None,
             claude_model_mapping: Some(sample_mapping()),
+            model_redirect: Some(sample_redirect()),
         };
 
         let value = serde_json::to_value(payload).expect("serializable attempt event");
@@ -1087,6 +1144,18 @@ mod tests {
                 "providerId": 7,
                 "providerName": "Provider A",
                 "applied": true,
+            }))
+        );
+        assert_eq!(
+            value.get("model_redirect"),
+            Some(&json!({
+                "steps": [{
+                    "stage": "provider",
+                    "providerId": 7,
+                    "providerName": "Provider A",
+                    "sourceModel": "gpt-original",
+                    "targetModel": "gpt-upstream"
+                }]
             }))
         );
     }
@@ -1116,9 +1185,11 @@ mod tests {
             cache_creation_1h_input_tokens: None,
             effective_input_tokens: None,
             claude_model_mapping: None,
+            model_redirect: None,
         };
 
         let value = serde_json::to_value(payload).expect("serializable request event");
         assert_eq!(value.get("claude_model_mapping"), Some(&json!(null)));
+        assert_eq!(value.get("model_redirect"), Some(&json!(null)));
     }
 }

@@ -1,6 +1,13 @@
 import type { ReactElement } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render as rtlRender,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { ProviderEditorDialog } from "../ProviderEditorDialog";
@@ -95,6 +102,8 @@ function makeProvider(partial: Partial<ProviderSummary> = {}): ProviderSummary {
     oauth_last_error: null,
     source_provider_id: null,
     bridge_type: null,
+    model_policy_status: "ready",
+    model_policy: { version: 1, mode: "all", rules: [] },
     api_key_configured: partial.api_key_configured ?? false,
     ...partial,
     stream_idle_timeout_seconds: partial.stream_idle_timeout_seconds ?? null,
@@ -292,14 +301,15 @@ describe("pages/providers/ProviderEditorDialog", () => {
       target: { value: "https://example.com/v1" },
     });
 
-    fireEvent.click(dialog.getByText("Claude 模型映射"));
-    fireEvent.change(dialog.getByPlaceholderText(/minimax-text-01/), {
+    fireEvent.click(dialog.getByText("模型路由策略"));
+    fireEvent.click(dialog.getByRole("button", { name: "添加规则" }));
+    fireEvent.change(dialog.getByLabelText("源模型 1"), {
       target: { value: "x".repeat(201) },
     });
     fireEvent.click(dialog.getByRole("button", { name: "保存" }));
-    expect(vi.mocked(toast)).toHaveBeenCalledWith(expect.stringContaining("主模型 过长"));
+    expect(vi.mocked(toast)).toHaveBeenCalledWith(expect.stringContaining("源模型最多 200"));
 
-    fireEvent.change(dialog.getByPlaceholderText(/minimax-text-01/), { target: { value: "ok" } });
+    fireEvent.change(dialog.getByLabelText("源模型 1"), { target: { value: "ok" } });
     fireEvent.click(dialog.getByRole("button", { name: "保存" }));
 
     await waitFor(() =>
@@ -949,7 +959,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
     expect(vi.mocked(providerUpsert)).not.toHaveBeenCalled();
   });
 
-  it("syncs haiku sonnet opus with main model by default", () => {
+  it("edits a generic model rule", () => {
     render(
       <ProviderEditorDialog
         mode="create"
@@ -961,23 +971,18 @@ describe("pages/providers/ProviderEditorDialog", () => {
     );
 
     const dialog = within(screen.getByRole("dialog"));
-    fireEvent.click(dialog.getByText("Claude 模型映射"));
-    const mainInput = dialog.getByPlaceholderText(/minimax-text-01/);
-    const haikuInput = dialog.getByPlaceholderText(/glm-4-plus-haiku/);
-    const sonnetInput = dialog.getByPlaceholderText(/glm-4-plus-sonnet/);
-    const opusInput = dialog.getByPlaceholderText(/glm-4-plus-opus/);
-
-    fireEvent.change(dialog.getByPlaceholderText(/minimax-text-01/), {
-      target: { value: "glm-main" },
+    fireEvent.click(dialog.getByText("模型路由策略"));
+    fireEvent.click(dialog.getByRole("button", { name: "添加规则" }));
+    fireEvent.change(dialog.getByLabelText("源模型 1"), { target: { value: "gpt-*" } });
+    fireEvent.change(dialog.getByLabelText("目标模型 1"), {
+      target: { value: "upstream-*" },
     });
 
-    expect(mainInput).toHaveValue("glm-main");
-    expect(haikuInput).toHaveValue("glm-main");
-    expect(sonnetInput).toHaveValue("glm-main");
-    expect(opusInput).toHaveValue("glm-main");
+    expect(dialog.getByLabelText("源模型 1")).toHaveValue("gpt-*");
+    expect(dialog.getByLabelText("目标模型 1")).toHaveValue("upstream-*");
   });
 
-  it("preserves custom haiku value when main model changes again", () => {
+  it("supports searching and deleting a generic model rule", () => {
     render(
       <ProviderEditorDialog
         mode="create"
@@ -989,22 +994,57 @@ describe("pages/providers/ProviderEditorDialog", () => {
     );
 
     const dialog = within(screen.getByRole("dialog"));
-    fireEvent.click(dialog.getByText("Claude 模型映射"));
+    fireEvent.click(dialog.getByText("模型路由策略"));
+    fireEvent.click(dialog.getByRole("button", { name: "添加规则" }));
+    fireEvent.change(dialog.getByLabelText("源模型 1"), { target: { value: "gpt-5.4" } });
+    fireEvent.change(dialog.getByLabelText("搜索规则"), { target: { value: "5.4" } });
+    expect(dialog.getByLabelText("源模型 1")).toBeInTheDocument();
+    fireEvent.click(dialog.getByRole("button", { name: "删除规则 1" }));
+    expect(dialog.getByRole("button", { name: "添加规则" })).toHaveFocus();
+  });
 
-    const mainInput = dialog.getByPlaceholderText(/minimax-text-01/);
-    const haikuInput = dialog.getByPlaceholderText(/glm-4-plus-haiku/);
-    const sonnetInput = dialog.getByPlaceholderText(/glm-4-plus-sonnet/);
-    const opusInput = dialog.getByPlaceholderText(/glm-4-plus-opus/);
+  it("guards unsaved model policy changes but ignores search-only changes", () => {
+    const onOpenChange = vi.fn();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
 
-    fireEvent.change(mainInput, { target: { value: "glm-main-a" } });
-    fireEvent.change(haikuInput, { target: { value: "glm-haiku-custom" } });
-    fireEvent.change(mainInput, { target: { value: "glm-main-b" } });
+    render(
+      <ProviderEditorDialog
+        mode="create"
+        open={true}
+        cliKey="codex"
+        onSaved={vi.fn()}
+        onOpenChange={onOpenChange}
+      />
+    );
 
-    // haiku was customized so it should NOT be overwritten
-    expect(haikuInput).toHaveValue("glm-haiku-custom");
-    // sonnet and opus still matched old main_model, so they sync
-    expect(sonnetInput).toHaveValue("glm-main-b");
-    expect(opusInput).toHaveValue("glm-main-b");
+    const dialog = within(screen.getByRole("dialog"));
+    fireEvent.click(dialog.getByText("模型路由策略"));
+    fireEvent.click(dialog.getByRole("button", { name: "添加规则" }));
+    fireEvent.click(dialog.getByRole("button", { name: "取消" }));
+    expect(confirmSpy).toHaveBeenCalledWith("有未保存的修改，确定关闭吗？");
+    expect(onOpenChange).not.toHaveBeenCalled();
+
+    confirmSpy.mockReturnValue(true);
+    fireEvent.click(dialog.getByRole("button", { name: "取消" }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    confirmSpy.mockRestore();
+
+    cleanup();
+    onOpenChange.mockClear();
+    render(
+      <ProviderEditorDialog
+        mode="create"
+        open={true}
+        cliKey="codex"
+        onSaved={vi.fn()}
+        onOpenChange={onOpenChange}
+      />
+    );
+    const searchDialog = within(screen.getByRole("dialog"));
+    fireEvent.click(searchDialog.getByText("模型路由策略"));
+    fireEvent.change(searchDialog.getByLabelText("搜索规则"), { target: { value: "gpt" } });
+    fireEvent.click(searchDialog.getByRole("button", { name: "取消" }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
   it("supports edit mode, drives UI handlers, and blocks close while saving", async () => {
@@ -1056,13 +1096,11 @@ describe("pages/providers/ProviderEditorDialog", () => {
     // Toggle enabled switch (covers Switch onCheckedChange handler)
     fireEvent.click(dialog.getByRole("switch"));
 
-    // Drive Claude models onChange handlers
-    fireEvent.click(dialog.getByText("Claude 模型映射"));
-    fireEvent.change(dialog.getByPlaceholderText(/minimax-text-01/), { target: { value: "m" } });
-    fireEvent.change(dialog.getByPlaceholderText(/kimi-k2-thinking/), { target: { value: "r" } });
-    fireEvent.change(dialog.getByPlaceholderText(/glm-4-plus-haiku/), { target: { value: "h" } });
-    fireEvent.change(dialog.getByPlaceholderText(/glm-4-plus-sonnet/), { target: { value: "s" } });
-    fireEvent.change(dialog.getByPlaceholderText(/glm-4-plus-opus/), { target: { value: "o" } });
+    // Drive generic model policy handlers
+    fireEvent.click(dialog.getByText("模型路由策略"));
+    fireEvent.click(dialog.getByRole("button", { name: "添加规则" }));
+    fireEvent.change(dialog.getByLabelText("源模型 1"), { target: { value: "gpt-*" } });
+    fireEvent.change(dialog.getByLabelText("目标模型 1"), { target: { value: "upstream-*" } });
 
     // Start saving and block close while saving
     fireEvent.click(dialog.getByRole("button", { name: "保存" }));

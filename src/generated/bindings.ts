@@ -2798,6 +2798,7 @@ export type GatewayAttemptEvent = {
   circuit_failure_count: number | null;
   circuit_failure_threshold: number | null;
   claude_model_mapping: ClaudeModelMapping | null;
+  model_redirect: ModelRedirect | null;
 };
 export type GatewayCircuitEvent = {
   trace_id: string;
@@ -2870,6 +2871,7 @@ export type GatewayRequestEvent = {
   cache_creation_1h_input_tokens: number | null;
   effective_input_tokens: number | null;
   claude_model_mapping: ClaudeModelMapping | null;
+  model_redirect: ModelRedirect | null;
 };
 export type GatewayRequestSignalEvent = {
   trace_id: string;
@@ -3181,6 +3183,14 @@ export type ModelPricesSyncReport = {
   updated: number;
   skipped: number;
   total: number;
+};
+export type ModelRedirect = { steps: ModelRedirectStep[] };
+export type ModelRedirectStep = {
+  stage: string;
+  providerId: number;
+  providerName: string;
+  sourceModel: string;
+  targetModel: string;
 };
 export type NoticeLevel = "info" | "success" | "warning" | "error";
 export type NoticeSendInput = { level: NoticeLevel; title: string | null; body: string };
@@ -3615,6 +3625,14 @@ export type ProviderLimitUsageRow = {
   window_weekly_start_ts: number;
   window_monthly_start_ts: number;
 };
+export type ProviderModelMode = "all" | "selected";
+export type ProviderModelPolicyStatus = "legacy" | "ready" | "invalid";
+export type ProviderModelPolicyV1 = {
+  version: number;
+  mode: ProviderModelMode;
+  rules: ProviderModelRule[];
+};
+export type ProviderModelRule = { source: string; target: string | null };
 export type ProviderOAuthDeviceCodeCancelResult = { cancelled: boolean };
 export type ProviderOAuthDeviceCodePollInput = {
   providerId: number;
@@ -3676,6 +3694,8 @@ export type ProviderSummary = {
   base_urls: string[];
   base_url_mode: ProviderBaseUrlMode;
   claude_models: ClaudeModels;
+  model_policy: ProviderModelPolicyV1 | null;
+  model_policy_status: ProviderModelPolicyStatus;
   enabled: boolean;
   priority: number;
   cost_multiplier: number;
@@ -3713,6 +3733,7 @@ export type ProviderUpsertInput = {
   costMultiplier: number;
   priority: number | null;
   claudeModels: ClaudeModels | null;
+  modelPolicy: ProviderModelPolicyV1 | null;
   limit5hUsd: number | null;
   limitDailyUsd: number | null;
   dailyResetMode: DailyResetMode | null;

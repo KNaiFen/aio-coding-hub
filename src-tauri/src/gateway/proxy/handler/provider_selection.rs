@@ -12,6 +12,55 @@ pub(super) struct ProviderSelection {
     pub(super) session_bound_sort_mode_id: Option<Option<i64>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ModelPolicyFilterResult {
+    pub(super) original_provider_ids: Vec<i64>,
+    pub(super) ineligible_provider_ids: Vec<i64>,
+    pub(super) invalid_provider_ids: Vec<i64>,
+}
+
+pub(super) fn filter_providers_by_model_policy(
+    providers: &mut Vec<providers::ProviderForGateway>,
+    requested_model: Option<&str>,
+) -> ModelPolicyFilterResult {
+    let original_provider_ids = providers.iter().map(|provider| provider.id).collect();
+    let Some(requested_model) = requested_model.filter(|model| !model.is_empty()) else {
+        return ModelPolicyFilterResult {
+            original_provider_ids,
+            ineligible_provider_ids: Vec::new(),
+            invalid_provider_ids: Vec::new(),
+        };
+    };
+
+    let mut ineligible_provider_ids = Vec::new();
+    let mut invalid_provider_ids = Vec::new();
+    providers.retain(|provider| match provider.model_policy_status {
+        providers::ProviderModelPolicyStatus::Legacy => true,
+        providers::ProviderModelPolicyStatus::Ready => {
+            let Some(policy) = provider.model_policy.as_ref() else {
+                invalid_provider_ids.push(provider.id);
+                return false;
+            };
+            if policy.resolve(requested_model).is_some() {
+                true
+            } else {
+                ineligible_provider_ids.push(provider.id);
+                false
+            }
+        }
+        providers::ProviderModelPolicyStatus::Invalid => {
+            invalid_provider_ids.push(provider.id);
+            false
+        }
+    });
+
+    ModelPolicyFilterResult {
+        original_provider_ids,
+        ineligible_provider_ids,
+        invalid_provider_ids,
+    }
+}
+
 pub(super) fn select_providers_with_session_binding<R: tauri::Runtime>(
     state: &GatewayAppState<R>,
     cli_key: &str,

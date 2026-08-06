@@ -6,6 +6,8 @@ import type {
   ClaudeModels,
   ProviderExtensionValuesInput,
   ProviderOAuthDeviceCodeStartResult,
+  ProviderModelPolicyStatus,
+  ProviderModelPolicyV1,
   ProviderSummary,
 } from "../../services/providers/providers";
 import type { ProviderEditorDialogFormInput } from "../../schemas/providerEditorDialog";
@@ -36,6 +38,7 @@ import {
   normalizeTagsForCostMultiplier,
   withCx2ccDefaultModel,
 } from "./providerEditorUtils";
+import { cloneProviderModelPolicy, DEFAULT_PROVIDER_MODEL_POLICY } from "./providerModelPolicy";
 import { copyApiKey as copyApiKeyAction } from "./useProviderEditorActions";
 import {
   handleOAuthLogin as oauthLoginAction,
@@ -217,6 +220,11 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
   const [baseUrlRows, setBaseUrlRows] = useState<BaseUrlRow[]>(() => [newBaseUrlRow()]);
   const [pingingAll, setPingingAll] = useState(false);
   const [claudeModels, setClaudeModels] = useState<ClaudeModels>({});
+  const [modelPolicy, setModelPolicy] = useState<ProviderModelPolicyV1 | null>(() =>
+    cloneProviderModelPolicy(DEFAULT_PROVIDER_MODEL_POLICY)
+  );
+  const [modelPolicyStatus, setModelPolicyStatus] = useState<ProviderModelPolicyStatus>("ready");
+  const [modelPolicyDirty, setModelPolicyDirty] = useState(false);
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
   const [streamIdleTimeoutSeconds, setStreamIdleTimeoutSeconds] = useState("");
@@ -262,6 +270,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
   const editProviderSnapshotRef = useRef<ProviderSummary | null>(null);
 
   const { register, reset, setValue, watch } = form;
+  const formDirty = form.formState.isDirty;
   const enabled = watch("enabled");
   const dailyResetMode = watch("daily_reset_mode");
   const limit5hUsd = watch("limit_5h_usd");
@@ -465,14 +474,28 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
   }, []);
 
   const requestOpenChange = useCallback(
-    (nextOpen: boolean) => {
+    (nextOpen: boolean, options?: { bypassDirty?: boolean }) => {
       if (!nextOpen) {
+        if (
+          !options?.bypassDirty &&
+          (form.formState.isDirty || modelPolicyDirty) &&
+          typeof window !== "undefined" &&
+          !window.confirm("有未保存的修改，确定关闭吗？")
+        ) {
+          return;
+        }
         cancelActiveOAuthLoginAttempt();
       }
       onOpenChange(nextOpen);
     },
-    [cancelActiveOAuthLoginAttempt, onOpenChange]
+    [cancelActiveOAuthLoginAttempt, form.formState.isDirty, modelPolicyDirty, onOpenChange]
   );
+
+  const setModelPolicyFromUi = useCallback((next: ProviderModelPolicyV1) => {
+    setModelPolicy(next);
+    setModelPolicyStatus("ready");
+    setModelPolicyDirty(true);
+  }, []);
 
   useProviderEditorEffects({
     open,
@@ -491,6 +514,9 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
     setBaseUrlRows,
     setPingingAll,
     setClaudeModels,
+    setModelPolicy,
+    setModelPolicyStatus,
+    setModelPolicyDirty,
     setTags,
     setTagInput,
     setStreamIdleTimeoutSeconds,
@@ -528,6 +554,8 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
       baseUrlRows,
       tags,
       claudeModels,
+      modelPolicyStatus,
+      modelPolicy,
       streamIdleTimeoutSeconds,
       apiKeyConfigured,
       isCodexGatewaySource,
@@ -549,6 +577,8 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
       baseUrlRows,
       tags,
       claudeModels,
+      modelPolicyStatus,
+      modelPolicy,
       streamIdleTimeoutSeconds,
       apiKeyConfigured,
       isCodexGatewaySource,
@@ -712,6 +742,11 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
     setPingingAll,
     newBaseUrlRow,
     claudeModels,
+    modelPolicy,
+    modelPolicyStatus,
+    modelPolicyDirty,
+    setModelPolicy: setModelPolicyFromUi,
+    formDirty,
     setClaudeModels,
     claudeModelCount,
     streamIdleTimeoutSeconds,

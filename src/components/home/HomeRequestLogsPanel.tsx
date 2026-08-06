@@ -49,9 +49,9 @@ import {
 } from "./requestLogPresentation";
 import { FastModeBadge, FolderBadge, FreeBadge, SessionReuseBadge } from "./LogBadges";
 import {
-  formatClaudeModelMappingText,
+  formatModelRedirectText,
   hasPriorityServiceTierSpecialSetting,
-  resolveClaudeModelMappingFromSpecialSettings,
+  resolveModelRedirectFromSpecialSettings,
 } from "./requestLogSpecialSettings";
 import { getErrorCodeLabel } from "./requestLogErrorLabels";
 import { Clock, CheckCircle2, XCircle, Server, RefreshCw, ArrowUpRight } from "lucide-react";
@@ -140,9 +140,9 @@ const RequestLogCard = memo(function RequestLogCard({
 
   const providerTitle = providerText;
 
-  const modelText = formatClaudeModelMappingText(
+  const modelText = formatModelRedirectText(
     log.requested_model,
-    resolveClaudeModelMappingFromSpecialSettings(log.special_settings_json, log.final_provider_id)
+    resolveModelRedirectFromSpecialSettings(log.special_settings_json, log.final_provider_id)
   );
 
   const cliLabel = cliShortLabel(log.cli_key);

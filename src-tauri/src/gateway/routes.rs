@@ -362,6 +362,17 @@ mod tests {
         tokio::sync::oneshot::Receiver<String>,
         tokio::task::JoinHandle<()>,
     ) {
+        spawn_capturing_status_json_upstream("200 OK", body).await
+    }
+
+    async fn spawn_capturing_status_json_upstream(
+        status: &'static str,
+        body: &'static str,
+    ) -> (
+        String,
+        tokio::sync::oneshot::Receiver<String>,
+        tokio::task::JoinHandle<()>,
+    ) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind capturing json upstream stub");
@@ -376,7 +387,7 @@ mod tests {
                     .unwrap_or_default();
                 let _ = tx.send(captured_body);
                 let response = format!(
-                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
                     body.len(),
                     body
                 );
@@ -646,6 +657,17 @@ mod tests {
         base_url: String,
         priority: i64,
     ) -> i64 {
+        insert_provider_with_priority_and_policy(db, cli_key, name, base_url, priority, None)
+    }
+
+    fn insert_provider_with_priority_and_policy(
+        db: &db::Db,
+        cli_key: &str,
+        name: &str,
+        base_url: String,
+        priority: i64,
+        model_policy: Option<providers::ProviderModelPolicyV1>,
+    ) -> i64 {
         let provider_id = providers::upsert(
             db,
             providers::ProviderUpsertParams {
@@ -660,6 +682,7 @@ mod tests {
                 cost_multiplier: 1.0,
                 priority: Some(priority),
                 claude_models: None,
+                model_policy,
                 limit_5h_usd: None,
                 limit_daily_usd: None,
                 daily_reset_mode: None,
@@ -679,6 +702,20 @@ mod tests {
         .id;
         append_default_route_provider(db, cli_key, provider_id);
         provider_id
+    }
+
+    fn selected_model_policy(
+        source: &str,
+        target: Option<&str>,
+    ) -> providers::ProviderModelPolicyV1 {
+        providers::ProviderModelPolicyV1 {
+            version: 1,
+            mode: providers::ProviderModelMode::Selected,
+            rules: vec![providers::ProviderModelRule {
+                source: source.to_string(),
+                target: target.map(str::to_string),
+            }],
+        }
     }
 
     fn append_default_route_provider(db: &db::Db, cli_key: &str, provider_id: i64) {
@@ -720,6 +757,7 @@ mod tests {
                 cost_multiplier: 1.0,
                 priority: Some(priority),
                 claude_models: None,
+                model_policy: None,
                 limit_5h_usd: None,
                 limit_daily_usd: None,
                 daily_reset_mode: None,
@@ -742,6 +780,15 @@ mod tests {
     }
 
     fn insert_cx2cc_bridge_provider(db: &db::Db, source_provider_id: i64, priority: i64) -> i64 {
+        insert_cx2cc_bridge_provider_with_policy(db, source_provider_id, priority, None)
+    }
+
+    fn insert_cx2cc_bridge_provider_with_policy(
+        db: &db::Db,
+        source_provider_id: i64,
+        priority: i64,
+        model_policy: Option<providers::ProviderModelPolicyV1>,
+    ) -> i64 {
         let provider_id = providers::upsert(
             db,
             providers::ProviderUpsertParams {
@@ -756,6 +803,7 @@ mod tests {
                 cost_multiplier: 1.0,
                 priority: Some(priority),
                 claude_models: None,
+                model_policy,
                 limit_5h_usd: None,
                 limit_daily_usd: None,
                 daily_reset_mode: None,
@@ -3374,6 +3422,284 @@ module.exports.activate = function activate(api) {
             log.error_code.as_deref(),
             Some(crate::gateway::proxy::GatewayErrorCode::NoEnabledProvider.as_str())
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn provider_model_routing_failover_recomputes_redirect_from_original_model() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 2;
+        app_settings.provider_cooldown_seconds = 0;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("provider-model-routing-failover.sqlite"))
+            .expect("init test db");
+        let first_error = r#"{"error":{"message":"temporary upstream failure"}}"#;
+        let success_body = r#"{"id":"stub-ok","object":"chat.completion","choices":[]}"#;
+        let (first_base_url, first_capture_rx, first_task) =
+            spawn_capturing_status_json_upstream("500 Internal Server Error", first_error).await;
+        let (second_base_url, second_capture_rx, second_task) =
+            spawn_capturing_json_upstream(success_body).await;
+        let first_provider_id = insert_provider_with_priority_and_policy(
+            &db,
+            "codex",
+            "Redirect A",
+            first_base_url,
+            0,
+            Some(selected_model_policy("gpt-original", Some("model-a"))),
+        );
+        let second_provider_id = insert_provider_with_priority_and_policy(
+            &db,
+            "codex",
+            "Redirect B",
+            second_base_url,
+            1,
+            Some(selected_model_policy("gpt-original", Some("model-b"))),
+        );
+
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+        let router = build_router(gateway_state(app_handle, db, log_tx));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/v1/chat/completions")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"model":"gpt-original","messages":[{"role":"user","content":"hello"}]}"#,
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let first_body: Value = serde_json::from_str(
+            &first_capture_rx
+                .await
+                .expect("first upstream request capture"),
+        )
+        .expect("first upstream body");
+        let second_body: Value = serde_json::from_str(
+            &second_capture_rx
+                .await
+                .expect("second upstream request capture"),
+        )
+        .expect("second upstream body");
+        assert_eq!(
+            first_body.get("model").and_then(Value::as_str),
+            Some("model-a")
+        );
+        assert_eq!(
+            second_body.get("model").and_then(Value::as_str),
+            Some("model-b")
+        );
+
+        let log = recv_terminal_request_log(&mut log_rx).await;
+        let special_settings: Value = serde_json::from_str(
+            log.special_settings_json
+                .as_deref()
+                .expect("model redirect settings"),
+        )
+        .expect("special settings json");
+        let redirects: Vec<&Value> = special_settings
+            .as_array()
+            .expect("special settings array")
+            .iter()
+            .filter(|setting| setting.get("type").and_then(Value::as_str) == Some("model_redirect"))
+            .collect();
+        assert_eq!(redirects.len(), 2);
+        for (redirect, provider_id, target) in [
+            (redirects[0], first_provider_id, "model-a"),
+            (redirects[1], second_provider_id, "model-b"),
+        ] {
+            let step = redirect
+                .get("steps")
+                .and_then(Value::as_array)
+                .and_then(|steps| steps.first())
+                .expect("model redirect step");
+            assert_eq!(
+                step.get("providerId").and_then(Value::as_i64),
+                Some(provider_id)
+            );
+            assert_eq!(
+                step.get("sourceModel").and_then(Value::as_str),
+                Some("gpt-original")
+            );
+            assert_eq!(
+                step.get("targetModel").and_then(Value::as_str),
+                Some(target)
+            );
+        }
+
+        first_task.abort();
+        second_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn provider_model_routing_rejects_forced_ineligible_provider() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("provider-model-routing-forced.sqlite"))
+            .expect("init test db");
+        let provider_id = insert_provider_with_priority_and_policy(
+            &db,
+            "codex",
+            "Forced Ineligible",
+            "http://127.0.0.1:9".to_string(),
+            0,
+            Some(selected_model_policy("gpt-other", None)),
+        );
+        let (log_tx, _log_rx) = tokio::sync::mpsc::channel(4);
+        let router = build_router(gateway_state(app_handle, db, log_tx));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(format!(
+                "/codex/_aio/provider/{provider_id}/v1/chat/completions"
+            ))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"model":"gpt-original","messages":[{"role":"user","content":"hello"}]}"#,
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        let payload: Value = serde_json::from_slice(&body).expect("json body");
+        assert_eq!(
+            payload.get("error_code").and_then(Value::as_str),
+            Some(
+                crate::gateway::proxy::GatewayErrorCode::ForcedProviderNotEligibleForModel.as_str()
+            )
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn provider_model_routing_applies_ready_cx2cc_bridge_policy_only_once() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 1;
+        app_settings.provider_cooldown_seconds = 0;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("provider-model-routing-cx2cc.sqlite"))
+            .expect("init test db");
+        let success_body = r#"{
+            "id":"resp_bridge",
+            "model":"bridge-target",
+            "status":"completed",
+            "output":[{
+                "type":"message",
+                "role":"assistant",
+                "content":[{"type":"output_text","text":"ok"}]
+            }],
+            "usage":{"input_tokens":1,"output_tokens":1}
+        }"#;
+        let (upstream_base_url, capture_rx, upstream_task) =
+            spawn_capturing_json_upstream(success_body).await;
+        let source_provider_id = insert_provider_with_priority_and_policy(
+            &db,
+            "codex",
+            "CX2CC Source",
+            upstream_base_url,
+            0,
+            Some(selected_model_policy(
+                "bridge-target",
+                Some("source-target"),
+            )),
+        );
+        let bridge_provider_id = insert_cx2cc_bridge_provider_with_policy(
+            &db,
+            source_provider_id,
+            0,
+            Some(selected_model_policy(
+                "claude-3-5-sonnet",
+                Some("bridge-target"),
+            )),
+        );
+
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+        let router = build_router(gateway_state(app_handle, db, log_tx));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(format!(
+                "/claude/_aio/provider/{bridge_provider_id}/v1/messages"
+            ))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"model":"claude-3-5-sonnet","max_tokens":128,"messages":[{"role":"user","content":"hello"}]}"#,
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let upstream_body: Value =
+            serde_json::from_str(&capture_rx.await.expect("upstream request capture"))
+                .expect("upstream body");
+        assert_eq!(
+            upstream_body.get("model").and_then(Value::as_str),
+            Some("bridge-target")
+        );
+
+        let log = recv_terminal_request_log(&mut log_rx).await;
+        let special_settings: Value = serde_json::from_str(
+            log.special_settings_json
+                .as_deref()
+                .expect("model redirect settings"),
+        )
+        .expect("special settings json");
+        let redirects: Vec<&Value> = special_settings
+            .as_array()
+            .expect("special settings array")
+            .iter()
+            .filter(|setting| setting.get("type").and_then(Value::as_str) == Some("model_redirect"))
+            .collect();
+        assert_eq!(redirects.len(), 1);
+        let steps = redirects[0]
+            .get("steps")
+            .and_then(Value::as_array)
+            .expect("model redirect steps");
+        assert_eq!(steps.len(), 1);
+        let step = &steps[0];
+        assert_eq!(step.get("stage").and_then(Value::as_str), Some("bridge"));
+        assert_eq!(
+            step.get("providerId").and_then(Value::as_i64),
+            Some(bridge_provider_id)
+        );
+        assert_eq!(
+            step.get("sourceModel").and_then(Value::as_str),
+            Some("claude-3-5-sonnet")
+        );
+        assert_eq!(
+            step.get("targetModel").and_then(Value::as_str),
+            Some("bridge-target")
+        );
+
+        upstream_task.abort();
     }
 
     #[tokio::test(flavor = "current_thread")]

@@ -1,7 +1,7 @@
 //! Usage: Shared context types for `failover_loop` internal submodules.
 
 use crate::circuit_breaker;
-use crate::gateway::events::{ClaudeModelMapping, FailoverAttempt};
+use crate::gateway::events::{ClaudeModelMapping, FailoverAttempt, ModelRedirect};
 use crate::gateway::proxy::abort_guard::RequestAbortGuard;
 use crate::gateway::proxy::cx2cc::settings::Cx2ccSettings;
 use crate::gateway::proxy::gemini_oauth;
@@ -196,6 +196,7 @@ pub(super) struct ProviderCtx<'a> {
     pub(super) session_reuse: Option<bool>,
     pub(super) stream_idle_timeout_seconds: Option<u32>,
     pub(super) claude_model_mapping: Option<&'a ClaudeModelMapping>,
+    pub(super) model_redirect: Option<&'a ModelRedirect>,
 }
 
 pub(super) struct ProviderCtxOwned {

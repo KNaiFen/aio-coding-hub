@@ -4,6 +4,8 @@ import { logToConsole } from "../../services/consoleLog";
 import {
   type ProviderOAuthStatusResult,
   type ClaudeModels,
+  type ProviderModelPolicyStatus,
+  type ProviderModelPolicyV1,
   type ProviderSummary,
 } from "../../services/providers/providers";
 import type { GatewayStatus } from "../../services/gateway/gateway";
@@ -21,6 +23,7 @@ import {
   deriveCx2ccSourceValue,
   withCx2ccDefaultModel,
 } from "./providerEditorUtils";
+import { DEFAULT_PROVIDER_MODEL_POLICY } from "./providerModelPolicy";
 
 export type EffectDeps = {
   open: boolean;
@@ -39,6 +42,9 @@ export type EffectDeps = {
   setBaseUrlRows: (v: BaseUrlRow[]) => void;
   setPingingAll: (v: boolean) => void;
   setClaudeModels: (v: ClaudeModels) => void;
+  setModelPolicy: (v: ProviderModelPolicyV1 | null) => void;
+  setModelPolicyStatus: (v: ProviderModelPolicyStatus) => void;
+  setModelPolicyDirty: (v: boolean) => void;
   setTags: React.Dispatch<React.SetStateAction<string[]>>;
   setTagInput: (v: string) => void;
   setStreamIdleTimeoutSeconds: (v: string) => void;
@@ -79,6 +85,9 @@ export function useProviderEditorEffects(d: EffectDeps) {
     setBaseUrlRows,
     setPingingAll,
     setClaudeModels,
+    setModelPolicy,
+    setModelPolicyStatus,
+    setModelPolicyDirty,
     setTags,
     setTagInput,
     setStreamIdleTimeoutSeconds,
@@ -125,6 +134,9 @@ export function useProviderEditorEffects(d: EffectDeps) {
           ? withCx2ccDefaultModel(createInitialValues?.claude_models ?? {})
           : (createInitialValues?.claude_models ?? {})
       );
+      setModelPolicy({ ...DEFAULT_PROVIDER_MODEL_POLICY, rules: [] });
+      setModelPolicyStatus("ready");
+      setModelPolicyDirty(false);
       setTags(
         normalizeTagsForCostMultiplier(
           createInitialValues?.tags ?? [],
@@ -153,6 +165,8 @@ export function useProviderEditorEffects(d: EffectDeps) {
 
     const initialAuthMode = deriveAuthMode(snapshot);
     const initialCx2ccSourceValue = deriveCx2ccSourceValue(snapshot);
+    const initialModelPolicyStatus: ProviderModelPolicyStatus =
+      snapshot.model_policy_status ?? (snapshot.cli_key === "claude" ? "legacy" : "ready");
     setAuthMode(initialAuthMode);
     setCx2ccSourceValue(initialCx2ccSourceValue);
     setOauthStatus(null);
@@ -164,6 +178,13 @@ export function useProviderEditorEffects(d: EffectDeps) {
         ? withCx2ccDefaultModel(snapshot.claude_models ?? {})
         : (snapshot.claude_models ?? {})
     );
+    setModelPolicy(
+      initialModelPolicyStatus === "ready"
+        ? (snapshot.model_policy ?? { ...DEFAULT_PROVIDER_MODEL_POLICY, rules: [] })
+        : null
+    );
+    setModelPolicyStatus(initialModelPolicyStatus);
+    setModelPolicyDirty(false);
     setTags(
       normalizeTagsForCostMultiplier(snapshot.tags ?? [], String(snapshot.cost_multiplier ?? 1.0))
     );
@@ -203,6 +224,9 @@ export function useProviderEditorEffects(d: EffectDeps) {
     setBaseUrlMode,
     setBaseUrlRows,
     setClaudeModels,
+    setModelPolicy,
+    setModelPolicyDirty,
+    setModelPolicyStatus,
     setCx2ccSourceValue,
     setOauthLoading,
     setOauthStatus,

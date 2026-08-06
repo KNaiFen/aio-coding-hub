@@ -382,6 +382,8 @@ mod tests {
             base_url_mode: crate::providers::ProviderBaseUrlMode::Order,
             api_key_plaintext: String::new(),
             claude_models: crate::providers::ClaudeModels::default(),
+            model_policy: Some(crate::providers::ProviderModelPolicyV1::all()),
+            model_policy_status: crate::providers::ProviderModelPolicyStatus::Ready,
             limit_5h_usd: None,
             limit_daily_usd: None,
             daily_reset_mode: crate::providers::DailyResetMode::Fixed,

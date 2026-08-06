@@ -20,6 +20,12 @@ function makeContext(
     isCodexGatewaySource: false,
     sourceProviderId: null,
     selectedCx2ccSourceProvider: null,
+    modelPolicyStatus: "ready",
+    modelPolicy: {
+      version: 1,
+      mode: "all",
+      rules: [],
+    },
     formValues: {
       ...DEFAULT_FORM_VALUES,
       name: "Provider A",
@@ -94,5 +100,53 @@ describe("pages/providers/providerEditorSubmitModel", () => {
     expect(result.value.payload.bridgeType).toBe("cx2cc");
     expect(result.value.payload.sourceProviderId).toBeNull();
     expect(result.value.payload.authMode).toBe("api_key");
+  });
+
+  it("preserves legacy ownership when editing without opting into the generic policy", () => {
+    const result = buildProviderEditorUpsertInput(
+      makeContext({
+        mode: "edit",
+        editingProviderId: 9,
+        modelPolicyStatus: "legacy",
+        modelPolicy: null,
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.payload.modelPolicy).toBeNull();
+  });
+
+  it("blocks saving an invalid policy until it is reset", () => {
+    const result = buildProviderEditorUpsertInput(
+      makeContext({
+        modelPolicyStatus: "invalid",
+        modelPolicy: null,
+      })
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        kind: "message",
+        message: "模型策略无效，请先重置并保存",
+      },
+    });
+  });
+
+  it("blocks an empty selected policy", () => {
+    const result = buildProviderEditorUpsertInput(
+      makeContext({
+        modelPolicy: { version: 1, mode: "selected", rules: [] },
+      })
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        kind: "message",
+        message: "选定模型模式至少需要一条规则",
+      },
+    });
   });
 });
