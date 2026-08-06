@@ -75,6 +75,7 @@ trait ExtensionHostProcess: Send {
     fn is_running(&mut self) -> bool;
     fn recycle_if_idle<'a>(&'a mut self) -> BoxFuture<'a, AppResult<bool>>;
     fn dispose<'a>(&'a mut self) -> BoxFuture<'a, ()>;
+    fn abort(&mut self);
 }
 
 trait ExtensionHostFactory: Send + Sync {
@@ -149,6 +150,10 @@ impl ExtensionHostProcess for RealExtensionHostProcess {
             self.host.dispose().await;
         })
     }
+
+    fn abort(&mut self) {
+        self.host.abort();
+    }
 }
 
 struct ManagedExtensionHostInstance {
@@ -202,6 +207,10 @@ impl ManagedExtensionHostInstance {
 
     async fn dispose(&self) {
         self.process.lock().await.dispose().await;
+    }
+
+    async fn abort(&self) {
+        self.process.lock().await.abort();
     }
 
     async fn recycle_if_idle(&self) -> AppResult<bool> {
@@ -363,6 +372,7 @@ impl ExtensionHostInstanceRegistry {
         call_timeout: Duration,
         now: Instant,
     ) -> Result<GatewayHookResult, GatewayPluginError> {
+        let deadline = tokio::time::Instant::now() + call_timeout;
         let context_value = serde_json::to_value(&context).map_err(|err| {
             GatewayPluginError::new(
                 "PLUGIN_EXTENSION_HOST_INVALID_CONTEXT",
@@ -375,22 +385,28 @@ impl ExtensionHostInstanceRegistry {
             "config": detail.config.clone(),
             "context": context_value,
         });
-        let _operation_guard = self.operation_gate.read().await;
+        ensure_gateway_hook_deadline(deadline)?;
+        let _operation_guard =
+            await_gateway_hook_deadline(deadline, self.operation_gate.read()).await?;
         let key = ExtensionHostInstanceKey::from_gateway_plugin_detail(&detail, call_timeout)
             .map_err(extension_host_gateway_error)?;
-        let plugin_lock = self.plugin_lock_for(&key.plugin_id).await;
-        let _plugin_guard = plugin_lock.lock().await;
+        ensure_gateway_hook_deadline(deadline)?;
+        let plugin_lock =
+            await_gateway_hook_deadline(deadline, self.plugin_lock_for(&key.plugin_id)).await?;
+        let _plugin_guard = await_gateway_hook_deadline(deadline, plugin_lock.lock()).await?;
 
         if let Some(value) = self
-            .execute_gateway_hook_warm_instance(&key, hook, payload.clone(), now)
-            .await
-            .map_err(extension_host_gateway_error)?
+            .execute_gateway_hook_warm_instance(&key, hook, payload.clone(), now, deadline)
+            .await?
         {
-            return gateway_hook_result_from_extension_host_output(hook, &context, value);
+            let result = gateway_hook_result_from_extension_host_output(hook, &context, value)?;
+            ensure_gateway_hook_deadline(deadline)?;
+            return Ok(result);
         }
 
-        let mut disposals = {
-            let mut instances = self.instances.lock().await;
+        let disposals = {
+            let mut instances =
+                await_gateway_hook_deadline(deadline, self.instances.lock()).await?;
             let mut disposals = remove_same_plugin_with_different_key(&mut instances, &key);
             disposals.extend(remove_idle_locked(
                 &mut instances,
@@ -399,28 +415,61 @@ impl ExtensionHostInstanceRegistry {
             ));
             disposals
         };
-        dispose_instances(disposals.drain(..)).await;
+        dispose_instances_before_gateway_deadline(deadline, disposals).await?;
 
-        let mut process = self
-            .factory
-            .start(detail, self.db.clone(), call_timeout)
-            .await
-            .map_err(extension_host_gateway_error)?;
-        let value = match process.execute_gateway_hook(hook, payload).await {
-            Ok(value) => value,
+        let mut process = await_gateway_hook_deadline(
+            deadline,
+            self.factory.start(detail, self.db.clone(), call_timeout),
+        )
+        .await?
+        .map_err(extension_host_gateway_error)?;
+        let value =
+            match tokio::time::timeout_at(deadline, process.execute_gateway_hook(hook, payload))
+                .await
+            {
+                Ok(Ok(value)) => value,
+                Ok(Err(error)) => {
+                    dispose_process_before_gateway_deadline(deadline, &mut process).await?;
+                    return Err(extension_host_gateway_error(error));
+                }
+                Err(_) => {
+                    process.abort();
+                    return Err(gateway_hook_timeout_error());
+                }
+            };
+        if let Err(error) = ensure_gateway_hook_deadline(deadline) {
+            process.abort();
+            return Err(error);
+        }
+        let result = match gateway_hook_result_from_extension_host_output(hook, &context, value) {
+            Ok(result) => result,
             Err(error) => {
-                process.dispose().await;
-                return Err(extension_host_gateway_error(error));
+                process.abort();
+                return Err(error);
             }
         };
-        let result = gateway_hook_result_from_extension_host_output(hook, &context, value)?;
-        let instance = Arc::new(ManagedExtensionHostInstance::new(process, now));
-        let disposals = {
-            let mut instances = self.instances.lock().await;
-            instances.insert(key, instance);
-            remove_lru_over_limit_locked(&mut instances, self.limits.max_warm_instances)
+        if let Err(error) = ensure_gateway_hook_deadline(deadline) {
+            process.abort();
+            return Err(error);
+        }
+        let mut instances = match tokio::time::timeout_at(deadline, self.instances.lock()).await {
+            Ok(instances) => instances,
+            Err(_) => {
+                process.abort();
+                return Err(gateway_hook_timeout_error());
+            }
         };
-        dispose_instances(disposals).await;
+        let instance = Arc::new(ManagedExtensionHostInstance::new(process, now));
+        let instance_key = key.clone();
+        instances.insert(key, instance.clone());
+        let disposals =
+            remove_lru_over_limit_locked(&mut instances, self.limits.max_warm_instances);
+        drop(instances);
+        if let Err(error) = dispose_instances_before_gateway_deadline(deadline, disposals).await {
+            self.abort_warm_instance_if_current(&instance_key, &instance)
+                .await;
+            return Err(error);
+        }
 
         Ok(result)
     }
@@ -583,25 +632,64 @@ impl ExtensionHostInstanceRegistry {
         hook: &str,
         context: Value,
         now: Instant,
-    ) -> AppResult<Option<Value>> {
-        let instance = { self.instances.lock().await.get(key).cloned() };
+        deadline: tokio::time::Instant,
+    ) -> Result<Option<Value>, GatewayPluginError> {
+        let instance = {
+            await_gateway_hook_deadline(deadline, self.instances.lock())
+                .await?
+                .get(key)
+                .cloned()
+        };
         let Some(instance) = instance else {
             return Ok(None);
         };
 
-        match instance
-            .execute_gateway_hook_if_running(hook, context, now)
-            .await
+        match tokio::time::timeout_at(
+            deadline,
+            instance.execute_gateway_hook_if_running(hook, context, now),
+        )
+        .await
         {
-            Ok(Some(value)) => Ok(Some(value)),
-            Ok(None) => {
-                self.remove_warm_instance_if_current(key, &instance).await;
+            Err(_) => {
+                self.abort_warm_instance_if_current(key, &instance).await;
+                Err(gateway_hook_timeout_error())
+            }
+            Ok(Ok(Some(value))) => Ok(Some(value)),
+            Ok(Ok(None)) => {
+                let removed = self.take_warm_instance_if_current(key, &instance).await;
+                dispose_instances_before_gateway_deadline(deadline, removed.into_iter().collect())
+                    .await?;
                 Ok(None)
             }
-            Err(error) => {
-                self.remove_warm_instance_if_current(key, &instance).await;
-                Err(error)
+            Ok(Err(error)) => {
+                let removed = self.take_warm_instance_if_current(key, &instance).await;
+                dispose_instances_before_gateway_deadline(deadline, removed.into_iter().collect())
+                    .await?;
+                Err(extension_host_gateway_error(error))
             }
+        }
+    }
+
+    async fn take_warm_instance_if_current(
+        &self,
+        key: &ExtensionHostInstanceKey,
+        instance: &Arc<ManagedExtensionHostInstance>,
+    ) -> Option<Arc<ManagedExtensionHostInstance>> {
+        let mut instances = self.instances.lock().await;
+        let should_remove = instances
+            .get(key)
+            .filter(|current| Arc::ptr_eq(current, instance))
+            .is_some();
+        should_remove.then(|| instances.remove(key)).flatten()
+    }
+
+    async fn abort_warm_instance_if_current(
+        &self,
+        key: &ExtensionHostInstanceKey,
+        instance: &Arc<ManagedExtensionHostInstance>,
+    ) {
+        if let Some(instance) = self.take_warm_instance_if_current(key, instance).await {
+            schedule_abort_instance(instance);
         }
     }
 
@@ -610,14 +698,7 @@ impl ExtensionHostInstanceRegistry {
         key: &ExtensionHostInstanceKey,
         instance: &Arc<ManagedExtensionHostInstance>,
     ) {
-        let removed = {
-            let mut instances = self.instances.lock().await;
-            let should_remove = instances
-                .get(key)
-                .filter(|current| Arc::ptr_eq(current, instance))
-                .is_some();
-            should_remove.then(|| instances.remove(key)).flatten()
-        };
+        let removed = self.take_warm_instance_if_current(key, instance).await;
         if let Some(instance) = removed {
             instance.dispose().await;
         }
@@ -854,6 +935,69 @@ async fn dispose_instances(instances: impl IntoIterator<Item = Arc<ManagedExtens
     for instance in instances {
         instance.dispose().await;
     }
+}
+
+async fn dispose_instances_before_gateway_deadline(
+    deadline: tokio::time::Instant,
+    instances: Vec<Arc<ManagedExtensionHostInstance>>,
+) -> Result<(), GatewayPluginError> {
+    if instances.is_empty() {
+        return Ok(());
+    }
+    let aborts = instances.clone();
+    if tokio::time::timeout_at(deadline, dispose_instances(instances))
+        .await
+        .is_err()
+    {
+        for instance in aborts {
+            schedule_abort_instance(instance);
+        }
+        return Err(gateway_hook_timeout_error());
+    }
+    Ok(())
+}
+
+async fn dispose_process_before_gateway_deadline(
+    deadline: tokio::time::Instant,
+    process: &mut Box<dyn ExtensionHostProcess>,
+) -> Result<(), GatewayPluginError> {
+    if tokio::time::timeout_at(deadline, process.dispose())
+        .await
+        .is_err()
+    {
+        process.abort();
+        return Err(gateway_hook_timeout_error());
+    }
+    Ok(())
+}
+
+fn schedule_abort_instance(instance: Arc<ManagedExtensionHostInstance>) {
+    tauri::async_runtime::spawn(async move {
+        instance.abort().await;
+    });
+}
+
+async fn await_gateway_hook_deadline<T>(
+    deadline: tokio::time::Instant,
+    future: impl Future<Output = T>,
+) -> Result<T, GatewayPluginError> {
+    tokio::time::timeout_at(deadline, future)
+        .await
+        .map_err(|_| gateway_hook_timeout_error())
+}
+
+fn ensure_gateway_hook_deadline(deadline: tokio::time::Instant) -> Result<(), GatewayPluginError> {
+    if tokio::time::Instant::now() >= deadline {
+        return Err(gateway_hook_timeout_error());
+    }
+    Ok(())
+}
+
+fn gateway_hook_timeout_error() -> GatewayPluginError {
+    GatewayPluginError::new(
+        "PLUGIN_EXTENSION_HOST_TIMEOUT",
+        "extension host gateway hook exceeded its invocation deadline",
+    )
 }
 
 fn plugin_root(detail: &PluginDetail) -> AppResult<PathBuf> {
@@ -1122,6 +1266,7 @@ mod tests {
         executions: Vec<u64>,
         recycle_checks: Vec<u64>,
         disposals: Vec<u64>,
+        aborts: Vec<u64>,
     }
 
     struct FakeExtensionHostProcess {
@@ -1134,9 +1279,12 @@ mod tests {
     struct BlockingExtensionHostFactory {
         slow_start: Arc<BlockingStartControl>,
         slow_command: Arc<BlockingCommandControl>,
+        slow_gateway_hook: Arc<BlockingCommandControl>,
         slow_dispose: Arc<BlockingDisposeControl>,
         starts: Arc<AtomicUsize>,
         disposals: Arc<AtomicUsize>,
+        aborts: Arc<AtomicUsize>,
+        aborted: Arc<Notify>,
     }
 
     #[derive(Default)]
@@ -1161,8 +1309,11 @@ mod tests {
     struct BlockingExtensionHostProcess {
         plugin_id: String,
         slow_command: Arc<BlockingCommandControl>,
+        slow_gateway_hook: Arc<BlockingCommandControl>,
         slow_dispose: Arc<BlockingDisposeControl>,
         disposals: Arc<AtomicUsize>,
+        aborts: Arc<AtomicUsize>,
+        aborted: Arc<Notify>,
         running: bool,
     }
 
@@ -1282,6 +1433,11 @@ mod tests {
                 self.state.lock().unwrap().disposals.push(self.id);
             })
         }
+
+        fn abort(&mut self) {
+            self.running = false;
+            self.state.lock().unwrap().aborts.push(self.id);
+        }
     }
 
     impl ExtensionHostFactory for BlockingExtensionHostFactory {
@@ -1292,16 +1448,19 @@ mod tests {
             _call_timeout: Duration,
         ) -> BoxFuture<'a, AppResult<Box<dyn ExtensionHostProcess>>> {
             Box::pin(async move {
-                self.starts.fetch_add(1, Ordering::SeqCst);
-                if detail.summary.plugin_id == "acme.start" {
+                let start_number = self.starts.fetch_add(1, Ordering::SeqCst) + 1;
+                if detail.summary.plugin_id == "acme.start" && start_number == 1 {
                     self.slow_start.started.notify_waiters();
                     self.slow_start.release.notified().await;
                 }
                 Ok(Box::new(BlockingExtensionHostProcess {
                     plugin_id: detail.summary.plugin_id,
                     slow_command: self.slow_command.clone(),
+                    slow_gateway_hook: self.slow_gateway_hook.clone(),
                     slow_dispose: self.slow_dispose.clone(),
                     disposals: self.disposals.clone(),
+                    aborts: self.aborts.clone(),
+                    aborted: self.aborted.clone(),
                     running: true,
                 }) as Box<dyn ExtensionHostProcess>)
             })
@@ -1335,6 +1494,11 @@ mod tests {
             _context: Value,
         ) -> BoxFuture<'a, AppResult<Value>> {
             Box::pin(async move {
+                if hook == "gateway.slow" {
+                    self.slow_gateway_hook.starts.fetch_add(1, Ordering::SeqCst);
+                    self.slow_gateway_hook.started.notify_waiters();
+                    self.slow_gateway_hook.release.notified().await;
+                }
                 Ok(json!({
                     "action": "continue",
                     "pluginId": self.plugin_id,
@@ -1361,6 +1525,12 @@ mod tests {
                 self.running = false;
             })
         }
+
+        fn abort(&mut self) {
+            self.running = false;
+            self.aborts.fetch_add(1, Ordering::SeqCst);
+            self.aborted.notify_waiters();
+        }
     }
 
     impl BlockingExtensionHostFactory {
@@ -1370,6 +1540,10 @@ mod tests {
 
         fn dispose_count(&self) -> usize {
             self.disposals.load(Ordering::SeqCst)
+        }
+
+        fn abort_count(&self) -> usize {
+            self.aborts.load(Ordering::SeqCst)
         }
 
         fn command_start_count(&self) -> usize {
@@ -1384,6 +1558,30 @@ mod tests {
                 }
                 notified.await;
             }
+        }
+
+        async fn wait_for_gateway_hook_start_count(&self, target: usize) {
+            loop {
+                let notified = self.slow_gateway_hook.started.notified();
+                if self.slow_gateway_hook.starts.load(Ordering::SeqCst) >= target {
+                    return;
+                }
+                notified.await;
+            }
+        }
+
+        async fn wait_for_abort_count(&self, target: usize) {
+            tokio::time::timeout(Duration::from_secs(1), async {
+                loop {
+                    let notified = self.aborted.notified();
+                    if self.abort_count() >= target {
+                        return;
+                    }
+                    notified.await;
+                }
+            })
+            .await
+            .expect("abort should be observed");
         }
     }
 
@@ -1444,6 +1642,19 @@ mod tests {
             audit_logs: Vec::new(),
             runtime_failures: Vec::new(),
             rollback_versions: Vec::new(),
+        }
+    }
+
+    fn gateway_context(trace_id: &str) -> GatewayVisibleHookContext {
+        GatewayVisibleHookContext {
+            hook_name: GatewayPluginHookName::RequestAfterBodyRead
+                .as_str()
+                .to_string(),
+            trace_id: trace_id.to_string(),
+            request: Default::default(),
+            response: Default::default(),
+            stream: Default::default(),
+            log: Default::default(),
         }
     }
 
@@ -1574,6 +1785,267 @@ mod tests {
 
         assert_eq!(factory.start_count(), 2);
         assert_eq!(factory.executed_instance_ids(), vec![1, 2]);
+    }
+
+    #[tokio::test]
+    async fn gateway_hook_deadline_includes_operation_gate_wait() {
+        let factory = Arc::new(FakeExtensionHostFactory::default());
+        let registry = ExtensionHostInstanceRegistry::new_for_tests(
+            factory.clone(),
+            ExtensionHostRegistryLimits {
+                max_warm_instances: 8,
+                idle_recycle: Duration::from_secs(120),
+            },
+        );
+        let operation_guard = registry.operation_gate.write().await;
+
+        let error = registry
+            .execute_gateway_hook_with_now(
+                plugin_detail("acme.gateway", "gate"),
+                GatewayPluginHookName::RequestAfterBodyRead.as_str(),
+                gateway_context("trace-gate-deadline"),
+                Duration::from_millis(30),
+                Instant::now(),
+            )
+            .await
+            .expect_err("operation gate wait should consume the invocation budget");
+
+        assert_eq!(error.code(), "PLUGIN_EXTENSION_HOST_TIMEOUT");
+        assert_eq!(factory.start_count(), 0);
+        drop(operation_guard);
+    }
+
+    #[tokio::test]
+    async fn gateway_hook_deadline_includes_same_plugin_queue_wait() {
+        let factory = Arc::new(BlockingExtensionHostFactory::default());
+        let registry = Arc::new(ExtensionHostInstanceRegistry::new_for_tests(
+            factory.clone(),
+            ExtensionHostRegistryLimits {
+                max_warm_instances: 8,
+                idle_recycle: Duration::from_secs(120),
+            },
+        ));
+        let first_registry = registry.clone();
+        let first = tokio::spawn(async move {
+            first_registry
+                .execute_gateway_hook_with_now(
+                    plugin_detail("acme.gateway.queue", "queue"),
+                    "gateway.slow",
+                    gateway_context("trace-queue-first"),
+                    Duration::from_secs(2),
+                    Instant::now(),
+                )
+                .await
+        });
+        factory.wait_for_gateway_hook_start_count(1).await;
+
+        let error = registry
+            .execute_gateway_hook_with_now(
+                plugin_detail("acme.gateway.queue", "queue"),
+                GatewayPluginHookName::RequestAfterBodyRead.as_str(),
+                gateway_context("trace-queue-second"),
+                Duration::from_millis(30),
+                Instant::now(),
+            )
+            .await
+            .expect_err("queued invocation should expire on its own deadline");
+
+        assert_eq!(error.code(), "PLUGIN_EXTENSION_HOST_TIMEOUT");
+        assert_eq!(factory.start_count(), 1);
+        assert_eq!(factory.abort_count(), 0);
+
+        factory.slow_gateway_hook.release.notify_waiters();
+        first
+            .await
+            .expect("first gateway hook task")
+            .expect("first gateway hook result");
+        assert_eq!(registry.instance_count().await, 1);
+        assert_eq!(factory.abort_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn gateway_hook_warm_timeout_aborts_and_removes_current_instance() {
+        let factory = Arc::new(BlockingExtensionHostFactory::default());
+        let registry = ExtensionHostInstanceRegistry::new_for_tests(
+            factory.clone(),
+            ExtensionHostRegistryLimits {
+                max_warm_instances: 8,
+                idle_recycle: Duration::from_secs(120),
+            },
+        );
+        let detail = plugin_detail("acme.gateway.warm", "warm-timeout");
+        let call_timeout = Duration::from_millis(40);
+
+        registry
+            .execute_gateway_hook_with_now(
+                detail.clone(),
+                GatewayPluginHookName::RequestAfterBodyRead.as_str(),
+                gateway_context("trace-warm-initial"),
+                call_timeout,
+                Instant::now(),
+            )
+            .await
+            .expect("initial invocation should warm the instance");
+
+        let error = registry
+            .execute_gateway_hook_with_now(
+                detail.clone(),
+                "gateway.slow",
+                gateway_context("trace-warm-timeout"),
+                call_timeout,
+                Instant::now(),
+            )
+            .await
+            .expect_err("warm invocation should reach the absolute deadline");
+
+        assert_eq!(error.code(), "PLUGIN_EXTENSION_HOST_TIMEOUT");
+        assert_eq!(registry.instance_count().await, 0);
+        factory.wait_for_abort_count(1).await;
+
+        registry
+            .execute_gateway_hook_with_now(
+                detail,
+                GatewayPluginHookName::RequestAfterBodyRead.as_str(),
+                gateway_context("trace-warm-retry"),
+                call_timeout,
+                Instant::now(),
+            )
+            .await
+            .expect("retry should cold start a clean instance");
+        assert_eq!(factory.start_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn gateway_hook_deadline_covers_cold_factory_start() {
+        let factory = Arc::new(BlockingExtensionHostFactory::default());
+        let registry = ExtensionHostInstanceRegistry::new_for_tests(
+            factory.clone(),
+            ExtensionHostRegistryLimits {
+                max_warm_instances: 8,
+                idle_recycle: Duration::from_secs(120),
+            },
+        );
+        let detail = plugin_detail("acme.start", "cold-start");
+
+        let error = registry
+            .execute_gateway_hook_with_now(
+                detail.clone(),
+                GatewayPluginHookName::RequestAfterBodyRead.as_str(),
+                gateway_context("trace-cold-start-timeout"),
+                Duration::from_millis(30),
+                Instant::now(),
+            )
+            .await
+            .expect_err("cold factory start should consume the invocation budget");
+
+        assert_eq!(error.code(), "PLUGIN_EXTENSION_HOST_TIMEOUT");
+        assert_eq!(registry.instance_count().await, 0);
+        assert_eq!(factory.start_count(), 1);
+
+        registry
+            .execute_gateway_hook_with_now(
+                detail,
+                GatewayPluginHookName::RequestAfterBodyRead.as_str(),
+                gateway_context("trace-cold-start-retry"),
+                Duration::from_secs(1),
+                Instant::now(),
+            )
+            .await
+            .expect("retry should start a fresh process");
+        assert_eq!(factory.start_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn gateway_hook_deadline_covers_cold_execution_and_aborts_process() {
+        let factory = Arc::new(BlockingExtensionHostFactory::default());
+        let registry = ExtensionHostInstanceRegistry::new_for_tests(
+            factory.clone(),
+            ExtensionHostRegistryLimits {
+                max_warm_instances: 8,
+                idle_recycle: Duration::from_secs(120),
+            },
+        );
+        let detail = plugin_detail("acme.gateway.cold", "cold-execution");
+        let call_timeout = Duration::from_millis(40);
+
+        let error = registry
+            .execute_gateway_hook_with_now(
+                detail.clone(),
+                "gateway.slow",
+                gateway_context("trace-cold-execution-timeout"),
+                call_timeout,
+                Instant::now(),
+            )
+            .await
+            .expect_err("cold gateway execution should reach the invocation deadline");
+
+        assert_eq!(error.code(), "PLUGIN_EXTENSION_HOST_TIMEOUT");
+        assert_eq!(factory.abort_count(), 1);
+        assert_eq!(registry.instance_count().await, 0);
+
+        registry
+            .execute_gateway_hook_with_now(
+                detail,
+                GatewayPluginHookName::RequestAfterBodyRead.as_str(),
+                gateway_context("trace-cold-execution-retry"),
+                call_timeout,
+                Instant::now(),
+            )
+            .await
+            .expect("retry should cold start after abort");
+        assert_eq!(factory.start_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn gateway_hook_lru_cleanup_timeout_aborts_the_new_instance() {
+        let factory = Arc::new(BlockingExtensionHostFactory::default());
+        let registry = ExtensionHostInstanceRegistry::new_for_tests(
+            factory.clone(),
+            ExtensionHostRegistryLimits {
+                max_warm_instances: 1,
+                idle_recycle: Duration::from_secs(120),
+            },
+        );
+        let old_detail = plugin_detail("acme.slow", "old-instance");
+        let new_detail = plugin_detail("acme.gateway.new", "new-instance");
+
+        registry
+            .execute_gateway_hook_with_now(
+                old_detail,
+                GatewayPluginHookName::RequestAfterBodyRead.as_str(),
+                gateway_context("trace-lru-old"),
+                Duration::from_secs(1),
+                Instant::now(),
+            )
+            .await
+            .expect("old instance should warm before LRU eviction");
+
+        let error = registry
+            .execute_gateway_hook_with_now(
+                new_detail.clone(),
+                GatewayPluginHookName::RequestAfterBodyRead.as_str(),
+                gateway_context("trace-lru-new-timeout"),
+                Duration::from_millis(40),
+                Instant::now(),
+            )
+            .await
+            .expect_err("LRU cleanup should consume the same invocation deadline");
+
+        assert_eq!(error.code(), "PLUGIN_EXTENSION_HOST_TIMEOUT");
+        assert_eq!(registry.instance_count().await, 0);
+        factory.wait_for_abort_count(2).await;
+
+        registry
+            .execute_gateway_hook_with_now(
+                new_detail,
+                GatewayPluginHookName::RequestAfterBodyRead.as_str(),
+                gateway_context("trace-lru-new-retry"),
+                Duration::from_secs(1),
+                Instant::now(),
+            )
+            .await
+            .expect("retry should cold start after both timeout cleanups");
+        assert_eq!(factory.start_count(), 3);
     }
 
     #[tokio::test]

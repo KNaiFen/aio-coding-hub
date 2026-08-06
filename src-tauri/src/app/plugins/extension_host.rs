@@ -300,6 +300,10 @@ impl ExtensionHostInstance {
         self.runtime.shutdown().await;
     }
 
+    pub(crate) fn abort(&mut self) {
+        self.runtime.abort();
+    }
+
     #[cfg(test)]
     async fn start_for_tests(plugin_root: &Path) -> AppResult<Self> {
         let manifest = read_manifest(plugin_root)?;
