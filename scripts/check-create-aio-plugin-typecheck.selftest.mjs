@@ -30,7 +30,10 @@ function runTypecheck(root) {
 }
 
 const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
-assert.equal(packageJson.scripts?.typecheck, "tsc -p tsconfig.json --noEmit");
+assert.equal(
+  packageJson.scripts?.typecheck,
+  "node ../../scripts/require-github-actions.mjs && tsc -p tsconfig.json --noEmit"
+);
 
 const root = mkdtempSync(join(tmpdir(), "aio-create-plugin-typecheck-"));
 try {
