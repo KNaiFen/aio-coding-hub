@@ -395,6 +395,7 @@ const KNOWN_UI_FIELD_TYPES = new Set([
   "button",
 ]);
 const KNOWN_BADGE_TONES = new Set(["neutral", "success", "warning", "danger"]);
+const KNOWN_FAILURE_POLICIES = new Set(["fail-open", "fail-closed"]);
 
 export function permissionRisk(permission: PluginPermission): PluginPermissionRisk {
   return PERMISSION_RISKS[permission];
@@ -638,6 +639,16 @@ function validateGatewayHookContributions(gatewayHooks: unknown): ValidationResu
     }
     if (!KNOWN_HOOKS.has(record.name as GatewayHookName)) {
       return invalid("PLUGIN_UNKNOWN_HOOK", `unknown hook: ${record.name}`);
+    }
+    const failurePolicy = record.failurePolicy;
+    if (
+      failurePolicy != null &&
+      (typeof failurePolicy !== "string" || !KNOWN_FAILURE_POLICIES.has(failurePolicy))
+    ) {
+      return invalid(
+        "PLUGIN_INVALID_FAILURE_POLICY",
+        "gateway hook failurePolicy must be fail-open or fail-closed"
+      );
     }
     const timeoutMs = record.timeoutMs;
     if (
