@@ -1,6 +1,5 @@
 //! Usage: App data and DB disk-management helpers (reset, usage stats, cleanup).
 
-use crate::app_paths;
 use crate::db;
 use crate::shared::error::db_err;
 use crate::usage_ledger;
@@ -39,14 +38,11 @@ fn file_len_or_zero(path: &Path) -> Result<u64, String> {
     }
 }
 
-fn remove_file_if_exists(path: &Path) -> Result<bool, String> {
+fn remove_file_if_exists(path: &Path) -> Result<bool, std::io::Error> {
     match std::fs::remove_file(path) {
         Ok(()) => Ok(true),
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
-        Err(err) => Err(format!(
-            "failed to remove {}: {err}",
-            path.to_string_lossy()
-        )),
+        Err(err) => Err(err),
     }
 }
 
@@ -207,30 +203,35 @@ pub fn request_logs_clear_all(
     })
 }
 
-pub fn app_data_reset<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
+/// Delete the complete reset target set.  The caller owns the durable marker;
+/// this helper is intentionally idempotent so a later retry can finish a
+/// partially completed process without reopening the database.
+pub(crate) fn app_data_reset_at(
+    dir: &Path,
+    db_path: &Path,
 ) -> crate::shared::error::AppResult<bool> {
-    tracing::error!(
-        "app data reset initiated (destructive operation: deleting settings and database)"
-    );
+    let (wal_path, shm_path) = db_related_paths(db_path);
+    let targets = [
+        ("settings_tmp", dir.join("settings.json.tmp")),
+        ("settings_backup", dir.join("settings.json.bak")),
+        ("settings", dir.join("settings.json")),
+        ("sqlite_wal", wal_path),
+        ("sqlite_shm", shm_path),
+        ("sqlite", db_path.to_path_buf()),
+    ];
+    let mut failed = Vec::new();
+    for (label, path) in targets {
+        if remove_file_if_exists(&path).is_err() {
+            failed.push(label);
+        }
+    }
 
-    // Ensure the app data dir exists.
-    let dir = app_paths::app_data_dir(app)?;
-
-    // settings.json (+ temp artifacts)
-    let settings_path = dir.join("settings.json");
-    let settings_tmp_path = dir.join("settings.json.tmp");
-    let settings_bak_path = dir.join("settings.json.bak");
-    let _ = remove_file_if_exists(&settings_tmp_path)?;
-    let _ = remove_file_if_exists(&settings_bak_path)?;
-    let _ = remove_file_if_exists(&settings_path)?;
-
-    // sqlite db (+ wal/shm)
-    let db_path = db::db_path(app)?;
-    let (wal_path, shm_path) = db_related_paths(&db_path);
-    let _ = remove_file_if_exists(&wal_path)?;
-    let _ = remove_file_if_exists(&shm_path)?;
-    let _ = remove_file_if_exists(&db_path)?;
+    if !failed.is_empty() {
+        return Err(crate::shared::error::AppError::new(
+            "APP_DATA_RESET_INCOMPLETE",
+            format!("failed reset targets: {}", failed.join(", ")),
+        ));
+    }
 
     Ok(true)
 }

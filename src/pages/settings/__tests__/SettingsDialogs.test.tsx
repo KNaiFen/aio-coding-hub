@@ -103,7 +103,7 @@ describe("pages/settings/SettingsDialogs", () => {
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     expect(setResetOpen).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "取消" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "清理中…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "登记中…" })).toBeDisabled();
   });
 
   it("closes reset all dialog and resets pending flag when dismissed", () => {

@@ -424,7 +424,7 @@ describe("pages/settings/SettingsSidebar", () => {
     expect(clearMutation.mutateAsync).toHaveBeenCalledTimes(3);
     expect(toast).toHaveBeenCalledWith("清理请求日志失败：请稍后重试");
 
-    // reset all: null -> toast; ok -> schedules exit; error -> toast
+    // reset all: null -> toast; ok -> backend-owned exit; error -> toast
     fireEvent.click(screen.getByRole("button", { name: "open-reset-all" }));
     expect(screen.getByText("resetOpen:true")).toBeInTheDocument();
 
@@ -439,7 +439,7 @@ describe("pages/settings/SettingsSidebar", () => {
       await Promise.resolve();
     });
     expect(appDataReset).toHaveBeenCalledTimes(2);
-    expect(toast).toHaveBeenCalledWith("已清理全部信息：应用即将退出，请重新打开");
+    expect(toast).toHaveBeenCalledWith("已登记数据重置：应用正在退出");
     expect(client.getQueryData(gatewayKeys.status())).toEqual(
       APP_DATA_RESET_STOPPED_GATEWAY_STATUS
     );
@@ -450,11 +450,7 @@ describe("pages/settings/SettingsSidebar", () => {
     expect(client.getQueryData(settingsKeys.get())).toBeUndefined();
     expect(client.getQueryData(dataManagementKeys.dbDiskUsage())).toBeUndefined();
     expect(client.getQueryData(appAboutKeys.get())).toEqual({ version: "keep" });
-    vi.advanceTimersByTime(1000);
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(appExit).toHaveBeenCalled();
+    expect(appExit).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "confirm-reset-all" }));
     await act(async () => {

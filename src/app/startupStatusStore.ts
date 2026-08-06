@@ -9,6 +9,7 @@ import { logToConsole } from "../services/consoleLog";
 
 const IDLE_STARTUP_STATUS: AppStartupStatus = Object.freeze({
   running: false,
+  maintenanceMode: false,
   currentStage: "idle",
   failedStage: null,
   errorMessage: null,
@@ -16,6 +17,7 @@ const IDLE_STARTUP_STATUS: AppStartupStatus = Object.freeze({
 });
 
 let snapshot: AppStartupStatus = IDLE_STARTUP_STATUS;
+let synchronized = false;
 let statusUpdateGeneration = 0;
 let activeStartupStatusSubscription: symbol | null = null;
 const listeners = new Set<() => void>();
@@ -37,6 +39,7 @@ export function getAppStartupStatusSnapshot(): AppStartupStatus {
 
 function commitAppStartupStatusSnapshot(next: AppStartupStatus) {
   snapshot = next;
+  synchronized = true;
   emitSnapshot();
 }
 
@@ -49,6 +52,7 @@ export function resetAppStartupStatusStore() {
   statusUpdateGeneration += 1;
   activeStartupStatusSubscription = null;
   snapshot = IDLE_STARTUP_STATUS;
+  synchronized = false;
   emitSnapshot();
 }
 
@@ -114,4 +118,16 @@ export async function listenAndSyncAppStartupStatusSnapshot(): Promise<() => voi
 
 export function useAppStartupStatus(): AppStartupStatus {
   return useSyncExternalStore(subscribe, getAppStartupStatusSnapshot, getAppStartupStatusSnapshot);
+}
+
+export function getAppStartupStatusSynchronizedSnapshot(): boolean {
+  return synchronized;
+}
+
+export function useAppStartupStatusSynchronized(): boolean {
+  return useSyncExternalStore(
+    subscribe,
+    getAppStartupStatusSynchronizedSnapshot,
+    getAppStartupStatusSynchronizedSnapshot
+  );
 }

@@ -8,6 +8,8 @@ import { Button } from "../../ui/Button";
 
 function startupStageLabel(stage: AppStartupStage | null): string {
   switch (stage) {
+    case "resetting_data":
+      return "数据重置";
     case "initializing_db":
       return "数据库初始化";
     case "reading_settings":
@@ -28,7 +30,7 @@ export function AppStartupStatusBanner() {
   const status = useAppStartupStatus();
   const [retrying, setRetrying] = useState(false);
 
-  if (!status || status.currentStage !== "failed") {
+  if (!status || status.maintenanceMode || status.currentStage !== "failed") {
     return null;
   }
 
