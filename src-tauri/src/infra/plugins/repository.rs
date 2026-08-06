@@ -511,6 +511,7 @@ THEN 1 ELSE 0 END
     Ok(exists != 0)
 }
 
+#[cfg(test)]
 pub(crate) fn save_plugin_config(
     db: &db::Db,
     plugin_id: &str,
