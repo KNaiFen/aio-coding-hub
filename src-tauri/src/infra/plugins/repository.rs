@@ -1342,13 +1342,8 @@ mod tests {
             &[],
         )
         .unwrap();
-        save_plugin_storage_value(
-            &db,
-            "config.user-first",
-            "cursor",
-            serde_json::json!("new"),
-        )
-        .unwrap();
+        save_plugin_storage_value(&db, "config.user-first", "cursor", serde_json::json!("new"))
+            .unwrap();
 
         assert_eq!(
             get_plugin(&db, "config.user-first").unwrap().config,

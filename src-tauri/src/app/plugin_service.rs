@@ -3222,7 +3222,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(saved.config["mode"], "rewrite_system_message");
-        assert_eq!(saved.config["storage"], serde_json::json!({"cursor": "current"}));
+        assert_eq!(
+            saved.config["storage"],
+            serde_json::json!({"cursor": "current"})
+        );
     }
 
     #[test]
@@ -3444,7 +3447,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(updated.summary.current_version.as_deref(), Some("1.0.1"));
-        assert_eq!(updated.config["storage"], serde_json::json!({"cursor": "kept"}));
+        assert_eq!(
+            updated.config["storage"],
+            serde_json::json!({"cursor": "kept"})
+        );
     }
 
     #[test]
