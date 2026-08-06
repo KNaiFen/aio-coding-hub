@@ -18,7 +18,7 @@ Reserved hooks 在宿主实现对应调用点前，会被 manifest validation �
 
 ## Resource Budgets
 
-Plugin hook contexts are host-trimmed and budget-trimmed. Extension Host manifests do not declare `permissions`; the host decides visible context from the hook, granted capability, runtime policy, and context budget. The gateway may accept request bodies larger than the plugin context budget, but plugins only receive bounded visible context. When a body, stream chunk, log message, or normalized message list exceeds the plugin budget, the host truncates the visible value and marks the matching `*Truncated` flag in the internal context model.
+Plugin hook contexts are host-trimmed and budget-trimmed. Extension Host manifests do not declare `permissions`; the host decides visible context from the hook, granted capability, runtime policy, and context budget. The gateway may accept request bodies larger than the plugin context budget, but plugins only receive bounded visible context. When a body, stream chunk, log message, or normalized message list exceeds the plugin budget, the host truncates the visible value and marks the public camelCase flag: `bodyTruncated`, `normalizedMessagesTruncated`, `chunkTruncated`, or `messageTruncated`. Extension Host v1 also exposes the previous snake_case names, including `context.hook_name` and `context.trace_id`, as runtime compatibility aliases that resolve to the same values; JSON-RPC payloads only contain the canonical camelCase fields.
 
 Hook outputs are also bounded. Oversized body, stream, log, or header mutations are rejected with `PLUGIN_OUTPUT_TOO_LARGE`; the pipeline then applies the hook failure policy and circuit-breaker behavior.
 
@@ -43,12 +43,12 @@ Replay 支持按 hook 分层：
 
 | Hook | 阶段 | Visible context labels | Mutation labels | Mutation fields | Context fields |
 | --- | --- | --- | --- | --- | --- |
-| `gateway.request.afterBodyRead` | 读取 request body 后、发送 upstream provider 前。 | `request.meta.read`, `request.header.read`, `request.header.readSensitive`, `request.body.read` | `request.header.write`, `request.body.write` | `headers`, `requestBody` | `traceId`, `request.cliKey`, `request.method`, `request.path`, `request.query`, `request.headers`, `request.body`, `request.requestedModel`, `request.normalizedMessages` |
-| `gateway.request.beforeSend` | provider resolution 后、发送 upstream provider 前。 | `request.meta.read`, `request.header.read`, `request.header.readSensitive`, `request.body.read` | `request.header.write`, `request.body.write` | `headers`, `requestBody` | `traceId`, `request.cliKey`, `request.method`, `request.path`, `request.query`, `request.headers`, `request.body`, `request.requestedModel`, `request.normalizedMessages` |
-| `gateway.response.chunk` | 每个有边界的 streaming response chunk。 | `stream.inspect` | `stream.modify` | `streamChunk` | `traceId`, `stream.sequence`, `stream.chunk` |
-| `gateway.response.after` | 完整 non-streaming upstream response body 可用后。 | `response.header.read`, `response.body.read` | `response.header.write`, `response.body.write` | `headers`, `responseBody` | `traceId`, `response.status`, `response.headers`, `response.body` |
-| `gateway.error` | gateway error response materialization 后、发送前。 | `response.header.read`, `response.body.read` | `response.header.write`, `response.body.write` | `headers`, `responseBody` | `traceId`, `response.status`, `response.headers`, `response.body` |
-| `log.beforePersist` | gateway request log persistence 前。 | `log.redact` | `log.redact` | `logMessage` | `traceId`, `log.message` |
+| `gateway.request.afterBodyRead` | 读取 request body 后、发送 upstream provider 前。 | `request.meta.read`, `request.header.read`, `request.header.readSensitive`, `request.body.read` | `request.header.write`, `request.body.write` | `headers`, `requestBody` | `traceId`, `request.cliKey`, `request.method`, `request.path`, `request.query`, `request.headers`, `request.body`, `request.bodyTruncated`, `request.requestedModel`, `request.normalizedMessages`, `request.normalizedMessagesTruncated` |
+| `gateway.request.beforeSend` | provider resolution 后、发送 upstream provider 前。 | `request.meta.read`, `request.header.read`, `request.header.readSensitive`, `request.body.read` | `request.header.write`, `request.body.write` | `headers`, `requestBody` | `traceId`, `request.cliKey`, `request.method`, `request.path`, `request.query`, `request.headers`, `request.body`, `request.bodyTruncated`, `request.requestedModel`, `request.normalizedMessages`, `request.normalizedMessagesTruncated` |
+| `gateway.response.chunk` | 每个有边界的 streaming response chunk。 | `stream.inspect` | `stream.modify` | `streamChunk` | `traceId`, `stream.sequence`, `stream.chunk`, `stream.chunkTruncated` |
+| `gateway.response.after` | 完整 non-streaming upstream response body 可用后。 | `response.header.read`, `response.body.read` | `response.header.write`, `response.body.write` | `headers`, `responseBody` | `traceId`, `response.status`, `response.headers`, `response.body`, `response.bodyTruncated` |
+| `gateway.error` | gateway error response materialization 后、发送前。 | `response.header.read`, `response.body.read` | `response.header.write`, `response.body.write` | `headers`, `responseBody` | `traceId`, `response.status`, `response.headers`, `response.body`, `response.bodyTruncated` |
+| `log.beforePersist` | gateway request log persistence 前。 | `log.redact` | `log.redact` | `logMessage` | `traceId`, `log.message`, `log.messageTruncated` |
 
 ## gateway.request.afterBodyRead
 
@@ -59,6 +59,7 @@ Replay 支持按 hook 分层：
 - Mutation labels：`request.header.write`、`request.body.write`。
 - Mutation fields：`headers`、`requestBody`。
 - Provider-neutral field：`request.normalizedMessages`。
+- Truncation fields：`request.bodyTruncated`、`request.normalizedMessagesTruncated`。
 
 这个 hook 适合 prompt optimization、privacy filtering 和 request-body checks。只有宿主为当前 hook 调用提供 body context 时，插件才会看到 `request.body` 和 `request.normalizedMessages`；插件不能通过 Extension Host manifest 申请 `request.body.read`。
 
@@ -110,6 +111,7 @@ Codex/OpenAI Responses-style fixture：
 - Mutation labels：`request.header.write`、`request.body.write`。
 - Mutation fields：`headers`、`requestBody`。
 - Provider-neutral field：`request.normalizedMessages`。
+- Truncation fields：`request.bodyTruncated`、`request.normalizedMessagesTruncated`。
 
 它在当前 attempt 的 provider selection、auth/header preparation、request body sanitizers 和 protocol rectifiers 后执行，紧贴 gateway 向 upstream provider 发送 bytes 前。插件必须保证最终 upstream request-body 或 request-header mutation 时，使用这个 hook。
 
@@ -123,7 +125,7 @@ Codex/OpenAI Responses-style fixture：
 - Visible context labels：`stream.inspect`。
 - Mutation labels：`stream.modify`。
 - Mutation fields：`streamChunk`。
-- Context fields：`traceId`、`stream.sequence`、`stream.chunk`。
+- Context fields：`traceId`、`stream.sequence`、`stream.chunk`、`stream.chunkTruncated`。
 
 这个 hook 接收有边界的 streaming chunks，而不是完整响应。需要完整 response bodies 的插件，应在 non-streaming requests 中使用 `gateway.response.after`。
 
@@ -135,7 +137,7 @@ Codex/OpenAI Responses-style fixture：
 - Visible context labels：`response.header.read`、`response.body.read`。
 - Mutation labels：`response.header.write`、`response.body.write`。
 - Mutation fields：`headers`、`responseBody`。
-- Context fields：`traceId`、`response.status`、`response.headers`、`response.body`。
+- Context fields：`traceId`、`response.status`、`response.headers`、`response.body`、`response.bodyTruncated`。
 
 这个 hook 适合 non-streaming response redaction、warnings 或 response blocking。
 
@@ -147,7 +149,7 @@ Codex/OpenAI Responses-style fixture：
 - Visible context labels：`response.header.read`、`response.body.read`。
 - Mutation labels：`response.header.write`、`response.body.write`。
 - Mutation fields：`headers`、`responseBody`。
-- Context fields：`traceId`、`response.status`、`response.headers`、`response.body`。
+- Context fields：`traceId`、`response.status`、`response.headers`、`response.body`、`response.bodyTruncated`。
 
 这个 hook 用于脱敏或改写 gateway-generated error responses，不应处理 provider success responses。
 
@@ -159,7 +161,7 @@ Codex/OpenAI Responses-style fixture：
 - Visible context labels：`log.redact`。
 - Mutation labels：`log.redact`。
 - Mutation fields：`logMessage`。
-- Context fields：`traceId`、`log.message`。
+- Context fields：`traceId`、`log.message`、`log.messageTruncated`。
 
 这个 hook 用于 request logs 入队或写入前的不可逆脱敏。
 

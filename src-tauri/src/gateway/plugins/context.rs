@@ -256,7 +256,9 @@ impl GatewayLogHookInput {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct GatewayVisibleHookContext {
+    #[serde(skip_serializing)]
     pub(crate) hook_name: String,
+    #[serde(skip_serializing)]
     pub(crate) trace_id: String,
     pub(crate) request: GatewayVisibleRequestContext,
     pub(crate) response: GatewayVisibleResponseContext,
@@ -286,6 +288,7 @@ pub(crate) struct GatewayNormalizedMessage {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct GatewayVisibleRequestContext {
     pub(crate) cli_key: Option<String>,
     pub(crate) method: Option<String>,
@@ -300,6 +303,7 @@ pub(crate) struct GatewayVisibleRequestContext {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct GatewayVisibleResponseContext {
     pub(crate) status: Option<u16>,
     pub(crate) headers: Option<serde_json::Map<String, serde_json::Value>>,
@@ -308,6 +312,7 @@ pub(crate) struct GatewayVisibleResponseContext {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct GatewayVisibleStreamContext {
     pub(crate) sequence: Option<u64>,
     pub(crate) chunk: Option<String>,
@@ -315,6 +320,7 @@ pub(crate) struct GatewayVisibleStreamContext {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct GatewayVisibleLogContext {
     pub(crate) message: Option<String>,
     pub(crate) message_truncated: bool,
@@ -615,6 +621,98 @@ mod tests {
             assert_eq!(GatewayPluginHookName::from_str(hook.as_str()), Some(hook));
         }
         assert_eq!(GatewayPluginHookName::from_str("gateway.unknown"), None);
+    }
+
+    #[test]
+    fn visible_hook_context_serializes_only_canonical_camel_case_wire_fields() {
+        let mut request_headers = serde_json::Map::new();
+        request_headers.insert("x-public".to_string(), serde_json::json!("visible"));
+        let context = GatewayVisibleHookContext {
+            hook_name: GatewayPluginHookName::RequestAfterBodyRead
+                .as_str()
+                .to_string(),
+            trace_id: "trace-canonical-wire".to_string(),
+            request: GatewayVisibleRequestContext {
+                cli_key: Some("codex".to_string()),
+                method: Some("POST".to_string()),
+                path: Some("/v1/responses".to_string()),
+                query: Some("debug=1".to_string()),
+                headers: Some(request_headers),
+                body: Some("request-body".to_string()),
+                body_truncated: true,
+                normalized_messages: vec![GatewayNormalizedMessage {
+                    role: "user".to_string(),
+                    text: "hello".to_string(),
+                    source: "openai.responses.input_text".to_string(),
+                }],
+                normalized_messages_truncated: true,
+                requested_model: Some("gpt-test".to_string()),
+            },
+            response: GatewayVisibleResponseContext {
+                status: Some(200),
+                headers: None,
+                body: Some("response-body".to_string()),
+                body_truncated: true,
+            },
+            stream: GatewayVisibleStreamContext {
+                sequence: Some(3),
+                chunk: Some("stream-chunk".to_string()),
+                chunk_truncated: true,
+            },
+            log: GatewayVisibleLogContext {
+                message: Some("log-message".to_string()),
+                message_truncated: true,
+            },
+        };
+
+        let serialized = serde_json::to_value(context).expect("visible context serializes");
+
+        assert_eq!(
+            serialized,
+            serde_json::json!({
+                "request": {
+                    "cliKey": "codex",
+                    "method": "POST",
+                    "path": "/v1/responses",
+                    "query": "debug=1",
+                    "headers": { "x-public": "visible" },
+                    "body": "request-body",
+                    "bodyTruncated": true,
+                    "normalizedMessages": [{
+                        "role": "user",
+                        "text": "hello",
+                        "source": "openai.responses.input_text"
+                    }],
+                    "normalizedMessagesTruncated": true,
+                    "requestedModel": "gpt-test"
+                },
+                "response": {
+                    "status": 200,
+                    "headers": null,
+                    "body": "response-body",
+                    "bodyTruncated": true
+                },
+                "stream": {
+                    "sequence": 3,
+                    "chunk": "stream-chunk",
+                    "chunkTruncated": true
+                },
+                "log": {
+                    "message": "log-message",
+                    "messageTruncated": true
+                }
+            })
+        );
+        assert!(serialized.get("hook_name").is_none());
+        assert!(serialized.get("trace_id").is_none());
+        assert!(serialized.pointer("/request/cli_key").is_none());
+        assert!(serialized.pointer("/request/body_truncated").is_none());
+        assert!(serialized
+            .pointer("/request/normalized_messages")
+            .is_none());
+        assert!(serialized.pointer("/response/body_truncated").is_none());
+        assert!(serialized.pointer("/stream/chunk_truncated").is_none());
+        assert!(serialized.pointer("/log/message_truncated").is_none());
     }
 
     fn headers() -> HeaderMap {
