@@ -1,0 +1,3 @@
+{"file":".trellis/spec/aio-coding-hub/backend/index.md","reason":"Observer 查询、缓存与性能边界"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/local-observer-tui-contract.md","reason":"Observer 协议和摘要兼容语义"}
+{"file":"CODEBASE_HEALTH_AUDIT.md","reason":"AUD-035 I/O 证据与验收"}

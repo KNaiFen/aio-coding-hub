@@ -49,9 +49,9 @@ Specta generates both TypeScript fields as `string | null` in
 - Structured patch unsupported string: fail before output bytes are produced.
 - Full raw TOML save: validate the complete file before atomic write. Fields
   with exact enums must reject empty, non-string, padded, and unknown values.
-- Generated boundary: edit Rust types, run `pnpm tauri:gen-types`, and format
-  the generated file. Do not hand-maintain generated types as the source of
-  truth.
+- Generated boundary: edit Rust types and let GitHub Actions generate and
+  format the TypeScript bindings. Apply only the reviewed bounded drift patch;
+  do not generate locally or hand-maintain generated types as the source of truth.
 - Frontend adapter: a `null` default must deserialize to Rust `None`; it is not
   the same as the empty-string deletion signal.
 - UI: preserve unknown current values with a synthetic option. Passive render
@@ -111,15 +111,13 @@ validator for a field whose raw contract requires exact values.
   - Assert unknown-value display, direct selector patches, and companion-field
     changes only from the explicit action.
 
-Focused verification:
+GitHub Actions must run the focused frontend/Rust tests, generate bindings,
+format, lint, type-check, run Clippy, and complete the affected Rust suite.
+Locally, use only the dependency-free repository contract and diff check:
 
-```powershell
-pnpm exec vitest run src/components/cli-manager/tabs/__tests__/codexApprovalReviewer.test.ts src/components/cli-manager/tabs/__tests__/CodexTab.test.tsx
-Push-Location src-tauri
-cargo test --lib infra::codex_config::tests
-cargo test --test codex_config_toml_raw
-Pop-Location
-pnpm check:generated-bindings
+```bash
+node scripts/check-cloud-only-verification.mjs
+git diff --check
 ```
 
 ### 7. Wrong vs Correct

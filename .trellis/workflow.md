@@ -470,6 +470,8 @@ If `task.py start` errors with a session-identity message (no context key from h
 
 Goal: turn reviewed planning artifacts into code that passes quality checks.
 
+The repository `AGENTS.md` owns the execution boundary. Trellis never grants permission to run package scripts, lint, type-check, tests, builds, generators, or native tools locally. In a cloud-only repository, local work is limited to the explicitly authorized dependency-free contracts and diff checks; full quality gates are reported from CI.
+
 #### 2.1 Implement `[required · repeatable]`
 
 [Claude Code, Cursor, OpenCode, CodeBuddy, Droid, Pi, Oh My Pi]
@@ -477,7 +479,7 @@ Goal: turn reviewed planning artifacts into code that passes quality checks.
 Spawn the implement sub-agent:
 
 - **Agent type**: `trellis-implement`
-- **Task description**: Implement the reviewed task artifacts, consulting materials under `{TASK_DIR}/research/`; finish by running project lint and type-check
+- **Task description**: Implement the reviewed task artifacts, consulting materials under `{TASK_DIR}/research/`; finish with repository-authorized verification and list cloud-owned gates
 - **Dispatch prompt guard**: Tell the spawned agent it is already the `trellis-implement` sub-agent and must implement directly, not spawn another `trellis-implement` / `trellis-check`.
 
 The platform hook/plugin auto-handles:
@@ -491,7 +493,7 @@ The platform hook/plugin auto-handles:
 Spawn the implement sub-agent:
 
 - **Agent type**: `trellis-implement`
-- **Task description**: Implement the reviewed task artifacts, consulting materials under `{TASK_DIR}/research/`; finish by running project lint and type-check
+- **Task description**: Implement the reviewed task artifacts, consulting materials under `{TASK_DIR}/research/`; finish with repository-authorized verification and list cloud-owned gates
 - **Dispatch prompt guard**: The prompt MUST start with `Active task: <task path>`, then explicitly say the spawned agent is already `trellis-implement` and must implement directly without spawning another `trellis-implement` / `trellis-check`.
 
 The pull-based sub-agent definition auto-handles the context load requirement:
@@ -505,7 +507,7 @@ The pull-based sub-agent definition auto-handles the context load requirement:
 Spawn the implement sub-agent:
 
 - **Agent type**: `trellis-implement`
-- **Task description**: Implement the reviewed task artifacts, consulting materials under `{TASK_DIR}/research/`; finish by running project lint and type-check
+- **Task description**: Implement the reviewed task artifacts, consulting materials under `{TASK_DIR}/research/`; finish with repository-authorized verification and list cloud-owned gates
 - **Dispatch prompt guard**: Tell the spawned agent it is already the `trellis-implement` sub-agent and must implement directly, not spawn another `trellis-implement` / `trellis-check`.
 
 The platform prelude auto-handles the context load requirement:
@@ -520,7 +522,7 @@ The platform prelude auto-handles the context load requirement:
 2. Read `{TASK_DIR}/prd.md`, then `design.md` if present, then `implement.md` if present
 3. Consult materials under `{TASK_DIR}/research/`
 4. Implement the code per reviewed artifacts
-5. Run project lint and type-check
+5. Run only verification explicitly authorized by the repository rules and list the CI gates still required
 
 [/codex-inline, Kilo, Antigravity, Devin]
 
@@ -531,14 +533,14 @@ The platform prelude auto-handles the context load requirement:
 Spawn the check sub-agent:
 
 - **Agent type**: `trellis-check`
-- **Task description**: Review all code changes against specs and task artifacts; fix any findings directly; ensure lint and type-check pass
+- **Task description**: Review all code changes against specs and task artifacts; fix findings directly; run only repository-authorized local checks and identify required CI gates
 - **Dispatch prompt guard**: Tell the spawned agent it is already the `trellis-check` sub-agent and must review/fix directly, not spawn another `trellis-check` / `trellis-implement`.
 
 The check agent's job:
 - Review code changes against specs
 - Review code changes against `prd.md`, `design.md` if present, and `implement.md` if present
 - Auto-fix issues it finds
-- Run lint and typecheck to verify
+- Run only the verification allowed by the repository execution boundary
 
 [/Claude Code, Cursor, OpenCode, codex-sub-agent, Kiro, Gemini, Qoder, CodeBuddy, Copilot, Droid, Pi, Oh My Pi, ZCode, Reasonix, Trae]
 
@@ -546,14 +548,14 @@ The check agent's job:
 
 Load the `trellis-check` skill and verify the code per its guidance:
 - Spec compliance
-- lint / type-check / tests
+- repository-authorized local contracts and required cloud gates
 - Cross-layer consistency (when changes span layers)
 
 If issues are found → fix → re-check, until green.
 
 [/codex-inline, Kilo, Antigravity, Devin]
 
-**Final pass (before Phase 3.4 commit)**: the last 2.2 of a task must run full-scope, not just on the latest implement chunk. List all affected packages with `python ./.trellis/scripts/get_context.py --mode packages`, then load each package's spec index Quality Check section. This catches cross-layer / multi-package issues a mid-iteration local 2.2 cannot.
+**Final pass (before Phase 3.4 commit)**: the last 2.2 of a task must review the full scope, not just the latest implement chunk. List all affected packages with `python ./.trellis/scripts/get_context.py --mode packages`, then load each package's spec index Quality Check section. Run only locally authorized contracts; submit all dependency-backed or native checks to the required CI workflow. This catches cross-layer / multi-package issues without expanding local execution authority.
 
 #### 2.3 Rollback `[on demand]`
 

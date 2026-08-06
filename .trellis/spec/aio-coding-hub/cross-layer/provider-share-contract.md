@@ -308,9 +308,9 @@ extension values.
   warning/confirmation flows, file and content modes, late preview suppression,
   discard on edit/mode switch/close/unmount, target-CLI invalidation, and CLI
   switch after success.
-- Final gate: regenerate bindings, then run focused tests, `pnpm typecheck`,
-  `pnpm lint`, `pnpm tauri:fmt`, `pnpm tauri:check`, and full
-  `pnpm tauri:test`.
+- Final gate: GitHub Actions must regenerate bindings and run focused tests,
+  TypeScript, lint, Rust formatting/checks, the full Rust suite, and audit.
+  Locally, use only the cloud-only dependency-free contract and diff checks.
 
 ### 7. Wrong vs Correct
 

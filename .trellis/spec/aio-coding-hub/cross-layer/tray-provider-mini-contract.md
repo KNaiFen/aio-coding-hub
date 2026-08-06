@@ -59,5 +59,5 @@ frozen-generation behavior, title, and empty state remain unchanged.
   scroll reset.
 - Rust unit tests assert logical heights for 0, 1, 5, 10, and 20 providers
   (112, 68, 164, 284, and 284), 404-pixel logical width, and 808-by-568 2x
-  placement. Native tests run in GitHub Actions; local frontend-only validation
-  must not invoke Cargo tooling.
+  placement. Native and frontend tests run in GitHub Actions; local checks use
+  only the cloud-only allowlist.

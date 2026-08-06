@@ -45,8 +45,8 @@ waiting for a check that never reports.
 - `change-scope` is the only owner of `scope`, `full_ci`, and `docs_checks`
   outputs and must run before selectable suites.
 - `docs-contract` uses dependency-free Node.js checks only. It must validate
-  plugin documentation, the plugin API contract, Trellis spec links, and the
-  standalone TUI README/release contract.
+  the cloud-only verification boundary, plugin documentation, the plugin API
+  contract, Trellis spec links, and the standalone TUI README/release contract.
 - Support, frontend, Rust, and candidate planning run only when
   `full_ci=true`. Candidate assembly retains all existing version-change and
   signed-build requirements.

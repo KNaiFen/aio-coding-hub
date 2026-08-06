@@ -83,6 +83,9 @@ jobs:
         with:
           node-version: 22
 
+      - name: Validate cloud-only verification contract
+        run: node scripts/check-cloud-only-verification.mjs
+
       - name: Validate plugin documentation
         run: node scripts/check-plugin-system-docs.mjs
 
@@ -107,6 +110,9 @@ jobs:
         with:
           node-version: 22
 
+      - name: Validate cloud-only verification contract
+        run: node scripts/check-cloud-only-verification.selftest.mjs && node scripts/check-cloud-only-verification.mjs
+
       - name: Validate CI change-scope classifier
         run: node scripts/ci-change-scope.selftest.mjs
 
@@ -130,9 +136,6 @@ jobs:
 
       - name: Validate release promotion integrity
         run: node scripts/release-promotion.selftest.mjs
-
-      - name: Reject local native-build entry points
-        run: node scripts/check-local-build-entrypoints.mjs
 
       - name: Validate Homebrew Cask generator
         run: node scripts/support-matrix.homebrew-cask.selftest.mjs

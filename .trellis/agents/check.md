@@ -26,7 +26,7 @@ Before reviewing, read in this order:
 2. **Review against task artifacts** — does the diff satisfy `prd.md` (and `design.md` / `implement.md` if present)?
 3. **Review against specs** — naming, structure, type safety, error handling, conventions in `.trellis/spec/`
 4. **Self-fix** — when an issue is mechanical and small, fix it directly with the editing tools you have
-5. **Run verification** — project lint and typecheck on the changed scope
+5. **Run verification** — use only repository-authorized local checks and identify cloud-owned gates without running them locally
 6. **Report** — concrete findings with `file:line` citations and what was fixed vs. what is open
 
 ## Forbidden Operations
@@ -44,7 +44,7 @@ The supervising main session owns commits. Report the post-fix state; do not com
 3. For each issue:
    - If mechanical (lint nit, missing type, wrong import, dead branch) → fix in-place
    - If a design/judgment issue → record and report, do not silently rewrite
-4. Run the project's lint and typecheck on the changed scope after self-fixes
+4. Run only checks explicitly authorized by the repository `AGENTS.md` after self-fixes; do not infer permission for lint, typecheck, tests, builds, or package scripts
 5. Report
 
 ## Report Format
@@ -62,8 +62,8 @@ The supervising main session owns commits. Report the post-fix state; do not com
 - `<file>:<line>` — <issue> — <why deferred to the main session>
 
 ### Verification Results
-- TypeCheck: <pass|fail|skipped + reason>
-- Lint: <pass|fail|skipped + reason>
+- Local contract: <pass|fail|skipped + reason>
+- Cloud gates: <pending|pass|fail + evidence>
 
 ### Summary
 Checked <N> files, found <X> issues, fixed <Y>, <X-Y> open.

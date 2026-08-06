@@ -1,0 +1,3 @@
+{"file":".trellis/spec/aio-coding-hub/backend/index.md","reason":"数据库事务、启动顺序、持久恢复与错误处理规范"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/settings-ownership-rollback-contract.md","reason":"SQLite 权威、外部投影和回滚收敛合同"}
+{"file":"CODEBASE_HEALTH_AUDIT.md","reason":"AUD-002 双写漂移证据与验收"}

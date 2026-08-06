@@ -1,0 +1,2 @@
+{"file":".trellis/spec/aio-coding-hub/backend/index.md","reason":"执行 Rust 后端 Quality Check"}
+{"file":"CODEBASE_HEALTH_AUDIT.md","reason":"核对 session-only、迁移与非受管保护验收"}

@@ -270,17 +270,16 @@ Keep focused regressions in
   `export_skill_dir_files` to `write_skill_files_to_dir` byte-for-byte round trip
   containing temporary-like names.
 
-Run at least:
+GitHub Actions must run the focused config-migration Rust suite, Rust formatting,
+Clippy, the full affected Rust library suite, and dependency audit. These are
+cloud-owned gates and must not be invoked locally.
 
-```powershell
-cargo test --manifest-path src-tauri/Cargo.toml config_migrate --lib --locked
-pnpm tauri:fmt
-pnpm tauri:clippy
+Allowed local verification is limited to:
+
+```bash
+node scripts/check-cloud-only-verification.mjs
 git diff --check
 ```
-
-Run the full Rust library suite when production config-migration code or a
-shared filesystem helper changes.
 
 ### 7. Wrong vs Correct
 
@@ -467,8 +466,8 @@ same SQLite transaction that inserts the provider and canonical extension.
 - Assert sensitive carrier types do not derive `Debug` and errors/logs do not
   contain synthetic credential values.
 - Keep 64 MiB bundle, Skill payload, import lock, staged filesystem, and all
-  existing v1/v2 rollback regressions green; run the full Rust suite after
-  production config-migration changes.
+  existing v1/v2 rollback regressions green; GitHub Actions must run the full
+  Rust suite after production config-migration changes.
 
 ### 7. Wrong vs Correct
 

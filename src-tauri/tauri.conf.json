@@ -4,7 +4,6 @@
   "version": "0.60.49",
   "identifier": "io.aio.codinghub",
   "build": {
-    "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "pnpm build",
     "frontendDist": "../dist"

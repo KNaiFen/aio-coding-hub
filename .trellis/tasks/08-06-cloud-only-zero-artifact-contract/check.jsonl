@@ -1,0 +1,5 @@
+{"file":"AGENTS.md","reason":"确认本地零产物规则无矛盾"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/index.md","reason":"执行跨层 Quality Check"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/ci-change-scope-contract.md","reason":"确认完整 CI 与 ci-gate 不被弱化"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/cloud-only-verification-contract.md","reason":"核对本地允许命令和云端门禁合同"}
+{"file":"CODEBASE_HEALTH_AUDIT.md","reason":"逐项核对 AUD-054 验收"}
