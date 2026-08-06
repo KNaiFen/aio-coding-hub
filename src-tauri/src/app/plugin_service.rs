@@ -434,7 +434,7 @@ pub(crate) fn install_official_plugin(
         Some(installed_dir.to_string_lossy().to_string()),
         host_version,
     )?;
-    repository::save_plugin_config(
+    repository::save_plugin_config_preserving_storage(
         db,
         plugin_id,
         fixture.manifest.config_version.unwrap_or(1),
@@ -1975,7 +1975,7 @@ pub(crate) fn update_plugin_from_local_package(
                 extracted.manifest.clone(),
                 Some(installed_dir.to_string_lossy().to_string()),
             )?;
-            repository::save_plugin_config_with_tx(
+            repository::save_plugin_config_with_tx_preserving_storage(
                 tx,
                 &plugin_id,
                 extracted.manifest.config_version.unwrap_or(1),
@@ -2042,7 +2042,13 @@ pub(crate) fn rollback_plugin_to_version(
     let config_version = manifest.config_version.unwrap_or(1);
     let detail = repository::with_plugin_transaction(db, |tx| {
         repository::update_plugin_manifest_with_tx(tx, manifest, installed_dir)?;
-        repository::save_plugin_config_with_tx(tx, plugin_id, config_version, &next_config, &[])?;
+        repository::save_plugin_config_with_tx_preserving_storage(
+            tx,
+            plugin_id,
+            config_version,
+            &next_config,
+            &[],
+        )?;
         let detail =
             repository::save_plugin_permissions_with_tx(tx, plugin_id, &granted, &pending)?;
         append_audit_with_tx(
@@ -2291,7 +2297,13 @@ pub(crate) fn save_plugin_config(
     let config = config_with_schema_defaults(detail.manifest.config_schema.as_ref(), config);
     validate_config_against_schema(detail.manifest.config_schema.as_ref(), &config)?;
     let config_version = detail.manifest.config_version.unwrap_or(1);
-    let next = repository::save_plugin_config(db, plugin_id, config_version, &config, &[])?;
+    let next = repository::save_plugin_config_preserving_storage(
+        db,
+        plugin_id,
+        config_version,
+        &config,
+        &[],
+    )?;
     append_audit(
         db,
         Some(plugin_id.to_string()),
@@ -3175,6 +3187,45 @@ mod tests {
     }
 
     #[test]
+    fn service_config_save_preserves_runtime_storage() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::init_for_tests(&dir.path().join("plugins.db")).unwrap();
+
+        install_plugin_manifest(
+            &db,
+            manifest(),
+            PluginInstallSource::Local,
+            None,
+            env!("CARGO_PKG_VERSION"),
+        )
+        .unwrap();
+        repository::save_plugin_config(
+            &db,
+            "community.prompt-helper",
+            1,
+            &serde_json::json!({
+                "mode": "append_instruction",
+                "storage": {"cursor": "current"}
+            }),
+            &[],
+        )
+        .unwrap();
+
+        let saved = save_plugin_config(
+            &db,
+            "community.prompt-helper",
+            serde_json::json!({
+                "mode": "rewrite_system_message",
+                "storage": {"cursor": "stale"}
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(saved.config["mode"], "rewrite_system_message");
+        assert_eq!(saved.config["storage"], serde_json::json!({"cursor": "current"}));
+    }
+
+    #[test]
     fn local_plugin_install_records_no_pending_permissions_for_extension_host() {
         let dir = tempfile::tempdir().unwrap();
         let db = crate::db::init_for_tests(&dir.path().join("plugins.db")).unwrap();
@@ -3345,6 +3396,55 @@ mod tests {
 
         let uninstalled = uninstall_plugin(&db, "official.privacy-filter").unwrap();
         assert_eq!(uninstalled.summary.status, PluginStatus::Uninstalled);
+    }
+
+    #[test]
+    fn official_plugin_update_preserves_runtime_storage() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::init_for_tests(&dir.path().join("official-storage-update.db")).unwrap();
+        let installed_root = dir.path().join("installed");
+        let official_root = dir.path().join("official");
+        let source_dir = official_root.join("privacy-filter");
+        let packaged_root = crate::app::plugins::official::official_resource_root_for_tests();
+        copy_dir_recursive(&packaged_root.join("privacy-filter"), &source_dir).unwrap();
+
+        install_official_plugin(
+            &db,
+            "official.privacy-filter",
+            &official_root,
+            env!("CARGO_PKG_VERSION"),
+            &installed_root,
+        )
+        .unwrap();
+        repository::save_plugin_storage_value(
+            &db,
+            "official.privacy-filter",
+            "cursor",
+            serde_json::json!("kept"),
+        )
+        .unwrap();
+
+        let manifest_path = source_dir.join("plugin.json");
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+        manifest["version"] = serde_json::json!("1.0.1");
+        std::fs::write(
+            &manifest_path,
+            serde_json::to_vec_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        let updated = install_official_plugin(
+            &db,
+            "official.privacy-filter",
+            &official_root,
+            env!("CARGO_PKG_VERSION"),
+            &installed_root,
+        )
+        .unwrap();
+
+        assert_eq!(updated.summary.current_version.as_deref(), Some("1.0.1"));
+        assert_eq!(updated.config["storage"], serde_json::json!({"cursor": "kept"}));
     }
 
     #[test]
@@ -6227,6 +6327,13 @@ INSERT INTO plugin_market_sources(
             serde_json::json!({"enabled": true, "extra": "kept"}),
         )
         .unwrap();
+        repository::save_plugin_storage_value(
+            &db,
+            "local.rollback-state",
+            "cursor",
+            serde_json::json!("before-update"),
+        )
+        .unwrap();
 
         let updated = update_plugin_from_local_package(
             &db,
@@ -6241,6 +6348,17 @@ INSERT INTO plugin_market_sources(
         )
         .unwrap();
         assert!(updated.pending_permissions.is_empty());
+        assert_eq!(
+            updated.config["storage"],
+            serde_json::json!({"cursor": "before-update"})
+        );
+        repository::save_plugin_storage_value(
+            &db,
+            "local.rollback-state",
+            "cursor",
+            serde_json::json!("before-rollback"),
+        )
+        .unwrap();
 
         let rolled_back = rollback_plugin_to_version(&db, "local.rollback-state", "1.0.0").unwrap();
 
@@ -6251,6 +6369,10 @@ INSERT INTO plugin_market_sources(
         assert!(rolled_back.granted_permissions.is_empty());
         assert!(rolled_back.pending_permissions.is_empty());
         assert_eq!(rolled_back.config["enabled"], true);
+        assert_eq!(
+            rolled_back.config["storage"],
+            serde_json::json!({"cursor": "before-rollback"})
+        );
         assert_eq!(
             repository::plugin_config_version(&db, "local.rollback-state").unwrap(),
             Some(1)
