@@ -69,11 +69,16 @@ export function SettingsDataManagementCard({
         </SettingsRow>
         <SettingsRow label="请求日志留存" subtitle="可在「系统设置 → 请求记录保留」中调整">
           <span className="font-mono text-sm text-foreground">
-            {requestLogRetentionDays === null
-              ? "—"
-              : requestLogRetentionDays === 0
-                ? "永久保留"
-                : `${requestLogRetentionDays} 天`}
+            {requestLogRetentionDays === null ? "—" : `${requestLogRetentionDays} 天`}
+          </span>
+        </SettingsRow>
+        <SettingsRow label="SQLite 可回收空间" subtitle="手动压缩数据库后归还磁盘空间">
+          <span className="font-mono text-sm text-foreground">
+            {dbDiskUsageAvailable === "checking"
+              ? "加载中…"
+              : dbDiskUsageAvailable === "unavailable"
+                ? "—"
+                : formatBytes(dbDiskUsage?.reclaimable_bytes ?? 0)}
           </span>
         </SettingsRow>
         <SettingsRow label="压缩数据库" subtitle="回收已删除记录占用的磁盘空间，不删除数据">

@@ -49,6 +49,7 @@ const APP_DATA_RESET_EMPTY_DB_DISK_USAGE: DbDiskUsage = {
   wal_bytes: 0,
   shm_bytes: 0,
   total_bytes: 0,
+  reclaimable_bytes: 0,
 };
 
 const APP_DATA_RESET_EMPTY_USAGE_SUMMARY = {

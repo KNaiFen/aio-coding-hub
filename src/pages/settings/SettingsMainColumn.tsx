@@ -375,14 +375,14 @@ function SystemSettingsPanel({
                 commitNumberField({
                   key: "request_log_retention_days",
                   next: e.currentTarget.valueAsNumber,
-                  min: 0,
+                  min: 1,
                   max: 3650,
-                  invalidMessage: "请求记录保留必须为 0（永久）或 1-3650 天",
+                  invalidMessage: "请求记录保留必须为 1-3650 天",
                 })
               }
               onKeyDown={blurOnEnter}
               className="h-8 w-16 text-xs"
-              min={0}
+              min={1}
               max={3650}
               disabled={settingsInputsDisabled}
             />

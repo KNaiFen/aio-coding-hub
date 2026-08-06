@@ -6,7 +6,7 @@ describe("MSW defaults", () => {
     resetMswState();
 
     expect(getSettingsState()).toEqual({
-      schema_version: 59,
+      schema_version: 60,
       preferred_port: 37123,
       show_home_heatmap: true,
       show_home_usage: true,
@@ -27,7 +27,7 @@ describe("MSW defaults", () => {
       tray_enabled: true,
       enable_cli_proxy_startup_recovery: true,
       log_retention_days: 7,
-      request_log_retention_days: 0,
+      request_log_retention_days: 7,
       provider_cooldown_seconds: 30,
       provider_availability_hours: 6,
       provider_base_url_ping_cache_ttl_seconds: 60,

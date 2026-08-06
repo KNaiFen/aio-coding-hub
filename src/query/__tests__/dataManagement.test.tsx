@@ -45,6 +45,7 @@ describe("query/dataManagement", () => {
       wal_bytes: 2,
       shm_bytes: 3,
       total_bytes: 6,
+      reclaimable_bytes: 1,
     });
 
     const client = createTestQueryClient();
@@ -186,6 +187,7 @@ describe("query/dataManagement", () => {
       wal_bytes: 2,
       shm_bytes: 3,
       total_bytes: 6,
+      reclaimable_bytes: 1,
     });
 
     const client = createTestQueryClient();
@@ -207,6 +209,7 @@ describe("query/dataManagement", () => {
         wal_bytes: 0,
         shm_bytes: 0,
         total_bytes: 0,
+        reclaimable_bytes: 0,
       });
     });
     expect(dbDiskUsageGet).toHaveBeenCalledTimes(1);

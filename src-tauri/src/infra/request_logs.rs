@@ -403,12 +403,11 @@ pub fn spawn_write_through<R: tauri::Runtime>(
     true
 }
 
-/// Deletes request logs older than `retention_days`, in small batches so the
-/// write lock is never held long. `retention_days == 0` means retention is
-/// disabled and nothing is deleted.
+/// Deletes request details older than `retention_days`, in small batches so the
+/// write lock is never held long. Usage-ledger coverage is required per batch.
 pub fn purge_expired(db: &db::Db, retention_days: u32, now_unix: i64) -> AppResult<u64> {
     if retention_days == 0 {
-        return Ok(0);
+        return Err("SEC_INVALID_INPUT: request log retention days must be >= 1".into());
     }
     let cutoff = now_unix.saturating_sub(i64::from(retention_days).saturating_mul(24 * 60 * 60));
     let mut total: u64 = 0;
@@ -555,9 +554,6 @@ async fn run_retention_once(app: &tauri::AppHandle, db: &db::Db) {
     let retention_db = db.clone();
     let result = crate::blocking::run("request_log_retention", move || {
         let retention_days = crate::settings::request_log_retention_days_fail_open(&retention_app);
-        if retention_days == 0 {
-            return Ok::<u64, crate::shared::error::AppError>(0);
-        }
         let deleted = purge_expired(&retention_db, retention_days, now_unix_seconds())?;
         if deleted > 0 {
             tracing::info!(retention_days, deleted, "purged expired request logs");
@@ -1350,13 +1346,13 @@ INSERT INTO usage_ledger (
     }
 
     #[test]
-    fn purge_expired_is_disabled_when_retention_days_is_zero() {
+    fn purge_expired_rejects_zero_retention_days() {
         let (_app, db, _dir) = init_test_db();
         insert_request_log_row(&db, "trace-old", Some(200), None, 10, 1_000);
 
-        let deleted = purge_expired(&db, 0, 200_000).expect("purge disabled");
+        let error = purge_expired(&db, 0, 200_000).expect_err("zero retention must fail");
 
-        assert_eq!(deleted, 0);
+        assert!(error.to_string().contains("retention days must be >= 1"));
         assert!(request_log_exists(&db, "trace-old"));
     }
 

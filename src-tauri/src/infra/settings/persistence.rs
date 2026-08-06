@@ -288,7 +288,7 @@ pub fn request_log_retention_days_fail_open<R: tauri::Runtime>(app: &tauri::AppH
             if !REQUEST_LOG_RETENTION_DAYS_FAIL_OPEN_WARNED.swap(true, Ordering::Relaxed) {
                 tracing::warn!(
                     default = DEFAULT_REQUEST_LOG_RETENTION_DAYS,
-                    "settings read failed, disabling request log retention: {}",
+                    "settings read failed, using default request log retention days: {}",
                     err
                 );
             }
@@ -383,6 +383,9 @@ pub(crate) fn validate_bounds(settings: &AppSettings) -> AppResult<()> {
             "SEC_INVALID_INPUT: request_log_retention_days must be <= {MAX_REQUEST_LOG_RETENTION_DAYS}"
         )
         .into());
+    }
+    if settings.request_log_retention_days == 0 {
+        return Err("SEC_INVALID_INPUT: request_log_retention_days must be >= 1".into());
     }
     if settings.provider_cooldown_seconds > MAX_PROVIDER_COOLDOWN_SECONDS {
         return Err(format!(
@@ -736,6 +739,10 @@ mod tests {
         let (settings, _, _) = parse_settings_json(r#"{}"#).unwrap();
         assert_eq!(settings.preferred_port, DEFAULT_GATEWAY_PORT);
         assert_eq!(settings.log_retention_days, DEFAULT_LOG_RETENTION_DAYS);
+        assert_eq!(
+            settings.request_log_retention_days,
+            DEFAULT_REQUEST_LOG_RETENTION_DAYS
+        );
         assert!(settings.tray_enabled);
         assert!(!settings.auto_start);
         assert!(settings.enable_session_reuse);
@@ -1134,6 +1141,17 @@ mod tests {
 
         let err = validate_bounds(&settings).unwrap_err().to_string();
         assert!(err.contains("log_retention_days must be <="));
+    }
+
+    #[test]
+    fn validate_bounds_rejects_zero_request_log_retention() {
+        let settings = AppSettings {
+            request_log_retention_days: 0,
+            ..Default::default()
+        };
+
+        let err = validate_bounds(&settings).unwrap_err().to_string();
+        assert!(err.contains("request_log_retention_days must be >= 1"));
     }
 
     #[test]

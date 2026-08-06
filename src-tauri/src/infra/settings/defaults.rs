@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-pub const SCHEMA_VERSION: u32 = 59;
+pub const SCHEMA_VERSION: u32 = 60;
 pub const DEFAULT_GATEWAY_PORT: u16 = 37123;
 pub const MAX_GATEWAY_PORT: u16 = 37199;
 pub const DEFAULT_PROVIDER_COOLDOWN_SECONDS: u32 = 30;
@@ -57,6 +57,7 @@ pub(super) const SCHEMA_VERSION_ADD_MODEL_ROUTING_POLICY: u32 = 56;
 pub(super) const SCHEMA_VERSION_ADD_UPSTREAM_ERROR_RESPONSE_RULES: u32 = 57;
 pub(super) const SCHEMA_VERSION_ADD_PROVIDER_AVAILABILITY_HOURS: u32 = 58;
 pub(super) const SCHEMA_VERSION_ADD_STREAM_INTERNAL_ERROR_RETRY: u32 = 59;
+pub(super) const SCHEMA_VERSION_SET_REQUEST_LOG_RETENTION_DEFAULT: u32 = 60;
 
 pub const MAX_MODEL_ROUTING_RULES: usize = 128;
 pub const MAX_MODEL_ROUTING_MODEL_BYTES: usize = 256;
@@ -64,9 +65,7 @@ pub const MAX_MODEL_ROUTING_EFFORT_CHARS: usize = 64;
 
 pub(super) const DEFAULT_LOG_RETENTION_DAYS: u32 = 7;
 pub(super) const MAX_LOG_RETENTION_DAYS: u32 = 3650;
-// Request-log DB retention: 0 = keep forever. Deliberately separate from
-// file-log retention because request logs feed long-horizon usage/cost stats.
-pub(super) const DEFAULT_REQUEST_LOG_RETENTION_DAYS: u32 = 0;
+pub(super) const DEFAULT_REQUEST_LOG_RETENTION_DAYS: u32 = 7;
 pub(super) const MAX_REQUEST_LOG_RETENTION_DAYS: u32 = 3650;
 pub(super) const DEFAULT_FAILOVER_MAX_ATTEMPTS_PER_PROVIDER: u32 = 5;
 pub(super) const DEFAULT_FAILOVER_MAX_PROVIDERS_TO_TRY: u32 = 5;
