@@ -910,12 +910,22 @@ fn remove_managed_backup_candidate(
         }
     }
 
-    let validation = managed_backup_version(&quarantine).and_then(|version| {
-        if version != Some(expected_version) {
-            return Ok(false);
+    let validation = match fs::symlink_metadata(&quarantine) {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+            managed_backup_version(&quarantine).and_then(|version| {
+                if version != Some(expected_version) {
+                    return Ok(false);
+                }
+                backup_tree_is_safe_to_remove(&quarantine)
+            })
         }
-        backup_tree_is_safe_to_remove(&quarantine)
-    });
+        Ok(_) => Ok(false),
+        Err(err) => Err(format!(
+            "failed to inspect isolated provider sync backup {}: {err}",
+            quarantine.display()
+        )
+        .into()),
+    };
     match validation {
         Ok(true) => {}
         Ok(false) => {
