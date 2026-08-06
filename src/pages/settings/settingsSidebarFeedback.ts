@@ -37,8 +37,8 @@ export function presentDbCompacted(result: DbCompactResult) {
 }
 
 export function presentResetAllSuccess() {
-  logToConsole("info", "清理全部信息", { ok: true });
-  toast("已清理全部信息：应用即将退出，请重新打开");
+  logToConsole("info", "已登记数据重置", { ok: true });
+  toast("已登记数据重置：应用正在退出");
 }
 
 export function presentConfigExported() {

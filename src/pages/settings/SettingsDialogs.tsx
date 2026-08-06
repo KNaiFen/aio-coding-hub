@@ -74,12 +74,12 @@ export function SettingsDialogs({
           resetAll.setOpen(open);
         }}
         title="确认清理全部信息"
-        description="将删除本地数据库与 settings.json，并在完成后退出应用。下次启动会以默认配置重新初始化。此操作不可撤销。"
+        description="将登记数据重置并退出应用。下次启动会在任何服务运行前删除本地数据库与 settings.json，并以默认配置重新初始化。此操作不可撤销。"
         className="max-w-lg"
       >
         <div className="space-y-4">
           <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
-            注意：此操作会清空所有本地数据与配置。完成后应用会自动退出，需要手动重新打开。
+            注意：当前进程只登记重置并退出；实际清理会在下次启动时完成。
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line-subtle pt-3">
             <Button
@@ -94,7 +94,7 @@ export function SettingsDialogs({
               variant="danger"
               disabled={resetAll.pending}
             >
-              {resetAll.pending ? "清理中…" : "确认清理并退出"}
+              {resetAll.pending ? "登记中…" : "登记重置并退出"}
             </Button>
           </div>
         </div>

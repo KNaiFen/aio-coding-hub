@@ -8,6 +8,7 @@ import { logToConsole } from "../../services/consoleLog";
 import { createDeferred } from "../../test/utils/deferred";
 import {
   getAppStartupStatusSnapshot,
+  getAppStartupStatusSynchronizedSnapshot,
   listenAndSyncAppStartupStatusSnapshot,
   resetAppStartupStatusStore,
   setAppStartupStatusSnapshot,
@@ -23,6 +24,7 @@ vi.mock("../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
 
 const READY_STATUS: AppStartupStatus = {
   running: false,
+  maintenanceMode: false,
   currentStage: "ready",
   failedStage: null,
   errorMessage: null,
@@ -31,6 +33,7 @@ const READY_STATUS: AppStartupStatus = {
 
 const INITIALIZING_STATUS: AppStartupStatus = {
   running: true,
+  maintenanceMode: false,
   currentStage: "initializing_db",
   failedStage: null,
   errorMessage: null,
@@ -42,6 +45,14 @@ describe("app/startupStatusStore", () => {
     vi.clearAllMocks();
     resetAppStartupStatusStore();
     vi.mocked(listenAppStartupStatusEvents).mockResolvedValue(vi.fn());
+  });
+
+  it("tracks whether the initial startup status has synchronized", () => {
+    expect(getAppStartupStatusSynchronizedSnapshot()).toBe(false);
+    setAppStartupStatusSnapshot(READY_STATUS);
+    expect(getAppStartupStatusSynchronizedSnapshot()).toBe(true);
+    resetAppStartupStatusStore();
+    expect(getAppStartupStatusSynchronizedSnapshot()).toBe(false);
   });
 
   it("does not let an older GET response overwrite a newer status update", async () => {

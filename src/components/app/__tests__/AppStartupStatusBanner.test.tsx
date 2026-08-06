@@ -31,6 +31,7 @@ vi.mock("../../../services/app/startupStatus", async () => {
 function setFailedStatus(partial: Record<string, unknown> = {}) {
   setAppStartupStatusSnapshot({
     running: false,
+    maintenanceMode: false,
     currentStage: "failed",
     failedStage: "starting_gateway",
     errorMessage: "gateway boom",
@@ -55,6 +56,7 @@ describe("components/app/AppStartupStatusBanner", () => {
 
     setAppStartupStatusSnapshot({
       running: true,
+      maintenanceMode: false,
       currentStage: "starting_gateway",
       failedStage: null,
       errorMessage: null,
@@ -93,6 +95,7 @@ describe("components/app/AppStartupStatusBanner", () => {
     setFailedStatus({ failedStage: "reading_settings" });
     vi.mocked(appStartupRetry).mockResolvedValue({
       running: false,
+      maintenanceMode: false,
       currentStage: "ready",
       failedStage: null,
       errorMessage: null,
@@ -118,6 +121,7 @@ describe("components/app/AppStartupStatusBanner", () => {
 
     const readyStatus: AppStartupStatus = {
       running: false,
+      maintenanceMode: false,
       currentStage: "ready",
       failedStage: null,
       errorMessage: null,
@@ -128,6 +132,7 @@ describe("components/app/AppStartupStatusBanner", () => {
     await act(async () => {
       pendingRetry.resolve({
         running: false,
+        maintenanceMode: false,
         currentStage: "failed",
         failedStage: "reading_settings",
         errorMessage: "stale retry response",

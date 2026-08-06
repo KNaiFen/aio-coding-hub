@@ -3,7 +3,7 @@
 use crate::shared::error::AppResult;
 use crate::{blocking, db};
 use std::future::Future;
-use tokio::sync::{Mutex as AsyncMutex, MutexGuard};
+use tokio::sync::Mutex as AsyncMutex;
 
 #[derive(Default)]
 pub(crate) struct DbInitState(pub(crate) AsyncMutex<Option<db::Db>>);
@@ -30,15 +30,15 @@ pub(crate) async fn ensure_db_ready<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: &DbInitState,
 ) -> AppResult<db::Db> {
-    ensure_db_ready_with(state, || blocking::run("db_init", move || db::init(&app))).await
-}
-
-pub(crate) async fn prepare_db_reset<'a>(state: &'a DbInitState) -> MutexGuard<'a, Option<db::Db>> {
-    let mut guard = state.0.lock().await;
-    // Hold the cache lock through file deletion so no concurrent command can
-    // recreate the pool midway through a destructive reset.
-    let _ = guard.take();
-    guard
+    crate::app::maintenance::ensure_normal_operation(&app)?;
+    ensure_db_ready_with(state, || {
+        let app = app.clone();
+        async move {
+            crate::app::maintenance::ensure_normal_operation(&app)?;
+            blocking::run("db_init", move || db::init(&app)).await
+        }
+    })
+    .await
 }
 
 #[cfg(test)]

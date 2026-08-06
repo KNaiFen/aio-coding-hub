@@ -3,8 +3,10 @@ import { Toaster } from "sonner";
 import { HashRouter } from "react-router-dom";
 import { AppRoutes } from "./app/AppRoutes";
 import { useInitializeAppSession } from "./app/appSession";
-import { useAppBootstrap } from "./app/useAppBootstrap";
+import { AppRuntimeServices, useAppBootstrap } from "./app/useAppBootstrap";
 import { useGlobalFileDropGuard } from "./app/useGlobalFileDropGuard";
+import { AppMaintenanceScreen } from "./components/app/AppMaintenanceScreen";
+import { Spinner } from "./ui/Spinner";
 
 type CssVarsStyle = CSSProperties & Record<`--toast-${string}`, string | number>;
 
@@ -16,15 +18,31 @@ const TOASTER_STYLE: CssVarsStyle = {
 
 export default function App() {
   useInitializeAppSession();
-  useAppBootstrap();
+  const { status, synchronized } = useAppBootstrap();
   useGlobalFileDropGuard();
+
+  const inMaintenance = synchronized && status.maintenanceMode;
+  const runtimeReady = synchronized && !inMaintenance && status.currentStage === "ready";
+  const canRenderRoutes =
+    synchronized &&
+    !inMaintenance &&
+    (status.currentStage === "ready" || status.currentStage === "failed");
 
   return (
     <>
       <Toaster richColors closeButton position="top-center" style={TOASTER_STYLE} />
-      <HashRouter>
-        <AppRoutes />
-      </HashRouter>
+      {runtimeReady ? <AppRuntimeServices /> : null}
+      {inMaintenance ? (
+        <AppMaintenanceScreen status={status} />
+      ) : canRenderRoutes ? (
+        <HashRouter>
+          <AppRoutes />
+        </HashRouter>
+      ) : (
+        <main className="flex min-h-screen items-center justify-center bg-background text-foreground">
+          <Spinner />
+        </main>
+      )}
     </>
   );
 }

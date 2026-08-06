@@ -11,6 +11,7 @@ import {
 
 const validStatus = {
   running: false,
+  maintenanceMode: false,
   currentStage: "idle",
   failedStage: null,
   errorMessage: null,
@@ -21,6 +22,7 @@ describe("services/app/startupStatus", () => {
   it("normalizes app startup status command results", async () => {
     vi.mocked(tauriInvoke).mockResolvedValueOnce({
       running: false,
+      maintenanceMode: false,
       currentStage: "failed",
       failedStage: "starting_gateway",
       errorMessage: "  gateway failed  ",
@@ -29,6 +31,7 @@ describe("services/app/startupStatus", () => {
 
     await expect(appStartupStatusGet()).resolves.toEqual({
       running: false,
+      maintenanceMode: false,
       currentStage: "failed",
       failedStage: "starting_gateway",
       errorMessage: "gateway failed",

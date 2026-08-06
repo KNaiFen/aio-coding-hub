@@ -3,7 +3,7 @@
   "name": "cross-restart-data-reset",
   "title": "AUD-008 跨重启数据重置",
   "description": "将数据重置改为 durable marker 加下次启动前清理，并提供失败可重试、不可越过的应用级维护态。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": "cross-layer",
   "scope": "data-management",
   "package": "aio-coding-hub",
@@ -12,7 +12,7 @@
   "assignee": "KNaiFen",
   "createdAt": "2026-08-06",
   "completedAt": null,
-  "branch": "codex/cross-restart-data-reset",
+  "branch": "codex/final-hardening-stack",
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,
@@ -21,6 +21,6 @@
   "children": [],
   "parent": "08-06-final-hardening-zero-artifact",
   "relatedFiles": [],
-  "notes": "本批第 5 项；先建立 AUD-002 将复用的 maintenance coordinator。",
+  "notes": "本批第 5 项；在堆叠分支先完成代码，PR/CI/合并后置；先建立 AUD-002 将复用的 maintenance coordinator。",
   "meta": {}
 }
