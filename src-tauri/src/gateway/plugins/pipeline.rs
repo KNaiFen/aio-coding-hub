@@ -324,6 +324,20 @@ impl GatewayPluginPipeline {
             let visible =
                 current_input.visible_context_with_budget(&permissions, self.config.context_budget);
             let truncation = VisibleTruncationState::from_context(&visible);
+            if let Some(err) = self.fail_closed_truncated_context_error(
+                plugin,
+                hook_name,
+                input.trace_id.as_str(),
+                truncation,
+                &mut audit_events,
+                &mut execution_reports,
+            ) {
+                return Err(attach_plugin_diagnostics(
+                    err,
+                    audit_events,
+                    execution_reports,
+                ));
+            }
             let started_at_ms = now_unix_millis();
             let started = Instant::now();
             let hook_timeout = self.hook_timeout(plugin, input.hook_name);
@@ -596,6 +610,20 @@ impl GatewayPluginPipeline {
             let visible =
                 current_input.visible_context_with_budget(&permissions, self.config.context_budget);
             let truncation = VisibleTruncationState::from_context(&visible);
+            if let Some(err) = self.fail_closed_truncated_context_error(
+                plugin,
+                hook_name,
+                input.trace_id.as_str(),
+                truncation,
+                &mut audit_events,
+                &mut execution_reports,
+            ) {
+                return Err(attach_plugin_diagnostics(
+                    err,
+                    audit_events,
+                    execution_reports,
+                ));
+            }
             let started_at_ms = now_unix_millis();
             let started = Instant::now();
             let hook_timeout = self.hook_timeout(plugin, input.hook_name);
@@ -839,6 +867,20 @@ impl GatewayPluginPipeline {
             let visible =
                 current_input.visible_context_with_budget(&permissions, self.config.context_budget);
             let truncation = VisibleTruncationState::from_context(&visible);
+            if let Some(err) = self.fail_closed_truncated_context_error(
+                plugin,
+                hook_name,
+                input.trace_id.as_str(),
+                truncation,
+                &mut audit_events,
+                &mut execution_reports,
+            ) {
+                return Err(attach_plugin_diagnostics(
+                    err,
+                    audit_events,
+                    execution_reports,
+                ));
+            }
             let started_at_ms = now_unix_millis();
             let started = Instant::now();
             let hook_timeout = self.hook_timeout(plugin, hook_name);
@@ -1049,6 +1091,20 @@ impl GatewayPluginPipeline {
             let visible =
                 current_input.visible_context_with_budget(&permissions, self.config.context_budget);
             let truncation = VisibleTruncationState::from_context(&visible);
+            if let Some(err) = self.fail_closed_truncated_context_error(
+                plugin,
+                hook_name,
+                input.trace_id.as_str(),
+                truncation,
+                &mut audit_events,
+                &mut execution_reports,
+            ) {
+                return Err(attach_plugin_diagnostics(
+                    err,
+                    audit_events,
+                    execution_reports,
+                ));
+            }
             let started_at_ms = now_unix_millis();
             let started = Instant::now();
             let hook_timeout = self.hook_timeout(plugin, hook_name);
@@ -1336,6 +1392,52 @@ impl GatewayPluginPipeline {
         );
     }
 
+    fn fail_closed_truncated_context_error(
+        &self,
+        plugin: &PluginDetail,
+        hook_name: GatewayPluginHookName,
+        trace_id: &str,
+        truncation: VisibleTruncationState,
+        audit_events: &mut Vec<GatewayPluginAuditEvent>,
+        execution_reports: &mut Vec<GatewayPluginHookExecutionReport>,
+    ) -> Option<GatewayPluginError> {
+        if failure_policy(plugin, hook_name) != FailurePolicy::FailClosed {
+            return None;
+        }
+        let field = truncation.truncated_direct_field()?;
+        let err = truncated_context_execution_error(field);
+        let error_code = err.code_for_logging();
+        audit_events.push(audit_event(
+            plugin,
+            hook_name,
+            "plugin.hook.failed",
+            "high",
+            "Plugin hook context exceeded the safe budget",
+            serde_json::json!({
+                "error": err.to_string(),
+                "failureKind": "context_budget",
+                "field": field,
+                "executorInvoked": false,
+            }),
+        ));
+        execution_reports.push(self.hook_execution_report(
+            plugin,
+            hook_name,
+            trace_id,
+            HookReportOutcome {
+                started_at_ms: now_unix_millis(),
+                duration_ms: 0,
+                status: budget_or_policy_status(error_code),
+                failure_kind: Some(failure_kind_for_error_code(error_code)),
+                error_code: Some(error_code),
+                mutation_summary: serde_json::json!({ "changed": false }),
+                replayable: false,
+                replay_export_reason: Some("visible plugin context exceeded the safe budget"),
+            },
+        ));
+        Some(err)
+    }
+
     fn hook_execution_report(
         &self,
         plugin: &PluginDetail,
@@ -1492,6 +1594,27 @@ impl VisibleTruncationState {
             log_message: visible.log.message_truncated,
         }
     }
+
+    fn truncated_direct_field(self) -> Option<&'static str> {
+        if self.request_body {
+            Some("request body")
+        } else if self.response_body {
+            Some("response body")
+        } else if self.stream_chunk {
+            Some("stream chunk")
+        } else if self.log_message {
+            Some("log message")
+        } else {
+            None
+        }
+    }
+}
+
+fn truncated_context_execution_error(field: &'static str) -> GatewayPluginError {
+    GatewayPluginError::new(
+        "PLUGIN_CONTEXT_TRUNCATED",
+        format!("fail-closed plugin cannot execute because visible {field} was truncated"),
+    )
 }
 
 fn truncated_context_mutation_error(field: &'static str) -> GatewayPluginError {
@@ -2005,6 +2128,7 @@ mod tests {
         PluginDetail, PluginHook, PluginInstallSource, PluginManifest, PluginRuntime, PluginStatus,
         PluginSummary,
     };
+    use crate::gateway::plugins::context::DEFAULT_PLUGIN_CONTEXT_BODY_BYTES;
     use axum::body::Bytes;
     use axum::http::{HeaderMap, Method};
     use std::collections::BTreeMap;
@@ -2617,6 +2741,356 @@ mod tests {
                 )
                 .open
         );
+    }
+
+    fn fail_closed_plugin(
+        plugin_id: &str,
+        hook_name: GatewayPluginHookName,
+        permissions: Vec<&str>,
+    ) -> PluginDetail {
+        let mut plugin = plugin(plugin_id, 10, permissions);
+        let hook = gateway_hook_mut(&mut plugin);
+        hook.name = hook_name.as_str().to_string();
+        hook.failure_policy = Some("fail-closed".to_string());
+        plugin
+    }
+
+    fn truncated_context_config() -> GatewayPluginPipelineConfig {
+        GatewayPluginPipelineConfig {
+            hook_timeout: Duration::from_secs(1),
+            circuit_failure_threshold: 1,
+            circuit_cooldown: Duration::from_secs(60),
+            context_budget: GatewayPluginContextBudget {
+                body_bytes: 4,
+                stream_bytes: 4,
+                log_bytes: 4,
+                ..GatewayPluginContextBudget::default()
+            },
+            ..GatewayPluginPipelineConfig::default()
+        }
+    }
+
+    fn assert_fail_closed_context_budget_rejection(err: &GatewayPluginError) {
+        assert_eq!(err.code(), "PLUGIN_CONTEXT_TRUNCATED");
+        assert!(err.audit_events().iter().any(|event| {
+            event.event_type == "plugin.hook.failed"
+                && event
+                    .details
+                    .get("executorInvoked")
+                    .and_then(serde_json::Value::as_bool)
+                    == Some(false)
+        }));
+        assert_eq!(err.execution_reports().len(), 1);
+        let report = &err.execution_reports()[0];
+        assert_eq!(report.status, "budgetRejected");
+        assert_eq!(report.failure_kind.as_deref(), Some("context_budget"));
+        assert_eq!(
+            report.error_code.as_deref(),
+            Some("PLUGIN_CONTEXT_TRUNCATED")
+        );
+        assert_eq!(report.circuit_state.as_deref(), Some("closed"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn gateway_plugin_pipeline_rejects_fail_closed_truncated_request_before_executor() {
+        let executor = InMemoryGatewayPluginExecutor::new();
+        let observed_timeouts = executor.observed_timeouts();
+        let pipeline = GatewayPluginPipeline::for_tests(
+            vec![fail_closed_plugin(
+                "plugin.request-truncated",
+                GatewayPluginHookName::RequestAfterBodyRead,
+                vec!["request.body.read"],
+            )],
+            Arc::new(executor),
+            truncated_context_config(),
+        );
+
+        let err = pipeline
+            .run_request_hook(request_input())
+            .await
+            .expect_err("fail-closed truncated request context should not reach the executor");
+
+        assert_fail_closed_context_budget_rejection(&err);
+        assert!(observed_timeouts.lock().unwrap().is_empty());
+        assert_eq!(
+            pipeline
+                .circuit_snapshot(
+                    "plugin.request-truncated",
+                    GatewayPluginHookName::RequestAfterBodyRead,
+                )
+                .failure_count,
+            0
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn gateway_plugin_pipeline_rejects_fail_closed_lossy_utf8_at_body_cap_before_executor() {
+        let executor = InMemoryGatewayPluginExecutor::new();
+        let observed_timeouts = executor.observed_timeouts();
+        let pipeline = GatewayPluginPipeline::for_tests(
+            vec![fail_closed_plugin(
+                "plugin.request-lossy-budget",
+                GatewayPluginHookName::RequestAfterBodyRead,
+                vec!["request.body.read"],
+            )],
+            Arc::new(executor),
+            GatewayPluginPipelineConfig::default(),
+        );
+        let input = GatewayRequestHookInput {
+            body: Bytes::from(vec![0xff; DEFAULT_PLUGIN_CONTEXT_BODY_BYTES]),
+            ..request_input()
+        };
+
+        let err = pipeline
+            .run_request_hook(input)
+            .await
+            .expect_err("fail-closed lossy request context should not reach the executor");
+
+        assert_fail_closed_context_budget_rejection(&err);
+        assert!(observed_timeouts.lock().unwrap().is_empty());
+        assert_eq!(
+            pipeline
+                .circuit_snapshot(
+                    "plugin.request-lossy-budget",
+                    GatewayPluginHookName::RequestAfterBodyRead,
+                )
+                .failure_count,
+            0
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn gateway_plugin_pipeline_rejects_fail_closed_lossy_utf8_response_at_body_cap_before_executor(
+    ) {
+        let executor = InMemoryGatewayPluginExecutor::new();
+        let observed_timeouts = executor.observed_timeouts();
+        let pipeline = GatewayPluginPipeline::for_tests(
+            vec![fail_closed_plugin(
+                "plugin.response-lossy-budget",
+                GatewayPluginHookName::ResponseAfter,
+                vec!["response.body.read"],
+            )],
+            Arc::new(executor),
+            GatewayPluginPipelineConfig::default(),
+        );
+        let input = GatewayResponseHookInput {
+            body: Bytes::from(vec![0xff; DEFAULT_PLUGIN_CONTEXT_BODY_BYTES]),
+            ..response_input()
+        };
+
+        let err = pipeline
+            .run_response_hook(input)
+            .await
+            .expect_err("fail-closed lossy response context should not reach the executor");
+
+        assert_fail_closed_context_budget_rejection(&err);
+        assert!(observed_timeouts.lock().unwrap().is_empty());
+        assert_eq!(
+            pipeline
+                .circuit_snapshot(
+                    "plugin.response-lossy-budget",
+                    GatewayPluginHookName::ResponseAfter,
+                )
+                .failure_count,
+            0
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn gateway_plugin_pipeline_rejects_fail_closed_lossy_utf8_stream_at_chunk_cap_before_executor(
+    ) {
+        let executor = InMemoryGatewayPluginExecutor::new();
+        let observed_timeouts = executor.observed_timeouts();
+        let pipeline = GatewayPluginPipeline::for_tests(
+            vec![fail_closed_plugin(
+                "plugin.stream-lossy-budget",
+                GatewayPluginHookName::ResponseChunk,
+                vec!["stream.inspect"],
+            )],
+            Arc::new(executor),
+            GatewayPluginPipelineConfig::default(),
+        );
+        let input = GatewayStreamHookInput {
+            chunk: Bytes::from(vec![
+                0xff;
+                GatewayPluginContextBudget::default().stream_bytes
+            ]),
+            ..stream_input()
+        };
+
+        let err = pipeline
+            .run_stream_hook(input)
+            .await
+            .expect_err("fail-closed lossy stream context should not reach the executor");
+
+        assert_fail_closed_context_budget_rejection(&err);
+        assert!(observed_timeouts.lock().unwrap().is_empty());
+        assert_eq!(
+            pipeline
+                .circuit_snapshot(
+                    "plugin.stream-lossy-budget",
+                    GatewayPluginHookName::ResponseChunk,
+                )
+                .failure_count,
+            0
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn gateway_plugin_pipeline_rejects_fail_closed_truncated_response_before_executor() {
+        let executor = InMemoryGatewayPluginExecutor::new();
+        let observed_timeouts = executor.observed_timeouts();
+        let pipeline = GatewayPluginPipeline::for_tests(
+            vec![fail_closed_plugin(
+                "plugin.response-truncated",
+                GatewayPluginHookName::ResponseAfter,
+                vec!["response.body.read"],
+            )],
+            Arc::new(executor),
+            truncated_context_config(),
+        );
+
+        let err = pipeline
+            .run_response_hook(response_input())
+            .await
+            .expect_err("fail-closed truncated response context should not reach the executor");
+
+        assert_fail_closed_context_budget_rejection(&err);
+        assert!(observed_timeouts.lock().unwrap().is_empty());
+        assert_eq!(
+            pipeline
+                .circuit_snapshot(
+                    "plugin.response-truncated",
+                    GatewayPluginHookName::ResponseAfter
+                )
+                .failure_count,
+            0
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn gateway_plugin_pipeline_rejects_fail_closed_truncated_stream_before_executor() {
+        let executor = InMemoryGatewayPluginExecutor::new();
+        let observed_timeouts = executor.observed_timeouts();
+        let pipeline = GatewayPluginPipeline::for_tests(
+            vec![fail_closed_plugin(
+                "plugin.stream-truncated",
+                GatewayPluginHookName::ResponseChunk,
+                vec!["stream.inspect"],
+            )],
+            Arc::new(executor),
+            truncated_context_config(),
+        );
+
+        let err = pipeline
+            .run_stream_hook(stream_input())
+            .await
+            .expect_err("fail-closed truncated stream context should not reach the executor");
+
+        assert_fail_closed_context_budget_rejection(&err);
+        assert!(observed_timeouts.lock().unwrap().is_empty());
+        assert_eq!(
+            pipeline
+                .circuit_snapshot(
+                    "plugin.stream-truncated",
+                    GatewayPluginHookName::ResponseChunk
+                )
+                .failure_count,
+            0
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn gateway_plugin_pipeline_rejects_fail_closed_truncated_log_before_executor() {
+        let executor = InMemoryGatewayPluginExecutor::new();
+        let observed_timeouts = executor.observed_timeouts();
+        let pipeline = GatewayPluginPipeline::for_tests(
+            vec![fail_closed_plugin(
+                "plugin.log-truncated",
+                GatewayPluginHookName::LogBeforePersist,
+                vec!["log.redact"],
+            )],
+            Arc::new(executor),
+            truncated_context_config(),
+        );
+
+        let err = pipeline
+            .run_log_hook(log_input())
+            .await
+            .expect_err("fail-closed truncated log context should not reach the executor");
+
+        assert_fail_closed_context_budget_rejection(&err);
+        assert!(observed_timeouts.lock().unwrap().is_empty());
+        assert_eq!(
+            pipeline
+                .circuit_snapshot(
+                    "plugin.log-truncated",
+                    GatewayPluginHookName::LogBeforePersist
+                )
+                .failure_count,
+            0
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn gateway_plugin_pipeline_keeps_fail_open_truncated_context_executable() {
+        let executor = InMemoryGatewayPluginExecutor::new();
+        let observed_timeouts = executor.observed_timeouts();
+        let pipeline = GatewayPluginPipeline::for_tests(
+            vec![plugin(
+                "plugin.fail-open-truncated",
+                10,
+                vec!["request.body.read"],
+            )],
+            Arc::new(executor),
+            truncated_context_config(),
+        );
+
+        let output = pipeline
+            .run_request_hook(request_input())
+            .await
+            .expect("fail-open truncated context should preserve the request");
+
+        assert_eq!(output.body.as_ref(), b"hello");
+        assert_eq!(observed_timeouts.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn gateway_plugin_pipeline_does_not_reject_normalized_message_only_truncation() {
+        let input = GatewayRequestHookInput {
+            body: Bytes::from_static(br#"{"messages":[{"role":"user","content":"abcdef"}]}"#),
+            ..request_input()
+        };
+        let executor = InMemoryGatewayPluginExecutor::new();
+        let observed_timeouts = executor.observed_timeouts();
+        let pipeline = GatewayPluginPipeline::for_tests(
+            vec![fail_closed_plugin(
+                "plugin.normalized-only",
+                GatewayPluginHookName::RequestAfterBodyRead,
+                vec!["request.body.read"],
+            )],
+            Arc::new(executor),
+            GatewayPluginPipelineConfig {
+                context_budget: GatewayPluginContextBudget {
+                    body_bytes: input.body.len(),
+                    normalized_messages: 1,
+                    normalized_message_text_bytes: 2,
+                    ..GatewayPluginContextBudget::default()
+                },
+                ..GatewayPluginPipelineConfig::default()
+            },
+        );
+
+        let output = pipeline
+            .run_request_hook(input)
+            .await
+            .expect("normalized-message-only truncation should not reject a fail-closed hook");
+
+        assert_eq!(
+            output.body.as_ref(),
+            br#"{"messages":[{"role":"user","content":"abcdef"}]}"#
+        );
+        assert_eq!(observed_timeouts.lock().unwrap().len(), 1);
     }
 
     #[tokio::test(flavor = "current_thread")]

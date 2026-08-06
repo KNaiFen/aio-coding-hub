@@ -219,6 +219,7 @@ mod tests {
         GatewayHookResult, GatewayNormalizedMessage, GatewayPluginHookName,
         GatewayRequestHookInput, GatewayVisibleHookContext, GatewayVisibleLogContext,
         GatewayVisibleRequestContext, GatewayVisibleResponseContext, GatewayVisibleStreamContext,
+        DEFAULT_PLUGIN_CONTEXT_BODY_BYTES,
     };
     use crate::gateway::plugins::pipeline::{GatewayPluginPipeline, GatewayPluginPipelineConfig};
     use axum::body::Bytes;
@@ -336,8 +337,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn runtime_executor_extension_host_request_hooks_receive_large_bodies_without_truncation()
-    {
+    async fn runtime_executor_extension_host_request_hooks_receive_context_body_budget_without_truncation(
+    ) {
         let temp = tempfile::tempdir().expect("tempdir");
         write_gateway_extension_plugin(
             temp.path(),
@@ -354,16 +355,13 @@ mod tests {
             })()"#,
         );
         let plugin = extension_host_plugin_detail_with_root("example.extension", temp.path());
-        let body = json!({
-            "messages": [{
-                "role": "user",
-                "content": format!(
-                    "{} 你知道 13344441520 是哪里的手机号嘛",
-                    "x".repeat(300 * 1024)
-                )
-            }]
-        })
-        .to_string();
+        let prefix = "{\"messages\":[{\"role\":\"user\",\"content\":\"";
+        let suffix = "\"}]}";
+        let secret = "13344441520";
+        let filler_len =
+            DEFAULT_PLUGIN_CONTEXT_BODY_BYTES - prefix.len() - secret.len() - suffix.len();
+        let body = format!("{prefix}{}{secret}{suffix}", "x".repeat(filler_len));
+        assert_eq!(body.len(), DEFAULT_PLUGIN_CONTEXT_BODY_BYTES);
         let pipeline = GatewayPluginPipeline::for_tests(
             vec![plugin],
             Arc::new(RuntimeGatewayPluginExecutor::for_tests()),
@@ -383,7 +381,9 @@ mod tests {
                 requested_model: None,
             })
             .await
-            .expect("large extension host request body should be available to plugins");
+            .expect(
+                "context-budget-sized extension host request body should be available to plugins",
+            );
         let redacted = String::from_utf8(output.body.to_vec()).expect("utf8 body");
 
         assert!(redacted.contains("[电话]"));
