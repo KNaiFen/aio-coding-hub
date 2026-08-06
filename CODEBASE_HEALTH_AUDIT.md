@@ -1084,6 +1084,7 @@ Rust 运行时状态 / 请求日志
 - 实际影响与根因：原始 request/error/retry 明细和运行日志可无限增长，长期桌面用户磁盘占用不可预测；自动 VACUUM 还会在用户未明确请求时长时间持有数据库资源。根因是明细 retention、永久聚合 ledger 和物理压缩没有分开建模。
 - 最小修复建议：默认与历史 0 配置迁移为 7 天，所有写入口拒绝 0；保留 usage_ledger/统计聚合永久可查，只删到期原始明细。运行日志增加 256 MiB 软上限，超额只回收最旧已关闭滚动文件，活动文件永不删。清理后通过 `freelist_count * page_size` 展示可回收空间，移除自动 VACUUM，手动压缩才执行。
 - 验证及回归测试：云端 Rust/前端覆盖 settings migration、ledger 覆盖、明细删除、上月统计、运行日志日龄/容量/活动文件、SQLite freelist 展示和手动压缩；确保不重构现有 request-log JSON 字段。
+- 2026-08-07 代码与交付状态：堆叠候选提交 `1a733301` 完成 settings v60/旧 0 迁移、请求明细覆盖门、UTC 日滚动年龄与 256 MiB 软上限、惰性跨日活动文件保护、freelist IPC/UI 及非自动 VACUUM 回归源码。本地 cloud-only checker/self-test 与差异检查通过；未运行本地生成器或依赖型/native 命令。PR、Actions 全量门、生成绑定核验和合并列入待执行交付，因此仍为 `planned`。
 
 ## 5. 待验证假设
 
@@ -1547,7 +1548,7 @@ AUD-014 执行结果：只修改 CLI proxy controls hook、Sidebar 和对应两�
 | --- | --- | --- | --- | --- |
 | 1 | `.trellis/tasks/08-06-cloud-only-zero-artifact-contract` / `codex/cloud-only-zero-artifact-contract` | `AUD-054` | `resolved`：规则、README、活跃 spec/template、package/workspace scripts 与零依赖合同由 `c5b3c6b9` 建立，自测修正为 `2334403b`。 | PR #86 / merge `d32106c3`；PR run `31103175487` 与 workflow_dispatch `31103187154` 全绿；24 个精确仓库产物目录已清理。 |
 | 2 | `.trellis/tasks/08-06-provider-sync-session-snapshot` / `codex/provider-sync-session-only-backup` | `AUD-055` | sessions-only v2 manifest、v1 managed 迁移、单代 backup、回滚和非受管保护。 | 云端 Rust tests/format/bindings/Clippy；本候选已补 AUD-054 的 PR/CI/提交证据。 |
-| 3 | `.trellis/tasks/08-06-request-runtime-log-retention` / `codex/request-runtime-log-retention` | `AUD-056` | 7 天请求/运行日志、ledger 永久保留、256 MiB 软上限、freelist 可见、不自动 VACUUM。 | 云端完整跨层门；下一候选补 AUD-055 证据。 |
+| 3 | `.trellis/tasks/08-06-request-runtime-log-retention` / `codex/final-hardening-stack` | `AUD-056` | 代码候选 `1a733301`：7 天请求/运行日志、ledger 永久保留、256 MiB 软上限、活动文件保护、freelist 可见、不自动 VACUUM。 | PR、云端完整跨层门、bindings 核验与合并待执行；当前不阻塞后续代码。 |
 | 4 | `.trellis/tasks/08-06-gateway-lan-bearer-token` / `codex/gateway-lan-bearer-token` | `AUD-016` | 真实 peer 的全路由 token、一次性展示/轮换、header 脱敏、WSL 同步和 provider 专用路径移除。 | 云端 socket/路由/日志/WSL 覆盖；下一候选补 AUD-056 证据。 |
 | 5 | `.trellis/tasks/08-06-cross-restart-data-reset` / `codex/cross-restart-data-reset` | `AUD-008` | durable marker、专用退出、启动前清理、失败 maintenance retry/exit gate。 | 云端跨平台生命周期门；为 AUD-002 提供共享 coordinator。 |
 | 6 | `.trellis/tasks/08-06-filesystem-recovery-journal` / `codex/filesystem-recovery-journal` | `AUD-002` | prepare-first journal、SQLite 权威 replay、Skills 受管 artifact、补偿错误聚合。 | 云端故障注入/重启/脱敏/并发门；下一候选补 AUD-008 证据。 |
