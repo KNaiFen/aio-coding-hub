@@ -49,6 +49,7 @@
 
 - **状态**：`planned`
 - **日期**：2026-08-06
+- **待执行交付**：代码候选已在堆叠分支提交为 `d86e92e8`；本地仅通过零依赖 cloud-only checker/self-test 与 `git diff --check`，未运行 Cargo、pnpm、Tauri、生成器、类型检查、Lint、测试或构建。PR、精确 head 全量 CI、跨平台故障注入与主线门统一后置；在云端验证和合并前保持 `planned`。
 - **观察问题**：数据重置在当前进程逐文件删除，而退出清理可能再次初始化数据库；文件占用或部分失败会让应用带着不完整清理继续运行。
 - **锁定决策**：reset IPC 只持久写 marker 后走专用退出；下次启动在 DB、observer、gateway 和后台任务前删除；失败保留 marker 并进入 retry/exit 维护态。
 - **拟议方向**：建立应用级 maintenance coordinator、幂等 marker 生命周期和专用退出路径，并 gate 原生/前端启动任务。
