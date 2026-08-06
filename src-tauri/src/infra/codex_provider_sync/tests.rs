@@ -251,6 +251,49 @@ fn backup_removal_revalidates_an_entry_replaced_after_classification() {
     );
 }
 
+#[test]
+fn backup_removal_preserves_a_symlink_replaced_after_classification() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path().join(PROVIDER_SYNC_BACKUP_ROOT);
+    std::fs::create_dir_all(&root).expect("create backup root");
+    let candidate = root.join("candidate");
+    write_managed_manifest(&candidate, 1, "1", PROVIDER_SYNC_MANAGED_BY);
+    let expected = managed_backup_version(&candidate)
+        .expect("classify candidate")
+        .expect("managed candidate");
+
+    let displaced_managed = root.join("displaced-managed");
+    std::fs::rename(&candidate, &displaced_managed).expect("replace candidate");
+    let external_managed = temp.path().join("external-managed");
+    write_managed_manifest(&external_managed, 1, "2", PROVIDER_SYNC_MANAGED_BY);
+    std::fs::write(external_managed.join("user-notes.txt"), b"keep me")
+        .expect("write external data");
+    if symlink_test_dir(&external_managed, &candidate).is_err() {
+        return;
+    }
+
+    let warning = remove_managed_backup_candidate(&root, &candidate, expected)
+        .expect("safe candidate removal");
+
+    assert!(warning.is_some(), "replacement should be reported");
+    assert!(
+        std::fs::symlink_metadata(&candidate)
+            .expect("replacement symlink must survive")
+            .file_type()
+            .is_symlink(),
+        "replacement symlink must be restored"
+    );
+    assert_eq!(
+        std::fs::read(external_managed.join("user-notes.txt"))
+            .expect("symlink target data must survive"),
+        b"keep me".to_vec()
+    );
+    assert!(
+        displaced_managed.exists(),
+        "the separately displaced managed backup is outside this removal"
+    );
+}
+
 fn session_change(path: &Path, original: &[u8], next: &[u8]) -> SessionChange {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).expect("create session parent");
