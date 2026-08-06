@@ -501,6 +501,30 @@ export const commands = {
   async gatewayStatus(): Promise<GatewayStatus> {
     return await TAURI_INVOKE("gateway_status");
   },
+  async gatewayBearerTokenReveal(): Promise<Result<GatewayBearerTokenReveal | null, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("gateway_bearer_token_reveal") };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async gatewayBearerTokenRotate(): Promise<Result<GatewayBearerTokenReveal, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("gateway_bearer_token_rotate") };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async gatewayBearerTokenAcknowledge(): Promise<Result<boolean, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("gateway_bearer_token_acknowledge") };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async gatewayCheckPortAvailable(port: number): Promise<Result<boolean, string>> {
     try {
       return { status: "ok", data: await TAURI_INVOKE("gateway_check_port_available", { port }) };
@@ -897,17 +921,6 @@ export const commands = {
       return {
         status: "ok",
         data: await TAURI_INVOKE("codex_managed_profile_delete", { profileUuid }),
-      };
-    } catch (e) {
-      if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
-    }
-  },
-  async providerClaudeTerminalLaunchCommand(providerId: number): Promise<Result<string, string>> {
-    try {
-      return {
-        status: "ok",
-        data: await TAURI_INVOKE("provider_claude_terminal_launch_command", { providerId }),
       };
     } catch (e) {
       if (e instanceof Error) throw e;
@@ -3191,6 +3204,10 @@ export type GatewayActiveSessionSummary = {
   total_output_tokens: number | null;
   total_cost_usd: number | null;
   total_duration_ms: number | null;
+};
+export type GatewayBearerTokenReveal = {
+  token: string;
+  wsl_sync_error: string | null;
 };
 export type GatewayAttemptEvent = {
   trace_id: string;

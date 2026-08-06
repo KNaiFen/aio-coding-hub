@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
 
 use super::active_requests::{ActiveRequestFinishReason, ActiveRequestRegistry};
+use super::access_token::GatewayAccessControl;
 use super::background_tasks::GatewayBackgroundTasks;
 use super::codex_session_id::CodexSessionIdCache;
 use super::plugins::pipeline::GatewayPluginPipeline;
@@ -27,6 +28,7 @@ pub(in crate::gateway) struct GatewayAppState<R: tauri::Runtime = tauri::Wry> {
     #[cfg(test)]
     pub(super) http_client_override: Option<reqwest::Client>,
     pub(super) active_requests: Arc<ActiveRequestRegistry>,
+    pub(super) access_control: GatewayAccessControl,
 }
 
 impl<R: tauri::Runtime> Clone for GatewayAppState<R> {
@@ -45,6 +47,7 @@ impl<R: tauri::Runtime> Clone for GatewayAppState<R> {
             #[cfg(test)]
             http_client_override: self.http_client_override.clone(),
             active_requests: self.active_requests.clone(),
+            access_control: self.access_control.clone(),
         }
     }
 }

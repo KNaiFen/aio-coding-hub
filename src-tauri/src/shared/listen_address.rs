@@ -10,6 +10,16 @@ pub(crate) fn is_wildcard_host(host: &str) -> bool {
     matches!(host.trim(), "0.0.0.0" | "::")
 }
 
+pub(crate) fn is_loopback_host(host: &str) -> bool {
+    let host = host.trim().trim_start_matches('[').trim_end_matches(']');
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.parse::<std::net::IpAddr>()
+        .map(|address| address.is_loopback())
+        .unwrap_or(false)
+}
+
 pub(crate) fn format_host_port(host: &str, port: u16) -> String {
     if host.contains(':') {
         format!("[{host}]:{port}")
@@ -178,6 +188,16 @@ mod tests {
     #[test]
     fn wildcard_host_rejects_localhost() {
         assert!(!is_wildcard_host("127.0.0.1"));
+    }
+
+    #[test]
+    fn loopback_host_accepts_ipv4_ipv6_and_localhost() {
+        assert!(is_loopback_host("127.0.0.1"));
+        assert!(is_loopback_host("[::1]"));
+        assert!(is_loopback_host("LOCALHOST"));
+        assert!(!is_loopback_host("0.0.0.0"));
+        assert!(!is_loopback_host("192.168.1.10"));
+        assert!(!is_loopback_host("gateway.internal"));
     }
 
     #[test]

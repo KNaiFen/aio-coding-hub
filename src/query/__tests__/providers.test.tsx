@@ -16,7 +16,6 @@ import {
   providerOAuthStatus,
   providerAccountUsageFetch,
   providerAvailabilityTimelinesGet,
-  providerClaudeTerminalLaunchCommand,
   providerDelete,
   providerDuplicate,
   providerTestAvailability,
@@ -38,7 +37,6 @@ import {
   useOAuthLimitsQuery,
   useProviderAccountUsageQuery,
   useProviderAvailabilityTimelinesQuery,
-  useProviderClaudeTerminalLaunchCommandMutation,
   useProviderDeleteMutation,
   useProviderDuplicateMutation,
   useDefaultRouteProviderSetSessionReusePriorityMutation,
@@ -82,7 +80,6 @@ vi.mock("../../services/providers/providers", async () => {
     providerTestAvailability: vi.fn(),
     providersReorder: vi.fn(),
     defaultRouteProviderSetSessionReusePriority: vi.fn(),
-    providerClaudeTerminalLaunchCommand: vi.fn(),
   };
 });
 
@@ -1908,24 +1905,6 @@ describe("query/providers", () => {
 
     expect(providersReorder).toHaveBeenCalledWith("claude", [1, 3, 2]);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: providersKeys.list("claude") });
-  });
-
-  it("useProviderClaudeTerminalLaunchCommandMutation calls service with provider id", async () => {
-    setTauriRuntime();
-
-    vi.mocked(providerClaudeTerminalLaunchCommand).mockResolvedValue("bash '/tmp/aio.sh'");
-
-    const client = createTestQueryClient();
-    const wrapper = createQueryWrapper(client);
-
-    const { result } = renderHook(() => useProviderClaudeTerminalLaunchCommandMutation(), {
-      wrapper,
-    });
-    await act(async () => {
-      await result.current.mutateAsync({ providerId: 8 });
-    });
-
-    expect(providerClaudeTerminalLaunchCommand).toHaveBeenCalledWith(8);
   });
 
   it("updates the default route session reuse priority optimistically and stores the response", async () => {

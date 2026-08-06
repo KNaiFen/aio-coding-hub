@@ -5,7 +5,6 @@ import {
   MAX_PROVIDER_ORDER_IDS,
   type ProviderSummary,
   defaultRouteProviderSetSessionReusePriority,
-  providerClaudeTerminalLaunchCommand,
   providerCopyApiKeyToClipboard,
   providerDelete,
   providerDuplicate,
@@ -49,7 +48,6 @@ vi.mock("../../../generated/bindings", async () => {
       providerDelete: vi.fn(),
       providersReorder: vi.fn(),
       defaultRouteProviderSetSessionReusePriority: vi.fn(),
-      providerClaudeTerminalLaunchCommand: vi.fn(),
       providerCopyApiKeyToClipboard: vi.fn(),
       baseUrlPingMs: vi.fn(),
       providerOauthStartFlow: vi.fn(),
@@ -457,10 +455,6 @@ describe("services/providers/providers", () => {
       status: "ok",
       data: [] as any,
     });
-    vi.mocked(commands.providerClaudeTerminalLaunchCommand).mockResolvedValueOnce({
-      status: "ok",
-      data: "bash '/tmp/aio.sh'" as any,
-    });
     vi.mocked(commands.providerTestAvailability).mockResolvedValueOnce({
       status: "ok",
       data: {
@@ -480,7 +474,6 @@ describe("services/providers/providers", () => {
     await providerSetEnabled(1, true);
     await providerDelete(1);
     await providersReorder("claude", [2, 1]);
-    await providerClaudeTerminalLaunchCommand(5);
     await providerTestAvailability(5);
 
     expect(commands.providersList).toHaveBeenCalledWith("claude");
@@ -488,7 +481,6 @@ describe("services/providers/providers", () => {
     expect(commands.providerSetEnabled).toHaveBeenCalledWith(1, true);
     expect(commands.providerDelete).toHaveBeenCalledWith(1, false);
     expect(commands.providersReorder).toHaveBeenCalledWith("claude", [2, 1]);
-    expect(commands.providerClaudeTerminalLaunchCommand).toHaveBeenCalledWith(5);
     expect(commands.providerTestAvailability).toHaveBeenCalledWith(5);
   });
 

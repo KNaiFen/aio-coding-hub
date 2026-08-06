@@ -32,13 +32,12 @@ mod provider_selection;
 mod request_fingerprint;
 mod runtime_settings;
 
-use early_error::extract_forced_provider_id;
 use middleware::{
     BillingHeaderRectifierMiddleware, BodyReaderMiddleware, CliProxyGuardMiddleware,
     CodexRequestClassifierMiddleware, CodexSessionCompletionMiddleware,
     Cx2ccCountTokensInterceptorMiddleware, ManagedModelRouteMiddleware, MiddlewareAction,
     ModelInferenceMiddleware, ProbeInterceptorMiddleware, ProviderResolutionMiddleware,
-    ProxyContext, RecursionGuardMiddleware, RequestFingerprintMiddleware,
+    ProxyContext, RequestFingerprintMiddleware,
     RuntimeSettingsMiddleware, WarmupInterceptorMiddleware,
 };
 
@@ -169,8 +168,6 @@ where
         (parts.headers, b)
     };
 
-    let forced_provider_id = extract_forced_provider_id(&headers);
-
     // Build the initial context.
     let ctx = ProxyContext {
         state,
@@ -205,7 +202,6 @@ where
         effective_sort_mode_id: None,
         providers: vec![],
         session_bound_provider_id: None,
-        forced_provider_id,
         fingerprint_key: 0,
         fingerprint_debug: String::new(),
         unavailable_fingerprint_key: 0,
@@ -213,13 +209,7 @@ where
     };
 
     // --- Middleware chain ---
-    // 1. Recursion guard (blocks recursive loops).
-    let ctx = match RecursionGuardMiddleware::run(ctx) {
-        MiddlewareAction::Continue(ctx) => *ctx,
-        MiddlewareAction::ShortCircuit(resp) => return resp,
-    };
-
-    // 2. CLI proxy guard (checks enable/disable per CLI key).
+    // 1. CLI proxy guard (checks enable/disable per CLI key).
     let ctx = match CliProxyGuardMiddleware::run(ctx).await {
         MiddlewareAction::Continue(ctx) => *ctx,
         MiddlewareAction::ShortCircuit(resp) => return resp,
@@ -444,6 +434,7 @@ mod tests {
             provider_enable_gate: Arc::new(crate::gateway::runtime::ProviderEnableGate::default()),
             http_client_override: None,
             active_requests,
+            access_control: crate::gateway::access_token::GatewayAccessControl::default(),
         }
     }
 
@@ -493,7 +484,6 @@ mod tests {
             effective_sort_mode_id: None,
             providers: vec![],
             session_bound_provider_id: None,
-            forced_provider_id: None,
             fingerprint_key: 0,
             fingerprint_debug: String::new(),
             unavailable_fingerprint_key: 0,
@@ -573,7 +563,6 @@ mod tests {
             effective_sort_mode_id: None,
             providers: vec![],
             session_bound_provider_id: None,
-            forced_provider_id: None,
             fingerprint_key: 0,
             fingerprint_debug: String::new(),
             unavailable_fingerprint_key: 0,
@@ -629,7 +618,6 @@ mod tests {
             effective_sort_mode_id: None,
             providers: vec![],
             session_bound_provider_id: None,
-            forced_provider_id: None,
             fingerprint_key: 0,
             fingerprint_debug: String::new(),
             unavailable_fingerprint_key: 0,
@@ -1162,62 +1150,6 @@ mod tests {
 
         assert_eq!(decision.session_id.as_deref(), Some("sess-normal-456"));
         assert!(decision.allow_session_reuse);
-    }
-
-    #[test]
-    fn extract_forced_provider_id_reads_positive_integer() {
-        let mut headers = HeaderMap::new();
-        headers.insert("x-aio-provider-id", HeaderValue::from_static("12"));
-        assert_eq!(
-            super::early_error::extract_forced_provider_id(&headers),
-            Some(12)
-        );
-    }
-
-    #[test]
-    fn extract_forced_provider_id_rejects_invalid_or_non_positive_values() {
-        let mut headers = HeaderMap::new();
-        headers.insert("x-aio-provider-id", HeaderValue::from_static("0"));
-        assert_eq!(
-            super::early_error::extract_forced_provider_id(&headers),
-            None
-        );
-
-        headers.insert("x-aio-provider-id", HeaderValue::from_static("-1"));
-        assert_eq!(
-            super::early_error::extract_forced_provider_id(&headers),
-            None
-        );
-
-        headers.insert("x-aio-provider-id", HeaderValue::from_static("abc"));
-        assert_eq!(
-            super::early_error::extract_forced_provider_id(&headers),
-            None
-        );
-    }
-
-    #[test]
-    fn force_provider_if_requested_keeps_only_selected_provider() {
-        let mut providers = vec![provider(1), provider(2), provider(3)];
-        let special_settings = super::new_special_settings();
-
-        super::early_error::force_provider_if_requested(&mut providers, Some(2), &special_settings);
-
-        assert_eq!(provider_ids(&providers), vec![2]);
-    }
-
-    #[test]
-    fn force_provider_if_requested_clears_when_selected_provider_missing() {
-        let mut providers = vec![provider(1), provider(2), provider(3)];
-        let special_settings = super::new_special_settings();
-
-        super::early_error::force_provider_if_requested(
-            &mut providers,
-            Some(99),
-            &special_settings,
-        );
-
-        assert!(providers.is_empty());
     }
 
     #[test]

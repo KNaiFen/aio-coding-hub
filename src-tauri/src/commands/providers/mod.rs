@@ -1,5 +1,4 @@
 mod account_usage;
-mod claude_terminal;
 mod crud;
 mod models;
 mod oauth;
@@ -8,7 +7,6 @@ mod oauth_reset;
 mod share;
 
 pub(crate) use account_usage::*;
-pub(crate) use claude_terminal::*;
 pub(crate) use crud::*;
 pub(crate) use models::*;
 pub(crate) use oauth::*;

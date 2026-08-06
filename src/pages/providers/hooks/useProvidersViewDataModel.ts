@@ -14,7 +14,6 @@ import { toast } from "sonner";
 import { PointerSensor, type DragEndEvent, useSensor, useSensors } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import { logToConsole } from "../../../services/consoleLog";
-import { copyText } from "../../../services/clipboard";
 import type { GatewayProviderCircuitStatus } from "../../../services/gateway/gateway";
 import {
   type CliKey,
@@ -33,7 +32,6 @@ import {
   useDefaultRouteProvidersQuery,
   useDefaultRouteProviderSetSessionReusePriorityMutation,
   useDefaultRouteProvidersSetOrderMutation,
-  useProviderClaudeTerminalLaunchCommandMutation,
   useProviderDeleteMutation,
   useProviderAvailabilityTimelinesQuery,
   useProviderDuplicateMutation,
@@ -110,7 +108,6 @@ type ProviderActionState = {
   activeCli: CliKey;
   circuitResetting: ProviderActionMap;
   circuitResettingAll: boolean;
-  terminalCopyingByProviderId: ProviderActionMap;
   duplicatingByProviderId: ProviderActionMap;
   testingByProviderId: ProviderActionMap;
 };
@@ -133,7 +130,6 @@ function createProviderActionState(activeCli: CliKey): ProviderActionState {
     activeCli,
     circuitResetting: {},
     circuitResettingAll: false,
-    terminalCopyingByProviderId: {},
     duplicatingByProviderId: {},
     testingByProviderId: {},
   };
@@ -155,17 +151,6 @@ const EMPTY_MODE_PROVIDERS: SortModeProviderRow[] = [];
 const CLOSED_CREATE_MODE_DIALOG: CreateModeDialogState = { open: false, name: "" };
 const CLOSED_RENAME_MODE_DIALOG: RenameModeDialogState = { open: false, name: "" };
 
-function terminalLaunchCopiedToastMessage(command: string) {
-  const normalized = command.trim().toLowerCase();
-  if (
-    normalized.startsWith("powershell ") ||
-    normalized.startsWith("powershell.exe ") ||
-    normalized.startsWith("pwsh ")
-  ) {
-    return "已复制, 请在目标文件夹 PowerShell 粘贴执行";
-  }
-  return "已复制, 请在目标文件夹终端粘贴执行";
-}
 const EMPTY_ROUTE_ROWS: ProviderRouteRow[] = [];
 
 type CodexBridgeSourceCliKey = Exclude<CliKey, "grok">;
@@ -463,7 +448,6 @@ export function useProvidersViewDataModel(activeCli: CliKey, availabilityHours =
   let effectiveProviderActionState = providerActionState;
   const circuitResettingRef = useRef<ProviderActionMap>({});
   const circuitResettingAllRef = useRef(false);
-  const terminalCopyingByProviderIdRef = useRef<ProviderActionMap>({});
   const duplicatingByProviderIdRef = useRef<ProviderActionMap>({});
   const testingByProviderIdRef = useRef<ProviderActionMap>({});
   const togglingByProviderIdRef = useRef<ProviderActionMap>({});
@@ -473,7 +457,6 @@ export function useProvidersViewDataModel(activeCli: CliKey, availabilityHours =
     togglingByProviderIdRef.current = {};
     circuitResettingRef.current = {};
     circuitResettingAllRef.current = false;
-    terminalCopyingByProviderIdRef.current = {};
     duplicatingByProviderIdRef.current = {};
     testingByProviderIdRef.current = {};
     setProviderActionState(effectiveProviderActionState);
@@ -482,7 +465,6 @@ export function useProvidersViewDataModel(activeCli: CliKey, availabilityHours =
   const {
     circuitResetting,
     circuitResettingAll,
-    terminalCopyingByProviderId,
     duplicatingByProviderId,
     testingByProviderId,
   } = effectiveProviderActionState;
@@ -490,7 +472,6 @@ export function useProvidersViewDataModel(activeCli: CliKey, availabilityHours =
     (
       key:
         | "circuitResetting"
-        | "terminalCopyingByProviderId"
         | "duplicatingByProviderId"
         | "testingByProviderId",
       value: SetStateAction<ProviderActionMap>
@@ -504,10 +485,6 @@ export function useProvidersViewDataModel(activeCli: CliKey, availabilityHours =
   );
   const setCircuitResetting: ProviderActionMapSetter = useCallback(
     (value) => setProviderActionMap("circuitResetting", value),
-    [setProviderActionMap]
-  );
-  const setTerminalCopyingByProviderId: ProviderActionMapSetter = useCallback(
-    (value) => setProviderActionMap("terminalCopyingByProviderId", value),
     [setProviderActionMap]
   );
   const setDuplicatingByProviderId: ProviderActionMapSetter = useCallback(
@@ -547,7 +524,6 @@ export function useProvidersViewDataModel(activeCli: CliKey, availabilityHours =
   const sortModeProviderSetEnabledMutation = useSortModeProviderSetEnabledMutation();
   const sortModeProviderSetSessionReusePriorityMutation =
     useSortModeProviderSetSessionReusePriorityMutation();
-  const terminalLaunchCommandMutation = useProviderClaudeTerminalLaunchCommandMutation();
   const testAvailabilityMutation = useProviderTestAvailabilityMutation();
 
   const sortModes = sortModesQuery.data ?? EMPTY_SORT_MODES;
@@ -895,62 +871,6 @@ export function useProvidersViewDataModel(activeCli: CliKey, availabilityHours =
       }
     },
     [deleteTarget, providerDeleteMutation, setDeleteTarget]
-  );
-
-  const copyTerminalLaunchCommand = useCallback(
-    async (provider: ProviderSummary) => {
-      if (provider.cli_key !== "claude") return;
-      if (
-        !beginStatefulProviderAction(
-          terminalCopyingByProviderIdRef,
-          setTerminalCopyingByProviderId,
-          provider.id
-        )
-      ) {
-        return;
-      }
-
-      let launchCommand: string | null = null;
-      try {
-        try {
-          launchCommand = await terminalLaunchCommandMutation.mutateAsync({
-            providerId: provider.id,
-          });
-          if (!launchCommand) {
-            toast("生成启动命令失败");
-            return;
-          }
-        } catch (error) {
-          logToConsole("error", "生成 Claude 终端启动命令失败", {
-            provider_id: provider.id,
-            error: String(error),
-          });
-          toast(`生成启动命令失败：${String(error)}`);
-          return;
-        }
-
-        try {
-          await copyText(launchCommand);
-          toast(terminalLaunchCopiedToastMessage(launchCommand));
-          logToConsole("info", "复制 Claude 终端启动命令", {
-            provider_id: provider.id,
-          });
-        } catch (error) {
-          logToConsole("error", "复制 Claude 终端启动命令失败", {
-            provider_id: provider.id,
-            error: String(error),
-          });
-          toast("复制失败：当前环境不支持剪贴板");
-        }
-      } finally {
-        finishStatefulProviderAction(
-          terminalCopyingByProviderIdRef,
-          setTerminalCopyingByProviderId,
-          provider.id
-        );
-      }
-    },
-    [setTerminalCopyingByProviderId, terminalLaunchCommandMutation]
   );
 
   const duplicateProvider = useCallback(
@@ -1548,7 +1468,6 @@ export function useProvidersViewDataModel(activeCli: CliKey, availabilityHours =
     openCreateDialog,
     toggleProviderEnabled,
     resetCircuit,
-    copyTerminalLaunchCommand,
     duplicateProvider,
     handleDragEnd,
     handleProviderCardDragEnd,
@@ -1563,7 +1482,6 @@ export function useProvidersViewDataModel(activeCli: CliKey, availabilityHours =
     confirmRemoveProvider,
     sourceProviderNamesById,
     sourceProvidersById,
-    terminalCopyingByProviderId,
     duplicatingByProviderId,
     testProviderAvailability,
     testingByProviderId,

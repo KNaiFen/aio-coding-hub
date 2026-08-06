@@ -34,6 +34,7 @@ impl GatewayControlService {
         cfg: &settings::AppSettings,
         preferred_port: Option<u16>,
     ) -> crate::shared::error::AppResult<GatewayStartResult> {
+        super::access_token::ensure_for_settings(app, cfg)?;
         if let Some(runtime) = running.as_ref() {
             let status = runtime.status();
             let effective_preferred_port = status.port.unwrap_or(cfg.preferred_port);
@@ -100,6 +101,7 @@ impl GatewayControlService {
             #[cfg(test)]
             http_client_override: None,
             active_requests: active_requests.clone(),
+            access_control: super::access_token::access_control(app),
         };
         let router = build_router(state);
         let (shutdown, shutdown_rx) = oneshot::channel::<()>();
@@ -116,7 +118,11 @@ impl GatewayControlService {
                 }
             };
 
-            let serve = axum::serve(listener, router).with_graceful_shutdown(async move {
+            let serve = axum::serve(
+                listener,
+                router.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .with_graceful_shutdown(async move {
                 let _ = shutdown_rx.await;
             });
 

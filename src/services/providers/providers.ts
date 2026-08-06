@@ -479,20 +479,6 @@ export async function providerCopyApiKeyToClipboard(providerId: number) {
   });
 }
 
-export async function providerClaudeTerminalLaunchCommand(providerId: number) {
-  const normalizedProviderId = validateProviderId(providerId);
-
-  return invokeGeneratedIpc<string>({
-    title: "生成 Claude 终端启动命令失败",
-    cmd: "provider_claude_terminal_launch_command",
-    args: { providerId: normalizedProviderId },
-    invoke: () =>
-      commands.providerClaudeTerminalLaunchCommand(normalizedProviderId) as Promise<
-        GeneratedCommandResult<string>
-      >,
-  });
-}
-
 export async function providerOAuthStartFlow(
   cliKey: string,
   providerId: number

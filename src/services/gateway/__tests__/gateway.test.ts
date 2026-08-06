@@ -7,6 +7,9 @@ import {
   GATEWAY_SESSIONS_MAX_LIMIT,
   GATEWAY_SESSIONS_MIN_LIMIT,
   gatewayActiveSessionCount,
+  gatewayBearerTokenAcknowledge,
+  gatewayBearerTokenReveal,
+  gatewayBearerTokenRotate,
   gatewayCheckPortAvailable,
   gatewayCircuitResetCli,
   gatewayCircuitResetProvider,
@@ -37,6 +40,9 @@ vi.mock("../../../generated/bindings", async () => {
     commands: {
       ...actual.commands,
       gatewayStatus: vi.fn(),
+      gatewayBearerTokenReveal: vi.fn(),
+      gatewayBearerTokenRotate: vi.fn(),
+      gatewayBearerTokenAcknowledge: vi.fn(),
       gatewayStart: vi.fn(),
       gatewayStop: vi.fn(),
       gatewayCheckPortAvailable: vi.fn(),
@@ -200,6 +206,49 @@ describe("services/gateway/gateway", () => {
       proxyUsername: "proxy-user",
       proxyPassword: "secret",
     });
+  });
+
+  it("maps one-time Gateway token lifecycle responses without persisting the token", async () => {
+    const token = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    const reveal = { token, wsl_sync_error: "WSL_GATEWAY_TOKEN_SYNC_FAILED" };
+    vi.mocked(commands.gatewayBearerTokenReveal)
+      .mockResolvedValueOnce({ status: "ok", data: reveal })
+      .mockResolvedValueOnce({ status: "ok", data: null });
+    vi.mocked(commands.gatewayBearerTokenRotate).mockResolvedValueOnce({
+      status: "ok",
+      data: { token, wsl_sync_error: null },
+    });
+    vi.mocked(commands.gatewayBearerTokenAcknowledge).mockResolvedValueOnce({
+      status: "ok",
+      data: true,
+    });
+
+    await expect(gatewayBearerTokenReveal()).resolves.toEqual(reveal);
+    await expect(gatewayBearerTokenReveal()).resolves.toBeNull();
+    await expect(gatewayBearerTokenRotate()).resolves.toEqual({
+      token,
+      wsl_sync_error: null,
+    });
+    await expect(gatewayBearerTokenAcknowledge()).resolves.toBe(true);
+  });
+
+  it("rejects malformed Gateway token reveal responses without echoing their value", async () => {
+    vi.mocked(commands.gatewayBearerTokenRotate).mockResolvedValueOnce({
+      status: "ok",
+      data: { token: "raw-secret", wsl_sync_error: null },
+    });
+
+    await expect(gatewayBearerTokenRotate()).rejects.toThrow(
+      "SEC_INVALID_INPUT: invalid Gateway Bearer token reveal response"
+    );
+    expect(logToConsole).toHaveBeenCalledWith(
+      "error",
+      "轮换网关访问令牌失败",
+      expect.objectContaining({
+        cmd: "gateway_bearer_token_rotate",
+        error: "SEC_INVALID_INPUT: invalid Gateway Bearer token reveal response",
+      })
+    );
   });
 
   it("normalizes gateway sessions list limits before ipc", async () => {

@@ -1,4 +1,5 @@
 pub(crate) mod active_requests;
+pub(crate) mod access_token;
 mod background_tasks;
 mod billing_header_rectifier;
 mod binder;
@@ -61,6 +62,12 @@ pub(crate) fn listen_rebind_required(
     next: &settings::AppSettings,
 ) -> bool {
     binder::listen_rebind_required(previous, next)
+}
+
+pub(crate) fn listener_accepts_non_loopback(
+    cfg: &settings::AppSettings,
+) -> crate::shared::error::AppResult<bool> {
+    binder::listener_accepts_non_loopback(cfg)
 }
 
 pub(crate) fn resolve_transport_base_url(

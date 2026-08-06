@@ -3,8 +3,8 @@
 use super::{MiddlewareAction, ProxyContext};
 use crate::gateway::proxy::forwarder::{filter_routing_candidates, needs_limit_evaluation};
 use crate::gateway::proxy::handler::early_error::{
-    build_early_error_log_ctx, early_error_contract, force_provider_if_requested,
-    push_special_setting, respond_early_error_with_enqueue, respond_invalid_cli_key_with_spawn,
+    build_early_error_log_ctx, early_error_contract, push_special_setting,
+    respond_early_error_with_enqueue, respond_invalid_cli_key_with_spawn,
     respond_provider_selection_failed_with_spawn, EarlyErrorKind,
 };
 use crate::gateway::proxy::handler::provider_selection::{
@@ -113,14 +113,6 @@ impl ProviderResolutionMiddleware {
         ctx.effective_sort_mode_id = selection.effective_sort_mode_id;
         ctx.providers = selection.providers;
 
-        // --- forced provider ---
-        let forced_provider_missing = force_provider_if_requested(
-            &mut ctx.providers,
-            ctx.forced_provider_id,
-            &ctx.special_settings,
-        );
-        let provider_ids_after_force = provider_ids(&ctx.providers);
-
         // A known OAuth or spend-limit exhaustion is route eligibility, not a
         // failed attempt. Filter it before session binding so the first
         // actually usable provider remains provider_index=1 and can reuse an
@@ -178,7 +170,6 @@ impl ProviderResolutionMiddleware {
             ctx.created_at,
             enable_session_reuse,
             ctx.allow_session_reuse,
-            ctx.forced_provider_id,
             &mut ctx.providers,
             selection.bound_provider_order.as_deref(),
         );
@@ -196,12 +187,9 @@ impl ProviderResolutionMiddleware {
                     session_bound_sort_mode_id: selection.session_bound_sort_mode_id,
                     session_id: ctx.session_id.as_deref(),
                     session_bound_provider_id: ctx.session_bound_provider_id,
-                    forced_provider_id: ctx.forced_provider_id,
                     initial_provider_ids: &initial_provider_ids,
-                    provider_ids_after_force: &provider_ids_after_force,
                     final_provider_ids: &final_provider_ids,
                     limit_excluded_provider_ids: &limit_excluded_provider_ids,
-                    forced_provider_missing,
                 }),
             );
             let contract = early_error_contract(EarlyErrorKind::NoEnabledProvider);
@@ -239,12 +227,9 @@ struct NoEnabledProviderDiagnosticArgs<'a> {
     session_bound_sort_mode_id: Option<Option<i64>>,
     session_id: Option<&'a str>,
     session_bound_provider_id: Option<i64>,
-    forced_provider_id: Option<i64>,
     initial_provider_ids: &'a [i64],
-    provider_ids_after_force: &'a [i64],
     final_provider_ids: &'a [i64],
     limit_excluded_provider_ids: &'a [i64],
-    forced_provider_missing: bool,
 }
 
 fn no_enabled_provider_diagnostic(args: &NoEnabledProviderDiagnosticArgs<'_>) -> serde_json::Value {
@@ -252,9 +237,7 @@ fn no_enabled_provider_diagnostic(args: &NoEnabledProviderDiagnosticArgs<'_>) ->
         Some(id) => serde_json::json!({"kind": "custom", "modeId": id}),
         None => serde_json::json!({"kind": "default", "modeId": serde_json::Value::Null}),
     };
-    let cleared_reason = if args.forced_provider_missing {
-        "forced_provider_not_in_candidates"
-    } else if !args.limit_excluded_provider_ids.is_empty() && args.final_provider_ids.is_empty() {
+    let cleared_reason = if !args.limit_excluded_provider_ids.is_empty() && args.final_provider_ids.is_empty() {
         "all_candidates_limit_excluded"
     } else if args.effective_sort_mode_id.is_some() {
         "empty_sort_mode_candidates"
@@ -281,12 +264,8 @@ fn no_enabled_provider_diagnostic(args: &NoEnabledProviderDiagnosticArgs<'_>) ->
         "sessionIdPresent": args.session_id.is_some(),
         "sessionIdSuffix": args.session_id.map(diagnostic_session_suffix),
         "sessionBoundProviderId": args.session_bound_provider_id,
-        "forcedProviderId": args.forced_provider_id,
-        "forcedProviderMissing": args.forced_provider_missing,
-        "candidateProviderIdsBeforeForce": args.initial_provider_ids,
-        "candidateProviderCountBeforeForce": args.initial_provider_ids.len(),
-        "candidateProviderIdsAfterForce": args.provider_ids_after_force,
-        "candidateProviderCountAfterForce": args.provider_ids_after_force.len(),
+        "candidateProviderIds": args.initial_provider_ids,
+        "candidateProviderCount": args.initial_provider_ids.len(),
         "candidateProviderIdsAfterLimit": args.final_provider_ids,
         "candidateProviderCountAfterLimit": args.final_provider_ids.len(),
         "limitExcludedProviderIds": args.limit_excluded_provider_ids,
@@ -328,12 +307,9 @@ mod tests {
             session_bound_sort_mode_id: None,
             session_id: Some("01234567-89ab-cdef-0123-456789abcdef"),
             session_bound_provider_id: None,
-            forced_provider_id: None,
             initial_provider_ids: &[],
-            provider_ids_after_force: &[],
             final_provider_ids: &[],
             limit_excluded_provider_ids: &[],
-            forced_provider_missing: false,
         });
 
         assert_eq!(
@@ -371,59 +347,9 @@ mod tests {
         assert!(!value.to_string().contains("01234567-89ab-cdef"));
         assert_eq!(
             value
-                .get("candidateProviderCountBeforeForce")
+                .get("candidateProviderCount")
                 .and_then(|v| v.as_u64()),
             Some(0)
-        );
-    }
-
-    #[test]
-    fn no_enabled_provider_diagnostic_marks_forced_provider_missing() {
-        let value = no_enabled_provider_diagnostic(&NoEnabledProviderDiagnosticArgs {
-            cli_key: "claude",
-            active_sort_mode_id: Some(7),
-            effective_sort_mode_id: None,
-            session_bound_sort_mode_id: Some(None),
-            session_id: None,
-            session_bound_provider_id: Some(11),
-            forced_provider_id: Some(99),
-            initial_provider_ids: &[11, 22],
-            provider_ids_after_force: &[],
-            final_provider_ids: &[],
-            limit_excluded_provider_ids: &[],
-            forced_provider_missing: true,
-        });
-
-        assert_eq!(
-            value.get("clearedReason").and_then(|v| v.as_str()),
-            Some("forced_provider_not_in_candidates")
-        );
-        assert_eq!(
-            value.pointer("/sortMode/kind").and_then(|v| v.as_str()),
-            Some("default")
-        );
-        assert_eq!(
-            value.get("activeSortModeId").and_then(|v| v.as_i64()),
-            Some(7)
-        );
-        assert_eq!(
-            value.get("sortModeSource").and_then(|v| v.as_str()),
-            Some("session_bound")
-        );
-        assert_eq!(
-            value
-                .get("candidateProviderIdsBeforeForce")
-                .and_then(|v| v.as_array())
-                .map(|items| items.iter().filter_map(|v| v.as_i64()).collect::<Vec<_>>()),
-            Some(vec![11, 22])
-        );
-        assert_eq!(
-            value.get("forcedProviderId").and_then(|v| v.as_i64()),
-            Some(99)
-        );
-        assert_eq!(
-            value.get("forcedProviderMissing").and_then(|v| v.as_bool()),
-            Some(true)
         );
     }
 
@@ -436,12 +362,9 @@ mod tests {
             session_bound_sort_mode_id: None,
             session_id: Some("session-limit-test"),
             session_bound_provider_id: None,
-            forced_provider_id: None,
             initial_provider_ids: &[11, 22],
-            provider_ids_after_force: &[11, 22],
             final_provider_ids: &[],
             limit_excluded_provider_ids: &[11, 22],
-            forced_provider_missing: false,
         });
 
         assert_eq!(
@@ -450,7 +373,7 @@ mod tests {
         );
         assert_eq!(
             value
-                .get("candidateProviderIdsAfterForce")
+                .get("candidateProviderIds")
                 .and_then(|v| v.as_array())
                 .map(|items| items.iter().filter_map(|v| v.as_i64()).collect::<Vec<_>>()),
             Some(vec![11, 22])

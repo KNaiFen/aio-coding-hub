@@ -99,46 +99,6 @@ pub(super) fn early_error_contract(kind: EarlyErrorKind) -> EarlyErrorContract {
 }
 
 // ---------------------------------------------------------------------------
-// Forced provider
-// ---------------------------------------------------------------------------
-
-pub(super) fn extract_forced_provider_id(headers: &axum::http::HeaderMap) -> Option<i64> {
-    let raw = headers.get("x-aio-provider-id")?.to_str().ok()?.trim();
-    let provider_id = raw.parse::<i64>().ok()?;
-    (provider_id > 0).then_some(provider_id)
-}
-
-pub(super) fn force_provider_if_requested(
-    providers: &mut Vec<crate::providers::ProviderForGateway>,
-    provider_id: Option<i64>,
-    special_settings: &SpecialSettings,
-) -> bool {
-    let Some(provider_id) = provider_id else {
-        return false;
-    };
-
-    if let Some(index) = providers.iter().position(|p| p.id == provider_id) {
-        if index > 0 {
-            providers.rotate_left(index);
-        }
-        providers.truncate(1);
-        push_special_setting(
-            special_settings,
-            serde_json::json!({
-                "type": "provider_lock",
-                "scope": "request",
-                "hit": true,
-                "providerId": provider_id,
-            }),
-        );
-        false
-    } else {
-        providers.clear();
-        true
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Special settings helpers
 // ---------------------------------------------------------------------------
 
