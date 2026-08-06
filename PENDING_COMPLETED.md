@@ -407,9 +407,22 @@
 - 实施边界：本条只修正 Tray mini 横向密度和稳定对齐，不改变请求计数口径、可用性聚合、供应商资格、路由、刷新节奏、快照协议或其他桌面页面。
 - 交付证据：实现提交 `b6a5f973a31991d7261e4d682b4d84fd2d2eadc5`，验证证据提交 `8ec0f90af5204bfe37c9c44eac215246dfa6ebb3`；功能 PR #27、合并提交 `22917a9a69e2e719bf980672d0f2f06bb26c1dac` 与 CI `30810717682` 均成功。版本 `aio-coding-hub-v0.60.46` 已发布，发布提交为 `c1dca6b25b58c0307f54183d1319b7bb1316aca2`，版本 PR #28、主分支候选 CI `30814365441` 和发布工作流 `30818164026` 均成功；12 个资产、11 个有效载荷校验和及 `latest.json` 已验证。404x284 与 808x568 fixture 截图确认固定列无换行、重叠、裁切或位移。
 
+### AIO-PENDING-016：云端验证与本地零产物合同
+
+- 状态：`done`
+- Trellis：`.trellis/tasks/08-06-cloud-only-zero-artifact-contract`
+- 记录日期：2026-08-06
+- 完成日期：2026-08-06
+- 观察问题：仓库文档、package/workspace 脚本和 Trellis 模板仍保留会安装依赖或产生 Node/Rust/Tauri 本地产物的入口，与云端构建策略冲突。
+- 已锁定决策：本地禁止依赖安装、dev、类型检查、Lint、测试、构建、Cargo 与 Tauri；只允许零依赖 Node 源码合同/解析检查和 `git diff --check`。跨平台桌面打包不升级为每个 PR 的必需任务。
+- 实施结果：活跃规则、README、Trellis 规范和模板统一为云端验证；根及 workspace package scripts 由 GitHub Actions guard 约束；零依赖 checker/self-test 锁定真实 CI `run` 步骤、完整 frontend/Rust 门、手动 dev-build 与候选桌面/TUI 非 PR 必需语义。
+- 验收结果：候选 `2334403b` 的 PR run `31103175487` 与精确分支 workflow_dispatch run `31103187154` 均通过 frontend、Rust format/bindings、Clippy、Rust tests、百万行基准、依赖审计和 `ci-gate`；候选与 squash merge 树一致。
+- 交付证据：逻辑提交 `c5b3c6b9`、CI 自测修正 `2334403b`；PR #86 squash 合并为 `d32106c3706edc7535ea074d4c352c6b7e701dbf`。合并后重新枚举同仓库 worktree，只删除 24 个被忽略的精确 `src-tauri/target`、`node_modules`、根级 `dist`/`coverage` 目录，回收约 10.2 GiB；仓库内 pnpm store、全局 Cargo/pnpm 缓存、受控插件 fixture 和其他项目均保留。
+
 ## 已完成或放弃
 
 - 2026-08-02：`AIO-PENDING-001` 至 `AIO-PENDING-011` 已完成，证据见“本批次完成证据”。
 - 2026-08-03：`AIO-PENDING-013` 因无法稳定复现且用户决定自行观察而放弃。
 - 2026-08-03：`AIO-PENDING-012`、`AIO-PENDING-014` 已完成并随 `aio-coding-hub-v0.60.45` 发布，证据见“本批次完成证据”。
 - 2026-08-03：`AIO-PENDING-015` 已完成并随 `aio-coding-hub-v0.60.46` 发布，证据见“本批次完成证据”。
+- 2026-08-06：`AIO-PENDING-016` 已完成，PR #86 与两条精确候选 CI 全绿，合并后仓库级零产物清理已核验。

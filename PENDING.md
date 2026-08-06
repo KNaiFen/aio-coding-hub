@@ -14,16 +14,6 @@
 
 ## 未解决条目
 
-### AIO-PENDING-016 - 云端验证与本地零产物合同
-
-- **状态**：`planned`
-- **日期**：2026-08-06
-- **观察问题**：仓库文档、package/workspace 脚本和 Trellis 模板仍保留会安装依赖或产生 Node/Rust/Tauri 本地产物的入口，与云端构建策略冲突。
-- **锁定决策**：本地禁止依赖安装、dev、类型检查、Lint、测试、构建、Cargo 与 Tauri；只允许零依赖 Node 源码合同/解析检查和 `git diff --check`。跨平台桌面打包不升级为每个 PR 的必需任务。
-- **拟议方向**：更新活跃规则与 README，限制受控脚本为 GitHub Actions 使用，演进零依赖合同检查并加强 CI 静态质量门；历史任务和归档不改写。
-- **验收标准**：本地入口检查能拒绝仓库受控的依赖/构建命令；`ci.yml` 全量 workflow_dispatch 的 rustfmt、bindings、Clippy、Rust tests、前端质量门和 audit 均通过；合并后只清理重新核验过的仓库级产物。
-- **Trellis**：[`08-06-cloud-only-zero-artifact-contract`](./.trellis/tasks/08-06-cloud-only-zero-artifact-contract/)
-
 ### AIO-PENDING-017 - Provider Sync session-only 快照
 
 - **状态**：`planned`

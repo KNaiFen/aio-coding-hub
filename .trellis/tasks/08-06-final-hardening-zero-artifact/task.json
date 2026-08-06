@@ -3,7 +3,7 @@
   "name": "final-hardening-zero-artifact",
   "title": "最终修复与本地零产物",
   "description": "按固定顺序交付八项审计修复，并以本地零产物、GitHub Actions 全量验证和最终文档收口完成治理闭环。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": "cross-layer",
   "scope": "release-governance",
   "package": "aio-coding-hub",
