@@ -1,13 +1,15 @@
 use axum::{
     body::Body,
-    extract::{Path, State},
-    http::Request,
-    response::Response,
+    extract::{connect_info::ConnectInfo, Path, State},
+    http::{header, Request, StatusCode},
+    middleware,
+    response::{IntoResponse, Response},
     routing::{any, get},
     Json, Router,
 };
 use serde::Serialize;
 
+use super::access_token::GatewayAccessControl;
 use super::proxy::proxy_impl;
 use super::runtime::GatewayAppState;
 use super::util::now_unix_seconds;
@@ -50,28 +52,6 @@ where
     proxy_impl(state, cli_key, forwarded_path, req).await
 }
 
-async fn proxy_cli_with_provider_any<R>(
-    State(state): State<GatewayAppState<R>>,
-    Path((cli_key, provider_id, path)): Path<(String, i64, String)>,
-    mut req: Request<Body>,
-) -> Response
-where
-    R: tauri::Runtime + 'static,
-    R::Handle: Unpin,
-{
-    if let Ok(value) = axum::http::HeaderValue::from_str(&provider_id.to_string()) {
-        req.headers_mut().insert("x-aio-provider-id", value);
-    }
-
-    let forwarded_path = if path.is_empty() {
-        "/".to_string()
-    } else {
-        format!("/{path}")
-    };
-
-    proxy_impl(state, cli_key, forwarded_path, req).await
-}
-
 async fn proxy_openai_v1_any<R>(
     State(state): State<GatewayAppState<R>>,
     Path(path): Path<String>,
@@ -108,14 +88,250 @@ where
     Router::new()
         .route("/", get(root))
         .route("/health", get(health))
-        .route(
-            "/:cli_key/_aio/provider/:provider_id/*path",
-            any(proxy_cli_with_provider_any::<R>),
-        )
         .route("/v1", any(proxy_openai_v1_root::<R>))
         .route("/v1/*path", any(proxy_openai_v1_any::<R>))
         .route("/:cli_key/*path", any(proxy_cli_any::<R>))
+        .layer(middleware::from_fn_with_state(
+            state.access_control.clone(),
+            authorize_gateway_request,
+        ))
         .with_state(state)
+}
+
+async fn authorize_gateway_request(
+    State(access): State<GatewayAccessControl>,
+    mut request: Request<Body>,
+    next: middleware::Next,
+) -> Response {
+    // Removed provider-specific URLs stay a stable 404 and never enter proxy
+    // dispatch, regardless of the peer's authentication state.
+    if is_removed_provider_path(request.uri().path()) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let peer = request
+        .extensions()
+        .get::<ConnectInfo<std::net::SocketAddr>>()
+        .map(|info| info.0);
+    #[cfg(test)]
+    let peer = peer.or_else(|| Some(std::net::SocketAddr::from(([127, 0, 0, 1], 0))));
+
+    let Some(peer) = peer else {
+        return unauthorized_response();
+    };
+    if !peer.ip().is_loopback() && !valid_bearer_header(request.headers(), &access) {
+        return unauthorized_response();
+    }
+
+    // Client-controlled identity and forwarding headers are never trusted.
+    for name in [
+        header::AUTHORIZATION.as_str(),
+        "x-aio-provider-id",
+        "x-aio-gateway-forwarded",
+        "forwarded",
+        "x-forwarded-for",
+        "x-forwarded-host",
+        "x-forwarded-proto",
+        "x-real-ip",
+    ] {
+        request.headers_mut().remove(name);
+    }
+
+    next.run(request).await
+}
+
+fn valid_bearer_header(headers: &axum::http::HeaderMap, access: &GatewayAccessControl) -> bool {
+    let mut values = headers.get_all(header::AUTHORIZATION).iter();
+    let Some(value) = values.next() else {
+        return false;
+    };
+    if values.next().is_some() {
+        return false;
+    }
+    let Ok(raw) = value.to_str() else {
+        return false;
+    };
+    let Some(token) = raw.strip_prefix("Bearer ") else {
+        return false;
+    };
+    access.verify(token)
+}
+
+fn unauthorized_response() -> Response {
+    Response::builder()
+        .status(StatusCode::UNAUTHORIZED)
+        .header(header::WWW_AUTHENTICATE, "Bearer")
+        .body(Body::empty())
+        .expect("static unauthorized response")
+        .into_response()
+}
+
+fn is_removed_provider_path(path: &str) -> bool {
+    let mut segments = path.split('/').filter(|segment| !segment.is_empty());
+    matches!(
+        (segments.next(), segments.next(), segments.next()),
+        (Some(_), Some("_aio"), Some("provider"))
+    )
+}
+
+#[cfg(test)]
+mod access_contract_tests {
+    use super::*;
+    use axum::body::to_bytes;
+    use axum::http::{HeaderMap, HeaderValue};
+    use tower::ServiceExt;
+
+    const TEST_TOKEN: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+    fn contract_router() -> Router {
+        let access = GatewayAccessControl::from_token_for_tests(TEST_TOKEN);
+        Router::new()
+            .route("/", any(|| async { StatusCode::NO_CONTENT }))
+            .route("/health", any(|| async { StatusCode::NO_CONTENT }))
+            .route("/:cli_key/*path", any(echo_identity_headers))
+            .layer(middleware::from_fn_with_state(
+                access,
+                authorize_gateway_request,
+            ))
+    }
+
+    async fn echo_identity_headers(headers: HeaderMap) -> Json<Vec<String>> {
+        Json(
+            [
+                header::AUTHORIZATION.as_str(),
+                "x-aio-provider-id",
+                "x-aio-gateway-forwarded",
+                "forwarded",
+                "x-forwarded-for",
+                "x-forwarded-host",
+                "x-forwarded-proto",
+                "x-real-ip",
+            ]
+            .into_iter()
+            .filter(|name| headers.contains_key(*name))
+            .map(str::to_string)
+            .collect(),
+        )
+    }
+
+    fn request_for_peer(path: &str, peer: [u8; 4]) -> Request<Body> {
+        let mut request = Request::builder()
+            .uri(path)
+            .body(Body::empty())
+            .expect("request");
+        request.extensions_mut().insert(ConnectInfo(
+            std::net::SocketAddr::from((peer, 37123)),
+        ));
+        request
+    }
+
+    #[test]
+    fn legacy_provider_paths_are_rejected_before_proxy_dispatch() {
+        assert!(is_removed_provider_path("/codex/_aio/provider/3/v1/responses"));
+        assert!(!is_removed_provider_path("/codex/v1/responses"));
+    }
+
+    #[tokio::test]
+    async fn non_loopback_requires_one_strict_bearer_value_on_every_route() {
+        for path in ["/", "/health", "/codex/v1/responses"] {
+            let response = contract_router()
+                .oneshot(request_for_peer(path, [192, 168, 1, 20]))
+                .await
+                .expect("route response");
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "path={path}");
+
+            let mut wrong = request_for_peer(path, [192, 168, 1, 20]);
+            wrong.headers_mut().insert(
+                header::AUTHORIZATION,
+                HeaderValue::from_static(
+                    "Bearer BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+                ),
+            );
+            let response = contract_router()
+                .oneshot(wrong)
+                .await
+                .expect("route response");
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "path={path}");
+
+            let mut duplicate = request_for_peer(path, [192, 168, 1, 20]);
+            duplicate.headers_mut().append(
+                header::AUTHORIZATION,
+                HeaderValue::from_static("Bearer AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
+            );
+            duplicate.headers_mut().append(
+                header::AUTHORIZATION,
+                HeaderValue::from_static("Bearer AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
+            );
+            let response = contract_router()
+                .oneshot(duplicate)
+                .await
+                .expect("route response");
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "path={path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn correct_non_loopback_token_and_tokenless_loopback_are_accepted() {
+        for path in ["/", "/health", "/codex/v1/responses"] {
+            let mut authenticated = request_for_peer(path, [192, 168, 1, 20]);
+            authenticated.headers_mut().insert(
+                header::AUTHORIZATION,
+                HeaderValue::from_static("Bearer AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
+            );
+            let response = contract_router()
+                .oneshot(authenticated)
+                .await
+                .expect("route response");
+            assert_ne!(response.status(), StatusCode::UNAUTHORIZED, "path={path}");
+
+            let response = contract_router()
+                .oneshot(request_for_peer(path, [127, 0, 0, 1]))
+                .await
+                .expect("route response");
+            assert_ne!(response.status(), StatusCode::UNAUTHORIZED, "path={path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn authenticated_request_drops_auth_provider_and_forwarding_headers() {
+        let mut request = request_for_peer("/codex/v1/responses", [192, 168, 1, 20]);
+        for (name, value) in [
+            (header::AUTHORIZATION.as_str(), format!("Bearer {TEST_TOKEN}")),
+            ("x-aio-provider-id", "99".to_string()),
+            ("x-aio-gateway-forwarded", "aio-coding-hub".to_string()),
+            ("forwarded", "for=127.0.0.1".to_string()),
+            ("x-forwarded-for", "127.0.0.1".to_string()),
+            ("x-real-ip", "127.0.0.1".to_string()),
+        ] {
+            request.headers_mut().insert(
+                axum::http::HeaderName::from_bytes(name.as_bytes()).expect("header name"),
+                HeaderValue::from_bytes(value.as_bytes()).expect("header value"),
+            );
+        }
+
+        let response = contract_router()
+            .oneshot(request)
+            .await
+            .expect("route response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 1024)
+            .await
+            .expect("response body");
+        let remaining: Vec<String> = serde_json::from_slice(&body).expect("header list");
+        assert!(remaining.is_empty(), "identity headers leaked: {remaining:?}");
+    }
+
+    #[tokio::test]
+    async fn removed_provider_url_is_always_404_before_auth_or_proxy() {
+        let response = contract_router()
+            .oneshot(request_for_peer(
+                "/codex/_aio/provider/3/v1/responses",
+                [192, 168, 1, 20],
+            ))
+            .await
+            .expect("route response");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
 }
 
 #[cfg(test)]
@@ -1255,14 +1471,12 @@ INSERT INTO codex_managed_profiles(
         let db = db::init_for_tests(&db_dir.path().join(db_name)).expect("init test db");
         let (upstream_base_url, captured_rx, upstream_task) =
             spawn_capturing_raw_upstream(response_body).await;
-        let provider_id = insert_codex_provider(&db, upstream_base_url);
+        insert_codex_provider(&db, upstream_base_url);
         let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
         let router = build_router(gateway_state(app_handle, db, log_tx));
         let request = Request::builder()
             .method(Method::POST)
-            .uri(format!(
-                "/codex/_aio/provider/{provider_id}{forwarded_path}"
-            ))
+            .uri(format!("/codex{forwarded_path}"))
             .header(header::CONTENT_TYPE, "application/json")
             .header(header::CONTENT_ENCODING, content_encoding)
             .body(Body::from(encoded_body))
@@ -1313,12 +1527,12 @@ INSERT INTO codex_managed_profiles(
         let db = db::init_for_tests(&db_dir.path().join(db_name)).expect("init test db");
         let (upstream_base_url, captured_rx, upstream_task) =
             spawn_capturing_raw_upstream(r#"{"id":"must-not-arrive"}"#).await;
-        let provider_id = insert_codex_provider(&db, upstream_base_url);
+        insert_codex_provider(&db, upstream_base_url);
         let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
         let router = build_router(gateway_state(app_handle, db, log_tx));
         let request = Request::builder()
             .method(Method::POST)
-            .uri(format!("/codex/_aio/provider/{provider_id}/v1/responses"))
+            .uri("/codex/v1/responses")
             .header(header::CONTENT_TYPE, "application/json")
             .header(header::CONTENT_ENCODING, content_encoding)
             .body(Body::from(encoded_body))
@@ -1582,6 +1796,7 @@ INSERT INTO codex_managed_profiles(
             active_requests: Arc::new(
                 crate::gateway::active_requests::ActiveRequestRegistry::default(),
             ),
+            access_control: crate::gateway::access_token::GatewayAccessControl::default(),
         }
     }
 
@@ -2884,9 +3099,7 @@ INSERT INTO codex_managed_profiles(
         let router = build_router(gateway_state(app_handle, db, log_tx));
         let request = Request::builder()
             .method(Method::POST)
-            .uri(format!(
-                "/codex/_aio/provider/{provider_id}/v1/chat/completions"
-            ))
+            .uri("/codex/v1/chat/completions")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(
                 r#"{"model":"gpt-route-timeout","messages":[{"role":"user","content":"hello"}]}"#,
@@ -2984,7 +3197,7 @@ INSERT INTO codex_managed_profiles(
             r#"{"id":"stub-ok","object":"chat.completion","choices":[]}"#,
         )
         .await;
-        let provider_id = insert_codex_provider(&db, upstream_base_url);
+        let _provider_id = insert_codex_provider(&db, upstream_base_url);
 
         let executor = InMemoryGatewayPluginExecutor::new().with_request_handler(
             "test.request-rewrite",
@@ -3013,9 +3226,7 @@ INSERT INTO codex_managed_profiles(
         ));
         let request = Request::builder()
             .method(Method::POST)
-            .uri(format!(
-                "/codex/_aio/provider/{provider_id}/v1/chat/completions"
-            ))
+            .uri("/codex/v1/chat/completions")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(
                 r#"{"model":"gpt-plugin","messages":[{"role":"user","content":"original"}]}"#,
@@ -3079,7 +3290,7 @@ INSERT INTO codex_managed_profiles(
             r#"{"id":"resp-compaction","object":"response","model":"gpt-plugin","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}"#,
         )
         .await;
-        let provider_id = insert_codex_provider(&db, upstream_base_url);
+        let _provider_id = insert_codex_provider(&db, upstream_base_url);
 
         let forged_metadata = serde_json::json!({
             "request_kind": "compaction",
@@ -3143,7 +3354,7 @@ INSERT INTO codex_managed_profiles(
         ));
         let request = Request::builder()
             .method(Method::POST)
-            .uri(format!("/codex/_aio/provider/{provider_id}/v1/responses"))
+            .uri("/codex/v1/responses")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(original_body))
             .expect("request");
@@ -3263,7 +3474,7 @@ INSERT INTO codex_managed_profiles(
         let (upstream_base_url, captured_rx, upstream_task) =
             spawn_capturing_raw_upstream(r#"{"id":"stub-ok","object":"response","output":[]}"#)
                 .await;
-        let provider_id = insert_codex_provider(&db, upstream_base_url);
+        let _provider_id = insert_codex_provider(&db, upstream_base_url);
         let plugin_pipeline = GatewayPluginPipeline::for_tests_shared(
             vec![plugin],
             Arc::new(privacy_filter_route_executor()),
@@ -3292,7 +3503,7 @@ INSERT INTO codex_managed_profiles(
         let compressed_body = gzip_bytes(plain_body.as_bytes());
         let request = Request::builder()
             .method(Method::POST)
-            .uri(format!("/codex/_aio/provider/{provider_id}/v1/responses"))
+            .uri("/codex/v1/responses")
             .header(header::CONTENT_TYPE, "application/json")
             .header(header::CONTENT_ENCODING, "gzip")
             .body(Body::from(compressed_body))
@@ -3393,7 +3604,7 @@ INSERT INTO codex_managed_profiles(
         let (upstream_base_url, captured_rx, upstream_task) =
             spawn_capturing_raw_upstream(r#"{"id":"stub-ok","object":"response","output":[]}"#)
                 .await;
-        let provider_id = insert_codex_provider(&db, upstream_base_url);
+        let _provider_id = insert_codex_provider(&db, upstream_base_url);
         let plugin_pipeline = GatewayPluginPipeline::for_tests_shared(
             vec![plugin],
             Arc::new(privacy_filter_route_executor()),
@@ -3457,7 +3668,7 @@ INSERT INTO codex_managed_profiles(
         .to_string();
         let request = Request::builder()
             .method(Method::POST)
-            .uri(format!("/codex/_aio/provider/{provider_id}/v1/responses"))
+            .uri("/codex/v1/responses")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(plain_body))
             .expect("request");
@@ -3548,7 +3759,7 @@ INSERT INTO codex_managed_profiles(
         let (upstream_base_url, captured_rx, upstream_task) =
             spawn_capturing_raw_upstream(r#"{"id":"stub-ok","object":"response","output":[]}"#)
                 .await;
-        let provider_id = insert_codex_provider(&db, upstream_base_url);
+        let _provider_id = insert_codex_provider(&db, upstream_base_url);
         let plugin_pipeline = GatewayPluginPipeline::for_tests_shared(
             vec![plugin],
             Arc::new(privacy_filter_route_executor()),
@@ -3564,7 +3775,7 @@ INSERT INTO codex_managed_profiles(
         ));
         let request = Request::builder()
             .method(Method::POST)
-            .uri(format!("/codex/_aio/provider/{provider_id}/v1/responses"))
+            .uri("/codex/v1/responses")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(
                 serde_json::json!({
@@ -3637,7 +3848,7 @@ INSERT INTO codex_managed_profiles(
                 r#"{"id":"stub-ok","object":"response","output":[]}"#,
             )
             .await;
-        let provider_id = insert_codex_provider(&db, upstream_base_url);
+        let _provider_id = insert_codex_provider(&db, upstream_base_url);
         let call_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let executor =
             InMemoryGatewayPluginExecutor::new().with_request_handler("test.before-send", {
@@ -3680,7 +3891,7 @@ INSERT INTO codex_managed_profiles(
         .to_string();
         let request = Request::builder()
             .method(Method::POST)
-            .uri(format!("/codex/_aio/provider/{provider_id}/v1/responses"))
+            .uri("/codex/v1/responses")
             .header(header::CONTENT_TYPE, "application/json")
             .header(header::CONTENT_ENCODING, "gzip")
             .body(Body::from(gzip_bytes(plain_body.as_bytes())))
@@ -3741,7 +3952,7 @@ INSERT INTO codex_managed_profiles(
         let (upstream_base_url, captured_rx, upstream_task) =
             spawn_capturing_raw_upstream(r#"{"id":"stub-ok","object":"response","output":[]}"#)
                 .await;
-        let provider_id = insert_codex_provider(&db, upstream_base_url);
+        let _provider_id = insert_codex_provider(&db, upstream_base_url);
 
         let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
         let router = build_router(gateway_state(app_handle, db, log_tx));
@@ -3760,7 +3971,7 @@ INSERT INTO codex_managed_profiles(
         let compressed_body = gzip_bytes(plain_body.as_bytes());
         let request = Request::builder()
             .method(Method::POST)
-            .uri(format!("/codex/_aio/provider/{provider_id}/v1/responses"))
+            .uri("/codex/v1/responses")
             .header(header::CONTENT_TYPE, "application/json")
             .header(header::CONTENT_ENCODING, "gzip")
             .body(Body::from(compressed_body))
@@ -3805,7 +4016,7 @@ INSERT INTO codex_managed_profiles(
         let (upstream_base_url, captured_rx, upstream_task) =
             spawn_capturing_raw_upstream(r#"{"id":"stub-ok","object":"response","output":[]}"#)
                 .await;
-        let provider_id = insert_codex_provider(&db, upstream_base_url);
+        let _provider_id = insert_codex_provider(&db, upstream_base_url);
 
         let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
         let router = build_router(gateway_state(app_handle, db, log_tx));
@@ -3827,7 +4038,7 @@ INSERT INTO codex_managed_profiles(
         let compressed_body = zstd_bytes(plain_body.as_bytes());
         let request = Request::builder()
             .method(Method::POST)
-            .uri(format!("/codex/_aio/provider/{provider_id}/v1/responses"))
+            .uri("/codex/v1/responses")
             .header(header::CONTENT_TYPE, "application/json")
             .header(header::CONTENT_ENCODING, "zstd")
             .body(Body::from(compressed_body))
@@ -4056,7 +4267,7 @@ INSERT INTO codex_managed_profiles(
             r#"{"id":"stub-chat","object":"chat.completion","choices":[]}"#,
         )
         .await;
-        let provider_id =
+        let _provider_id =
             insert_provider_with_priority(&db, "grok", "Grok Gzip Stub", upstream_base_url, 0);
         let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
         let router = build_router(gateway_state(app_handle, db, log_tx));
@@ -4064,9 +4275,7 @@ INSERT INTO codex_managed_profiles(
         let encoded_body = gzip_bytes(plain_body.as_bytes());
         let request = Request::builder()
             .method(Method::POST)
-            .uri(format!(
-                "/grok/_aio/provider/{provider_id}/v1/chat/completions"
-            ))
+            .uri("/grok/v1/chat/completions")
             .header(header::CONTENT_TYPE, "application/json")
             .header(header::CONTENT_ENCODING, "gzip")
             .body(Body::from(encoded_body.clone()))
@@ -4112,7 +4321,7 @@ INSERT INTO codex_managed_profiles(
             r#"{"id":"stub-ok","object":"chat.completion","choices":[]}"#,
         )
         .await;
-        let provider_id = insert_codex_provider(&db, upstream_base_url);
+        let _provider_id = insert_codex_provider(&db, upstream_base_url);
 
         let executor = InMemoryGatewayPluginExecutor::new().with_request_handler(
             "test.request-rewrite",
@@ -4139,9 +4348,7 @@ INSERT INTO codex_managed_profiles(
         ));
         let request = Request::builder()
             .method(Method::POST)
-            .uri(format!(
-                "/codex/_aio/provider/{provider_id}/v1/chat/completions"
-            ))
+            .uri("/codex/v1/chat/completions")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(
                 r#"{"model":"gpt-plugin","messages":[{"role":"user","content":"original"}]}"#,
@@ -4189,7 +4396,7 @@ INSERT INTO codex_managed_profiles(
             r#"{"id":"stub-ok","object":"chat.completion","choices":[]}"#,
         )
         .await;
-        let provider_id = insert_codex_provider(&db, upstream_base_url);
+        let _provider_id = insert_codex_provider(&db, upstream_base_url);
 
         let executor =
             InMemoryGatewayPluginExecutor::new().with_request_handler("test.before-send", |_ctx| {
@@ -4214,9 +4421,7 @@ INSERT INTO codex_managed_profiles(
         ));
         let request = Request::builder()
             .method(Method::POST)
-            .uri(format!(
-                "/codex/_aio/provider/{provider_id}/v1/chat/completions"
-            ))
+            .uri("/codex/v1/chat/completions")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(
                 r#"{"model":"gpt-plugin","messages":[{"role":"user","content":"hello"}]}"#,
@@ -4269,7 +4474,7 @@ INSERT INTO codex_managed_profiles(
             r#"{"id":"stub-ok","object":"chat.completion","choices":[]}"#,
         )
         .await;
-        let provider_id = insert_codex_provider(&db, upstream_base_url);
+        let _provider_id = insert_codex_provider(&db, upstream_base_url);
 
         let executor =
             InMemoryGatewayPluginExecutor::new().with_request_handler("test.before-send", |_ctx| {
@@ -4294,9 +4499,7 @@ INSERT INTO codex_managed_profiles(
         ));
         let request = Request::builder()
             .method(Method::POST)
-            .uri(format!(
-                "/codex/_aio/provider/{provider_id}/v1/chat/completions"
-            ))
+            .uri("/codex/v1/chat/completions")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(
                 r#"{"model":"gpt-plugin","messages":[{"role":"user","content":"hello"}]}"#,
@@ -5073,7 +5276,7 @@ INSERT INTO codex_managed_profiles(
         let (upstream_base_url, upstream_task) =
             spawn_json_upstream(r#"{"id":"original","object":"chat.completion","choices":[]}"#)
                 .await;
-        let provider_id = insert_codex_provider(&db, upstream_base_url);
+        let _provider_id = insert_codex_provider(&db, upstream_base_url);
 
         let executor = InMemoryGatewayPluginExecutor::new().with_response_handler(
             "test.response-after",
@@ -5099,9 +5302,7 @@ INSERT INTO codex_managed_profiles(
         ));
         let request = Request::builder()
             .method(Method::POST)
-            .uri(format!(
-                "/codex/_aio/provider/{provider_id}/v1/chat/completions"
-            ))
+            .uri("/codex/v1/chat/completions")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(
                 r#"{"model":"gpt-plugin","reasoning":{"effort":"high"},"messages":[{"role":"user","content":"hello"}]}"#,
@@ -5155,7 +5356,7 @@ INSERT INTO codex_managed_profiles(
         let (upstream_base_url, upstream_task) =
             spawn_json_upstream(r#"{"id":"original","object":"chat.completion","choices":[]}"#)
                 .await;
-        let provider_id = insert_codex_provider(&db, upstream_base_url);
+        let _provider_id = insert_codex_provider(&db, upstream_base_url);
 
         let executor = InMemoryGatewayPluginExecutor::new().with_response_handler(
             "test.response-after",
@@ -5179,9 +5380,7 @@ INSERT INTO codex_managed_profiles(
         let router = build_router(state);
         let request = Request::builder()
             .method(Method::POST)
-            .uri(format!(
-                "/codex/_aio/provider/{provider_id}/v1/chat/completions"
-            ))
+            .uri("/codex/v1/chat/completions")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(
                 r#"{"model":"gpt-plugin","messages":[{"role":"user","content":"hello"}]}"#,
@@ -5236,7 +5435,7 @@ INSERT INTO codex_managed_profiles(
         let (upstream_base_url, upstream_task) =
             spawn_json_upstream(r#"{"id":"original","object":"chat.completion","choices":[]}"#)
                 .await;
-        let provider_id = insert_codex_provider(&db, upstream_base_url);
+        let _provider_id = insert_codex_provider(&db, upstream_base_url);
 
         let executor = InMemoryGatewayPluginExecutor::new().with_response_handler(
             "test.response-after",
@@ -5259,9 +5458,7 @@ INSERT INTO codex_managed_profiles(
         let router = build_router(state);
         let request = Request::builder()
             .method(Method::POST)
-            .uri(format!(
-                "/codex/_aio/provider/{provider_id}/v1/chat/completions"
-            ))
+            .uri("/codex/v1/chat/completions")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(
                 r#"{"model":"gpt-plugin","messages":[{"role":"user","content":"hello"}]}"#,
@@ -5313,7 +5510,7 @@ INSERT INTO codex_managed_profiles(
             "data: [DONE]\n\n"
         );
         let (upstream_base_url, upstream_task) = spawn_sse_upstream(upstream_body).await;
-        let provider_id = insert_codex_provider(&db, upstream_base_url);
+        let _provider_id = insert_codex_provider(&db, upstream_base_url);
 
         let executor =
             InMemoryGatewayPluginExecutor::new().with_stream_handler("test.stream-chunk", |ctx| {
@@ -5343,9 +5540,7 @@ INSERT INTO codex_managed_profiles(
         ));
         let request = Request::builder()
             .method(Method::POST)
-            .uri(format!(
-                "/codex/_aio/provider/{provider_id}/v1/chat/completions"
-            ))
+            .uri("/codex/v1/chat/completions")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(
                 r#"{"model":"gpt-5.5","stream":true,"messages":[{"role":"user","content":"hello"}]}"#,
@@ -5426,7 +5621,7 @@ INSERT INTO codex_managed_profiles(
         .expect("init test db");
         let (upstream_base_url, upstream_task) =
             spawn_sse_upstream("data: dangerous-command\n\n").await;
-        let provider_id = insert_codex_provider(&db, upstream_base_url);
+        let _provider_id = insert_codex_provider(&db, upstream_base_url);
 
         let executor =
             InMemoryGatewayPluginExecutor::new().with_stream_handler("test.stream-chunk", |ctx| {
@@ -5455,9 +5650,7 @@ INSERT INTO codex_managed_profiles(
         ));
         let request = Request::builder()
             .method(Method::POST)
-            .uri(format!(
-                "/codex/_aio/provider/{provider_id}/v1/chat/completions"
-            ))
+            .uri("/codex/v1/chat/completions")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(
                 r#"{"model":"gpt-plugin","stream":true,"messages":[{"role":"user","content":"hello"}]}"#,
@@ -5517,7 +5710,7 @@ INSERT INTO codex_managed_profiles(
         let (upstream_base_url, upstream_task) =
             spawn_json_upstream(r#"{"id":"stub-ok","object":"chat.completion","choices":[]}"#)
                 .await;
-        let provider_id = insert_codex_provider(&db, upstream_base_url);
+        let _provider_id = insert_codex_provider(&db, upstream_base_url);
 
         let executor =
             InMemoryGatewayPluginExecutor::new().with_log_handler("test.log-redaction", |ctx| {
@@ -5543,9 +5736,7 @@ INSERT INTO codex_managed_profiles(
         ));
         let request = Request::builder()
             .method(Method::POST)
-            .uri(format!(
-                "/codex/_aio/provider/{provider_id}/v1/chat/completions?token=secret-query"
-            ))
+            .uri("/codex/v1/chat/completions?token=secret-query")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(
                 r#"{"model":"gpt-plugin","messages":[{"role":"user","content":"hello"}]}"#,
@@ -6918,9 +7109,7 @@ INSERT INTO codex_managed_profiles(
         let router = build_router(gateway_state(app_handle, db, log_tx));
         let request = Request::builder()
             .method(Method::POST)
-            .uri(format!(
-                "/codex/_aio/provider/{limited_id}/v1/chat/completions"
-            ))
+            .uri("/codex/v1/chat/completions")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(
                 r#"{"model":"gpt-forced-limited","messages":[{"role":"user","content":"hello"}]}"#,
@@ -7397,9 +7586,7 @@ INSERT INTO codex_managed_profiles(
         let router = build_router(gateway_state(app_handle, db, log_tx));
         let request = Request::builder()
             .method(Method::POST)
-            .uri(format!(
-                "/codex/_aio/provider/{provider_id}/v1/chat/completions"
-            ))
+            .uri("/codex/v1/chat/completions")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(
                 r#"{"model":"gpt-route-large-5xx","messages":[{"role":"user","content":"hello"}]}"#,
@@ -7513,7 +7700,7 @@ INSERT INTO codex_managed_profiles(
         let router = build_router(gateway_state(app_handle, db, log_tx));
         let request = Request::builder()
             .method(Method::POST)
-            .uri(format!("/claude/_aio/provider/{provider_id}/v1/messages"))
+            .uri("/claude/v1/messages")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(
                 r#"{"model":"claude-3-5-sonnet","max_tokens":128,"messages":[{"role":"user","content":"hello"}]}"#,
@@ -7593,7 +7780,7 @@ INSERT INTO codex_managed_profiles(
         let router = build_router(gateway_state(app_handle, db, log_tx));
         let request = Request::builder()
             .method(Method::POST)
-            .uri(format!("/claude/_aio/provider/{provider_id}/v1/messages"))
+            .uri("/claude/v1/messages")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(
                 r#"{"model":"claude-3-5-sonnet","max_tokens":128,"messages":[{"role":"user","content":"hello"}]}"#,
@@ -7727,7 +7914,7 @@ INSERT INTO codex_managed_profiles(
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn mock_runtime_router_internal_forwarded_codex_response_is_not_logged() {
+    async fn mock_runtime_router_spoofed_forwarded_header_does_not_skip_request_logging() {
         let _env_lock = crate::test_support::test_env_lock();
         let home = tempfile::tempdir().expect("home dir");
         let _env = isolate_app_env(home.path());
@@ -7743,7 +7930,7 @@ INSERT INTO codex_managed_profiles(
         let db = db::init_for_tests(
             &db_dir
                 .path()
-                .join("gateway-route-internal-codex-not-logged-test.sqlite"),
+                .join("gateway-route-spoofed-forwarded-is-logged-test.sqlite"),
         )
         .expect("init test db");
         let success_body = r#"{"id":"internal-ok","object":"response","model":"gpt-internal"}"#;
@@ -7777,7 +7964,7 @@ INSERT INTO codex_managed_profiles(
 
         assert!(request_logs::get_by_trace_id(&db, &trace_id)
             .expect("query request log")
-            .is_none());
+            .is_some());
 
         success_task.abort();
     }
@@ -9148,7 +9335,7 @@ INSERT INTO codex_managed_profiles(
         let router = build_router(gateway_state(app_handle, db, log_tx));
         let request = Request::builder()
             .method(Method::POST)
-            .uri(format!("/claude/_aio/provider/{provider_id}/v1/messages"))
+            .uri("/claude/v1/messages")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(
                 r#"{"model":"claude-3-5-sonnet","max_tokens":512,"messages":[{"role":"user","content":"hello"}]}"#,
@@ -9227,14 +9414,14 @@ INSERT INTO codex_managed_profiles(
             r#"{"id":"msg_compact","type":"message","role":"assistant","content":[{"type":"text","text":"summary"}],"model":"claude-3-5-sonnet","usage":{"input_tokens":1,"output_tokens":1}}"#,
         )
         .await;
-        let provider_id =
+        let _provider_id =
             insert_provider_with_priority(&db, "claude", "Compact Stub", upstream_base_url, 0);
 
         let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
         let router = build_router(gateway_state(app_handle, db, log_tx));
         let request = Request::builder()
             .method(Method::POST)
-            .uri(format!("/claude/_aio/provider/{provider_id}/v1/messages"))
+            .uri("/claude/v1/messages")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(
                 r#"{"model":"claude-3-5-sonnet","max_tokens":512,"system":[{"type":"text","text":"You are a helpful AI assistant tasked with summarizing conversations. Follow the instructions."}],"messages":[{"role":"user","content":"Your task is to create a detailed summary of the conversation so far."}]}"#,
@@ -9317,14 +9504,14 @@ INSERT INTO codex_managed_profiles(
             Duration::from_secs(2),
         )
         .await;
-        let provider_id =
+        let _provider_id =
             insert_provider_with_priority(&db, "claude", "Compact Slow Stub", upstream_base_url, 0);
 
         let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
         let router = build_router(gateway_state(app_handle, db, log_tx));
         let request = Request::builder()
             .method(Method::POST)
-            .uri(format!("/claude/_aio/provider/{provider_id}/v1/messages"))
+            .uri("/claude/v1/messages")
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(
                 r#"{"model":"claude-3-5-sonnet","max_tokens":512,"system":[{"type":"text","text":"You are a helpful AI assistant tasked with summarizing conversations. Follow the instructions."}],"messages":[{"role":"user","content":"Your task is to create a detailed summary of the conversation so far."}]}"#,
@@ -9456,7 +9643,7 @@ INSERT INTO codex_managed_profiles(
             "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-disabled-mismatch\",\"status\":\"completed\",\"model\":\"gpt-disabled-mismatch\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello world\"}]}],\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n"
         );
         let (mismatch_base_url, mismatch_task) = spawn_sse_upstream(mismatch_sse_body).await;
-        let provider_id = insert_codex_provider_with_priority(
+        let _provider_id = insert_codex_provider_with_priority(
             &db,
             "Disabled Mismatch Stream",
             mismatch_base_url,

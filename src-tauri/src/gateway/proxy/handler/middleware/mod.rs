@@ -14,7 +14,6 @@ pub(super) mod managed_model_route;
 pub(super) mod model_inference;
 pub(super) mod probe_interceptor;
 pub(super) mod provider_resolution;
-pub(super) mod recursion_guard;
 pub(super) mod request_fingerprint;
 pub(super) mod runtime_settings_reader;
 pub(super) mod warmup_interceptor;
@@ -29,7 +28,6 @@ pub(super) use managed_model_route::ManagedModelRouteMiddleware;
 pub(super) use model_inference::ModelInferenceMiddleware;
 pub(super) use probe_interceptor::ProbeInterceptorMiddleware;
 pub(super) use provider_resolution::ProviderResolutionMiddleware;
-pub(super) use recursion_guard::RecursionGuardMiddleware;
 pub(super) use request_fingerprint::RequestFingerprintMiddleware;
 pub(super) use runtime_settings_reader::RuntimeSettingsMiddleware;
 pub(super) use warmup_interceptor::WarmupInterceptorMiddleware;
@@ -104,7 +102,6 @@ pub(super) struct ProxyContext<R: tauri::Runtime = tauri::Wry> {
     pub(super) effective_sort_mode_id: Option<i64>,
     pub(super) providers: Vec<providers::ProviderForGateway>,
     pub(super) session_bound_provider_id: Option<i64>,
-    pub(super) forced_provider_id: Option<i64>,
 
     // -- request fingerprinting --
     pub(super) fingerprint_key: u64,

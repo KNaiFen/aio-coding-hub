@@ -46,9 +46,10 @@ pub struct WslConfigureReport {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WslCliBackup {
     pub cli_key: String,
-    /// Keys injected by AIO and the values written.
+    /// Non-secret keys managed by AIO and the values written.
     pub injected_keys: std::collections::HashMap<String, String>,
-    /// Original values before injection. `None` means key did not exist.
+    /// Original values before injection. Gateway credentials are never stored.
+    /// `None` means the key did not exist and should be removed on restore.
     pub original_values: std::collections::HashMap<String, Option<String>>,
 }
 

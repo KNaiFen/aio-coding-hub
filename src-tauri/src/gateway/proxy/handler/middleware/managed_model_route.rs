@@ -63,13 +63,6 @@ impl ManagedModelRouteMiddleware {
             }
         };
 
-        if ctx
-            .forced_provider_id
-            .is_some_and(|provider_id| provider_id != binding.provider_id)
-        {
-            return reject(ctx, canonical_model, "forced_provider_conflict").await;
-        }
-
         let route = ManagedModelRoute {
             canonical_model,
             model_uuid: binding.model_uuid,

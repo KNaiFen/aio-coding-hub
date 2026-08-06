@@ -8,6 +8,7 @@ pub(crate) fn create_builder() -> tauri::Builder<tauri::Wry> {
     let builder = tauri::Builder::default()
         .manage(DbInitState::default())
         .manage(GatewayState::default())
+        .manage(crate::gateway::access_token::GatewayBearerTokenState::default())
         .manage(crate::app::request_log_snapshot_state::RequestLogSnapshotState::default())
         .manage(resident::ResidentState::default())
         .manage(StartupState::default())

@@ -9,9 +9,7 @@ use std::thread::JoinHandle;
 use super::config_claude::configure_wsl_claude;
 use super::config_codex::configure_wsl_codex;
 use super::config_gemini::configure_wsl_gemini;
-use super::constants::{
-    WSL_CODEX_API_KEY, WSL_CODEX_PREFERRED_AUTH_METHOD, WSL_CODEX_PROVIDER_KEY,
-};
+use super::constants::{WSL_CODEX_PREFERRED_AUTH_METHOD, WSL_CODEX_PROVIDER_KEY};
 use super::detection::resolve_wsl_home_unc;
 use super::manifest::{read_wsl_current_values, read_wsl_manifest, write_wsl_manifest};
 use super::mcp_sync::{read_wsl_mcp_manifest, sync_wsl_mcp_for_cli, write_wsl_mcp_manifest};
@@ -364,6 +362,7 @@ pub fn configure_clients(
     distros: &[String],
     targets: &settings::WslTargetCli,
     proxy_origin: &str,
+    gateway_bearer_token: Option<&str>,
     mcp_data: Option<&WslMcpSyncData>,
     prompt_data: Option<&WslPromptSyncData>,
     skills_data: Option<&WslSkillsSyncData>,
@@ -385,7 +384,19 @@ pub fn configure_clients(
         let mut cli_backups = Vec::new();
 
         // Load existing manifest so we don't overwrite original_values on repeated calls
-        let existing_manifest = read_wsl_manifest(app, distro).unwrap_or(None);
+        let (existing_manifest, manifest_available) = match read_wsl_manifest(app, distro) {
+            Ok(manifest) => (manifest, true),
+            Err(_) => {
+                results.push(WslConfigureCliReport {
+                    cli_key: "manifest".to_string(),
+                    ok: false,
+                    message:
+                        "WSL_MANIFEST_INVALID: existing client backup could not be validated"
+                            .to_string(),
+                });
+                (None, false)
+            }
+        };
         let existing_backups: std::collections::HashMap<&str, &WslCliBackup> = existing_manifest
             .as_ref()
             .map(|m| {
@@ -396,36 +407,43 @@ pub fn configure_clients(
             })
             .unwrap_or_default();
 
-        // -- Auth configuration (with original-value capture) --
-        for (cli_key, enabled, configure_fn) in [
-            (
-                "claude",
-                targets.claude,
-                configure_wsl_claude as fn(&str, &str) -> AppResult<()>,
-            ),
-            (
-                "codex",
-                targets.codex,
-                configure_wsl_codex as fn(&str, &str) -> AppResult<()>,
-            ),
-            (
-                "gemini",
-                targets.gemini,
-                configure_wsl_gemini as fn(&str, &str) -> AppResult<()>,
-            ),
+        // Auth is rewritten only while the one-time plaintext is in memory.
+        for (cli_key, enabled) in [
+            ("claude", targets.claude),
+            ("codex", targets.codex),
+            ("gemini", targets.gemini),
         ] {
             if !enabled {
                 continue;
             }
+            if !manifest_available {
+                continue;
+            }
+            let Some(gateway_bearer_token) = gateway_bearer_token else {
+                results.push(WslConfigureCliReport {
+                    cli_key: cli_key.to_string(),
+                    ok: false,
+                    message: "WSL_GATEWAY_TOKEN_REVEAL_REQUIRED: rotate the Gateway Bearer token before updating this client".to_string(),
+                });
+                continue;
+            };
             // If we already have a backup for this CLI (from a prior call), preserve
             // the original_values; otherwise capture fresh ones now.
             let original_values = if let Some(prev) = existing_backups.get(cli_key) {
                 prev.original_values.clone()
             } else {
-                read_wsl_current_values(distro, cli_key).unwrap_or_default()
+                let mut values = read_wsl_current_values(distro, cli_key).unwrap_or_default();
+                remove_managed_gateway_credential(cli_key, gateway_bearer_token, &mut values);
+                values
             };
 
-            match configure_fn(distro, proxy_origin) {
+            let configure_result = match cli_key {
+                "claude" => configure_wsl_claude(distro, proxy_origin, gateway_bearer_token),
+                "codex" => configure_wsl_codex(distro, proxy_origin, gateway_bearer_token),
+                "gemini" => configure_wsl_gemini(distro, proxy_origin, gateway_bearer_token),
+                _ => unreachable!("fixed WSL CLI list"),
+            };
+            match configure_result {
                 Ok(()) => {
                     // Record what we injected
                     let injected_keys = match cli_key {
@@ -434,10 +452,6 @@ pub fn configure_clients(
                             m.insert(
                                 "ANTHROPIC_BASE_URL".to_string(),
                                 format!("{proxy_origin}/claude"),
-                            );
-                            m.insert(
-                                "ANTHROPIC_AUTH_TOKEN".to_string(),
-                                "aio-coding-hub".to_string(),
                             );
                             m
                         }
@@ -451,18 +465,9 @@ pub fn configure_clients(
                                 "model_provider".to_string(),
                                 WSL_CODEX_PROVIDER_KEY.to_string(),
                             );
-                            m.insert("OPENAI_API_KEY".to_string(), WSL_CODEX_API_KEY.to_string());
                             m
                         }
-                        "gemini" => {
-                            let mut m = std::collections::HashMap::new();
-                            m.insert(
-                                "GOOGLE_GEMINI_BASE_URL".to_string(),
-                                format!("{proxy_origin}/gemini"),
-                            );
-                            m.insert("GEMINI_API_KEY".to_string(), "aio-coding-hub".to_string());
-                            m
-                        }
+                        "gemini" => std::collections::HashMap::new(),
                         _ => std::collections::HashMap::new(),
                     };
                     cli_backups.push(WslCliBackup {
@@ -600,7 +605,7 @@ pub fn configure_clients(
                 .ok()
                 .map(|p| p.to_string_lossy().to_string());
             let manifest = WslDistroManifest {
-                schema_version: 1,
+                schema_version: super::manifest::WSL_MANIFEST_SCHEMA_VERSION,
                 distro: distro.clone(),
                 configured: true,
                 proxy_origin: proxy_origin.to_string(),
@@ -610,6 +615,12 @@ pub fn configure_clients(
             };
             if let Err(e) = write_wsl_manifest(app, distro, &manifest) {
                 tracing::warn!("failed to write WSL manifest for {distro}: {e}");
+                results.push(WslConfigureCliReport {
+                    cli_key: "manifest".to_string(),
+                    ok: false,
+                    message: "WSL_MANIFEST_WRITE_FAILED: client backup could not be saved"
+                        .to_string(),
+                });
             }
         }
 
@@ -633,9 +644,45 @@ pub fn configure_clients(
     };
 
     WslConfigureReport {
-        ok: success_ops > 0,
+        ok: error_ops == 0,
         message,
         distros: distro_reports,
+    }
+}
+
+fn remove_managed_gateway_credential(
+    cli_key: &str,
+    gateway_bearer_token: &str,
+    values: &mut std::collections::HashMap<String, Option<String>>,
+) {
+    let (credential_key, already_managed) = match cli_key {
+        "claude" => {
+            let managed = values
+                .get("ANTHROPIC_BASE_URL")
+                .and_then(|value| value.as_deref())
+                .is_some_and(|value| value.trim_end_matches('/').ends_with("/claude"));
+            ("ANTHROPIC_AUTH_TOKEN", managed)
+        }
+        "codex" => {
+            let managed = values
+                .get("model_provider")
+                .and_then(|value| value.as_deref())
+                == Some(super::constants::WSL_CODEX_PROVIDER_KEY);
+            ("OPENAI_API_KEY", managed)
+        }
+        "gemini" => ("GEMINI_API_KEY", false),
+        _ => return,
+    };
+    let is_gateway_token = values
+        .get(credential_key)
+        .and_then(|value| value.as_deref())
+        .is_some_and(|value| {
+            value == gateway_bearer_token
+                || (already_managed
+                    && crate::gateway::access_token::is_strict_generated_token(value))
+        });
+    if already_managed || is_gateway_token {
+        values.insert(credential_key.to_string(), None);
     }
 }
 
@@ -670,6 +717,34 @@ mod tests {
             rendered,
             "status warning\n[wsl status stdout truncated after 14 bytes]"
         );
+    }
+
+    #[test]
+    fn managed_gateway_credentials_are_never_captured_in_manifest_values() {
+        let token = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        let mut claude = [
+            (
+                "ANTHROPIC_BASE_URL".to_string(),
+                Some("http://172.20.0.1:37123/claude".to_string()),
+            ),
+            ("ANTHROPIC_AUTH_TOKEN".to_string(), Some(token.to_string())),
+        ]
+        .into_iter()
+        .collect();
+        remove_managed_gateway_credential("claude", token, &mut claude);
+        assert_eq!(claude.get("ANTHROPIC_AUTH_TOKEN"), Some(&None));
+
+        let mut codex = [
+            (
+                "model_provider".to_string(),
+                Some(super::super::constants::WSL_CODEX_PROVIDER_KEY.to_string()),
+            ),
+            ("OPENAI_API_KEY".to_string(), Some(token.to_string())),
+        ]
+        .into_iter()
+        .collect();
+        remove_managed_gateway_credential("codex", token, &mut codex);
+        assert_eq!(codex.get("OPENAI_API_KEY"), Some(&None));
     }
 
     #[test]

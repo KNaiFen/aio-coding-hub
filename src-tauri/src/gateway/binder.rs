@@ -34,6 +34,15 @@ pub(crate) fn listen_rebind_required(
     false
 }
 
+pub(crate) fn listener_accepts_non_loopback(
+    cfg: &settings::AppSettings,
+) -> crate::shared::error::AppResult<bool> {
+    let binding = resolve_gateway_binding(cfg)?;
+    Ok(!crate::shared::listen_address::is_loopback_host(
+        &binding.bind_host,
+    ))
+}
+
 pub(super) struct ResolvedGatewayBinding {
     pub(super) bind_host: String,
     pub(super) base_host: String,

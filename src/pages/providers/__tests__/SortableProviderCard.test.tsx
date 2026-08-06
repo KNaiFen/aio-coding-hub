@@ -1092,17 +1092,6 @@ describe("pages/providers/SortableProviderCard", () => {
     expect(screen.getByText("解除熔断")).toBeInTheDocument();
   });
 
-  it("shows terminal launch button when callback provided", () => {
-    renderCard(
-      {},
-      {
-        onCopyTerminalLaunchCommand: vi.fn(),
-      }
-    );
-
-    expect(screen.getByText("终端启动")).toBeInTheDocument();
-  });
-
   it("invokes the share action for an independent provider", () => {
     const onShare = vi.fn();
     renderCard({}, { onShare });

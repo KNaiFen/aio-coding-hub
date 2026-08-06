@@ -3,7 +3,7 @@
   "name": "gateway-lan-bearer-token",
   "title": "AUD-016 非回环网关访问边界",
   "description": "为全部非回环 Gateway 路由增加基于真实 TCP peer 的一次性 Bearer Token 边界，并移除 provider 专用信任路径。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": "cross-layer",
   "scope": "gateway-security",
   "package": "aio-coding-hub",
@@ -21,6 +21,6 @@
   "children": [],
   "parent": "08-06-final-hardening-zero-artifact",
   "relatedFiles": [],
-  "notes": "本批第 4 项；WSL 非回环连接同样带 token，一次性明文在生成或轮换时直接同步。",
+  "notes": "本批第 4 项；代码候选在堆叠分支完成，PR/CI/合并按用户 2026-08-07 决策后置。WSL 非回环连接同样带 token，一次性明文在生成或轮换时直接同步。",
   "meta": {}
 }

@@ -138,7 +138,6 @@ pub(super) fn resolve_session_bound_provider_id(
     created_at: i64,
     enable_session_reuse: bool,
     allow_session_reuse: bool,
-    forced_provider_id: Option<i64>,
     providers: &mut [providers::ProviderForGateway],
     bound_provider_order: Option<&[i64]>,
 ) -> Option<i64> {
@@ -149,7 +148,7 @@ pub(super) fn resolve_session_bound_provider_id(
     let bound_provider_id = session_id
         .and_then(|sid| session.get_bound_provider(cli_key, sid, route_generation, created_at));
 
-    if allow_session_reuse && forced_provider_id.is_none() {
+    if allow_session_reuse {
         if let (Some(session_id), Some(bound_provider_id)) = (session_id, bound_provider_id) {
             if !providers.iter().any(|p| p.id == bound_provider_id) {
                 // The bound provider is no longer eligible for the current session's provider list

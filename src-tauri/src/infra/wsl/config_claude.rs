@@ -5,10 +5,11 @@ use super::shell::{bash_single_quote, run_wsl_bash_script};
 pub(super) fn configure_wsl_claude(
     distro: &str,
     proxy_origin: &str,
+    gateway_bearer_token: &str,
 ) -> crate::shared::error::AppResult<()> {
     let base_url = format!("{proxy_origin}/claude");
     let base_url = bash_single_quote(&base_url);
-    let auth_token = bash_single_quote("aio-coding-hub");
+    let auth_token = bash_single_quote(gateway_bearer_token);
 
     let script = format!(
         r#"
@@ -27,6 +28,7 @@ fi
 
 base_url={base_url}
 auth_token={auth_token}
+export AIO_GATEWAY_TOKEN="$auth_token"
 
 ts="$(date +%s)"
 if [ -f "$config_path" ]; then
@@ -44,25 +46,27 @@ if command -v jq >/dev/null 2>&1; then
       exit 2
     fi
 
-    jq --arg base_url "$base_url" --arg auth_token "$auth_token" '
+    jq --arg base_url "$base_url" '
       .env = (.env // {{}})
       | .env.ANTHROPIC_BASE_URL = $base_url
-      | .env.ANTHROPIC_AUTH_TOKEN = $auth_token
+      | .env.ANTHROPIC_AUTH_TOKEN = env.AIO_GATEWAY_TOKEN
     ' "$config_path" > "$tmp_path"
   else
-    jq -n --arg base_url "$base_url" --arg auth_token "$auth_token" '{{env:{{ANTHROPIC_BASE_URL:$base_url, ANTHROPIC_AUTH_TOKEN:$auth_token}}}}' > "$tmp_path"
+    jq -n --arg base_url "$base_url" '{{env:{{ANTHROPIC_BASE_URL:$base_url, ANTHROPIC_AUTH_TOKEN:env.AIO_GATEWAY_TOKEN}}}}' > "$tmp_path"
   fi
 
-  jq -e --arg base_url "$base_url" --arg auth_token "$auth_token" '
-    .env.ANTHROPIC_BASE_URL == $base_url and .env.ANTHROPIC_AUTH_TOKEN == $auth_token
+  jq -e --arg base_url "$base_url" '
+    .env.ANTHROPIC_BASE_URL == $base_url and .env.ANTHROPIC_AUTH_TOKEN == env.AIO_GATEWAY_TOKEN
   ' "$tmp_path" >/dev/null
 elif command -v python3 >/dev/null 2>&1; then
-  python3 - "$base_url" "$auth_token" "$config_path" "$tmp_path" <<'PY'
+  python3 - "$base_url" "$config_path" "$tmp_path" <<'PY'
 import json
+import os
 import sys
 from pathlib import Path
 
-base_url, auth_token, src, dst = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+base_url, src, dst = sys.argv[1], sys.argv[2], sys.argv[3]
+auth_token = os.environ["AIO_GATEWAY_TOKEN"]
 
 data = {{}}
 try:
@@ -93,12 +97,14 @@ data["env"] = env
 Path(dst).write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 PY
 
-  python3 - "$base_url" "$auth_token" "$tmp_path" <<'PY'
+  python3 - "$base_url" "$tmp_path" <<'PY'
 import json
+import os
 import sys
 from pathlib import Path
 
-base_url, auth_token, path = sys.argv[1], sys.argv[2], sys.argv[3]
+base_url, path = sys.argv[1], sys.argv[2]
+auth_token = os.environ["AIO_GATEWAY_TOKEN"]
 payload = json.loads(Path(path).read_text(encoding="utf-8"))
 ok = (
     isinstance(payload, dict)
