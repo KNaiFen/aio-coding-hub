@@ -11,6 +11,7 @@ describe("services/settings/settingsValidation", () => {
       validateSettingsSetInput({
         preferredPort: 1024,
         logRetentionDays: 3650,
+        requestLogRetentionDays: 1,
         providerCooldownSeconds: 0,
         providerAvailabilityHours: 6,
         providerBaseUrlPingCacheTtlSeconds: 1,
@@ -38,6 +39,9 @@ describe("services/settings/settingsValidation", () => {
     expect(validateSettingsSetInput({ preferredPort: 1023 })).toContain("首选端口必须 >= 1024");
     expect(validateSettingsSetInput({ logRetentionDays: 3651 })).toContain(
       "日志保留天数必须 <= 3650"
+    );
+    expect(validateSettingsSetInput({ requestLogRetentionDays: 0 })).toContain(
+      "请求记录保留天数必须 >= 1"
     );
     expect(validateSettingsSetInput({ providerCooldownSeconds: 3601 })).toContain(
       "Provider 冷却时间必须 <= 3600"

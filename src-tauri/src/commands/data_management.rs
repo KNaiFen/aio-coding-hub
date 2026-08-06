@@ -22,9 +22,11 @@ pub(crate) async fn app_data_dir_get(app: tauri::AppHandle) -> Result<String, St
 #[specta::specta]
 pub(crate) async fn db_disk_usage_get(
     app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
 ) -> Result<data_management::DbDiskUsage, String> {
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
     blocking::run("db_disk_usage_get", move || {
-        data_management::db_disk_usage_get(&app)
+        data_management::db_disk_usage_get(&app, &db)
     })
     .await
     .map_err(Into::into)

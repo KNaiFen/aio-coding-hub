@@ -294,6 +294,10 @@ describe("cross-layer contracts", () => {
     // relaxing/removing the Rust check turns this test red.
     const minOnePairs = [
       [
+        limits.MIN_REQUEST_LOG_RETENTION_DAYS,
+        "request_log_retention_days must be >= 1",
+      ],
+      [
         limits.MIN_PROVIDER_BASE_URL_PING_CACHE_TTL_SECONDS,
         "provider_base_url_ping_cache_ttl_seconds must be >= 1",
       ],

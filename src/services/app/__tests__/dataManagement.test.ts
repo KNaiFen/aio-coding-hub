@@ -67,7 +67,13 @@ describe("services/app/dataManagement", () => {
   it("invokes data management commands with expected parameters", async () => {
     vi.mocked(commands.dbDiskUsageGet).mockResolvedValueOnce({
       status: "ok",
-      data: { db_bytes: 1, wal_bytes: 2, shm_bytes: 3, total_bytes: 6 } as any,
+      data: {
+        db_bytes: 1,
+        wal_bytes: 2,
+        shm_bytes: 3,
+        total_bytes: 6,
+        reclaimable_bytes: 1,
+      } as any,
     });
     vi.mocked(commands.requestLogsClearAll).mockResolvedValueOnce({
       status: "ok",
@@ -115,7 +121,26 @@ describe("services/app/dataManagement", () => {
   it("validates generated disk usage and clear-count payloads", async () => {
     vi.mocked(commands.dbDiskUsageGet).mockResolvedValueOnce({
       status: "ok",
-      data: { db_bytes: 1, wal_bytes: 2, shm_bytes: 3, total_bytes: 7 } as any,
+      data: {
+        db_bytes: 1,
+        wal_bytes: 2,
+        shm_bytes: 3,
+        total_bytes: 7,
+        reclaimable_bytes: 0,
+      } as any,
+    });
+
+    await expect(dbDiskUsageGet()).rejects.toThrow("IPC_INVALID_RESULT");
+
+    vi.mocked(commands.dbDiskUsageGet).mockResolvedValueOnce({
+      status: "ok",
+      data: {
+        db_bytes: 1,
+        wal_bytes: 2,
+        shm_bytes: 3,
+        total_bytes: 6,
+        reclaimable_bytes: -1,
+      } as any,
     });
 
     await expect(dbDiskUsageGet()).rejects.toThrow("IPC_INVALID_RESULT");

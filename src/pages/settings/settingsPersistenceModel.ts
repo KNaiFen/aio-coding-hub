@@ -44,7 +44,7 @@ export const DEFAULT_PERSISTED_SETTINGS: PersistedSettings = {
   start_minimized: false,
   tray_enabled: true,
   log_retention_days: 7,
-  request_log_retention_days: 0,
+  request_log_retention_days: 7,
   provider_cooldown_seconds: 30,
   provider_availability_hours: 6,
   provider_base_url_ping_cache_ttl_seconds: 60,
@@ -193,8 +193,8 @@ export function validatePersistedSettings(desired: PersistedSettings, keys: Pers
   }
 
   if (keys.includes("request_log_retention_days")) {
-    if (!isIntegerInRange(desired.request_log_retention_days, 0, 3650)) {
-      return "请求记录保留必须为 0（永久）或 1-3650 天";
+    if (!isIntegerInRange(desired.request_log_retention_days, 1, 3650)) {
+      return "请求记录保留必须为 1-3650 天";
     }
   }
 

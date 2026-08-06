@@ -97,7 +97,7 @@ function renderSettingsMainColumn(
     setTrayEnabled: vi.fn(),
     logRetentionDays: 30,
     setLogRetentionDays: vi.fn(),
-    requestLogRetentionDays: 0,
+    requestLogRetentionDays: 7,
     setRequestLogRetentionDays: vi.fn(),
     providerAvailabilityHours: 6,
     setProviderAvailabilityHours: vi.fn(),
