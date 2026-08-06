@@ -7,9 +7,10 @@
     "create-aio-plugin": "./src/cli.ts"
   },
   "scripts": {
-    "cli": "tsx scripts/run-cli.mjs",
-    "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "preinstall": "node ../../scripts/require-github-actions.mjs",
+    "cli": "node ../../scripts/require-github-actions.mjs && tsx scripts/run-cli.mjs",
+    "test": "node ../../scripts/require-github-actions.mjs && vitest run",
+    "typecheck": "node ../../scripts/require-github-actions.mjs && tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@aio-coding-hub/plugin-sdk": "workspace:*"

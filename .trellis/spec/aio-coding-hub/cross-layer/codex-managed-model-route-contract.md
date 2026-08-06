@@ -387,9 +387,9 @@ codexManagedProfilesKeys.list()
   manual fallback, capability-required Profile gating, effort/context saves,
   existing-Profile restart messaging, profile preserved messaging, and neutral
   versus severe log presentation.
-- Run full Rust tests after shared gateway/config migration changes, plus unit
-  tests, typecheck, lint, Rust fmt/Clippy/check, generated-binding checks, and
-  `git diff --check`.
+- GitHub Actions must run full Rust tests after shared gateway/config migration
+  changes, plus unit tests, typecheck, lint, Rust fmt/Clippy/check, and
+  generated-binding checks; locally use only the cloud-only allowlist.
 
 ### 7. Wrong vs Correct
 

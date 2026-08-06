@@ -1,5 +1,5 @@
 //! Usage: Centralized gateway error-code enum for stable classification/mapping.
-//! SYNC: Enforced by `scripts/check-gateway-error-codes.mjs` (CI + precommit:full).
+//! SYNC: Enforced by `scripts/check-gateway-error-codes.mjs` in the CI quality gate.
 //!       When adding/removing variants, also update `src/constants/gatewayErrorCodes.ts`.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

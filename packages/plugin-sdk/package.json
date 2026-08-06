@@ -7,8 +7,9 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "preinstall": "node ../../scripts/require-github-actions.mjs",
+    "test": "node ../../scripts/require-github-actions.mjs && vitest run",
+    "typecheck": "node ../../scripts/require-github-actions.mjs && tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
     "typescript": "~5.8.3",

@@ -1,0 +1,3 @@
+{"file":".trellis/spec/aio-coding-hub/backend/index.md","reason":"执行后端 Quality Check"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/request-log-usage-ledger-pagination-contract.md","reason":"核对 ledger 永久保留"}
+{"file":"CODEBASE_HEALTH_AUDIT.md","reason":"核对留存和手动 VACUUM 验收"}

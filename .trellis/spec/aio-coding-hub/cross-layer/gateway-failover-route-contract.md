@@ -247,8 +247,9 @@ buildRequestRouteMeta({
 - Frontend-test the rich route panel in light/dark themes, long wrapped content,
   collision-bounded scrolling, known-reason deduplication, and preservation of
   unknown future reasons without changing the default short-tooltip surface.
-- Run the full Rust library suite after shared failover selection or gate
-  changes, then generated bindings, typecheck, lint, and Rust format checks.
+- GitHub Actions must run the full Rust library suite after shared failover
+  selection or gate changes, plus generated bindings, typecheck, lint, and Rust
+  format checks; locally use only the cloud-only allowlist.
 
 ### 7. Wrong vs Correct
 

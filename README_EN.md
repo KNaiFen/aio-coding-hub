@@ -185,18 +185,17 @@ sudo xattr -cr /Applications/"AIO Coding Hub.app"
 
 </details>
 
-### Local Frontend Development and Cloud Desktop Builds
+### Zero-Artifact Local Checks and Cloud Validation
 
-Local frontend work requires Node.js 22 and pnpm; no Rust/Tauri toolchain is required.
+Do not install repository dependencies, start a development server, or run formatting, type checking, linting, tests, or builds locally. The allowed local checks do not need `node_modules` and do not create Node or Rust artifacts:
 
 ```bash
-git clone https://github.com/KNaiFen/aio-coding-hub.git
-cd aio-coding-hub
-pnpm install
-pnpm dev
+node scripts/check-cloud-only-verification.selftest.mjs
+node scripts/check-cloud-only-verification.mjs
+git diff --check
 ```
 
-`pnpm dev` starts the Vite frontend only. Native integration, Rust validation, and desktop packaging run in GitHub Actions. To obtain a desktop artifact, manually run `dev-build` from the repository Actions page and select a target.
+For a changed `.mjs` file, `node --check <changed-file.mjs>` is also allowed directly. Dependency installation, complete frontend quality gates, Rust, generated bindings, and artifacts belong to a full `ci` workflow_dispatch. Run `dev-build` from Actions only when a desktop integration artifact is needed.
 
 <!-- SUPPORT_MATRIX_SOURCE_BUILD:START -->
 | Scope | Cloud workflow target | Notes |
@@ -243,15 +242,9 @@ curl http://127.0.0.1:37123/health
 
 ## Quality Assurance
 
-```bash
-pnpm check:precommit       # Quick Node/TypeScript checks
-pnpm check:precommit:full  # Full local static checks (still Node/frontend only)
-pnpm check:prepush         # Frontend coverage, plugin SDK, and static contracts
-pnpm test:unit             # Frontend unit tests
-pnpm build                 # TypeScript + Vite frontend build
-```
+GitHub Actions owns dependency auditing, frontend lint, TypeScript, plugin SDK/scaffolder tests, E2E, coverage, the Vite build, Rust formatting, `Cargo.lock`, generated bindings, Clippy, Rust tests, and audit. `ci-gate` closes over those results. Cross-platform desktop packaging remains a main-candidate or on-demand `dev-build` concern, not a required job for every PR.
 
-GitHub Actions owns Rust formatting, `Cargo.lock`, generated bindings, Clippy, Rust tests, audit, and Tauri packaging. When CI reports canonicalization drift, download and apply its patch instead of regenerating files locally.
+When CI reports formatting, lockfile, or generated-binding drift, download and review its bounded patch instead of regenerating files locally.
 
 ---
 

@@ -1,0 +1,5 @@
+{"file":"AGENTS.md","reason":"本地与云端验证的仓库级强制边界"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/index.md","reason":"活跃跨层质量规范"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/ci-change-scope-contract.md","reason":"CI 变更范围与门禁合同"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/cloud-only-verification-contract.md","reason":"本地零产物与云端质量门的新增强制合同"}
+{"file":"CODEBASE_HEALTH_AUDIT.md","reason":"AUD-054 需求、证据与验收事实源"}

@@ -188,18 +188,17 @@ sudo xattr -cr /Applications/"AIO Coding Hub.app"
 
 </details>
 
-### 本地前端开发与云端桌面构建
+### 本地零产物与云端验证
 
-本地前端需要 Node.js 22 与 pnpm；无需安装 Rust/Tauri 工具链。
+仓库不在本地安装依赖、启动开发服务，也不在本地运行格式化、类型检查、Lint、测试或构建。允许的本地检查不依赖 `node_modules`，且不会生成 Node/Rust 产物：
 
 ```bash
-git clone https://github.com/KNaiFen/aio-coding-hub.git
-cd aio-coding-hub
-pnpm install
-pnpm dev
+node scripts/check-cloud-only-verification.selftest.mjs
+node scripts/check-cloud-only-verification.mjs
+git diff --check
 ```
 
-`pnpm dev` 只启动 Vite 前端。原生集成、Rust 校验和桌面打包均在 GitHub Actions 中完成；需要桌面制品时，在仓库 Actions 页面手动运行 `dev-build` 并选择目标。
+修改 `.mjs` 文件时还可直接运行 `node --check <changed-file.mjs>`。依赖安装、前端完整质量门、Rust、生成绑定与制品均由 `ci` 的全量 `workflow_dispatch` 执行；需要桌面集成制品时，在 Actions 页面按需运行 `dev-build` 并选择目标。
 
 <!-- SUPPORT_MATRIX_SOURCE_BUILD:START -->
 | 分类 | 云端工作流目标 | 说明 |
@@ -257,15 +256,9 @@ curl http://127.0.0.1:37123/health
 
 ## 质量保证
 
-```bash
-pnpm check:precommit       # 快速 Node/TypeScript 检查
-pnpm check:precommit:full  # 完整本地静态检查（仍为 Node/前端）
-pnpm check:prepush         # 前端覆盖率、插件 SDK 与静态合同
-pnpm test:unit             # 前端单元测试
-pnpm build                 # TypeScript + Vite 前端构建
-```
+GitHub Actions 的完整 CI 负责依赖审计、前端 Lint、TypeScript、插件 SDK/脚手架测试、E2E、覆盖率、Vite build、Rust 格式、`Cargo.lock`、生成绑定、Clippy、Rust 测试与 audit。`ci-gate` 统一收口这些结果；跨平台桌面打包仍是 main 候选或按需 `dev-build`，不是每个 PR 的必需任务。
 
-Rust 格式、`Cargo.lock`、生成绑定、Clippy、Rust 测试、audit 与 Tauri 打包全部由 GitHub Actions 负责。CI 检测到规范化漂移时，下载并应用它提供的补丁，不要在本地重新生成。
+CI 检测到格式、锁文件或生成绑定漂移时，下载并审查它提供的有界补丁，不要在本地重新生成。
 
 ---
 

@@ -55,6 +55,9 @@ TypeScript bindings, frontend adapters, and React UI.
 - [CI change-scope contract](./ci-change-scope-contract.md): explicit
   documentation allowlists, rename-aware Git ranges, fail-closed suite
   selection, and a stable required gate.
+- [Cloud-only verification contract](./cloud-only-verification-contract.md):
+  zero-artifact local checks, Actions-only package scripts, complete frontend
+  and Rust CI gates, and bounded generated-file drift handling.
 - [Release promotion contract](./release-promotion-contract.md): remote tag
   identity, immutable main source commits, exact-SHA candidate reuse, and
   trigger-parity regression coverage.
@@ -229,23 +232,25 @@ When changing release source validation or candidate promotion:
 
 ## Quality Check
 
-- Regenerate and verify `src/generated/bindings.ts` from Rust source.
-- Test Rust parsing, structured patching, and full-file write safety.
-- Test frontend adapter defaults and the UI's null/unknown-value behavior.
-- When Rust changes touch target-gated code, run
-  `cargo clippy --all-targets --locked -- -D warnings` on every affected target
-  family. Host Clippy does not compile another platform's `cfg` branches; use
-  the CI-equivalent Linux environment for Unix-only code before pushing from
-  Windows.
+- Read [Cloud-only verification contract](./cloud-only-verification-contract.md)
+  before choosing any command. Locally, run only its dependency-free checker,
+  relevant `node --check` parsing, and `git diff --check`.
+- GitHub Actions regenerates and verifies `src/generated/bindings.ts`, tests
+  Rust parsing/write safety and frontend behavior, and runs Clippy for all
+  affected target families. A host-only local check is not equivalent to the
+  CI target matrix.
 - Verify unrelated patches preserve fields that they do not own.
-- Run a deterministic barrier through a real production settings writer; prove
-  unrelated Image Gen/Grok fields survive and CAS preserves newer owner values.
-- Run focused tests, `pnpm typecheck`, `pnpm lint`, `pnpm tauri:fmt`, and
-  `pnpm check:generated-bindings`.
+- GitHub Actions must run a deterministic barrier through a real production
+  settings writer; prove unrelated Image Gen/Grok fields survive and CAS
+  preserves newer owner values.
+- Require the full GitHub Actions frontend and Rust jobs for focused tests,
+  TypeScript, lint, formatting, generated bindings, Clippy, Rust tests, and
+  dependency audit. Do not run their package/native commands locally.
 - When changing gateway selection or failover, verify skipped candidates,
   Ready-provider limits, route projection, and attempt/transition labels together.
-- When changing release promotion, run the release-source collision self-test,
-  support contracts, workflow formatting checks, and exact-SHA candidate checks.
+- When changing release promotion, GitHub Actions must run the release-source
+  collision self-test, support contracts, workflow formatting checks, and
+  exact-SHA candidate checks.
 - When changing configured model routing, verify exact case-sensitive matching,
   provider override/disable/inherit semantics, all four wire protocols, compact
   requests, auxiliary exclusions, target-model pricing, and malformed-marker

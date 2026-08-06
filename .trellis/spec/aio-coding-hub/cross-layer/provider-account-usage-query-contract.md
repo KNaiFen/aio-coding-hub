@@ -272,9 +272,9 @@ and normalization. The existing generated IPC DTO remains the frontend boundary.
 - Keep all sub2api fixtures green and prove its parser and redirect behavior do
   not change. Keep the query-owner, manual-refresh race, display rendering, and
   routing/circuit/availability isolation tests green.
-- Run focused Rust and frontend tests, generated-binding validation, typecheck,
-  lint, Rust format/check/Clippy, secret/PII diff audit, and `git diff --check`
-  in proportion to the change.
+- GitHub Actions must run focused Rust and frontend tests, generated-binding
+  validation, typecheck, lint, Rust format/check/Clippy, secret/PII diff audit,
+  and the required full suites; locally use only the cloud-only allowlist.
 
 ### 7. Wrong vs Correct
 
@@ -457,8 +457,9 @@ access token.
 - Frontend: explicit selector, legacy billing default, partial-save allowed,
   configured/missing state, masked token, explicit clear, mode/adapter draft
   preservation, and nested diagnostic redaction.
-- Run generated-binding validation, focused and full frontend/Rust tests,
-  typecheck, lint, format, Clippy, secret/PII diff audit, and diff check.
+- GitHub Actions must run generated-binding validation, focused and full
+  frontend/Rust tests, typecheck, lint, format, Clippy, secret/PII diff audit,
+  and the required full suites; locally use only the cloud-only allowlist.
 
 ### 7. Wrong vs Correct
 

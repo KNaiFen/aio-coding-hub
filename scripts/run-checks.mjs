@@ -1,12 +1,13 @@
 /**
- * Single source of truth for aggregate check stages.
+ * Single source of truth for GitHub-Actions-only aggregate check stages.
  *
  * Usage:
  *   node scripts/run-checks.mjs <stage>
  *   node scripts/run-checks.mjs --list
  *
  * Adding a check: define its command in CHECKS, then add its id to the
- * stages that should run it. These aggregate stages are Node/frontend-only.
+ * stages that should run it. Do not invoke this file locally: every
+ * dependency-backed package script is guarded for GitHub Actions.
  */
 import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
@@ -17,7 +18,7 @@ const repoRoot = resolve(dirname(modulePath), "..");
 
 export const CHECKS = {
   "format-check": "pnpm format:check",
-  "local-build-entrypoints": "pnpm check:local-build-entrypoints",
+  "cloud-only-verification": "node scripts/check-cloud-only-verification.mjs",
   lint: "pnpm lint",
   typecheck: "pnpm typecheck",
   "no-instant-now-sub": "pnpm check:no-instant-now-sub",
@@ -35,9 +36,9 @@ export const CHECKS = {
   "unit-coverage-shards": "pnpm test:unit:coverage:shards",
 };
 
-const PRECOMMIT_SRC = ["local-build-entrypoints", "lint", "typecheck", "no-instant-now-sub"];
-const PREPUSH_STATIC = [
-  "local-build-entrypoints",
+const FRONTEND_STATIC = ["cloud-only-verification", "lint", "typecheck", "no-instant-now-sub"];
+const FULL_CI_STATIC = [
+  "cloud-only-verification",
   "lint",
   "typecheck",
   "no-instant-now-sub",
@@ -52,17 +53,18 @@ const PREPUSH_STATIC = [
 ];
 
 export const STAGES = {
-  precommit: PRECOMMIT_SRC,
-  "precommit-full": [
+  "frontend-static": FRONTEND_STATIC,
+  "frontend-full": [
     "format-check",
-    ...PRECOMMIT_SRC,
+    ...FRONTEND_STATIC,
     "spec-links",
     "homebrew-cask",
     "tui-release-contract",
     "gateway-error-codes",
   ],
-  prepush: [...PREPUSH_STATIC, "unit-coverage-shards", "plugin-sdk-test", "create-aio-plugin-test"],
+  "full-ci": [...FULL_CI_STATIC, "unit-coverage-shards", "plugin-sdk-test", "create-aio-plugin-test"],
   "plugin-hardening": [
+    "cloud-only-verification",
     "plugin-api-contract",
     "plugin-sdk-test",
     "plugin-sdk-typecheck",
