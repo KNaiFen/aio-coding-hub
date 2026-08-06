@@ -1,8 +1,6 @@
 //! Usage: Descriptor-driven gateway plugin mutation enforcement.
 
-use super::context::{
-    GatewayHookResult, GatewayPluginHookName, DEFAULT_PLUGIN_CONTEXT_BODY_BYTES,
-};
+use super::context::{GatewayHookResult, GatewayPluginHookName, DEFAULT_PLUGIN_CONTEXT_BODY_BYTES};
 use super::permissions::GatewayPluginError;
 use super::registry::HookDescriptor;
 

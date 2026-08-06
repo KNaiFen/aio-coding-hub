@@ -855,7 +855,10 @@ mod tests {
 
         assert_eq!(visible_string_with_limit(&empty, 0), (String::new(), false));
         assert_eq!(visible_string_with_limit(&valid, 0), (String::new(), true));
-        assert_eq!(visible_string_with_limit(&invalid, 0), (String::new(), true));
+        assert_eq!(
+            visible_string_with_limit(&invalid, 0),
+            (String::new(), true)
+        );
     }
 
     #[test]

@@ -337,8 +337,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn runtime_executor_extension_host_request_hooks_receive_context_body_budget_without_truncation()
-    {
+    async fn runtime_executor_extension_host_request_hooks_receive_context_body_budget_without_truncation(
+    ) {
         let temp = tempfile::tempdir().expect("tempdir");
         write_gateway_extension_plugin(
             temp.path(),
@@ -358,7 +358,8 @@ mod tests {
         let prefix = "{\"messages\":[{\"role\":\"user\",\"content\":\"";
         let suffix = "\"}]}";
         let secret = "13344441520";
-        let filler_len = DEFAULT_PLUGIN_CONTEXT_BODY_BYTES - prefix.len() - secret.len() - suffix.len();
+        let filler_len =
+            DEFAULT_PLUGIN_CONTEXT_BODY_BYTES - prefix.len() - secret.len() - suffix.len();
         let body = format!("{prefix}{}{secret}{suffix}", "x".repeat(filler_len));
         assert_eq!(body.len(), DEFAULT_PLUGIN_CONTEXT_BODY_BYTES);
         let pipeline = GatewayPluginPipeline::for_tests(
@@ -380,7 +381,9 @@ mod tests {
                 requested_model: None,
             })
             .await
-            .expect("context-budget-sized extension host request body should be available to plugins");
+            .expect(
+                "context-budget-sized extension host request body should be available to plugins",
+            );
         let redacted = String::from_utf8(output.body.to_vec()).expect("utf8 body");
 
         assert!(redacted.contains("[电话]"));

@@ -2784,7 +2784,10 @@ mod tests {
         let report = &err.execution_reports()[0];
         assert_eq!(report.status, "budgetRejected");
         assert_eq!(report.failure_kind.as_deref(), Some("context_budget"));
-        assert_eq!(report.error_code.as_deref(), Some("PLUGIN_CONTEXT_TRUNCATED"));
+        assert_eq!(
+            report.error_code.as_deref(),
+            Some("PLUGIN_CONTEXT_TRUNCATED")
+        );
         assert_eq!(report.circuit_state.as_deref(), Some("closed"));
     }
 
@@ -2908,7 +2911,10 @@ mod tests {
             GatewayPluginPipelineConfig::default(),
         );
         let input = GatewayStreamHookInput {
-            chunk: Bytes::from(vec![0xff; GatewayPluginContextBudget::default().stream_bytes]),
+            chunk: Bytes::from(vec![
+                0xff;
+                GatewayPluginContextBudget::default().stream_bytes
+            ]),
             ..stream_input()
         };
 
@@ -2953,7 +2959,10 @@ mod tests {
         assert!(observed_timeouts.lock().unwrap().is_empty());
         assert_eq!(
             pipeline
-                .circuit_snapshot("plugin.response-truncated", GatewayPluginHookName::ResponseAfter)
+                .circuit_snapshot(
+                    "plugin.response-truncated",
+                    GatewayPluginHookName::ResponseAfter
+                )
                 .failure_count,
             0
         );
@@ -2982,7 +2991,10 @@ mod tests {
         assert!(observed_timeouts.lock().unwrap().is_empty());
         assert_eq!(
             pipeline
-                .circuit_snapshot("plugin.stream-truncated", GatewayPluginHookName::ResponseChunk)
+                .circuit_snapshot(
+                    "plugin.stream-truncated",
+                    GatewayPluginHookName::ResponseChunk
+                )
                 .failure_count,
             0
         );
@@ -3011,7 +3023,10 @@ mod tests {
         assert!(observed_timeouts.lock().unwrap().is_empty());
         assert_eq!(
             pipeline
-                .circuit_snapshot("plugin.log-truncated", GatewayPluginHookName::LogBeforePersist)
+                .circuit_snapshot(
+                    "plugin.log-truncated",
+                    GatewayPluginHookName::LogBeforePersist
+                )
                 .failure_count,
             0
         );
