@@ -121,6 +121,7 @@
   "gatewayHookContribution": {
     "requiredFields": ["name"],
     "optionalFields": ["priority", "failurePolicy", "timeoutMs"],
+    "failurePolicies": ["fail-open", "fail-closed"],
     "defaultTimeoutMs": 5000,
     "timeoutMs": "positive integer milliseconds; omitted hooks use defaultHookTimeoutMs"
   },

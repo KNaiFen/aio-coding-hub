@@ -434,7 +434,9 @@ describe("validateManifest", () => {
     const manifest: PluginManifest = {
       ...openRouterManifest,
       contributes: {
-        gatewayHooks: [{ name: "gateway.request.afterBodyRead", priority: 10 }],
+        gatewayHooks: [
+          { name: "gateway.request.afterBodyRead", priority: 10, failurePolicy: "fail-open" },
+        ],
       },
       capabilities: ["gateway.hooks"],
     };
@@ -501,6 +503,23 @@ describe("validateManifest", () => {
       ok: false,
       error: { code: "PLUGIN_INVALID_HOOK_TIMEOUT" },
     });
+  });
+
+  test("rejects gatewayHooks with invalid failurePolicy", () => {
+    for (const failurePolicy of ["fail-close", "unexpected", 42]) {
+      const manifest = {
+        ...openRouterManifest,
+        contributes: {
+          gatewayHooks: [{ name: "gateway.request.afterBodyRead", failurePolicy }],
+        },
+        capabilities: ["gateway.hooks"],
+      };
+
+      expect(validateManifest(manifest as unknown as PluginManifest)).toMatchObject({
+        ok: false,
+        error: { code: "PLUGIN_INVALID_FAILURE_POLICY" },
+      });
+    }
   });
 
   test("rejects top-level legacy hooks and permissions", () => {

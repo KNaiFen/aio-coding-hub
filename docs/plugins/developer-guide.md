@@ -214,6 +214,8 @@ module.exports.activate = function(api) {
 - `gateway.response.after`：处理非流式完整响应体。
 - `log.beforePersist`：日志入库前脱敏。
 
+`failurePolicy` 只能是 `fail-open` 或 `fail-closed`，省略时为 `fail-open`。对需要强制日志脱敏的插件，`log.beforePersist` 应显式声明 `fail-closed`：当 hook 失败、熔断或最终 `logMessage` 不是宿主可解析的 JSON object 时，宿主会保留插件诊断并放弃该条请求日志，绝不回退写入原始敏感日志。
+
 Claude 和 Codex/OpenAI Responses 的请求结构不同。插件应避免只适配一种结构：
 
 ```json
@@ -335,4 +337,4 @@ WASM、process 和第三方 native 运行时属于 unsupported pre-release legac
 - 报 `PLUGIN_UNSUPPORTED_RUNTIME`：说明插件仍使用 unsupported pre-release legacy runtime，需要迁移到 Extension Host。
 - 请求没有被改写：检查 hook 是否选对，是否声明 `contributes.gatewayHooks`、`capabilities: ["gateway.hooks"]`，fixture 是否覆盖实际 provider 请求结构。
 - 只能看到原始本地请求：隐私过滤保护的是 gateway-to-upstream body 和持久化日志；client-to-gateway 的本地入站请求在 hook 前仍是原文。
-- 日志仍有敏感值：确认插件注册 `log.beforePersist`，且 Extension Host hook 返回 `logMessage` mutation。当前 `log.beforePersist` 默认 `fail-open`；hook 失败、超时或返回非法日志 payload 时，宿主会记录诊断并保留原始日志继续入库。
+- 日志仍有敏感值：确认插件注册 `log.beforePersist`，且 Extension Host hook 返回 `logMessage` mutation。默认 `fail-open` 在 hook 失败、超时或返回非法日志 payload 时会记录诊断并保留原始日志；需要强制脱敏时，声明 `failurePolicy: "fail-closed"`，此类失败会放弃该条请求日志。

@@ -53,7 +53,7 @@ Gateway hooks 必须使用 `contributes.gatewayHooks` 与 `api.gateway.registerH
 - 在暴露给插件前，对 request 和 response bodies 做大小边界控制。
 - Stream hooks 保持 chunk-based，并提供 sliding-window context，而不是缓冲完整 stream。
 - 按 plugin ID、version 和 runtime key 缓存 Extension Host worker state。
-- 对非安全增强使用 fail open；只对用户明确启用的安全/隐私关卡使用 fail closed。当前 `log.beforePersist` 失败或返回非法 payload 时会保留原始日志，没有宿主兜底脱敏。
+- 对非安全增强使用 fail open；只对用户明确启用的安全/隐私关卡使用 fail closed。`log.beforePersist` 缺省或显式 `fail-open` 时，失败或非法 payload 会保留原始日志；显式 `fail-closed` 时，宿主会保留插件诊断但跳过整条 request log，不回退原文。
 - 记录 runtime failures 和 circuit-open skips，避免坏插件持续拖慢 gateway。
 - official bundled plugins 要少而聚焦，控制 host startup、binary size 和维护风险。
 

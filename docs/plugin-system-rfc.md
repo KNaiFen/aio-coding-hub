@@ -115,7 +115,7 @@ Earlier drafts considered alternate WASM and arbitrary process runtimes. They ar
 - Audit logs must not store sensitive raw values.
 - Consecutive failures can quarantine a plugin.
 - Safety-class plugins may use fail-closed behavior. Decorative plugins default to fail-open.
-- `log.beforePersist` falls back to host redaction if plugin redaction fails.
+- `log.beforePersist` defaults to fail-open. An explicitly fail-closed log hook drops the request log when execution fails, its circuit is open, or its final payload cannot be parsed safely; plugin diagnostics remain available for investigation.
 
 ## 7. Cross-Platform Principles
 
@@ -148,7 +148,7 @@ The Skill 市场 and this plugin system are separate:
 | `gateway.response.chunk` | security fail-closed, non-security fail-open | yes | Terminate stream or emit safe error for security failures. |
 | `gateway.response.after` | security fail-closed, non-security fail-open | yes | Return safe error for security failures. |
 | `gateway.error` | fail-open | no | Never hide the host error. |
-| `log.beforePersist` | fail-closed-to-host-redaction | no | Use host redaction before persistence. |
+| `log.beforePersist` | fail-open | yes | Fail-open keeps the original log after diagnostics; fail-closed drops the request log when the hook fails, its circuit is open, or the final payload is invalid. |
 
 ## 10. Observability
 

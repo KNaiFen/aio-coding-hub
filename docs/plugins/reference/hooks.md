@@ -6,7 +6,7 @@ Hooks 是网关和日志 pipeline 中稳定的扩展点。Plugin API v1 刻意�
 默认 vNext hook timeout: 5000 ms.
 默认 v1 failure policy: `fail-open`.
 
-`fail-open` 的实际语义是可用性优先：hook 失败、超时、输出超预算或输出 payload 无效时，宿主会记录诊断并继续原路径。对 `log.beforePersist`，当前代码会保留原始日志继续入库；没有宿主兜底脱敏或丢弃日志行为。
+`fail-open` 的实际语义是可用性优先：hook 失败、超时、输出超预算或输出 payload 无效时，宿主会记录诊断并继续原路径。对 `log.beforePersist`，这表示保留原始日志继续入库。显式声明 `fail-closed` 时，request、response 和 stream hook 会返回安全错误；`log.beforePersist` 在 hook 失败、熔断或最终 payload 不是可解析 JSON object 时会放弃该条请求日志，同时保留插件诊断。熔断状态按插件和 hook 名称分别计算。
 
 Timeout 是宿主为每次 hook invocation 选择的执行预算。Gateway pipeline 会把本次预算显式传给 runtime executor；Extension Host gateway hooks 使用同一个预算完成 activation、hook dispatch 和 runtime cleanup，不在 executor 内再叠加固定上限或 grace window。
 
@@ -37,7 +37,7 @@ Replay 支持按 hook 分层：
 | `gateway.response.chunk` | 记录 chunk 级执行结果和 timeout/budget 状态 | 复现单个有界 chunk 或滑动窗口场景 | 不代表完整响应；需要 streamed fixture |
 | `gateway.response.after` | 记录 non-streaming response body hook 结果 | 复现完整响应检查、替换或阻断 | 只适用于 non-streaming response body |
 | `gateway.error` | 记录 gateway-generated error response hook 结果 | 复现错误响应脱敏或改写 | 不处理 provider success response |
-| `log.beforePersist` | 记录日志入库前脱敏结果 | 复现日志 redaction 和 mutation summary | log payload 仍受日志持久化策略限制；失败或非法 payload 时保留原始日志 |
+| `log.beforePersist` | 记录日志入库前脱敏结果 | 复现日志 redaction 和 mutation summary | fail-open 在失败或非法 payload 时保留原始日志；显式 fail-closed 会放弃该条请求日志 |
 
 ## Hook 矩阵
 
@@ -163,4 +163,4 @@ Codex/OpenAI Responses-style fixture：
 
 这个 hook 用于 request logs 入队或写入前的不可逆脱敏。
 
-当前失败边界是 fail-open：如果 hook 执行失败，或返回的 `logMessage` 不是宿主能解析回 request log payload 的 JSON object，宿主会保留原始日志继续入库。隐私插件不能把默认 `log.beforePersist` 当作强制合规日志脱敏保证；需要更强语义时必须先补宿主兜底脱敏、丢弃日志或官方插件专用策略。
+默认失败边界是 fail-open：如果 hook 执行失败，或返回的 `logMessage` 不是宿主能解析回 request log payload 的 JSON object，宿主会保留原始日志继续入库。隐私插件需要强制日志脱敏时，应在 `log.beforePersist` 明确声明 `failurePolicy: "fail-closed"`；此时 hook 失败、熔断或最终 payload 无效会让宿主放弃该条请求日志，而不是回退到原始敏感日志。诊断事件和执行报告仍会保留。
