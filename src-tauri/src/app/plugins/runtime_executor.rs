@@ -648,11 +648,7 @@ mod tests {
         write_gateway_extension_plugin_source(root, hook_name, &extension_source);
     }
 
-    fn write_gateway_extension_plugin_source(
-        root: &Path,
-        hook_name: &str,
-        extension_source: &str,
-    ) {
+    fn write_gateway_extension_plugin_source(root: &Path, hook_name: &str, extension_source: &str) {
         std::fs::create_dir_all(root.join("dist")).expect("create dist");
         let manifest = json!({
             "id": "example.extension",

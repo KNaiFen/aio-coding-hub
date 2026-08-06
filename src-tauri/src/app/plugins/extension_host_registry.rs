@@ -423,22 +423,20 @@ impl ExtensionHostInstanceRegistry {
         )
         .await?
         .map_err(extension_host_gateway_error)?;
-        let value = match tokio::time::timeout_at(
-            deadline,
-            process.execute_gateway_hook(hook, payload),
-        )
-        .await
-        {
-            Ok(Ok(value)) => value,
-            Ok(Err(error)) => {
-                dispose_process_before_gateway_deadline(deadline, &mut process).await?;
-                return Err(extension_host_gateway_error(error));
-            }
-            Err(_) => {
-                process.abort();
-                return Err(gateway_hook_timeout_error());
-            }
-        };
+        let value =
+            match tokio::time::timeout_at(deadline, process.execute_gateway_hook(hook, payload))
+                .await
+            {
+                Ok(Ok(value)) => value,
+                Ok(Err(error)) => {
+                    dispose_process_before_gateway_deadline(deadline, &mut process).await?;
+                    return Err(extension_host_gateway_error(error));
+                }
+                Err(_) => {
+                    process.abort();
+                    return Err(gateway_hook_timeout_error());
+                }
+            };
         if let Err(error) = ensure_gateway_hook_deadline(deadline) {
             process.abort();
             return Err(error);
@@ -659,20 +657,14 @@ impl ExtensionHostInstanceRegistry {
             Ok(Ok(Some(value))) => Ok(Some(value)),
             Ok(Ok(None)) => {
                 let removed = self.take_warm_instance_if_current(key, &instance).await;
-                dispose_instances_before_gateway_deadline(
-                    deadline,
-                    removed.into_iter().collect(),
-                )
-                .await?;
+                dispose_instances_before_gateway_deadline(deadline, removed.into_iter().collect())
+                    .await?;
                 Ok(None)
             }
             Ok(Err(error)) => {
                 let removed = self.take_warm_instance_if_current(key, &instance).await;
-                dispose_instances_before_gateway_deadline(
-                    deadline,
-                    removed.into_iter().collect(),
-                )
-                .await?;
+                dispose_instances_before_gateway_deadline(deadline, removed.into_iter().collect())
+                    .await?;
                 Err(extension_host_gateway_error(error))
             }
         }
@@ -994,9 +986,7 @@ async fn await_gateway_hook_deadline<T>(
         .map_err(|_| gateway_hook_timeout_error())
 }
 
-fn ensure_gateway_hook_deadline(
-    deadline: tokio::time::Instant,
-) -> Result<(), GatewayPluginError> {
+fn ensure_gateway_hook_deadline(deadline: tokio::time::Instant) -> Result<(), GatewayPluginError> {
     if tokio::time::Instant::now() >= deadline {
         return Err(gateway_hook_timeout_error());
     }
@@ -1505,9 +1495,7 @@ mod tests {
         ) -> BoxFuture<'a, AppResult<Value>> {
             Box::pin(async move {
                 if hook == "gateway.slow" {
-                    self.slow_gateway_hook
-                        .starts
-                        .fetch_add(1, Ordering::SeqCst);
+                    self.slow_gateway_hook.starts.fetch_add(1, Ordering::SeqCst);
                     self.slow_gateway_hook.started.notify_waiters();
                     self.slow_gateway_hook.release.notified().await;
                 }
