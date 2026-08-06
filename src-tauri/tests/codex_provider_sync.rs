@@ -303,8 +303,8 @@ fn codex_provider_sync_updates_only_active_sessions_and_writes_v2_backup() {
             ("thread-3", Some("OpenAI"), Some(1)),
         ],
     );
-    write_sqlite_sidecars(&sqlite_path);
     let original_threads = read_threads_db(&sqlite_path);
+    write_sqlite_sidecars(&sqlite_path);
     let original_wal =
         fs::read(format!("{}-wal", sqlite_path.to_string_lossy())).expect("snapshot sqlite wal");
     let original_shm =
@@ -376,7 +376,6 @@ fn codex_provider_sync_updates_only_active_sessions_and_writes_v2_backup() {
         invalid_archived_bytes,
         "archived sessions must not even be parsed"
     );
-    assert_eq!(read_threads_db(&sqlite_path), original_threads);
     assert_eq!(
         fs::read(format!("{}-wal", sqlite_path.to_string_lossy())).expect("read sqlite wal"),
         original_wal
@@ -385,6 +384,7 @@ fn codex_provider_sync_updates_only_active_sessions_and_writes_v2_backup() {
         fs::read(format!("{}-shm", sqlite_path.to_string_lossy())).expect("read sqlite shm"),
         original_shm
     );
+    assert_eq!(read_threads_db(&sqlite_path), original_threads);
     assert_eq!(
         fs::read(&global_state_path).expect("read global state after sync"),
         original_global_state
