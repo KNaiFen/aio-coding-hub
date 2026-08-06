@@ -1200,8 +1200,7 @@ impl GatewayPluginPipeline {
         *self
             .plugins
             .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) =
-            snapshot;
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = snapshot;
         self.circuits
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -1265,11 +1264,7 @@ impl GatewayPluginPipeline {
         );
     }
 
-    fn should_skip_for_circuit(
-        &self,
-        plugin_id: &str,
-        hook_name: GatewayPluginHookName,
-    ) -> bool {
+    fn should_skip_for_circuit(&self, plugin_id: &str, hook_name: GatewayPluginHookName) -> bool {
         let mut circuits = self
             .circuits
             .lock()
@@ -2551,10 +2546,8 @@ mod tests {
         assert!(first.audit_events.iter().all(|event| {
             !(event.plugin_id == "plugin.large" && event.event_type == "plugin.hook.completed")
         }));
-        let snapshot = pipeline.circuit_snapshot(
-            "plugin.large",
-            GatewayPluginHookName::RequestAfterBodyRead,
-        );
+        let snapshot =
+            pipeline.circuit_snapshot("plugin.large", GatewayPluginHookName::RequestAfterBodyRead);
         assert_eq!(snapshot.failure_count, 1);
         assert!(snapshot.open);
 
@@ -2616,12 +2609,14 @@ mod tests {
                     .and_then(serde_json::Value::as_str)
                     .is_some_and(|error| error.contains("PLUGIN_CONTEXT_TRUNCATED"))
         }));
-        assert!(pipeline
-            .circuit_snapshot(
-                "plugin.truncated",
-                GatewayPluginHookName::RequestAfterBodyRead,
-            )
-            .open);
+        assert!(
+            pipeline
+                .circuit_snapshot(
+                    "plugin.truncated",
+                    GatewayPluginHookName::RequestAfterBodyRead,
+                )
+                .open
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -2662,9 +2657,11 @@ mod tests {
                 .failure_count,
             1
         );
-        assert!(pipeline
-            .circuit_snapshot("plugin.slow", GatewayPluginHookName::RequestAfterBodyRead)
-            .open);
+        assert!(
+            pipeline
+                .circuit_snapshot("plugin.slow", GatewayPluginHookName::RequestAfterBodyRead)
+                .open
+        );
 
         let second = pipeline
             .run_request_hook(request_input())
@@ -2869,9 +2866,11 @@ mod tests {
             .expect("half-open probe");
 
         assert_eq!(output.body.as_ref(), b"recovered");
-        assert!(!pipeline
-            .circuit_snapshot("plugin.flaky", GatewayPluginHookName::RequestAfterBodyRead)
-            .open);
+        assert!(
+            !pipeline
+                .circuit_snapshot("plugin.flaky", GatewayPluginHookName::RequestAfterBodyRead)
+                .open
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -2941,12 +2940,14 @@ mod tests {
         gateway_hook_mut(&mut replacement).name = "log.beforePersist".to_string();
         pipeline.replace_plugins(vec![replacement]);
 
-        assert!(!pipeline
-            .circuit_snapshot(
-                "plugin.hook-refresh",
-                GatewayPluginHookName::RequestAfterBodyRead,
-            )
-            .open);
+        assert!(
+            !pipeline
+                .circuit_snapshot(
+                    "plugin.hook-refresh",
+                    GatewayPluginHookName::RequestAfterBodyRead,
+                )
+                .open
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -2973,11 +2974,7 @@ mod tests {
             },
         );
         let pipeline = GatewayPluginPipeline::for_tests_shared(
-            vec![plugin(
-                "plugin.hook-refresh",
-                10,
-                vec!["request.body.read"],
-            )],
+            vec![plugin("plugin.hook-refresh", 10, vec!["request.body.read"])],
             Arc::new(executor),
             GatewayPluginPipelineConfig {
                 circuit_failure_threshold: 1,
@@ -3142,9 +3139,14 @@ mod tests {
             .unwrap_err();
 
         assert!(err.to_string().starts_with("PLUGIN_RESERVED_HEADER:"));
-        assert!(pipeline
-            .circuit_snapshot("plugin.headers", GatewayPluginHookName::RequestAfterBodyRead)
-            .open);
+        assert!(
+            pipeline
+                .circuit_snapshot(
+                    "plugin.headers",
+                    GatewayPluginHookName::RequestAfterBodyRead
+                )
+                .open
+        );
         assert!(err.execution_reports().iter().any(|report| {
             report.plugin_id == "plugin.headers"
                 && report.status == "policyRejected"
@@ -3287,9 +3289,11 @@ mod tests {
             .expect_err("reserved response header should be rejected");
 
         assert_eq!(err.code(), "PLUGIN_RESERVED_HEADER");
-        assert!(pipeline
-            .circuit_snapshot("plugin.response", GatewayPluginHookName::ResponseAfter)
-            .open);
+        assert!(
+            pipeline
+                .circuit_snapshot("plugin.response", GatewayPluginHookName::ResponseAfter)
+                .open
+        );
         assert!(err.execution_reports().iter().any(|report| {
             report.plugin_id == "plugin.response"
                 && report.status == "policyRejected"
@@ -3601,13 +3605,13 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn gateway_plugin_log_pipeline_requires_valid_payload_after_fail_closed_success() {
-        let executor = InMemoryGatewayPluginExecutor::new().with_log_handler(
-            "plugin.log-closed",
-            |_ctx| GatewayHookResult {
-                log_message: Some("not-json".to_string()),
-                ..GatewayHookResult::continue_unchanged()
-            },
-        );
+        let executor =
+            InMemoryGatewayPluginExecutor::new().with_log_handler("plugin.log-closed", |_ctx| {
+                GatewayHookResult {
+                    log_message: Some("not-json".to_string()),
+                    ..GatewayHookResult::continue_unchanged()
+                }
+            });
         let mut plugin = plugin("plugin.log-closed", 10, vec!["log.redact"]);
         let hook = gateway_hook_mut(&mut plugin);
         hook.name = "log.beforePersist".to_string();
@@ -3736,9 +3740,14 @@ mod tests {
             .expect("request-hook circuit must not suppress log hook");
 
         assert_eq!(log_output.message, "redacted");
-        assert!(!pipeline
-            .circuit_snapshot("plugin.multiple-hooks", GatewayPluginHookName::LogBeforePersist)
-            .open);
+        assert!(
+            !pipeline
+                .circuit_snapshot(
+                    "plugin.multiple-hooks",
+                    GatewayPluginHookName::LogBeforePersist
+                )
+                .open
+        );
 
         let request_output = pipeline
             .run_request_hook(request_input())
