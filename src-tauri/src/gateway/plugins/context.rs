@@ -707,9 +707,7 @@ mod tests {
         assert!(serialized.get("trace_id").is_none());
         assert!(serialized.pointer("/request/cli_key").is_none());
         assert!(serialized.pointer("/request/body_truncated").is_none());
-        assert!(serialized
-            .pointer("/request/normalized_messages")
-            .is_none());
+        assert!(serialized.pointer("/request/normalized_messages").is_none());
         assert!(serialized.pointer("/response/body_truncated").is_none());
         assert!(serialized.pointer("/stream/chunk_truncated").is_none());
         assert!(serialized.pointer("/log/message_truncated").is_none());
