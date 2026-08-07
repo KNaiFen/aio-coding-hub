@@ -472,7 +472,8 @@ pub(crate) async fn retry_pending_maintenance<R: tauri::Runtime>(
 async fn retry_recovery_journal<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> bool {
     let db = {
         let state = app.state::<crate::app::app_state::DbInitState>();
-        state.0.lock().await.clone()
+        let db = state.0.lock().await.clone();
+        db
     };
     let db = match db {
         Some(db) => db,

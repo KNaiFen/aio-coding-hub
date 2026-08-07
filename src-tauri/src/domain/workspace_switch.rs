@@ -3,8 +3,6 @@
 use crate::claude_plugins;
 use crate::db;
 use crate::infra::recovery_journal::{JournalEntry, RecoveryOperation};
-use crate::mcp_sync;
-use crate::prompt_sync;
 use crate::shared::cli_key::{CliCapability, CliKey};
 use crate::shared::error::{db_err, AppError};
 use crate::shared::time::now_unix_seconds;

@@ -44,6 +44,7 @@ impl BodyReaderMiddleware {
                     &ctx.cli_key,
                     &ctx.req_method,
                     &ctx.forwarded_path,
+                    &ctx.headers,
                     None,
                 );
                 let contract = early_error_contract(EarlyErrorKind::BodyTooLarge);
@@ -76,6 +77,7 @@ impl BodyReaderMiddleware {
                     &ctx.cli_key,
                     &ctx.req_method,
                     &ctx.forwarded_path,
+                    &ctx.headers,
                     None,
                 );
                 let (contract, message) = match err {
@@ -106,6 +108,7 @@ impl BodyReaderMiddleware {
             &ctx.cli_key,
             &ctx.req_method,
             &ctx.forwarded_path,
+            &ctx.headers,
             ctx.introspection_json.as_ref(),
         ) {
             if let Ok(setting) = serde_json::to_value(marker) {
