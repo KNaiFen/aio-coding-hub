@@ -291,6 +291,12 @@ pub(crate) fn register_runtime_commands(
 ) -> tauri::Builder<tauri::Wry> {
     macro_rules! build_runtime_handler {
         ($($name:ident => $path:path),+ $(,)?) => {
+            let runtime_handler: Box<
+                dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync,
+            > = Box::new(tauri::generate_handler![
+                $($name,)*
+                desktop_updater_download_and_install,
+            ]);
             builder.invoke_handler(move |invoke: tauri::ipc::Invoke<tauri::Wry>| {
                 let allowed = {
                     let app = invoke.message.webview_ref().app_handle();
@@ -305,10 +311,7 @@ pub(crate) fn register_runtime_commands(
                     );
                     return true;
                 }
-                tauri::generate_handler![
-                    $($name,)*
-                    desktop_updater_download_and_install,
-                ](invoke)
+                runtime_handler(invoke)
             })
         };
     }
