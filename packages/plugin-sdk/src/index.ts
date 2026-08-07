@@ -476,7 +476,9 @@ function validateActivationEvents(
   if (activationEvents.length === 0) return null;
 
   const declaredCommands = new Set(contributes.commands?.map(({ command }) => command) ?? []);
-  const declaredGatewayHooks = new Set(contributes.gatewayHooks?.map(({ name }) => name) ?? []);
+  const declaredGatewayHooks = new Set<string>(
+    contributes.gatewayHooks?.map(({ name }) => name) ?? []
+  );
   const activatedCommands = new Set<string>();
   const activatedGatewayHooks = new Set<string>();
   const seenEvents = new Set<string>();
