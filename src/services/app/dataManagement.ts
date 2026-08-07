@@ -25,16 +25,20 @@ function toDbDiskUsage(value: DbDiskUsage): DbDiskUsage {
   const walBytes = requireNonNegativeSafeInteger(value.wal_bytes, "db_disk_usage.wal_bytes");
   const shmBytes = requireNonNegativeSafeInteger(value.shm_bytes, "db_disk_usage.shm_bytes");
   const totalBytes = requireNonNegativeSafeInteger(value.total_bytes, "db_disk_usage.total_bytes");
+  const reclaimableBytes = requireNonNegativeSafeInteger(
+    value.reclaimable_bytes,
+    "db_disk_usage.reclaimable_bytes"
+  );
   const expectedTotal = dbBytes + walBytes + shmBytes;
   if (!Number.isSafeInteger(expectedTotal) || totalBytes !== expectedTotal) {
     throw new Error("IPC_INVALID_RESULT: db_disk_usage.total_bytes mismatch");
   }
-
   return {
     db_bytes: dbBytes,
     wal_bytes: walBytes,
     shm_bytes: shmBytes,
     total_bytes: totalBytes,
+    reclaimable_bytes: reclaimableBytes,
   };
 }
 

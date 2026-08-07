@@ -29,7 +29,7 @@ export function createTestAppSettings(overrides?: Partial<AppSettings>): AppSett
     tray_enabled: true,
     enable_cli_proxy_startup_recovery: true,
     log_retention_days: 7,
-    request_log_retention_days: 0,
+    request_log_retention_days: 7,
     provider_cooldown_seconds: 30,
     provider_availability_hours: 6,
     provider_base_url_ping_cache_ttl_seconds: 60,

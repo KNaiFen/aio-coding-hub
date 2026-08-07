@@ -17,6 +17,7 @@ pub struct DbDiskUsage {
     pub wal_bytes: u64,
     pub shm_bytes: u64,
     pub total_bytes: u64,
+    pub reclaimable_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -63,7 +64,24 @@ fn db_related_paths(db_path: &Path) -> (PathBuf, PathBuf) {
     (wal_path, shm_path)
 }
 
-fn disk_usage_at(db_path: &Path) -> Result<DbDiskUsage, String> {
+fn sqlite_reclaimable_bytes(db: &db::Db) -> crate::shared::error::AppResult<u64> {
+    let conn = db.open_connection()?;
+    let freelist_count: i64 = conn
+        .query_row("PRAGMA freelist_count", [], |row| row.get(0))
+        .map_err(|e| db_err!("failed to read SQLite freelist_count: {e}"))?;
+    let page_size: i64 = conn
+        .query_row("PRAGMA page_size", [], |row| row.get(0))
+        .map_err(|e| db_err!("failed to read SQLite page_size: {e}"))?;
+    if freelist_count < 0 || page_size < 0 {
+        return Err(db_err!(
+            "SQLite space metrics must be non-negative: freelist_count={freelist_count}, page_size={page_size}"
+        ));
+    }
+
+    Ok((freelist_count as u64).saturating_mul(page_size as u64))
+}
+
+fn disk_usage_at(db_path: &Path, db: &db::Db) -> crate::shared::error::AppResult<DbDiskUsage> {
     let (wal_path, shm_path) = db_related_paths(db_path);
 
     let db_bytes = file_len_or_zero(db_path)?;
@@ -75,12 +93,16 @@ fn disk_usage_at(db_path: &Path) -> Result<DbDiskUsage, String> {
         wal_bytes,
         shm_bytes,
         total_bytes: db_bytes.saturating_add(wal_bytes).saturating_add(shm_bytes),
+        reclaimable_bytes: sqlite_reclaimable_bytes(db)?,
     })
 }
 
-pub fn db_disk_usage_get(app: &tauri::AppHandle) -> crate::shared::error::AppResult<DbDiskUsage> {
+pub fn db_disk_usage_get<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    db: &db::Db,
+) -> crate::shared::error::AppResult<DbDiskUsage> {
     let db_path = db::db_path(app)?;
-    Ok(disk_usage_at(&db_path)?)
+    disk_usage_at(&db_path, db)
 }
 
 pub fn db_compact(
@@ -94,18 +116,20 @@ pub fn db_compact(
 fn db_compact_at(db_path: &Path, db: &db::Db) -> crate::shared::error::AppResult<DbCompactResult> {
     tracing::info!("compacting database (user-initiated)");
 
-    let before_bytes = disk_usage_at(db_path)?.total_bytes;
+    let before_bytes = disk_usage_at(db_path, db)?.total_bytes;
 
-    let conn = db.open_connection()?;
+    {
+        let conn = db.open_connection()?;
 
-    // Checkpoints stay best-effort (same sequence as request_logs_clear_all),
-    // but VACUUM failures must surface: this is a user-initiated action.
-    let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
-    conn.execute_batch("VACUUM;")
-        .map_err(|e| db_err!("failed to vacuum database: {e}"))?;
-    let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+        // Checkpoints stay best-effort, but VACUUM failures must surface because
+        // this command is the user's explicit request to return reusable pages.
+        let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+        conn.execute_batch("VACUUM;")
+            .map_err(|e| db_err!("failed to vacuum database: {e}"))?;
+        let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+    }
 
-    let after_bytes = disk_usage_at(db_path)?.total_bytes;
+    let after_bytes = disk_usage_at(db_path, db)?.total_bytes;
 
     tracing::info!(before_bytes, after_bytes, "database compacted");
 
@@ -174,9 +198,8 @@ pub fn request_logs_clear_all(
         "request logs cleared"
     );
 
-    // Best-effort: reclaim disk usage (WAL truncate + vacuum).
-    let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
-    let _ = conn.execute_batch("VACUUM;");
+    // Keep reusable pages visible to the user. Returning them to the filesystem
+    // is reserved for the explicit database-compaction command.
     let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
 
     Ok(ClearRequestLogsResult {
@@ -215,7 +238,8 @@ pub fn app_data_reset<R: tauri::Runtime>(
 #[cfg(test)]
 mod tests {
     use super::{
-        db_compact_at, request_logs_clear_all, USAGE_LEDGER_COVERAGE_INCOMPLETE_ERROR_CODE,
+        db_compact_at, disk_usage_at, request_logs_clear_all,
+        USAGE_LEDGER_COVERAGE_INCOMPLETE_ERROR_CODE,
     };
     use rusqlite::params;
     use std::path::PathBuf;
@@ -267,6 +291,23 @@ INSERT INTO request_logs (
         );
     }
 
+    fn project_all_request_logs_to_ledger(db: &crate::db::Db) {
+        let trace_ids = {
+            let conn = db.open_connection().expect("open connection");
+            let mut statement = conn
+                .prepare("SELECT trace_id FROM request_logs ORDER BY id ASC")
+                .expect("prepare trace query");
+            let rows = statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .expect("query trace ids");
+            rows.collect::<Result<Vec<_>, _>>()
+                .expect("collect trace ids")
+        };
+        for trace_id in trace_ids {
+            project_request_log_to_ledger(db, &trace_id);
+        }
+    }
+
     #[test]
     fn db_compact_keeps_rows_and_reclaims_space() {
         let (db, db_path, _dir) = init_test_db();
@@ -279,8 +320,18 @@ INSERT INTO request_logs (
         }
         let rows_before = count_request_logs(&db);
         assert!(rows_before > 0, "expected surviving rows before compact");
+        let reclaimable_before = disk_usage_at(&db_path, &db)
+            .expect("read usage before compact")
+            .reclaimable_bytes;
+        assert!(
+            reclaimable_before > 0,
+            "expected reusable pages before compact"
+        );
 
         let result = db_compact_at(&db_path, &db).expect("compact db");
+        let reclaimable_after = disk_usage_at(&db_path, &db)
+            .expect("read usage after compact")
+            .reclaimable_bytes;
 
         assert_eq!(
             count_request_logs(&db),
@@ -292,6 +343,10 @@ INSERT INTO request_logs (
             "after_bytes {} must not exceed before_bytes {}",
             result.after_bytes,
             result.before_bytes
+        );
+        assert!(
+            reclaimable_after < reclaimable_before,
+            "manual compact should reduce reusable pages"
         );
     }
 
@@ -373,5 +428,24 @@ WHERE id = 1
         assert_eq!(result.request_logs_deleted, 1);
         assert_eq!(count_request_logs(&db), 0);
         assert_eq!(count_usage_ledger(&db), 1);
+    }
+
+    #[test]
+    fn request_logs_clear_all_leaves_reclaimable_pages_for_manual_compaction() {
+        let (db, db_path, _dir) = init_test_db();
+        insert_request_log_rows(&db, 300);
+        project_all_request_logs_to_ledger(&db);
+        let before = disk_usage_at(&db_path, &db).expect("usage before clear");
+
+        let result = request_logs_clear_all(&db).expect("clear request logs");
+        let after = disk_usage_at(&db_path, &db).expect("usage after clear");
+
+        assert_eq!(result.request_logs_deleted, 300);
+        assert_eq!(count_request_logs(&db), 0);
+        assert_eq!(count_usage_ledger(&db), 300);
+        assert!(
+            after.reclaimable_bytes > before.reclaimable_bytes,
+            "clear should expose reusable SQLite pages without vacuuming"
+        );
     }
 }

@@ -26,7 +26,7 @@ const DEFAULT_CLI_PROXY_STATUS: CliProxyStatus[] = [
 
 // Default settings matching the Rust backend defaults.
 const DEFAULT_SETTINGS: AppSettings = {
-  schema_version: 59,
+  schema_version: 60,
   preferred_port: 37123,
   show_home_heatmap: true,
   show_home_usage: true,
@@ -47,7 +47,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   tray_enabled: true,
   enable_cli_proxy_startup_recovery: true,
   log_retention_days: 7,
-  request_log_retention_days: 0,
+  request_log_retention_days: 7,
   provider_cooldown_seconds: 30,
   provider_availability_hours: 6,
   provider_base_url_ping_cache_ttl_seconds: 60,
@@ -120,6 +120,7 @@ const DEFAULT_DB_DISK_USAGE: DbDiskUsage = {
   wal_bytes: 0,
   shm_bytes: 0,
   total_bytes: 0,
+  reclaimable_bytes: 0,
 };
 
 const DEFAULT_USAGE_SUMMARY: UsageSummary = {

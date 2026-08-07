@@ -798,31 +798,9 @@ pub fn sort_mode_providers_set_order_json<R: tauri::Runtime>(
 pub fn db_disk_usage_json<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> crate::shared::error::AppResult<serde_json::Value> {
-    let db_path = crate::infra::db::db_path(app)?;
-    let wal_path = {
-        let mut out = db_path.clone().into_os_string();
-        out.push("-wal");
-        std::path::PathBuf::from(out)
-    };
-    let shm_path = {
-        let mut out = db_path.clone().into_os_string();
-        out.push("-shm");
-        std::path::PathBuf::from(out)
-    };
-
-    let file_len =
-        |p: &std::path::Path| -> u64 { std::fs::metadata(p).map(|m| m.len()).unwrap_or(0) };
-
-    let db_bytes = file_len(&db_path);
-    let wal_bytes = file_len(&wal_path);
-    let shm_bytes = file_len(&shm_path);
-
-    serialize_json(serde_json::json!({
-        "db_bytes": db_bytes,
-        "wal_bytes": wal_bytes,
-        "shm_bytes": shm_bytes,
-        "total_bytes": db_bytes + wal_bytes + shm_bytes,
-    }))
+    let db = crate::infra::db::init(app)?;
+    let usage = crate::data_management::db_disk_usage_get(app, &db)?;
+    serialize_json(usage)
 }
 
 pub fn request_logs_clear_all_json<R: tauri::Runtime>(

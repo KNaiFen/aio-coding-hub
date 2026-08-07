@@ -89,6 +89,15 @@ describe("pages/settings/settingsPersistenceModel", () => {
     expect(
       validatePersistedSettings(
         applyPersistedSettingsPatch(DEFAULT_PERSISTED_SETTINGS, {
+          request_log_retention_days: 0,
+        }),
+        ["request_log_retention_days"]
+      )
+    ).toBe("请求记录保留必须为 1-3650 天");
+
+    expect(
+      validatePersistedSettings(
+        applyPersistedSettingsPatch(DEFAULT_PERSISTED_SETTINGS, {
           upstream_stream_idle_timeout_seconds: 10,
         }),
         ["upstream_stream_idle_timeout_seconds"]

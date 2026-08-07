@@ -389,7 +389,7 @@ pub struct AppSettings {
     // Startup crash recovery for CLI proxy takeover (default enabled).
     pub enable_cli_proxy_startup_recovery: bool,
     pub log_retention_days: u32,
-    // Request-log DB retention in days; 0 = keep forever.
+    // Request-detail DB retention in days. Usage ledger aggregates are independent.
     pub request_log_retention_days: u32,
     pub provider_cooldown_seconds: u32,
     #[serde(default = "default_provider_availability_hours")]

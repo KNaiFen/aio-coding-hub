@@ -24,6 +24,7 @@ fn db_disk_usage_after_init() {
 
     let db_bytes = json_u64(&usage, "db_bytes");
     let total_bytes = json_u64(&usage, "total_bytes");
+    let _reclaimable_bytes = json_u64(&usage, "reclaimable_bytes");
 
     // After DB init, the main DB file should have non-zero size.
     assert!(

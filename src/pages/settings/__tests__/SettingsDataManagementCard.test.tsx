@@ -22,6 +22,7 @@ function createDbDiskUsage(overrides: Partial<DbDiskUsage> = {}): DbDiskUsage {
     wal_bytes: 1024 * 1024 * 5,
     shm_bytes: 1024 * 1024 * 5,
     total_bytes: 1024 * 1024 * 50, // 50 MB
+    reclaimable_bytes: 1024 * 1024 * 10,
     ...overrides,
   };
 }
@@ -31,7 +32,7 @@ describe("pages/settings/SettingsDataManagementCard", () => {
     about: createAboutInfo(),
     dbDiskUsageAvailable: "available" as const,
     dbDiskUsage: createDbDiskUsage(),
-    requestLogRetentionDays: 0,
+    requestLogRetentionDays: 7,
     refreshDbDiskUsage: vi.fn().mockResolvedValue(undefined),
     openAppDataDir: vi.fn().mockResolvedValue(undefined),
     onCompactDb: vi.fn().mockResolvedValue(undefined),
@@ -64,16 +65,17 @@ describe("pages/settings/SettingsDataManagementCard", () => {
   it("displays disk usage when available", () => {
     render(<SettingsDataManagementCard {...defaultProps} />);
     expect(screen.getByText("50.0 MB")).toBeInTheDocument();
+    expect(screen.getByText("10.0 MB")).toBeInTheDocument();
   });
 
   it("displays loading state when checking disk usage", () => {
     render(<SettingsDataManagementCard {...defaultProps} dbDiskUsageAvailable="checking" />);
-    expect(screen.getByText("加载中…")).toBeInTheDocument();
+    expect(screen.getAllByText("加载中…")).toHaveLength(2);
   });
 
   it("displays dash when disk usage unavailable", () => {
     render(<SettingsDataManagementCard {...defaultProps} dbDiskUsageAvailable="unavailable" />);
-    expect(screen.getByText("—")).toBeInTheDocument();
+    expect(screen.getAllByText("—")).toHaveLength(2);
   });
 
   it("calls refreshDbDiskUsage when clicking refresh button", () => {
@@ -86,9 +88,9 @@ describe("pages/settings/SettingsDataManagementCard", () => {
     expect(refreshDbDiskUsage).toHaveBeenCalled();
   });
 
-  it("shows permanent retention label when retention days is 0", () => {
-    render(<SettingsDataManagementCard {...defaultProps} requestLogRetentionDays={0} />);
-    expect(screen.getByText("永久保留")).toBeInTheDocument();
+  it("shows the default retention day count", () => {
+    render(<SettingsDataManagementCard {...defaultProps} requestLogRetentionDays={7} />);
+    expect(screen.getByText("7 天")).toBeInTheDocument();
   });
 
   it("shows day-count retention label when retention days is positive", () => {

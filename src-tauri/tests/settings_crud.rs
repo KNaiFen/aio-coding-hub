@@ -30,6 +30,7 @@ fn settings_read_defaults() {
     assert!(json_bool(&settings, "tray_enabled"));
     assert_eq!(settings["home_usage_period"], serde_json::json!("last15"));
     assert_eq!(json_i64(&settings, "log_retention_days"), 7);
+    assert_eq!(json_i64(&settings, "request_log_retention_days"), 7);
     assert_eq!(json_i64(&settings, "failover_max_attempts_per_provider"), 5);
     assert_eq!(json_i64(&settings, "failover_max_providers_to_try"), 5);
     assert_eq!(json_i64(&settings, "circuit_breaker_failure_threshold"), 5);
@@ -41,6 +42,53 @@ fn settings_read_defaults() {
         settings["update_releases_url"],
         serde_json::json!("https://github.com/KNaiFen/aio-coding-hub/releases")
     );
+}
+
+#[test]
+fn settings_migrates_legacy_permanent_request_log_retention() {
+    let app = support::TestApp::new();
+    let handle = app.handle();
+
+    let mut settings =
+        aio_coding_hub_lib::test_support::settings_get_json(&handle).expect("read defaults");
+    settings["schema_version"] = serde_json::json!(59);
+    settings["request_log_retention_days"] = serde_json::json!(0);
+
+    let app_data_dir =
+        aio_coding_hub_lib::test_support::app_data_dir(&handle).expect("app data dir");
+    std::fs::write(
+        app_data_dir.join("settings.json"),
+        serde_json::to_vec_pretty(&settings).expect("serialize legacy settings"),
+    )
+    .expect("write legacy settings");
+    aio_coding_hub_lib::test_support::clear_settings_cache();
+
+    let migrated =
+        aio_coding_hub_lib::test_support::settings_get_json(&handle).expect("read migrated");
+
+    assert_eq!(json_i64(&migrated, "schema_version"), 60);
+    assert_eq!(json_i64(&migrated, "request_log_retention_days"), 7);
+
+    aio_coding_hub_lib::test_support::clear_settings_cache();
+    let persisted =
+        aio_coding_hub_lib::test_support::settings_get_json(&handle).expect("read persisted");
+    assert_eq!(json_i64(&persisted, "request_log_retention_days"), 7);
+}
+
+#[test]
+fn settings_rejects_zero_request_log_retention_on_write() {
+    let app = support::TestApp::new();
+    let handle = app.handle();
+
+    let mut settings =
+        aio_coding_hub_lib::test_support::settings_get_json(&handle).expect("read defaults");
+    settings["request_log_retention_days"] = serde_json::json!(0);
+
+    let error = aio_coding_hub_lib::test_support::settings_set_json(&handle, settings)
+        .expect_err("zero request-log retention must be rejected");
+    assert!(error
+        .to_string()
+        .contains("request_log_retention_days must be >= 1"));
 }
 
 #[test]

@@ -3090,6 +3090,7 @@ export type DbDiskUsage = {
   wal_bytes: number;
   shm_bytes: number;
   total_bytes: number;
+  reclaimable_bytes: number;
 };
 export type DefaultPromptSyncItem = { cli_key: string; action: string; message: string | null };
 export type DefaultPromptSyncReport = { items: DefaultPromptSyncItem[] };

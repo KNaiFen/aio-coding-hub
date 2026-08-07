@@ -1495,6 +1495,28 @@ fn migrate_add_stream_internal_error_retry(
     changed
 }
 
+fn migrate_set_request_log_retention_default(
+    settings: &mut AppSettings,
+    schema_version_present: bool,
+) -> bool {
+    if schema_version_present
+        && settings.schema_version >= SCHEMA_VERSION_SET_REQUEST_LOG_RETENTION_DEFAULT
+    {
+        return false;
+    }
+
+    let mut changed = migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_SET_REQUEST_LOG_RETENTION_DEFAULT,
+    );
+    if settings.request_log_retention_days == 0 {
+        settings.request_log_retention_days = DEFAULT_REQUEST_LOG_RETENTION_DAYS;
+        changed = true;
+    }
+    changed
+}
+
 type SettingsMigration = fn(&mut AppSettings, bool) -> bool;
 
 const SETTINGS_MIGRATIONS: &[SettingsMigration] = &[
@@ -1539,6 +1561,7 @@ const SETTINGS_MIGRATIONS: &[SettingsMigration] = &[
     migrate_add_upstream_error_response_rules,
     migrate_add_provider_availability_hours,
     migrate_add_stream_internal_error_retry,
+    migrate_set_request_log_retention_default,
 ];
 
 fn apply_settings_migrations(settings: &mut AppSettings, schema_version_present: bool) -> bool {
@@ -2758,5 +2781,62 @@ mod tests {
         assert!(sanitize_codex_home_override(&mut s));
         assert_eq!(s.codex_home_mode, CodexHomeMode::FollowCodexHome);
         assert!(s.codex_home_override.is_empty());
+    }
+
+    #[test]
+    fn request_log_retention_migration_replaces_legacy_zero() {
+        let mut settings = AppSettings {
+            schema_version: SCHEMA_VERSION_ADD_STREAM_INTERNAL_ERROR_RETRY,
+            request_log_retention_days: 0,
+            ..Default::default()
+        };
+
+        assert!(migrate_set_request_log_retention_default(
+            &mut settings,
+            true
+        ));
+        assert_eq!(
+            settings.schema_version,
+            SCHEMA_VERSION_SET_REQUEST_LOG_RETENTION_DEFAULT
+        );
+        assert_eq!(
+            settings.request_log_retention_days,
+            DEFAULT_REQUEST_LOG_RETENTION_DAYS
+        );
+    }
+
+    #[test]
+    fn request_log_retention_migration_replaces_unversioned_zero() {
+        let mut settings = AppSettings {
+            request_log_retention_days: 0,
+            ..Default::default()
+        };
+
+        assert!(migrate_set_request_log_retention_default(
+            &mut settings,
+            false
+        ));
+        assert_eq!(
+            settings.schema_version,
+            SCHEMA_VERSION_SET_REQUEST_LOG_RETENTION_DEFAULT
+        );
+        assert_eq!(
+            settings.request_log_retention_days,
+            DEFAULT_REQUEST_LOG_RETENTION_DAYS
+        );
+    }
+
+    #[test]
+    fn request_log_retention_migration_keeps_current_zero_for_validation() {
+        let mut settings = AppSettings {
+            request_log_retention_days: 0,
+            ..Default::default()
+        };
+
+        assert!(!migrate_set_request_log_retention_default(
+            &mut settings,
+            true
+        ));
+        assert_eq!(settings.request_log_retention_days, 0);
     }
 }
