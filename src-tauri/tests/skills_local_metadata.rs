@@ -225,8 +225,12 @@ fn skill_import_local_fails_when_source_metadata_is_invalid() {
     .to_string();
 
     assert!(
-        err.contains("failed to parse source metadata"),
-        "unexpected error: {err}"
+        err.contains("primary=INTERNAL_ERROR"),
+        "unexpected error classification: {err}"
+    );
+    assert!(
+        !err.contains(&local_dir.display().to_string()),
+        "recovery error must not expose the local path: {err}"
     );
 
     let imported_count: i64 = fix
