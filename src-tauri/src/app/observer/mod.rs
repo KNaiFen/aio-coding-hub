@@ -882,7 +882,7 @@ mod tests {
             Some("claude-folder".to_string()),
             after_negative_ttl,
         );
-        let (folders, misses) = cache.lookup(&[claude.clone()], after_negative_ttl);
+        let (folders, misses) = cache.lookup(std::slice::from_ref(&claude), after_negative_ttl);
         assert_eq!(
             folders.get(&claude).map(String::as_str),
             Some("claude-folder")
