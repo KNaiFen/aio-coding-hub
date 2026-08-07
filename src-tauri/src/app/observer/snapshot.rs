@@ -74,6 +74,14 @@ struct DbProjection {
     provider_details_truncated: bool,
 }
 
+struct DbProjectionRequest {
+    scope: CliScope,
+    active: Vec<ActiveRequestSnapshotItem>,
+    history_limit: usize,
+    now_unix: i64,
+    include_providers: bool,
+}
+
 impl DbProjection {
     fn unavailable(provider_details_requested: bool, history_limit: usize) -> Self {
         Self {
@@ -115,11 +123,13 @@ pub(super) async fn build_snapshot(
         db,
         db_query_permit,
         folder_cache,
-        scope,
-        &raw_active,
-        history_limit,
-        generated_at_ms / 1000,
-        include_providers,
+        DbProjectionRequest {
+            scope,
+            active: raw_active.clone(),
+            history_limit,
+            now_unix: generated_at_ms / 1000,
+            include_providers,
+        },
     )
     .await
     .unwrap_or_else(|| DbProjection::unavailable(include_providers, history_limit));
@@ -233,16 +243,11 @@ async fn load_db_projection(
     db: Option<&crate::db::Db>,
     db_query_permit: Option<OwnedSemaphorePermit>,
     folder_cache: Arc<StdMutex<FolderLookupCache>>,
-    scope: CliScope,
-    active: &[ActiveRequestSnapshotItem],
-    history_limit: usize,
-    now_unix: i64,
-    include_providers: bool,
+    request: DbProjectionRequest,
 ) -> Option<DbProjection> {
     let db = db?.clone();
     let db_query_permit = db_query_permit?;
     let app = app.clone();
-    let active = active.to_vec();
     tokio::time::timeout(
         DB_SNAPSHOT_TIMEOUT,
         blocking::run("observer_snapshot", move || {
@@ -251,11 +256,7 @@ async fn load_db_projection(
                 &app,
                 &db,
                 &folder_cache,
-                scope,
-                &active,
-                history_limit,
-                now_unix,
-                include_providers,
+                &request,
             ))
         }),
     )
@@ -268,24 +269,22 @@ fn build_db_projection(
     app: &tauri::AppHandle,
     db: &crate::db::Db,
     folder_cache: &Arc<StdMutex<FolderLookupCache>>,
-    scope: CliScope,
-    active: &[ActiveRequestSnapshotItem],
-    history_limit: usize,
-    now_unix: i64,
-    include_providers: bool,
+    request: &DbProjectionRequest,
 ) -> DbProjection {
-    let active_trace_ids = active
+    let active_trace_ids = request
+        .active
         .iter()
         .map(|item| item.trace_id.clone())
         .collect::<Vec<_>>();
     let terminal_trace_ids =
         request_logs::observer_persisted_trace_ids(db, &active_trace_ids).unwrap_or_default();
-    let active_trace_ids = active
+    let active_trace_ids = request
+        .active
         .iter()
         .filter(|item| !terminal_trace_ids.contains(&item.trace_id))
         .map(|item| item.trace_id.clone())
         .collect::<Vec<_>>();
-    let cli_key = (scope != CliScope::All).then(|| scope.as_str());
+    let cli_key = (request.scope != CliScope::All).then(|| request.scope.as_str());
     let inference_result = request_logs::list_observer_terminal_inferences(
         db,
         cli_key,
@@ -293,7 +292,7 @@ fn build_db_projection(
     );
     let inference_available = inference_result.is_ok();
     let inference_rows = inference_result.unwrap_or_default();
-    let recent_result = match recent_query_limit(history_limit) {
+    let recent_result = match recent_query_limit(request.history_limit) {
         Some(limit) => {
             request_logs::list_observer_recent_terminal(db, cli_key, limit, &active_trace_ids)
         }
@@ -301,7 +300,7 @@ fn build_db_projection(
     };
     let recent_available = recent_result.is_ok();
     let recent_rows = recent_result.unwrap_or_default();
-    let rendered_active = rendered_active(active, &terminal_trace_ids, scope);
+    let rendered_active = rendered_active(&request.active, &terminal_trace_ids, request.scope);
     let folders = resolve_folders(
         app,
         folder_cache,
@@ -310,10 +309,10 @@ fn build_db_projection(
         &recent_rows,
     );
 
-    let provider_cli_key = preferred_cli_key(scope, inference_rows.first());
+    let provider_cli_key = preferred_cli_key(request.scope, inference_rows.first());
     let provider_result = provider_cli_key
         .as_deref()
-        .map(|cli_key| load_provider_candidates(db, cli_key, now_unix));
+        .map(|cli_key| load_provider_candidates(db, cli_key, request.now_unix));
     let provider_available = provider_result.as_ref().is_none_or(|result| result.is_ok());
     let (provider_candidates, limited_provider_ids) =
         provider_result.and_then(Result::ok).unwrap_or_default();
@@ -322,11 +321,11 @@ fn build_db_projection(
     let availability_hours = crate::settings::read(app)
         .map(|settings| settings.provider_availability_hours)
         .unwrap_or(crate::settings::DEFAULT_PROVIDER_AVAILABILITY_HOURS);
-    let provider_details_result = include_providers.then(|| {
+    let provider_details_result = request.include_providers.then(|| {
         load_provider_observations(
             db,
-            (scope != CliScope::All).then(|| scope.as_str()),
-            now_unix,
+            (request.scope != CliScope::All).then(|| request.scope.as_str()),
+            request.now_unix,
             availability_hours,
         )
     });
@@ -348,7 +347,7 @@ fn build_db_projection(
         provider_candidates,
         limited_provider_ids,
         today,
-        provider_details_requested: include_providers,
+        provider_details_requested: request.include_providers,
         provider_details_available,
         provider_details,
         provider_details_truncated,
