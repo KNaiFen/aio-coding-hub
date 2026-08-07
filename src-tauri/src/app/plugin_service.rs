@@ -2166,6 +2166,9 @@ pub(crate) fn revalidate_quarantined_plugin(
     host_version: &str,
     cache_dir: &Path,
 ) -> AppResult<PluginDetail> {
+    // Hold the package mutation lock across evidence validation and the final
+    // state transition so an update or rollback cannot replace the reviewed tree.
+    let _mutation_guard = plugin_package_mutation_guard();
     let detail = detail_with_config_defaults_for_db(db, repository::get_plugin(db, plugin_id)?)?;
     if detail.summary.status != PluginStatus::Quarantined {
         return Err(AppError::new(

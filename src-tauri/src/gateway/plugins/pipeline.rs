@@ -220,6 +220,7 @@ struct GatewayPluginSnapshot {
 
 pub(crate) struct GatewayPluginPipeline {
     plugins: RwLock<Arc<GatewayPluginSnapshot>>,
+    snapshot_refresh_lock: Mutex<()>,
     executor: Arc<dyn GatewayPluginExecutor>,
     config: GatewayPluginPipelineConfig,
     circuits: Mutex<HashMap<(String, GatewayPluginHookName), GatewayPluginCircuitSnapshot>>,
@@ -231,6 +232,7 @@ impl GatewayPluginPipeline {
     pub(crate) fn empty_shared() -> Arc<Self> {
         Arc::new(Self {
             plugins: RwLock::new(Arc::new(GatewayPluginSnapshot::default())),
+            snapshot_refresh_lock: Mutex::new(()),
             executor: Arc::new(NoopGatewayPluginExecutor),
             config: GatewayPluginPipelineConfig::default(),
             circuits: Mutex::new(HashMap::new()),
@@ -247,6 +249,7 @@ impl GatewayPluginPipeline {
         executor.retain_runtime_caches_for_plugins(&plugins);
         Self {
             plugins: RwLock::new(Arc::new(build_plugin_snapshot(plugins))),
+            snapshot_refresh_lock: Mutex::new(()),
             executor,
             config,
             circuits: Mutex::new(HashMap::new()),
@@ -263,6 +266,7 @@ impl GatewayPluginPipeline {
         executor.retain_runtime_caches_for_plugins(&plugins);
         Self {
             plugins: RwLock::new(Arc::new(build_plugin_snapshot(plugins))),
+            snapshot_refresh_lock: Mutex::new(()),
             executor,
             config,
             circuits: Mutex::new(HashMap::new()),
@@ -1291,6 +1295,34 @@ impl GatewayPluginPipeline {
     }
 
     pub(crate) fn replace_plugins(&self, plugins: Vec<PluginDetail>) {
+        let _refresh_guard = self
+            .snapshot_refresh_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.replace_plugins_while_refresh_locked(plugins);
+    }
+
+    /// Loads enabled plugins while holding the same lock used by quarantine
+    /// removal, so a stale database read cannot restore a just-quarantined
+    /// plugin after its snapshot entry has been removed.
+    pub(crate) fn refresh_plugins_with<F>(
+        &self,
+        load_plugins: F,
+    ) -> crate::shared::error::AppResult<usize>
+    where
+        F: FnOnce() -> crate::shared::error::AppResult<Vec<PluginDetail>>,
+    {
+        let _refresh_guard = self
+            .snapshot_refresh_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let plugins = load_plugins()?;
+        let plugin_count = plugins.len();
+        self.replace_plugins_while_refresh_locked(plugins);
+        Ok(plugin_count)
+    }
+
+    fn replace_plugins_while_refresh_locked(&self, plugins: Vec<PluginDetail>) {
         let active_circuit_keys = {
             let mut snapshot = self
                 .plugins
@@ -1454,6 +1486,10 @@ impl GatewayPluginPipeline {
     }
 
     fn remove_plugin_from_snapshot(&self, plugin_id: &str) {
+        let _refresh_guard = self
+            .snapshot_refresh_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let active_circuit_keys = {
             let mut snapshot = self
                 .plugins
@@ -2277,7 +2313,7 @@ mod tests {
     use axum::body::Bytes;
     use axum::http::{HeaderMap, Method};
     use std::collections::BTreeMap;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{mpsc, Arc, Mutex};
     use std::time::Duration;
     use tokio::sync::Notify;
 
@@ -3412,6 +3448,59 @@ mod tests {
             .expect("quarantined plugin must no longer run");
         assert_eq!(after_quarantine.body.as_ref(), b"hello");
         assert_eq!(observed_timeouts.lock().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn stale_refresh_cannot_restore_a_plugin_after_quarantine_removal() {
+        let stale_plugin = plugin(
+            "plugin.stale-refresh",
+            10,
+            vec!["request.body.read", "request.body.write"],
+        );
+        let pipeline = GatewayPluginPipeline::for_tests_shared(
+            vec![stale_plugin.clone()],
+            Arc::new(InMemoryGatewayPluginExecutor::new()),
+            GatewayPluginPipelineConfig::default(),
+        );
+        let (refresh_loaded_tx, refresh_loaded_rx) = mpsc::channel();
+        let (allow_refresh_tx, allow_refresh_rx) = mpsc::channel();
+        let refresh_pipeline = Arc::clone(&pipeline);
+        let refresh = std::thread::spawn(move || {
+            refresh_pipeline
+                .refresh_plugins_with(|| {
+                    refresh_loaded_tx.send(()).expect("signal stale refresh load");
+                    allow_refresh_rx.recv().expect("allow stale refresh commit");
+                    Ok(vec![stale_plugin])
+                })
+                .expect("refresh stale plugin snapshot");
+        });
+        refresh_loaded_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("stale refresh should hold the refresh lock");
+
+        let (removal_done_tx, removal_done_rx) = mpsc::channel();
+        let removal_pipeline = Arc::clone(&pipeline);
+        let removal = std::thread::spawn(move || {
+            removal_pipeline.remove_plugin_from_snapshot("plugin.stale-refresh");
+            removal_done_tx.send(()).expect("signal quarantine removal");
+        });
+        let removal_finished_before_refresh = removal_done_rx
+            .recv_timeout(Duration::from_millis(100))
+            .is_ok();
+
+        allow_refresh_tx
+            .send(())
+            .expect("release stale refresh commit");
+        refresh.join().expect("stale refresh thread");
+        removal.join().expect("quarantine removal thread");
+        assert!(
+            !removal_finished_before_refresh,
+            "quarantine removal must wait for an in-progress refresh"
+        );
+        assert_eq!(
+            pipeline.plugins_for_hook_count_for_tests(GatewayPluginHookName::RequestAfterBodyRead),
+            0
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]

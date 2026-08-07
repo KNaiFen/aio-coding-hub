@@ -219,10 +219,8 @@ impl GatewayControlService {
         let Some(runtime) = running else {
             return;
         };
-        match plugin_service::enabled_plugins_for_gateway(db) {
-            Ok(plugins) => {
-                let plugin_count = plugins.len();
-                runtime.refresh_plugin_pipeline(plugins);
+        match runtime.refresh_plugin_pipeline(|| plugin_service::enabled_plugins_for_gateway(db)) {
+            Ok(plugin_count) => {
                 tracing::info!(plugin_count, "refreshed gateway plugin pipeline");
             }
             Err(err) => {
