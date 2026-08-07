@@ -35,11 +35,35 @@ vi.mock("../services/settings/settings", async () => {
   };
 });
 
+vi.mock("../services/app/startupStatus", async () => {
+  const actual = await vi.importActual<typeof import("../services/app/startupStatus")>(
+    "../services/app/startupStatus"
+  );
+  return {
+    ...actual,
+    appStartupStatusGet: vi.fn(),
+    listenAppStartupStatusEvents: vi.fn(),
+  };
+});
+
 import { listenGatewayEvents } from "../services/gateway/gatewayEvents";
 import { listenNoticeEvents } from "../services/notification/noticeEvents";
 import { settingsGet } from "../services/settings/settings";
+import {
+  appStartupStatusGet,
+  listenAppStartupStatusEvents,
+} from "../services/app/startupStatus";
+import { resetAppStartupStatusStore } from "../app/startupStatusStore";
 
 const DEFAULT_HASH = "#/";
+const READY_STARTUP_STATUS = {
+  running: false,
+  maintenanceMode: false,
+  currentStage: "ready" as const,
+  failedStage: null,
+  errorMessage: null,
+  canRetry: false,
+};
 
 function renderApp() {
   const client = createTestQueryClient();
@@ -58,14 +82,18 @@ async function renderRouteAndFindHeading(hash: string, headingName: string, time
 
 describe("App (smoke)", () => {
   beforeEach(() => {
+    resetAppStartupStatusStore();
     mockLogToConsole.mockReset();
     vi.mocked(listenGatewayEvents).mockResolvedValue(() => {});
     vi.mocked(listenNoticeEvents).mockResolvedValue(() => {});
     vi.mocked(settingsGet).mockResolvedValue(null as any);
+    vi.mocked(appStartupStatusGet).mockResolvedValue(READY_STARTUP_STATUS);
+    vi.mocked(listenAppStartupStatusEvents).mockResolvedValue(() => {});
   });
 
   afterEach(() => {
     cleanup();
+    resetAppStartupStatusStore();
     window.location.hash = DEFAULT_HASH;
   });
 

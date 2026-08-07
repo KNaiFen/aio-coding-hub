@@ -291,28 +291,25 @@ pub(crate) fn register_runtime_commands(
 ) -> tauri::Builder<tauri::Wry> {
     macro_rules! build_runtime_handler {
         ($($name:ident => $path:path),+ $(,)?) => {
-            {
-                let generated_handler = tauri::generate_handler![
+            builder.invoke_handler(move |invoke: tauri::ipc::Invoke<tauri::Wry>| {
+                let allowed = {
+                    let app = invoke.message.webview_ref().app_handle();
+                    crate::app::maintenance::invoke_allowed_during_maintenance(
+                        app,
+                        invoke.message.command(),
+                    )
+                };
+                if !allowed {
+                    invoke.resolver.reject(
+                        "APP_MAINTENANCE_REQUIRED: 应用正在维护中，只能重试数据清理或退出",
+                    );
+                    return true;
+                }
+                tauri::generate_handler![
                     $($name,)*
                     desktop_updater_download_and_install,
-                ];
-                builder.invoke_handler(move |invoke: tauri::ipc::Invoke<tauri::Wry>| {
-                    let allowed = {
-                        let app = invoke.message.webview_ref().app_handle();
-                        crate::app::maintenance::invoke_allowed_during_maintenance(
-                            app,
-                            invoke.message.command(),
-                        )
-                    };
-                    if !allowed {
-                        invoke.resolver.reject(
-                            "APP_MAINTENANCE_REQUIRED: 应用正在维护中，只能重试数据清理或退出",
-                        );
-                        return true;
-                    }
-                    generated_handler(invoke)
-                })
-            }
+                ](invoke)
+            })
         };
     }
 
