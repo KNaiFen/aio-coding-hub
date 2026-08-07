@@ -52,8 +52,7 @@ impl MaintenanceState {
     }
 
     fn can_retry(&self) -> bool {
-        self.phase() == MAINTENANCE_FAILED
-            && !self.reset_exit_requested.load(Ordering::Acquire)
+        self.phase() == MAINTENANCE_FAILED && !self.reset_exit_requested.load(Ordering::Acquire)
     }
 
     fn allows_invoke(&self, command: &str) -> bool {
@@ -146,18 +145,14 @@ fn sync_directory(_path: &Path) -> std::io::Result<()> {
 }
 
 fn sync_directory_for_reset(path: &Path) -> AppResult<()> {
-    sync_directory(path).map_err(|_| {
-        AppError::new(
-            "APP_MAINTENANCE_MARKER_FAILED",
-            "数据重置持久化未完成",
-        )
-    })
+    sync_directory(path)
+        .map_err(|_| AppError::new("APP_MAINTENANCE_MARKER_FAILED", "数据重置持久化未完成"))
 }
 
 fn sync_parent_directory(path: &Path) -> AppResult<()> {
-    let parent = path.parent().ok_or_else(|| {
-        AppError::new("APP_MAINTENANCE_MARKER_FAILED", "维护 marker 路径无效")
-    })?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| AppError::new("APP_MAINTENANCE_MARKER_FAILED", "维护 marker 路径无效"))?;
     sync_directory_for_reset(parent)
 }
 
@@ -219,9 +214,8 @@ fn remove_completed_marker_if_present(data_dir: &Path) -> AppResult<()> {
 pub(crate) fn write_reset_marker_at(data_dir: &Path) -> AppResult<bool> {
     let marker = marker_path_for_data_dir(data_dir);
     if let Some(parent) = marker.parent() {
-        std::fs::create_dir_all(parent).map_err(|_| {
-            AppError::new("APP_MAINTENANCE_MARKER_FAILED", "无法登记数据重置")
-        })?;
+        std::fs::create_dir_all(parent)
+            .map_err(|_| AppError::new("APP_MAINTENANCE_MARKER_FAILED", "无法登记数据重置"))?;
         // Persist both the app-data directory entry and the maintenance
         // directory entry before relying on the marker inside it.
         if let Some(data_parent) = data_dir.parent() {
@@ -373,9 +367,7 @@ pub(crate) fn run_before_startup<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -
     }
 }
 
-pub(crate) async fn retry_pending_reset<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
-) -> bool {
+pub(crate) async fn retry_pending_reset<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> bool {
     if !app
         .try_state::<MaintenanceState>()
         .is_some_and(|state| state.can_retry())
