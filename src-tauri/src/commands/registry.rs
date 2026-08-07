@@ -296,7 +296,7 @@ pub(crate) fn register_runtime_commands(
                     $($name,)*
                     desktop_updater_download_and_install,
                 ];
-                builder.invoke_handler(move |invoke| {
+                builder.invoke_handler(move |invoke: tauri::ipc::Invoke<tauri::Wry>| {
                     let allowed = {
                         let app = invoke.message.webview_ref().app_handle();
                         crate::app::maintenance::invoke_allowed_during_maintenance(
