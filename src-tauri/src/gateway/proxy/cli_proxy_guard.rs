@@ -24,10 +24,7 @@ struct CliProxyEnabledCacheKey {
     cli_key: String,
 }
 
-fn cli_proxy_enabled_cache_key(
-    app_data_dir: PathBuf,
-    cli_key: &str,
-) -> CliProxyEnabledCacheKey {
+fn cli_proxy_enabled_cache_key(app_data_dir: PathBuf, cli_key: &str) -> CliProxyEnabledCacheKey {
     CliProxyEnabledCacheKey {
         app_data_dir,
         cli_key: cli_key.to_string(),
