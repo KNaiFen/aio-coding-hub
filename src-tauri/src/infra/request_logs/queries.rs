@@ -15,6 +15,42 @@ use super::types::{
 
 const CLAUDE_VISIBLE_LOG_PATH: &str = "/v1/messages";
 const CLAUDE_VISIBLE_LOG_CONDITION: &str = "(cli_key != 'claude' OR path = '/v1/messages')";
+const OBSERVER_MODEL_INFERENCE_CONDITION: &str = r#"
+lower(trim(method)) = 'post'
+AND (
+  (
+    lower(trim(cli_key)) = 'claude'
+    AND lower(rtrim(substr(trim(path), 1, instr(trim(path) || '?', '?') - 1), '/'))
+      IN ('/v1/messages', '/messages')
+  )
+  OR (
+    lower(trim(cli_key)) = 'codex'
+    AND lower(rtrim(substr(trim(path), 1, instr(trim(path) || '?', '?') - 1), '/'))
+      IN (
+        '/responses',
+        '/v1/responses',
+        '/v1/codex/responses',
+        '/responses/compact',
+        '/v1/responses/compact',
+        '/v1/codex/responses/compact'
+      )
+  )
+  OR (
+    lower(trim(cli_key)) = 'grok'
+    AND lower(rtrim(substr(trim(path), 1, instr(trim(path) || '?', '?') - 1), '/'))
+      IN ('/chat/completions', '/v1/chat/completions', '/responses', '/v1/responses')
+  )
+  OR (
+    lower(trim(cli_key)) = 'gemini'
+    AND (
+      lower(rtrim(substr(trim(path), 1, instr(trim(path) || '?', '?') - 1), '/'))
+        LIKE '%:generatecontent'
+      OR lower(rtrim(substr(trim(path), 1, instr(trim(path) || '?', '?') - 1), '/'))
+        LIKE '%:streamgeneratecontent'
+    )
+  )
+)
+"#;
 const REQUEST_LOG_PAGE_CURSOR_VERSION: u8 = 1;
 const REQUEST_LOG_PAGE_CURSOR_MAX_BYTES: usize = 512;
 const REQUEST_LOG_PAGE_MAX_LIMIT: usize = 200;
@@ -814,6 +850,68 @@ pub fn list_recent_all(
     Ok(items)
 }
 
+fn list_observer_rows(
+    db: &db::Db,
+    cli_key: Option<&str>,
+    limit: usize,
+    excluded_trace_ids: &[String],
+    inference_only: bool,
+) -> crate::shared::error::AppResult<Vec<RequestLogSummary>> {
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
+    let filters = RequestLogPageFilters {
+        cli_key: cli_key.map(str::to_owned),
+        ..RequestLogPageFilters::default()
+    };
+    let (mut conditions, mut query_params) =
+        page_conditions_and_params(&filters, excluded_trace_ids, None)?;
+    if inference_only {
+        conditions.push(format!("({OBSERVER_MODEL_INFERENCE_CONDITION})"));
+    }
+    let query_limit = i64::try_from(limit)
+        .map_err(|_| invalid_page_input("observer request-log limit is invalid"))?;
+    query_params.push(query_limit.into());
+    let sql = format!(
+        "SELECT{}FROM request_logs WHERE {} ORDER BY created_at_ms DESC, id DESC LIMIT ?",
+        REQUEST_LOG_SUMMARY_FIELDS,
+        conditions.join(" AND ")
+    );
+    let conn = db.open_connection()?;
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| db_err!("failed to prepare observer request-log query: {e}"))?;
+    let rows = stmt
+        .query_map(params_from_iter(query_params.iter()), row_to_summary)
+        .map_err(|e| db_err!("failed to query observer request logs: {e}"))?;
+    let mut items = Vec::new();
+    for row in rows {
+        items.push(row.map_err(|e| db_err!("failed to read observer request-log row: {e}"))?);
+    }
+    attach_source_provider_info(&conn, &mut items)?;
+    Ok(items)
+}
+
+/// Newest terminal inference records used by the Observer last/dominant summary.
+pub fn list_observer_terminal_inferences(
+    db: &db::Db,
+    cli_key: Option<&str>,
+    limit: usize,
+) -> crate::shared::error::AppResult<Vec<RequestLogSummary>> {
+    list_observer_rows(db, cli_key, limit, &[], true)
+}
+
+/// Newest persisted Observer rows. A row without status/error remains an
+/// interrupted terminal row unless its trace is still present in the active set.
+pub fn list_observer_recent_terminal(
+    db: &db::Db,
+    cli_key: Option<&str>,
+    limit: usize,
+    excluded_trace_ids: &[String],
+) -> crate::shared::error::AppResult<Vec<RequestLogSummary>> {
+    list_observer_rows(db, cli_key, limit, excluded_trace_ids, false)
+}
+
 #[cfg(test)]
 pub fn page_all(
     db: &db::Db,
@@ -1101,13 +1199,57 @@ pub fn terminal_trace_ids(
     Ok(terminal)
 }
 
+/// Observer projections treat every visible persisted row as terminal. Rows
+/// without a status/error represent an interrupted request after it leaves the
+/// active registry, so they must also suppress a matching active trace.
+pub fn observer_persisted_trace_ids(
+    db: &db::Db,
+    trace_ids: &[String],
+) -> crate::shared::error::AppResult<HashSet<String>> {
+    const SQLITE_PARAM_CHUNK: usize = 900;
+
+    let mut persisted = HashSet::new();
+    if trace_ids.is_empty() {
+        return Ok(persisted);
+    }
+
+    let conn = db.open_connection()?;
+    for chunk in trace_ids.chunks(SQLITE_PARAM_CHUNK) {
+        let placeholders = std::iter::repeat_n("?", chunk.len())
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT trace_id FROM request_logs \
+             WHERE trace_id IN ({placeholders}) \
+             AND {CLAUDE_VISIBLE_LOG_CONDITION}"
+        );
+        let mut stmt = conn
+            .prepare(&sql)
+            .map_err(|e| db_err!("failed to prepare observer persisted trace query: {e}"))?;
+        let rows = stmt
+            .query_map(params_from_iter(chunk.iter().map(String::as_str)), |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(|e| db_err!("failed to query observer persisted traces: {e}"))?;
+        for row in rows {
+            persisted.insert(
+                row.map_err(|e| db_err!("failed to read observer persisted trace: {e}"))?,
+            );
+        }
+    }
+
+    Ok(persisted)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        final_provider_from_attempts, get_by_id, get_by_trace_id, list_after_id_all, list_recent,
+        final_provider_from_attempts, get_by_id, get_by_trace_id, list_after_id_all,
+        list_observer_recent_terminal, list_observer_terminal_inferences, list_recent,
         list_recent_all, load_source_provider_info_map, page_all, page_all_excluding_traces,
         parse_attempts, route_from_attempts, snapshot_membership_excluding_traces,
-        start_provider_from_attempts, summaries_by_ids, terminal_trace_ids,
+        observer_persisted_trace_ids, start_provider_from_attempts, summaries_by_ids,
+        terminal_trace_ids,
     };
     use crate::db;
     use crate::request_logs::{
@@ -1571,6 +1713,75 @@ INSERT INTO providers (id, name, source_provider_id, bridge_type) VALUES (12, 'C
     }
 
     #[test]
+    fn observer_queries_bound_inference_rows_and_exclude_active_traces() {
+        let dir = tempdir().unwrap();
+        let db = db::init_for_tests(&dir.path().join("observer-request-logs.db")).unwrap();
+        let conn = db.open_connection().unwrap();
+        for (id, trace_id, cli_key, path) in [
+            (1, "claude-message", "claude", "/v1/messages"),
+            (2, "claude-count", "claude", "/v1/messages/count_tokens"),
+            (3, "codex-response", "codex", "/v1/responses"),
+            (4, "codex-models", "codex", "/v1/models"),
+            (5, "grok-response", "grok", "/v1/responses/?trace=1"),
+            (
+                6,
+                "gemini-stream",
+                "gemini",
+                "/v1beta/models/gemini:streamGenerateContent?alt=sse",
+            ),
+            (
+                7,
+                "codex-compact",
+                "codex",
+                "/v1/codex/responses/compact/",
+            ),
+            (8, "claude-alias", "claude", "/messages"),
+            (9, "codex-get", "codex", "/v1/responses"),
+        ] {
+            seed_request_log(&conn, id, trace_id, cli_key, path);
+        }
+        conn.execute(
+            "UPDATE request_logs SET status = NULL, error_code = NULL WHERE id = 5",
+            [],
+        )
+        .unwrap();
+        conn.execute("UPDATE request_logs SET method = 'GET' WHERE id = 9", [])
+            .unwrap();
+        conn.execute(
+            "UPDATE request_logs SET created_at_ms = 7000 WHERE id IN (6, 7)",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let inference = list_observer_terminal_inferences(&db, None, 3).unwrap();
+        assert_eq!(
+            inference.iter().map(|item| item.id).collect::<Vec<_>>(),
+            vec![7, 6, 5],
+            "query limit applies after inference and visibility predicates"
+        );
+        assert!(inference[2].is_interrupted);
+
+        let claude = list_observer_terminal_inferences(&db, Some("claude"), 10).unwrap();
+        assert_eq!(
+            claude.iter().map(|item| item.id).collect::<Vec<_>>(),
+            vec![1],
+            "Claude aliases and token-count rows retain the existing visibility boundary"
+        );
+
+        let excluded = vec!["codex-compact".to_string(), "gemini-stream".to_string()];
+        let recent = list_observer_recent_terminal(&db, None, 3, &excluded).unwrap();
+        assert_eq!(
+            recent.iter().map(|item| item.id).collect::<Vec<_>>(),
+            vec![9, 5, 4],
+            "active rows do not consume the requested recent capacity"
+        );
+        assert!(list_observer_recent_terminal(&db, Some("codex"), 0, &[])
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
     fn page_all_uses_two_key_cursor_without_gaps_for_tied_timestamps() {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("request-logs-page.db");
@@ -1837,6 +2048,41 @@ INSERT INTO providers (id, name, source_provider_id, bridge_type) VALUES (12, 'C
         assert!(terminal.contains("trace-error-terminal"));
         assert!(!terminal.contains("trace-pending"));
         assert!(!terminal.contains("trace-missing"));
+    }
+
+    #[test]
+    fn observer_persisted_trace_ids_keep_visibility_and_interrupted_semantics() {
+        let dir = tempdir().unwrap();
+        let db = db::init_for_tests(&dir.path().join("observer-traces.db")).unwrap();
+        let conn = db.open_connection().unwrap();
+        seed_request_log(&conn, 1, "visible-claude", "claude", "/v1/messages");
+        seed_request_log(
+            &conn,
+            2,
+            "hidden-claude",
+            "claude",
+            "/v1/messages/count_tokens",
+        );
+        seed_request_log(&conn, 3, "interrupted-codex", "codex", "/v1/responses");
+        conn.execute(
+            "UPDATE request_logs SET status = NULL, error_code = NULL WHERE id = 3",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let persisted = observer_persisted_trace_ids(
+            &db,
+            &[
+                "visible-claude".to_string(),
+                "hidden-claude".to_string(),
+                "interrupted-codex".to_string(),
+            ],
+        )
+        .unwrap();
+        assert!(persisted.contains("visible-claude"));
+        assert!(persisted.contains("interrupted-codex"));
+        assert!(!persisted.contains("hidden-claude"));
     }
 
     #[test]
