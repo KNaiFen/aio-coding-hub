@@ -241,14 +241,13 @@ describe("services/gateway/gateway", () => {
     await expect(gatewayBearerTokenRotate()).rejects.toThrow(
       "SEC_INVALID_INPUT: invalid Gateway Bearer token reveal response"
     );
-    expect(logToConsole).toHaveBeenCalledWith(
-      "error",
-      "轮换网关访问令牌失败",
-      expect.objectContaining({
-        cmd: "gateway_bearer_token_rotate",
-        error: "SEC_INVALID_INPUT: invalid Gateway Bearer token reveal response",
-      })
-    );
+    const [level, title, details] = vi.mocked(logToConsole).mock.calls[0] ?? [];
+    expect(level).toBe("error");
+    expect(title).toBe("轮换网关访问令牌失败");
+    expect(details).toMatchObject({
+      cmd: "gateway_bearer_token_rotate",
+      error: "SEC_INVALID_INPUT: invalid Gateway Bearer token reveal response",
+    });
   });
 
   it("normalizes gateway sessions list limits before ipc", async () => {

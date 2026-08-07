@@ -245,10 +245,12 @@ pub(crate) async fn wsl_configure_clients(
                 &distros,
                 &targets,
                 &proxy_origin,
-                Some(&gateway_bearer_token),
-                Some(&mcp_data),
-                Some(&prompt_data),
-                Some(&skills_data),
+                wsl::WslConfigureData {
+                    gateway_bearer_token: Some(&gateway_bearer_token),
+                    mcp_data: Some(&mcp_data),
+                    prompt_data: Some(&prompt_data),
+                    skills_data: Some(&skills_data),
+                },
             ))
         },
     )
@@ -342,10 +344,12 @@ pub(crate) async fn wsl_auto_sync_core(app: &tauri::AppHandle) -> Result<(), Str
                 &distros,
                 &targets,
                 &proxy_origin,
-                gateway_bearer_token.as_deref(),
-                Some(&mcp_data),
-                Some(&prompt_data),
-                Some(&skills_data),
+                wsl::WslConfigureData {
+                    gateway_bearer_token: gateway_bearer_token.as_deref(),
+                    mcp_data: Some(&mcp_data),
+                    prompt_data: Some(&prompt_data),
+                    skills_data: Some(&skills_data),
+                },
             ))
         },
     )
@@ -591,10 +595,12 @@ async fn do_wsl_auto_configure(
                 &distros_owned,
                 &targets,
                 &proxy_origin,
-                gateway_bearer_token.as_deref(),
-                Some(&mcp_data),
-                Some(&prompt_data),
-                Some(&skills_data),
+                wsl::WslConfigureData {
+                    gateway_bearer_token: gateway_bearer_token.as_deref(),
+                    mcp_data: Some(&mcp_data),
+                    prompt_data: Some(&prompt_data),
+                    skills_data: Some(&skills_data),
+                },
             ))
         },
     )

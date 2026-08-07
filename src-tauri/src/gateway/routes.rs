@@ -9649,7 +9649,7 @@ INSERT INTO codex_managed_profiles(
             "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-disabled-mismatch\",\"status\":\"completed\",\"model\":\"gpt-disabled-mismatch\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"hello world\"}]}],\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n"
         );
         let (mismatch_base_url, mismatch_task) = spawn_sse_upstream(mismatch_sse_body).await;
-        let _provider_id = insert_codex_provider_with_priority(
+        let provider_id = insert_codex_provider_with_priority(
             &db,
             "Disabled Mismatch Stream",
             mismatch_base_url,

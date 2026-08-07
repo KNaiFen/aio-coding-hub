@@ -135,7 +135,7 @@ pub(crate) fn ensure_for_settings<R: tauri::Runtime>(
     initialize_locked(&state.access, &mut runtime, &path, requires_token)?;
 
     let needs_rotation = requires_token
-        && runtime.persisted.as_ref().map_or(true, |persisted| {
+        && runtime.persisted.as_ref().is_none_or(|persisted| {
             !persisted.confirmed
                 && runtime.owned_unconfirmed_generation != Some(persisted.generation)
         });
@@ -219,6 +219,7 @@ pub(crate) fn pending_plaintext_for_internal_sync<R: tauri::Runtime>(
         .map(|pending| pending.plaintext.clone())
 }
 
+#[cfg(windows)]
 pub(crate) fn record_wsl_sync_error<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     error: Option<String>,

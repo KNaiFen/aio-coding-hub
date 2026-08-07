@@ -23,6 +23,13 @@ use super::types::*;
 const WSL_STATUS_OUTPUT_STREAM_LIMIT: usize = 16 * 1024;
 const WSL_STATUS_OUTPUT_READ_CHUNK_SIZE: usize = 8 * 1024;
 
+pub(crate) struct WslConfigureData<'a> {
+    pub(crate) gateway_bearer_token: Option<&'a str>,
+    pub(crate) mcp_data: Option<&'a WslMcpSyncData>,
+    pub(crate) prompt_data: Option<&'a WslPromptSyncData>,
+    pub(crate) skills_data: Option<&'a WslSkillsSyncData>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LimitedWslStatusOutput {
     bytes: Vec<u8>,
@@ -362,11 +369,14 @@ pub fn configure_clients(
     distros: &[String],
     targets: &settings::WslTargetCli,
     proxy_origin: &str,
-    gateway_bearer_token: Option<&str>,
-    mcp_data: Option<&WslMcpSyncData>,
-    prompt_data: Option<&WslPromptSyncData>,
-    skills_data: Option<&WslSkillsSyncData>,
+    sync_data: WslConfigureData<'_>,
 ) -> WslConfigureReport {
+    let WslConfigureData {
+        gateway_bearer_token,
+        mcp_data,
+        prompt_data,
+        skills_data,
+    } = sync_data;
     if !cfg!(windows) {
         return WslConfigureReport {
             ok: false,
