@@ -106,6 +106,7 @@ impl BodyReaderMiddleware {
             &ctx.cli_key,
             &ctx.req_method,
             &ctx.forwarded_path,
+            &ctx.headers,
             ctx.introspection_json.as_ref(),
         ) {
             if let Ok(setting) = serde_json::to_value(marker) {
