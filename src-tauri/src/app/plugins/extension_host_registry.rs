@@ -5,7 +5,10 @@ use super::privacy_redaction_service::PrivacyRedactionService;
 use crate::app::app_state::{ensure_db_ready, DbInitState};
 use crate::app::plugins::runtime_lifecycle::PluginRuntimeInstanceRegistry;
 use crate::db;
-use crate::domain::plugins::{PluginDetail, PluginManifest, PluginRuntime};
+use crate::domain::plugins::{
+    manifest_allows_command, manifest_allows_gateway_hook, manifest_allows_startup, PluginDetail,
+    PluginManifest, PluginRuntime,
+};
 use crate::gateway::plugins::context::{
     GatewayHookAction, GatewayHookResult, GatewayPluginHookName, GatewayVisibleHookContext,
 };
@@ -62,6 +65,10 @@ pub(crate) struct ExtensionHostCommandOutput {
 }
 
 trait ExtensionHostProcess: Send {
+    fn activate<'a>(&'a mut self) -> BoxFuture<'a, AppResult<()>> {
+        Box::pin(async { Ok(()) })
+    }
+
     fn execute_command<'a>(
         &'a mut self,
         command: &'a str,
@@ -121,6 +128,10 @@ struct RealExtensionHostProcess {
 }
 
 impl ExtensionHostProcess for RealExtensionHostProcess {
+    fn activate<'a>(&'a mut self) -> BoxFuture<'a, AppResult<()>> {
+        Box::pin(async move { self.host.activate().await })
+    }
+
     fn execute_command<'a>(
         &'a mut self,
         command: &'a str,
@@ -187,6 +198,19 @@ impl ManagedExtensionHostInstance {
         Ok(Some(value))
     }
 
+    async fn activate_if_running(&self, now: Instant) -> AppResult<bool> {
+        let mut process = self.process.lock().await;
+        if !process.is_running() {
+            return Ok(false);
+        }
+        process.activate().await?;
+        *self
+            .last_used
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = now;
+        Ok(true)
+    }
+
     async fn execute_gateway_hook_if_running(
         &self,
         hook: &str,
@@ -230,6 +254,7 @@ pub(crate) struct ExtensionHostInstanceRegistry {
     operation_gate: RwLock<()>,
     instances: Mutex<BTreeMap<ExtensionHostInstanceKey, Arc<ManagedExtensionHostInstance>>>,
     plugin_locks: Mutex<BTreeMap<String, Arc<Mutex<()>>>>,
+    startup_activated_plugin_ids: Mutex<HashSet<String>>,
     limits: ExtensionHostRegistryLimits,
     factory: Arc<dyn ExtensionHostFactory>,
 }
@@ -274,6 +299,7 @@ impl ExtensionHostInstanceRegistry {
             operation_gate: RwLock::new(()),
             instances: Mutex::new(BTreeMap::new()),
             plugin_locks: Mutex::new(BTreeMap::new()),
+            startup_activated_plugin_ids: Mutex::new(HashSet::new()),
             limits,
             factory,
         }
@@ -297,6 +323,15 @@ impl ExtensionHostInstanceRegistry {
         args: Value,
         now: Instant,
     ) -> AppResult<ExtensionHostCommandOutput> {
+        if !manifest_allows_command(&detail.manifest, command) {
+            return Err(AppError::new(
+                "PLUGIN_ACTIVATION_EVENT_NOT_DECLARED",
+                format!(
+                    "plugin {} did not declare activation for command {command}",
+                    detail.summary.plugin_id
+                ),
+            ));
+        }
         let _operation_guard = self.operation_gate.read().await;
         let key = ExtensionHostInstanceKey::from_plugin_detail(&detail)?;
         let plugin_lock = self.plugin_lock_for(&key.plugin_id).await;
@@ -353,6 +388,73 @@ impl ExtensionHostInstanceRegistry {
         })
     }
 
+    /// Activates an `onStartup` plugin once for this application process.
+    ///
+    /// The marker is recorded before the host call. A failed startup activation
+    /// is therefore counted as one attempt and never retried implicitly in the
+    /// same process; explicit lifecycle recovery remains the user's decision.
+    pub(crate) async fn activate_startup_plugin(&self, detail: PluginDetail) -> AppResult<bool> {
+        if !manifest_allows_startup(&detail.manifest) {
+            return Ok(false);
+        }
+        let plugin_id = detail.summary.plugin_id.clone();
+        let _operation_guard = self.operation_gate.read().await;
+        let plugin_lock = self.plugin_lock_for(&plugin_id).await;
+        let _plugin_guard = plugin_lock.lock().await;
+        {
+            let mut activated = self.startup_activated_plugin_ids.lock().await;
+            if !activated.insert(plugin_id.clone()) {
+                return Ok(false);
+            }
+        }
+
+        let now = Instant::now();
+        let key = ExtensionHostInstanceKey::from_plugin_detail(&detail)?;
+        if let Some(instance) = { self.instances.lock().await.get(&key).cloned() } {
+            match instance.activate_if_running(now).await {
+                Ok(true) => return Ok(true),
+                Ok(false) => self.remove_warm_instance_if_current(&key, &instance).await,
+                Err(error) => {
+                    self.remove_warm_instance_if_current(&key, &instance).await;
+                    return Err(error);
+                }
+            }
+        }
+
+        let disposals = {
+            let mut instances = self.instances.lock().await;
+            let mut disposals = remove_same_plugin_with_different_key(&mut instances, &key);
+            disposals.extend(remove_idle_locked(
+                &mut instances,
+                self.limits.idle_recycle,
+                now,
+            ));
+            disposals
+        };
+        dispose_instances(disposals).await;
+
+        let mut process = self
+            .factory
+            .start(
+                detail,
+                self.db.clone(),
+                crate::app::plugins::extension_host::DEFAULT_EXTENSION_HOST_CALL_TIMEOUT,
+            )
+            .await?;
+        if let Err(error) = process.activate().await {
+            process.dispose().await;
+            return Err(error);
+        }
+        let instance = Arc::new(ManagedExtensionHostInstance::new(process, now));
+        let disposals = {
+            let mut instances = self.instances.lock().await;
+            instances.insert(key, instance);
+            remove_lru_over_limit_locked(&mut instances, self.limits.max_warm_instances)
+        };
+        dispose_instances(disposals).await;
+        Ok(true)
+    }
+
     pub(crate) async fn execute_gateway_hook(
         &self,
         detail: PluginDetail,
@@ -372,6 +474,15 @@ impl ExtensionHostInstanceRegistry {
         call_timeout: Duration,
         now: Instant,
     ) -> Result<GatewayHookResult, GatewayPluginError> {
+        if !manifest_allows_gateway_hook(&detail.manifest, hook) {
+            return Err(GatewayPluginError::new(
+                "PLUGIN_ACTIVATION_EVENT_NOT_DECLARED",
+                format!(
+                    "plugin {} did not declare activation for gateway hook {hook}",
+                    detail.summary.plugin_id
+                ),
+            ));
+        }
         let deadline = tokio::time::Instant::now() + call_timeout;
         let context_value = serde_json::to_value(&context).map_err(|err| {
             GatewayPluginError::new(

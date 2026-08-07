@@ -45,6 +45,10 @@ Gateway hook 贡献点示例；公开文档中的规范名是 `contributes.gatew
 }
 ```
 
+`activationEvents` 缺失或为空数组时是 legacy on-demand manifest：已声明的 command 和 gateway hook 会按需激活，但不会隐式执行 startup activation。显式声明时只允许 `onStartup`、`onCommand:<command>` 和 `onGatewayHook:<hook>`；每个 command 或 gateway hook 必须与 `contributes` 中的同名贡献精确一一对应。空 payload、前后空白、未知事件，以及 `onProviderEditor:*` 和 `onProtocolBridge:*` 都会以 `PLUGIN_INVALID_ACTIVATION_EVENT` 被拒绝。
+
+已安装且使用两种废弃事件的插件在升级校验后会保留原 manifest 字节，并带明确原因转为 `disabled`；不会继续显示为 enabled 却被静默跳过。
+
 `timeoutMs` 可选；不填时使用宿主默认 hook timeout。需要扫描大 payload 或调用宿主侧重处理逻辑的插件可以自行声明更长的正整数毫秒值。
 
 Capability dependency table：

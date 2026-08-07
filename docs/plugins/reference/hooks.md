@@ -8,6 +8,8 @@ Hooks 是网关和日志 pipeline 中稳定的扩展点。Plugin API v1 刻意�
 
 `fail-open` 的实际语义是可用性优先：hook 失败、超时、输出超预算或输出 payload 无效时，宿主会记录诊断并继续原路径。对 `log.beforePersist`，这表示保留原始日志继续入库。显式声明 `fail-closed` 时，request、response 和 stream hook 会返回安全错误；`log.beforePersist` 在 hook 失败、熔断或最终 payload 不是可解析 JSON object 时会放弃该条请求日志，同时保留插件诊断。熔断状态按插件和 hook 名称分别计算。
 
+独立于短期熔断，host crash、JavaScript/runtime error 和 timeout 在同一插件的 600 秒窗口内累计第三次时会持久隔离。输出预算、context budget、capability/permission 和 header policy 拒绝仍保留诊断，但不计入该阈值。第三次发生的请求继续按它原本的 fail-open/fail-closed 结果完成；之后的请求不会再执行该插件。
+
 Timeout 是宿主为每次 hook invocation 选择的执行预算。Gateway pipeline 会把本次预算显式传给 runtime executor；Extension Host gateway hooks 使用同一个预算完成 activation、hook dispatch 和 runtime cleanup，不在 executor 内再叠加固定上限或 grace window。
 
 Reserved hooks 在宿主实现对应调用点前，会被 manifest validation 拒绝：
@@ -22,7 +24,7 @@ Plugin hook contexts are host-trimmed and budget-trimmed. Extension Host manifes
 
 When a directly visible request body, response body, stream chunk, or log message is truncated, a `fail-closed` hook is rejected before Extension Host execution with `PLUGIN_CONTEXT_TRUNCATED`. The audit and runtime report classify it as `budgetRejected` / `context_budget`, and the input-size rejection does not open the plugin circuit. A `fail-open` hook still receives the bounded context and its truncation flag; it cannot mutate a truncated direct field. `normalizedMessagesTruncated` by itself does not reject a `fail-closed` hook when the complete visible body is available.
 
-Hook outputs are also bounded. Body mutations are limited to 1 MiB, stream and log mutations to 64 KiB, and headers to the published count/value budgets. Oversized body, stream, log, or header mutations are rejected with `PLUGIN_OUTPUT_TOO_LARGE`; the pipeline then applies the hook failure policy and circuit-breaker behavior.
+Hook outputs are also bounded. Body mutations are limited to 1 MiB, stream and log mutations to 64 KiB, and headers to the published count/value budgets. Oversized body, stream, log, or header mutations are rejected with `PLUGIN_OUTPUT_TOO_LARGE`; the pipeline then applies the hook failure policy and circuit-breaker behavior, but this policy rejection does not enter the persistent quarantine count.
 
 ## Observability And Replay
 
