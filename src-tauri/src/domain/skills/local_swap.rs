@@ -10,8 +10,8 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use super::fs_ops::{
-    copy_workspace_local_skill_dir, has_skill_md, is_managed_link_to_ssot,
-    is_symlink_or_junction, workspace_local_skill_content_hash,
+    copy_workspace_local_skill_dir, has_skill_md, is_managed_link_to_ssot, is_symlink_or_junction,
+    workspace_local_skill_content_hash,
 };
 use super::local::managed_marker_belongs_to_installed_skill;
 use super::paths::{cli_skills_root, ssot_skills_root};
@@ -123,9 +123,9 @@ fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 fn is_valid_skill_hash(value: &str) -> bool {
-    value
-        .strip_prefix("sha256:")
-        .is_some_and(|digest| digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit()))
+    value.strip_prefix("sha256:").is_some_and(|digest| {
+        digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+    })
 }
 
 fn owner_bytes(operation_id: &str) -> Vec<u8> {
@@ -148,7 +148,10 @@ fn validate_snapshot_manifest(
         ));
     }
     crate::shared::cli_key::validate_cli_key(&manifest.cli_key)?;
-    if manifest.workspace_id.is_some_and(|workspace_id| workspace_id <= 0) {
+    if manifest
+        .workspace_id
+        .is_some_and(|workspace_id| workspace_id <= 0)
+    {
         return Err(recovery_error(
             "RECOVERY_ARTIFACT_INVALID",
             "工作区本地 Skills 快照工作区无效",
@@ -320,17 +323,10 @@ fn scan_local_skill_entries(
             continue;
         }
         let dir_name = entry.file_name().into_string().map_err(|_| {
-            recovery_error(
-                "RECOVERY_ARTIFACT_INVALID",
-                "本地 Skill 目录名不是 UTF-8",
-            )
+            recovery_error("RECOVERY_ARTIFACT_INVALID", "本地 Skill 目录名不是 UTF-8")
         })?;
-        validate_dir_name(&dir_name).map_err(|_| {
-            recovery_error(
-                "RECOVERY_ARTIFACT_INVALID",
-                "本地 Skill 目录名无效",
-            )
-        })?;
+        validate_dir_name(&dir_name)
+            .map_err(|_| recovery_error("RECOVERY_ARTIFACT_INVALID", "本地 Skill 目录名无效"))?;
         out.push(WorkspaceLocalSkillEntry {
             content_hash: local_skill_content_hash(&path)?,
             dir_name,
@@ -389,7 +385,10 @@ fn verify_payload(
                 recovery_error("RECOVERY_ARTIFACT_INVALID", "无法读取本地 Skills 快照条目")
             })?;
             let name = entry.file_name().into_string().map_err(|_| {
-                recovery_error("RECOVERY_ARTIFACT_INVALID", "本地 Skills 快照包含非 UTF-8 文件名")
+                recovery_error(
+                    "RECOVERY_ARTIFACT_INVALID",
+                    "本地 Skills 快照包含非 UTF-8 文件名",
+                )
             })?;
             if is_symlink_or_junction(&entry.path()) {
                 return Err(recovery_error(
@@ -408,13 +407,22 @@ fn verify_payload(
     }
     if payload_root != root {
         let payload_names = std::fs::read_dir(payload_root)
-            .map_err(|_| recovery_error("RECOVERY_ARTIFACT_INVALID", "无法读取本地 Skills 快照内容"))?
+            .map_err(|_| {
+                recovery_error("RECOVERY_ARTIFACT_INVALID", "无法读取本地 Skills 快照内容")
+            })?
             .map(|entry| {
                 entry
-                    .map_err(|_| recovery_error("RECOVERY_ARTIFACT_INVALID", "无法读取本地 Skills 快照内容"))?
+                    .map_err(|_| {
+                        recovery_error("RECOVERY_ARTIFACT_INVALID", "无法读取本地 Skills 快照内容")
+                    })?
                     .file_name()
                     .into_string()
-                    .map_err(|_| recovery_error("RECOVERY_ARTIFACT_INVALID", "本地 Skills 快照包含非 UTF-8 文件名"))
+                    .map_err(|_| {
+                        recovery_error(
+                            "RECOVERY_ARTIFACT_INVALID",
+                            "本地 Skills 快照包含非 UTF-8 文件名",
+                        )
+                    })
             })
             .collect::<AppResult<BTreeSet<_>>>()?;
         let expected_names = manifest
@@ -431,7 +439,10 @@ fn verify_payload(
     }
     for entry in &manifest.entries {
         let path = payload_root.join(&entry.dir_name);
-        if is_symlink_or_junction(&path) || !path.is_dir() || local_skill_content_hash(&path)? != entry.content_hash {
+        if is_symlink_or_junction(&path)
+            || !path.is_dir()
+            || local_skill_content_hash(&path)? != entry.content_hash
+        {
             return Err(recovery_error(
                 "RECOVERY_ARTIFACT_INVALID",
                 "本地 Skills 快照内容摘要不匹配",
@@ -501,7 +512,10 @@ pub(crate) fn stage_local_skills_for_workspace_switch<R: tauri::Runtime>(
 
     std::fs::create_dir(&root)
         .map_err(|_| recovery_error("RECOVERY_ARTIFACT_INVALID", "无法创建本地 Skills 快照"))?;
-    write_owner(&root.join(WORKSPACE_ARTIFACT_OWNER), operation.operation_id())?;
+    write_owner(
+        &root.join(WORKSPACE_ARTIFACT_OWNER),
+        operation.operation_id(),
+    )?;
     let entries_root = root.join(WORKSPACE_ARTIFACT_ENTRIES);
     std::fs::create_dir(&entries_root)
         .map_err(|_| recovery_error("RECOVERY_ARTIFACT_INVALID", "无法创建本地 Skills 快照条目"))?;
@@ -510,7 +524,10 @@ pub(crate) fn stage_local_skills_for_workspace_switch<R: tauri::Runtime>(
     let ssot_root = ssot_skills_root(app)?;
     let entries = scan_local_skill_entries(conn, &cli_root, &ssot_root)?;
     for entry in &entries {
-        copy_local_skill_dir(&cli_root.join(&entry.dir_name), &entries_root.join(&entry.dir_name))?;
+        copy_local_skill_dir(
+            &cli_root.join(&entry.dir_name),
+            &entries_root.join(&entry.dir_name),
+        )?;
     }
     let manifest = WorkspaceLocalSkillsManifest {
         schema_version: 1,
@@ -543,10 +560,15 @@ fn migrate_legacy_stash(
     for entry in std::fs::read_dir(root)
         .map_err(|_| recovery_error("RECOVERY_ARTIFACT_INVALID", "无法读取旧本地 Skills 暂存"))?
     {
-        let entry = entry.map_err(|_| recovery_error("RECOVERY_ARTIFACT_INVALID", "无法读取旧本地 Skills 条目"))?;
+        let entry = entry.map_err(|_| {
+            recovery_error("RECOVERY_ARTIFACT_INVALID", "无法读取旧本地 Skills 条目")
+        })?;
         let path = entry.path();
         let name = entry.file_name().into_string().map_err(|_| {
-            recovery_error("RECOVERY_ARTIFACT_INVALID", "旧本地 Skills 暂存包含非 UTF-8 文件名")
+            recovery_error(
+                "RECOVERY_ARTIFACT_INVALID",
+                "旧本地 Skills 暂存包含非 UTF-8 文件名",
+            )
         })?;
         if name == WORKSPACE_STASH_OWNER || name == WORKSPACE_STASH_MANIFEST {
             continue;
@@ -580,7 +602,10 @@ fn migrate_legacy_stash(
         entries,
     };
     write_owner(&root.join(WORKSPACE_STASH_OWNER), "legacy")?;
-    write_file_atomic(&root.join(WORKSPACE_STASH_MANIFEST), &manifest_bytes(&manifest)?)?;
+    write_file_atomic(
+        &root.join(WORKSPACE_STASH_MANIFEST),
+        &manifest_bytes(&manifest)?,
+    )?;
     Ok(manifest)
 }
 
@@ -635,11 +660,15 @@ fn replace_stash_from_artifact<R: tauri::Runtime>(
     manifest: &WorkspaceLocalSkillsManifest,
 ) -> AppResult<()> {
     let root = stash_bucket_path(app, cli_key, workspace_id)?;
-    let parent = root.parent().ok_or_else(|| {
-        recovery_error("RECOVERY_ARTIFACT_INVALID", "本地 Skills 暂存路径无效")
-    })?;
+    let parent = root
+        .parent()
+        .ok_or_else(|| recovery_error("RECOVERY_ARTIFACT_INVALID", "本地 Skills 暂存路径无效"))?;
     ensure_safe_directory(parent)?;
-    let temp = parent.join(format!(".{}.{}", stash_bucket_name(workspace_id), operation.operation_id()));
+    let temp = parent.join(format!(
+        ".{}.{}",
+        stash_bucket_name(workspace_id),
+        operation.operation_id()
+    ));
     if temp.exists() {
         let removed = validate_owned_directory_or_remove_empty(
             &temp,
@@ -648,14 +677,18 @@ fn replace_stash_from_artifact<R: tauri::Runtime>(
         )?;
         if !removed {
             std::fs::remove_dir_all(&temp).map_err(|_| {
-                recovery_error("RECOVERY_ARTIFACT_INVALID", "无法清理本地 Skills 暂存临时目录")
+                recovery_error(
+                    "RECOVERY_ARTIFACT_INVALID",
+                    "无法清理本地 Skills 暂存临时目录",
+                )
             })?;
         }
     }
     std::fs::create_dir(&temp)
         .map_err(|_| recovery_error("RECOVERY_ARTIFACT_INVALID", "无法创建本地 Skills 暂存"))?;
     write_owner(&temp.join(WORKSPACE_STASH_OWNER), operation.operation_id())?;
-    let artifact_entries = artifact_root(app, operation.operation_id())?.join(WORKSPACE_ARTIFACT_ENTRIES);
+    let artifact_entries =
+        artifact_root(app, operation.operation_id())?.join(WORKSPACE_ARTIFACT_ENTRIES);
     for entry in &manifest.entries {
         copy_local_skill_dir(
             &artifact_entries.join(&entry.dir_name),
@@ -668,9 +701,8 @@ fn replace_stash_from_artifact<R: tauri::Runtime>(
     )?;
     if root.exists() {
         let _ = load_stash(app, cli_key, workspace_id)?;
-        std::fs::remove_dir_all(&root).map_err(|_| {
-            recovery_error("RECOVERY_ARTIFACT_INVALID", "无法替换本地 Skills 暂存")
-        })?;
+        std::fs::remove_dir_all(&root)
+            .map_err(|_| recovery_error("RECOVERY_ARTIFACT_INVALID", "无法替换本地 Skills 暂存"))?;
     }
     std::fs::rename(&temp, &root)
         .map_err(|_| recovery_error("RECOVERY_ARTIFACT_INVALID", "无法提升本地 Skills 暂存"))?;
@@ -685,8 +717,7 @@ pub(crate) fn capture_staged_local_skills_for_workspace_switch<R: tauri::Runtime
     from_workspace_id: Option<i64>,
     operation: &RecoveryOperation,
 ) -> AppResult<()> {
-    let (manifest, _digest) =
-        load_workspace_artifact(app, operation, cli_key, from_workspace_id)?;
+    let (manifest, _digest) = load_workspace_artifact(app, operation, cli_key, from_workspace_id)?;
     replace_stash_from_artifact(app, operation, cli_key, from_workspace_id, &manifest)?;
 
     let cli_root = cli_skills_root(app, cli_key)?;
@@ -714,9 +745,8 @@ pub(crate) fn capture_staged_local_skills_for_workspace_switch<R: tauri::Runtime
                 "本地 Skills 暂存前后不一致",
             ));
         }
-        std::fs::remove_dir_all(&path).map_err(|_| {
-            recovery_error("RECOVERY_PROJECTION_CONFLICT", "无法暂存本地 Skill")
-        })?;
+        std::fs::remove_dir_all(&path)
+            .map_err(|_| recovery_error("RECOVERY_PROJECTION_CONFLICT", "无法暂存本地 Skill"))?;
     }
     Ok(())
 }
@@ -769,9 +799,8 @@ pub(crate) fn cleanup_workspace_switch_local_skills_artifact<R: tauri::Runtime>(
     )? {
         return Ok(());
     }
-    std::fs::remove_dir_all(&root).map_err(|_| {
-        recovery_error("RECOVERY_ARTIFACT_INVALID", "无法清理本地 Skills 快照")
-    })
+    std::fs::remove_dir_all(&root)
+        .map_err(|_| recovery_error("RECOVERY_ARTIFACT_INVALID", "无法清理本地 Skills 快照"))
 }
 
 pub(crate) fn capture_local_skills_for_workspace_switch<R: tauri::Runtime>(
@@ -885,8 +914,10 @@ mod tests {
         let root = parent.path().join("artifact");
         std::fs::create_dir(&root).expect("create empty artifact");
 
-        assert!(validate_owned_directory_or_remove_empty(&root, "owner", "expected")
-            .expect("empty unowned artifact is recoverable"));
+        assert!(
+            validate_owned_directory_or_remove_empty(&root, "owner", "expected")
+                .expect("empty unowned artifact is recoverable")
+        );
         assert!(!root.exists());
     }
 

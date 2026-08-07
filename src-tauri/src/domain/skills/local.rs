@@ -128,7 +128,10 @@ fn next_available_local_dir_name(
     }
 
     if root.join(&candidate).exists() {
-        return Ok(validate_dir_name(&format!("{base}-{}", now_unix_seconds()))?);
+        return Ok(validate_dir_name(&format!(
+            "{base}-{}",
+            now_unix_seconds()
+        ))?);
     }
 
     Ok(validate_dir_name(&candidate)?)
@@ -527,7 +530,8 @@ ON CONFLICT(workspace_id, skill_id) DO UPDATE SET
     )
     .map_err(|e| db_err!("failed to enable imported skill for workspace: {e}"))?;
 
-    tx.commit().map_err(|err| db_err!("failed to commit: {err}"))?;
+    tx.commit()
+        .map_err(|err| db_err!("failed to commit: {err}"))?;
 
     operation.mark_authoritative_committed();
     get_skill_by_id(&conn, skill_id)

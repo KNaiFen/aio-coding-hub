@@ -782,8 +782,7 @@ ON CONFLICT(workspace_id, server_id) DO UPDATE SET
         existing_by_key.insert(inserted_row.server_key.clone(), inserted_row);
     }
 
-    tx.commit()
-        .map_err(|e| db_err!("failed to commit: {e}"))?;
+    tx.commit().map_err(|e| db_err!("failed to commit: {e}"))?;
     operation.mark_authoritative_committed();
 
     Ok(McpImportReport {

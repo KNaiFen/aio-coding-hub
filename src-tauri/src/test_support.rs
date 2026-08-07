@@ -213,9 +213,7 @@ pub fn mcp_import_servers_json<R: tauri::Runtime>(
         &db,
         "mcp.import",
         crate::infra::recovery_journal::JournalContext::for_workspace(workspace_id),
-        |operation| {
-            crate::domain::mcp::import_servers(app, &db, workspace_id, servers, operation)
-        },
+        |operation| crate::domain::mcp::import_servers(app, &db, workspace_id, servers, operation),
     )?;
     serialize_json(report)
 }
@@ -231,12 +229,7 @@ pub fn mcp_import_from_workspace_cli_json<R: tauri::Runtime>(
         "mcp.import_from_cli",
         crate::infra::recovery_journal::JournalContext::for_workspace(workspace_id),
         |operation| {
-            crate::domain::mcp::import_servers_from_workspace_cli(
-                app,
-                &db,
-                workspace_id,
-                operation,
-            )
+            crate::domain::mcp::import_servers_from_workspace_cli(app, &db, workspace_id, operation)
         },
     )?;
     serialize_json(report)
@@ -820,9 +813,7 @@ pub fn skill_return_to_local<R: tauri::Runtime>(
             entity_id: Some(skill_id),
             ..crate::infra::recovery_journal::JournalContext::default()
         },
-        |operation| {
-            crate::skills::return_to_local(app, &db, workspace_id, skill_id, operation)
-        },
+        |operation| crate::skills::return_to_local(app, &db, workspace_id, skill_id, operation),
     )?;
     Ok(true)
 }

@@ -214,11 +214,9 @@ mod tests {
         assert!(try_begin_startup_run(&app_handle));
         assert!(replay_recovery_journal_stage(&app_handle, || Ok::<_, AppError>(1)).await);
 
-        assert!(
-            !app_handle
-                .state::<MaintenanceState>()
-                .blocks_normal_operation()
-        );
+        assert!(!app_handle
+            .state::<MaintenanceState>()
+            .blocks_normal_operation());
         let status = startup_status_snapshot(&app_handle);
         assert!(status.running);
         assert!(!status.maintenance_mode);
@@ -240,11 +238,9 @@ mod tests {
             .await
         );
 
-        assert!(
-            app_handle
-                .state::<MaintenanceState>()
-                .blocks_normal_operation()
-        );
+        assert!(app_handle
+            .state::<MaintenanceState>()
+            .blocks_normal_operation());
         let status = startup_status_snapshot(&app_handle);
         assert!(!status.running);
         assert!(status.maintenance_mode);

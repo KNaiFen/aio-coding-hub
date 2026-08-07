@@ -315,13 +315,9 @@ pub(crate) fn restore_grok_local_servers_for_workspace<R: tauri::Runtime>(
 
     let config_path = crate::grok_config::config_path(app)?;
     crate::grok_config::mutate_path(&config_path, |document| {
-        super::grok_toml::swap_grok_local_servers(
-            document,
-            managed_keys,
-            target_stash.as_deref(),
-        )
-        .map(|_| ())
-        .map_err(crate::shared::error::AppError::from)
+        super::grok_toml::swap_grok_local_servers(document, managed_keys, target_stash.as_deref())
+            .map(|_| ())
+            .map_err(crate::shared::error::AppError::from)
     })
 }
 

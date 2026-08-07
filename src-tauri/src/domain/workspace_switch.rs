@@ -282,12 +282,7 @@ fn phase_index(phase: &str) -> crate::shared::error::AppResult<usize> {
         .iter()
         .position(|candidate| *candidate == phase)
         .map(|index| index + 1)
-        .ok_or_else(|| {
-            AppError::new(
-                "RECOVERY_JOURNAL_INVALID",
-                "工作区恢复阶段无效",
-            )
-        })
+        .ok_or_else(|| AppError::new("RECOVERY_JOURNAL_INVALID", "工作区恢复阶段无效"))
 }
 
 fn run_phase(
@@ -307,19 +302,21 @@ fn run_phase(
     Ok(())
 }
 
-fn context_from_entry(entry: &JournalEntry) -> crate::shared::error::AppResult<WorkspaceRecoveryContext> {
+fn context_from_entry(
+    entry: &JournalEntry,
+) -> crate::shared::error::AppResult<WorkspaceRecoveryContext> {
     if entry.operation_kind != "workspace.apply" {
         return Err(AppError::new(
             "RECOVERY_JOURNAL_INVALID",
             "工作区恢复操作类型不匹配",
         ));
     }
-    let raw = entry.replay_context.as_deref().ok_or_else(|| {
-        AppError::new("RECOVERY_JOURNAL_INVALID", "工作区恢复上下文缺失")
-    })?;
-    let context: WorkspaceRecoveryContext = serde_json::from_str(raw).map_err(|_| {
-        AppError::new("RECOVERY_JOURNAL_INVALID", "工作区恢复上下文损坏")
-    })?;
+    let raw = entry
+        .replay_context
+        .as_deref()
+        .ok_or_else(|| AppError::new("RECOVERY_JOURNAL_INVALID", "工作区恢复上下文缺失"))?;
+    let context: WorkspaceRecoveryContext = serde_json::from_str(raw)
+        .map_err(|_| AppError::new("RECOVERY_JOURNAL_INVALID", "工作区恢复上下文损坏"))?;
     if context.schema_version != 1
         || context.to_workspace_id <= 0
         || context.from_workspace_id.is_some_and(|value| value <= 0)
@@ -451,7 +448,11 @@ fn execute_workspace_projection<R: tauri::Runtime>(
             )
         })?;
     } else {
-        for phase in [PHASE_SKILLS_MANAGED, PHASE_SKILLS_CAPTURE, PHASE_SKILLS_RESTORE] {
+        for phase in [
+            PHASE_SKILLS_MANAGED,
+            PHASE_SKILLS_CAPTURE,
+            PHASE_SKILLS_RESTORE,
+        ] {
             run_phase(operation, &mut completed, phase, || Ok(()))?;
         }
     }
@@ -474,9 +475,8 @@ pub(crate) fn apply_with_recovery<R: tauri::Runtime>(
         from_workspace_id,
         to_workspace_id: workspace_id,
     };
-    let serialized = serde_json::to_string(&context).map_err(|_| {
-        AppError::new("RECOVERY_JOURNAL_INVALID", "无法序列化工作区恢复上下文")
-    })?;
+    let serialized = serde_json::to_string(&context)
+        .map_err(|_| AppError::new("RECOVERY_JOURNAL_INVALID", "无法序列化工作区恢复上下文"))?;
     operation.set_replay_context(&serialized)?;
     if CliKey::parse(&cli_key)?.supports(CliCapability::Skills) {
         let artifact_digest = skills::stage_local_skills_for_workspace_switch(
@@ -881,7 +881,10 @@ command = "local"
             .expect("read repaired config")
             .parse::<toml_edit::DocumentMut>()
             .expect("valid repaired TOML");
-        assert_eq!(config["mcp_servers"]["managed"]["command"].as_str(), Some("npx"));
+        assert_eq!(
+            config["mcp_servers"]["managed"]["command"].as_str(),
+            Some("npx")
+        );
         assert!(!crate::infra::recovery_journal::has_pending(&test.db).expect("resolved journal"));
         let _ = default_id;
     }

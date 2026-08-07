@@ -39,10 +39,7 @@ pub(crate) fn validate_dir_name(dir_name: &str) -> Result<String, String> {
     if dir_name.is_empty() {
         return Err("SEC_INVALID_INPUT: dir_name is required".to_string());
     }
-    if dir_name
-        .bytes()
-        .any(|byte| matches!(byte, b'/' | b'\\'))
-    {
+    if dir_name.bytes().any(|byte| matches!(byte, b'/' | b'\\')) {
         return Err("SEC_INVALID_INPUT: dir_name must be a single directory name".to_string());
     }
 
@@ -77,7 +74,10 @@ mod tests {
     #[test]
     fn dir_name_rejects_portable_path_separators_and_parent_components() {
         for value in ["../escape", "nested/name", "nested\\name", ".", ".."] {
-            assert!(validate_dir_name(value).is_err(), "accepted unsafe value: {value}");
+            assert!(
+                validate_dir_name(value).is_err(),
+                "accepted unsafe value: {value}"
+            );
         }
         assert_eq!(validate_dir_name("safe-name").unwrap(), "safe-name");
     }

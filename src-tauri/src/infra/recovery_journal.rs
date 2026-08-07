@@ -85,18 +85,11 @@ struct ProjectionLock {
 }
 
 fn acquire_projection_lock_at(path: &Path) -> AppResult<ProjectionLock> {
-    let parent = path.parent().ok_or_else(|| {
-        AppError::new(
-            "RECOVERY_PROJECTION_LOCK_FAILED",
-            "外部投影锁路径无效",
-        )
-    })?;
-    std::fs::create_dir_all(parent).map_err(|_| {
-        AppError::new(
-            "RECOVERY_PROJECTION_LOCK_FAILED",
-            "无法创建外部投影锁目录",
-        )
-    })?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| AppError::new("RECOVERY_PROJECTION_LOCK_FAILED", "外部投影锁路径无效"))?;
+    std::fs::create_dir_all(parent)
+        .map_err(|_| AppError::new("RECOVERY_PROJECTION_LOCK_FAILED", "无法创建外部投影锁目录"))?;
     if std::fs::symlink_metadata(path)
         .is_ok_and(|metadata| metadata.file_type().is_symlink() || !metadata.is_file())
     {
@@ -110,22 +103,11 @@ fn acquire_projection_lock_at(path: &Path) -> AppResult<ProjectionLock> {
         .write(true)
         .create(true)
         .open(path)
-        .map_err(|_| {
-            AppError::new(
-                "RECOVERY_PROJECTION_LOCK_FAILED",
-                "无法打开外部投影锁",
-            )
-        })?;
+        .map_err(|_| AppError::new("RECOVERY_PROJECTION_LOCK_FAILED", "无法打开外部投影锁"))?;
 
     #[cfg(unix)]
-    rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive).map_err(
-        |_| {
-            AppError::new(
-                "RECOVERY_REPLAY_BUSY",
-                "另一个应用实例正在执行外部投影",
-            )
-        },
-    )?;
+    rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive)
+        .map_err(|_| AppError::new("RECOVERY_REPLAY_BUSY", "另一个应用实例正在执行外部投影"))?;
 
     #[cfg(windows)]
     {
@@ -347,10 +329,7 @@ fn validate_replay_context(context: &str) -> AppResult<()> {
         || context.len() > REPLAY_CONTEXT_MAX_BYTES
         || !serde_json::from_str::<serde_json::Value>(context).is_ok()
     {
-        return Err(AppError::new(
-            "RECOVERY_JOURNAL_INVALID",
-            "恢复上下文无效",
-        ));
+        return Err(AppError::new("RECOVERY_JOURNAL_INVALID", "恢复上下文无效"));
     }
     Ok(())
 }
@@ -359,14 +338,19 @@ fn validate_replay_context_for_kind(kind: &str, context: &str) -> AppResult<()> 
     validate_replay_context(context)?;
     let value = serde_json::from_str::<serde_json::Value>(context)
         .map_err(|_| AppError::new("RECOVERY_JOURNAL_INVALID", "恢复上下文无效"))?;
-    let object = value.as_object().ok_or_else(|| {
-        AppError::new("RECOVERY_JOURNAL_INVALID", "恢复上下文必须是对象")
-    })?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| AppError::new("RECOVERY_JOURNAL_INVALID", "恢复上下文必须是对象"))?;
 
     let (expected_operation, allowed, required): (&str, &[&str], &[&str]) = match kind {
         "workspace.apply" => (
             "",
-            &["schema_version", "cli_key", "from_workspace_id", "to_workspace_id"],
+            &[
+                "schema_version",
+                "cli_key",
+                "from_workspace_id",
+                "to_workspace_id",
+            ],
             &["schema_version", "cli_key", "to_workspace_id"],
         ),
         "skill.install" => (
@@ -376,8 +360,20 @@ fn validate_replay_context_for_kind(kind: &str, context: &str) -> AppResult<()> 
         ),
         "skill.import_local" => (
             "import_local",
-            &["operation", "workspace_id", "cli_key", "skill_key", "local_dir_name"],
-            &["operation", "workspace_id", "cli_key", "skill_key", "local_dir_name"],
+            &[
+                "operation",
+                "workspace_id",
+                "cli_key",
+                "skill_key",
+                "local_dir_name",
+            ],
+            &[
+                "operation",
+                "workspace_id",
+                "cli_key",
+                "skill_key",
+                "local_dir_name",
+            ],
         ),
         "skill.update" => (
             "update",
@@ -391,8 +387,20 @@ fn validate_replay_context_for_kind(kind: &str, context: &str) -> AppResult<()> 
         ),
         "skill.return_to_local" => (
             "return_to_local",
-            &["operation", "workspace_id", "cli_key", "skill_id", "skill_key"],
-            &["operation", "workspace_id", "cli_key", "skill_id", "skill_key"],
+            &[
+                "operation",
+                "workspace_id",
+                "cli_key",
+                "skill_id",
+                "skill_key",
+            ],
+            &[
+                "operation",
+                "workspace_id",
+                "cli_key",
+                "skill_id",
+                "skill_key",
+            ],
         ),
         "skill.install_to_local" => (
             "install_to_local",
@@ -413,8 +421,7 @@ fn validate_replay_context_for_kind(kind: &str, context: &str) -> AppResult<()> 
     };
 
     if !expected_operation.is_empty()
-        && object.get("operation").and_then(serde_json::Value::as_str)
-            != Some(expected_operation)
+        && object.get("operation").and_then(serde_json::Value::as_str) != Some(expected_operation)
     {
         return Err(AppError::new(
             "RECOVERY_JOURNAL_INVALID",
@@ -465,10 +472,7 @@ fn validate_replay_context_for_kind(kind: &str, context: &str) -> AppResult<()> 
                 crate::shared::cli_key::validate_cli_key(raw)?;
             } else {
                 crate::skills::validate_recovery_path_component(raw).map_err(|_| {
-                    AppError::new(
-                        "RECOVERY_JOURNAL_INVALID",
-                        "恢复上下文路径组件无效",
-                    )
+                    AppError::new("RECOVERY_JOURNAL_INVALID", "恢复上下文路径组件无效")
                 })?;
             }
         }
@@ -606,10 +610,7 @@ artifact_sha256,
 replay_context
 "#;
 
-fn load_entry(
-    conn: &rusqlite::Connection,
-    operation_id: &str,
-) -> AppResult<Option<JournalEntry>> {
+fn load_entry(conn: &rusqlite::Connection, operation_id: &str) -> AppResult<Option<JournalEntry>> {
     conn.query_row(
         &format!(
             "SELECT {ENTRY_COLUMNS} FROM external_effect_recovery_journal WHERE operation_id = ?1"
@@ -733,7 +734,9 @@ WHERE operation_id = ?6
     if changed == 1 {
         return Ok(());
     }
-    if load_entry(&conn, &claimed.entry.operation_id)?.is_some_and(|entry| entry.status == "resolved") {
+    if load_entry(&conn, &claimed.entry.operation_id)?
+        .is_some_and(|entry| entry.status == "resolved")
+    {
         return Ok(());
     }
     Err(AppError::new(
@@ -797,7 +800,9 @@ WHERE operation_id = ?4
     if changed == 1 {
         return Ok(());
     }
-    if load_entry(&conn, &claimed.entry.operation_id)?.is_some_and(|entry| entry.status == "resolved") {
+    if load_entry(&conn, &claimed.entry.operation_id)?
+        .is_some_and(|entry| entry.status == "resolved")
+    {
         return Ok(());
     }
     Err(AppError::new(
@@ -833,7 +838,8 @@ WHERE operation_id = ?2
         )
         .map_err(|_| AppError::new("RECOVERY_JOURNAL_UPDATE_FAILED", "无法完成恢复日志"))?;
     if changed != 1
-        && !load_entry(&conn, &claimed.entry.operation_id)?.is_some_and(|entry| entry.status == "resolved")
+        && !load_entry(&conn, &claimed.entry.operation_id)?
+            .is_some_and(|entry| entry.status == "resolved")
     {
         return Err(AppError::new(
             "RECOVERY_JOURNAL_STATE_CONFLICT",
@@ -1060,7 +1066,9 @@ fn fail_after_replay(
 ) -> AppError {
     match record_failure(db, claimed, &primary, replay_error.as_ref()) {
         Ok(()) => composite_error(&primary, replay_error.as_ref(), None),
-        Err(journal_error) => composite_error(&primary, replay_error.as_ref(), Some(&journal_error)),
+        Err(journal_error) => {
+            composite_error(&primary, replay_error.as_ref(), Some(&journal_error))
+        }
     }
 }
 
@@ -1090,10 +1098,7 @@ where
                 let phase = (|| {
                     let conn = db.open_connection()?;
                     load_entry(&conn, operation.operation_id())?.ok_or_else(|| {
-                        AppError::new(
-                            "RECOVERY_JOURNAL_STATE_CONFLICT",
-                            "恢复操作已不存在",
-                        )
+                        AppError::new("RECOVERY_JOURNAL_STATE_CONFLICT", "恢复操作已不存在")
                     })
                 })();
                 match phase {
@@ -1107,22 +1112,15 @@ where
             } else {
                 "authoritative_projection".to_string()
             };
-            if let Err(error) = update_claimed_status(
-                db,
-                &claimed,
-                "committed",
-                &committed_phase,
-                false,
-            ) {
+            if let Err(error) =
+                update_claimed_status(db, &claimed, "committed", &committed_phase, false)
+            {
                 let failure = fail_after_replay(db, &claimed, error, None);
                 crate::app::maintenance::fail_recovery_replay(app, failure.clone());
                 return Err(failure);
             }
             if let Err(replay_error) = finish_projection(app, db, &claimed) {
-                let primary = AppError::new(
-                    "RECOVERY_REPLAY_FAILED",
-                    "提交后的外部投影尚未收敛",
-                );
+                let primary = AppError::new("RECOVERY_REPLAY_FAILED", "提交后的外部投影尚未收敛");
                 let failure = fail_after_replay(db, &claimed, primary, Some(replay_error));
                 crate::app::maintenance::fail_recovery_replay(app, failure.clone());
                 return Err(failure);
@@ -1159,7 +1157,10 @@ where
     T: Send + 'static,
     F: FnOnce(&RecoveryOperation) -> AppResult<T> + Send + 'static,
 {
-    crate::blocking::run(task_name, move || run_operation(&app, &db, kind, context, work)).await
+    crate::blocking::run(task_name, move || {
+        run_operation(&app, &db, kind, context, work)
+    })
+    .await
 }
 
 pub(crate) fn run_operation_for_test<R, T, F>(
@@ -1202,9 +1203,8 @@ WHERE coordinator_key = 'replay'
         )
         .map_err(|_| AppError::new("RECOVERY_JOURNAL_DB_FAILED", "无法获取恢复协调器"))?;
     if changed == 0 {
-        tx.commit().map_err(|_| {
-            AppError::new("RECOVERY_JOURNAL_DB_FAILED", "无法释放恢复协调器读取锁")
-        })?;
+        tx.commit()
+            .map_err(|_| AppError::new("RECOVERY_JOURNAL_DB_FAILED", "无法释放恢复协调器读取锁"))?;
         return Ok(None);
     }
     let epoch = tx
@@ -1252,15 +1252,16 @@ WHERE coordinator_key = 'replay'
 
 fn release_replay_coordinator(db: &db::Db, claim: &ClaimToken) -> AppResult<()> {
     let conn = db.open_connection()?;
-    let changed = conn.execute(
-        r#"
+    let changed = conn
+        .execute(
+            r#"
 UPDATE external_effect_recovery_coordinator
 SET lease_owner = NULL, lease_expires_at = 0, updated_at = ?1
 WHERE coordinator_key = 'replay' AND lease_owner = ?2 AND claim_epoch = ?3
 "#,
-        params![now_unix_seconds(), claim.owner, claim.epoch],
-    )
-    .map_err(|_| AppError::new("RECOVERY_JOURNAL_DB_FAILED", "无法释放恢复协调器"))?;
+            params![now_unix_seconds(), claim.owner, claim.epoch],
+        )
+        .map_err(|_| AppError::new("RECOVERY_JOURNAL_DB_FAILED", "无法释放恢复协调器"))?;
     if changed == 1 {
         return Ok(());
     }
@@ -1270,10 +1271,7 @@ WHERE coordinator_key = 'replay' AND lease_owner = ?2 AND claim_epoch = ?3
     ))
 }
 
-fn claim_next_root_entry(
-    db: &db::Db,
-    coordinator: &ClaimToken,
-) -> AppResult<Option<ClaimedEntry>> {
+fn claim_next_root_entry(db: &db::Db, coordinator: &ClaimToken) -> AppResult<Option<ClaimedEntry>> {
     let now = now_unix_seconds();
     let mut conn = db.open_connection()?;
     let tx = conn
@@ -1428,10 +1426,7 @@ pub(crate) fn replay_pending<R: tauri::Runtime>(
         let mut resolved = 0usize;
         loop {
             let coordinator_ref = coordinator.as_ref().ok_or_else(|| {
-                AppError::new(
-                    "RECOVERY_REPLAY_BUSY",
-                    "恢复协调器已被其他实例接管",
-                )
+                AppError::new("RECOVERY_REPLAY_BUSY", "恢复协调器已被其他实例接管")
             })?;
             renew_replay_coordinator(db, coordinator_ref)?;
             let Some(claimed) = claim_next_root_entry(db, coordinator_ref)? else {
@@ -1444,10 +1439,7 @@ pub(crate) fn replay_pending<R: tauri::Runtime>(
                 return Ok(resolved);
             };
             if let Err(replay_error) = finish_projection(app, db, &claimed) {
-                let primary = AppError::new(
-                    "RECOVERY_REPLAY_FAILED",
-                    "启动恢复尚未完成",
-                );
+                let primary = AppError::new("RECOVERY_REPLAY_FAILED", "启动恢复尚未完成");
                 let failure = fail_after_replay(db, &claimed, primary, Some(replay_error));
                 return Err(failure);
             }
@@ -1456,18 +1448,15 @@ pub(crate) fn replay_pending<R: tauri::Runtime>(
             // Releasing and reacquiring between entries renews the fenced
             // coordinator without letting an expired owner extend itself.
             let released = coordinator.take().ok_or_else(|| {
-                AppError::new(
-                    "RECOVERY_REPLAY_BUSY",
-                    "恢复协调器已被其他实例接管",
-                )
+                AppError::new("RECOVERY_REPLAY_BUSY", "恢复协调器已被其他实例接管")
             })?;
             release_replay_coordinator(db, &released)?;
             coordinator = acquire_replay_coordinator(db)?;
         }
     })();
-    let release_result = coordinator
-        .as_ref()
-        .map_or(Ok(()), |coordinator| release_replay_coordinator(db, coordinator));
+    let release_result = coordinator.as_ref().map_or(Ok(()), |coordinator| {
+        release_replay_coordinator(db, coordinator)
+    });
     match (result, release_result) {
         (Ok(resolved), Ok(())) => Ok(resolved),
         (Ok(_), Err(release_error)) => Err(release_error),
@@ -1526,12 +1515,8 @@ mod tests {
     fn invalid_context_is_rejected_before_a_row_is_written() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db = crate::db::init_for_tests(&dir.path().join("journal.db")).expect("init db");
-        let error = prepare(
-            &db,
-            "prompt.upsert",
-            &JournalContext::for_entity(-1),
-        )
-        .expect_err("negative entity id must fail");
+        let error = prepare(&db, "prompt.upsert", &JournalContext::for_entity(-1))
+            .expect_err("negative entity id must fail");
         assert_eq!(error.code(), "RECOVERY_JOURNAL_INVALID");
         assert!(!has_pending(&db).expect("no row"));
     }

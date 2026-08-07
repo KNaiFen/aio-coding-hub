@@ -149,36 +149,36 @@ pub(crate) async fn mcp_server_upsert(
         "mcp.upsert",
         context,
         move |operation| {
-        let McpServerUpsertInput {
-            server_id,
-            server_key,
-            name,
-            transport,
-            command,
-            args,
-            env,
-            cwd,
-            url,
-            headers,
-        } = input;
-        mcp::upsert(
-            &app,
-            &db,
-            server_id,
-            &server_key,
-            &name,
-            &transport,
-            command.as_deref(),
-            args,
-            env.preserve_keys,
-            env.replace,
-            cwd.as_deref(),
-            url.as_deref(),
-            headers.preserve_keys,
-            headers.replace,
-            operation,
-        )
-        .map(McpServerSummaryView::from)
+            let McpServerUpsertInput {
+                server_id,
+                server_key,
+                name,
+                transport,
+                command,
+                args,
+                env,
+                cwd,
+                url,
+                headers,
+            } = input;
+            mcp::upsert(
+                &app,
+                &db,
+                server_id,
+                &server_key,
+                &name,
+                &transport,
+                command.as_deref(),
+                args,
+                env.preserve_keys,
+                env.replace,
+                cwd.as_deref(),
+                url.as_deref(),
+                headers.preserve_keys,
+                headers.replace,
+                operation,
+            )
+            .map(McpServerSummaryView::from)
         },
     )
     .await

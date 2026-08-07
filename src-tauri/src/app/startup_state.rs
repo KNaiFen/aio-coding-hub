@@ -99,11 +99,7 @@ fn begin_maintenance(status: &mut AppStartupStatus) {
     status.can_retry = false;
 }
 
-fn set_maintenance_failed(
-    status: &mut AppStartupStatus,
-    stage: AppStartupStage,
-    message: String,
-) {
+fn set_maintenance_failed(status: &mut AppStartupStatus, stage: AppStartupStage, message: String) {
     status.running = false;
     status.maintenance_mode = true;
     status.current_stage = AppStartupStage::Failed;

@@ -18,12 +18,15 @@ fn prompt_default_sync_preserves_source_bytes_and_resolves_journal() {
         .get("items")
         .and_then(|items| items.as_array())
         .and_then(|items| {
-            items.iter().find(|item| {
-                item.get("cli_key").and_then(|value| value.as_str()) == Some("claude")
-            })
+            items
+                .iter()
+                .find(|item| item.get("cli_key").and_then(|value| value.as_str()) == Some("claude"))
         })
         .expect("claude sync result");
-    assert_eq!(claude.get("action").and_then(|value| value.as_str()), Some("created"));
+    assert_eq!(
+        claude.get("action").and_then(|value| value.as_str()),
+        Some("created")
+    );
     assert_eq!(
         aio_coding_hub_lib::test_support::prompt_read_target_bytes(&handle, "claude")
             .expect("read source prompt"),

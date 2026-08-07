@@ -44,8 +44,9 @@ fn ensure_recovery_journal(conn: &mut Connection) -> crate::shared::error::AppRe
         .map_err(|error| format!("failed to start recovery journal ensure transaction: {error}"))?;
     super::v49_to_v50::create_recovery_journal_schema(&tx)?;
     super::v50_to_v51::create_recovery_claim_schema(&tx)?;
-    tx.commit()
-        .map_err(|error| format!("failed to commit recovery journal ensure transaction: {error}"))?;
+    tx.commit().map_err(|error| {
+        format!("failed to commit recovery journal ensure transaction: {error}")
+    })?;
     Ok(())
 }
 

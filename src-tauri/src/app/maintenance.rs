@@ -350,16 +350,11 @@ pub(crate) fn finish_recovery_replay<R: tauri::Runtime>(app: &tauri::AppHandle<R
     finish_maintenance(app);
 }
 
-pub(crate) fn finish_recovery_replay_for_startup<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-) {
+pub(crate) fn finish_recovery_replay_for_startup<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     finish_maintenance_for_startup(app);
 }
 
-pub(crate) fn fail_recovery_replay<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-    error: AppError,
-) {
+pub(crate) fn fail_recovery_replay<R: tauri::Runtime>(app: &tauri::AppHandle<R>, error: AppError) {
     if let Some(state) = app.try_state::<MaintenanceState>() {
         state.set_phase(MAINTENANCE_FAILED);
     }
@@ -426,9 +421,7 @@ pub(crate) fn run_before_startup<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -
     }
 }
 
-pub(crate) async fn retry_pending_maintenance<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
-) -> bool {
+pub(crate) async fn retry_pending_maintenance<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> bool {
     let Some(state) = app.try_state::<MaintenanceState>() else {
         return false;
     };
@@ -438,8 +431,8 @@ pub(crate) async fn retry_pending_maintenance<R: tauri::Runtime>(
     drop(state);
     crate::app::startup_state::begin_maintenance_run(&app);
 
-    let marker_state = crate::app_paths::app_data_dir(&app)
-        .and_then(|data_dir| reset_marker_state(&data_dir));
+    let marker_state =
+        crate::app_paths::app_data_dir(&app).and_then(|data_dir| reset_marker_state(&data_dir));
     match marker_state {
         Ok(ResetMarkerState::Pending | ResetMarkerState::Completed) => {
             let app_for_work = app.clone();

@@ -477,8 +477,7 @@ INSERT INTO prompts(
             })?;
 
             let id = tx.last_insert_rowid();
-            tx.commit()
-                .map_err(|e| db_err!("failed to commit: {e}"))?;
+            tx.commit().map_err(|e| db_err!("failed to commit: {e}"))?;
             id
         }
         Some(id) => {
@@ -515,8 +514,7 @@ WHERE id = ?5
                 other => db_err!("failed to update prompt: {other}"),
             })?;
 
-            tx.commit()
-                .map_err(|e| db_err!("failed to commit: {e}"))?;
+            tx.commit().map_err(|e| db_err!("failed to commit: {e}"))?;
             id
         }
     };
@@ -565,8 +563,7 @@ pub fn set_enabled(
         }
     }
 
-    tx.commit()
-        .map_err(|e| db_err!("failed to commit: {e}"))?;
+    tx.commit().map_err(|e| db_err!("failed to commit: {e}"))?;
 
     operation.mark_authoritative_committed();
     get_by_id(&conn, prompt_id)
@@ -591,8 +588,7 @@ pub fn delete(
         return Err("DB_NOT_FOUND: prompt not found".to_string().into());
     }
 
-    tx.commit()
-        .map_err(|e| db_err!("failed to commit: {e}"))?;
+    tx.commit().map_err(|e| db_err!("failed to commit: {e}"))?;
 
     operation.mark_authoritative_committed();
     Ok(())

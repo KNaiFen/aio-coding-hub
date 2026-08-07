@@ -543,8 +543,7 @@ WHERE id = ?11
         }
     };
 
-    tx.commit()
-        .map_err(|e| db_err!("failed to commit: {e}"))?;
+    tx.commit().map_err(|e| db_err!("failed to commit: {e}"))?;
 
     operation.mark_authoritative_committed();
     get_by_id(&conn, id)
@@ -585,8 +584,7 @@ ON CONFLICT(workspace_id, server_id) DO UPDATE SET
         .map_err(|e| db_err!("failed to disable mcp server: {e}"))?;
     }
 
-    tx.commit()
-        .map_err(|e| db_err!("failed to commit: {e}"))?;
+    tx.commit().map_err(|e| db_err!("failed to commit: {e}"))?;
 
     operation.mark_authoritative_committed();
     get_by_id_for_workspace(&conn, workspace_id, server_id)
@@ -610,8 +608,7 @@ pub fn delete(
         return Err("DB_NOT_FOUND: mcp server not found".to_string().into());
     }
 
-    tx.commit()
-        .map_err(|e| db_err!("failed to commit: {e}"))?;
+    tx.commit().map_err(|e| db_err!("failed to commit: {e}"))?;
     operation.mark_authoritative_committed();
     Ok(())
 }

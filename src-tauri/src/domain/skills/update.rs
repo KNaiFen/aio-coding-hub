@@ -275,7 +275,10 @@ pub fn update_skill(
         app,
         operation,
         &context,
-        &[("desired", src_dir.as_path()), ("previous", ssot_dir.as_path())],
+        &[
+            ("desired", src_dir.as_path()),
+            ("previous", ssot_dir.as_path()),
+        ],
         None,
     )?;
     let installed_content_hash = artifact.role_hash("desired")?.to_string();
@@ -284,8 +287,9 @@ pub fn update_skill(
     let tx = conn
         .transaction()
         .map_err(|e| db_err!("failed to start transaction: {e}"))?;
-    let updated_rows = tx.execute(
-        r#"
+    let updated_rows = tx
+        .execute(
+            r#"
 UPDATE skills
 SET
   name = ?1,
@@ -296,22 +300,23 @@ SET
   updated_at = ?6
 WHERE id = ?7
 "#,
-        params![
-            name.trim(),
-            normalized_name,
-            description,
-            installed_commit,
-            installed_content_hash,
-            now,
-            skill_id
-        ],
-    )
-    .map_err(|err| db_err!("failed to update skill metadata: {err}"))?;
+            params![
+                name.trim(),
+                normalized_name,
+                description,
+                installed_commit,
+                installed_content_hash,
+                now,
+                skill_id
+            ],
+        )
+        .map_err(|err| db_err!("failed to update skill metadata: {err}"))?;
     if updated_rows != 1 {
         return Err("SKILL_UPDATE_CONFLICT: skill no longer exists".into());
     }
 
-    tx.commit().map_err(|err| db_err!("failed to commit: {err}"))?;
+    tx.commit()
+        .map_err(|err| db_err!("failed to commit: {err}"))?;
 
     operation.mark_authoritative_committed();
     get_skill_by_id_for_workspace(&conn, workspace_id, skill_id)

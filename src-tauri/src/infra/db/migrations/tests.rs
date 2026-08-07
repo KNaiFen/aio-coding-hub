@@ -3730,7 +3730,12 @@ fn recovery_journal_migrates_v49_and_v50_with_idempotent_claim_schema() {
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("read v51 version");
     assert_eq!(version, 51);
-    for column in ["lease_owner", "lease_expires_at", "claim_epoch", "replay_context"] {
+    for column in [
+        "lease_owner",
+        "lease_expires_at",
+        "claim_epoch",
+        "replay_context",
+    ] {
         assert!(test_has_column(
             &conn,
             "external_effect_recovery_journal",

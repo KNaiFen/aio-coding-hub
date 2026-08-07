@@ -102,7 +102,11 @@ fn copy_dir_recursive_impl(
         let dst_meta = std::fs::symlink_metadata(dst)
             .map_err(|e| format!("failed to read metadata {}: {e}", dst.display()))?;
         if dst_meta.file_type().is_symlink() || is_symlink_or_junction(dst) || !dst_meta.is_dir() {
-            return Err(format!("SEC_INVALID_INPUT: copy target is unsafe: {}", dst.display()).into());
+            return Err(format!(
+                "SEC_INVALID_INPUT: copy target is unsafe: {}",
+                dst.display()
+            )
+            .into());
         }
     } else {
         std::fs::create_dir_all(dst)
@@ -117,9 +121,9 @@ fn copy_dir_recursive_impl(
     for entry in entries {
         let path = entry.path();
         let file_name = entry.file_name();
-        let file_name_str = file_name.to_str().ok_or_else(|| {
-            "SEC_INVALID_INPUT: skill file name must be valid UTF-8".to_string()
-        })?;
+        let file_name_str = file_name
+            .to_str()
+            .ok_or_else(|| "SEC_INVALID_INPUT: skill file name must be valid UTF-8".to_string())?;
         let dst_path = dst.join(&file_name);
         let relative_path = relative_root.join(&file_name);
 
@@ -196,15 +200,19 @@ fn copy_regular_skill_file(
     if copied != metadata.len() || current_len != metadata.len() {
         std::fs::remove_file(dst)
             .map_err(|e| format!("failed to remove incomplete {}: {e}", dst.display()))?;
-        return Err(format!("SKILL_COPY_SOURCE_CHANGED: {} changed while copying", src.display()).into());
+        return Err(format!(
+            "SKILL_COPY_SOURCE_CHANGED: {} changed while copying",
+            src.display()
+        )
+        .into());
     }
     Ok(())
 }
 
 fn validate_copy_relative_path(relative_path: &Path) -> crate::shared::error::AppResult<()> {
-    let relative = relative_path.to_str().ok_or_else(|| {
-        "SEC_INVALID_INPUT: skill relative path must be valid UTF-8".to_string()
-    })?;
+    let relative = relative_path
+        .to_str()
+        .ok_or_else(|| "SEC_INVALID_INPUT: skill relative path must be valid UTF-8".to_string())?;
     if relative.chars().count() > SKILL_RELATIVE_PATH_MAX_CHARS {
         return Err(format!(
             "SEC_INVALID_INPUT: skill relative path too long (max {SKILL_RELATIVE_PATH_MAX_CHARS} chars)"
@@ -258,7 +266,9 @@ fn skill_dir_content_hash_impl(
         hasher.update(b"\0");
 
         let Some(mut file) = open_regular_file_no_follow(&path)? else {
-            return Err(format!("SKILL_HASH_SOURCE_CHANGED: {} disappeared", path.display()).into());
+            return Err(
+                format!("SKILL_HASH_SOURCE_CHANGED: {} disappeared", path.display()).into(),
+            );
         };
         loop {
             let read = file
@@ -284,8 +294,15 @@ fn collect_skill_hash_files(
 ) -> crate::shared::error::AppResult<()> {
     let dir_metadata = std::fs::symlink_metadata(dir)
         .map_err(|e| format!("failed to read metadata {}: {e}", dir.display()))?;
-    if dir_metadata.file_type().is_symlink() || is_symlink_or_junction(dir) || !dir_metadata.is_dir() {
-        return Err(format!("SKILL_HASH_BLOCKED_SYMLINK_OR_NON_DIRECTORY: {}", dir.display()).into());
+    if dir_metadata.file_type().is_symlink()
+        || is_symlink_or_junction(dir)
+        || !dir_metadata.is_dir()
+    {
+        return Err(format!(
+            "SKILL_HASH_BLOCKED_SYMLINK_OR_NON_DIRECTORY: {}",
+            dir.display()
+        )
+        .into());
     }
 
     let mut entries = std::fs::read_dir(dir)
@@ -296,9 +313,9 @@ fn collect_skill_hash_files(
 
     for entry in entries {
         let file_name = entry.file_name();
-        let file_name_str = file_name.to_str().ok_or_else(|| {
-            "SEC_INVALID_INPUT: skill file name must be valid UTF-8".to_string()
-        })?;
+        let file_name_str = file_name
+            .to_str()
+            .ok_or_else(|| "SEC_INVALID_INPUT: skill file name must be valid UTF-8".to_string())?;
         let path = entry.path();
         let relative_path = relative_root.join(&file_name);
         let metadata = std::fs::symlink_metadata(&path)
@@ -619,8 +636,7 @@ mod tests {
         let destination = tempfile::tempdir().expect("destination tempdir");
         std::fs::write(source.path().join("SKILL.md"), "---\nname: Demo\n---\n")
             .expect("write skill");
-        let _listener = UnixListener::bind(source.path().join(".git"))
-            .expect("create .git socket");
+        let _listener = UnixListener::bind(source.path().join(".git")).expect("create .git socket");
 
         let copy_error = copy_dir_recursive(source.path(), &destination.path().join("copy"))
             .expect_err("copy must reject .git special file")
@@ -666,8 +682,11 @@ mod tests {
             .expect("write git head");
         std::fs::write(source.path().join(MANAGED_MARKER_FILE), b"managed\n")
             .expect("write managed marker");
-        std::fs::write(source.path().join(SOURCE_MARKER_FILE), br#"{"source":"local"}"#)
-            .expect("write source metadata");
+        std::fs::write(
+            source.path().join(SOURCE_MARKER_FILE),
+            br#"{"source":"local"}"#,
+        )
+        .expect("write source metadata");
 
         copy_workspace_local_skill_dir(source.path(), &copy).expect("copy workspace-local skill");
 

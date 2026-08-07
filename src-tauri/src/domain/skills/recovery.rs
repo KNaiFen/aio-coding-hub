@@ -105,10 +105,7 @@ impl SkillRecoveryContext {
                 workspace_id,
                 skill_id,
                 ..
-            } => {
-                entry.workspace_id == Some(*workspace_id)
-                    && entry.entity_id == Some(*skill_id)
-            }
+            } => entry.workspace_id == Some(*workspace_id) && entry.entity_id == Some(*skill_id),
             Self::Uninstall { skill_id, .. } => {
                 entry.workspace_id.is_none() && entry.entity_id == Some(*skill_id)
             }
@@ -235,18 +232,27 @@ fn artifact_context_json(context: &SkillRecoveryContext) -> AppResult<String> {
 
 fn artifact_role_path(root: &Path, role: &str) -> AppResult<PathBuf> {
     if !matches!(role, "desired" | "previous") {
-        return Err(AppError::new("RECOVERY_ARTIFACT_INVALID", "恢复制品角色无效"));
+        return Err(AppError::new(
+            "RECOVERY_ARTIFACT_INVALID",
+            "恢复制品角色无效",
+        ));
     }
     Ok(root.join(role))
 }
 
 fn validate_artifact_role(role: &ArtifactRole, root: &Path) -> AppResult<PathBuf> {
     if role.relative_path != "desired" && role.relative_path != "previous" {
-        return Err(AppError::new("RECOVERY_ARTIFACT_INVALID", "恢复制品路径无效"));
+        return Err(AppError::new(
+            "RECOVERY_ARTIFACT_INVALID",
+            "恢复制品路径无效",
+        ));
     }
     let path = root.join(&role.relative_path);
     if !path.starts_with(root) || is_symlink_or_junction(&path) {
-        return Err(AppError::new("RECOVERY_ARTIFACT_INVALID", "恢复制品路径不受信任"));
+        return Err(AppError::new(
+            "RECOVERY_ARTIFACT_INVALID",
+            "恢复制品路径不受信任",
+        ));
     }
     Ok(path)
 }
@@ -269,10 +275,7 @@ fn validate_root_entries(
     for entry in entries {
         let entry = entry.map_err(|error| format!("failed to inspect artifact entry: {error}"))?;
         let name = entry.file_name().into_string().map_err(|_| {
-            AppError::new(
-                "RECOVERY_ARTIFACT_INVALID",
-                "恢复制品包含非 UTF-8 文件名",
-            )
+            AppError::new("RECOVERY_ARTIFACT_INVALID", "恢复制品包含非 UTF-8 文件名")
         })?;
         if !allowed.contains(&name) || is_symlink_or_junction(&entry.path()) {
             return Err(AppError::new(
@@ -304,7 +307,10 @@ pub(super) fn stage_artifact<R: tauri::Runtime>(
     ensure_safe_directory(&root)?;
 
     let result = (|| {
-        write_file_atomic(&root.join(ARTIFACT_OWNER_FILE), operation.operation_id().as_bytes())?;
+        write_file_atomic(
+            &root.join(ARTIFACT_OWNER_FILE),
+            operation.operation_id().as_bytes(),
+        )?;
         let mut roles = BTreeMap::new();
         for (role, source) in role_sources {
             let target = artifact_role_path(&root, role)?;
@@ -335,9 +341,8 @@ pub(super) fn stage_artifact<R: tauri::Runtime>(
             roles: roles.clone(),
             source_sha256: source_sha256.clone(),
         };
-        let bytes = serde_json::to_vec(&manifest).map_err(|_| {
-            AppError::new("RECOVERY_ARTIFACT_INVALID", "无法序列化恢复制品清单")
-        })?;
+        let bytes = serde_json::to_vec(&manifest)
+            .map_err(|_| AppError::new("RECOVERY_ARTIFACT_INVALID", "无法序列化恢复制品清单"))?;
         let digest = sha256_hex(&bytes);
         write_file_atomic(&root.join(ARTIFACT_MANIFEST_FILE), &bytes)?;
         validate_root_entries(&root, &roles, source_sha256.is_some())?;
@@ -351,9 +356,13 @@ pub(super) fn stage_artifact<R: tauri::Runtime>(
         Err(primary) => match remove_owned_artifact(app, operation.operation_id(), None) {
             Ok(()) => Err(primary),
             Err(cleanup) => Err(AppError::new(
+                primary.code(),
+                format!(
+                    "{}; recovery_artifact_cleanup={}",
                     primary.code(),
-                    format!("{}; recovery_artifact_cleanup={}", primary.code(), cleanup.code()),
-                )),
+                    cleanup.code()
+                ),
+            )),
         },
     }
 }
@@ -364,50 +373,69 @@ fn load_artifact<R: tauri::Runtime>(
     expected_context: Option<&SkillRecoveryContext>,
 ) -> AppResult<LoadedArtifact> {
     let Some(reference) = entry.artifact_ref.as_deref() else {
-        return Err(AppError::new("RECOVERY_ARTIFACT_MISSING", "恢复操作缺少制品引用"));
+        return Err(AppError::new(
+            "RECOVERY_ARTIFACT_MISSING",
+            "恢复操作缺少制品引用",
+        ));
     };
     if reference != entry.operation_id || !crate::shared::uuid::is_canonical_uuid_v4(reference) {
-        return Err(AppError::new("RECOVERY_ARTIFACT_INVALID", "恢复制品引用无效"));
+        return Err(AppError::new(
+            "RECOVERY_ARTIFACT_INVALID",
+            "恢复制品引用无效",
+        ));
     }
     let root = artifact_root(app)?.join(reference);
     let metadata = std::fs::symlink_metadata(&root)
         .map_err(|_| AppError::new("RECOVERY_ARTIFACT_MISSING", "恢复制品不存在"))?;
     if metadata.file_type().is_symlink() || is_symlink_or_junction(&root) || !metadata.is_dir() {
-        return Err(AppError::new("RECOVERY_ARTIFACT_INVALID", "恢复制品目录不安全"));
+        return Err(AppError::new(
+            "RECOVERY_ARTIFACT_INVALID",
+            "恢复制品目录不安全",
+        ));
     }
     let owner = read_file_with_max_len(&root.join(ARTIFACT_OWNER_FILE), 128)?;
     if owner != entry.operation_id.as_bytes() {
-        return Err(AppError::new("RECOVERY_ARTIFACT_INVALID", "恢复制品所有权不匹配"));
-    }
-    let manifest_bytes = read_file_with_max_len(&root.join(ARTIFACT_MANIFEST_FILE), ARTIFACT_MAX_BYTES)?;
-    let actual_digest = sha256_hex(&manifest_bytes);
-    let expected_digest = entry.artifact_sha256.as_deref().ok_or_else(|| {
-        AppError::new(
+        return Err(AppError::new(
             "RECOVERY_ARTIFACT_INVALID",
-            "恢复日志缺少制品摘要",
-        )
-    })?;
+            "恢复制品所有权不匹配",
+        ));
+    }
+    let manifest_bytes =
+        read_file_with_max_len(&root.join(ARTIFACT_MANIFEST_FILE), ARTIFACT_MAX_BYTES)?;
+    let actual_digest = sha256_hex(&manifest_bytes);
+    let expected_digest = entry
+        .artifact_sha256
+        .as_deref()
+        .ok_or_else(|| AppError::new("RECOVERY_ARTIFACT_INVALID", "恢复日志缺少制品摘要"))?;
     if expected_digest != actual_digest {
-        return Err(AppError::new("RECOVERY_ARTIFACT_INVALID", "恢复制品摘要不匹配"));
+        return Err(AppError::new(
+            "RECOVERY_ARTIFACT_INVALID",
+            "恢复制品摘要不匹配",
+        ));
     }
     let manifest: ArtifactManifest = serde_json::from_slice(&manifest_bytes)
         .map_err(|_| AppError::new("RECOVERY_ARTIFACT_INVALID", "恢复制品清单损坏"))?;
     if manifest.schema_version != 1 || manifest.operation_id != entry.operation_id {
-        return Err(AppError::new("RECOVERY_ARTIFACT_INVALID", "恢复制品清单不匹配"));
+        return Err(AppError::new(
+            "RECOVERY_ARTIFACT_INVALID",
+            "恢复制品清单不匹配",
+        ));
     }
     validate_root_entries(&root, &manifest.roles, manifest.source_sha256.is_some())?;
     for role in manifest.roles.values() {
         let path = validate_artifact_role(role, &root)?;
         if skill_dir_content_hash(&path)? != role.content_hash {
-            return Err(AppError::new("RECOVERY_ARTIFACT_INVALID", "恢复制品内容摘要不匹配"));
+            return Err(AppError::new(
+                "RECOVERY_ARTIFACT_INVALID",
+                "恢复制品内容摘要不匹配",
+            ));
         }
     }
     let source_path = root.join(ARTIFACT_SOURCE_FILE);
     let source_metadata = match manifest.source_sha256.as_deref() {
         Some(expected_source_digest) => {
-            let metadata = std::fs::symlink_metadata(&source_path).map_err(|_| {
-                AppError::new("RECOVERY_ARTIFACT_INVALID", "制品来源元数据缺失")
-            })?;
+            let metadata = std::fs::symlink_metadata(&source_path)
+                .map_err(|_| AppError::new("RECOVERY_ARTIFACT_INVALID", "制品来源元数据缺失"))?;
             if metadata.file_type().is_symlink()
                 || is_symlink_or_junction(&source_path)
                 || !metadata.is_file()
@@ -424,9 +452,11 @@ fn load_artifact<R: tauri::Runtime>(
                     "制品来源元数据摘要不匹配",
                 ));
             }
-            Some(serde_json::from_slice(&bytes).map_err(|_| {
-                AppError::new("RECOVERY_ARTIFACT_INVALID", "制品来源元数据损坏")
-            })?)
+            Some(
+                serde_json::from_slice(&bytes).map_err(|_| {
+                    AppError::new("RECOVERY_ARTIFACT_INVALID", "制品来源元数据损坏")
+                })?,
+            )
         }
         None => match std::fs::symlink_metadata(&source_path) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
@@ -466,7 +496,10 @@ fn remove_owned_artifact<R: tauri::Runtime>(
     let metadata = std::fs::symlink_metadata(&root)
         .map_err(|_| AppError::new("RECOVERY_ARTIFACT_INVALID", "无法检查恢复制品目录"))?;
     if metadata.file_type().is_symlink() || is_symlink_or_junction(&root) || !metadata.is_dir() {
-        return Err(AppError::new("RECOVERY_ARTIFACT_INVALID", "恢复制品目录不安全"));
+        return Err(AppError::new(
+            "RECOVERY_ARTIFACT_INVALID",
+            "恢复制品目录不安全",
+        ));
     }
     let owner_path = root.join(ARTIFACT_OWNER_FILE);
     if !exists_or_is_link(&owner_path) {
@@ -485,7 +518,10 @@ fn remove_owned_artifact<R: tauri::Runtime>(
     }
     let owner = read_file_with_max_len(&owner_path, 128)?;
     if owner != operation_id.as_bytes() {
-        return Err(AppError::new("RECOVERY_ARTIFACT_INVALID", "恢复制品所有权不匹配"));
+        return Err(AppError::new(
+            "RECOVERY_ARTIFACT_INVALID",
+            "恢复制品所有权不匹配",
+        ));
     }
     let entry = JournalEntry {
         operation_id: operation_id.to_string(),
@@ -505,7 +541,10 @@ fn remove_owned_artifact<R: tauri::Runtime>(
             let _ = load_artifact(app, &entry, None)?;
         }
     } else if expected_digest.is_some() {
-        return Err(AppError::new("RECOVERY_ARTIFACT_INVALID", "恢复制品清单缺失"));
+        return Err(AppError::new(
+            "RECOVERY_ARTIFACT_INVALID",
+            "恢复制品清单缺失",
+        ));
     }
     validate_artifact_tree_for_removal(&root)?;
     std::fs::remove_dir_all(&root)
@@ -602,7 +641,9 @@ fn sync_all_skills<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     conn: &rusqlite::Connection,
 ) -> AppResult<()> {
-    for cli_key in crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::Skills) {
+    for cli_key in
+        crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::Skills)
+    {
         sync_one_cli(app, conn, cli_key)?;
     }
     Ok(())
@@ -610,7 +651,10 @@ fn sync_all_skills<R: tauri::Runtime>(
 
 fn context_for_entry(entry: &JournalEntry) -> AppResult<SkillRecoveryContext> {
     let Some(raw) = entry.replay_context.as_deref() else {
-        return Err(AppError::new("RECOVERY_ARTIFACT_INVALID", "Skill 恢复上下文缺失"));
+        return Err(AppError::new(
+            "RECOVERY_ARTIFACT_INVALID",
+            "Skill 恢复上下文缺失",
+        ));
     };
     let context: SkillRecoveryContext = serde_json::from_str(raw)
         .map_err(|_| AppError::new("RECOVERY_ARTIFACT_INVALID", "Skill 恢复上下文损坏"))?;
@@ -727,7 +771,10 @@ fn replay_install<R: tauri::Runtime>(
         skill_key,
     } = context
     else {
-        return Err(AppError::new("RECOVERY_ARTIFACT_INVALID", "Skill 安装恢复上下文不匹配"));
+        return Err(AppError::new(
+            "RECOVERY_ARTIFACT_INVALID",
+            "Skill 安装恢复上下文不匹配",
+        ));
     };
     let desired_hash = role_hash(artifact, "desired")?;
     let Some(installed_hash) =
@@ -736,7 +783,10 @@ fn replay_install<R: tauri::Runtime>(
         return Ok(());
     };
     if installed_hash != desired_hash {
-        return Err(AppError::new("RECOVERY_ARTIFACT_INVALID", "Skill 安装内容与 SQLite 不一致"));
+        return Err(AppError::new(
+            "RECOVERY_ARTIFACT_INVALID",
+            "Skill 安装内容与 SQLite 不一致",
+        ));
     }
     project_ssot_from_role(app, skill_key, artifact, "desired", None)?;
     let _ = workspace_id;
@@ -756,7 +806,10 @@ fn replay_import_local<R: tauri::Runtime>(
         local_dir_name,
     } = context
     else {
-        return Err(AppError::new("RECOVERY_ARTIFACT_INVALID", "本地导入恢复上下文不匹配"));
+        return Err(AppError::new(
+            "RECOVERY_ARTIFACT_INVALID",
+            "本地导入恢复上下文不匹配",
+        ));
     };
     let desired_hash = role_hash(artifact, "desired")?;
     let Some(installed_hash) =
@@ -772,7 +825,9 @@ fn replay_import_local<R: tauri::Runtime>(
     }
     project_ssot_from_role(app, skill_key, artifact, "desired", None)?;
     let local_dir = cli_skills_root(app, cli_key)?.join(local_dir_name);
-    if exists_or_is_link(&local_dir) && !is_managed_link_to_ssot(&local_dir, &ssot_skills_root(app)?) {
+    if exists_or_is_link(&local_dir)
+        && !is_managed_link_to_ssot(&local_dir, &ssot_skills_root(app)?)
+    {
         if is_symlink_or_junction(&local_dir)
             || !local_dir.is_dir()
             || skill_dir_content_hash(&local_dir)? != role_hash(artifact, "desired")?
@@ -797,7 +852,10 @@ fn replay_update<R: tauri::Runtime>(
         skill_key,
     } = context
     else {
-        return Err(AppError::new("RECOVERY_ARTIFACT_INVALID", "Skill 更新恢复上下文不匹配"));
+        return Err(AppError::new(
+            "RECOVERY_ARTIFACT_INVALID",
+            "Skill 更新恢复上下文不匹配",
+        ));
     };
     let desired_hash = role_hash(artifact, "desired")?;
     let previous_hash = role_hash(artifact, "previous")?;
@@ -807,11 +865,14 @@ fn replay_update<R: tauri::Runtime>(
         Some(*skill_id),
         skill_key,
         &[desired_hash, previous_hash],
-    )? else {
+    )?
+    else {
         let ssot_dir = ssot_skills_root(app)?.join(skill_key);
         if exists_or_is_link(&ssot_dir) {
             if is_symlink_or_junction(&ssot_dir) || !ssot_dir.is_dir() {
-                return Err(format!("RECOVERY_PROJECTION_UNSAFE_TARGET: {}", ssot_dir.display()).into());
+                return Err(
+                    format!("RECOVERY_PROJECTION_UNSAFE_TARGET: {}", ssot_dir.display()).into(),
+                );
             }
             let actual_hash = skill_dir_content_hash(&ssot_dir)?;
             if actual_hash != desired_hash && actual_hash != previous_hash {
@@ -829,7 +890,10 @@ fn replay_update<R: tauri::Runtime>(
     if hash == previous_hash {
         return project_ssot_from_role(app, skill_key, artifact, "previous", Some(desired_hash));
     }
-    Err(AppError::new("RECOVERY_ARTIFACT_INVALID", "Skill 更新状态与制品不一致"))
+    Err(AppError::new(
+        "RECOVERY_ARTIFACT_INVALID",
+        "Skill 更新状态与制品不一致",
+    ))
 }
 
 fn replay_uninstall<R: tauri::Runtime>(
@@ -841,17 +905,16 @@ fn replay_uninstall<R: tauri::Runtime>(
     let SkillRecoveryContext::Uninstall {
         skill_id,
         skill_key,
-    } = context else {
-        return Err(AppError::new("RECOVERY_ARTIFACT_INVALID", "Skill 卸载恢复上下文不匹配"));
+    } = context
+    else {
+        return Err(AppError::new(
+            "RECOVERY_ARTIFACT_INVALID",
+            "Skill 卸载恢复上下文不匹配",
+        ));
     };
     let previous_hash = role_hash(artifact, "previous")?;
-    let installed_hash = installed_hash_for_replay(
-        app,
-        conn,
-        Some(*skill_id),
-        skill_key,
-        &[previous_hash],
-    )?;
+    let installed_hash =
+        installed_hash_for_replay(app, conn, Some(*skill_id), skill_key, &[previous_hash])?;
     if let Some(installed_hash) = installed_hash {
         if installed_hash != previous_hash {
             return Err(AppError::new(
@@ -861,10 +924,15 @@ fn replay_uninstall<R: tauri::Runtime>(
         }
         return project_ssot_from_role(app, skill_key, artifact, "previous", None);
     }
-    for cli_key in crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::Skills) {
+    for cli_key in
+        crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::Skills)
+    {
         remove_from_cli(app, cli_key, skill_key)?;
     }
-    remove_directory_if_hash_matches(&ssot_skills_root(app)?.join(skill_key), role_hash(artifact, "previous")?)
+    remove_directory_if_hash_matches(
+        &ssot_skills_root(app)?.join(skill_key),
+        role_hash(artifact, "previous")?,
+    )
 }
 
 fn replay_return_to_local<R: tauri::Runtime>(
@@ -880,16 +948,14 @@ fn replay_return_to_local<R: tauri::Runtime>(
         skill_key,
     } = context
     else {
-        return Err(AppError::new("RECOVERY_ARTIFACT_INVALID", "返回本地恢复上下文不匹配"));
+        return Err(AppError::new(
+            "RECOVERY_ARTIFACT_INVALID",
+            "返回本地恢复上下文不匹配",
+        ));
     };
     let previous_hash = role_hash(artifact, "previous")?;
-    let installed_hash = installed_hash_for_replay(
-        app,
-        conn,
-        Some(*skill_id),
-        skill_key,
-        &[previous_hash],
-    )?;
+    let installed_hash =
+        installed_hash_for_replay(app, conn, Some(*skill_id), skill_key, &[previous_hash])?;
     if let Some(installed_hash) = installed_hash {
         if installed_hash != previous_hash {
             return Err(AppError::new(
@@ -901,7 +967,9 @@ fn replay_return_to_local<R: tauri::Runtime>(
     }
     let local_target = cli_skills_root(app, cli_key)?.join(skill_key);
     if exists_or_is_link(&local_target) {
-        if is_managed_dir(&local_target) || is_managed_link_to_ssot(&local_target, &ssot_skills_root(app)?) {
+        if is_managed_dir(&local_target)
+            || is_managed_link_to_ssot(&local_target, &ssot_skills_root(app)?)
+        {
             remove_managed_dir(&local_target)?;
         } else if is_symlink_or_junction(&local_target)
             || !local_target.is_dir()
@@ -918,7 +986,10 @@ fn replay_return_to_local<R: tauri::Runtime>(
     }
     remove_marker(&local_target)?;
     remove_managed_targets_except(app, skill_key, &local_target)?;
-    remove_directory_if_hash_matches(&ssot_skills_root(app)?.join(skill_key), role_hash(artifact, "previous")?)?;
+    remove_directory_if_hash_matches(
+        &ssot_skills_root(app)?.join(skill_key),
+        role_hash(artifact, "previous")?,
+    )?;
     let _ = workspace_id;
     Ok(())
 }
@@ -934,7 +1005,10 @@ fn replay_install_to_local<R: tauri::Runtime>(
         dir_name,
     } = context
     else {
-        return Err(AppError::new("RECOVERY_ARTIFACT_INVALID", "本地安装恢复上下文不匹配"));
+        return Err(AppError::new(
+            "RECOVERY_ARTIFACT_INVALID",
+            "本地安装恢复上下文不匹配",
+        ));
     };
     let local_dir = cli_skills_root(app, cli_key)?.join(dir_name);
     if exists_or_is_link(&local_dir) {
@@ -965,7 +1039,10 @@ fn replay_delete_local<R: tauri::Runtime>(
         dir_name,
     } = context
     else {
-        return Err(AppError::new("RECOVERY_ARTIFACT_INVALID", "本地删除恢复上下文不匹配"));
+        return Err(AppError::new(
+            "RECOVERY_ARTIFACT_INVALID",
+            "本地删除恢复上下文不匹配",
+        ));
     };
     let local_dir = cli_skills_root(app, cli_key)?.join(dir_name);
     remove_directory_if_hash_matches(&local_dir, role_hash(artifact, "previous")?)?;
@@ -992,11 +1069,17 @@ pub(crate) fn replay_recovery_operation<R: tauri::Runtime>(
     let conn = db.open_connection()?;
     match &context {
         SkillRecoveryContext::Install { .. } => replay_install(app, &conn, &context, &artifact),
-        SkillRecoveryContext::ImportLocal { .. } => replay_import_local(app, &conn, &context, &artifact),
+        SkillRecoveryContext::ImportLocal { .. } => {
+            replay_import_local(app, &conn, &context, &artifact)
+        }
         SkillRecoveryContext::Update { .. } => replay_update(app, &conn, &context, &artifact),
         SkillRecoveryContext::Uninstall { .. } => replay_uninstall(app, &conn, &context, &artifact),
-        SkillRecoveryContext::ReturnToLocal { .. } => replay_return_to_local(app, &conn, &context, &artifact),
-        SkillRecoveryContext::InstallToLocal { .. } => replay_install_to_local(app, &context, &artifact),
+        SkillRecoveryContext::ReturnToLocal { .. } => {
+            replay_return_to_local(app, &conn, &context, &artifact)
+        }
+        SkillRecoveryContext::InstallToLocal { .. } => {
+            replay_install_to_local(app, &context, &artifact)
+        }
         SkillRecoveryContext::DeleteLocal { .. } => replay_delete_local(app, &context, &artifact),
     }
 }
@@ -1034,8 +1117,8 @@ mod tests {
             std::env::set_var("AIO_CODING_HUB_TEST_HOME", home.path());
             crate::test_support::clear_settings_cache();
             let app = tauri::test::mock_app();
-            let db = db::init_for_tests(&home.path().join("recovery.sqlite"))
-                .expect("init recovery db");
+            let db =
+                db::init_for_tests(&home.path().join("recovery.sqlite")).expect("init recovery db");
             Self {
                 _lock: lock,
                 previous_test_home,
@@ -1062,11 +1145,8 @@ mod tests {
 
     fn write_skill(path: &Path, name: &str) {
         std::fs::create_dir_all(path).expect("create skill dir");
-        std::fs::write(
-            path.join("SKILL.md"),
-            format!("---\nname: {name}\n---\n"),
-        )
-        .expect("write skill");
+        std::fs::write(path.join("SKILL.md"), format!("---\nname: {name}\n---\n"))
+            .expect("write skill");
     }
 
     fn loaded_update_artifact(root: &Path) -> LoadedArtifact {
@@ -1148,8 +1228,7 @@ INSERT INTO skills(
             source_sha256: Some(sha256_hex(&source_bytes)),
         };
         let manifest_bytes = serde_json::to_vec(&manifest).expect("serialize manifest");
-        std::fs::write(root.join(ARTIFACT_MANIFEST_FILE), &manifest_bytes)
-            .expect("write manifest");
+        std::fs::write(root.join(ARTIFACT_MANIFEST_FILE), &manifest_bytes).expect("write manifest");
         let context = SkillRecoveryContext::Install {
             workspace_id: 1,
             skill_key: "demo".to_string(),
@@ -1209,8 +1288,7 @@ INSERT INTO skills(
         let conn = test.db.open_connection().expect("open db");
         insert_legacy_skill(&conn, 42, "demo");
 
-        replay_update(&test.handle(), &conn, &context, &artifact)
-            .expect("replay legacy update");
+        replay_update(&test.handle(), &conn, &context, &artifact).expect("replay legacy update");
 
         let stored: String = conn
             .query_row(
@@ -1283,8 +1361,7 @@ INSERT INTO skills(
     fn artifact_manifest_tampering_is_rejected() {
         let test = RecoveryTestApp::new();
         let (entry, context, root) = write_owned_artifact(&test);
-        std::fs::write(root.join(ARTIFACT_MANIFEST_FILE), b"{}")
-            .expect("tamper manifest");
+        std::fs::write(root.join(ARTIFACT_MANIFEST_FILE), b"{}").expect("tamper manifest");
 
         let error = load_artifact(&test.handle(), &entry, Some(&context))
             .expect_err("manifest tampering must fail");
@@ -1296,8 +1373,7 @@ INSERT INTO skills(
     fn artifact_role_tampering_is_rejected() {
         let test = RecoveryTestApp::new();
         let (entry, context, root) = write_owned_artifact(&test);
-        std::fs::write(root.join("desired").join("SKILL.md"), "tampered")
-            .expect("tamper role");
+        std::fs::write(root.join("desired").join("SKILL.md"), "tampered").expect("tamper role");
 
         let error = load_artifact(&test.handle(), &entry, Some(&context))
             .expect_err("role tampering must fail");
@@ -1309,8 +1385,7 @@ INSERT INTO skills(
     fn artifact_source_tampering_is_rejected() {
         let test = RecoveryTestApp::new();
         let (entry, context, root) = write_owned_artifact(&test);
-        std::fs::write(root.join(ARTIFACT_SOURCE_FILE), b"{}")
-            .expect("tamper source");
+        std::fs::write(root.join(ARTIFACT_SOURCE_FILE), b"{}").expect("tamper source");
 
         let error = load_artifact(&test.handle(), &entry, Some(&context))
             .expect_err("source tampering must fail");
@@ -1322,8 +1397,7 @@ INSERT INTO skills(
     fn cleanup_preserves_registered_artifact_after_content_tampering() {
         let test = RecoveryTestApp::new();
         let (entry, _context, root) = write_owned_artifact(&test);
-        std::fs::write(root.join("desired").join("SKILL.md"), "tampered")
-            .expect("tamper role");
+        std::fs::write(root.join("desired").join("SKILL.md"), "tampered").expect("tamper role");
 
         let error = cleanup_recovery_operation(&test.handle(), &entry)
             .expect_err("tampered artifact cleanup must fail closed");

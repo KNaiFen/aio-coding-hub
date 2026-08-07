@@ -2,11 +2,7 @@
 
 use rusqlite::{Connection, OptionalExtension};
 
-fn column_exists(
-    conn: &Connection,
-    table: &str,
-    column: &str,
-) -> Result<bool, String> {
+fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool, String> {
     conn.query_row(
         "SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2 LIMIT 1",
         (table, column),
@@ -26,8 +22,10 @@ fn add_column_if_missing(
     if column_exists(conn, table, column)? {
         return Ok(());
     }
-    conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {definition};"))
-        .map_err(|error| format!("failed to add {table}.{column}: {error}"))
+    conn.execute_batch(&format!(
+        "ALTER TABLE {table} ADD COLUMN {column} {definition};"
+    ))
+    .map_err(|error| format!("failed to add {table}.{column}: {error}"))
 }
 
 pub(super) fn create_recovery_claim_schema(conn: &Connection) -> Result<(), String> {

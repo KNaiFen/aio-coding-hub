@@ -1,7 +1,7 @@
 use super::fs_ops::{
-    create_skill_link, exists_or_is_link, has_skill_md, is_managed_dir,
-    is_managed_link_to_ssot, is_symlink, is_symlink_or_junction, remove_managed_dir,
-    skill_dir_content_hash, SkillSourceMetadata,
+    create_skill_link, exists_or_is_link, has_skill_md, is_managed_dir, is_managed_link_to_ssot,
+    is_symlink, is_symlink_or_junction, remove_managed_dir, skill_dir_content_hash,
+    SkillSourceMetadata,
 };
 use super::installed::{generate_unique_skill_key, get_skill_by_id, get_skill_by_id_for_workspace};
 use super::local::managed_marker_belongs_to_installed_skill;
@@ -81,11 +81,9 @@ pub(super) fn ensure_installed_content_hash(
                 )
                 .map_err(|e| db_err!("failed to backfill installed skill content hash: {e}"))?;
             if changed != 1 {
-                return Err(
-                    "RECOVERY_JOURNAL_STATE_CONFLICT: skill hash changed"
-                        .to_string()
-                        .into(),
-                );
+                return Err("RECOVERY_JOURNAL_STATE_CONFLICT: skill hash changed"
+                    .to_string()
+                    .into());
             }
             Ok(actual)
         }
@@ -238,7 +236,13 @@ LIMIT 1
         workspace_id,
         skill_key: skill_key.clone(),
     };
-    let artifact = stage_artifact(app, operation, &context, &[("desired", src_dir.as_path())], None)?;
+    let artifact = stage_artifact(
+        app,
+        operation,
+        &context,
+        &[("desired", src_dir.as_path())],
+        None,
+    )?;
     let installed_content_hash = artifact.role_hash("desired")?.to_string();
 
     let tx = conn
@@ -353,8 +357,7 @@ ON CONFLICT(workspace_id, skill_id) DO UPDATE SET
         .map_err(|e| db_err!("failed to disable skill: {e}"))?;
     }
 
-    tx.commit()
-        .map_err(|e| db_err!("failed to commit: {e}"))?;
+    tx.commit().map_err(|e| db_err!("failed to commit: {e}"))?;
 
     operation.mark_authoritative_committed();
     get_skill_by_id_for_workspace(&conn, workspace_id, skill_id)

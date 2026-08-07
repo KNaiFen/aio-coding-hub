@@ -290,11 +290,9 @@ fn mcp_import_from_workspace_cli_precommit_failure_preserves_target_bytes() {
         aio_coding_hub_lib::test_support::workspace_active_id_by_cli(&handle, "claude")
             .expect("claude active workspace");
 
-    let error = aio_coding_hub_lib::test_support::mcp_import_from_workspace_cli_json(
-        &handle,
-        workspace_id,
-    )
-    .expect_err("invalid target must fail before the SQLite commit");
+    let error =
+        aio_coding_hub_lib::test_support::mcp_import_from_workspace_cli_json(&handle, workspace_id)
+            .expect_err("invalid target must fail before the SQLite commit");
 
     assert_eq!(error.code(), "SEC_INVALID_INPUT");
     assert_eq!(

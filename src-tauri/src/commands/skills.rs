@@ -190,9 +190,7 @@ pub(crate) async fn skill_set_enabled(
             entity_id: Some(skill_id),
             ..JournalContext::default()
         },
-        move |operation| {
-            skills::set_enabled(&app, &db, workspace_id, skill_id, enabled, operation)
-        },
+        move |operation| skills::set_enabled(&app, &db, workspace_id, skill_id, enabled, operation),
     )
     .await
     .map_err(Into::into)
