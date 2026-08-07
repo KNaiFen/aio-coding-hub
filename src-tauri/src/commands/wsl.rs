@@ -195,6 +195,11 @@ pub(crate) async fn wsl_configure_clients(
     let port = status
         .port
         .ok_or_else(|| "gateway_start returned no port".to_string())?;
+    let gateway_bearer_token = crate::gateway::access_token::pending_plaintext_for_internal_sync(&app)
+        .ok_or_else(|| {
+            "WSL_GATEWAY_TOKEN_REVEAL_REQUIRED: rotate the Gateway Bearer token before configuring WSL clients"
+                .to_string()
+        })?;
 
     let host =
         match resolve_wsl_host_blocking(cfg.clone(), "wsl_configure_clients_resolve_host").await {
@@ -240,9 +245,12 @@ pub(crate) async fn wsl_configure_clients(
                 &distros,
                 &targets,
                 &proxy_origin,
-                Some(&mcp_data),
-                Some(&prompt_data),
-                Some(&skills_data),
+                wsl::WslConfigureData {
+                    gateway_bearer_token: Some(&gateway_bearer_token),
+                    mcp_data: Some(&mcp_data),
+                    prompt_data: Some(&prompt_data),
+                    skills_data: Some(&skills_data),
+                },
             ))
         },
     )
@@ -301,6 +309,8 @@ pub(crate) async fn wsl_auto_sync_core(app: &tauri::AppHandle) -> Result<(), Str
     let proxy_origin = format!("http://{}", gateway::listen::format_host_port(&host, port));
     let targets = cfg.wsl_target_cli;
     let distros = detection.distros;
+    let gateway_bearer_token =
+        crate::gateway::access_token::pending_plaintext_for_internal_sync(app);
 
     // 5. Gather MCP, Prompt, and Skills sync data
     let db_state = app.state::<DbInitState>();
@@ -334,9 +344,12 @@ pub(crate) async fn wsl_auto_sync_core(app: &tauri::AppHandle) -> Result<(), Str
                 &distros,
                 &targets,
                 &proxy_origin,
-                Some(&mcp_data),
-                Some(&prompt_data),
-                Some(&skills_data),
+                wsl::WslConfigureData {
+                    gateway_bearer_token: gateway_bearer_token.as_deref(),
+                    mcp_data: Some(&mcp_data),
+                    prompt_data: Some(&prompt_data),
+                    skills_data: Some(&skills_data),
+                },
             ))
         },
     )
@@ -351,7 +364,14 @@ pub(crate) async fn wsl_auto_sync_core(app: &tauri::AppHandle) -> Result<(), Str
 
     crate::app::heartbeat_watchdog::gated_emit(app, "wsl:auto_config_result", &report);
 
-    Ok(())
+    if report.ok {
+        Ok(())
+    } else {
+        Err(
+            "WSL_GATEWAY_TOKEN_SYNC_FAILED: one or more WSL clients rejected Gateway authentication"
+                .to_string(),
+        )
+    }
 }
 
 #[cfg(test)]
@@ -543,6 +563,8 @@ async fn do_wsl_auto_configure(
     let proxy_origin = format!("http://{}", gateway::listen::format_host_port(&host, port));
 
     let targets = cfg.wsl_target_cli;
+    let gateway_bearer_token =
+        crate::gateway::access_token::pending_plaintext_for_internal_sync(app);
 
     // Gather MCP, Prompt, and Skills sync data
     let (mcp_data, prompt_data, skills_data) = blocking::run("wsl_startup_gather_sync_data", {
@@ -573,9 +595,12 @@ async fn do_wsl_auto_configure(
                 &distros_owned,
                 &targets,
                 &proxy_origin,
-                Some(&mcp_data),
-                Some(&prompt_data),
-                Some(&skills_data),
+                wsl::WslConfigureData {
+                    gateway_bearer_token: gateway_bearer_token.as_deref(),
+                    mcp_data: Some(&mcp_data),
+                    prompt_data: Some(&prompt_data),
+                    skills_data: Some(&skills_data),
+                },
             ))
         },
     )
@@ -590,5 +615,12 @@ async fn do_wsl_auto_configure(
 
     crate::app::heartbeat_watchdog::gated_emit(app, "wsl:auto_config_result", &report);
 
-    Ok(())
+    if report.ok {
+        Ok(())
+    } else {
+        Err(
+            "WSL_GATEWAY_TOKEN_SYNC_FAILED: one or more WSL clients rejected Gateway authentication"
+                .to_string(),
+        )
+    }
 }

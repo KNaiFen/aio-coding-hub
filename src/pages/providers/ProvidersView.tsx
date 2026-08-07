@@ -109,7 +109,6 @@ export function ProvidersView({
     openCreateDialog,
     toggleProviderEnabled,
     resetCircuit,
-    copyTerminalLaunchCommand,
     duplicateProvider,
     handleProviderCardDragEnd,
     sensors,
@@ -123,7 +122,6 @@ export function ProvidersView({
     confirmRemoveProvider,
     sourceProviderNamesById,
     sourceProvidersById,
-    terminalCopyingByProviderId,
     duplicatingByProviderId,
     testProviderAvailability,
     testingByProviderId,
@@ -381,10 +379,6 @@ export function ProvidersView({
                           }
                           onToggleEnabled={toggleProviderEnabled}
                           onResetCircuit={resetCircuit}
-                          onCopyTerminalLaunchCommand={
-                            provider.cli_key === "claude" ? copyTerminalLaunchCommand : undefined
-                          }
-                          terminalLaunchCopying={Boolean(terminalCopyingByProviderId[provider.id])}
                           onTestAvailability={testProviderAvailability}
                           testAvailabilityLoading={Boolean(testingByProviderId[provider.id])}
                           onManageModels={

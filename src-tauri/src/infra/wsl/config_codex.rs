@@ -1,16 +1,17 @@
 //! WSL Codex CLI configuration.
 
-use super::constants::{WSL_CODEX_API_KEY, WSL_CODEX_PROVIDER_KEY};
+use super::constants::WSL_CODEX_PROVIDER_KEY;
 use super::shell::{bash_single_quote, run_wsl_bash_script, wsl_resolve_codex_home_script};
 
 pub(super) fn configure_wsl_codex(
     distro: &str,
     proxy_origin: &str,
+    gateway_bearer_token: &str,
 ) -> crate::shared::error::AppResult<()> {
     let base_url = format!("{proxy_origin}/v1");
     let base_url = bash_single_quote(&base_url);
     let provider_key = bash_single_quote(WSL_CODEX_PROVIDER_KEY);
-    let api_key = bash_single_quote(WSL_CODEX_API_KEY);
+    let api_key = bash_single_quote(gateway_bearer_token);
 
     let script = format!(
         r#"
@@ -37,6 +38,7 @@ fi
 base_url={base_url}
 provider_key={provider_key}
 api_key={api_key}
+export AIO_GATEWAY_TOKEN="$api_key"
 
 ts="$(date +%s)"
 [ -f "$config_path" ] && cp -a "$config_path" "$config_path.bak.$ts"
@@ -177,18 +179,20 @@ if command -v jq >/dev/null 2>&1; then
       echo "Refusing to modify: $auth_path must be a JSON object." >&2
       exit 2
     fi
-    jq --arg api_key "$api_key" '.OPENAI_API_KEY = $api_key' "$auth_path" > "$tmp_auth"
+    jq '.OPENAI_API_KEY = env.AIO_GATEWAY_TOKEN' "$auth_path" > "$tmp_auth"
   else
-    jq -n --arg api_key "$api_key" '{{OPENAI_API_KEY:$api_key}}' > "$tmp_auth"
+    jq -n '{{OPENAI_API_KEY:env.AIO_GATEWAY_TOKEN}}' > "$tmp_auth"
   fi
-  jq -e --arg api_key "$api_key" '.OPENAI_API_KEY == $api_key' "$tmp_auth" >/dev/null
+  jq -e '.OPENAI_API_KEY == env.AIO_GATEWAY_TOKEN' "$tmp_auth" >/dev/null
 elif command -v python3 >/dev/null 2>&1; then
-  python3 - "$api_key" "$auth_path" "$tmp_auth" <<'PY'
+  python3 - "$auth_path" "$tmp_auth" <<'PY'
 import json
+import os
 import sys
 from pathlib import Path
 
-api_key, src, dst = sys.argv[1], sys.argv[2], sys.argv[3]
+src, dst = sys.argv[1], sys.argv[2]
+api_key = os.environ["AIO_GATEWAY_TOKEN"]
 data = {{}}
 try:
     text = Path(src).read_text(encoding="utf-8")

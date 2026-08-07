@@ -6,12 +6,11 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import type { QueryClient, QueryFunctionContext } from "@tanstack/react-query";
-import { useCallback, useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   defaultRouteProvidersList,
   defaultRouteProviderSetSessionReusePriority,
   defaultRouteProvidersSetOrder,
-  providerClaudeTerminalLaunchCommand,
   providerUpsert,
   providerDuplicate,
   providerDelete,
@@ -584,20 +583,6 @@ export function useProviderDuplicateMutation() {
       }
     },
   });
-}
-
-export function useProviderClaudeTerminalLaunchCommandMutation() {
-  const [isPending, setIsPending] = useState(false);
-  const mutateAsync = useCallback(async (input: { providerId: number }) => {
-    setIsPending(true);
-    try {
-      return await providerClaudeTerminalLaunchCommand(input.providerId);
-    } finally {
-      setIsPending(false);
-    }
-  }, []);
-
-  return useMemo(() => ({ isPending, mutateAsync }), [isPending, mutateAsync]);
 }
 
 export function useOAuthLimitsQuery(providerId: number, enabled: boolean) {

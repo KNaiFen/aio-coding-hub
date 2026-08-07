@@ -1,12 +1,31 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { useWslHostAddressQuery } from "../../../query/wsl";
+import { copyText } from "../../../services/clipboard";
+import {
+  gatewayBearerTokenAcknowledge,
+  gatewayBearerTokenReveal,
+  gatewayBearerTokenRotate,
+} from "../../../services/gateway/gateway";
 import { NetworkSettingsCard } from "../NetworkSettingsCard";
 
 let gatewayMetaMock: any = { gatewayAvailable: "available", gateway: null, preferredPort: 37123 };
 
 vi.mock("sonner", () => ({ toast: vi.fn() }));
+vi.mock("../../../services/clipboard", () => ({ copyText: vi.fn() }));
+
+vi.mock("../../../services/gateway/gateway", async () => {
+  const actual = await vi.importActual<typeof import("../../../services/gateway/gateway")>(
+    "../../../services/gateway/gateway"
+  );
+  return {
+    ...actual,
+    gatewayBearerTokenReveal: vi.fn(),
+    gatewayBearerTokenRotate: vi.fn(),
+    gatewayBearerTokenAcknowledge: vi.fn(),
+  };
+});
 
 vi.mock("../../../hooks/useGatewayMeta", () => ({
   useGatewayMeta: () => gatewayMetaMock,
@@ -17,7 +36,61 @@ vi.mock("../../../query/wsl", async () => {
   return { ...actual, useWslHostAddressQuery: vi.fn() };
 });
 
+beforeEach(() => {
+  vi.mocked(gatewayBearerTokenReveal).mockReset().mockResolvedValue(null);
+  vi.mocked(gatewayBearerTokenRotate).mockReset();
+  vi.mocked(gatewayBearerTokenAcknowledge).mockReset().mockResolvedValue(true);
+  vi.mocked(copyText).mockReset().mockResolvedValue(undefined);
+});
+
 describe("components/cli-manager/NetworkSettingsCard", () => {
+  it("reveals, copies, confirms, and rotates the non-loopback Gateway token", async () => {
+    const firstToken = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    const rotatedToken = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+    vi.mocked(useWslHostAddressQuery).mockReturnValue({ data: null } as any);
+    vi.mocked(gatewayBearerTokenReveal)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        token: firstToken,
+        wsl_sync_error: "WSL_GATEWAY_TOKEN_SYNC_FAILED: review WSL settings",
+      });
+    vi.mocked(gatewayBearerTokenRotate).mockResolvedValue({
+      token: rotatedToken,
+      wsl_sync_error: null,
+    });
+
+    const settings = {
+      preferred_port: 37123,
+      gateway_listen_mode: "localhost",
+      gateway_custom_listen_address: "",
+    } as any;
+    const onPersistSettings = vi.fn(async () => ({
+      ...settings,
+      gateway_listen_mode: "lan",
+    }));
+
+    render(
+      <NetworkSettingsCard
+        available={true}
+        saving={false}
+        settings={settings}
+        onPersistSettings={onPersistSettings}
+      />
+    );
+
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "lan" } });
+    expect(await screen.findByText(firstToken)).toBeInTheDocument();
+    expect(screen.getByText(/WSL_GATEWAY_TOKEN_SYNC_FAILED/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "复制" }));
+    await waitFor(() => expect(copyText).toHaveBeenCalledWith(firstToken));
+    fireEvent.click(screen.getByRole("button", { name: "已保存" }));
+    await waitFor(() => expect(gatewayBearerTokenAcknowledge).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole("button", { name: "轮换访问令牌" }));
+    expect(await screen.findByText(rotatedToken)).toBeInTheDocument();
+  });
+
   it("switches listen mode and validates custom address", async () => {
     vi.mocked(useWslHostAddressQuery).mockReturnValue({ data: "172.20.0.1" } as any);
 

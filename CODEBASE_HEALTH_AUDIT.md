@@ -462,6 +462,7 @@ Rust 运行时状态 / 请求日志
 - 验证及回归测试：在真实 socket 上分别绑定 loopback 与 `0.0.0.0`；无 token、错误 token、过期 token访问所有三类代理路由均应在任何上游请求/DB 日志前返回 401/403，正确 token 才可代理。用正确 token但伪造内部 header 的请求仍必须被记录；只有宿主内部构造的递归 hop 可被识别。加入上游计数器断言未授权请求绝不注入/使用 Provider 凭据，并验证轮换撤销旧 token。
 - 2026-08-06 最新主线复核：`origin/main@4ee5faa8` 仍让 LAN 绑定 `0.0.0.0`，路由无入站认证；公开 provider 专用路径会注入 forced provider 并绕过 CLI enable guard，客户端仍可伪造固定 `x-aio-gateway-forwarded` 以跳过观测。删除 bypass 会改变 Claude Terminal 现有启动路径，marker 清理也涉及递归/观测兼容性。AUD016 需先决定 LAN token/代理信任模型、provider 专用路由权限和 marker 语义，继续 `confirmed`。
 - 2026-08-06 最终治理计划：任务 `.trellis/tasks/08-06-gateway-lan-bearer-token`。loopback 保持兼容；基于 Axum `ConnectInfo<SocketAddr>` 的真实 peer 对全部非回环 route（含 `/health`）执行最外层 Bearer 鉴权。高熵 token 只展示一次、磁盘只存摘要，旧 LAN/custom 配置自动生成，未确认即退出则下次轮换；认证后剥离 Authorization 与转发/provider 身份头。删除 provider 专用路由、全部 forced-provider 数据流和 Claude Terminal 入口。WSL 非回环连接同样带 token，一次性明文仅在生成/轮换时直接同步，失败必须可见。
+- 2026-08-07 代码完成、交付待执行：独立候选分支 `codex/aud019-gateway-lan-bearer-token` 的 `dfe4579e`、`3781b005`、`30d8db1b` 已实现私有摘要 sidecar、未确认重启轮换、真实 peer 全路由鉴权、严格单 Bearer、敏感/身份头剥离、旧 provider URL 404、forced-provider/Claude Terminal 全链删除，以及 Claude/Codex WSL token 同步与 Gemini 明确不兼容。WSL manifest 升至 v2 并拒绝持久化 Gateway credential；前端提供一次性 reveal、复制、确认和主动轮换，并显示 WSL 同步失败。附加修正保留 Provider 编辑器仍在使用的复制 API Key/Base URL ping IPC，并向 Codex compaction classifier 传递已净化的 headers。本地 cloud-only checker/self-test 与 `git diff --check` 通过；按用户决定，PR、Actions、bindings/native/frontend 云端门和合并后置，当前继续保持 `planned`。
 
 ### AUD-017：Responses 连续性缓存没有字节预算，可由少量大请求耗尽内存
 
@@ -1072,7 +1073,7 @@ Rust 运行时状态 / 请求日志
 
 ### AUD-056：请求日志永久留存与运行日志无容量软上限
 
-- 状态：`planned`
+- 状态：`resolved`
 - 优先级：`P1`
 - 判断依据：运行日志清理已有七天日龄，但请求日志默认仍为 `0=永久`；运行日志按日龄删除而不限制总容量；数据管理清空路径会自动 VACUUM，无法让用户观察或控制 SQLite 可回收空间。
 - 文件和行号：`src-tauri/src/infra/settings/defaults.rs:65-70`；`src-tauri/src/infra/settings/migration.rs:760-772,1558-1559`；`src-tauri/src/infra/settings/persistence.rs:268-295,372-383`；`src-tauri/src/infra/request_logs.rs:406-570`；`src-tauri/src/app/logging.rs:101-210`；`src-tauri/src/infra/data_management.rs:90-110,170-185`；前端 settings validation/fixtures。
@@ -1080,7 +1081,7 @@ Rust 运行时状态 / 请求日志
 - 实际影响与根因：原始 request/error/retry 明细和运行日志可无限增长，长期桌面用户磁盘占用不可预测；自动 VACUUM 还会在用户未明确请求时长时间持有数据库资源。根因是明细 retention、永久聚合 ledger 和物理压缩没有分开建模。
 - 最小修复建议：默认与历史 0 配置迁移为 7 天，所有写入口拒绝 0；保留 usage_ledger/统计聚合永久可查，只删到期原始明细。运行日志增加 256 MiB 软上限，超额只回收最旧已关闭滚动文件，活动文件永不删。清理后通过 `freelist_count * page_size` 展示可回收空间，移除自动 VACUUM，手动压缩才执行。
 - 验证及回归测试：云端 Rust/前端覆盖 settings migration、ledger 覆盖、明细删除、上月统计、运行日志日龄/容量/活动文件、SQLite freelist 展示和手动压缩；确保不重构现有 request-log JSON 字段。
-- 2026-08-07 代码与交付状态：独立候选提交 `28d65b2d`、`c86799ce` 完成 settings v60/旧 0 迁移、请求明细覆盖门、UTC 日滚动年龄与 256 MiB 软上限、惰性跨日活动文件保护、freelist IPC/UI、非自动 VACUUM 回归源码及 retention 闭包返回类型约束。本地 cloud-only checker/self-test 与差异检查通过；未运行本地生成器或依赖型/native 命令。PR、Actions 全量门、生成绑定核验和合并列入待执行交付，因此仍为 `planned`。
+- 2026-08-07 交付证据：独立候选 `73ff1d2942199ab36ecc24286fb9c29691719510` 完成 settings v60/旧 0 迁移、请求明细覆盖门、UTC 日滚动年龄与 256 MiB 软上限、惰性跨日活动文件保护、freelist IPC/UI 与非自动 VACUUM。PR [#89](https://github.com/KNaiFen/aio-coding-hub/pull/89) 的 PR CI `31174497952` 和 workflow_dispatch 全量 CI `31186468782` 均通过，随后以 `d7679695acbe4f67ebcdc517405cb123cfc58318` 合并至 `main`。本地仅执行 cloud-only checker/self-test 与差异检查，未运行本地生成器或依赖型/native 命令。
 
 ## 5. 待验证假设
 
@@ -1544,8 +1545,8 @@ AUD-014 执行结果：只修改 CLI proxy controls hook、Sidebar 和对应两�
 | --- | --- | --- | --- | --- |
 | 1 | `.trellis/tasks/08-06-cloud-only-zero-artifact-contract` / `codex/cloud-only-zero-artifact-contract` | `AUD-054` | `resolved`：规则、README、活跃 spec/template、package/workspace scripts 与零依赖合同由 `c5b3c6b9` 建立，自测修正为 `2334403b`。 | PR #86 / merge `d32106c3`；PR run `31103175487` 与 workflow_dispatch `31103187154` 全绿；24 个精确仓库产物目录已清理。 |
 | 2 | `.trellis/tasks/08-06-provider-sync-session-snapshot` / `codex/provider-sync-session-only-backup` | `AUD-055` | sessions-only v2 manifest、v1 managed 迁移、单代 backup、回滚和非受管保护。 | 云端 Rust tests/format/bindings/Clippy；本候选已补 AUD-054 的 PR/CI/提交证据。 |
-| 3 | `.trellis/tasks/08-06-request-runtime-log-retention` / `codex/aud018-request-runtime-log-retention` | `AUD-056` | 代码候选 `28d65b2d`、`c86799ce`：7 天请求/运行日志、ledger 永久保留、256 MiB 软上限、活动文件保护、freelist 可见、不自动 VACUUM。 | PR、云端完整跨层门、bindings 核验与合并待执行；当前不阻塞后续代码。 |
-| 4 | `.trellis/tasks/08-06-gateway-lan-bearer-token` / `codex/gateway-lan-bearer-token` | `AUD-016` | 真实 peer 的全路由 token、一次性展示/轮换、header 脱敏、WSL 同步和 provider 专用路径移除。 | 云端 socket/路由/日志/WSL 覆盖；下一候选补 AUD-056 证据。 |
+| 3 | `.trellis/tasks/08-06-request-runtime-log-retention` / `codex/aud018-request-runtime-log-retention` | `AUD-056` | `resolved`：PR #89 候选 `73ff1d29` 提供 7 天请求/运行日志、ledger 永久保留、256 MiB 软上限、活动文件保护、freelist 可见和不自动 VACUUM。 | PR #89 合并为 `d7679695`；PR run `31174497952` 与 workflow_dispatch `31186468782` 均在该精确 head 全绿。 |
+| 4 | `.trellis/tasks/08-06-gateway-lan-bearer-token` / `codex/aud019-gateway-lan-bearer-token` | `AUD-016` | 真实 peer 的全路由 token、一次性展示/轮换、header 脱敏、WSL manifest v2/同步和 provider 专用路径移除。 | 已重放到 AUD-056 合并后的主线，当前候选为 `51224cf2`；后续以该精确 head 复验云端 socket/路由/日志/WSL/bindings 门。 |
 | 5 | `.trellis/tasks/08-06-cross-restart-data-reset` / `codex/cross-restart-data-reset` | `AUD-008` | durable marker、专用退出、启动前清理、失败 maintenance retry/exit gate。 | 云端跨平台生命周期门；为 AUD-002 提供共享 coordinator。 |
 | 6 | `.trellis/tasks/08-06-filesystem-recovery-journal` / `codex/filesystem-recovery-journal` | `AUD-002` | prepare-first journal、SQLite 权威 replay、Skills 受管 artifact、补偿错误聚合。 | 云端故障注入/重启/脱敏/并发门；下一候选补 AUD-008 证据。 |
 | 7 | `.trellis/tasks/08-06-observer-zero-history-query` / `codex/observer-zero-history-query` | `AUD-035` | last/dominant/recent 受限查询和 source-aware 有界 folder cache，保持摘要语义。 | 云端查询 spy/缓存/协议回归；下一候选补 AUD-002 证据。 |

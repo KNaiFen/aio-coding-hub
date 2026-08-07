@@ -6,6 +6,8 @@ use crate::gateway_runtime_access::app_gateway_status;
 use crate::shared::cli_key::CliKey;
 use crate::{gateway, settings};
 
+pub(crate) use crate::gateway::access_token::GatewayBearerTokenReveal;
+
 #[derive(Debug, Clone, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct GatewayUpstreamProxyInput {
@@ -39,6 +41,55 @@ fn resolve_gateway_upstream_proxy_context(
 #[specta::specta]
 pub(crate) fn gateway_status(app: tauri::AppHandle) -> gateway::GatewayStatus {
     app_gateway_status(&app)
+}
+
+async fn sync_pending_gateway_token_to_wsl(_app: &tauri::AppHandle) {
+    #[cfg(windows)]
+    if crate::gateway::access_token::pending_plaintext_for_internal_sync(_app).is_some() {
+        let error = crate::commands::wsl::wsl_auto_sync_core(_app)
+            .await
+            .err()
+            .map(|_| {
+                "WSL_GATEWAY_TOKEN_SYNC_FAILED: WSL clients could not be updated; review WSL settings"
+                    .to_string()
+            });
+        crate::gateway::access_token::record_wsl_sync_error(_app, error);
+    }
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn gateway_bearer_token_reveal(
+    app: tauri::AppHandle,
+) -> Result<Option<GatewayBearerTokenReveal>, String> {
+    let cfg = settings::read(&app).map_err(|error| error.to_string())?;
+    if !gateway::listener_accepts_non_loopback(&cfg).map_err(|error| error.to_string())? {
+        return Ok(None);
+    }
+    gateway::access_token::ensure_for_settings(&app, &cfg).map_err(|error| error.to_string())?;
+    sync_pending_gateway_token_to_wsl(&app).await;
+    gateway::access_token::reveal_pending(&app).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn gateway_bearer_token_rotate(
+    app: tauri::AppHandle,
+) -> Result<GatewayBearerTokenReveal, String> {
+    gateway::access_token::rotate(&app).map_err(|error| error.to_string())?;
+    sync_pending_gateway_token_to_wsl(&app).await;
+    gateway::access_token::reveal_pending(&app)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| {
+            "GATEWAY_BEARER_STATE_INVALID: rotated token was not available for one-time reveal"
+                .to_string()
+        })
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) fn gateway_bearer_token_acknowledge(app: tauri::AppHandle) -> Result<bool, String> {
+    gateway::access_token::acknowledge_reveal(&app).map_err(|error| error.to_string())
 }
 
 #[tauri::command]

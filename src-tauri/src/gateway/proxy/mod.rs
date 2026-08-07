@@ -1,6 +1,6 @@
 //! Usage: Gateway proxy module facade (exports the proxy handler + shared types).
 
-use axum::http::{HeaderMap, Method};
+use axum::http::Method;
 
 mod abort_guard;
 mod caches;
@@ -39,8 +39,6 @@ pub(super) use handler::proxy_impl;
 
 const CLAUDE_COUNT_TOKENS_PATH: &str = "/v1/messages/count_tokens";
 const CLAUDE_LOGGED_MESSAGES_PATH: &str = "/v1/messages";
-const AIO_INTERNAL_FORWARD_HEADER: &str = "x-aio-gateway-forwarded";
-const AIO_INTERNAL_FORWARD_VALUE: &str = "aio-coding-hub";
 
 fn is_claude_count_tokens_request(cli_key: &str, forwarded_path: &str) -> bool {
     cli_key == "claude" && forwarded_path == CLAUDE_COUNT_TOKENS_PATH
@@ -98,27 +96,12 @@ fn is_claude_probe_request(
     normalized == "foo" || normalized == "count"
 }
 
-pub(super) fn is_internal_forwarded_request(headers: &HeaderMap) -> bool {
-    headers
-        .get(AIO_INTERNAL_FORWARD_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| value == AIO_INTERNAL_FORWARD_VALUE)
-        .unwrap_or(false)
-}
-
 fn compute_observe_request(
     cli_key: &str,
     method: &Method,
     forwarded_path: &str,
-    headers: &HeaderMap,
     introspection_json: Option<&serde_json::Value>,
 ) -> bool {
-    if is_internal_forwarded_request(headers) {
-        return false;
-    }
-
     if !should_observe_request(cli_key, method, forwarded_path) {
         return false;
     }

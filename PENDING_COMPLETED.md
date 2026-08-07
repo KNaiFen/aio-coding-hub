@@ -413,3 +413,15 @@
 - 2026-08-03：`AIO-PENDING-013` 因无法稳定复现且用户决定自行观察而放弃。
 - 2026-08-03：`AIO-PENDING-012`、`AIO-PENDING-014` 已完成并随 `aio-coding-hub-v0.60.45` 发布，证据见“本批次完成证据”。
 - 2026-08-03：`AIO-PENDING-015` 已完成并随 `aio-coding-hub-v0.60.46` 发布，证据见“本批次完成证据”。
+
+### AIO-PENDING-018 - 请求日志与运行日志留存
+
+- **状态**：`done`
+- **日期**：2026-08-06
+- **完成日期**：2026-08-07
+- **观察问题**：请求日志默认 `0=永久`，运行日志虽默认七天但没有容量上限，清空请求明细还会自动 VACUUM，缺少可预期的空间治理。
+- **锁定决策**：请求日志默认七天并迁移历史 0；`usage_ledger` 与聚合统计永久保留；运行日志七天加 256 MiB 软上限，只回收最旧已关闭滚动文件；不自动 VACUUM。
+- **拟议方向**：统一 settings/IPC/UI 留存边界，保持 ledger 覆盖检查，按日龄与容量清理运行日志，并用 SQLite freelist 展示可回收空间。
+- **验收标准**：旧配置持久迁移、所有写入拒绝 0；上月用量/Token/成本/趋势/排行保持；活动日志不被删除；清理后显示可回收字节，只有手动压缩归还空间。
+- **Trellis**：[`08-06-request-runtime-log-retention`](./.trellis/tasks/08-06-request-runtime-log-retention/)
+- **交付证据**：PR [#89](https://github.com/KNaiFen/aio-coding-hub/pull/89) 的精确候选提交为 `73ff1d2942199ab36ecc24286fb9c29691719510`，PR CI `31174497952` 与 workflow_dispatch 全量 CI `31186468782` 均通过；已合并到 `main`，合并提交为 `d7679695acbe4f67ebcdc517405cb123cfc58318`。

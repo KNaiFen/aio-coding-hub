@@ -16,8 +16,7 @@ impl CliProxyGuardMiddleware {
     pub(in crate::gateway::proxy::handler) async fn run<R: tauri::Runtime>(
         ctx: ProxyContext<R>,
     ) -> MiddlewareAction<R> {
-        let bypass = ctx.forced_provider_id.is_some();
-        if !crate::shared::cli_key::is_supported_cli_key(&ctx.cli_key) || bypass {
+        if !crate::shared::cli_key::is_supported_cli_key(&ctx.cli_key) {
             return MiddlewareAction::Continue(Box::new(ctx));
         }
 
@@ -50,13 +49,8 @@ impl CliProxyGuardMiddleware {
         );
         // observe_request not yet computed; derive it for the error log.
         let mut ctx = ctx;
-        ctx.observe_request = compute_observe_request(
-            &ctx.cli_key,
-            &ctx.req_method,
-            &ctx.forwarded_path,
-            &ctx.headers,
-            None,
-        );
+        ctx.observe_request =
+            compute_observe_request(&ctx.cli_key, &ctx.req_method, &ctx.forwarded_path, None);
         let log_ctx = build_early_error_log_ctx(&ctx);
 
         let resp = respond_early_error_with_enqueue(

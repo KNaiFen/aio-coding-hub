@@ -132,7 +132,6 @@ fn is_identity_header(name: &str) -> bool {
             | "x-stainless-lang"
             | "x-stainless-package-version"
             | "x-goog-api-client"
-            | "x-aio-gateway-forwarded"
     ) || lower == header::ACCEPT_ENCODING.as_str()
 }
 
@@ -172,10 +171,6 @@ mod tests {
             HeaderValue::from_static("abcdef01-2345-6789-abcd-ef0123456789"),
         );
         headers.insert(
-            "x-aio-gateway-forwarded",
-            HeaderValue::from_static("aio-coding-hub"),
-        );
-        headers.insert(
             "x-aio-upstream-meta-url",
             HeaderValue::from_static("https://internal.example/meta-secret"),
         );
@@ -206,9 +201,6 @@ mod tests {
         )));
         assert!(fingerprint.debug.contains("session_id"));
         assert!(fingerprint.debug.contains("x-session-id"));
-        assert!(fingerprint
-            .debug
-            .contains("x-aio-gateway-forwarded=aio-coding-hub"));
         assert!(fingerprint.debug.contains("x-aio-upstream-meta-url"));
         assert!(!fingerprint.debug.contains("secret prompt"));
         assert!(!fingerprint.debug.contains("sk-secret"));

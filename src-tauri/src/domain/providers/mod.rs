@@ -13,8 +13,8 @@ pub use types::{
 
 #[allow(unused_imports)]
 pub(crate) use types::{
-    has_bridged_input_semantics, is_supported_bridge_type, ClaudeTerminalLaunchContext,
-    GatewayProviderIdentity, GatewayProvidersSelection, ProviderAccountUsageCredentialContext,
+    has_bridged_input_semantics, is_supported_bridge_type, GatewayProviderIdentity,
+    GatewayProvidersSelection, ProviderAccountUsageCredentialContext,
     ProviderAccountUsageFetchContext, ProviderForGateway, ProviderOAuthDetails,
     ProviderObserverRow, ProviderRouteRow, ProviderTransportContext,
     CODEX_TO_ANTHROPIC_MESSAGES_BRIDGE_TYPE, CODEX_TO_OPENAI_CHAT_BRIDGE_TYPE,
@@ -27,7 +27,7 @@ pub use queries::{
 };
 
 pub(crate) use queries::{
-    active_sort_mode_id_for_gateway, claude_terminal_launch_context, clear_oauth, cli_key_by_id,
+    active_sort_mode_id_for_gateway, clear_oauth, cli_key_by_id,
     get_account_usage_credential_context, get_account_usage_fetch_context, get_by_id,
     get_enabled_direct_codex_for_gateway_by_identity, get_oauth_details,
     get_source_provider_for_availability, get_source_provider_for_gateway,

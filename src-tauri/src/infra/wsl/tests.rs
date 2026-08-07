@@ -2,6 +2,7 @@
 mod tests {
     use crate::mcp_sync::McpServerForSync;
     use crate::wsl::data_gathering::gather_skills_sync_data;
+    use crate::wsl::manifest::WSL_MANIFEST_SCHEMA_VERSION;
     use crate::wsl::mcp_adapt::adapt_mcp_servers_for_wsl;
     use crate::wsl::types::{WslCliBackup, WslDistroManifest};
     use std::collections::BTreeMap;
@@ -178,7 +179,7 @@ mod tests {
     #[test]
     fn test_wsl_manifest_roundtrip() {
         let manifest = WslDistroManifest {
-            schema_version: 1,
+            schema_version: WSL_MANIFEST_SCHEMA_VERSION,
             distro: "Ubuntu".to_string(),
             configured: true,
             proxy_origin: "http://172.20.0.1:12345".to_string(),
@@ -187,16 +188,10 @@ mod tests {
             cli_backups: vec![
                 WslCliBackup {
                     cli_key: "claude".to_string(),
-                    injected_keys: [
-                        (
-                            "ANTHROPIC_BASE_URL".to_string(),
-                            "http://172.20.0.1:12345/claude".to_string(),
-                        ),
-                        (
-                            "ANTHROPIC_AUTH_TOKEN".to_string(),
-                            "aio-coding-hub".to_string(),
-                        ),
-                    ]
+                    injected_keys: [(
+                        "ANTHROPIC_BASE_URL".to_string(),
+                        "http://172.20.0.1:12345/claude".to_string(),
+                    )]
                     .into_iter()
                     .collect(),
                     original_values: [
@@ -214,9 +209,7 @@ mod tests {
                 },
                 WslCliBackup {
                     cli_key: "gemini".to_string(),
-                    injected_keys: [("GEMINI_API_KEY".to_string(), "aio-coding-hub".to_string())]
-                        .into_iter()
-                        .collect(),
+                    injected_keys: Default::default(),
                     original_values: [("GEMINI_API_KEY".to_string(), Some("old-key".to_string()))]
                         .into_iter()
                         .collect(),
@@ -227,7 +220,7 @@ mod tests {
         let json = serde_json::to_string_pretty(&manifest).expect("serialize");
         let deserialized: WslDistroManifest = serde_json::from_str(&json).expect("deserialize");
 
-        assert_eq!(deserialized.schema_version, 1);
+        assert_eq!(deserialized.schema_version, WSL_MANIFEST_SCHEMA_VERSION);
         assert_eq!(deserialized.distro, "Ubuntu");
         assert_eq!(deserialized.proxy_origin, "http://172.20.0.1:12345");
         assert_eq!(deserialized.cli_backups.len(), 2);
@@ -243,7 +236,7 @@ mod tests {
     #[test]
     fn test_wsl_manifest_with_null_originals() {
         let manifest = WslDistroManifest {
-            schema_version: 1,
+            schema_version: WSL_MANIFEST_SCHEMA_VERSION,
             distro: "Debian".to_string(),
             configured: true,
             proxy_origin: "http://172.20.0.1:9999".to_string(),
@@ -251,16 +244,10 @@ mod tests {
             wsl_home_unc: None,
             cli_backups: vec![WslCliBackup {
                 cli_key: "claude".to_string(),
-                injected_keys: [
-                    (
-                        "ANTHROPIC_BASE_URL".to_string(),
-                        "http://172.20.0.1:9999/claude".to_string(),
-                    ),
-                    (
-                        "ANTHROPIC_AUTH_TOKEN".to_string(),
-                        "aio-coding-hub".to_string(),
-                    ),
-                ]
+                injected_keys: [(
+                    "ANTHROPIC_BASE_URL".to_string(),
+                    "http://172.20.0.1:9999/claude".to_string(),
+                )]
                 .into_iter()
                 .collect(),
                 original_values: [

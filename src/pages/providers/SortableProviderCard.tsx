@@ -19,7 +19,6 @@ import {
   Pencil,
   RefreshCw,
   Share2,
-  Terminal,
   Trash2,
   Zap,
 } from "lucide-react";
@@ -153,8 +152,6 @@ export type SortableProviderCardProps = {
   circuit: GatewayProviderCircuitStatus | null;
   circuitResetting: boolean;
   onResetCircuit: (provider: ProviderSummary) => void;
-  onCopyTerminalLaunchCommand?: (provider: ProviderSummary) => void;
-  terminalLaunchCopying?: boolean;
   onTestAvailability?: (provider: ProviderSummary) => void;
   testAvailabilityLoading?: boolean;
   onManageModels?: (provider: ProviderSummary) => void;
@@ -182,8 +179,6 @@ const ProviderCard = memo(function ProviderCard({
   circuit,
   circuitResetting,
   onResetCircuit,
-  onCopyTerminalLaunchCommand,
-  terminalLaunchCopying = false,
   onTestAvailability,
   testAvailabilityLoading = false,
   onManageModels,
@@ -582,20 +577,6 @@ const ProviderCard = memo(function ProviderCard({
               data-provider-card-secondary-actions="true"
               className="flex flex-wrap items-center justify-end gap-2"
             >
-              {onCopyTerminalLaunchCommand ? (
-                <Button
-                  onClick={() => onCopyTerminalLaunchCommand(provider)}
-                  variant="secondary"
-                  size="sm"
-                  className="px-2 py-1 text-[11px] gap-1.5"
-                  disabled={terminalLaunchCopying}
-                  title="复制终端启动命令"
-                >
-                  <Terminal className="h-3.5 w-3.5" />
-                  {terminalLaunchCopying ? "复制中…" : "终端启动"}
-                </Button>
-              ) : null}
-
               {onTestAvailability ? (
                 <Button
                   onClick={() => onTestAvailability(provider)}

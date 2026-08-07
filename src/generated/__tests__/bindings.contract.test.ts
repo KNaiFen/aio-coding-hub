@@ -59,6 +59,9 @@ describe("generated/bindings.ts contract", () => {
     expect(bindingsSource).toContain("app_frontend_error_report");
     expect(bindingsSource).toContain("app_data_reset");
     expect(bindingsSource).toContain("gateway_status");
+    expect(bindingsSource).toContain("gateway_bearer_token_reveal");
+    expect(bindingsSource).toContain("gateway_bearer_token_rotate");
+    expect(bindingsSource).toContain("gateway_bearer_token_acknowledge");
     expect(bindingsSource).toContain("gateway_sessions_list");
     expect(bindingsSource).toContain("gateway_active_session_count");
     expect(bindingsSource).toContain("gateway_upstream_proxy_validate");
@@ -67,6 +70,7 @@ describe("generated/bindings.ts contract", () => {
     expect(bindingsSource).toContain("cli_proxy_status_all");
     expect(bindingsSource).toContain("cli_proxy_set_enabled");
     expect(bindingsSource).toContain("provider_upsert");
+    expect(bindingsSource).not.toContain("provider_claude_terminal_launch_command");
     expect(bindingsSource).toContain("provider_oauth_fetch_limits");
     expect(bindingsSource).toContain("wsl_detect");
     expect(bindingsSource).toContain("sort_modes_list");

@@ -131,6 +131,7 @@ fn gateway_state_for_selection(
         provider_enable_gate: Arc::new(crate::gateway::runtime::ProviderEnableGate::default()),
         http_client_override: None,
         active_requests: Arc::new(ActiveRequestRegistry::default()),
+        access_control: crate::gateway::access_token::GatewayAccessControl::default(),
     }
 }
 
@@ -311,7 +312,6 @@ fn lower_priority_session_binding_keeps_higher_priority_route_candidate_first() 
         now,
         true,
         true,
-        None,
         &mut providers,
         Some(&[preferred.id, fallback.id]),
     );
@@ -357,58 +357,11 @@ fn resolve_session_bound_provider_id_skips_disabled_bound_provider() {
         now,
         true,
         true,
-        None,
         &mut enabled,
         Some(&order),
     );
 
     // Disabled provider must NOT be re-inserted; fall through to next enabled provider
-    assert_eq!(selected, None);
-    assert_eq!(ids(&enabled), vec![id2]);
-}
-
-#[test]
-fn resolve_session_bound_provider_id_skips_insertion_when_forced_provider_present() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let db_path = dir.path().join("test.db");
-    let db = crate::db::init_for_tests(&db_path).expect("init db");
-
-    let p1 = insert_provider(&db, "P1", true);
-    let p2 = insert_provider(&db, "P2", true);
-    let id1 = p1.id;
-    let id2 = p2.id;
-
-    providers::set_enabled(&db, id1, false).expect("disable provider 1");
-
-    let session = session_manager::SessionManager::new();
-    let circuit = circuit_breaker::CircuitBreaker::new(
-        circuit_breaker::CircuitBreakerConfig::default(),
-        HashMap::new(),
-        None,
-    );
-    let now = 1000;
-    let route_generation = session.capture_route_generation("claude");
-    session.bind_success("claude", "sess_1", route_generation, id1, None, now);
-
-    let mut enabled =
-        providers::list_enabled_for_gateway_in_mode(&db, "claude", None).expect("list enabled");
-    assert_eq!(ids(&enabled), vec![id2]);
-
-    let order = vec![id1, id2];
-    let selected = resolve_session_bound_provider_id(
-        &session,
-        &circuit,
-        "claude",
-        Some("sess_1"),
-        route_generation,
-        now,
-        true,
-        true,
-        Some(id2),
-        &mut enabled,
-        Some(&order),
-    );
-
     assert_eq!(selected, None);
     assert_eq!(ids(&enabled), vec![id2]);
 }
@@ -450,7 +403,6 @@ fn resolve_session_bound_provider_id_does_not_insert_when_reuse_disabled() {
         now,
         true,
         false,
-        None,
         &mut enabled,
         Some(&order),
     );
@@ -488,7 +440,6 @@ fn resolve_session_bound_provider_id_ignores_binding_when_globally_disabled() {
         now,
         false,
         true,
-        None,
         &mut enabled,
         Some(&[p2.id, p1.id]),
     );
@@ -538,7 +489,6 @@ fn resolve_session_bound_provider_id_clears_stale_binding_when_bound_provider_no
         now,
         true,
         true,
-        None,
         &mut candidates,
         Some(&order),
     );
@@ -581,7 +531,6 @@ fn default_mode_switches_to_enabled_provider_after_bound_provider_disabled_and_c
         now,
         true,
         true,
-        None,
         &mut enabled,
         Some(&[p1.id, p2.id]),
     );
@@ -631,7 +580,6 @@ fn sort_mode_excludes_globally_disabled_open_bound_provider() {
         now,
         true,
         true,
-        None,
         &mut enabled,
         Some(&[p1.id, p2.id]),
     );

@@ -15,7 +15,6 @@ import { toast } from "sonner";
 import { ProvidersView } from "../ProvidersView";
 import { useProvidersViewDataModel } from "../hooks/useProvidersViewDataModel";
 import { createTestQueryClient } from "../../../test/utils/reactQuery";
-import { copyText } from "../../../services/clipboard";
 import { logToConsole } from "../../../services/consoleLog";
 import { providerDuplicate } from "../../../services/providers/providers";
 import {
@@ -29,7 +28,6 @@ import {
   useDefaultRouteProvidersQuery,
   useDefaultRouteProvidersSetOrderMutation,
   useProviderAvailabilityTimelinesQuery,
-  useProviderClaudeTerminalLaunchCommandMutation,
   useProviderDeleteMutation,
   useProviderSetEnabledMutation,
   useProviderTestAvailabilityMutation,
@@ -86,7 +84,6 @@ vi.mock("@dnd-kit/utilities", () => ({
 }));
 
 vi.mock("sonner", () => ({ toast: vi.fn() }));
-vi.mock("../../../services/clipboard", () => ({ copyText: vi.fn() }));
 vi.mock("../../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
 vi.mock("../../../services/providers/providers", async () => {
   const actual = await vi.importActual<typeof import("../../../services/providers/providers")>(
@@ -180,7 +177,6 @@ vi.mock("../../../query/providers", async () => {
     useDefaultRouteProvidersSetOrderMutation: vi.fn(),
     useDefaultRouteProviderSetSessionReusePriorityMutation: vi.fn(),
     useProviderAvailabilityTimelinesQuery: vi.fn(),
-    useProviderClaudeTerminalLaunchCommandMutation: vi.fn(),
     useProviderSetEnabledMutation: vi.fn(),
     useProviderDeleteMutation: vi.fn(),
     useProvidersReorderMutation: vi.fn(),
@@ -224,14 +220,10 @@ function dragProviderPool(event: any) {
 
 beforeEach(() => {
   dndContextDragHandlers = [];
-  vi.mocked(copyText).mockResolvedValue(undefined);
   vi.mocked(providerDuplicate).mockResolvedValue({
     id: 999,
     cli_key: "claude",
     name: "P1 副本",
-  } as any);
-  vi.mocked(useProviderClaudeTerminalLaunchCommandMutation).mockReturnValue({
-    mutateAsync: vi.fn().mockResolvedValue("bash '/tmp/aio.sh'"),
   } as any);
   vi.mocked(useProviderTestAvailabilityMutation).mockReturnValue({
     mutateAsync: vi.fn().mockResolvedValue({ ok: true, latency_ms: 100, status: 200, error: null }),
@@ -604,12 +596,6 @@ describe("pages/providers/ProvidersView", () => {
     resetCliMutation.mutateAsync.mockResolvedValue(1);
     vi.mocked(useGatewayCircuitResetCliMutation).mockReturnValue(resetCliMutation as any);
 
-    const copyLaunchMutation = { mutateAsync: vi.fn().mockResolvedValue("bash '/tmp/aio.sh'") };
-    vi.mocked(useProviderClaudeTerminalLaunchCommandMutation).mockReturnValue(
-      copyLaunchMutation as any
-    );
-    vi.mocked(copyText).mockResolvedValue(undefined);
-
     renderWithQuery(<ProvidersView activeCli="claude" setActiveCli={vi.fn()} />);
 
     expect(screen.getByText("调用顺序")).toBeInTheDocument();
@@ -639,14 +625,6 @@ describe("pages/providers/ProvidersView", () => {
     await waitFor(() =>
       expect(resetCliMutation.mutateAsync).toHaveBeenCalledWith({ cliKey: "claude" })
     );
-
-    // Copy launch command.
-    fireEvent.click(screen.getAllByRole("button", { name: "终端启动" })[0]!);
-    await waitFor(() =>
-      expect(copyLaunchMutation.mutateAsync).toHaveBeenCalledWith({ providerId: 1 })
-    );
-    await waitFor(() => expect(copyText).toHaveBeenCalledWith("bash '/tmp/aio.sh'"));
-    expect(toast).toHaveBeenCalledWith("已复制, 请在目标文件夹终端粘贴执行");
 
     // Open create dialog (mocked ProviderEditorDialog).
     fireEvent.click(screen.getByRole("button", { name: "添加" }));
@@ -1100,187 +1078,6 @@ describe("pages/providers/ProvidersView", () => {
     await waitFor(() => expect(providerDuplicate).toHaveBeenCalledWith(1));
     await waitFor(() => expect(toast).toHaveBeenCalledWith("复制失败：Error: boom"));
     expect(screen.queryByTestId("provider-editor")).not.toBeInTheDocument();
-  });
-
-  it("shows generate error when launch command mutation fails", async () => {
-    vi.mocked(toast).mockClear();
-
-    const providers = [
-      {
-        id: 1,
-        cli_key: "claude",
-        name: "P1",
-        enabled: true,
-        base_urls: ["https://a"],
-        base_url_mode: "order",
-        cost_multiplier: 1,
-        claude_models: {},
-      },
-    ] as any[];
-
-    vi.mocked(useProvidersListQuery).mockReturnValue({
-      data: providers,
-      isFetching: false,
-      error: null,
-    } as any);
-    vi.mocked(useGatewayCircuitStatusQuery).mockReturnValue({
-      data: [],
-      isFetching: false,
-      error: null,
-      refetch: vi.fn().mockResolvedValue({ data: [] }),
-    } as any);
-
-    vi.mocked(useProviderSetEnabledMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
-    vi.mocked(useProviderDeleteMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
-    vi.mocked(useProvidersReorderMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
-    vi.mocked(useGatewayCircuitResetProviderMutation).mockReturnValue({
-      mutateAsync: vi.fn(),
-    } as any);
-    vi.mocked(useGatewayCircuitResetCliMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
-    vi.mocked(useProviderClaudeTerminalLaunchCommandMutation).mockReturnValue({
-      mutateAsync: vi.fn().mockRejectedValue(new Error("boom")),
-    } as any);
-
-    renderWithQuery(<ProvidersView activeCli="claude" setActiveCli={vi.fn()} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "终端启动" }));
-
-    await waitFor(() =>
-      expect(toast).toHaveBeenCalledWith(expect.stringContaining("生成启动命令失败"))
-    );
-  });
-
-  it("releases terminal-launch copying state after null command and gates rapid retries", async () => {
-    vi.mocked(toast).mockClear();
-    vi.mocked(copyText).mockClear();
-
-    const provider = {
-      id: 1,
-      cli_key: "claude",
-      name: "P1",
-      enabled: true,
-      base_urls: ["https://a"],
-      base_url_mode: "order",
-      cost_multiplier: 1,
-      claude_models: {},
-    } as any;
-
-    vi.mocked(useProvidersListQuery).mockReturnValue({
-      data: [provider],
-      isFetching: false,
-      refetch: vi.fn(),
-    } as any);
-    vi.mocked(useGatewayCircuitStatusQuery).mockReturnValue({
-      data: [],
-      isFetching: false,
-      refetch: vi.fn().mockResolvedValue({ data: [] }),
-    } as any);
-    vi.mocked(useProviderSetEnabledMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
-    vi.mocked(useProviderDeleteMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
-    vi.mocked(useProvidersReorderMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
-    vi.mocked(useGatewayCircuitResetProviderMutation).mockReturnValue({
-      mutateAsync: vi.fn(),
-    } as any);
-    vi.mocked(useGatewayCircuitResetCliMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
-
-    let resolveFirst: (command: string | null) => void = () => {
-      throw new Error("resolveFirst not set");
-    };
-    const firstCommandPromise = new Promise<string | null>((resolve) => {
-      resolveFirst = resolve;
-    });
-    const terminalMutation = {
-      mutateAsync: vi
-        .fn()
-        .mockReturnValueOnce(firstCommandPromise)
-        .mockResolvedValueOnce("bash '/tmp/aio.sh'"),
-    };
-    vi.mocked(useProviderClaudeTerminalLaunchCommandMutation).mockReturnValue(
-      terminalMutation as any
-    );
-
-    const { result } = renderHook(() => useProvidersViewDataModel("claude"), {
-      wrapper: queryWrapper(),
-    });
-
-    let firstCopy: Promise<void> | undefined;
-    let secondCopy: Promise<void> | undefined;
-    act(() => {
-      firstCopy = result.current.copyTerminalLaunchCommand(provider);
-      secondCopy = result.current.copyTerminalLaunchCommand(provider);
-    });
-
-    expect(terminalMutation.mutateAsync).toHaveBeenCalledTimes(1);
-    await secondCopy;
-
-    await act(async () => {
-      resolveFirst(null);
-      await firstCommandPromise;
-      await firstCopy;
-    });
-
-    await waitFor(() => expect(result.current.terminalCopyingByProviderId[1]).toBeUndefined());
-    expect(toast).toHaveBeenCalledWith("生成启动命令失败");
-    expect(copyText).not.toHaveBeenCalled();
-
-    await act(async () => {
-      await result.current.copyTerminalLaunchCommand(provider);
-    });
-
-    expect(terminalMutation.mutateAsync).toHaveBeenCalledTimes(2);
-    await waitFor(() => expect(copyText).toHaveBeenCalledWith("bash '/tmp/aio.sh'"));
-  });
-
-  it("shows PowerShell-specific toast when copied command targets Windows terminal", async () => {
-    vi.mocked(toast).mockClear();
-
-    const providers = [
-      {
-        id: 1,
-        cli_key: "claude",
-        name: "P1",
-        enabled: true,
-        base_urls: ["https://a"],
-        base_url_mode: "order",
-        cost_multiplier: 1,
-        claude_models: {},
-      },
-    ] as any[];
-
-    vi.mocked(useProvidersListQuery).mockReturnValue({
-      data: providers,
-      isFetching: false,
-      error: null,
-    } as any);
-    vi.mocked(useGatewayCircuitStatusQuery).mockReturnValue({
-      data: [],
-      isFetching: false,
-      error: null,
-      refetch: vi.fn().mockResolvedValue({ data: [] }),
-    } as any);
-
-    vi.mocked(useProviderSetEnabledMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
-    vi.mocked(useProviderDeleteMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
-    vi.mocked(useProvidersReorderMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
-    vi.mocked(useGatewayCircuitResetProviderMutation).mockReturnValue({
-      mutateAsync: vi.fn(),
-    } as any);
-    vi.mocked(useGatewayCircuitResetCliMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
-    vi.mocked(useProviderClaudeTerminalLaunchCommandMutation).mockReturnValue({
-      mutateAsync: vi
-        .fn()
-        .mockResolvedValue(
-          'powershell -NoLogo -NoExit -ExecutionPolicy Bypass -File "C:\\\\Temp\\\\aio.ps1"'
-        ),
-    } as any);
-
-    renderWithQuery(<ProvidersView activeCli="claude" setActiveCli={vi.fn()} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "终端启动" }));
-
-    await waitFor(() =>
-      expect(toast).toHaveBeenCalledWith("已复制, 请在目标文件夹 PowerShell 粘贴执行")
-    );
   });
 
   it("filters providers by name and restores the list after clearing search", async () => {
@@ -3168,7 +2965,6 @@ describe("pages/providers/ProvidersView", () => {
     ]);
 
     await act(async () => {
-      await result.current.copyTerminalLaunchCommand(providers[1]);
       await result.current.createSortMode();
       await result.current.renameSortMode();
       await result.current.deleteSortMode();

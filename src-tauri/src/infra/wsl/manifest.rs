@@ -8,6 +8,7 @@ use super::shell::write_file_synced;
 use super::types::{WslCliBackup, WslDistroManifest};
 
 pub(super) const WSL_MANIFEST_MAX_BYTES: usize = 256 * 1024;
+pub(super) const WSL_MANIFEST_SCHEMA_VERSION: u32 = 2;
 const WSL_MANIFEST_FILE_COUNT_MAX: usize = 256;
 pub(super) const WSL_CLIENT_CONFIG_MAX_BYTES: usize = 1024 * 1024;
 
@@ -34,7 +35,7 @@ pub(super) fn read_wsl_manifest<R: tauri::Runtime>(
     };
     let manifest: WslDistroManifest = serde_json::from_slice(&content)
         .map_err(|e| format!("failed to parse WSL manifest for {distro}: {e}"))?;
-    Ok(Some(manifest))
+    Ok(Some(normalize_wsl_manifest(manifest)?))
 }
 
 pub(super) fn write_wsl_manifest<R: tauri::Runtime>(
@@ -42,6 +43,7 @@ pub(super) fn write_wsl_manifest<R: tauri::Runtime>(
     distro: &str,
     manifest: &WslDistroManifest,
 ) -> AppResult<()> {
+    validate_v2_manifest(manifest)?;
     let path = wsl_manifest_path(app, distro)?;
     let json = serde_json::to_string_pretty(manifest)
         .map_err(|e| format!("failed to serialize WSL manifest: {e}"))?;
@@ -93,14 +95,77 @@ pub(super) fn read_all_wsl_manifests<R: tauri::Runtime>(
                 continue;
             }
         };
-        match serde_json::from_slice::<WslDistroManifest>(&bytes) {
-            Ok(m) => manifests.push(m),
+        match serde_json::from_slice::<WslDistroManifest>(&bytes)
+            .map_err(|error| error.to_string())
+            .and_then(|manifest| {
+                normalize_wsl_manifest(manifest).map_err(|error| error.to_string())
+            }) {
+            Ok(manifest) => manifests.push(manifest),
             Err(e) => {
                 tracing::warn!("failed to parse WSL manifest {}: {e}", path.display());
             }
         }
     }
     Ok(manifests)
+}
+
+fn normalize_wsl_manifest(mut manifest: WslDistroManifest) -> AppResult<WslDistroManifest> {
+    match manifest.schema_version {
+        1 => {
+            // V1 recorded injected credential values. They were fixed placeholders,
+            // but must not survive into the private-token format.
+            for backup in &mut manifest.cli_backups {
+                remove_gateway_auth_injected_keys(backup);
+            }
+            manifest.schema_version = WSL_MANIFEST_SCHEMA_VERSION;
+        }
+        WSL_MANIFEST_SCHEMA_VERSION => validate_v2_manifest(&manifest)?,
+        version => {
+            return Err(format!(
+                "unsupported WSL manifest schema version {version}; expected {WSL_MANIFEST_SCHEMA_VERSION}"
+            )
+            .into())
+        }
+    }
+    validate_v2_manifest(&manifest)?;
+    Ok(manifest)
+}
+
+fn validate_v2_manifest(manifest: &WslDistroManifest) -> AppResult<()> {
+    if manifest.schema_version != WSL_MANIFEST_SCHEMA_VERSION {
+        return Err(format!(
+            "unsupported WSL manifest schema version {}; expected {WSL_MANIFEST_SCHEMA_VERSION}",
+            manifest.schema_version
+        )
+        .into());
+    }
+    if manifest.cli_backups.iter().any(|backup| {
+        backup
+            .injected_keys
+            .keys()
+            .any(|key| is_gateway_auth_key(&backup.cli_key, key))
+    }) {
+        return Err("WSL manifest v2 must not persist Gateway credentials"
+            .to_string()
+            .into());
+    }
+    Ok(())
+}
+
+fn remove_gateway_auth_injected_keys(backup: &mut WslCliBackup) {
+    let cli_key = backup.cli_key.clone();
+    backup
+        .injected_keys
+        .retain(|key, _| !is_gateway_auth_key(&cli_key, key));
+}
+
+fn is_gateway_auth_key(cli_key: &str, key: &str) -> bool {
+    matches!(
+        (cli_key, key),
+        ("claude", "ANTHROPIC_AUTH_TOKEN")
+            | ("codex", "OPENAI_API_KEY")
+            | ("gemini", "GEMINI_API_KEY")
+    )
 }
 
 // ── Capture original values (pure Rust via UNC paths) ──

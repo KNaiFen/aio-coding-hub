@@ -1,7 +1,14 @@
-import { useMemo, useReducer } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
 import { toast } from "sonner";
 import type { AppSettings, GatewayListenMode } from "../../services/settings/settings";
 import { logToConsole } from "../../services/consoleLog";
+import { copyText } from "../../services/clipboard";
+import {
+  gatewayBearerTokenAcknowledge,
+  gatewayBearerTokenReveal,
+  gatewayBearerTokenRotate,
+  type GatewayBearerTokenReveal,
+} from "../../services/gateway/gateway";
 import {
   formatHostPort,
   parseCustomListenAddress,
@@ -10,11 +17,13 @@ import {
 import { useGatewayMeta } from "../../hooks/useGatewayMeta";
 import { useWslHostAddressQuery } from "../../query/wsl";
 import { Card } from "../../ui/Card";
+import { Button } from "../../ui/Button";
+import { Dialog } from "../../ui/Dialog";
 import { Input } from "../../ui/Input";
 import { Select } from "../../ui/Select";
 import { SettingsRow } from "../../ui/SettingsRow";
 import { cn } from "../../utils/cn";
-import { AlertTriangle, Network } from "lucide-react";
+import { AlertTriangle, Check, Copy, Network, RefreshCw } from "lucide-react";
 
 export type NetworkSettingsCardProps = {
   available: boolean;
@@ -35,6 +44,8 @@ type NetworkDraftAction =
   | { type: "resetFromSettings"; state: NetworkDraftState }
   | { type: "setListenMode"; listenMode: GatewayListenMode }
   | { type: "setCustomAddress"; customAddress: string };
+
+type GatewayTokenDialogState = GatewayBearerTokenReveal;
 
 function createNetworkDraftState(settings: AppSettings): NetworkDraftState {
   return {
@@ -78,6 +89,11 @@ export function NetworkSettingsCard({
     enabled: available && listenMode === "wsl_auto",
   });
   const wslHost = wslHostQuery.data ?? null;
+  const [gatewayTokenDialog, setGatewayTokenDialog] = useState<GatewayTokenDialogState | null>(
+    null
+  );
+  const [gatewayTokenDialogOpen, setGatewayTokenDialogOpen] = useState(false);
+  const [gatewayTokenActionPending, setGatewayTokenActionPending] = useState(false);
 
   function setListenMode(listenMode: GatewayListenMode) {
     dispatchDraft({ type: "setListenMode", listenMode });
@@ -106,6 +122,84 @@ export function NetworkSettingsCard({
     wslHost,
   ]);
 
+  const requiresGatewayToken = useMemo(() => {
+    if (listenMode === "localhost") return false;
+    if (listenMode !== "custom") return true;
+    const host = parseCustomListenAddress(customAddress)?.host.trim().toLowerCase();
+    if (!host) return false;
+    return !(
+      host === "localhost" ||
+      host === "::1" ||
+      host === "[::1]" ||
+      host === "127.0.0.1" ||
+      host.startsWith("127.")
+    );
+  }, [customAddress, listenMode]);
+
+  const revealPendingGatewayToken = useCallback(async () => {
+    if (!available) return;
+    try {
+      const reveal = await gatewayBearerTokenReveal();
+      if (reveal) {
+        setGatewayTokenDialog(reveal);
+        setGatewayTokenDialogOpen(true);
+      }
+    } catch {
+      logToConsole("error", "读取网关访问令牌失败");
+      toast("读取网关访问令牌失败：请稍后重试");
+    }
+  }, [available]);
+
+  useEffect(() => {
+    void revealPendingGatewayToken();
+  }, [revealPendingGatewayToken]);
+
+  function closeGatewayTokenDialog(open: boolean) {
+    setGatewayTokenDialogOpen(open);
+    if (!open) setGatewayTokenDialog(null);
+  }
+
+  async function rotateGatewayToken() {
+    if (gatewayTokenActionPending) return;
+    setGatewayTokenActionPending(true);
+    try {
+      const reveal = await gatewayBearerTokenRotate();
+      setGatewayTokenDialog(reveal);
+      setGatewayTokenDialogOpen(true);
+    } catch {
+      logToConsole("error", "轮换网关访问令牌失败");
+      toast("轮换网关访问令牌失败：请稍后重试");
+    } finally {
+      setGatewayTokenActionPending(false);
+    }
+  }
+
+  async function copyGatewayToken() {
+    if (!gatewayTokenDialog) return;
+    try {
+      await copyText(gatewayTokenDialog.token);
+      toast("访问令牌已复制");
+    } catch {
+      toast("复制失败：当前环境不支持剪贴板");
+    }
+  }
+
+  async function acknowledgeGatewayToken() {
+    if (gatewayTokenActionPending) return;
+    setGatewayTokenActionPending(true);
+    try {
+      await gatewayBearerTokenAcknowledge();
+      setGatewayTokenDialog(null);
+      setGatewayTokenDialogOpen(false);
+      toast("网关访问令牌已确认");
+    } catch {
+      logToConsole("error", "确认网关访问令牌失败");
+      toast("确认网关访问令牌失败：请稍后重试");
+    } finally {
+      setGatewayTokenActionPending(false);
+    }
+  }
+
   async function commitListenMode(next: GatewayListenMode) {
     if (!available) return;
     setListenMode(next);
@@ -115,6 +209,8 @@ export function NetworkSettingsCard({
       if (!updated) {
         return;
       }
+
+      await revealPendingGatewayToken();
 
       logToConsole("info", "更新监听模式", { next, running: gateway?.running ?? false });
       toast("监听模式已保存");
@@ -142,6 +238,8 @@ export function NetworkSettingsCard({
         return;
       }
 
+      await revealPendingGatewayToken();
+
       logToConsole("info", "更新自定义监听地址", {
         address: trimmed,
         running: gateway?.running ?? false,
@@ -158,7 +256,8 @@ export function NetworkSettingsCard({
   }
 
   return (
-    <Card className="md:col-span-2 relative overflow-hidden">
+    <>
+      <Card className="md:col-span-2 relative overflow-hidden">
       <div className="absolute top-0 right-0 p-4 opacity-5">
         <Network className="h-32 w-32" />
       </div>
@@ -215,13 +314,35 @@ export function NetworkSettingsCard({
               </div>
             </SettingsRow>
 
+            {requiresGatewayToken ? (
+              <SettingsRow label="远程访问令牌">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-secondary-foreground">
+                    非本地访问必须携带 Bearer Token
+                  </span>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="h-8 w-8 p-0"
+                    disabled={saving || gatewayTokenActionPending}
+                    onClick={() => void rotateGatewayToken()}
+                    aria-label="轮换访问令牌"
+                    title="轮换访问令牌"
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                  </Button>
+                </div>
+              </SettingsRow>
+            ) : null}
+
             {listenMode === "lan" ? (
               <div className="mt-3 rounded-lg bg-amber-50 dark:bg-amber-900/30 p-3 text-sm text-amber-800 dark:text-amber-400 border border-amber-100 dark:border-amber-800 flex items-start gap-2">
                 <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
                 <div>
                   <div className="font-medium">安全提示</div>
                   <div className="text-xs mt-0.5 text-amber-700 dark:text-amber-400">
-                    局域网模式会将网关暴露在本机网络接口上。请确保防火墙与访问控制策略符合你的安全要求。
+                    局域网模式会将网关暴露在本机网络接口上；所有远程请求均须提供应用生成的 Bearer Token。
                   </div>
                 </div>
               </div>
@@ -229,6 +350,41 @@ export function NetworkSettingsCard({
           </div>
         )}
       </div>
-    </Card>
+      </Card>
+
+      <Dialog
+        open={gatewayTokenDialogOpen && gatewayTokenDialog != null}
+        title="网关访问令牌"
+        description="该令牌仅在此处显示一次。关闭而不确认后，需要轮换令牌才能再次获得访问凭据。"
+        onOpenChange={closeGatewayTokenDialog}
+        className="max-w-xl"
+      >
+        <div className="space-y-4">
+          <code className="block break-all border border-border bg-secondary px-3 py-2 font-mono text-xs text-foreground">
+            {gatewayTokenDialog?.token}
+          </code>
+          {gatewayTokenDialog?.wsl_sync_error ? (
+            <div className="flex items-start gap-2 border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{gatewayTokenDialog.wsl_sync_error}</span>
+            </div>
+          ) : null}
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button type="button" variant="secondary" onClick={() => void copyGatewayToken()}>
+              <Copy className="h-4 w-4" />
+              复制
+            </Button>
+            <Button
+              type="button"
+              onClick={() => void acknowledgeGatewayToken()}
+              disabled={gatewayTokenActionPending}
+            >
+              <Check className="h-4 w-4" />
+              已保存
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+    </>
   );
 }

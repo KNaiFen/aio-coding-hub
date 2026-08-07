@@ -1,15 +1,20 @@
 import {
   commands,
   type GatewayActiveSessionSummary,
+  type GatewayBearerTokenReveal,
   type GatewayUpstreamProxyInput,
   type GatewayProviderCircuitStatus,
   type GatewayStatus,
 } from "../../generated/bindings";
-import { invokeGeneratedIpc, type GeneratedCommandResult } from "../generatedIpc";
+import {
+  invokeGeneratedIpc,
+  mapGeneratedCommandResponse,
+  type GeneratedCommandResult,
+} from "../generatedIpc";
 import type { CliKey } from "../providers/providers";
 import { CLI_KEYS } from "../../constants/clis";
 
-export type { GatewayProviderCircuitStatus, GatewayStatus };
+export type { GatewayBearerTokenReveal, GatewayProviderCircuitStatus, GatewayStatus };
 export type GatewayActiveSession = GatewayActiveSessionSummary;
 
 const CLI_KEY_VALUES = CLI_KEYS;
@@ -72,6 +77,54 @@ export async function gatewayStatus() {
     title: "获取网关状态失败",
     cmd: "gateway_status",
     invoke: () => commands.gatewayStatus(),
+  });
+}
+
+function normalizeGatewayBearerTokenReveal(value: GatewayBearerTokenReveal) {
+  if (
+    value == null ||
+    typeof value !== "object" ||
+    typeof value.token !== "string" ||
+    !/^[A-Za-z0-9_-]{43}$/.test(value.token) ||
+    (value.wsl_sync_error !== null && typeof value.wsl_sync_error !== "string")
+  ) {
+    throw new Error("SEC_INVALID_INPUT: invalid Gateway Bearer token reveal response");
+  }
+  return value;
+}
+
+export async function gatewayBearerTokenReveal() {
+  return invokeGeneratedIpc<GatewayBearerTokenReveal, null>({
+    title: "读取网关访问令牌失败",
+    cmd: "gateway_bearer_token_reveal",
+    invoke: async () =>
+      mapGeneratedCommandResponse(
+        await commands.gatewayBearerTokenReveal(),
+        normalizeGatewayBearerTokenReveal
+      ),
+    nullResultBehavior: "return_fallback",
+    fallback: null,
+  });
+}
+
+export async function gatewayBearerTokenRotate() {
+  return invokeGeneratedIpc<GatewayBearerTokenReveal>({
+    title: "轮换网关访问令牌失败",
+    cmd: "gateway_bearer_token_rotate",
+    invoke: async () =>
+      mapGeneratedCommandResponse(
+        await commands.gatewayBearerTokenRotate(),
+        normalizeGatewayBearerTokenReveal
+      ),
+  });
+}
+
+export async function gatewayBearerTokenAcknowledge() {
+  return invokeGeneratedIpc<boolean>({
+    title: "确认网关访问令牌失败",
+    cmd: "gateway_bearer_token_acknowledge",
+    invoke: () =>
+      commands.gatewayBearerTokenAcknowledge() as Promise<GeneratedCommandResult<boolean>>,
   });
 }
 

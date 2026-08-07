@@ -26,7 +26,6 @@ pub(in crate::gateway::proxy::handler) struct BodyReaderMiddleware;
 impl BodyReaderMiddleware {
     /// Reads the request body into `ctx.body_bytes` and parses introspection JSON.
     ///
-    /// Also strips the `x-aio-provider-id` header (already consumed as `forced_provider_id`).
     pub(in crate::gateway::proxy::handler) async fn run<R: tauri::Runtime>(
         mut ctx: ProxyContext<R>,
     ) -> MiddlewareAction<R> {
@@ -34,7 +33,6 @@ impl BodyReaderMiddleware {
             .request_body
             .take()
             .expect("request_body must be set before BodyReaderMiddleware");
-        ctx.headers.remove("x-aio-provider-id");
 
         let request_body_limit = max_request_body_bytes();
         match to_bytes(body, request_body_limit).await {
@@ -46,7 +44,6 @@ impl BodyReaderMiddleware {
                     &ctx.cli_key,
                     &ctx.req_method,
                     &ctx.forwarded_path,
-                    &ctx.headers,
                     None,
                 );
                 let contract = early_error_contract(EarlyErrorKind::BodyTooLarge);
@@ -79,7 +76,6 @@ impl BodyReaderMiddleware {
                     &ctx.cli_key,
                     &ctx.req_method,
                     &ctx.forwarded_path,
-                    &ctx.headers,
                     None,
                 );
                 let (contract, message) = match err {

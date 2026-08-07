@@ -6,7 +6,7 @@
 
 ## Token 生命周期
 
-settings 持久化摘要、是否已确认展示和代次，不保存明文。创建/轮换由 settings owned transaction 生成一次性明文，通过 transient mutation result 返回并同步 runtime Router 与 WSL 配置。旧非回环配置迁移为未确认代次；启动看到未确认代次时先轮换再暴露。
+私有 `gateway-bearer-token.json` sidecar 持久化摘要、是否已确认展示和代次，不进入 `AppSettings`、SettingsView、配置导入导出或诊断。创建/轮换只在受控内存保留一次性明文，通过 reveal mutation 返回并同步 runtime verifier 与 WSL 配置。旧非回环配置在首次启动时生成未确认代次；启动看到不属于当前进程的未确认代次时先轮换再暴露。
 
 ## 删除旧信任面
 
@@ -14,4 +14,4 @@ settings 持久化摘要、是否已确认展示和代次，不保存明文。�
 
 ## 失败与回滚
 
-settings 持久化、runtime 摘要、gateway rebind 和 WSL 同步沿现有 owned transaction 收敛。无法完整提交时返回可见错误并恢复上一代摘要；一次性明文不写诊断。
+sidecar 原子写入后才替换 runtime verifier；router 在启动时读取受控 verifier，因此轮换立即使旧 token 失效。WSL 同步失败作为一次性 reveal 的可见错误返回，不写入日志、manifest、argv 或错误细节；WSL manifest v2 只保存非秘密 managed keys，拒绝持久化 Gateway credential。

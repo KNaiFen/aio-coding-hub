@@ -417,13 +417,6 @@ pub(crate) struct ProviderObserverRow {
     pub account_usage_updated_at: Option<i64>,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct ClaudeTerminalLaunchContext {
-    /// The credential to pass as ANTHROPIC_API_KEY to `claude` CLI.
-    /// For `api_key` mode this is the stored api_key; for `oauth` mode it is the OAuth access token.
-    pub api_key_plaintext: String,
-}
-
 impl ProviderForGateway {
     pub(crate) fn is_cx2cc_bridge(&self) -> bool {
         is_cx2cc_bridge(self.bridge_type.as_deref())
