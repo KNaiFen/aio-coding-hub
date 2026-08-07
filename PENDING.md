@@ -18,7 +18,7 @@
 
 - **状态**：`planned`
 - **日期**：2026-08-06
-- **待执行交付**：代码已在 `codex/provider-sync-session-only-backup` 提交并推送，当前 head `59ea823513c995abf7820577c1c5d76e8a9742eb`，草稿 PR [#87](https://github.com/KNaiFen/aio-coding-hub/pull/87)。Actions `31117924101` 在 Rust tests 编译中被平台取消，`31117791366` attempt 2 在下载 Action 时返回 `Service Unavailable`，`31119433802` 的入口 job 被平台取消；均发生于 GitHub Actions `major_outage`，尚无产品测试失败证据。待平台恢复后重跑精确 head 的全量 CI、转 Ready、完成主线门与合并；在此之前保持 `planned`，不标记 `done`。
+- **待执行交付**：代码已在 `codex/provider-sync-session-only-backup` 提交并推送，当前 head `59ea823513c995abf7820577c1c5d76e8a9742eb`，草稿 PR [#87](https://github.com/KNaiFen/aio-coding-hub/pull/87)。Actions `31117924101` 在 Rust tests 编译中被平台取消，`31117791366` attempt 2 在下载 Action 时返回 `Service Unavailable`，`31119433802` 的入口 job 被平台取消；均发生于 GitHub Actions `major_outage`，尚无产品测试失败证据。待平台恢复后重跑精确 head 的全量 CI、转 Ready、完成主线门与合并；在此之前保持 `planned`，不标记 `done`。该 PR/CI/合并流程作为独立待执行交付，不再阻塞 AUD-002、AUD-035、AUD-033 的代码实施；后续项即使 CI 暂不可用，也先完成本地候选代码并把云端验证继续保留为 `planned`。
 - **观察问题**：Provider Sync 当前扫描并备份 `archived_sessions`、SQLite 与全局状态，且旧格式 managed backup 最多保留五代，造成与恢复目标无关的空间增长。
 - **锁定决策**：新格式只处理活动 `sessions`，不再扫描、改写或备份 `archived_sessions`；只保留最新一代新格式 managed backup；只删除 manifest 精确证明所有权的旧格式 managed backup。
 - **拟议方向**：引入 v2 session-only manifest 和严格 managed/unmanaged 分类，在首次成功创建 v2 后迁移清理 v1，并保留同步失败的完整回滚。
@@ -62,6 +62,7 @@
 
 - **状态**：`planned`
 - **日期**：2026-08-06
+- **待执行交付**：代码已在堆叠分支 `codex/final-hardening-stack` 提交为 `e969796d`；本地 cloud-only checker/self-test 与 `git diff --check` 通过，未运行 Cargo、pnpm、Tauri、生成器、类型检查、Lint、测试或构建。精确 head 全量 CI、生成绑定核验、主线门和合并统一后置；在完成云端验证与合并前保持 `planned`。
 - **观察问题**：Prompt、MCP、Skills 和 workspace switch 在 SQLite 与外部文件之间双写，多处补偿吞错；进程中断或 commit/恢复失败可留下跨重启漂移。
 - **锁定决策**：已提交 SQLite 状态为权威；任何外部副作用前 durable journal；启动前阻断自动对账并复用 AUD-008 维护态；补偿失败必须可见且错误摘要脱敏。
 - **拟议方向**：统一 prepare-first 操作协议。Skills 的不可由 metadata 重建内容使用 journal 专属、带 ownership/hash 的临时 staging/backup，resolved 后回收。
@@ -72,6 +73,7 @@
 
 - **状态**：`planned`
 - **日期**：2026-08-06
+- **待执行交付**：代码已在堆叠分支 `codex/final-hardening-stack` 提交为 `6cc90934` 与 `cbe4cdfd`；本地 cloud-only checker/self-test 与 `git diff --check` 通过，未运行 Cargo、pnpm、Tauri、生成器、类型检查、Lint、测试或构建。精确 head 全量 CI、生成绑定核验、主线门和合并统一后置；在完成云端验证与合并前保持 `planned`。
 - **观察问题**：`history_limit=0` 只在投影末端生效，之前仍读取并构造 500 条日志，并基于隐藏历史触发完整 Claude/Codex session-folder 扫描。
 - **锁定决策**：保持 last/dominant/active/all-scope 与 recent ready-empty 语义；改用受限查询；folder lookup 只服务实际渲染投影并使用有界内存缓存。
 - **拟议方向**：拆分 last/dominant/recent SQL，zero-history 跳过 recent；以 `(source, session_id)` 为键增加容量和正/负 TTL 均受限的 Observer folder cache。
@@ -82,6 +84,7 @@
 
 - **状态**：`planned`
 - **日期**：2026-08-06
+- **待执行交付**：代码已在堆叠分支 `codex/final-hardening-stack` 提交为 `3195b3cb`；本地 `node scripts/check-cloud-only-verification.selftest.mjs`、`node scripts/check-cloud-only-verification.mjs` 与 `git diff --check` 已通过，未运行 Cargo、pnpm、Tauri、格式化、类型检查、Lint、测试、构建或生成器。精确 head 全量 CI、生成绑定核验、主线门与合并全部后置；在云端验证与合并前保持 `planned`，不标记 `done`。
 - **观察问题**：`activationEvents` 当前基本不参与 command/gateway 调度，重复 runtime failure 只触发进程内 circuit breaker，重启后清零且没有校验恢复路径。
 - **锁定决策**：仅支持 `onStartup`、`onCommand:*`、`onGatewayHook:*`，空数组保持 legacy；显式拒绝两种废弃事件；10 分钟内 3 次严重故障持久 quarantine；revalidate 成功只到 disabled。
 - **拟议方向**：引入精确 ActivationPolicy gate，统一 startup/command/gateway 严重故障分类和原子阈值事务，隔离后刷新 gateway snapshot/host，增加 quarantined-only revalidate。
