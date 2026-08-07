@@ -1355,11 +1355,13 @@ fn optional_string_map(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::plugin_contributions::{CommandContribution, PluginContributes};
     use crate::domain::plugins::{
-        PluginDetail, PluginHostCompatibility, PluginInstallSource, PluginManifest,
+        PluginDetail, PluginHook, PluginHostCompatibility, PluginInstallSource, PluginManifest,
         PluginPermissionRisk, PluginRuntime, PluginStatus, PluginSummary,
     };
     use serde_json::json;
+    use std::collections::BTreeMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex as StdMutex};
     use std::time::{Duration, Instant};
@@ -1767,6 +1769,108 @@ mod tests {
             stream: Default::default(),
             log: Default::default(),
         }
+    }
+
+    fn explicit_command_detail(plugin_id: &str, command: &str) -> PluginDetail {
+        let mut detail = plugin_detail(plugin_id, "explicit-command");
+        detail.manifest.activation_events = vec![format!("onCommand:{command}")];
+        detail.manifest.contributes = Some(PluginContributes {
+            providers: Vec::new(),
+            protocols: Vec::new(),
+            protocol_bridges: Vec::new(),
+            commands: vec![CommandContribution {
+                command: command.to_string(),
+                title: "Allowed command".to_string(),
+                category: None,
+            }],
+            gateway_hooks: Vec::new(),
+            ui: BTreeMap::new(),
+        });
+        detail
+    }
+
+    fn explicit_gateway_detail(plugin_id: &str, hook: &str) -> PluginDetail {
+        let mut detail = plugin_detail(plugin_id, "explicit-gateway-hook");
+        detail.manifest.activation_events = vec![format!("onGatewayHook:{hook}")];
+        detail.manifest.contributes = Some(PluginContributes {
+            providers: Vec::new(),
+            protocols: Vec::new(),
+            protocol_bridges: Vec::new(),
+            commands: Vec::new(),
+            gateway_hooks: vec![PluginHook {
+                name: hook.to_string(),
+                priority: 0,
+                failure_policy: None,
+                timeout_ms: None,
+            }],
+            ui: BTreeMap::new(),
+        });
+        detail
+    }
+
+    #[tokio::test]
+    async fn registry_rejects_unmatched_explicit_command_without_starting_host() {
+        let factory = Arc::new(FakeExtensionHostFactory::default());
+        let registry = ExtensionHostInstanceRegistry::new_for_tests(
+            factory.clone(),
+            ExtensionHostRegistryLimits::default(),
+        );
+        let error = registry
+            .execute_command(
+                explicit_command_detail("acme.explicit-command", "acme.allowed"),
+                "acme.blocked",
+                json!({}),
+            )
+            .await
+            .expect_err("an undeclared command must be rejected before host startup");
+
+        assert_eq!(error.code(), "PLUGIN_ACTIVATION_EVENT_NOT_DECLARED");
+        assert_eq!(factory.start_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn registry_rejects_unmatched_explicit_gateway_hook_without_starting_host() {
+        let factory = Arc::new(FakeExtensionHostFactory::default());
+        let registry = ExtensionHostInstanceRegistry::new_for_tests(
+            factory.clone(),
+            ExtensionHostRegistryLimits::default(),
+        );
+        let error = registry
+            .execute_gateway_hook(
+                explicit_gateway_detail(
+                    "acme.explicit-gateway-hook",
+                    "gateway.request.afterBodyRead",
+                ),
+                "gateway.request.beforeSend",
+                gateway_context("trace-explicit-gateway-hook"),
+                Duration::from_secs(1),
+            )
+            .await
+            .expect_err("an undeclared gateway hook must be rejected before host startup");
+
+        assert_eq!(error.code(), "PLUGIN_ACTIVATION_EVENT_NOT_DECLARED");
+        assert_eq!(factory.start_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn registry_activates_explicit_startup_plugin_only_once_per_process() {
+        let factory = Arc::new(FakeExtensionHostFactory::default());
+        let registry = ExtensionHostInstanceRegistry::new_for_tests(
+            factory.clone(),
+            ExtensionHostRegistryLimits::default(),
+        );
+        let mut detail = plugin_detail("acme.startup", "explicit-startup");
+        detail.manifest.activation_events = vec!["onStartup".to_string()];
+
+        assert!(registry
+            .activate_startup_plugin(detail.clone())
+            .await
+            .expect("first matching startup activation"));
+        assert!(!registry
+            .activate_startup_plugin(detail)
+            .await
+            .expect("duplicate startup activation should be skipped"));
+        assert_eq!(factory.start_count(), 1);
     }
 
     #[tokio::test]
