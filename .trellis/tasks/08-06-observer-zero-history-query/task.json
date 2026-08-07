@@ -3,7 +3,7 @@
   "name": "observer-zero-history-query",
   "title": "AUD-035 history_limit=0 Observer I/O",
   "description": "用受限查询和有界 folder cache 消除 history_limit=0 的 500 行投影与完整会话树重复扫描。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": "backend",
   "scope": "observer-performance",
   "package": "aio-coding-hub",
