@@ -3,7 +3,7 @@
 - [x] 建立并合并 AUD-054：云端验证与本地零产物合同。
 - [x] 合并后核验并清理精确的 `src-tauri/target*`、仓库内 `node_modules` 和已知前端缓存。
 - [x] 完成 AUD-055 代码、提交和草稿 PR；CI 重跑、Ready、主线门与合并列入待执行交付。
-- [x] 完成 AUD-056 代码提交 `28d65b2d`；PR、Actions、bindings 核验与合并列入待执行交付。
+- [x] 完成 AUD-056 代码提交 `28d65b2d`、`c86799ce`；PR、Actions、bindings 核验与合并列入待执行交付。
 - [ ] 建立并合并 AUD-016：非回环 Gateway Bearer Token。
 - [ ] 建立并合并 AUD-008：跨重启数据重置与维护态。
 - [ ] 建立并合并 AUD-002：SQLite 权威恢复 journal。
