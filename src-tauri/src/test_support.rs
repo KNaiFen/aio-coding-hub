@@ -149,6 +149,39 @@ pub fn mcp_restore_target_bytes<R: tauri::Runtime>(
     crate::infra::mcp_sync::restore_target_bytes(app, cli_key, bytes).map_err(Into::into)
 }
 
+pub fn prompt_read_target_bytes<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    cli_key: &str,
+) -> crate::shared::error::AppResult<Option<Vec<u8>>> {
+    crate::infra::prompt_sync::read_target_bytes(app, cli_key).map_err(Into::into)
+}
+
+pub fn prompt_restore_target_bytes<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    cli_key: &str,
+    bytes: Option<Vec<u8>>,
+) -> crate::shared::error::AppResult<()> {
+    crate::infra::prompt_sync::restore_target_bytes(app, cli_key, bytes).map_err(Into::into)
+}
+
+pub fn recovery_journal_statuses_for_kind<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    operation_kind: &str,
+) -> crate::shared::error::AppResult<Vec<String>> {
+    let db = crate::infra::db::init(app)?;
+    let conn = db.open_connection()?;
+    let mut statement = conn
+        .prepare_cached(
+            "SELECT status FROM external_effect_recovery_journal WHERE operation_kind = ?1 ORDER BY created_at, operation_id",
+        )
+        .map_err(|error| format!("failed to prepare recovery journal status query: {error}"))?;
+    let rows = statement
+        .query_map([operation_kind], |row| row.get::<_, String>(0))
+        .map_err(|error| format!("failed to query recovery journal statuses: {error}"))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("failed to read recovery journal status: {error}").into())
+}
+
 pub fn mcp_swap_local_for_workspace_switch<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     cli_key: &str,
@@ -175,7 +208,15 @@ pub fn mcp_import_servers_json<R: tauri::Runtime>(
     let db = crate::infra::db::init(app)?;
     let servers: Vec<crate::domain::mcp::McpImportServer> = serde_json::from_value(servers)
         .map_err(|e| format!("SEC_INVALID_INPUT: invalid mcp import servers json: {e}"))?;
-    let report = crate::domain::mcp::import_servers(app, &db, workspace_id, servers)?;
+    let report = crate::infra::recovery_journal::run_operation_for_test(
+        app,
+        &db,
+        "mcp.import",
+        crate::infra::recovery_journal::JournalContext::for_workspace(workspace_id),
+        |operation| {
+            crate::domain::mcp::import_servers(app, &db, workspace_id, servers, operation)
+        },
+    )?;
     serialize_json(report)
 }
 
@@ -184,7 +225,34 @@ pub fn mcp_import_from_workspace_cli_json<R: tauri::Runtime>(
     workspace_id: i64,
 ) -> crate::shared::error::AppResult<serde_json::Value> {
     let db = crate::infra::db::init(app)?;
-    let report = crate::domain::mcp::import_servers_from_workspace_cli(app, &db, workspace_id)?;
+    let report = crate::infra::recovery_journal::run_operation_for_test(
+        app,
+        &db,
+        "mcp.import_from_cli",
+        crate::infra::recovery_journal::JournalContext::for_workspace(workspace_id),
+        |operation| {
+            crate::domain::mcp::import_servers_from_workspace_cli(
+                app,
+                &db,
+                workspace_id,
+                operation,
+            )
+        },
+    )?;
+    serialize_json(report)
+}
+
+pub fn prompts_default_sync_from_files_json<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> crate::shared::error::AppResult<serde_json::Value> {
+    let db = crate::infra::db::init(app)?;
+    let report = crate::infra::recovery_journal::run_operation_for_test(
+        app,
+        &db,
+        "prompt.default_sync",
+        crate::infra::recovery_journal::JournalContext::default(),
+        |_operation| crate::domain::prompts::default_sync_from_files(app, &db),
+    )?;
     serialize_json(report)
 }
 
@@ -649,14 +717,23 @@ pub fn skill_install_json<R: tauri::Runtime>(
     enabled: bool,
 ) -> crate::shared::error::AppResult<serde_json::Value> {
     let db = crate::infra::db::init(app)?;
-    let row = crate::skills::install(
+    let row = crate::infra::recovery_journal::run_operation_for_test(
         app,
         &db,
-        workspace_id,
-        git_url,
-        branch,
-        source_subdir,
-        enabled,
+        "skill.install",
+        crate::infra::recovery_journal::JournalContext::for_workspace(workspace_id),
+        |operation| {
+            crate::skills::install(
+                app,
+                &db,
+                workspace_id,
+                git_url,
+                branch,
+                source_subdir,
+                enabled,
+                operation,
+            )
+        },
     )?;
     serialize_json(row)
 }
@@ -668,7 +745,19 @@ pub fn skill_set_enabled_json<R: tauri::Runtime>(
     enabled: bool,
 ) -> crate::shared::error::AppResult<serde_json::Value> {
     let db = crate::infra::db::init(app)?;
-    let row = crate::skills::set_enabled(app, &db, workspace_id, skill_id, enabled)?;
+    let row = crate::infra::recovery_journal::run_operation_for_test(
+        app,
+        &db,
+        "skill.set_enabled",
+        crate::infra::recovery_journal::JournalContext {
+            workspace_id: Some(workspace_id),
+            entity_id: Some(skill_id),
+            ..crate::infra::recovery_journal::JournalContext::default()
+        },
+        |operation| {
+            crate::skills::set_enabled(app, &db, workspace_id, skill_id, enabled, operation)
+        },
+    )?;
     serialize_json(row)
 }
 
@@ -678,7 +767,17 @@ pub fn skill_update_json<R: tauri::Runtime>(
     skill_id: i64,
 ) -> crate::shared::error::AppResult<serde_json::Value> {
     let db = crate::infra::db::init(app)?;
-    let row = crate::skills::update_skill(app, &db, workspace_id, skill_id)?;
+    let row = crate::infra::recovery_journal::run_operation_for_test(
+        app,
+        &db,
+        "skill.update",
+        crate::infra::recovery_journal::JournalContext {
+            workspace_id: Some(workspace_id),
+            entity_id: Some(skill_id),
+            ..crate::infra::recovery_journal::JournalContext::default()
+        },
+        |operation| crate::skills::update_skill(app, &db, workspace_id, skill_id, operation),
+    )?;
     serialize_json(row)
 }
 
@@ -696,7 +795,13 @@ pub fn skill_uninstall<R: tauri::Runtime>(
     skill_id: i64,
 ) -> crate::shared::error::AppResult<bool> {
     let db = crate::infra::db::init(app)?;
-    crate::skills::uninstall(app, &db, skill_id)?;
+    crate::infra::recovery_journal::run_operation_for_test(
+        app,
+        &db,
+        "skill.uninstall",
+        crate::infra::recovery_journal::JournalContext::for_entity(skill_id),
+        |operation| crate::skills::uninstall(app, &db, skill_id, operation),
+    )?;
     Ok(true)
 }
 
@@ -706,7 +811,19 @@ pub fn skill_return_to_local<R: tauri::Runtime>(
     skill_id: i64,
 ) -> crate::shared::error::AppResult<bool> {
     let db = crate::infra::db::init(app)?;
-    crate::skills::return_to_local(app, &db, workspace_id, skill_id)?;
+    crate::infra::recovery_journal::run_operation_for_test(
+        app,
+        &db,
+        "skill.return_to_local",
+        crate::infra::recovery_journal::JournalContext {
+            workspace_id: Some(workspace_id),
+            entity_id: Some(skill_id),
+            ..crate::infra::recovery_journal::JournalContext::default()
+        },
+        |operation| {
+            crate::skills::return_to_local(app, &db, workspace_id, skill_id, operation)
+        },
+    )?;
     Ok(true)
 }
 
@@ -716,7 +833,13 @@ pub fn skill_local_delete<R: tauri::Runtime>(
     dir_name: &str,
 ) -> crate::shared::error::AppResult<bool> {
     let db = crate::infra::db::init(app)?;
-    crate::skills::delete_local(app, &db, workspace_id, dir_name)?;
+    crate::infra::recovery_journal::run_operation_for_test(
+        app,
+        &db,
+        "skill.local_delete",
+        crate::infra::recovery_journal::JournalContext::for_workspace(workspace_id),
+        |operation| crate::skills::delete_local(app, &db, workspace_id, dir_name, operation),
+    )?;
     Ok(true)
 }
 
@@ -735,7 +858,13 @@ pub fn skill_import_local_json<R: tauri::Runtime>(
     dir_name: &str,
 ) -> crate::shared::error::AppResult<serde_json::Value> {
     let db = crate::infra::db::init(app)?;
-    let row = crate::skills::import_local(app, &db, workspace_id, dir_name)?;
+    let row = crate::infra::recovery_journal::run_operation_for_test(
+        app,
+        &db,
+        "skill.import_local",
+        crate::infra::recovery_journal::JournalContext::for_workspace(workspace_id),
+        |operation| crate::skills::import_local(app, &db, workspace_id, dir_name, operation),
+    )?;
     serialize_json(row)
 }
 

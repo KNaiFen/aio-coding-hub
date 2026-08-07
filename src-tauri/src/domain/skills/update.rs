@@ -1,27 +1,25 @@
 //! Usage: Skill update detection and execution.
 
-use super::fs_ops::{copy_dir_recursive, skill_dir_content_hash};
+use super::fs_ops::skill_dir_content_hash;
 use super::git_url::{normalize_repo_branch, parse_github_owner_repo};
 use super::installed::{get_skill_by_id_for_workspace, installed_list_for_workspace};
-use super::ops::sync_one_cli;
+use super::ops::ensure_installed_content_hash;
 use super::paths::ssot_skills_root;
+use super::recovery::{stage_artifact, SkillRecoveryContext};
 use super::repo_cache::{ensure_repo_cache, get_repo_head_commit, github_get_branch_commit};
 use super::skill_md::parse_skill_md;
 use super::types::{InstalledSkillSummary, SkillUpdateInfo};
 use super::util::validate_relative_subdir;
 use crate::db;
+use crate::infra::recovery_journal::RecoveryOperation;
 use crate::shared::error::db_err;
 use crate::shared::text::normalize_name;
 use crate::shared::time::now_unix_seconds;
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 static SKILL_UPDATE_LOCKS: OnceLock<Mutex<HashSet<i64>>> = OnceLock::new();
-static UPDATE_PATH_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug)]
 struct SkillUpdateGuard {
@@ -225,18 +223,18 @@ pub fn check_updates_for_workspace(
     Ok(results)
 }
 
-/// Update a skill by replacing the SSOT directory in place.
-/// Preserves all workspace enablements.
+/// Stage the desired and previous SSOT contents, then commit SQLite metadata.
+/// The journal projects the committed state after this function returns.
 pub fn update_skill(
     app: &tauri::AppHandle<impl tauri::Runtime>,
     db: &db::Db,
     workspace_id: i64,
     skill_id: i64,
+    operation: &RecoveryOperation,
 ) -> crate::shared::error::AppResult<InstalledSkillSummary> {
     let mut conn = db.open_connection()?;
     let _guard = acquire_skill_update_lock(skill_id)?;
     let skill = get_skill_by_id_for_workspace(&conn, workspace_id, skill_id)?;
-    let previous_content_hash = installed_content_hash_for_conn(&conn, skill_id)?;
 
     // Local-only imports do not have a remote source to refresh from.
     if !is_updatable_skill_source(&skill.source_git_url) {
@@ -263,25 +261,30 @@ pub fn update_skill(
         get_latest_commit_for_skill(app, &skill.source_git_url, &skill.source_branch).ok()
     });
 
-    let ssot_root = ssot_skills_root(app)?;
-    let ssot_dir = ssot_root.join(&skill.skill_key);
-    let staging_dir = unique_update_path(&ssot_root, &skill.skill_key, "staging");
-    let backup_dir = unique_update_path(&ssot_root, &skill.skill_key, "old");
-    replace_skill_dir(&src_dir, &ssot_dir, &staging_dir, &backup_dir)?;
-
-    let installed_content_hash = match skill_dir_content_hash(&ssot_dir) {
-        Ok(hash) => hash,
-        Err(err) => {
-            let _ = restore_replaced_skill_dir(&ssot_dir, &backup_dir);
-            return Err(err);
-        }
+    let ssot_dir = ssot_skills_root(app)?.join(&skill.skill_key);
+    if !ssot_dir.is_dir() {
+        return Err(format!("SKILL_SSOT_MISSING: {}", skill.skill_key).into());
+    }
+    ensure_installed_content_hash(&conn, skill_id, &ssot_dir)?;
+    let context = SkillRecoveryContext::Update {
+        workspace_id,
+        skill_id,
+        skill_key: skill.skill_key.clone(),
     };
+    let artifact = stage_artifact(
+        app,
+        operation,
+        &context,
+        &[("desired", src_dir.as_path()), ("previous", ssot_dir.as_path())],
+        None,
+    )?;
+    let installed_content_hash = artifact.role_hash("desired")?.to_string();
 
     let now = now_unix_seconds();
     let tx = conn
         .transaction()
         .map_err(|e| db_err!("failed to start transaction: {e}"))?;
-    let updated_rows = match tx.execute(
+    let updated_rows = tx.execute(
         r#"
 UPDATE skills
 SET
@@ -302,169 +305,16 @@ WHERE id = ?7
             now,
             skill_id
         ],
-    ) {
-        Ok(rows) => rows,
-        Err(err) => {
-            let _ = tx.rollback();
-            let _ = restore_replaced_skill_dir(&ssot_dir, &backup_dir);
-            return Err(db_err!("failed to update skill metadata: {err}"));
-        }
-    };
+    )
+    .map_err(|err| db_err!("failed to update skill metadata: {err}"))?;
     if updated_rows != 1 {
-        let _ = tx.rollback();
-        let _ = restore_replaced_skill_dir(&ssot_dir, &backup_dir);
         return Err("SKILL_UPDATE_CONFLICT: skill no longer exists".into());
     }
 
-    if let Err(err) = tx.commit() {
-        let _ = restore_replaced_skill_dir(&ssot_dir, &backup_dir);
-        return Err(db_err!("failed to commit: {err}"));
-    }
+    tx.commit().map_err(|err| db_err!("failed to commit: {err}"))?;
 
-    let skill_cli_keys: Vec<_> =
-        crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::Skills)
-            .collect();
-    for cli_key in skill_cli_keys.iter().copied() {
-        if let Err(err) = sync_one_cli(app, &conn, cli_key) {
-            let rollback_suffix = restore_committed_update(
-                &conn,
-                &skill,
-                previous_content_hash.as_deref(),
-                &ssot_dir,
-                &backup_dir,
-            )
-            .map(|message| format!("; rollback failed: {message}"))
-            .unwrap_or_default();
-            for repair_cli_key in skill_cli_keys.iter().copied() {
-                if let Err(repair_err) = sync_one_cli(app, &conn, repair_cli_key) {
-                    tracing::warn!(
-                        cli_key = %repair_cli_key,
-                        "skill update rollback sync skipped: {repair_err}"
-                    );
-                }
-            }
-            return Err(format!(
-                "SKILL_UPDATE_SYNC_FAILED: failed to sync {cli_key}: {err}{rollback_suffix}"
-            )
-            .into());
-        }
-    }
-
-    let _ = std::fs::remove_dir_all(&backup_dir);
-
+    operation.mark_authoritative_committed();
     get_skill_by_id_for_workspace(&conn, workspace_id, skill_id)
-}
-
-fn unique_update_path(root: &Path, skill_key: &str, suffix: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|value| value.as_nanos())
-        .unwrap_or_default();
-    let counter = UPDATE_PATH_COUNTER.fetch_add(1, Ordering::Relaxed);
-    root.join(format!(".{skill_key}.update-{suffix}-{nanos}-{counter}"))
-}
-
-fn replace_skill_dir(
-    src_dir: &Path,
-    ssot_dir: &Path,
-    staging_dir: &Path,
-    backup_dir: &Path,
-) -> crate::shared::error::AppResult<()> {
-    let _ = std::fs::remove_dir_all(staging_dir);
-    let _ = std::fs::remove_dir_all(backup_dir);
-
-    if let Err(err) = copy_dir_recursive(src_dir, staging_dir) {
-        let _ = std::fs::remove_dir_all(staging_dir);
-        return Err(err);
-    }
-
-    if ssot_dir.exists() {
-        std::fs::rename(ssot_dir, backup_dir).map_err(|e| {
-            let _ = std::fs::remove_dir_all(staging_dir);
-            format!(
-                "SKILL_UPDATE_REPLACE_FAILED: failed to move {} to {}: {e}",
-                ssot_dir.display(),
-                backup_dir.display()
-            )
-        })?;
-    }
-
-    if let Err(err) = std::fs::rename(staging_dir, ssot_dir) {
-        let _ = restore_replaced_skill_dir(ssot_dir, backup_dir);
-        return Err(format!(
-            "SKILL_UPDATE_REPLACE_FAILED: failed to activate {}: {err}",
-            ssot_dir.display()
-        )
-        .into());
-    }
-
-    Ok(())
-}
-
-fn restore_replaced_skill_dir(ssot_dir: &Path, backup_dir: &Path) -> std::io::Result<()> {
-    if ssot_dir.exists() {
-        std::fs::remove_dir_all(ssot_dir)?;
-    }
-    if backup_dir.exists() {
-        std::fs::rename(backup_dir, ssot_dir)?;
-    }
-    Ok(())
-}
-
-fn restore_committed_update(
-    conn: &Connection,
-    skill: &InstalledSkillSummary,
-    previous_content_hash: Option<&str>,
-    ssot_dir: &Path,
-    backup_dir: &Path,
-) -> Option<String> {
-    let mut errors = Vec::new();
-    if let Err(err) = restore_replaced_skill_dir(ssot_dir, backup_dir) {
-        errors.push(format!("files: {err}"));
-    }
-    if let Err(err) = restore_skill_metadata(conn, skill, previous_content_hash) {
-        errors.push(format!("db: {err}"));
-    }
-    if errors.is_empty() {
-        None
-    } else {
-        Some(errors.join("; "))
-    }
-}
-
-fn restore_skill_metadata(
-    conn: &Connection,
-    skill: &InstalledSkillSummary,
-    previous_content_hash: Option<&str>,
-) -> crate::shared::error::AppResult<()> {
-    let rows = conn
-        .execute(
-            r#"
-UPDATE skills
-SET
-  name = ?1,
-  normalized_name = ?2,
-  description = ?3,
-  installed_commit = ?4,
-  installed_content_hash = ?5,
-  updated_at = ?6
-WHERE id = ?7
-"#,
-            params![
-                skill.name.trim(),
-                normalize_name(&skill.name),
-                skill.description.as_str(),
-                skill.installed_commit.as_deref(),
-                previous_content_hash,
-                skill.updated_at,
-                skill.id
-            ],
-        )
-        .map_err(|e| db_err!("failed to restore skill metadata: {e}"))?;
-    if rows != 1 {
-        return Err("SKILL_UPDATE_ROLLBACK_FAILED: skill no longer exists".into());
-    }
-    Ok(())
 }
 
 /// Update the installed_commit for a skill in the database.
@@ -487,16 +337,6 @@ pub(super) fn update_installed_commit(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn unique_update_path_changes_between_calls() {
-        let root = Path::new("/tmp");
-
-        let first = unique_update_path(root, "context7", "staging");
-        let second = unique_update_path(root, "context7", "staging");
-
-        assert_ne!(first, second);
-    }
 
     #[test]
     fn skill_update_lock_rejects_concurrent_same_skill() {

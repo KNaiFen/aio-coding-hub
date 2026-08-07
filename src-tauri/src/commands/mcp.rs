@@ -1,6 +1,7 @@
 //! Usage: MCP server management related Tauri commands.
 
 use crate::app_state::{ensure_db_ready, DbInitState};
+use crate::infra::recovery_journal::{self, JournalContext};
 use crate::{blocking, mcp};
 use std::collections::BTreeMap;
 
@@ -136,7 +137,18 @@ pub(crate) async fn mcp_server_upsert(
     #[cfg(windows)]
     let app_for_wsl = app.clone();
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
-    let result = blocking::run("mcp_server_upsert", move || {
+    let context = JournalContext {
+        workspace_id: None,
+        entity_id: input.server_id,
+        ..JournalContext::default()
+    };
+    let result = recovery_journal::run_blocking_operation(
+        "mcp_server_upsert",
+        app.clone(),
+        db.clone(),
+        "mcp.upsert",
+        context,
+        move |operation| {
         let McpServerUpsertInput {
             server_id,
             server_key,
@@ -164,9 +176,11 @@ pub(crate) async fn mcp_server_upsert(
             url.as_deref(),
             headers.preserve_keys,
             headers.replace,
+            operation,
         )
         .map(McpServerSummaryView::from)
-    })
+        },
+    )
     .await
     .map_err(Into::into);
     #[cfg(windows)]
@@ -186,16 +200,29 @@ pub(crate) async fn mcp_server_set_enabled(
     #[cfg(windows)]
     let app_for_wsl = app.clone();
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
-    let result = blocking::run("mcp_server_set_enabled", move || {
-        mcp::set_enabled(
-            &app,
-            &db,
-            input.workspace_id,
-            input.server_id,
-            input.enabled,
-        )
-        .map(McpServerSummaryView::from)
-    })
+    let context = JournalContext {
+        workspace_id: Some(input.workspace_id),
+        entity_id: Some(input.server_id),
+        ..JournalContext::default()
+    };
+    let result = recovery_journal::run_blocking_operation(
+        "mcp_server_set_enabled",
+        app.clone(),
+        db.clone(),
+        "mcp.set_enabled",
+        context,
+        move |operation| {
+            mcp::set_enabled(
+                &app,
+                &db,
+                input.workspace_id,
+                input.server_id,
+                input.enabled,
+                operation,
+            )
+            .map(McpServerSummaryView::from)
+        },
+    )
     .await
     .map_err(Into::into);
     #[cfg(windows)]
@@ -215,10 +242,14 @@ pub(crate) async fn mcp_server_delete(
     #[cfg(windows)]
     let app_for_wsl = app.clone();
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
-    let result = blocking::run(
+    let result = recovery_journal::run_blocking_operation(
         "mcp_server_delete",
-        move || -> crate::shared::error::AppResult<bool> {
-            mcp::delete(&app, &db, input.server_id)?;
+        app.clone(),
+        db.clone(),
+        "mcp.delete",
+        JournalContext::for_entity(input.server_id),
+        move |operation| -> crate::shared::error::AppResult<bool> {
+            mcp::delete(&app, &db, input.server_id, operation)?;
             Ok(true)
         },
     )
@@ -247,9 +278,17 @@ pub(crate) async fn mcp_import_servers(
     #[cfg(windows)]
     let app_for_wsl = app.clone();
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
-    let result = blocking::run("mcp_import_servers", move || {
-        mcp::import_servers(&app, &db, input.workspace_id, input.servers)
-    })
+    let context = JournalContext::for_workspace(input.workspace_id);
+    let result = recovery_journal::run_blocking_operation(
+        "mcp_import_servers",
+        app.clone(),
+        db.clone(),
+        "mcp.import",
+        context,
+        move |operation| {
+            mcp::import_servers(&app, &db, input.workspace_id, input.servers, operation)
+        },
+    )
     .await
     .map_err(Into::into);
     #[cfg(windows)]
@@ -269,9 +308,17 @@ pub(crate) async fn mcp_import_from_workspace_cli(
     #[cfg(windows)]
     let app_for_wsl = app.clone();
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
-    let result = blocking::run("mcp_import_from_workspace_cli", move || {
-        mcp::import_servers_from_workspace_cli(&app, &db, input.workspace_id)
-    })
+    let context = JournalContext::for_workspace(input.workspace_id);
+    let result = recovery_journal::run_blocking_operation(
+        "mcp_import_from_workspace_cli",
+        app.clone(),
+        db.clone(),
+        "mcp.import_from_cli",
+        context,
+        move |operation| {
+            mcp::import_servers_from_workspace_cli(&app, &db, input.workspace_id, operation)
+        },
+    )
     .await
     .map_err(Into::into);
     #[cfg(windows)]

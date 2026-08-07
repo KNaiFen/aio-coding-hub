@@ -1,6 +1,7 @@
 //! Usage: MCP server import/export parsing and DB import.
 
 use crate::db;
+use crate::infra::recovery_journal::RecoveryOperation;
 use crate::shared::cli_key::CliKey;
 use crate::shared::error::db_err;
 use crate::shared::time::now_unix_seconds;
@@ -8,10 +9,8 @@ use crate::workspaces;
 use rusqlite::params;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use super::backups::CliBackupSnapshots;
 use super::cli_specs::MCP_CLI_KEYS;
 use super::db::{list_for_workspace, upsert_by_name};
-use super::sync::sync_all_cli;
 use super::types::{McpImportReport, McpImportServer, McpImportSkip, McpParseResult};
 use super::validate::{suggest_key, validate_server_key};
 use crate::shared::text::normalize_name;
@@ -635,16 +634,18 @@ pub fn import_servers_from_workspace_cli<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     db: &db::Db,
     workspace_id: i64,
+    operation: &RecoveryOperation,
 ) -> crate::shared::error::AppResult<McpImportReport> {
     let parsed = parse_workspace_cli_target_json(app, db, workspace_id)?;
-    import_servers(app, db, workspace_id, parsed.servers)
+    import_servers(app, db, workspace_id, parsed.servers, operation)
 }
 
 pub fn import_servers<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
+    _app: &tauri::AppHandle<R>,
     db: &db::Db,
     workspace_id: i64,
     servers: Vec<McpImportServer>,
+    operation: &RecoveryOperation,
 ) -> crate::shared::error::AppResult<McpImportReport> {
     if servers.is_empty() {
         return Err("SEC_INVALID_INPUT: servers is required".to_string().into());
@@ -658,7 +659,6 @@ pub fn import_servers<R: tauri::Runtime>(
         .map_err(|e| db_err!("failed to start transaction: {e}"))?;
 
     let _cli_key = workspaces::get_cli_key_by_id(&tx, workspace_id)?;
-    let snapshots = CliBackupSnapshots::capture_all(app)?;
 
     let mut inserted = 0u32;
     let mut updated = 0u32;
@@ -782,15 +782,9 @@ ON CONFLICT(workspace_id, server_id) DO UPDATE SET
         existing_by_key.insert(inserted_row.server_key.clone(), inserted_row);
     }
 
-    if let Err(err) = sync_all_cli(app, &tx) {
-        snapshots.restore_all(app);
-        return Err(err);
-    }
-
-    if let Err(err) = tx.commit() {
-        snapshots.restore_all(app);
-        return Err(db_err!("failed to commit: {err}"));
-    }
+    tx.commit()
+        .map_err(|e| db_err!("failed to commit: {e}"))?;
+    operation.mark_authoritative_committed();
 
     Ok(McpImportReport {
         inserted,

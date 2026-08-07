@@ -192,8 +192,12 @@ pub(crate) fn app_startup_status_get(app: tauri::AppHandle) -> AppStartupStatus 
 pub(crate) async fn app_startup_retry(app: tauri::AppHandle) -> AppStartupStatus {
     let status = crate::app::startup_state::startup_status_snapshot(&app);
     if status.maintenance_mode {
-        if crate::app::maintenance::retry_pending_reset(app.clone()).await {
-            crate::app::bootstrap::start_normal_runtime(&app);
+        if crate::app::maintenance::retry_pending_maintenance(app.clone()).await {
+            if crate::app::maintenance::normal_runtime_started(&app) {
+                let _ = crate::app::startup_tasks::spawn(app.clone());
+            } else {
+                crate::app::bootstrap::start_normal_runtime(&app);
+            }
         }
     } else {
         let _ = crate::app::startup_tasks::spawn(app.clone());

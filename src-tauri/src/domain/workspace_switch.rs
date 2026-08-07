@@ -2,13 +2,15 @@
 
 use crate::claude_plugins;
 use crate::db;
+use crate::infra::recovery_journal::{JournalEntry, RecoveryOperation};
 use crate::mcp_sync;
 use crate::prompt_sync;
-use crate::shared::error::db_err;
+use crate::shared::cli_key::{CliCapability, CliKey};
+use crate::shared::error::{db_err, AppError};
 use crate::shared::time::now_unix_seconds;
 use crate::{mcp, prompts, skills, workspaces};
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -237,142 +239,262 @@ pub fn preview(
     })
 }
 
-pub fn apply<R: tauri::Runtime>(
+const PHASE_CONTEXT: &str = "workspace.context";
+const PHASE_ACTIVE: &str = "workspace.active";
+const PHASE_PROMPT: &str = "workspace.prompt";
+const PHASE_MCP_CAPTURE: &str = "workspace.mcp_capture";
+const PHASE_MCP_MANAGED: &str = "workspace.mcp_managed";
+const PHASE_MCP_RESTORE: &str = "workspace.mcp_restore";
+const PHASE_CLAUDE_CAPTURE: &str = "workspace.claude_capture";
+const PHASE_CLAUDE_RESTORE: &str = "workspace.claude_restore";
+const PHASE_SKILLS_MANAGED: &str = "workspace.skills_managed";
+const PHASE_SKILLS_CAPTURE: &str = "workspace.skills_capture";
+const PHASE_SKILLS_RESTORE: &str = "workspace.skills_restore";
+const PHASE_COMPLETE: &str = "workspace.complete";
+
+const WORKSPACE_PHASES: &[&str] = &[
+    PHASE_CONTEXT,
+    PHASE_ACTIVE,
+    PHASE_PROMPT,
+    PHASE_MCP_CAPTURE,
+    PHASE_MCP_MANAGED,
+    PHASE_MCP_RESTORE,
+    PHASE_CLAUDE_CAPTURE,
+    PHASE_CLAUDE_RESTORE,
+    PHASE_SKILLS_MANAGED,
+    PHASE_SKILLS_CAPTURE,
+    PHASE_SKILLS_RESTORE,
+    PHASE_COMPLETE,
+];
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkspaceRecoveryContext {
+    schema_version: u8,
+    cli_key: String,
+    from_workspace_id: Option<i64>,
+    to_workspace_id: i64,
+}
+
+fn phase_index(phase: &str) -> crate::shared::error::AppResult<usize> {
+    if phase == "prepare" {
+        return Ok(0);
+    }
+    WORKSPACE_PHASES
+        .iter()
+        .position(|candidate| *candidate == phase)
+        .map(|index| index + 1)
+        .ok_or_else(|| {
+            AppError::new(
+                "RECOVERY_JOURNAL_INVALID",
+                "工作区恢复阶段无效",
+            )
+        })
+}
+
+fn run_phase(
+    operation: &RecoveryOperation,
+    completed: &mut usize,
+    phase: &'static str,
+    work: impl FnOnce() -> crate::shared::error::AppResult<()>,
+) -> crate::shared::error::AppResult<()> {
+    let index = phase_index(phase)?;
+    if *completed >= index {
+        return Ok(());
+    }
+    operation.renew_lease()?;
+    work()?;
+    operation.checkpoint_phase(phase)?;
+    *completed = index;
+    Ok(())
+}
+
+fn context_from_entry(entry: &JournalEntry) -> crate::shared::error::AppResult<WorkspaceRecoveryContext> {
+    if entry.operation_kind != "workspace.apply" {
+        return Err(AppError::new(
+            "RECOVERY_JOURNAL_INVALID",
+            "工作区恢复操作类型不匹配",
+        ));
+    }
+    let raw = entry.replay_context.as_deref().ok_or_else(|| {
+        AppError::new("RECOVERY_JOURNAL_INVALID", "工作区恢复上下文缺失")
+    })?;
+    let context: WorkspaceRecoveryContext = serde_json::from_str(raw).map_err(|_| {
+        AppError::new("RECOVERY_JOURNAL_INVALID", "工作区恢复上下文损坏")
+    })?;
+    if context.schema_version != 1
+        || context.to_workspace_id <= 0
+        || context.from_workspace_id.is_some_and(|value| value <= 0)
+        || entry.workspace_id != Some(context.to_workspace_id)
+        || entry.cli_key.as_deref() != Some(context.cli_key.as_str())
+    {
+        return Err(AppError::new(
+            "RECOVERY_JOURNAL_INVALID",
+            "工作区恢复上下文不匹配",
+        ));
+    }
+    CliKey::parse(&context.cli_key)?;
+    Ok(context)
+}
+
+fn execute_workspace_projection<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    db: &db::Db,
+    operation: &RecoveryOperation,
+    context: &WorkspaceRecoveryContext,
+) -> crate::shared::error::AppResult<()> {
+    let conn = db.open_connection()?;
+    let cli_key = workspaces::get_cli_key_by_id(&conn, context.to_workspace_id)?;
+    if cli_key != context.cli_key {
+        return Err(AppError::new(
+            "RECOVERY_JOURNAL_INVALID",
+            "工作区恢复 CLI 不匹配",
+        ));
+    }
+    let cli = CliKey::parse(&cli_key)?;
+    let mut completed = phase_index(&operation.entry().phase)?;
+    if completed >= phase_index(PHASE_ACTIVE)?
+        && workspaces::active_id_by_cli(&conn, &cli_key)? != Some(context.to_workspace_id)
+    {
+        return Err(AppError::new(
+            "RECOVERY_JOURNAL_STATE_CONFLICT",
+            "SQLite 中的活动工作区已变化，拒绝重放旧投影",
+        ));
+    }
+
+    run_phase(operation, &mut completed, PHASE_CONTEXT, || Ok(()))?;
+    run_phase(operation, &mut completed, PHASE_ACTIVE, || {
+        workspaces::set_active(&conn, context.to_workspace_id)?;
+        operation.mark_authoritative_committed();
+        Ok(())
+    })?;
+
+    if cli.supports(CliCapability::Prompts) {
+        run_phase(operation, &mut completed, PHASE_PROMPT, || {
+            prompts::sync_cli_for_workspace(app, &conn, context.to_workspace_id)
+        })?;
+    } else {
+        run_phase(operation, &mut completed, PHASE_PROMPT, || Ok(()))?;
+    }
+
+    if cli.supports(CliCapability::Mcp) {
+        let managed_from = list_enabled_mcp_keys(&conn, context.from_workspace_id)?
+            .into_iter()
+            .collect::<HashSet<_>>();
+        let managed_to = list_enabled_mcp_keys(&conn, Some(context.to_workspace_id))?
+            .into_iter()
+            .collect::<HashSet<_>>();
+        run_phase(operation, &mut completed, PHASE_MCP_CAPTURE, || {
+            mcp::capture_local_mcp_servers_for_workspace_switch(
+                app,
+                &cli_key,
+                &managed_from,
+                context.from_workspace_id,
+            )
+        })?;
+        run_phase(operation, &mut completed, PHASE_MCP_MANAGED, || {
+            mcp::sync_cli_for_workspace(app, &conn, context.to_workspace_id)
+        })?;
+        run_phase(operation, &mut completed, PHASE_MCP_RESTORE, || {
+            mcp::restore_local_mcp_servers_for_workspace_switch(
+                app,
+                &cli_key,
+                &managed_to,
+                context.to_workspace_id,
+            )
+        })?;
+    } else {
+        for phase in [PHASE_MCP_CAPTURE, PHASE_MCP_MANAGED, PHASE_MCP_RESTORE] {
+            run_phase(operation, &mut completed, phase, || Ok(()))?;
+        }
+    }
+
+    if cli_key == "claude" {
+        run_phase(operation, &mut completed, PHASE_CLAUDE_CAPTURE, || {
+            claude_plugins::capture_local_plugins_for_workspace_switch(
+                app,
+                &cli_key,
+                context.from_workspace_id,
+            )
+        })?;
+        run_phase(operation, &mut completed, PHASE_CLAUDE_RESTORE, || {
+            claude_plugins::restore_local_plugins_for_workspace_switch(
+                app,
+                &cli_key,
+                context.to_workspace_id,
+            )
+        })?;
+    } else {
+        for phase in [PHASE_CLAUDE_CAPTURE, PHASE_CLAUDE_RESTORE] {
+            run_phase(operation, &mut completed, phase, || Ok(()))?;
+        }
+    }
+
+    if cli.supports(CliCapability::Skills) {
+        run_phase(operation, &mut completed, PHASE_SKILLS_MANAGED, || {
+            skills::sync_cli_for_workspace(app, &conn, context.to_workspace_id)
+        })?;
+        run_phase(operation, &mut completed, PHASE_SKILLS_CAPTURE, || {
+            skills::capture_staged_local_skills_for_workspace_switch(
+                app,
+                &conn,
+                &cli_key,
+                context.from_workspace_id,
+                operation,
+            )
+        })?;
+        run_phase(operation, &mut completed, PHASE_SKILLS_RESTORE, || {
+            skills::restore_staged_local_skills_for_workspace_switch(
+                app,
+                &conn,
+                &cli_key,
+                context.to_workspace_id,
+                operation,
+            )
+        })?;
+    } else {
+        for phase in [PHASE_SKILLS_MANAGED, PHASE_SKILLS_CAPTURE, PHASE_SKILLS_RESTORE] {
+            run_phase(operation, &mut completed, phase, || Ok(()))?;
+        }
+    }
+
+    run_phase(operation, &mut completed, PHASE_COMPLETE, || Ok(()))
+}
+
+pub(crate) fn apply_with_recovery<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     db: &db::Db,
     workspace_id: i64,
+    operation: &RecoveryOperation,
 ) -> crate::shared::error::AppResult<WorkspaceApplyReport> {
     let conn = db.open_connection()?;
-
     let cli_key = workspaces::get_cli_key_by_id(&conn, workspace_id)?;
     let from_workspace_id = workspaces::active_id_by_cli(&conn, &cli_key)?;
-
-    if from_workspace_id == Some(workspace_id) {
-        return Ok(WorkspaceApplyReport {
-            cli_key,
-            from_workspace_id,
-            to_workspace_id: workspace_id,
-            applied_at: now_unix_seconds(),
-        });
-    }
-
-    let prev_prompt_target = prompt_sync::read_target_bytes(app, &cli_key)?;
-    let prev_prompt_manifest = prompt_sync::read_manifest_bytes(app, &cli_key)?;
-    let prev_mcp_target = mcp_sync::read_target_bytes(app, &cli_key)?;
-    let prev_mcp_manifest = mcp_sync::read_manifest_bytes(app, &cli_key)?;
-    let managed_mcp_server_keys: HashSet<String> = list_enabled_mcp_keys(&conn, from_workspace_id)?
-        .into_iter()
-        .collect();
-
-    if let Err(err) = prompts::sync_cli_for_workspace(app, &conn, workspace_id) {
-        let _ = prompt_sync::restore_target_bytes(app, &cli_key, prev_prompt_target);
-        let _ = prompt_sync::restore_manifest_bytes(app, &cli_key, prev_prompt_manifest);
-        return Err(err);
-    }
-
-    if let Err(err) = mcp::swap_local_mcp_servers_for_workspace_switch(
-        app,
-        &cli_key,
-        &managed_mcp_server_keys,
+    let context = WorkspaceRecoveryContext {
+        schema_version: 1,
+        cli_key: cli_key.clone(),
         from_workspace_id,
-        workspace_id,
-    ) {
-        let _ = prompt_sync::restore_target_bytes(app, &cli_key, prev_prompt_target);
-        let _ = prompt_sync::restore_manifest_bytes(app, &cli_key, prev_prompt_manifest);
-        let _ = mcp_sync::restore_target_bytes(app, &cli_key, prev_mcp_target);
-        let _ = mcp_sync::restore_manifest_bytes(app, &cli_key, prev_mcp_manifest);
-        return Err(err);
-    }
-
-    if let Err(err) = mcp::sync_cli_for_workspace(app, &conn, workspace_id) {
-        let _ = prompt_sync::restore_target_bytes(app, &cli_key, prev_prompt_target);
-        let _ = prompt_sync::restore_manifest_bytes(app, &cli_key, prev_prompt_manifest);
-        let _ = mcp_sync::restore_target_bytes(app, &cli_key, prev_mcp_target);
-        let _ = mcp_sync::restore_manifest_bytes(app, &cli_key, prev_mcp_manifest);
-        return Err(err);
-    }
-
-    let mut local_plugins_swap = if cli_key == "claude" {
-        match claude_plugins::swap_local_plugins_for_workspace_switch(
+        to_workspace_id: workspace_id,
+    };
+    let serialized = serde_json::to_string(&context).map_err(|_| {
+        AppError::new("RECOVERY_JOURNAL_INVALID", "无法序列化工作区恢复上下文")
+    })?;
+    operation.set_replay_context(&serialized)?;
+    if CliKey::parse(&cli_key)?.supports(CliCapability::Skills) {
+        let artifact_digest = skills::stage_local_skills_for_workspace_switch(
             app,
+            &conn,
             &cli_key,
             from_workspace_id,
-            workspace_id,
-        ) {
-            Ok(swap) => Some(swap),
-            Err(err) => {
-                let _ = prompt_sync::restore_target_bytes(app, &cli_key, prev_prompt_target);
-                let _ = prompt_sync::restore_manifest_bytes(app, &cli_key, prev_prompt_manifest);
-                let _ = mcp_sync::restore_target_bytes(app, &cli_key, prev_mcp_target);
-                let _ = mcp_sync::restore_manifest_bytes(app, &cli_key, prev_mcp_manifest);
-                return Err(err);
-            }
-        }
-    } else {
-        None
-    };
-
-    if let Err(err) = skills::sync_cli_for_workspace(app, &conn, workspace_id) {
-        let _ = prompt_sync::restore_target_bytes(app, &cli_key, prev_prompt_target);
-        let _ = prompt_sync::restore_manifest_bytes(app, &cli_key, prev_prompt_manifest);
-        let _ = mcp_sync::restore_target_bytes(app, &cli_key, prev_mcp_target);
-        let _ = mcp_sync::restore_manifest_bytes(app, &cli_key, prev_mcp_manifest);
-
-        if let Some(swap) = local_plugins_swap.take() {
-            swap.rollback();
-        }
-
-        if let Some(from_id) = from_workspace_id {
-            let _ = skills::sync_cli_for_workspace(app, &conn, from_id);
-        }
-
-        return Err(err);
+            operation,
+        )?;
+        operation.configure_replay(
+            &serialized,
+            Some(operation.operation_id()),
+            Some(&artifact_digest),
+        )?;
     }
-
-    let local_skills_swap = match skills::swap_local_skills_for_workspace_switch(
-        app,
-        &conn,
-        &cli_key,
-        from_workspace_id,
-        workspace_id,
-    ) {
-        Ok(swap) => swap,
-        Err(err) => {
-            let _ = prompt_sync::restore_target_bytes(app, &cli_key, prev_prompt_target);
-            let _ = prompt_sync::restore_manifest_bytes(app, &cli_key, prev_prompt_manifest);
-            let _ = mcp_sync::restore_target_bytes(app, &cli_key, prev_mcp_target);
-            let _ = mcp_sync::restore_manifest_bytes(app, &cli_key, prev_mcp_manifest);
-
-            if let Some(swap) = local_plugins_swap.take() {
-                swap.rollback();
-            }
-
-            if let Some(from_id) = from_workspace_id {
-                let _ = skills::sync_cli_for_workspace(app, &conn, from_id);
-            }
-
-            return Err(err);
-        }
-    };
-
-    if let Err(err) = workspaces::set_active(&conn, workspace_id) {
-        let _ = prompt_sync::restore_target_bytes(app, &cli_key, prev_prompt_target);
-        let _ = prompt_sync::restore_manifest_bytes(app, &cli_key, prev_prompt_manifest);
-        let _ = mcp_sync::restore_target_bytes(app, &cli_key, prev_mcp_target);
-        let _ = mcp_sync::restore_manifest_bytes(app, &cli_key, prev_mcp_manifest);
-
-        local_skills_swap.rollback();
-
-        if let Some(swap) = local_plugins_swap.take() {
-            swap.rollback();
-        }
-
-        if let Some(from_id) = from_workspace_id {
-            let _ = skills::sync_cli_for_workspace(app, &conn, from_id);
-        }
-
-        return Err(err);
-    }
+    execute_workspace_projection(app, db, operation, &context)?;
 
     Ok(WorkspaceApplyReport {
         cli_key,
@@ -380,6 +502,48 @@ pub fn apply<R: tauri::Runtime>(
         to_workspace_id: workspace_id,
         applied_at: now_unix_seconds(),
     })
+}
+
+pub(crate) fn replay_recovery_operation<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    db: &db::Db,
+    operation: &RecoveryOperation,
+) -> crate::shared::error::AppResult<()> {
+    let context = context_from_entry(operation.entry())?;
+    if CliKey::parse(&context.cli_key)?.supports(CliCapability::Skills)
+        && operation.entry().artifact_ref.is_none()
+    {
+        if operation.entry().phase == "prepare" {
+            return Ok(());
+        }
+        return Err(AppError::new(
+            "RECOVERY_ARTIFACT_INVALID",
+            "工作区切换缺少本地 Skills 恢复制品",
+        ));
+    }
+    execute_workspace_projection(app, db, operation, &context)
+}
+
+pub(crate) fn cleanup_recovery_operation<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    entry: &JournalEntry,
+) -> crate::shared::error::AppResult<()> {
+    skills::cleanup_workspace_switch_local_skills_artifact(app, entry)
+}
+
+#[cfg(test)]
+fn apply<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    db: &db::Db,
+    workspace_id: i64,
+) -> crate::shared::error::AppResult<WorkspaceApplyReport> {
+    crate::infra::recovery_journal::run_operation_for_test(
+        app,
+        db,
+        "workspace.apply",
+        crate::infra::recovery_journal::JournalContext::for_workspace(workspace_id),
+        |operation| apply_with_recovery(app, db, workspace_id, operation),
+    )
 }
 
 #[cfg(test)]
@@ -553,6 +717,25 @@ INSERT INTO skills(
                 Some(workspace_id)
             );
         }
+
+        fn assert_pending_workspace_journal(&self, expected_phase: &str) {
+            let conn = self.db.open_connection().expect("open db");
+            let (status, phase): (String, String) = conn
+                .query_row(
+                    r#"
+SELECT status, phase
+FROM external_effect_recovery_journal
+WHERE operation_kind = 'workspace.apply' AND status != 'resolved'
+ORDER BY created_at DESC, operation_id DESC
+LIMIT 1
+"#,
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .expect("pending workspace journal");
+            assert_eq!(status, "failed");
+            assert_eq!(phase, expected_phase);
+        }
     }
 
     const INITIAL_CONFIG: &str = r#"# keep
@@ -620,7 +803,7 @@ command = "local"
     }
 
     #[test]
-    fn grok_workspace_prompt_failure_restores_files_and_active_workspace() {
+    fn grok_workspace_prompt_failure_keeps_sqlite_target_and_replays_after_repair() {
         let test = GrokWorkspaceTestApp::new();
         let default_id = test.default_workspace_id();
         let target_id = test.target_workspace_id();
@@ -632,7 +815,7 @@ command = "local"
             apply(&test.handle(), &test.db, target_id).expect_err("oversized prompt must fail");
 
         assert!(error.to_string().contains("too large"));
-        test.assert_active(default_id);
+        test.assert_active(target_id);
         assert_eq!(
             std::fs::read(test.grok_home.join("config.toml")).expect("read config"),
             INITIAL_CONFIG.as_bytes()
@@ -644,10 +827,23 @@ command = "local"
         assert!(prompt_sync::read_manifest_bytes(&test.handle(), "grok")
             .expect("read prompt manifest")
             .is_none());
+        assert!(crate::infra::recovery_journal::has_pending(&test.db).expect("pending journal"));
+        test.assert_pending_workspace_journal(PHASE_ACTIVE);
+
+        test.set_prompt(target_id, "repaired instructions");
+        crate::infra::recovery_journal::replay_pending(&test.handle(), &test.db)
+            .expect("replay repaired prompt projection");
+        test.assert_active(target_id);
+        assert_eq!(
+            std::fs::read_to_string(test.grok_home.join("AGENTS.md")).expect("read prompt"),
+            "repaired instructions\n"
+        );
+        assert!(!crate::infra::recovery_journal::has_pending(&test.db).expect("resolved journal"));
+        let _ = default_id;
     }
 
     #[test]
-    fn grok_workspace_mcp_failure_rolls_back_prompt_config_and_manifests() {
+    fn grok_workspace_mcp_failure_keeps_checkpoint_and_replays_after_repair() {
         let test = GrokWorkspaceTestApp::new();
         let default_id = test.default_workspace_id();
         let target_id = test.target_workspace_id();
@@ -661,25 +857,39 @@ command = "local"
             apply(&test.handle(), &test.db, target_id).expect_err("invalid Grok TOML must fail");
 
         assert!(error.to_string().contains("GROK_CONFIG_INVALID_TOML"));
-        test.assert_active(default_id);
+        test.assert_active(target_id);
         assert_eq!(
             std::fs::read(test.grok_home.join("config.toml")).expect("read config"),
             invalid
         );
         assert_eq!(
             std::fs::read_to_string(test.grok_home.join("AGENTS.md")).expect("read prompt"),
-            "original instructions"
+            "target instructions\n"
         );
         assert!(prompt_sync::read_manifest_bytes(&test.handle(), "grok")
             .expect("read prompt manifest")
-            .is_none());
+            .is_some());
         assert!(mcp_sync::read_manifest_bytes(&test.handle(), "grok")
             .expect("read MCP manifest")
             .is_none());
+        assert!(crate::infra::recovery_journal::has_pending(&test.db).expect("pending journal"));
+        test.assert_pending_workspace_journal(PHASE_PROMPT);
+
+        test.write_config(INITIAL_CONFIG.as_bytes());
+        crate::infra::recovery_journal::replay_pending(&test.handle(), &test.db)
+            .expect("replay repaired MCP projection");
+        test.assert_active(target_id);
+        let config = std::fs::read_to_string(test.grok_home.join("config.toml"))
+            .expect("read repaired config")
+            .parse::<toml_edit::DocumentMut>()
+            .expect("valid repaired TOML");
+        assert_eq!(config["mcp_servers"]["managed"]["command"].as_str(), Some("npx"));
+        assert!(!crate::infra::recovery_journal::has_pending(&test.db).expect("resolved journal"));
+        let _ = default_id;
     }
 
     #[test]
-    fn grok_workspace_skills_failure_rolls_back_prompt_mcp_and_active_workspace() {
+    fn grok_workspace_skills_failure_keeps_target_and_replays_after_ssot_repair() {
         let test = GrokWorkspaceTestApp::new();
         let default_id = test.default_workspace_id();
         let target_id = test.target_workspace_id();
@@ -693,20 +903,30 @@ command = "local"
             apply(&test.handle(), &test.db, target_id).expect_err("missing SSOT skill must fail");
 
         assert!(error.to_string().contains("SKILL_SSOT_MISSING"));
-        test.assert_active(default_id);
-        assert_eq!(
-            std::fs::read(test.grok_home.join("config.toml")).expect("read config"),
-            INITIAL_CONFIG.as_bytes()
-        );
+        test.assert_active(target_id);
         assert_eq!(
             std::fs::read_to_string(test.grok_home.join("AGENTS.md")).expect("read prompt"),
-            "original instructions"
+            "target instructions\n"
         );
         assert!(prompt_sync::read_manifest_bytes(&test.handle(), "grok")
             .expect("read prompt manifest")
-            .is_none());
+            .is_some());
         assert!(mcp_sync::read_manifest_bytes(&test.handle(), "grok")
             .expect("read MCP manifest")
-            .is_none());
+            .is_some());
+        assert!(crate::infra::recovery_journal::has_pending(&test.db).expect("pending journal"));
+        test.assert_pending_workspace_journal(PHASE_CLAUDE_RESTORE);
+
+        let paths = crate::skills::paths_get(&test.handle(), "grok").expect("resolve skill paths");
+        let skill_dir = std::path::PathBuf::from(paths.ssot_dir).join("demo");
+        std::fs::create_dir_all(&skill_dir).expect("create repaired SSOT skill");
+        std::fs::write(skill_dir.join("SKILL.md"), "---\nname: Demo\n---\n")
+            .expect("write repaired SKILL.md");
+        crate::infra::recovery_journal::replay_pending(&test.handle(), &test.db)
+            .expect("replay repaired Skills projection");
+        test.assert_active(target_id);
+        assert!(test.grok_home.join("skills").join("demo").exists());
+        assert!(!crate::infra::recovery_journal::has_pending(&test.db).expect("resolved journal"));
+        let _ = default_id;
     }
 }

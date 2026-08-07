@@ -121,35 +121,11 @@ fn ensure_clean_plugins_layout(plugins_root: &Path) -> crate::shared::error::App
     Ok(())
 }
 
-#[derive(Debug)]
-pub(crate) struct LocalPluginsSwap {
-    cli_root: PathBuf,
-    from_bucket_plugins: PathBuf,
-    to_bucket_plugins: PathBuf,
-
-    had_cli_root: bool,
-}
-
-impl LocalPluginsSwap {
-    pub(crate) fn rollback(self) {
-        // Best-effort: restore previous state by stashing current cli root back to the to-bucket,
-        // then restoring the from-bucket if it existed.
-        if self.cli_root.exists() {
-            let _ = move_dir(&self.cli_root, &self.to_bucket_plugins);
-        }
-
-        if self.had_cli_root && self.from_bucket_plugins.exists() {
-            let _ = move_dir(&self.from_bucket_plugins, &self.cli_root);
-        }
-    }
-}
-
-pub(crate) fn swap_local_plugins_for_workspace_switch<R: tauri::Runtime>(
+pub(crate) fn capture_local_plugins_for_workspace_switch<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     cli_key: &str,
     from_workspace_id: Option<i64>,
-    to_workspace_id: i64,
-) -> crate::shared::error::AppResult<LocalPluginsSwap> {
+) -> crate::shared::error::AppResult<()> {
     validate_cli_key(cli_key)?;
 
     let cli_root = claude_plugins_root(app)?;
@@ -170,57 +146,76 @@ pub(crate) fn swap_local_plugins_for_workspace_switch<R: tauri::Runtime>(
 
     let stash_root = stash_root(app, cli_key)?;
     let from_bucket = stash_root.join(stash_bucket_name(from_workspace_id));
-    let to_bucket = stash_root.join(to_workspace_id.to_string());
 
     std::fs::create_dir_all(&from_bucket)
         .map_err(|e| format!("failed to create {}: {e}", from_bucket.display()))?;
-    std::fs::create_dir_all(&to_bucket)
-        .map_err(|e| format!("failed to create {}: {e}", to_bucket.display()))?;
-
     let from_bucket_plugins = from_bucket.join("plugins");
-    let to_bucket_plugins = to_bucket.join("plugins");
-
-    let had_cli_root = cli_root.exists();
-
-    let swap = LocalPluginsSwap {
-        cli_root: cli_root.clone(),
-        from_bucket_plugins: from_bucket_plugins.clone(),
-        to_bucket_plugins: to_bucket_plugins.clone(),
-        had_cli_root,
-    };
-
-    if had_cli_root {
+    if cli_root.exists() {
         move_dir(&cli_root, &from_bucket_plugins).map_err(|err| {
             format!("CLAUDE_PLUGINS_SWAP_FAILED: failed to stash plugins dir: {err}")
         })?;
     }
 
-    if to_bucket_plugins.exists() {
-        if let Err(err) = move_dir(&to_bucket_plugins, &cli_root) {
-            swap.rollback();
-            return Err(format!(
-                "CLAUDE_PLUGINS_SWAP_FAILED: failed to restore plugins dir: {err}"
-            )
-            .into());
-        }
-    } else if !cli_root.exists() {
-        if let Err(err) = std::fs::create_dir_all(&cli_root)
-            .map_err(|e| format!("failed to create {}: {e}", cli_root.display()))
-        {
-            swap.rollback();
-            return Err(
-                format!("CLAUDE_PLUGINS_SWAP_FAILED: failed to create plugins dir: {err}").into(),
-            );
-        }
-    }
+    Ok(())
+}
 
-    if let Err(err) = ensure_clean_plugins_layout(&cli_root) {
-        swap.rollback();
+pub(crate) fn restore_local_plugins_for_workspace_switch<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    cli_key: &str,
+    to_workspace_id: i64,
+) -> crate::shared::error::AppResult<()> {
+    validate_cli_key(cli_key)?;
+
+    let cli_root = claude_plugins_root(app)?;
+    if cli_root.exists() && is_symlink(&cli_root)? {
         return Err(format!(
-            "CLAUDE_PLUGINS_SWAP_FAILED: failed to seed clean plugins layout: {err}"
+            "SEC_INVALID_INPUT: refusing to modify symlink path={}",
+            cli_root.display()
+        )
+        .into());
+    }
+    if cli_root.exists() && !cli_root.is_dir() {
+        return Err(format!(
+            "SEC_INVALID_INPUT: plugins path exists but is not a directory: {}",
+            cli_root.display()
         )
         .into());
     }
 
-    Ok(swap)
+    let to_bucket = stash_root(app, cli_key)?.join(to_workspace_id.to_string());
+    std::fs::create_dir_all(&to_bucket)
+        .map_err(|e| format!("failed to create {}: {e}", to_bucket.display()))?;
+    let to_bucket_plugins = to_bucket.join("plugins");
+
+    if to_bucket_plugins.exists() {
+        if cli_root.exists() {
+            return Err(format!(
+                "CLAUDE_PLUGINS_SWAP_FAILED: local plugins target already exists: {}",
+                cli_root.display()
+            )
+            .into());
+        }
+        move_dir(&to_bucket_plugins, &cli_root).map_err(|err| {
+            format!("CLAUDE_PLUGINS_SWAP_FAILED: failed to restore plugins dir: {err}")
+        })?;
+    } else if !cli_root.exists() {
+        std::fs::create_dir_all(&cli_root)
+            .map_err(|e| format!("failed to create {}: {e}", cli_root.display()))?;
+    }
+
+    ensure_clean_plugins_layout(&cli_root).map_err(|err| {
+        format!("CLAUDE_PLUGINS_SWAP_FAILED: failed to seed clean plugins layout: {err}")
+    })?;
+
+    Ok(())
+}
+
+pub(crate) fn swap_local_plugins_for_workspace_switch<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    cli_key: &str,
+    from_workspace_id: Option<i64>,
+    to_workspace_id: i64,
+) -> crate::shared::error::AppResult<()> {
+    capture_local_plugins_for_workspace_switch(app, cli_key, from_workspace_id)?;
+    restore_local_plugins_for_workspace_switch(app, cli_key, to_workspace_id)
 }

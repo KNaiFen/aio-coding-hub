@@ -1,16 +1,18 @@
 use super::fs_ops::{
-    copy_dir_recursive, create_skill_link, exists_or_is_link, has_skill_md, is_managed_dir,
-    is_managed_link_to_ssot, is_symlink, is_symlink_or_junction, remove_managed_dir, remove_marker,
-    skill_dir_content_hash, write_source_metadata, SkillSourceMetadata,
+    create_skill_link, exists_or_is_link, has_skill_md, is_managed_dir,
+    is_managed_link_to_ssot, is_symlink, is_symlink_or_junction, remove_managed_dir,
+    skill_dir_content_hash, SkillSourceMetadata,
 };
 use super::installed::{generate_unique_skill_key, get_skill_by_id, get_skill_by_id_for_workspace};
 use super::local::managed_marker_belongs_to_installed_skill;
 use super::paths::{cli_skills_root, ensure_skills_roots, ssot_skills_root, validate_cli_key};
+use super::recovery::{stage_artifact, SkillRecoveryContext};
 use super::repo_cache::ensure_repo_cache;
 use super::skill_md::parse_skill_md;
 use super::types::InstalledSkillSummary;
 use super::util::validate_relative_subdir;
 use crate::db;
+use crate::infra::recovery_journal::RecoveryOperation;
 use crate::shared::error::db_err;
 use crate::shared::text::normalize_name;
 use crate::shared::time::now_unix_seconds;
@@ -38,43 +40,56 @@ fn is_aio_managed_skill_target(
         || is_managed_link_to_ssot(path, ssot_root))
 }
 
-fn local_source_cli_key(source_git_url: &str) -> Option<&str> {
-    source_git_url
-        .strip_prefix("local://")
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-}
-
 fn ensure_ssot_dir_exists<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
+    _app: &tauri::AppHandle<R>,
     skill: &InstalledSkillSummary,
     ssot_dir: &Path,
 ) -> crate::shared::error::AppResult<()> {
-    if ssot_dir.exists() {
+    if exists_or_is_link(ssot_dir) && !is_symlink_or_junction(ssot_dir) && ssot_dir.is_dir() {
         return Ok(());
     }
+    Err(format!("SKILL_SSOT_MISSING: {}", skill.skill_key).into())
+}
 
-    let Some(source_cli_key) = local_source_cli_key(&skill.source_git_url) else {
-        return Err("SKILL_SSOT_MISSING: ssot skill dir not found"
-            .to_string()
-            .into());
-    };
-
-    validate_cli_key(source_cli_key)?;
-    validate_relative_subdir(&skill.source_subdir)?;
-
-    let local_source_dir = cli_skills_root(app, source_cli_key)?.join(skill.source_subdir.trim());
-    if !local_source_dir.is_dir() || !has_skill_md(&local_source_dir) {
-        return Err("SKILL_SSOT_MISSING: ssot skill dir not found"
-            .to_string()
-            .into());
+pub(super) fn ensure_installed_content_hash(
+    conn: &Connection,
+    skill_id: i64,
+    ssot_dir: &Path,
+) -> crate::shared::error::AppResult<String> {
+    let actual = skill_dir_content_hash(ssot_dir)?;
+    let stored: Option<Option<String>> = conn
+        .query_row(
+            "SELECT installed_content_hash FROM skills WHERE id = ?1",
+            [skill_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| db_err!("failed to query installed skill content hash: {e}"))?;
+    match stored {
+        None => Err("DB_NOT_FOUND: skill not found".to_string().into()),
+        Some(Some(stored)) if stored != actual => Err(
+            "RECOVERY_ARTIFACT_INVALID: installed skill content hash does not match SSOT"
+                .to_string()
+                .into(),
+        ),
+        Some(Some(stored)) => Ok(stored),
+        Some(None) => {
+            let changed = conn
+                .execute(
+                    "UPDATE skills SET installed_content_hash = ?1 WHERE id = ?2 AND installed_content_hash IS NULL",
+                    params![actual, skill_id],
+                )
+                .map_err(|e| db_err!("failed to backfill installed skill content hash: {e}"))?;
+            if changed != 1 {
+                return Err(
+                    "RECOVERY_JOURNAL_STATE_CONFLICT: skill hash changed"
+                        .to_string()
+                        .into(),
+                );
+            }
+            Ok(actual)
+        }
     }
-
-    if let Err(err) = copy_dir_recursive(&local_source_dir, ssot_dir) {
-        let _ = std::fs::remove_dir_all(ssot_dir);
-        return Err(err);
-    }
-    Ok(())
 }
 
 fn sync_to_cli<R: tauri::Runtime>(
@@ -104,7 +119,7 @@ fn sync_to_cli<R: tauri::Runtime>(
     Ok(())
 }
 
-fn remove_from_cli<R: tauri::Runtime>(
+pub(super) fn remove_from_cli<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     cli_key: &str,
     skill_key: &str,
@@ -125,36 +140,7 @@ fn remove_from_cli<R: tauri::Runtime>(
     remove_managed_dir(&target)
 }
 
-fn ensure_local_target_for_return(
-    local_target: &Path,
-    ssot_dir: &Path,
-) -> crate::shared::error::AppResult<()> {
-    if exists_or_is_link(local_target) {
-        let ssot_root = ssot_dir.parent().unwrap_or(ssot_dir);
-        if is_managed_dir(local_target) || is_managed_link_to_ssot(local_target, ssot_root) {
-            remove_managed_dir(local_target)?;
-        } else if is_symlink(local_target)? || (local_target.is_dir() && has_skill_md(local_target))
-        {
-            return Ok(());
-        } else {
-            return Err(format!(
-                "SKILL_RETURN_LOCAL_TARGET_EXISTS_UNMANAGED: {}",
-                local_target.display()
-            )
-            .into());
-        }
-    }
-
-    // At this point local_target does not exist (either never existed or was removed above).
-    if let Err(err) = copy_dir_recursive(ssot_dir, local_target) {
-        let _ = std::fs::remove_dir_all(local_target);
-        return Err(err);
-    }
-    remove_marker(local_target);
-    Ok(())
-}
-
-fn remove_managed_targets_except<R: tauri::Runtime>(
+pub(super) fn remove_managed_targets_except<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     skill_key: &str,
     keep_target: &Path,
@@ -199,14 +185,13 @@ pub fn install(
     branch: &str,
     source_subdir: &str,
     enabled: bool,
+    operation: &RecoveryOperation,
 ) -> crate::shared::error::AppResult<InstalledSkillSummary> {
     ensure_skills_roots(app)?;
     validate_relative_subdir(source_subdir)?;
 
     let mut conn = db.open_connection()?;
-    let cli_key = workspaces::get_cli_key_by_id(&conn, workspace_id)?;
-    validate_cli_key(&cli_key)?;
-    let should_sync = workspaces::is_active_workspace(&conn, workspace_id)?;
+    let _cli_key = workspaces::get_cli_key_by_id(&conn, workspace_id)?;
     let now = now_unix_seconds();
 
     // Ensure source not already installed.
@@ -248,17 +233,17 @@ LIMIT 1
 
     let (name, description) = parse_skill_md(&skill_md)?;
     let normalized_name = normalize_name(&name);
+    let skill_key = generate_unique_skill_key(&conn, &name)?;
+    let context = SkillRecoveryContext::Install {
+        workspace_id,
+        skill_key: skill_key.clone(),
+    };
+    let artifact = stage_artifact(app, operation, &context, &[("desired", src_dir.as_path())], None)?;
+    let installed_content_hash = artifact.role_hash("desired")?.to_string();
 
     let tx = conn
         .transaction()
         .map_err(|e| db_err!("failed to start transaction: {e}"))?;
-
-    let skill_key = generate_unique_skill_key(&tx, &name)?;
-    let ssot_root = ssot_skills_root(app)?;
-    let ssot_dir = ssot_root.join(&skill_key);
-    if ssot_dir.exists() {
-        return Err("SKILL_CONFLICT: ssot dir already exists".to_string().into());
-    }
 
     tx.execute(
         r#"
@@ -274,7 +259,7 @@ INSERT INTO skills(
   installed_content_hash,
   created_at,
   updated_at
-) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9, ?10)
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
 "#,
         params![
             skill_key,
@@ -285,6 +270,7 @@ INSERT INTO skills(
             branch.trim(),
             source_subdir.trim(),
             installed_commit,
+            installed_content_hash,
             now,
             now
         ],
@@ -306,48 +292,9 @@ ON CONFLICT(workspace_id, skill_id) DO UPDATE SET
         .map_err(|e| db_err!("failed to enable skill for workspace: {e}"))?;
     }
 
-    // FS: copy to SSOT first.
-    if let Err(err) = copy_dir_recursive(&src_dir, &ssot_dir) {
-        let _ = std::fs::remove_dir_all(&ssot_dir);
-        let _ = tx.execute("DELETE FROM skills WHERE id = ?1", params![skill_id]);
-        return Err(err);
-    }
+    tx.commit().map_err(|e| db_err!("failed to commit: {e}"))?;
 
-    let installed_content_hash = match skill_dir_content_hash(&ssot_dir) {
-        Ok(hash) => hash,
-        Err(err) => {
-            let _ = std::fs::remove_dir_all(&ssot_dir);
-            let _ = tx.execute("DELETE FROM skills WHERE id = ?1", params![skill_id]);
-            return Err(err);
-        }
-    };
-    if let Err(err) = tx.execute(
-        "UPDATE skills SET installed_content_hash = ?1 WHERE id = ?2",
-        params![installed_content_hash, skill_id],
-    ) {
-        let _ = std::fs::remove_dir_all(&ssot_dir);
-        let _ = tx.execute("DELETE FROM skills WHERE id = ?1", params![skill_id]);
-        return Err(db_err!(
-            "failed to update installed skill content hash: {err}"
-        ));
-    }
-
-    // FS: sync to CLI only when enabled in the active workspace.
-    if should_sync && enabled {
-        if let Err(err) = sync_to_cli(app, &cli_key, &skill_key, &ssot_dir) {
-            let _ = remove_from_cli(app, &cli_key, &skill_key);
-            let _ = std::fs::remove_dir_all(&ssot_dir);
-            let _ = tx.execute("DELETE FROM skills WHERE id = ?1", params![skill_id]);
-            return Err(err);
-        }
-    }
-
-    if let Err(err) = tx.commit() {
-        let _ = remove_from_cli(app, &cli_key, &skill_key);
-        let _ = std::fs::remove_dir_all(&ssot_dir);
-        return Err(db_err!("failed to commit: {err}"));
-    }
-
+    operation.mark_authoritative_committed();
     get_skill_by_id_for_workspace(&conn, workspace_id, skill_id)
 }
 
@@ -357,11 +304,11 @@ pub fn set_enabled<R: tauri::Runtime>(
     workspace_id: i64,
     skill_id: i64,
     enabled: bool,
+    operation: &RecoveryOperation,
 ) -> crate::shared::error::AppResult<InstalledSkillSummary> {
     let mut conn = db.open_connection()?;
     let cli_key = workspaces::get_cli_key_by_id(&conn, workspace_id)?;
     validate_cli_key(&cli_key)?;
-    let should_sync = workspaces::is_active_workspace(&conn, workspace_id)?;
     let now = now_unix_seconds();
 
     let current = get_skill_by_id(&conn, skill_id)?;
@@ -382,14 +329,6 @@ pub fn set_enabled<R: tauri::Runtime>(
     let ssot_root = ssot_skills_root(app)?;
     let ssot_dir = ssot_root.join(&current.skill_key);
     ensure_ssot_dir_exists(app, &current, &ssot_dir)?;
-
-    if should_sync {
-        if enabled {
-            sync_to_cli(app, &cli_key, &current.skill_key, &ssot_dir)?;
-        } else {
-            remove_from_cli(app, &cli_key, &current.skill_key)?;
-        }
-    }
 
     let tx = conn
         .transaction()
@@ -414,17 +353,10 @@ ON CONFLICT(workspace_id, skill_id) DO UPDATE SET
         .map_err(|e| db_err!("failed to disable skill: {e}"))?;
     }
 
-    if let Err(err) = tx.commit() {
-        if should_sync {
-            if enabled {
-                let _ = remove_from_cli(app, &cli_key, &current.skill_key);
-            } else if was_enabled {
-                let _ = sync_to_cli(app, &cli_key, &current.skill_key, &ssot_dir);
-            }
-        }
-        return Err(db_err!("failed to commit: {err}"));
-    }
+    tx.commit()
+        .map_err(|e| db_err!("failed to commit: {e}"))?;
 
+    operation.mark_authoritative_committed();
     get_skill_by_id_for_workspace(&conn, workspace_id, skill_id)
 }
 
@@ -432,39 +364,29 @@ pub fn uninstall<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     db: &db::Db,
     skill_id: i64,
+    operation: &RecoveryOperation,
 ) -> crate::shared::error::AppResult<()> {
     let conn = db.open_connection()?;
     let skill = get_skill_by_id(&conn, skill_id)?;
-
-    // Safety: ensure we will only delete managed dirs.
     let ssot_root = ssot_skills_root(app)?;
-    for cli_key in
-        crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::Skills)
-    {
-        let root = cli_skills_root(app, cli_key)?;
-        let target = root.join(&skill.skill_key);
-        if exists_or_is_link(&target)
-            && !is_managed_dir(&target)
-            && !is_managed_link_to_ssot(&target, &ssot_root)
-            && !is_external_local_skill_dir(&target)?
-        {
-            return Err(format!("SKILL_REMOVE_BLOCKED_UNMANAGED: {}", target.display()).into());
-        }
-    }
-
-    for cli_key in
-        crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::Skills)
-    {
-        remove_from_cli(app, cli_key, &skill.skill_key)?;
-    }
-
     let ssot_dir = ssot_root.join(&skill.skill_key);
-    if ssot_dir.exists() {
-        std::fs::remove_dir_all(&ssot_dir)
-            .map_err(|e| format!("failed to remove {}: {e}", ssot_dir.display()))?;
-    }
+    ensure_ssot_dir_exists(app, &skill, &ssot_dir)?;
+    ensure_installed_content_hash(&conn, skill_id, &ssot_dir)?;
+    let context = SkillRecoveryContext::Uninstall {
+        skill_id,
+        skill_key: skill.skill_key.clone(),
+    };
+    let _artifact = stage_artifact(
+        app,
+        operation,
+        &context,
+        &[("previous", ssot_dir.as_path())],
+        None,
+    )?;
 
-    delete_skill_row(&conn, skill_id)
+    delete_skill_row(&conn, skill_id)?;
+    operation.mark_authoritative_committed();
+    Ok(())
 }
 
 pub fn return_to_local<R: tauri::Runtime>(
@@ -472,6 +394,7 @@ pub fn return_to_local<R: tauri::Runtime>(
     db: &db::Db,
     workspace_id: i64,
     skill_id: i64,
+    operation: &RecoveryOperation,
 ) -> crate::shared::error::AppResult<()> {
     let conn = db.open_connection()?;
     let cli_key = workspaces::get_cli_key_by_id(&conn, workspace_id)?;
@@ -487,26 +410,30 @@ pub fn return_to_local<R: tauri::Runtime>(
     let skill = get_skill_by_id(&conn, skill_id)?;
     let ssot_dir = ssot_skills_root(app)?.join(&skill.skill_key);
     ensure_ssot_dir_exists(app, &skill, &ssot_dir)?;
+    ensure_installed_content_hash(&conn, skill_id, &ssot_dir)?;
 
-    let cli_root = cli_skills_root(app, &cli_key)?;
-    std::fs::create_dir_all(&cli_root)
-        .map_err(|e| format!("failed to create {}: {e}", cli_root.display()))?;
-    let local_target = cli_root.join(&skill.skill_key);
-    ensure_local_target_for_return(&local_target, &ssot_dir)?;
-    write_source_metadata(
-        &local_target,
-        &SkillSourceMetadata {
-            source_git_url: skill.source_git_url.clone(),
-            source_branch: skill.source_branch.clone(),
-            source_subdir: skill.source_subdir.clone(),
-        },
+    let source_metadata = SkillSourceMetadata {
+        source_git_url: skill.source_git_url.clone(),
+        source_branch: skill.source_branch.clone(),
+        source_subdir: skill.source_subdir.clone(),
+    };
+    let context = SkillRecoveryContext::ReturnToLocal {
+        workspace_id,
+        cli_key,
+        skill_id,
+        skill_key: skill.skill_key.clone(),
+    };
+    let _artifact = stage_artifact(
+        app,
+        operation,
+        &context,
+        &[("previous", ssot_dir.as_path())],
+        Some(&source_metadata),
     )?;
-    remove_managed_targets_except(app, &skill.skill_key, &local_target)?;
 
-    std::fs::remove_dir_all(&ssot_dir)
-        .map_err(|e| format!("failed to remove {}: {e}", ssot_dir.display()))?;
-
-    delete_skill_row(&conn, skill_id)
+    delete_skill_row(&conn, skill_id)?;
+    operation.mark_authoritative_committed();
+    Ok(())
 }
 
 fn sync_enabled_skill_keys_for_cli<R: tauri::Runtime>(
