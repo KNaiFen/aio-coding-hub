@@ -15,12 +15,12 @@
   "branch": "codex/aud021-filesystem-recovery-journal",
   "base_branch": "codex/aud020-cross-restart-data-reset",
   "worktree_path": "/private/tmp/aio-aud021-recovery",
-  "commit": "23718b01",
-  "pr_url": null,
+  "commit": "0e8464c0",
+  "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/92",
   "subtasks": [],
   "children": [],
   "parent": "08-06-final-hardening-zero-artifact",
   "relatedFiles": [],
-  "notes": "本批第 6 项；代码已在依赖 AUD-020 的候选分支提交为 eed41abb、23718b01。Skills SSOT 通过 journal 专属、带 hash 的受管 staging/backup 恢复；云端验证和合并后置。",
+  "notes": "本批第 6 项；候选已重放为 0e8464c0，基于最新 AUD-008 候选。Skills SSOT 通过 journal 专属、带 hash 的受管 staging/backup 恢复；PR #92 的精确 head 云端验证和顺序合并仍待执行。",
   "meta": {}
 }
