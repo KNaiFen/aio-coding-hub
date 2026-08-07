@@ -297,6 +297,7 @@ pub fn install_to_local<R: tauri::Runtime>(
     };
     let _artifact = stage_artifact(
         app,
+        &conn,
         operation,
         &context,
         &[("desired", src_dir.as_path())],
@@ -374,6 +375,7 @@ pub fn delete_local<R: tauri::Runtime>(
     };
     let _artifact = stage_artifact(
         app,
+        &conn,
         operation,
         &context,
         &[("previous", local_dir.as_path())],
@@ -467,6 +469,7 @@ pub fn import_local<R: tauri::Runtime>(
     };
     let artifact = stage_artifact(
         app,
+        &conn,
         operation,
         &context,
         &[("desired", local_dir.as_path())],

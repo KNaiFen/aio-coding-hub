@@ -10,7 +10,7 @@ use crate::db;
 use crate::shared::cli_key::{CliCapability, CliKey};
 use crate::shared::error::{AppError, AppResult};
 use crate::shared::time::now_unix_seconds;
-use rusqlite::{params, OptionalExtension, TransactionBehavior};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::fs::{File, OpenOptions};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -181,10 +181,13 @@ impl RecoveryOperation {
         self.authoritative_committed.load(Ordering::Acquire)
     }
 
-    pub(crate) fn checkpoint_phase(&self, phase: &'static str) -> AppResult<()> {
+    pub(crate) fn checkpoint_phase_with_conn(
+        &self,
+        conn: &Connection,
+        phase: &'static str,
+    ) -> AppResult<()> {
         validate_operation_kind(phase)?;
         let now = now_unix_seconds();
-        let conn = self.db.open_connection()?;
         let changed = conn
             .execute(
                 r#"
@@ -217,8 +220,12 @@ WHERE operation_id = ?4
     }
 
     pub(crate) fn renew_lease(&self) -> AppResult<()> {
-        let now = now_unix_seconds();
         let conn = self.db.open_connection()?;
+        self.renew_lease_with_conn(&conn)
+    }
+
+    pub(crate) fn renew_lease_with_conn(&self, conn: &Connection) -> AppResult<()> {
+        let now = now_unix_seconds();
         let changed = conn
             .execute(
                 r#"
@@ -247,8 +254,9 @@ WHERE operation_id = ?3
         ))
     }
 
-    pub(crate) fn configure_replay(
+    pub(crate) fn configure_replay_with_conn(
         &self,
+        conn: &Connection,
         replay_context: &str,
         artifact_ref: Option<&str>,
         artifact_sha256: Option<&str>,
@@ -269,7 +277,6 @@ WHERE operation_id = ?3
         }
 
         let now = now_unix_seconds();
-        let conn = self.db.open_connection()?;
         let changed = conn
             .execute(
                 r#"
@@ -305,8 +312,12 @@ WHERE operation_id = ?6
         ))
     }
 
-    pub(crate) fn set_replay_context(&self, replay_context: &str) -> AppResult<()> {
-        self.configure_replay(replay_context, None, None)
+    pub(crate) fn set_replay_context_with_conn(
+        &self,
+        conn: &Connection,
+        replay_context: &str,
+    ) -> AppResult<()> {
+        self.configure_replay_with_conn(conn, replay_context, None, None)
     }
 }
 
@@ -1629,8 +1640,10 @@ mod tests {
             claim: claimed.claim,
             authoritative_committed: AtomicBool::new(true),
         };
+        let conn = operation.db.open_connection().expect("open journal connection");
         let error = operation
-            .set_replay_context(
+            .set_replay_context_with_conn(
+                &conn,
                 r#"{"operation":"install","workspace_id":1,"skill_key":"demo","extra":true}"#,
             )
             .expect_err("unknown context field must be rejected");

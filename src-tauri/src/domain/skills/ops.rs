@@ -238,6 +238,7 @@ LIMIT 1
     };
     let artifact = stage_artifact(
         app,
+        &conn,
         operation,
         &context,
         &[("desired", src_dir.as_path())],
@@ -381,6 +382,7 @@ pub fn uninstall<R: tauri::Runtime>(
     };
     let _artifact = stage_artifact(
         app,
+        &conn,
         operation,
         &context,
         &[("previous", ssot_dir.as_path())],
@@ -428,6 +430,7 @@ pub fn return_to_local<R: tauri::Runtime>(
     };
     let _artifact = stage_artifact(
         app,
+        &conn,
         operation,
         &context,
         &[("previous", ssot_dir.as_path())],

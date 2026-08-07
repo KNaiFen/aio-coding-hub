@@ -502,7 +502,7 @@ pub(crate) fn stage_local_skills_for_workspace_switch<R: tauri::Runtime>(
     operation: &RecoveryOperation,
 ) -> AppResult<String> {
     crate::shared::cli_key::validate_cli_key(cli_key)?;
-    operation.renew_lease()?;
+    operation.renew_lease_with_conn(conn)?;
     let root = artifact_root(app, operation.operation_id())?;
     if root.exists() {
         let (_manifest, digest) =

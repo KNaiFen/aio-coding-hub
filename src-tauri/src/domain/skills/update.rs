@@ -273,6 +273,7 @@ pub fn update_skill(
     };
     let artifact = stage_artifact(
         app,
+        &conn,
         operation,
         &context,
         &[

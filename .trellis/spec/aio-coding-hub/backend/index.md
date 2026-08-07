@@ -74,6 +74,14 @@ When changing upstream error response rules:
    bounded evidence is unavailable.
 4. Keep attempt logs original and the request-level status client-visible.
 
+When changing recovery-journal-backed filesystem projection:
+
+1. Reuse a caller-held SQLite connection for journal lease, checkpoint, and
+   replay-context mutations; do not borrow a second pool connection while the
+   first is held.
+2. Keep a fresh pool borrow only at orchestration boundaries where no active
+   connection is held.
+
 ## Quality Check
 
 - Unit-test the attempt-budget calculation at its boundary values.
@@ -90,3 +98,5 @@ When changing upstream error response rules:
   timeouts, provider selection, retries, circuit state, or response status.
 - Prove error response rules cannot change provider selection, retry counts,
   circuit state, or attempt evidence, including a failure followed by success.
+- Exercise recovery projection in the one-connection test pool so journal
+  bookkeeping cannot silently depend on spare pool capacity.

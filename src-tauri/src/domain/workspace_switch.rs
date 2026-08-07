@@ -287,6 +287,7 @@ fn phase_index(phase: &str) -> crate::shared::error::AppResult<usize> {
 
 fn run_phase(
     operation: &RecoveryOperation,
+    conn: &Connection,
     completed: &mut usize,
     phase: &'static str,
     work: impl FnOnce() -> crate::shared::error::AppResult<()>,
@@ -295,9 +296,9 @@ fn run_phase(
     if *completed >= index {
         return Ok(());
     }
-    operation.renew_lease()?;
+    operation.renew_lease_with_conn(conn)?;
     work()?;
-    operation.checkpoint_phase(phase)?;
+    operation.checkpoint_phase_with_conn(conn, phase)?;
     *completed = index;
     Ok(())
 }
@@ -334,12 +335,11 @@ fn context_from_entry(
 
 fn execute_workspace_projection<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
-    db: &db::Db,
+    conn: &Connection,
     operation: &RecoveryOperation,
     context: &WorkspaceRecoveryContext,
 ) -> crate::shared::error::AppResult<()> {
-    let conn = db.open_connection()?;
-    let cli_key = workspaces::get_cli_key_by_id(&conn, context.to_workspace_id)?;
+    let cli_key = workspaces::get_cli_key_by_id(conn, context.to_workspace_id)?;
     if cli_key != context.cli_key {
         return Err(AppError::new(
             "RECOVERY_JOURNAL_INVALID",
@@ -349,7 +349,7 @@ fn execute_workspace_projection<R: tauri::Runtime>(
     let cli = CliKey::parse(&cli_key)?;
     let mut completed = phase_index(&operation.entry().phase)?;
     if completed >= phase_index(PHASE_ACTIVE)?
-        && workspaces::active_id_by_cli(&conn, &cli_key)? != Some(context.to_workspace_id)
+        && workspaces::active_id_by_cli(conn, &cli_key)? != Some(context.to_workspace_id)
     {
         return Err(AppError::new(
             "RECOVERY_JOURNAL_STATE_CONFLICT",
@@ -357,29 +357,29 @@ fn execute_workspace_projection<R: tauri::Runtime>(
         ));
     }
 
-    run_phase(operation, &mut completed, PHASE_CONTEXT, || Ok(()))?;
-    run_phase(operation, &mut completed, PHASE_ACTIVE, || {
-        workspaces::set_active(&conn, context.to_workspace_id)?;
+    run_phase(operation, conn, &mut completed, PHASE_CONTEXT, || Ok(()))?;
+    run_phase(operation, conn, &mut completed, PHASE_ACTIVE, || {
+        workspaces::set_active(conn, context.to_workspace_id)?;
         operation.mark_authoritative_committed();
         Ok(())
     })?;
 
     if cli.supports(CliCapability::Prompts) {
-        run_phase(operation, &mut completed, PHASE_PROMPT, || {
-            prompts::sync_cli_for_workspace(app, &conn, context.to_workspace_id)
+        run_phase(operation, conn, &mut completed, PHASE_PROMPT, || {
+            prompts::sync_cli_for_workspace(app, conn, context.to_workspace_id)
         })?;
     } else {
-        run_phase(operation, &mut completed, PHASE_PROMPT, || Ok(()))?;
+        run_phase(operation, conn, &mut completed, PHASE_PROMPT, || Ok(()))?;
     }
 
     if cli.supports(CliCapability::Mcp) {
-        let managed_from = list_enabled_mcp_keys(&conn, context.from_workspace_id)?
+        let managed_from = list_enabled_mcp_keys(conn, context.from_workspace_id)?
             .into_iter()
             .collect::<HashSet<_>>();
-        let managed_to = list_enabled_mcp_keys(&conn, Some(context.to_workspace_id))?
+        let managed_to = list_enabled_mcp_keys(conn, Some(context.to_workspace_id))?
             .into_iter()
             .collect::<HashSet<_>>();
-        run_phase(operation, &mut completed, PHASE_MCP_CAPTURE, || {
+        run_phase(operation, conn, &mut completed, PHASE_MCP_CAPTURE, || {
             mcp::capture_local_mcp_servers_for_workspace_switch(
                 app,
                 &cli_key,
@@ -387,10 +387,10 @@ fn execute_workspace_projection<R: tauri::Runtime>(
                 context.from_workspace_id,
             )
         })?;
-        run_phase(operation, &mut completed, PHASE_MCP_MANAGED, || {
-            mcp::sync_cli_for_workspace(app, &conn, context.to_workspace_id)
+        run_phase(operation, conn, &mut completed, PHASE_MCP_MANAGED, || {
+            mcp::sync_cli_for_workspace(app, conn, context.to_workspace_id)
         })?;
-        run_phase(operation, &mut completed, PHASE_MCP_RESTORE, || {
+        run_phase(operation, conn, &mut completed, PHASE_MCP_RESTORE, || {
             mcp::restore_local_mcp_servers_for_workspace_switch(
                 app,
                 &cli_key,
@@ -400,19 +400,19 @@ fn execute_workspace_projection<R: tauri::Runtime>(
         })?;
     } else {
         for phase in [PHASE_MCP_CAPTURE, PHASE_MCP_MANAGED, PHASE_MCP_RESTORE] {
-            run_phase(operation, &mut completed, phase, || Ok(()))?;
+            run_phase(operation, conn, &mut completed, phase, || Ok(()))?;
         }
     }
 
     if cli_key == "claude" {
-        run_phase(operation, &mut completed, PHASE_CLAUDE_CAPTURE, || {
+        run_phase(operation, conn, &mut completed, PHASE_CLAUDE_CAPTURE, || {
             claude_plugins::capture_local_plugins_for_workspace_switch(
                 app,
                 &cli_key,
                 context.from_workspace_id,
             )
         })?;
-        run_phase(operation, &mut completed, PHASE_CLAUDE_RESTORE, || {
+        run_phase(operation, conn, &mut completed, PHASE_CLAUDE_RESTORE, || {
             claude_plugins::restore_local_plugins_for_workspace_switch(
                 app,
                 &cli_key,
@@ -421,27 +421,27 @@ fn execute_workspace_projection<R: tauri::Runtime>(
         })?;
     } else {
         for phase in [PHASE_CLAUDE_CAPTURE, PHASE_CLAUDE_RESTORE] {
-            run_phase(operation, &mut completed, phase, || Ok(()))?;
+            run_phase(operation, conn, &mut completed, phase, || Ok(()))?;
         }
     }
 
     if cli.supports(CliCapability::Skills) {
-        run_phase(operation, &mut completed, PHASE_SKILLS_MANAGED, || {
-            skills::sync_cli_for_workspace(app, &conn, context.to_workspace_id)
+        run_phase(operation, conn, &mut completed, PHASE_SKILLS_MANAGED, || {
+            skills::sync_cli_for_workspace(app, conn, context.to_workspace_id)
         })?;
-        run_phase(operation, &mut completed, PHASE_SKILLS_CAPTURE, || {
+        run_phase(operation, conn, &mut completed, PHASE_SKILLS_CAPTURE, || {
             skills::capture_staged_local_skills_for_workspace_switch(
                 app,
-                &conn,
+                conn,
                 &cli_key,
                 context.from_workspace_id,
                 operation,
             )
         })?;
-        run_phase(operation, &mut completed, PHASE_SKILLS_RESTORE, || {
+        run_phase(operation, conn, &mut completed, PHASE_SKILLS_RESTORE, || {
             skills::restore_staged_local_skills_for_workspace_switch(
                 app,
-                &conn,
+                conn,
                 &cli_key,
                 context.to_workspace_id,
                 operation,
@@ -453,11 +453,11 @@ fn execute_workspace_projection<R: tauri::Runtime>(
             PHASE_SKILLS_CAPTURE,
             PHASE_SKILLS_RESTORE,
         ] {
-            run_phase(operation, &mut completed, phase, || Ok(()))?;
+            run_phase(operation, conn, &mut completed, phase, || Ok(()))?;
         }
     }
 
-    run_phase(operation, &mut completed, PHASE_COMPLETE, || Ok(()))
+    run_phase(operation, conn, &mut completed, PHASE_COMPLETE, || Ok(()))
 }
 
 pub(crate) fn apply_with_recovery<R: tauri::Runtime>(
@@ -477,7 +477,7 @@ pub(crate) fn apply_with_recovery<R: tauri::Runtime>(
     };
     let serialized = serde_json::to_string(&context)
         .map_err(|_| AppError::new("RECOVERY_JOURNAL_INVALID", "无法序列化工作区恢复上下文"))?;
-    operation.set_replay_context(&serialized)?;
+    operation.set_replay_context_with_conn(&conn, &serialized)?;
     if CliKey::parse(&cli_key)?.supports(CliCapability::Skills) {
         let artifact_digest = skills::stage_local_skills_for_workspace_switch(
             app,
@@ -486,13 +486,14 @@ pub(crate) fn apply_with_recovery<R: tauri::Runtime>(
             from_workspace_id,
             operation,
         )?;
-        operation.configure_replay(
+        operation.configure_replay_with_conn(
+            &conn,
             &serialized,
             Some(operation.operation_id()),
             Some(&artifact_digest),
         )?;
     }
-    execute_workspace_projection(app, db, operation, &context)?;
+    execute_workspace_projection(app, &conn, operation, &context)?;
 
     Ok(WorkspaceApplyReport {
         cli_key,
@@ -519,7 +520,8 @@ pub(crate) fn replay_recovery_operation<R: tauri::Runtime>(
             "工作区切换缺少本地 Skills 恢复制品",
         ));
     }
-    execute_workspace_projection(app, db, operation, &context)
+    let conn = db.open_connection()?;
+    execute_workspace_projection(app, &conn, operation, &context)
 }
 
 pub(crate) fn cleanup_recovery_operation<R: tauri::Runtime>(
@@ -813,7 +815,7 @@ command = "local"
         let error =
             apply(&test.handle(), &test.db, target_id).expect_err("oversized prompt must fail");
 
-        assert!(error.to_string().contains("too large"));
+        assert_eq!(error.code(), "SEC_INVALID_INPUT");
         test.assert_active(target_id);
         assert_eq!(
             std::fs::read(test.grok_home.join("config.toml")).expect("read config"),
@@ -855,7 +857,7 @@ command = "local"
         let error =
             apply(&test.handle(), &test.db, target_id).expect_err("invalid Grok TOML must fail");
 
-        assert!(error.to_string().contains("GROK_CONFIG_INVALID_TOML"));
+        assert_eq!(error.code(), "GROK_CONFIG_INVALID_TOML");
         test.assert_active(target_id);
         assert_eq!(
             std::fs::read(test.grok_home.join("config.toml")).expect("read config"),
@@ -904,7 +906,7 @@ command = "local"
         let error =
             apply(&test.handle(), &test.db, target_id).expect_err("missing SSOT skill must fail");
 
-        assert!(error.to_string().contains("SKILL_SSOT_MISSING"));
+        assert_eq!(error.code(), "SKILL_SSOT_MISSING");
         test.assert_active(target_id);
         assert_eq!(
             std::fs::read_to_string(test.grok_home.join("AGENTS.md")).expect("read prompt"),

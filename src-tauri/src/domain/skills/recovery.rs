@@ -12,7 +12,7 @@ use crate::db;
 use crate::infra::recovery_journal::{JournalEntry, RecoveryOperation};
 use crate::shared::error::{AppError, AppResult};
 use crate::shared::fs::{read_file_with_max_len, write_file_atomic};
-use rusqlite::OptionalExtension;
+use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -290,12 +290,13 @@ fn validate_root_entries(
 
 pub(super) fn stage_artifact<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
+    conn: &Connection,
     operation: &RecoveryOperation,
     context: &SkillRecoveryContext,
     role_sources: &[(&str, &Path)],
     source_metadata: Option<&SkillSourceMetadata>,
 ) -> AppResult<StagedArtifact> {
-    operation.renew_lease()?;
+    operation.renew_lease_with_conn(conn)?;
     let root = artifact_root(app)?.join(operation.operation_id());
     if root.exists() {
         return Err(AppError::new(
@@ -348,7 +349,12 @@ pub(super) fn stage_artifact<R: tauri::Runtime>(
         write_file_atomic(&root.join(ARTIFACT_MANIFEST_FILE), &bytes)?;
         validate_root_entries(&root, &roles, source_sha256.is_some())?;
         let context_json = artifact_context_json(context)?;
-        operation.configure_replay(&context_json, Some(operation.operation_id()), Some(&digest))?;
+        operation.configure_replay_with_conn(
+            conn,
+            &context_json,
+            Some(operation.operation_id()),
+            Some(&digest),
+        )?;
         Ok(StagedArtifact { roles })
     })();
 
