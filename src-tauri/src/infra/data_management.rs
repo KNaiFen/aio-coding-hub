@@ -118,14 +118,16 @@ fn db_compact_at(db_path: &Path, db: &db::Db) -> crate::shared::error::AppResult
 
     let before_bytes = disk_usage_at(db_path, db)?.total_bytes;
 
-    let conn = db.open_connection()?;
+    {
+        let conn = db.open_connection()?;
 
-    // Checkpoints stay best-effort, but VACUUM failures must surface because
-    // this command is the user's explicit request to return reusable pages.
-    let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
-    conn.execute_batch("VACUUM;")
-        .map_err(|e| db_err!("failed to vacuum database: {e}"))?;
-    let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+        // Checkpoints stay best-effort, but VACUUM failures must surface because
+        // this command is the user's explicit request to return reusable pages.
+        let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+        conn.execute_batch("VACUUM;")
+            .map_err(|e| db_err!("failed to vacuum database: {e}"))?;
+        let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+    }
 
     let after_bytes = disk_usage_at(db_path, db)?.total_bytes;
 
