@@ -15,12 +15,12 @@
   "branch": "codex/aud019-gateway-lan-bearer-token",
   "base_branch": "main",
   "worktree_path": "/private/tmp/aio-aud019-gateway-token",
-  "commit": "30d8db1b",
-  "pr_url": null,
+  "commit": "51224cf2",
+  "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/90",
   "subtasks": [],
   "children": [],
   "parent": "08-06-final-hardening-zero-artifact",
   "relatedFiles": [],
-  "notes": "本批第 4 项；代码候选在独立分支提交为 dfe4579e、3781b005、30d8db1b，PR/CI/合并按用户 2026-08-07 决策后置。WSL 非回环连接同样带 token，一次性明文在生成或轮换时直接同步。",
+  "notes": "本批第 4 项；候选已在 AUD-056 合并后的 main 重放为 51224cf2，并纳入精确云端格式补丁和 CI 诊断修复。PR #90 的精确 head 全量 CI、生成绑定核验和合并仍待执行。WSL 非回环连接同样带 token，一次性明文在生成或轮换时直接同步。",
   "meta": {}
 }

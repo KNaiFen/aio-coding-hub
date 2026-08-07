@@ -34,22 +34,11 @@
 - **验收标准**：归档会话字节不变；成功后最多一代 v2；v1 managed 可迁移、非受管/损坏/symlink 保留；云端 Rust 覆盖迁移、回滚和所有权边界。
 - **Trellis**：[`08-06-provider-sync-session-snapshot`](./.trellis/tasks/08-06-provider-sync-session-snapshot/)
 
-### AIO-PENDING-018 - 请求日志与运行日志留存
-
-- **状态**：`planned`
-- **日期**：2026-08-06
-- **待执行交付**：代码已在独立候选分支 `codex/aud018-request-runtime-log-retention` 提交为 `28d65b2d`、`c86799ce`；本地 cloud-only checker/self-test 与 `git diff --check` 通过，未运行 Cargo、pnpm、Tauri、生成器、测试或构建。PR、精确 head 全量 CI、生成绑定核验、主线门和合并统一后置；在完成云端验证与合并前保持 `planned`。
-- **观察问题**：请求日志默认 `0=永久`，运行日志虽默认七天但没有容量上限，清空请求明细还会自动 VACUUM，缺少可预期的空间治理。
-- **锁定决策**：请求日志默认七天并迁移历史 0；`usage_ledger` 与聚合统计永久保留；运行日志七天加 256 MiB 软上限，只回收最旧已关闭滚动文件；不自动 VACUUM。
-- **拟议方向**：统一 settings/IPC/UI 留存边界，保持 ledger 覆盖检查，按日龄与容量清理运行日志，并用 SQLite freelist 展示可回收空间。
-- **验收标准**：旧配置持久迁移、所有写入拒绝 0；上月用量/Token/成本/趋势/排行保持；活动日志不被删除；清理后显示可回收字节，只有手动压缩归还空间。
-- **Trellis**：[`08-06-request-runtime-log-retention`](./.trellis/tasks/08-06-request-runtime-log-retention/)
-
 ### AIO-PENDING-019 - 非回环 Gateway Bearer Token
 
 - **状态**：`planned`
 - **日期**：2026-08-06
-- **待执行交付**：代码已在独立候选分支 `codex/aud019-gateway-lan-bearer-token` 提交为 `dfe4579e`、`3781b005`、`30d8db1b`；本地 cloud-only checker/self-test 与 `git diff --check` 通过，未运行 Cargo、pnpm、Tauri、类型检查、Lint、测试或构建。PR、精确 head 全量 CI、生成绑定核验、主线门和合并统一后置；在完成云端验证与合并前保持 `planned`。
+- **待执行交付**：代码已在独立候选分支 `codex/aud019-gateway-lan-bearer-token` 重放为 `51224cf2`，包含精确云端格式补丁和 CI 诊断修复；本地 cloud-only checker/self-test 与 `git diff --check` 通过，未运行 Cargo、pnpm、Tauri、类型检查、Lint、测试或构建。PR、精确 head 全量 CI、生成绑定核验、主线门和合并统一后置；在完成云端验证与合并前保持 `planned`。
 - **观察问题**：现有 LAN/custom 非回环 Gateway 缺少统一路由鉴权，provider/forwarded header 和 provider 专用路由扩大了可伪造信任面。
 - **锁定决策**：保留 LAN；真实 TCP peer 非回环时所有路由含 health 必须使用应用生成 Bearer Token；loopback 兼容。Token 只展示一次、仅持久化摘要；删除 provider 专用路由、forced-provider 数据流和 Claude Terminal 入口。
 - **拟议方向**：在最外层 Axum middleware 基于 `ConnectInfo<SocketAddr>` 鉴权并剥离敏感/转发身份头，支持旧 LAN 迁移、未确认重启轮换、主动轮换和 WSL 明文即时同步。
