@@ -860,15 +860,20 @@ mod tests {
         cache.record(claude.clone(), None, now);
 
         let (folders, misses) = cache.lookup(&[codex.clone(), claude.clone()], now);
-        assert_eq!(folders.get(&codex).map(String::as_str), Some("codex-folder"));
+        assert_eq!(
+            folders.get(&codex).map(String::as_str),
+            Some("codex-folder")
+        );
         assert!(!folders.contains_key(&claude));
-        assert!(misses.is_empty(), "negative entries suppress repeated scans");
+        assert!(
+            misses.is_empty(),
+            "negative entries suppress repeated scans"
+        );
 
         let after_negative_ttl = now
             .checked_add(OBSERVER_FOLDER_CACHE_MISS_TTL)
             .expect("negative expiry");
-        let (folders, misses) =
-            cache.lookup(&[codex.clone(), claude.clone()], after_negative_ttl);
+        let (folders, misses) = cache.lookup(&[codex.clone(), claude.clone()], after_negative_ttl);
         assert!(folders.contains_key(&codex));
         assert_eq!(misses, vec![claude.clone()]);
 

@@ -138,10 +138,7 @@ pub(super) async fn build_snapshot(
         .map(|item| project_active(item, &db_projection.folders, generated_at_ms))
         .collect::<Vec<_>>();
 
-    let terminal_inference = db_projection
-        .inference_rows
-        .iter()
-        .collect::<Vec<_>>();
+    let terminal_inference = db_projection.inference_rows.iter().collect::<Vec<_>>();
 
     let last_request = if db_projection.inference_available {
         terminal_inference
@@ -281,8 +278,8 @@ fn build_db_projection(
         .iter()
         .map(|item| item.trace_id.clone())
         .collect::<Vec<_>>();
-    let terminal_trace_ids = request_logs::observer_persisted_trace_ids(db, &active_trace_ids)
-        .unwrap_or_default();
+    let terminal_trace_ids =
+        request_logs::observer_persisted_trace_ids(db, &active_trace_ids).unwrap_or_default();
     let active_trace_ids = active
         .iter()
         .filter(|item| !terminal_trace_ids.contains(&item.trace_id))
@@ -297,12 +294,9 @@ fn build_db_projection(
     let inference_available = inference_result.is_ok();
     let inference_rows = inference_result.unwrap_or_default();
     let recent_result = match recent_query_limit(history_limit) {
-        Some(limit) => request_logs::list_observer_recent_terminal(
-            db,
-            cli_key,
-            limit,
-            &active_trace_ids,
-        ),
+        Some(limit) => {
+            request_logs::list_observer_recent_terminal(db, cli_key, limit, &active_trace_ids)
+        }
         None => Ok(Vec::new()),
     };
     let recent_available = recent_result.is_ok();
@@ -866,14 +860,14 @@ fn resolve_folders(
 ) -> HashMap<FolderKey, String> {
     let keys = folder_lookup_keys(
         active
-        .iter()
-        .map(|item| (item.cli_key.as_str(), item.session_id.as_deref()))
-        .chain(
-            last_inference
-                .into_iter()
-                .chain(recent.iter())
-                .map(|row| (row.cli_key.as_str(), row.session_id.as_deref())),
-        ),
+            .iter()
+            .map(|item| (item.cli_key.as_str(), item.session_id.as_deref()))
+            .chain(
+                last_inference
+                    .into_iter()
+                    .chain(recent.iter())
+                    .map(|row| (row.cli_key.as_str(), row.session_id.as_deref())),
+            ),
     );
     let lookup_started_at = Instant::now();
     let (mut folders, misses) = {
@@ -889,10 +883,12 @@ fn resolve_folders(
     if !misses.is_empty() {
         let items = misses
             .iter()
-            .map(|(source, session_id)| cli_sessions::CliSessionsFolderLookupKey {
-                source: *source,
-                session_id: session_id.clone(),
-            })
+            .map(
+                |(source, session_id)| cli_sessions::CliSessionsFolderLookupKey {
+                    source: *source,
+                    session_id: session_id.clone(),
+                },
+            )
             .collect::<Vec<_>>();
         let requested = misses.iter().cloned().collect::<HashSet<_>>();
         let scanned = cli_sessions::folder_lookup_by_ids(app, &items, None).unwrap_or_default();
@@ -921,10 +917,7 @@ fn resolve_folders(
     folders
         .into_iter()
         .map(|((source, session_id), folder_name)| {
-            (
-                (source.as_str().to_string(), session_id),
-                folder_name,
-            )
+            ((source.as_str().to_string(), session_id), folder_name)
         })
         .collect()
 }
