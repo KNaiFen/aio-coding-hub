@@ -70,7 +70,7 @@
 
 - **状态**：`planned`
 - **日期**：2026-08-06
-- **待执行交付**：代码已在独立候选分支 `codex/aud022-observer-zero-history-query` 提交为 `1f64f787`、`6b77a6dc`；本地 cloud-only checker/self-test 与 `git diff --check` 通过，未运行 Cargo、pnpm、Tauri、生成器、类型检查、Lint、测试或构建。PR、精确 head 全量 CI、bindings 核验、主线门和合并统一后置；在云端验证和合并前保持 `planned`。
+- **待执行交付**：代码已在独立候选分支 `codex/aud022-observer-zero-history-query` 重放为 `dc9a4418`；本地 cloud-only checker/self-test 与 `git diff --check` 通过，未运行 Cargo、pnpm、Tauri、生成器、类型检查、Lint、测试或构建。PR、精确 head 全量 CI、bindings 核验、主线门和合并统一后置；在云端验证和合并前保持 `planned`。
 - **观察问题**：`history_limit=0` 只在投影末端生效，之前仍读取并构造 500 条日志，并基于隐藏历史触发完整 Claude/Codex session-folder 扫描。
 - **锁定决策**：保持 last/dominant/active/all-scope 与 recent ready-empty 语义；改用受限查询；folder lookup 只服务实际渲染投影并使用有界内存缓存。
 - **拟议方向**：拆分 last/dominant/recent SQL，zero-history 跳过 recent；以 `(source, session_id)` 为键增加容量和正/负 TTL 均受限的 Observer folder cache。

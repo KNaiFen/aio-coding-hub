@@ -15,12 +15,12 @@
   "branch": "codex/aud022-observer-zero-history-query",
   "base_branch": "main",
   "worktree_path": "/private/tmp/aio-aud022-observer",
-  "commit": "6b77a6dc",
-  "pr_url": null,
+  "commit": "dc9a4418",
+  "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/93",
   "subtasks": [],
   "children": [],
   "parent": "08-06-final-hardening-zero-artifact",
   "relatedFiles": [],
-  "notes": "本批第 7 项；代码已在独立候选分支提交为 1f64f787、6b77a6dc，保持 last、dominant、active、all-scope 与 recent ready-empty 语义。",
+  "notes": "本批第 7 项；候选已在 AUD-056 合并后的 main 重放为 dc9a4418，保持 last、dominant、active、all-scope 与 recent ready-empty 语义。PR #93 的精确 head 全量 CI、bindings 核验和顺序合并仍待执行。",
   "meta": {}
 }
