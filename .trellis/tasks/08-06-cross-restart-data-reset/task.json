@@ -15,12 +15,12 @@
   "branch": "codex/aud020-cross-restart-data-reset",
   "base_branch": "main",
   "worktree_path": "/private/tmp/aio-aud020-reset",
-  "commit": "5ab4e48b",
-  "pr_url": null,
+  "commit": "c4c069e2",
+  "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/91",
   "subtasks": [],
   "children": [],
   "parent": "08-06-final-hardening-zero-artifact",
   "relatedFiles": [],
-  "notes": "本批第 5 项；在独立候选分支提交为 5ab4e48b，PR/CI/合并后置；先建立 AUD-002 将复用的 maintenance coordinator。",
+  "notes": "本批第 5 项；候选已在 AUD-056 合并后的 main 重放为 c4c069e2。PR #91 的精确 head 全量 CI、跨平台故障注入、绑定核验和顺序合并仍待执行；先建立 AUD-002 将复用的 maintenance coordinator。",
   "meta": {}
 }
