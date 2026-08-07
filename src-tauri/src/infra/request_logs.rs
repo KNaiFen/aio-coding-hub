@@ -30,9 +30,10 @@ mod semantics;
 mod queries;
 use queries::{final_provider_from_attempts, parse_attempts, validate_cli_key};
 pub use queries::{
-    get_by_id, get_by_trace_id, list_after_id, list_after_id_all, list_recent, list_recent_all,
-    page_all_excluding_traces, snapshot_membership_excluding_traces, summaries_by_ids,
-    terminal_trace_ids,
+    get_by_id, get_by_trace_id, list_after_id, list_after_id_all,
+    list_observer_recent_terminal, list_observer_terminal_inferences, list_recent, list_recent_all,
+    observer_persisted_trace_ids, page_all_excluding_traces, snapshot_membership_excluding_traces,
+    summaries_by_ids, terminal_trace_ids,
 };
 
 const WRITE_BUFFER_CAPACITY: usize = 512;
