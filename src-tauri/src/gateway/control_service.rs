@@ -432,7 +432,9 @@ mod tests {
             crate::db::init_for_tests(&temp.path().join("gateway-fallback.db")).expect("init db");
         let pipeline = fallback_gateway_plugin_pipeline_for_tests(&db);
 
-        pipeline.replace_plugins(vec![extension_host_plugin_without_root()]);
+        pipeline
+            .refresh_plugins_with(|| Ok(vec![extension_host_plugin_without_root()]))
+            .expect("test refresh should succeed");
 
         let err = pipeline
             .run_request_hook(GatewayRequestHookInput {

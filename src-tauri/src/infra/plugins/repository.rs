@@ -870,39 +870,6 @@ pub(crate) fn list_audit_logs(
     list_audit_logs_with_conn(&conn, plugin_id, limit)
 }
 
-pub(crate) fn record_runtime_failure(
-    db: &db::Db,
-    input: RecordPluginRuntimeFailureInput,
-) -> AppResult<PluginRuntimeFailure> {
-    let conn = db.open_connection()?;
-    ensure_plugin_exists(&conn, &input.plugin_id)?;
-    let now = now_unix_seconds();
-    conn.execute(
-        r#"
-INSERT INTO plugin_runtime_failures(
-  plugin_id,
-  hook_name,
-  failure_kind,
-  message,
-  trace_id,
-  created_at
-) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-"#,
-        params![
-            input.plugin_id,
-            input.hook_name,
-            input.failure_kind,
-            input.message,
-            input.trace_id,
-            now
-        ],
-    )
-    .map_err(|e| db_err!("failed to record plugin runtime failure: {e}"))?;
-
-    let id = conn.last_insert_rowid();
-    get_runtime_failure_by_id(&conn, id)
-}
-
 /// Persists a severe runtime failure and transitions an enabled plugin to
 /// quarantine once its rolling failure window reaches the fixed threshold.
 ///
@@ -1453,22 +1420,6 @@ LIMIT ?2
     Ok(out)
 }
 
-fn get_runtime_failure_by_id(
-    conn: &rusqlite::Connection,
-    id: i64,
-) -> AppResult<PluginRuntimeFailure> {
-    conn.query_row(
-        r#"
-SELECT id, plugin_id, hook_name, failure_kind, message, trace_id, created_at
-FROM plugin_runtime_failures
-WHERE id = ?1
-"#,
-        params![id],
-        runtime_failure_from_row,
-    )
-    .map_err(|e| db_err!("failed to query inserted plugin runtime failure: {e}"))
-}
-
 fn runtime_failure_from_row(
     row: &rusqlite::Row<'_>,
 ) -> Result<PluginRuntimeFailure, rusqlite::Error> {
@@ -1804,15 +1755,26 @@ mod tests {
             },
         )
         .unwrap();
-        record_runtime_failure(
-            &db,
-            RecordPluginRuntimeFailureInput {
-                plugin_id: "community.prompt-helper".to_string(),
-                hook_name: Some("gateway.request.afterBodyRead".to_string()),
-                failure_kind: "timeout".to_string(),
-                message: "Hook timed out".to_string(),
-                trace_id: Some("trace-1".to_string()),
-            },
+        let conn = db.open_connection().unwrap();
+        conn.execute(
+            r#"
+INSERT INTO plugin_runtime_failures(
+  plugin_id,
+  hook_name,
+  failure_kind,
+  message,
+  trace_id,
+  created_at
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+"#,
+            params![
+                "community.prompt-helper",
+                "gateway.request.afterBodyRead",
+                "timeout",
+                "Hook timed out",
+                "trace-1",
+                now_unix_seconds(),
+            ],
         )
         .unwrap();
 
