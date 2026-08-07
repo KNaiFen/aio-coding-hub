@@ -405,20 +405,32 @@ fn execute_workspace_projection<R: tauri::Runtime>(
     }
 
     if cli_key == "claude" {
-        run_phase(operation, conn, &mut completed, PHASE_CLAUDE_CAPTURE, || {
-            claude_plugins::capture_local_plugins_for_workspace_switch(
-                app,
-                &cli_key,
-                context.from_workspace_id,
-            )
-        })?;
-        run_phase(operation, conn, &mut completed, PHASE_CLAUDE_RESTORE, || {
-            claude_plugins::restore_local_plugins_for_workspace_switch(
-                app,
-                &cli_key,
-                context.to_workspace_id,
-            )
-        })?;
+        run_phase(
+            operation,
+            conn,
+            &mut completed,
+            PHASE_CLAUDE_CAPTURE,
+            || {
+                claude_plugins::capture_local_plugins_for_workspace_switch(
+                    app,
+                    &cli_key,
+                    context.from_workspace_id,
+                )
+            },
+        )?;
+        run_phase(
+            operation,
+            conn,
+            &mut completed,
+            PHASE_CLAUDE_RESTORE,
+            || {
+                claude_plugins::restore_local_plugins_for_workspace_switch(
+                    app,
+                    &cli_key,
+                    context.to_workspace_id,
+                )
+            },
+        )?;
     } else {
         for phase in [PHASE_CLAUDE_CAPTURE, PHASE_CLAUDE_RESTORE] {
             run_phase(operation, conn, &mut completed, phase, || Ok(()))?;
@@ -426,27 +438,43 @@ fn execute_workspace_projection<R: tauri::Runtime>(
     }
 
     if cli.supports(CliCapability::Skills) {
-        run_phase(operation, conn, &mut completed, PHASE_SKILLS_MANAGED, || {
-            skills::sync_cli_for_workspace(app, conn, context.to_workspace_id)
-        })?;
-        run_phase(operation, conn, &mut completed, PHASE_SKILLS_CAPTURE, || {
-            skills::capture_staged_local_skills_for_workspace_switch(
-                app,
-                conn,
-                &cli_key,
-                context.from_workspace_id,
-                operation,
-            )
-        })?;
-        run_phase(operation, conn, &mut completed, PHASE_SKILLS_RESTORE, || {
-            skills::restore_staged_local_skills_for_workspace_switch(
-                app,
-                conn,
-                &cli_key,
-                context.to_workspace_id,
-                operation,
-            )
-        })?;
+        run_phase(
+            operation,
+            conn,
+            &mut completed,
+            PHASE_SKILLS_MANAGED,
+            || skills::sync_cli_for_workspace(app, conn, context.to_workspace_id),
+        )?;
+        run_phase(
+            operation,
+            conn,
+            &mut completed,
+            PHASE_SKILLS_CAPTURE,
+            || {
+                skills::capture_staged_local_skills_for_workspace_switch(
+                    app,
+                    conn,
+                    &cli_key,
+                    context.from_workspace_id,
+                    operation,
+                )
+            },
+        )?;
+        run_phase(
+            operation,
+            conn,
+            &mut completed,
+            PHASE_SKILLS_RESTORE,
+            || {
+                skills::restore_staged_local_skills_for_workspace_switch(
+                    app,
+                    conn,
+                    &cli_key,
+                    context.to_workspace_id,
+                    operation,
+                )
+            },
+        )?;
     } else {
         for phase in [
             PHASE_SKILLS_MANAGED,

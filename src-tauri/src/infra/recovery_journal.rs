@@ -1640,7 +1640,10 @@ mod tests {
             claim: claimed.claim,
             authoritative_committed: AtomicBool::new(true),
         };
-        let conn = operation.db.open_connection().expect("open journal connection");
+        let conn = operation
+            .db
+            .open_connection()
+            .expect("open journal connection");
         let error = operation
             .set_replay_context_with_conn(
                 &conn,
