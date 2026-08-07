@@ -552,7 +552,7 @@ async fn run_retention_once(app: &tauri::AppHandle, db: &db::Db) {
 
     let retention_app = app.clone();
     let retention_db = db.clone();
-    let result = crate::blocking::run("request_log_retention", move || {
+    let result = crate::blocking::run("request_log_retention", move || -> AppResult<u64> {
         let retention_days = crate::settings::request_log_retention_days_fail_open(&retention_app);
         let deleted = purge_expired(&retention_db, retention_days, now_unix_seconds())?;
         if deleted > 0 {
