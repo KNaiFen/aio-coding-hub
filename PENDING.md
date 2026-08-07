@@ -85,6 +85,7 @@
 - **状态**：`planned`
 - **日期**：2026-08-06
 - **待执行交付**：代码已在堆叠分支 `codex/final-hardening-stack` 提交为 `3195b3cb`；本地 `node scripts/check-cloud-only-verification.selftest.mjs`、`node scripts/check-cloud-only-verification.mjs` 与 `git diff --check` 已通过，未运行 Cargo、pnpm、Tauri、格式化、类型检查、Lint、测试、构建或生成器。精确 head 全量 CI、生成绑定核验、主线门与合并全部后置；在云端验证与合并前保持 `planned`，不标记 `done`。
+- **云端验证**：精确 head `0ea611f9a0ac1b49a31ead32eb807b55005dd435` 的 Actions [31155660000](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31155660000) 已完成但失败：`support-contract` 通过；`frontend` 被候选未改动的 `js-yaml` 新高危公告 `GHSA-5p4m-2wfm-xmqj` 阻断；`rust` 在云端格式化后的 bindings 生成编译阶段暴露维护态生命周期、Gateway 参数、请求日志类型推断与命令注册错误，未进入 Clippy/测试且没有生成修复 artifact。按当前批处理规则先跳过修复、PR 与合并，保留为待执行交付。
 - **观察问题**：`activationEvents` 当前基本不参与 command/gateway 调度，重复 runtime failure 只触发进程内 circuit breaker，重启后清零且没有校验恢复路径。
 - **锁定决策**：仅支持 `onStartup`、`onCommand:*`、`onGatewayHook:*`，空数组保持 legacy；显式拒绝两种废弃事件；10 分钟内 3 次严重故障持久 quarantine；revalidate 成功只到 disabled。
 - **拟议方向**：引入精确 ActivationPolicy gate，统一 startup/command/gateway 严重故障分类和原子阈值事务，隔离后刷新 gateway snapshot/host，增加 quarantined-only revalidate。

@@ -15,4 +15,6 @@
 
 - 2026-08-07：`codex/final-hardening-stack` 已以 `3195b3cb` 提交 AUD-033 源码、云端测试覆盖和跨层合同更新；`src/generated/bindings.ts` 保持由 CI 生成，未手工修改。
 - 已通过：`node scripts/check-cloud-only-verification.selftest.mjs`、`node scripts/check-cloud-only-verification.mjs`、`git diff --check`。
-- 未运行：Cargo、pnpm、Tauri、格式化、类型检查、Lint、测试、构建或生成器；尚未推送、创建 PR、触发 CI 或合并。`AIO-PENDING-023` 继续为 `planned`，等待候选提交后的云端验证与合并证据。
+- 未在本地运行：Cargo、pnpm、Tauri、格式化、类型检查、Lint、测试、构建或生成器。
+- 已推送：`codex/final-hardening-stack`；Actions [31155660000](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31155660000) 对精确 head `0ea611f9a0ac1b49a31ead32eb807b55005dd435` 执行全量 CI，`support-contract` 通过，`frontend` 因候选未改动的 `js-yaml` 新高危公告失败，`rust` 因生成器编译错误失败且没有修复 artifact。
+- 按用户决定先跳过 CI 修复、PR 与合并；`AIO-PENDING-023` 继续为 `planned`，等待后续处理云端阻断并完成验证与合并。
