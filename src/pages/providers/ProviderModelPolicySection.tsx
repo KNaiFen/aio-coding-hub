@@ -1,4 +1,4 @@
-import { ChevronDown, Plus, Search, Trash2 } from "lucide-react";
+import { ChevronDown, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { FormField } from "../../ui/FormField";
 import { Input } from "../../ui/Input";
@@ -13,6 +13,7 @@ import type {
 import {
   cloneProviderModelPolicy,
   DEFAULT_PROVIDER_MODEL_POLICY,
+  type ProviderModelDiscoveryUiState,
   normalizeProviderModelPolicyDraft,
   validateProviderModelPolicy,
 } from "./providerModelPolicy";
@@ -24,6 +25,9 @@ export type ProviderModelPolicySectionProps = {
   legacyClaudeModels?: ClaudeModels | null;
   saving: boolean;
   onChange: (policy: ProviderModelPolicyV1) => void;
+  modelDiscoveryState: ProviderModelDiscoveryUiState;
+  onDiscoverModels: () => void | Promise<void>;
+  hasMultipleBaseUrls: boolean;
 };
 
 export function ProviderModelPolicySection({
@@ -33,6 +37,9 @@ export function ProviderModelPolicySection({
   legacyClaudeModels,
   saving,
   onChange,
+  modelDiscoveryState,
+  onDiscoverModels,
+  hasMultipleBaseUrls,
 }: ProviderModelPolicySectionProps) {
   const [search, setSearch] = useState("");
   const [localDraft, setLocalDraft] = useState<ProviderModelPolicyV1>(() =>
@@ -43,6 +50,7 @@ export function ProviderModelPolicySection({
   const sourceRefs = useRef<Record<number, HTMLInputElement | null>>({});
   const addButtonRef = useRef<HTMLButtonElement | null>(null);
   const focusRuleIndexRef = useRef<number | null>(null);
+  const previousStatusRef = useRef(status);
 
   useEffect(() => {
     if (status === "ready" && policy) {
@@ -53,6 +61,13 @@ export function ProviderModelPolicySection({
       focusRuleIndexRef.current = null;
     }
   }, [policy, status]);
+
+  useEffect(() => {
+    if (previousStatusRef.current === "legacy" && status === "ready") {
+      setShowCutoverWarning(true);
+    }
+    previousStatusRef.current = status;
+  }, [status]);
 
   const currentPolicy = status === "ready" && policy ? policy : localDraft;
   const visibleRules = currentPolicy.rules
@@ -120,6 +135,53 @@ export function ProviderModelPolicySection({
     emit(cloneProviderModelPolicy(DEFAULT_PROVIDER_MODEL_POLICY));
   };
 
+  const discoveryPanel = (legacy: boolean) => (
+    <div className="space-y-1.5 rounded-md border border-border bg-secondary/50 px-3 py-2 text-xs text-muted-foreground">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div role="status" aria-live="polite" className="min-w-0 space-y-1">
+          {discoveryOrigin(modelDiscoveryState) ? (
+            <p>
+              <span className="font-medium text-foreground">仅代表当前端点</span>
+              <code className="ml-2 break-all text-foreground">
+                {discoveryOrigin(modelDiscoveryState)}
+              </code>
+              {discoveryBaseUrlIndex(modelDiscoveryState) != null ? (
+                <span className="ml-2">地址 {discoveryBaseUrlIndex(modelDiscoveryState)}</span>
+              ) : null}
+            </p>
+          ) : null}
+          <p>{discoveryMessage(modelDiscoveryState)}</p>
+          {hasMultipleBaseUrls ? <p>多个地址的模型能力若不同，请拆分为独立 Provider。</p> : null}
+        </div>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => void onDiscoverModels()}
+          disabled={saving || modelDiscoveryState.status === "loading"}
+          aria-busy={modelDiscoveryState.status === "loading"}
+        >
+          <RefreshCw
+            className={`h-4 w-4 ${modelDiscoveryState.status === "loading" ? "animate-spin" : ""}`}
+            aria-hidden="true"
+          />
+          获取上游模型
+        </Button>
+      </div>
+      {legacy ? (
+        <p>获取成功后会进入通用模型策略草稿，保存前可取消。</p>
+      ) : (
+        <>
+          <p>
+            {currentPolicy.mode === "all"
+              ? "全部模型：新增规则不会限制未列出的模型。"
+              : "仅选定模型：规则决定模型资格。"}
+          </p>
+          <p>规则不改变供应商排序。</p>
+        </>
+      )}
+    </div>
+  );
+
   return (
     <details
       data-cli-key={cliKey}
@@ -164,6 +226,7 @@ export function ProviderModelPolicySection({
               )}
             </div>
             <p>现有路由行为保持不变；Thinking 槽位不会自动转换为通用规则。</p>
+            {discoveryPanel(true)}
             <Button
               type="button"
               variant="secondary"
@@ -179,6 +242,7 @@ export function ProviderModelPolicySection({
             className="space-y-3 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-foreground"
           >
             <p>模型策略无效，当前请求不会使用该供应商。</p>
+            {discoveryPanel(false)}
             <Button
               type="button"
               variant="secondary"
@@ -198,6 +262,8 @@ export function ProviderModelPolicySection({
                 保存后无法在界面切回旧策略
               </p>
             ) : null}
+
+            {discoveryPanel(false)}
 
             <FormField
               label="模型匹配模式"
@@ -303,4 +369,53 @@ export function ProviderModelPolicySection({
       </div>
     </details>
   );
+}
+
+function discoveryOrigin(state: ProviderModelDiscoveryUiState) {
+  if (state.status !== "ready" && state.status !== "empty" && state.status !== "capacity") {
+    return null;
+  }
+  return state.origin;
+}
+
+function discoveryBaseUrlIndex(state: ProviderModelDiscoveryUiState) {
+  if (state.status !== "ready" && state.status !== "empty" && state.status !== "capacity") {
+    return null;
+  }
+  return state.baseUrlIndex;
+}
+
+function discoveryMessage(state: ProviderModelDiscoveryUiState) {
+  switch (state.status) {
+    case "idle":
+      return "手动获取模型目录后，会把未覆盖模型追加为空目标规则。";
+    case "loading":
+      return "正在读取当前端点的模型目录…";
+    case "changed":
+      return "连接已变化，请重新获取。";
+    case "ready":
+      return state.addedCount > 0
+        ? `已获取 ${state.discoveredCount} 个模型，新增 ${state.addedCount} 条规则。`
+        : `已获取 ${state.discoveredCount} 个模型，没有新增规则。`;
+    case "empty":
+      return "当前端点返回了合法的空模型目录，草稿未修改。";
+    case "capacity":
+      return `发现 ${state.discoveredCount} 个模型，但规则将超过 500 条，草稿未修改。`;
+    case "unsupported":
+      return state.reason === "cx_2cc"
+        ? "CX2CC 请到对应 Codex Provider 获取，或手工维护规则。"
+        : "当前 OAuth 连接暂不支持获取，请手工维护规则。";
+    case "error":
+      return {
+        invalid_config: "连接配置不完整，请检查 Base URL、认证方式和 API Key。",
+        redirect: "端点发生重定向，请直接配置最终 endpoint。",
+        unauthorized: "认证失败，请检查 API Key 或 OAuth 登录状态。",
+        timeout: "获取超时，请重试。",
+        network: "无法连接上游，请检查 endpoint、代理和网络。",
+        invalid_response: "上游模型目录格式无法安全使用。",
+        too_large: "上游模型目录过大，无法安全合并。",
+      }[state.code];
+    case "unexpected_error":
+      return "获取失败，请查看应用日志后重试。";
+  }
 }

@@ -120,6 +120,9 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
           legacyClaudeModels={f.claudeModels}
           saving={f.saving}
           onChange={f.setModelPolicy}
+          modelDiscoveryState={f.modelDiscoveryState}
+          onDiscoverModels={f.discoverModels}
+          hasMultipleBaseUrls={f.baseUrlRows.filter((row) => row.url.trim()).length > 1}
         />
         <LimitsSection form={f} />
         {f.cliKey === "claude" && f.authMode === "cx2cc" ? <ClaudeModelSection form={f} /> : null}

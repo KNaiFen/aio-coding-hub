@@ -783,6 +783,16 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async providerModelsDiscover(
+    input: ProviderModelDiscoveryInput
+  ): Promise<Result<ProviderModelDiscoveryResult, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("provider_models_discover", { input }) };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async providerOauthStartFlow(
     cliKey: string,
     providerId: number
@@ -3625,6 +3635,30 @@ export type ProviderLimitUsageRow = {
   window_weekly_start_ts: number;
   window_monthly_start_ts: number;
 };
+export type ProviderModelDiscoveryErrorCode =
+  | "invalid_config"
+  | "redirect"
+  | "unauthorized"
+  | "timeout"
+  | "network"
+  | "invalid_response"
+  | "too_large";
+export type ProviderModelDiscoveryInput = {
+  providerId: number | null;
+  cliKey: string;
+  authMode: ProviderAuthMode;
+  baseUrls: string[];
+  baseUrlMode: ProviderBaseUrlMode;
+  apiKey: string | null;
+  sourceProviderId: number | null;
+  bridgeType: string | null;
+};
+export type ProviderModelDiscoveryResult =
+  | { status: "ready"; models: string[]; origin: string; base_url_index: number | null }
+  | { status: "empty"; origin: string; base_url_index: number | null }
+  | { status: "unsupported"; reason: ProviderModelDiscoveryUnsupportedReason }
+  | { status: "error"; code: ProviderModelDiscoveryErrorCode; http_status: number | null };
+export type ProviderModelDiscoveryUnsupportedReason = "oauth" | "cx_2cc";
 export type ProviderModelMode = "all" | "selected";
 export type ProviderModelPolicyStatus = "legacy" | "ready" | "invalid";
 export type ProviderModelPolicyV1 = {

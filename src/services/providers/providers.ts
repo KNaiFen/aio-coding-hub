@@ -10,6 +10,10 @@ import {
   type ProviderModelPolicyStatus as GeneratedProviderModelPolicyStatus,
   type ProviderModelPolicyV1 as GeneratedProviderModelPolicyV1,
   type ProviderModelRule as GeneratedProviderModelRule,
+  type ProviderModelDiscoveryErrorCode as GeneratedProviderModelDiscoveryErrorCode,
+  type ProviderModelDiscoveryInput as GeneratedProviderModelDiscoveryInput,
+  type ProviderModelDiscoveryResult as GeneratedProviderModelDiscoveryResult,
+  type ProviderModelDiscoveryUnsupportedReason as GeneratedProviderModelDiscoveryUnsupportedReason,
   type ProviderOAuthDeviceCodeCancelResult as GeneratedProviderOAuthDeviceCodeCancelResult,
   type ProviderOAuthDeviceCodePollResult as GeneratedProviderOAuthDeviceCodePollResult,
   type ProviderOAuthDeviceCodeStartResult as GeneratedProviderOAuthDeviceCodeStartResult,
@@ -61,6 +65,13 @@ export type ProviderModelMode = GeneratedProviderModelMode;
 export type ProviderModelPolicyStatus = GeneratedProviderModelPolicyStatus;
 export type ProviderModelPolicyV1 = GeneratedProviderModelPolicyV1;
 export type ProviderModelRule = GeneratedProviderModelRule;
+export type ProviderModelDiscoveryErrorCode = GeneratedProviderModelDiscoveryErrorCode;
+export type ProviderModelDiscoveryResult = GeneratedProviderModelDiscoveryResult;
+export type ProviderModelDiscoveryUnsupportedReason =
+  GeneratedProviderModelDiscoveryUnsupportedReason;
+export type ProviderModelDiscoveryInput = Omit<GeneratedProviderModelDiscoveryInput, "cliKey"> & {
+  cliKey: CliKey;
+};
 
 const CLI_KEY_VALUES = CLI_KEYS;
 const PROVIDER_AUTH_MODE_VALUES = [
@@ -247,6 +258,24 @@ export async function providersList(cliKey: CliKey) {
       mapGeneratedCommandResponse(await commands.providersList(normalizedCliKey), (rows) =>
         rows.map(toProviderSummary)
       ),
+  });
+}
+
+export async function providerModelsDiscover(input: ProviderModelDiscoveryInput) {
+  const payload = {
+    ...input,
+    providerId: input.providerId == null ? null : validateProviderId(input.providerId),
+    cliKey: validateProviderCliKey(input.cliKey),
+  } satisfies GeneratedProviderModelDiscoveryInput;
+
+  return invokeGeneratedIpc<ProviderModelDiscoveryResult>({
+    title: "获取上游模型失败",
+    cmd: "provider_models_discover",
+    args: { input: payload },
+    invoke: () =>
+      commands.providerModelsDiscover(payload) as Promise<
+        GeneratedCommandResult<ProviderModelDiscoveryResult>
+      >,
   });
 }
 

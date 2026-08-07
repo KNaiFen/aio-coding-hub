@@ -1,4 +1,9 @@
-import type { ProviderModelPolicyV1, ProviderModelRule } from "../../services/providers/providers";
+import type {
+  ProviderModelDiscoveryErrorCode,
+  ProviderModelDiscoveryUnsupportedReason,
+  ProviderModelPolicyV1,
+  ProviderModelRule,
+} from "../../services/providers/providers";
 
 export const DEFAULT_PROVIDER_MODEL_POLICY: ProviderModelPolicyV1 = {
   version: 1,
@@ -49,5 +54,61 @@ export function normalizeProviderModelPolicyDraft(policy: ProviderModelPolicyV1)
       source: rule.source.trim(),
       target: rule.target?.trim() || null,
     })),
+  };
+}
+
+export type MergeDiscoveredModelIdsResult = {
+  capacityExceeded: boolean;
+  addedCount: number;
+  policy: ProviderModelPolicyV1;
+};
+
+export type ProviderModelDiscoveryUiState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "changed" }
+  | {
+      status: "ready";
+      discoveredCount: number;
+      addedCount: number;
+      origin: string;
+      baseUrlIndex: number | null;
+    }
+  | { status: "empty"; origin: string; baseUrlIndex: number | null }
+  | { status: "capacity"; discoveredCount: number; origin: string; baseUrlIndex: number | null }
+  | { status: "unsupported"; reason: ProviderModelDiscoveryUnsupportedReason }
+  | { status: "error"; code: ProviderModelDiscoveryErrorCode }
+  | { status: "unexpected_error" };
+
+function sourceMatchesModel(source: string, modelId: string) {
+  const wildcardIndex = source.indexOf("*");
+  if (wildcardIndex < 0) return source === modelId;
+  return (
+    modelId.startsWith(source.slice(0, wildcardIndex)) &&
+    modelId.endsWith(source.slice(wildcardIndex + 1))
+  );
+}
+
+export function mergeDiscoveredModelIds(
+  policy: ProviderModelPolicyV1,
+  discoveredIds: string[]
+): MergeDiscoveredModelIdsResult {
+  const normalizedIds = [...new Set(discoveredIds.map((id) => id.trim()).filter(Boolean))].sort();
+  const additions = normalizedIds
+    .filter(
+      (modelId) => !policy.rules.some((rule) => sourceMatchesModel(rule.source.trim(), modelId))
+    )
+    .map<ProviderModelRule>((source) => ({ source, target: null }));
+
+  if (policy.rules.length + additions.length > 500) {
+    return { capacityExceeded: true, addedCount: 0, policy };
+  }
+
+  return {
+    capacityExceeded: false,
+    addedCount: additions.length,
+    policy: additions.length
+      ? { ...policy, rules: [...policy.rules.map((rule) => ({ ...rule })), ...additions] }
+      : policy,
   };
 }

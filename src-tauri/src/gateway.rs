@@ -25,6 +25,7 @@ mod upstream_identity;
 pub(crate) mod util;
 mod warmup;
 
+use crate::providers;
 use crate::settings;
 use serde::Serialize;
 
@@ -57,4 +58,14 @@ pub(crate) fn listen_rebind_required(
     next: &settings::AppSettings,
 ) -> bool {
     binder::listen_rebind_required(previous, next)
+}
+
+pub(crate) async fn select_provider_base_url_for_discovery(
+    base_urls: &[String],
+    mode: providers::ProviderBaseUrlMode,
+) -> String {
+    let client = http_client::get();
+    proxy::select_base_url_by_mode(&client, base_urls, mode)
+        .await
+        .0
 }

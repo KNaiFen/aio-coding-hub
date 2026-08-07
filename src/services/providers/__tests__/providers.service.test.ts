@@ -16,6 +16,7 @@ import {
   providerOAuthStartDeviceFlow,
   providerOAuthStartFlow,
   providerOAuthStatus,
+  providerModelsDiscover,
   providerSetEnabled,
   providerTestAvailability,
   providersList,
@@ -54,6 +55,7 @@ vi.mock("../../../generated/bindings", async () => {
       providerOauthFetchLimits: vi.fn(),
       providerOauthResetCodexQuota: vi.fn(),
       providerTestAvailability: vi.fn(),
+      providerModelsDiscover: vi.fn(),
     },
   };
 });
@@ -105,6 +107,65 @@ function createProviderSummary(overrides: Partial<ProviderSummary> = {}): Provid
 }
 
 describe("services/providers/providers", () => {
+  it("passes discovery input and returns the upstream catalog", async () => {
+    vi.mocked(commands.providerModelsDiscover).mockResolvedValueOnce({
+      status: "ok",
+      data: {
+        status: "ready",
+        models: ["gpt-5.4"],
+        origin: "https://example.com",
+        base_url_index: 1,
+      },
+    });
+
+    const input = {
+      providerId: 12,
+      cliKey: "codex" as const,
+      authMode: "api_key" as const,
+      baseUrls: ["https://example.com/v1"],
+      baseUrlMode: "ping" as const,
+      apiKey: "sk-secret",
+      sourceProviderId: null,
+      bridgeType: null,
+    };
+
+    await expect(providerModelsDiscover(input)).resolves.toEqual({
+      status: "ready",
+      models: ["gpt-5.4"],
+      origin: "https://example.com",
+      base_url_index: 1,
+    });
+    expect(commands.providerModelsDiscover).toHaveBeenCalledWith(input);
+  });
+
+  it("redacts discovery API keys when the command fails", async () => {
+    vi.mocked(commands.providerModelsDiscover).mockRejectedValueOnce(new Error("discover failed"));
+
+    await expect(
+      providerModelsDiscover({
+        providerId: null,
+        cliKey: "claude",
+        authMode: "api_key",
+        baseUrls: ["https://example.com"],
+        baseUrlMode: "order",
+        apiKey: "sk-secret",
+        sourceProviderId: null,
+        bridgeType: null,
+      })
+    ).rejects.toThrow("discover failed");
+
+    expect(logToConsole).toHaveBeenCalledWith(
+      "error",
+      "获取上游模型失败",
+      expect.objectContaining({
+        cmd: "provider_models_discover",
+        args: expect.objectContaining({
+          input: expect.objectContaining({ apiKey: "[REDACTED]" }),
+        }),
+      })
+    );
+  });
+
   it("rethrows and logs when invoke fails", async () => {
     vi.mocked(commands.providersList).mockRejectedValueOnce(new Error("providers boom"));
 

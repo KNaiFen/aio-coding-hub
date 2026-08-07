@@ -20,6 +20,7 @@ pub(crate) mod notification_sound;
 pub(crate) mod plugin_registry;
 pub(crate) mod plugin_service;
 pub(crate) mod plugins;
+pub(crate) mod provider_model_discovery;
 pub(crate) mod provider_service;
 pub(crate) mod resident;
 pub(crate) mod settings_service;

@@ -20,6 +20,7 @@ import {
   providerOAuthCancelDeviceFlow,
   providerOAuthDisconnect,
   providerOAuthFetchLimits,
+  providerModelsDiscover,
   providerOAuthPollDeviceFlow,
   providerOAuthRefresh,
   providerOAuthStartDeviceFlow,
@@ -70,6 +71,7 @@ vi.mock("../../../services/providers/providers", async () => {
     providerOAuthDisconnect: vi.fn(),
     providerOAuthStatus: vi.fn(),
     providerOAuthFetchLimits: vi.fn(),
+    providerModelsDiscover: vi.fn(),
   };
 });
 
@@ -212,6 +214,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
     vi.mocked(providerOAuthDisconnect).mockReset();
     vi.mocked(providerOAuthStatus).mockReset();
     vi.mocked(providerOAuthFetchLimits).mockReset();
+    vi.mocked(providerModelsDiscover).mockReset();
     vi.mocked(copyText).mockReset();
     vi.mocked(openDesktopUrl).mockReset();
     vi.mocked(logToConsole).mockReset();
@@ -980,6 +983,247 @@ describe("pages/providers/ProviderEditorDialog", () => {
 
     expect(dialog.getByLabelText("源模型 1")).toHaveValue("gpt-*");
     expect(dialog.getByLabelText("目标模型 1")).toHaveValue("upstream-*");
+  });
+
+  it("discovers API-key models and merges them into the unsaved policy draft", async () => {
+    vi.mocked(providerModelsDiscover).mockResolvedValueOnce({
+      status: "ready",
+      models: ["gpt-5.4", "claude-3"],
+      origin: "https://example.com",
+      base_url_index: 1,
+    });
+
+    render(
+      <ProviderEditorDialog
+        mode="create"
+        open={true}
+        cliKey="codex"
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    fireEvent.change(dialog.getByPlaceholderText("sk-…"), {
+      target: { value: "sk-draft-secret" },
+    });
+    fireEvent.change(dialog.getByPlaceholderText("中转 endpoint（例如：https://example.com/v1）"), {
+      target: { value: "https://example.com/v1" },
+    });
+    fireEvent.click(dialog.getByText("模型路由策略"));
+    fireEvent.click(dialog.getByRole("button", { name: "获取上游模型" }));
+
+    await waitFor(() => expect(dialog.getByLabelText("源模型 1")).toHaveValue("claude-3"));
+    expect(dialog.getByLabelText("目标模型 1")).toHaveValue("");
+    expect(dialog.getByText("已获取 2 个模型，新增 2 条规则。")).toBeInTheDocument();
+    expect(providerModelsDiscover).toHaveBeenCalledWith({
+      providerId: null,
+      cliKey: "codex",
+      authMode: "api_key",
+      baseUrls: ["https://example.com/v1"],
+      baseUrlMode: "order",
+      apiKey: "sk-draft-secret",
+      sourceProviderId: null,
+      bridgeType: null,
+    });
+  });
+
+  it("discovers models from a legacy Claude edit into a generic policy draft", async () => {
+    vi.mocked(providerModelsDiscover).mockResolvedValueOnce({
+      status: "ready",
+      models: ["claude-3-5-sonnet"],
+      origin: "https://api.anthropic.com",
+      base_url_index: 1,
+    });
+
+    render(
+      <ProviderEditorDialog
+        mode="edit"
+        open={true}
+        provider={makeProvider({
+          model_policy_status: "legacy",
+          model_policy: null,
+          claude_models: { main_model: "claude-legacy" },
+          api_key_configured: true,
+        })}
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    fireEvent.click(dialog.getByText("模型路由策略"));
+    await waitFor(() => expect(dialog.getByText("当前 Claude 仍使用旧版模型映射")).toBeVisible());
+    fireEvent.click(dialog.getByRole("button", { name: "获取上游模型" }));
+
+    await waitFor(() => expect(dialog.getByLabelText("源模型 1")).toHaveValue("claude-3-5-sonnet"));
+    expect(dialog.getByText("保存后无法在界面切回旧策略")).toBeInTheDocument();
+    expect(providerModelsDiscover).toHaveBeenCalledWith({
+      providerId: 1,
+      cliKey: "claude",
+      authMode: "api_key",
+      baseUrls: ["https://example.com/v1"],
+      baseUrlMode: "order",
+      apiKey: null,
+      sourceProviderId: null,
+      bridgeType: null,
+    });
+  });
+
+  it("recovers an invalid policy through successful model discovery", async () => {
+    vi.mocked(providerModelsDiscover).mockResolvedValueOnce({
+      status: "ready",
+      models: ["gpt-5.4"],
+      origin: "https://example.com",
+      base_url_index: 1,
+    });
+
+    render(
+      <ProviderEditorDialog
+        mode="edit"
+        open={true}
+        provider={makeProvider({
+          cli_key: "codex",
+          model_policy_status: "invalid",
+          model_policy: null,
+          api_key_configured: true,
+        })}
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    fireEvent.click(dialog.getByText("模型路由策略"));
+    await waitFor(() => expect(dialog.getByText(/模型策略无效/)).toBeVisible());
+    fireEvent.click(dialog.getByRole("button", { name: "获取上游模型" }));
+
+    await waitFor(() => expect(dialog.getByLabelText("源模型 1")).toHaveValue("gpt-5.4"));
+    expect(dialog.queryByText("保存后无法在界面切回旧策略")).not.toBeInTheDocument();
+    expect(dialog.queryByRole("button", { name: /重置为全部模型/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps the latest discovery result when an earlier request finishes later", async () => {
+    let resolveFirst!: (value: Awaited<ReturnType<typeof providerModelsDiscover>>) => void;
+    let resolveSecond!: (value: Awaited<ReturnType<typeof providerModelsDiscover>>) => void;
+    vi.mocked(providerModelsDiscover)
+      .mockReturnValueOnce(new Promise((resolve) => (resolveFirst = resolve)))
+      .mockReturnValueOnce(new Promise((resolve) => (resolveSecond = resolve)));
+
+    render(
+      <ProviderEditorDialog
+        mode="create"
+        open={true}
+        cliKey="codex"
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    const apiKey = dialog.getByPlaceholderText("sk-…");
+    fireEvent.change(apiKey, { target: { value: "sk-first" } });
+    fireEvent.click(dialog.getByText("模型路由策略"));
+    fireEvent.click(dialog.getByRole("button", { name: "获取上游模型" }));
+    fireEvent.change(apiKey, { target: { value: "sk-second" } });
+    fireEvent.click(dialog.getByRole("button", { name: "获取上游模型" }));
+
+    resolveSecond({
+      status: "ready",
+      models: ["new-model"],
+      origin: "https://new.example.com",
+      base_url_index: 1,
+    });
+    await waitFor(() => expect(dialog.getByLabelText("源模型 1")).toHaveValue("new-model"));
+
+    resolveFirst({
+      status: "ready",
+      models: ["old-model"],
+      origin: "https://old.example.com",
+      base_url_index: 1,
+    });
+    await waitFor(() => expect(dialog.getByLabelText("源模型 1")).toHaveValue("new-model"));
+    expect(dialog.queryByDisplayValue("old-model")).not.toBeInTheDocument();
+  });
+
+  it("ignores a discovery response that arrives after closing", async () => {
+    let resolveDiscovery!: (value: Awaited<ReturnType<typeof providerModelsDiscover>>) => void;
+    vi.mocked(providerModelsDiscover).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveDiscovery = resolve;
+      })
+    );
+    const onOpenChange = vi.fn();
+
+    render(
+      <ProviderEditorDialog
+        mode="create"
+        open={true}
+        cliKey="codex"
+        onSaved={vi.fn()}
+        onOpenChange={onOpenChange}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    fireEvent.click(dialog.getByText("模型路由策略"));
+    fireEvent.click(dialog.getByRole("button", { name: "获取上游模型" }));
+    fireEvent.click(dialog.getByRole("button", { name: "取消" }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+
+    resolveDiscovery({
+      status: "ready",
+      models: ["late-model"],
+      origin: "https://late.example.com",
+      base_url_index: 1,
+    });
+
+    await waitFor(() =>
+      expect(
+        dialog.getByText("手动获取模型目录后，会把未覆盖模型追加为空目标规则。")
+      ).toBeInTheDocument()
+    );
+    expect(dialog.queryByDisplayValue("late-model")).not.toBeInTheDocument();
+  });
+
+  it("ignores a discovery response after the connection changes", async () => {
+    let resolveDiscovery!: (value: Awaited<ReturnType<typeof providerModelsDiscover>>) => void;
+    vi.mocked(providerModelsDiscover).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveDiscovery = resolve;
+      })
+    );
+
+    render(
+      <ProviderEditorDialog
+        mode="create"
+        open={true}
+        cliKey="codex"
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    fireEvent.change(dialog.getByPlaceholderText("sk-…"), {
+      target: { value: "sk-draft-secret" },
+    });
+    fireEvent.click(dialog.getByText("模型路由策略"));
+    fireEvent.click(dialog.getByRole("button", { name: "获取上游模型" }));
+    expect(dialog.getByText("正在读取当前端点的模型目录…")).toBeInTheDocument();
+
+    fireEvent.change(dialog.getByPlaceholderText("sk-…"), {
+      target: { value: "sk-new-secret" },
+    });
+    resolveDiscovery({
+      status: "ready",
+      models: ["gpt-5.4"],
+      origin: "https://example.com",
+      base_url_index: 1,
+    });
+
+    await waitFor(() => expect(dialog.getByText("连接已变化，请重新获取。")).toBeInTheDocument());
+    expect(dialog.queryByLabelText("源模型 1")).not.toBeInTheDocument();
   });
 
   it("supports searching and deleting a generic model rule", () => {

@@ -104,6 +104,7 @@ macro_rules! generated_command_registry {
             provider_copy_api_key_to_clipboard => crate::commands::providers::provider_copy_api_key_to_clipboard,
             base_url_ping_ms => crate::commands::providers::base_url_ping_ms,
             provider_test_availability => crate::commands::provider_availability::provider_test_availability,
+            provider_models_discover => crate::commands::providers::provider_models_discover,
             provider_oauth_start_flow => crate::commands::providers::provider_oauth_start_flow,
             provider_oauth_start_device_flow => crate::commands::providers::provider_oauth_start_device_flow,
             provider_oauth_poll_device_flow => crate::commands::providers::provider_oauth_poll_device_flow,
@@ -351,6 +352,14 @@ mod tests {
         assert!(
             generated_command_names().contains(&"model_price_upsert"),
             "model_price_upsert should stay in the shared generated command registry"
+        );
+    }
+
+    #[test]
+    fn includes_provider_model_discovery_in_generated_command_registry() {
+        assert!(
+            generated_command_names().contains(&"provider_models_discover"),
+            "provider_models_discover should stay in the shared generated command registry"
         );
     }
 

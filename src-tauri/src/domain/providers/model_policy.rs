@@ -195,6 +195,23 @@ fn validate_policy_value(field: &str, value: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) fn normalize_concrete_model_id(value: &str) -> Result<String, String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err("SEC_INVALID_INPUT: model id is required".into());
+    }
+    if value.contains('*') {
+        return Err("SEC_INVALID_INPUT: model id cannot contain wildcard".into());
+    }
+    if value.chars().count() > PROVIDER_MODEL_POLICY_MAX_VALUE_CHARS {
+        return Err(format!(
+            "SEC_INVALID_INPUT: model id exceeds {} characters",
+            PROVIDER_MODEL_POLICY_MAX_VALUE_CHARS
+        ));
+    }
+    Ok(value.to_string())
+}
+
 fn match_rule<'a>(pattern: &'a str, source_model: &'a str) -> Option<&'a str> {
     let Some(star) = pattern.find('*') else {
         return (pattern == source_model).then_some("");
