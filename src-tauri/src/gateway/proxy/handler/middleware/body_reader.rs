@@ -44,7 +44,6 @@ impl BodyReaderMiddleware {
                     &ctx.cli_key,
                     &ctx.req_method,
                     &ctx.forwarded_path,
-                    &ctx.headers,
                     None,
                 );
                 let contract = early_error_contract(EarlyErrorKind::BodyTooLarge);
@@ -77,7 +76,6 @@ impl BodyReaderMiddleware {
                     &ctx.cli_key,
                     &ctx.req_method,
                     &ctx.forwarded_path,
-                    &ctx.headers,
                     None,
                 );
                 let (contract, message) = match err {
