@@ -17,11 +17,7 @@ SDK 面向这些场景：
 packages/plugin-sdk
 ```
 
-运行 SDK 检查：
-
-```bash
-pnpm --filter @aio-coding-hub/plugin-sdk typecheck
-```
+SDK 的类型检查和测试由 GitHub Actions 运行；当前仓库不在本地执行 package script。
 
 ## 主要类型
 
@@ -30,6 +26,7 @@ TypeScript SDK 导出：
 - `PluginManifest`
 - `PluginRuntime`
 - `ExtensionRuntime`
+- `ActivationEvent`
 - `PluginHook`
 - `GatewayHookName`
 - `PluginPermission`
@@ -47,14 +44,9 @@ TypeScript SDK 导出：
 
 `PluginPermission` 和 `permissionRisk` 保留给 hook context/mutation label 风险展示、audit 和 legacy official runtime history。Extension Host manifest 不能声明 top-level `permissions`；`validateManifest` 会拒绝该字段。
 
-`create-aio-plugin` 使用 SDK 做 manifest validation，并针对真实插件目录提供本地开发命令：
+`ActivationEvent` 只包含 `onStartup`、`onCommand:<command>` 和 `onGatewayHook:<hook>`。缺失或空数组保持 legacy 按需激活；显式数组必须与实际 command 和 gateway hook 贡献精确匹配。两种废弃事件、空或带空白的 payload、重复和未知事件都会返回稳定的 `PLUGIN_INVALID_ACTIVATION_EVENT`。
 
-```bash
-pnpm --filter create-aio-plugin cli doctor ./acme.redactor
-pnpm --filter create-aio-plugin cli validate --strict ./acme.redactor
-pnpm --filter create-aio-plugin cli pack ./acme.redactor
-pnpm --filter create-aio-plugin cli publish-check ./acme.redactor
-```
+`create-aio-plugin` 使用 SDK 做 manifest validation；仓库内的 CLI 检查由 GitHub Actions 执行。
 
 `create-aio-plugin replay` 当前不在本地执行 Extension Host gateway hooks；hook 行为应通过宿主 `plugin_hook_execution_reports`、`plugin_export_replay_fixture` 和桌面应用内复测确认。
 

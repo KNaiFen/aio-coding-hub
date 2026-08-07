@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -58,6 +58,153 @@ pub struct PluginManifest {
     pub signature: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
+}
+
+/// Parsed activation contract for an Extension Host manifest.
+///
+/// Legacy manifests intentionally omit `activationEvents` (or provide an empty
+/// array) and keep the historical on-demand behavior. Explicit manifests must
+/// name every executable contribution so an event cannot accidentally grant a
+/// host execution path that was not declared by the plugin package.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PluginActivationPolicy {
+    Legacy,
+    Explicit {
+        startup: bool,
+        commands: BTreeSet<String>,
+        gateway_hooks: BTreeSet<String>,
+    },
+}
+
+impl PluginActivationPolicy {
+    pub fn allows_startup(&self) -> bool {
+        matches!(self, Self::Explicit { startup: true, .. })
+    }
+
+    pub fn allows_command(&self, command: &str) -> bool {
+        match self {
+            Self::Legacy => true,
+            Self::Explicit { commands, .. } => commands.contains(command),
+        }
+    }
+
+    pub fn allows_gateway_hook(&self, hook_name: &str) -> bool {
+        match self {
+            Self::Legacy => true,
+            Self::Explicit { gateway_hooks, .. } => gateway_hooks.contains(hook_name),
+        }
+    }
+}
+
+pub fn activation_policy(
+    manifest: &PluginManifest,
+) -> Result<PluginActivationPolicy, PluginValidationError> {
+    if manifest.activation_events.is_empty() {
+        return Ok(PluginActivationPolicy::Legacy);
+    }
+
+    let declared_commands = manifest
+        .contributes
+        .as_ref()
+        .map(|contributes| {
+            contributes
+                .commands
+                .iter()
+                .map(|command| command.command.clone())
+                .collect::<BTreeSet<_>>()
+        })
+        .unwrap_or_default();
+    let declared_gateway_hooks = manifest
+        .contributes
+        .as_ref()
+        .map(|contributes| {
+            contributes
+                .gateway_hooks
+                .iter()
+                .map(|hook| hook.name.clone())
+                .collect::<BTreeSet<_>>()
+        })
+        .unwrap_or_default();
+
+    let mut startup = false;
+    let mut commands = BTreeSet::new();
+    let mut gateway_hooks = BTreeSet::new();
+    let mut seen_events = BTreeSet::new();
+
+    for event in &manifest.activation_events {
+        if !seen_events.insert(event.clone()) {
+            return Err(invalid_activation_event(event));
+        }
+        if event == "onStartup" {
+            startup = true;
+            continue;
+        }
+        if let Some(command) = event.strip_prefix("onCommand:") {
+            if command.is_empty() || command.trim() != command || !declared_commands.contains(command)
+            {
+                return Err(invalid_activation_event(event));
+            }
+            commands.insert(command.to_string());
+            continue;
+        }
+        if let Some(hook_name) = event.strip_prefix("onGatewayHook:") {
+            if hook_name.is_empty()
+                || hook_name.trim() != hook_name
+                || !is_active_gateway_hook(hook_name)
+                || !declared_gateway_hooks.contains(hook_name)
+            {
+                return Err(invalid_activation_event(event));
+            }
+            gateway_hooks.insert(hook_name.to_string());
+            continue;
+        }
+
+        return Err(invalid_activation_event(event));
+    }
+
+    if commands != declared_commands || gateway_hooks != declared_gateway_hooks {
+        return Err(PluginValidationError::new(
+            "PLUGIN_INVALID_ACTIVATION_EVENT",
+            "explicit activationEvents must exactly match command and gateway hook contributions",
+        ));
+    }
+
+    Ok(PluginActivationPolicy::Explicit {
+        startup,
+        commands,
+        gateway_hooks,
+    })
+}
+
+pub fn manifest_allows_command(manifest: &PluginManifest, command: &str) -> bool {
+    activation_policy(manifest)
+        .map(|policy| policy.allows_command(command))
+        .unwrap_or(false)
+}
+
+pub fn manifest_allows_gateway_hook(manifest: &PluginManifest, hook_name: &str) -> bool {
+    activation_policy(manifest)
+        .map(|policy| policy.allows_gateway_hook(hook_name))
+        .unwrap_or(false)
+}
+
+pub fn manifest_allows_startup(manifest: &PluginManifest) -> bool {
+    activation_policy(manifest)
+        .map(|policy| policy.allows_startup())
+        .unwrap_or(false)
+}
+
+pub fn manifest_has_deprecated_activation_events(manifest: &PluginManifest) -> bool {
+    manifest.activation_events.iter().any(|event| {
+        event.starts_with("onProviderEditor:") || event.starts_with("onProtocolBridge:")
+    })
+}
+
+fn invalid_activation_event(event: &str) -> PluginValidationError {
+    PluginValidationError::new(
+        "PLUGIN_INVALID_ACTIVATION_EVENT",
+        format!("invalid activation event: {event}"),
+    )
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, PartialEq, Eq)]
@@ -750,37 +897,10 @@ fn validate_extension_host_manifest(
             "extensionHost manifests must not declare top-level permissions",
         ));
     }
-    validate_activation_events(&manifest.activation_events)?;
     validate_contributes(manifest.id.as_str(), manifest.contributes.as_ref())?;
+    let _ = activation_policy(manifest)?;
     validate_capabilities(&manifest.capabilities)?;
     validate_capability_dependencies(manifest.contributes.as_ref(), &manifest.capabilities)?;
-    Ok(())
-}
-
-fn validate_activation_events(activation_events: &[String]) -> Result<(), PluginValidationError> {
-    for event in activation_events {
-        if event == "onStartup" {
-            continue;
-        }
-        let has_known_prefix = [
-            "onCommand:",
-            "onProviderEditor:",
-            "onProtocolBridge:",
-            "onGatewayHook:",
-        ]
-        .iter()
-        .any(|prefix| {
-            event
-                .strip_prefix(prefix)
-                .is_some_and(|value| !value.trim().is_empty())
-        });
-        if !has_known_prefix {
-            return Err(PluginValidationError::new(
-                "PLUGIN_INVALID_ACTIVATION_EVENT",
-                format!("invalid activation event: {event}"),
-            ));
-        }
-    }
     Ok(())
 }
 
@@ -1177,7 +1297,24 @@ fn validate_host_compatibility(
         ));
     }
 
+    let current_platform = current_plugin_platform();
+    if !compatibility.platforms.is_empty()
+        && !compatibility
+            .platforms
+            .iter()
+            .any(|platform| platform == current_platform)
+    {
+        return Err(PluginValidationError::new(
+            "PLUGIN_INCOMPATIBLE_PLATFORM",
+            format!("plugin does not support the current platform: {current_platform}"),
+        ));
+    }
+
     Ok(())
+}
+
+fn current_plugin_platform() -> &'static str {
+    std::env::consts::OS
 }
 
 fn matches_version_range(range: &str, version: (u64, u64, u64)) -> bool {
@@ -1309,6 +1446,98 @@ mod tests {
             serde_json::from_value(valid_extension_host_manifest()).unwrap();
         validate_manifest(&manifest, "0.62.0").unwrap();
         assert_eq!(manifest.id.as_str(), "acme.extension");
+    }
+
+    #[test]
+    fn explicit_activation_events_require_exact_command_and_gateway_hook_contributions() {
+        let mut raw = valid_extension_host_manifest();
+        raw["activationEvents"] = serde_json::json!([
+            "onCommand:acme.extension.refresh",
+            "onGatewayHook:gateway.request.afterBodyRead"
+        ]);
+        raw["capabilities"] = serde_json::json!(["commands.execute", "gateway.hooks"]);
+        raw["contributes"] = serde_json::json!({
+            "commands": [{
+                "command": "acme.extension.refresh",
+                "title": "Refresh"
+            }],
+            "gatewayHooks": [{
+                "name": "gateway.request.afterBodyRead",
+                "priority": 100,
+                "failurePolicy": "fail-open"
+            }]
+        });
+
+        let manifest: PluginManifest = serde_json::from_value(raw.clone()).unwrap();
+        validate_manifest(&manifest, "0.62.0").unwrap();
+        assert!(manifest_allows_command(&manifest, "acme.extension.refresh"));
+        assert!(!manifest_allows_command(&manifest, "acme.extension.other"));
+        assert!(manifest_allows_gateway_hook(
+            &manifest,
+            "gateway.request.afterBodyRead"
+        ));
+        assert!(!manifest_allows_gateway_hook(
+            &manifest,
+            "gateway.request.beforeSend"
+        ));
+        assert!(!manifest_allows_startup(&manifest));
+
+        raw["activationEvents"] = serde_json::json!(["onCommand:acme.extension.refresh"]);
+        assert_manifest_validation_error(raw, "PLUGIN_INVALID_ACTIVATION_EVENT");
+    }
+
+    #[test]
+    fn activation_events_reject_deprecated_blank_and_unknown_variants() {
+        for event in [
+            "onProviderEditor:openai",
+            "onProtocolBridge:acme.extension.bridge",
+            "onCommand:",
+            "onGatewayHook:  ",
+            " onStartup",
+            "onStartup ",
+            "onUnknown:thing",
+        ] {
+            let mut raw = valid_extension_host_manifest();
+            raw["activationEvents"] = serde_json::json!([event]);
+            assert_manifest_validation_error(raw, "PLUGIN_INVALID_ACTIVATION_EVENT");
+        }
+    }
+
+    #[test]
+    fn missing_or_empty_activation_events_keep_legacy_on_demand_behavior() {
+        let mut missing = valid_extension_host_manifest();
+        missing
+            .as_object_mut()
+            .expect("manifest object")
+            .remove("activationEvents");
+        let missing: PluginManifest = serde_json::from_value(missing).unwrap();
+        validate_manifest(&missing, "0.62.0").unwrap();
+        assert!(matches!(activation_policy(&missing), Ok(PluginActivationPolicy::Legacy)));
+        assert!(manifest_allows_command(&missing, "legacy.command"));
+        assert!(manifest_allows_gateway_hook(
+            &missing,
+            "gateway.request.afterBodyRead"
+        ));
+        assert!(!manifest_allows_startup(&missing));
+
+        let mut empty = valid_extension_host_manifest();
+        empty["activationEvents"] = serde_json::json!([]);
+        let empty: PluginManifest = serde_json::from_value(empty).unwrap();
+        validate_manifest(&empty, "0.62.0").unwrap();
+        assert!(matches!(activation_policy(&empty), Ok(PluginActivationPolicy::Legacy)));
+    }
+
+    #[test]
+    fn manifest_platform_compatibility_is_enforced_when_declared() {
+        let mut supported = valid_extension_host_manifest();
+        supported["hostCompatibility"]["platforms"] = serde_json::json!([current_plugin_platform()]);
+        let supported: PluginManifest = serde_json::from_value(supported).unwrap();
+        validate_manifest(&supported, "0.62.0").unwrap();
+
+        let mut unsupported = valid_extension_host_manifest();
+        unsupported["hostCompatibility"]["platforms"] =
+            serde_json::json!(["unsupported-platform"]);
+        assert_manifest_validation_error(unsupported, "PLUGIN_INCOMPATIBLE_PLATFORM");
     }
 
     #[test]

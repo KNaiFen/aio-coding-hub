@@ -21,9 +21,7 @@
   "activationEvents": [
     "onStartup",
     "onCommand:<command>",
-    "onProviderEditor:<providerType>",
-    "onProtocolBridge:<bridgeType>",
-    "onGatewayHook:<hookName>"
+    "onGatewayHook:<hook>"
   ],
   "capabilities": [
     "commands.execute",

@@ -25,7 +25,7 @@ const openRouterManifest: PluginManifest = {
   apiVersion: "1.0.0",
   main: "dist/extension.js",
   runtime: { kind: "extensionHost", language: "typescript" },
-  activationEvents: ["onStartup", "onProviderEditor:openrouter"],
+  activationEvents: [],
   contributes: {
     providers: [
       {
@@ -71,7 +71,7 @@ describe("validateManifest", () => {
   test("keeps plugin API contribution types representable", () => {
     const gatewayHook: GatewayHookName = "gateway.request.afterBodyRead";
     const permission: PluginPermission = "request.body.read";
-    const activationEvent: ActivationEvent = "onProviderEditor:openrouter";
+    const activationEvent: ActivationEvent = "onCommand:acme.openrouter.refreshModels";
     const capability: PluginCapability = "provider.extensionValues";
     const privacyCapability: PluginCapability = "privacy.redact";
     const slot: UiContributionSlot = "providers.editor.sections";
@@ -87,10 +87,8 @@ describe("validateManifest", () => {
       runtime: { kind: "extensionHost", language: "typescript" },
       activationEvents: [
         "onStartup",
-        "onCommand:acme.openrouter.refreshModels",
         activationEvent,
         "onGatewayHook:gateway.request.afterBodyRead",
-        "onProtocolBridge:acme.openrouter.openai-gemini",
       ],
       contributes: {
         providers: [
@@ -264,7 +262,6 @@ describe("validateManifest", () => {
       apiVersion: "1.0.0",
       main: "dist/extension.js",
       runtime: { kind: "extensionHost", language: "typescript" },
-      activationEvents: ["onProtocolBridge:acme.bridge.openai-gemini"],
       contributes: {
         protocols: [
           { protocolId: "openai.chat", direction: "both" },
@@ -418,16 +415,57 @@ describe("validateManifest", () => {
     });
   });
 
-  test("rejects invalid activation event", () => {
-    const manifest = {
+  test("requires explicit activation events to match command and gateway hook contributions", () => {
+    const explicitManifest: PluginManifest = {
       ...openRouterManifest,
-      activationEvents: ["onStartup", "onCommand:"],
+      activationEvents: ["onStartup", "onCommand:acme.openrouter.refreshModels"],
     };
+    expect(validateManifest(explicitManifest)).toEqual({ ok: true });
 
-    expect(validateManifest(manifest as PluginManifest)).toMatchObject({
+    const missingCommandEvent = {
+      ...explicitManifest,
+      activationEvents: ["onStartup"],
+    };
+    expect(validateManifest(missingCommandEvent as PluginManifest)).toMatchObject({
       ok: false,
       error: { code: "PLUGIN_INVALID_ACTIVATION_EVENT" },
     });
+  });
+
+  test("rejects deprecated, blank, padded, and unknown activation events", () => {
+    for (const event of [
+      "onProviderEditor:openrouter",
+      "onProtocolBridge:acme.openrouter.openai-gemini",
+      "onCommand:",
+      "onCommand: acme.openrouter.refreshModels",
+      "onGatewayHook:gateway.request.afterBodyRead ",
+      "onUnknown:thing",
+    ]) {
+      const manifest = {
+        ...openRouterManifest,
+        activationEvents: [event],
+      };
+
+      expect(validateManifest(manifest as unknown as PluginManifest)).toMatchObject({
+        ok: false,
+        error: { code: "PLUGIN_INVALID_ACTIVATION_EVENT" },
+      });
+    }
+  });
+
+  test("keeps missing and empty activation events as legacy on-demand manifests", () => {
+    const missing = { ...openRouterManifest, activationEvents: undefined };
+
+    expect(validateManifest(missing as PluginManifest)).toEqual({ ok: true });
+    expect(validateManifest(openRouterManifest)).toEqual({ ok: true });
+  });
+
+  test("keeps the documented activation event families synchronized", () => {
+    expect(contract.activationEvents).toEqual([
+      "onStartup",
+      "onCommand:<command>",
+      "onGatewayHook:<hook>",
+    ]);
   });
 
   test("validates gatewayHooks manifest", () => {

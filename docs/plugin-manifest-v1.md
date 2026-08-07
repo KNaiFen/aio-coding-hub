@@ -36,6 +36,8 @@ Extension Host manifest 不再使用 top-level `hooks` 或 top-level `permission
 | `signature` | string | Package signature。 |
 | `category` | string | `security`、`productivity`、`redaction` 或 `utility`。 |
 
+`activationEvents` 缺失或为空数组时保持 legacy on-demand 行为：已声明的 command 与 gateway hook 可按需激活，但不会触发 startup activation。显式数组只允许 `onStartup`、`onCommand:<command>` 和 `onGatewayHook:<hook>`；每个 command 与 gateway hook 必须和 `contributes` 中的同名声明精确匹配。空 payload、带前后空白或未知事件会被拒绝；`onProviderEditor:*` 与 `onProtocolBridge:*` 已废弃并被拒绝。
+
 ## 3. ID 与版本规则
 
 Plugin IDs 使用 `publisher.plugin-name` 格式。
@@ -215,12 +217,12 @@ Validation 会拒绝：
 | `update_available` | `enabled` | 更新成功且 capabilities 仍有效。 |
 | `update_available` | `disabled` | 更新成功但新增 capability 需要用户确认。 |
 | `installed` | `incompatible` | 宿主应用版本或 Plugin API 版本不兼容。当前 `platforms` 不触发该状态。 |
-| `enabled` | `quarantined` | 重复 crash、timeout、signature failure 或 revoked market status。 |
+| `enabled` | `quarantined` | 600 秒内第三次 host crash、JavaScript/runtime error 或 timeout，或 signature failure、revoked market status。 |
 | `disabled` | `quarantined` | Signature failure 或 revoked market status。 |
 | `quarantined` | `disabled` | 用户确认并在校验后恢复。 |
 | any active state | `uninstalled` | 用户卸载插件。 |
 
-Upgrade failure 会恢复 previous version、config snapshot、capabilities 和 enabled state。Signature failure 会让插件进入 `quarantined`。Runtime crash 和 repeated timeout 可以让 enabled plugin 进入 `quarantined`。
+Upgrade failure 会恢复 previous version、config snapshot、capabilities 和 enabled state。Signature failure 会让插件进入 `quarantined`。同一插件的 host crash、JavaScript/runtime error 与 timeout 在 600 秒内累计第三次会进入 `quarantined`；context/output budget、capability/permission 和 header policy 拒绝不计数。第三次请求保留其原本 fail-open/fail-closed 结果，后续请求不再执行插件。重新校验会重新验证 manifest、安装和来源边界，成功后仅转为 `disabled`，不会自动启用；市场撤销隔离不能恢复。
 
 ## 11. Manifest 示例：社区 Prompt Helper
 

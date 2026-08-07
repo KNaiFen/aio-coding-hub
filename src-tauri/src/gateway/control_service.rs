@@ -288,6 +288,7 @@ fn load_gateway_plugin_pipeline(
                     plugins,
                     Arc::new(RuntimeGatewayPluginExecutor::with_db(db.clone())),
                     super::plugins::pipeline::GatewayPluginPipelineConfig::default(),
+                    db.clone(),
                 ),
             )
         }
@@ -317,6 +318,7 @@ fn empty_runtime_gateway_plugin_pipeline(
             Vec::new(),
             Arc::new(RuntimeGatewayPluginExecutor::with_db(db.clone())),
             super::plugins::pipeline::GatewayPluginPipelineConfig::default(),
+            db.clone(),
         ),
     )
 }

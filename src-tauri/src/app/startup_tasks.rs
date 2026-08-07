@@ -1,6 +1,7 @@
 //! Usage: Async startup task pipeline extracted from bootstrap setup.
 
 use super::app_state::{ensure_db_ready, DbInitState};
+use super::plugins::extension_host_registry::ExtensionHostRuntimeState;
 use super::startup_state::{
     fail_startup_run, finish_startup_run, set_startup_stage, try_begin_startup_run, AppStartupStage,
 };
@@ -14,7 +15,6 @@ pub(crate) fn spawn(app_handle: tauri::AppHandle) -> bool {
     if !try_begin_startup_run(&app_handle) {
         return false;
     }
-
     tauri::async_runtime::spawn(async move {
         run(app_handle).await;
     });
@@ -63,6 +63,25 @@ async fn run(app_handle: tauri::AppHandle) {
             );
             return;
         }
+    }
+
+    let extension_host_state = app_handle.state::<ExtensionHostRuntimeState>();
+    match extension_host_state
+        .registry(app_handle.clone(), db_state.inner())
+        .await
+    {
+        Ok(registry) => match crate::app::plugin_service::activate_startup_plugins(&db, &registry).await {
+            Ok(true) => crate::app::gateway_control::app_refresh_gateway_plugins(&app_handle, &db),
+            Ok(false) => {}
+            Err(error) => tracing::warn!(
+                error = %error,
+                "failed to enumerate plugins for startup activation"
+            ),
+        },
+        Err(error) => tracing::warn!(
+            error = %error,
+            "extension host registry was unavailable for startup activation"
+        ),
     }
 
     crate::request_logs::spawn_retention_task(app_handle.clone(), db.clone());

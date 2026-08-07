@@ -29,6 +29,7 @@ import {
   usePluginExportReplayFixtureMutation,
   usePluginExtensionRuntimeReportsQuery,
   usePluginQuery,
+  usePluginRevalidateMutation,
   usePluginRollbackMutation,
   usePluginSaveConfigMutation,
   usePluginUpdateRemoteMutation,
@@ -88,6 +89,7 @@ vi.mock("../../query/plugins", async () => {
     usePluginUpdateRemoteMutation: vi.fn(),
     usePluginUpdateFromFileMutation: vi.fn(),
     usePluginRollbackMutation: vi.fn(),
+    usePluginRevalidateMutation: vi.fn(),
     usePluginEnableMutation: vi.fn(),
     usePluginDisableMutation: vi.fn(),
     usePluginUninstallMutation: vi.fn(),
@@ -409,6 +411,7 @@ describe("pages/PluginsPage", () => {
     vi.mocked(usePluginUpdateFromFileMutation).mockReturnValue(mutation() as any);
     vi.mocked(usePluginUpdateRemoteMutation).mockReturnValue(mutation() as any);
     vi.mocked(usePluginRollbackMutation).mockReturnValue(mutation() as any);
+    vi.mocked(usePluginRevalidateMutation).mockReturnValue(mutation() as any);
     vi.mocked(usePluginEnableMutation).mockReturnValue(mutation() as any);
     vi.mocked(usePluginDisableMutation).mockReturnValue(mutation() as any);
     vi.mocked(usePluginUninstallMutation).mockReturnValue(mutation() as any);
@@ -1941,6 +1944,54 @@ describe("pages/PluginsPage", () => {
     expect(screen.getByText("已隔离")).toBeInTheDocument();
     expect(screen.getByText("已卸载")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "启用" })).not.toBeInTheDocument();
+    expect(enableMutation.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it("only offers quarantined plugins a revalidation action", async () => {
+    const revalidateMutation = mutation();
+    const enableMutation = mutation();
+    const quarantined = summary({
+      plugin_id: "community.runtime-failure",
+      name: "Runtime Failure Plugin",
+      status: "quarantined",
+      last_error: "Plugin quarantined after repeated severe runtime failures",
+    });
+    vi.mocked(usePluginRevalidateMutation).mockReturnValue(revalidateMutation as any);
+    vi.mocked(usePluginEnableMutation).mockReturnValue(enableMutation as any);
+    vi.mocked(usePluginsListQuery).mockReturnValue({
+      data: [quarantined],
+      isLoading: false,
+      isFetching: false,
+      error: null,
+    } as any);
+    vi.mocked(usePluginQuery).mockReturnValue({
+      data: detail({
+        summary: quarantined,
+        audit_logs: [
+          {
+            id: 2,
+            plugin_id: quarantined.plugin_id,
+            trace_id: "trace-runtime-failure",
+            event_type: "plugin.quarantined",
+            risk_level: "critical",
+            message: "Plugin quarantined after repeated severe runtime failures",
+            details: { reason: quarantined.last_error ?? "" },
+            created_at: 31,
+          },
+        ],
+      }),
+      isLoading: false,
+      isFetching: false,
+      error: null,
+    } as any);
+
+    renderWithProviders(<PluginsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "重新校验" }));
+
+    await waitFor(() => {
+      expect(revalidateMutation.mutateAsync).toHaveBeenCalledWith("community.runtime-failure");
+      expect(toast.success).toHaveBeenCalledWith("重新校验隔离插件成功");
+    });
     expect(enableMutation.mutateAsync).not.toHaveBeenCalled();
   });
 });

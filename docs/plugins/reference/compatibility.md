@@ -46,4 +46,6 @@ Scaffold and pack flow create Extension Host packages with `main`, `runtime.kind
 
 Quarantined 和 incompatible 插件不能启用。更新新增的 capabilities 会进入 pending，不会静默继承用户确认。
 
+如果已安装 manifest 使用 `onProviderEditor:*` 或 `onProtocolBridge:*`，升级校验会保留其 manifest 和签名字节，写入可见原因并将插件转为 `disabled`。运行时隔离的插件只能通过重新校验恢复：重验会再次检查 manifest、宿主兼容性、配置、安装目录和入口、来源完整性/签名及市场撤销状态；成功只恢复到 `disabled`，仍须由用户显式启用。市场撤销隔离不能通过重新校验解除。
+
 0.62.2 也不开放 browser-like plugin container。Linux、macOS、Windows 上的插件仍运行在宿主支持的 Extension Host 中；第三方插件不能把 AIO Coding Hub 内部变成浏览器或 WebView 插件容器。

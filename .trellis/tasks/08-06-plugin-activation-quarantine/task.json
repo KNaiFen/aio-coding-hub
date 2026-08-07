@@ -3,7 +3,7 @@
   "name": "plugin-activation-quarantine",
   "title": "AUD-033 插件激活与持久隔离",
   "description": "实施精确插件激活事件调度，并在 10 分钟 3 次严重运行时故障后持久 quarantine。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": "cross-layer",
   "scope": "plugin-runtime",
   "package": "aio-coding-hub",

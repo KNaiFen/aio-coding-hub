@@ -1,6 +1,6 @@
 // Usage: Summarizes plugin lifecycle status, source trust, quarantine, and rollback controls.
 
-import { RotateCcw, ShieldAlert } from "lucide-react";
+import { RotateCcw, ShieldAlert, ShieldCheck } from "lucide-react";
 import type { JsonValue, PluginDetail } from "../../services/plugins";
 import { Button } from "../../ui/Button";
 import { formatUnixSeconds } from "../../utils/formatters";
@@ -11,6 +11,7 @@ type PluginLifecyclePanelProps = {
   rollbackVersion: string | null;
   busy: boolean;
   onRollback: (version: string) => void;
+  onRevalidate: () => void;
 };
 
 const INSTALL_SOURCE_LABELS: Record<string, string> = {
@@ -95,6 +96,7 @@ export function PluginLifecyclePanel({
   rollbackVersion,
   busy,
   onRollback,
+  onRevalidate,
 }: PluginLifecyclePanelProps) {
   const checksum = auditString(detail, ["packageChecksum", "checksum"]);
   const sourceLabel = INSTALL_SOURCE_LABELS[detail.install_source] ?? detail.install_source;
@@ -116,6 +118,12 @@ export function PluginLifecyclePanel({
           >
             <RotateCcw className="h-3.5 w-3.5" />
             回滚 {rollbackVersion}
+          </Button>
+        ) : null}
+        {detail.summary.status === "quarantined" ? (
+          <Button size="sm" variant="secondary" disabled={busy} onClick={onRevalidate}>
+            <ShieldCheck className="h-3.5 w-3.5" />
+            重新校验
           </Button>
         ) : null}
       </div>

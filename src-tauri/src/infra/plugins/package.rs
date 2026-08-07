@@ -150,6 +150,15 @@ fn extract_zip_bytes(
                 format!("failed to read plugin package entry: {error}"),
             )
         })?;
+        if file
+            .unix_mode()
+            .is_some_and(|mode| mode & 0o170000 == 0o120000)
+        {
+            return Err(AppError::new(
+                "PLUGIN_PACKAGE_SYMLINK_UNSUPPORTED",
+                "plugin package entries must not be symbolic links",
+            ));
+        }
         let relative_path = safe_zip_entry_path(file.name())?;
         if relative_path.as_os_str().is_empty() {
             continue;
