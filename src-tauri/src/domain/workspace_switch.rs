@@ -547,6 +547,7 @@ fn apply<R: tauri::Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{mcp_sync, prompt_sync};
     use rusqlite::params;
     use std::ffi::OsString;
     use std::sync::atomic::{AtomicU64, Ordering};

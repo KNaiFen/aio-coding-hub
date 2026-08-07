@@ -422,13 +422,15 @@ pub(crate) fn run_before_startup<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -
 }
 
 pub(crate) async fn retry_pending_maintenance<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> bool {
-    let Some(state) = app.try_state::<MaintenanceState>() else {
-        return false;
+    let retry_started = {
+        let Some(state) = app.try_state::<MaintenanceState>() else {
+            return false;
+        };
+        state.try_begin_retry()
     };
-    if !state.try_begin_retry() {
+    if !retry_started {
         return false;
     }
-    drop(state);
     crate::app::startup_state::begin_maintenance_run(&app);
 
     let marker_state =

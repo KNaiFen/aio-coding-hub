@@ -417,7 +417,6 @@ fn normalize_prompt_content(content: &str) -> String {
 }
 
 pub fn upsert(
-    _app: &tauri::AppHandle,
     db: &db::Db,
     prompt_id: Option<i64>,
     workspace_id: i64,

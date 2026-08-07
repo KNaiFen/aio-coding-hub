@@ -153,7 +153,7 @@ pub fn prompt_read_target_bytes<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     cli_key: &str,
 ) -> crate::shared::error::AppResult<Option<Vec<u8>>> {
-    crate::infra::prompt_sync::read_target_bytes(app, cli_key).map_err(Into::into)
+    crate::infra::prompt_sync::read_target_bytes(app, cli_key)
 }
 
 pub fn prompt_restore_target_bytes<R: tauri::Runtime>(
@@ -161,7 +161,7 @@ pub fn prompt_restore_target_bytes<R: tauri::Runtime>(
     cli_key: &str,
     bytes: Option<Vec<u8>>,
 ) -> crate::shared::error::AppResult<()> {
-    crate::infra::prompt_sync::restore_target_bytes(app, cli_key, bytes).map_err(Into::into)
+    crate::infra::prompt_sync::restore_target_bytes(app, cli_key, bytes)
 }
 
 pub fn recovery_journal_statuses_for_kind<R: tauri::Runtime>(
@@ -333,7 +333,7 @@ pub fn skills_swap_local_for_workspace_switch<R: tauri::Runtime>(
 ) -> crate::shared::error::AppResult<()> {
     let db = crate::infra::db::init(app)?;
     let conn = db.open_connection()?;
-    let _ = crate::domain::skills::swap_local_skills_for_workspace_switch(
+    crate::domain::skills::swap_local_skills_for_workspace_switch(
         app,
         &conn,
         cli_key,
@@ -349,7 +349,7 @@ pub fn plugins_swap_local_for_workspace_switch<R: tauri::Runtime>(
     from_workspace_id: Option<i64>,
     to_workspace_id: i64,
 ) -> crate::shared::error::AppResult<()> {
-    let _ = crate::domain::claude_plugins::swap_local_plugins_for_workspace_switch(
+    crate::domain::claude_plugins::swap_local_plugins_for_workspace_switch(
         app,
         cli_key,
         from_workspace_id,

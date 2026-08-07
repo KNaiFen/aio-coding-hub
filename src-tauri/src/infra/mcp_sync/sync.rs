@@ -234,43 +234,6 @@ pub fn sync_cli<R: tauri::Runtime>(
     Ok(())
 }
 
-pub(crate) fn swap_grok_local_servers_for_workspace<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-    managed_keys: &HashSet<String>,
-    from_stash_path: &Path,
-    target_stash: Option<Vec<u8>>,
-) -> crate::shared::error::AppResult<()> {
-    if target_stash
-        .as_ref()
-        .is_some_and(|bytes| bytes.len() > super::MCP_SYNC_TARGET_MAX_BYTES)
-    {
-        return Err(format!(
-            "SEC_INVALID_INPUT: MCP local stash too large (max {} bytes)",
-            super::MCP_SYNC_TARGET_MAX_BYTES
-        )
-        .into());
-    }
-
-    let config_path = crate::grok_config::config_path(app)?;
-    crate::grok_config::mutate_path(&config_path, |document| {
-        let current_stash = super::grok_toml::swap_grok_local_servers(
-            document,
-            managed_keys,
-            target_stash.as_deref(),
-        )
-        .map_err(crate::shared::error::AppError::from)?;
-        if current_stash.len() > super::MCP_SYNC_TARGET_MAX_BYTES {
-            return Err(format!(
-                "SEC_INVALID_INPUT: MCP local stash too large (max {} bytes)",
-                super::MCP_SYNC_TARGET_MAX_BYTES
-            )
-            .into());
-        }
-        super::fs::write_file_atomic(from_stash_path, &current_stash)?;
-        Ok(())
-    })
-}
-
 pub(crate) fn capture_grok_local_servers_for_workspace<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     managed_keys: &HashSet<String>,

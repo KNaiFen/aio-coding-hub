@@ -87,7 +87,6 @@ pub(crate) async fn prompt_upsert(
         context,
         move |operation| {
             prompts::upsert(
-                &app,
                 &db,
                 prompt_id,
                 workspace_id,

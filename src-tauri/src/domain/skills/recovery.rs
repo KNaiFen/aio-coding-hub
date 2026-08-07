@@ -185,6 +185,7 @@ impl StagedArtifact {
     }
 }
 
+#[derive(Debug)]
 struct LoadedArtifact {
     root: PathBuf,
     manifest: ArtifactManifest,

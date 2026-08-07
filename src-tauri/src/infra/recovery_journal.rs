@@ -102,6 +102,7 @@ fn acquire_projection_lock_at(path: &Path) -> AppResult<ProjectionLock> {
         .read(true)
         .write(true)
         .create(true)
+        .truncate(false)
         .open(path)
         .map_err(|_| AppError::new("RECOVERY_PROJECTION_LOCK_FAILED", "无法打开外部投影锁"))?;
 
@@ -327,7 +328,7 @@ fn validate_operation_kind(kind: &str) -> AppResult<()> {
 fn validate_replay_context(context: &str) -> AppResult<()> {
     if context.is_empty()
         || context.len() > REPLAY_CONTEXT_MAX_BYTES
-        || !serde_json::from_str::<serde_json::Value>(context).is_ok()
+        || serde_json::from_str::<serde_json::Value>(context).is_err()
     {
         return Err(AppError::new("RECOVERY_JOURNAL_INVALID", "恢复上下文无效"));
     }
@@ -838,8 +839,8 @@ WHERE operation_id = ?2
         )
         .map_err(|_| AppError::new("RECOVERY_JOURNAL_UPDATE_FAILED", "无法完成恢复日志"))?;
     if changed != 1
-        && !load_entry(&conn, &claimed.entry.operation_id)?
-            .is_some_and(|entry| entry.status == "resolved")
+        && load_entry(&conn, &claimed.entry.operation_id)?
+            .is_none_or(|entry| entry.status != "resolved")
     {
         return Err(AppError::new(
             "RECOVERY_JOURNAL_STATE_CONFLICT",
@@ -1398,6 +1399,7 @@ fn reject_unresolved_children(db: &db::Db) -> AppResult<()> {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn has_pending(db: &db::Db) -> AppResult<bool> {
     let conn = db.open_connection()?;
     conn.query_row(
