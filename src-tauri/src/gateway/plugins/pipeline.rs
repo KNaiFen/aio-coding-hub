@@ -1294,14 +1294,6 @@ impl GatewayPluginPipeline {
             .unwrap_or_default()
     }
 
-    pub(crate) fn replace_plugins(&self, plugins: Vec<PluginDetail>) {
-        let _refresh_guard = self
-            .snapshot_refresh_lock
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        self.replace_plugins_while_refresh_locked(plugins);
-    }
-
     /// Loads enabled plugins while holding the same lock used by quarantine
     /// removal, so a stale database read cannot restore a just-quarantined
     /// plugin after its snapshot entry has been removed.
@@ -2534,7 +2526,9 @@ mod tests {
             GatewayPluginPipelineConfig::default(),
         );
 
-        pipeline.replace_plugins(vec![plugin("acme.b", 1, vec!["request.body.read"])]);
+        pipeline
+            .refresh_plugins_with(|| Ok(vec![plugin("acme.b", 1, vec!["request.body.read"])]))
+            .expect("test refresh should succeed");
 
         assert_eq!(executor.last_retain_ids(), vec!["acme.b"]);
     }
@@ -3737,11 +3731,15 @@ mod tests {
             .expect("pipeline should execute initial plugin");
         assert_eq!(before.body.as_ref(), b"old");
 
-        pipeline.replace_plugins(vec![plugin(
-            "plugin.new",
-            10,
-            vec!["request.body.read", "request.body.write"],
-        )]);
+        pipeline
+            .refresh_plugins_with(|| {
+                Ok(vec![plugin(
+                    "plugin.new",
+                    10,
+                    vec!["request.body.read", "request.body.write"],
+                )])
+            })
+            .expect("test refresh should succeed");
 
         let after = pipeline
             .run_request_hook(request_input())
@@ -3770,7 +3768,9 @@ mod tests {
 
         let mut replacement = plugin("plugin.hook-refresh", 10, vec!["log.redact"]);
         gateway_hook_mut(&mut replacement).name = "log.beforePersist".to_string();
-        pipeline.replace_plugins(vec![replacement]);
+        pipeline
+            .refresh_plugins_with(|| Ok(vec![replacement]))
+            .expect("test refresh should succeed");
 
         assert!(
             !pipeline
@@ -3821,18 +3821,24 @@ mod tests {
         started.notified().await;
         let mut log_only = plugin("plugin.hook-refresh", 10, vec!["log.redact"]);
         gateway_hook_mut(&mut log_only).name = "log.beforePersist".to_string();
-        pipeline.replace_plugins(vec![log_only]);
+        pipeline
+            .refresh_plugins_with(|| Ok(vec![log_only]))
+            .expect("test refresh should succeed");
         release.notify_one();
         in_flight
             .await
             .expect("in-flight hook task")
             .expect("old fail-open hook result");
 
-        pipeline.replace_plugins(vec![plugin(
-            "plugin.hook-refresh",
-            10,
-            vec!["request.body.read"],
-        )]);
+        pipeline
+            .refresh_plugins_with(|| {
+                Ok(vec![plugin(
+                    "plugin.hook-refresh",
+                    10,
+                    vec!["request.body.read"],
+                )])
+            })
+            .expect("test refresh should succeed");
         assert_eq!(
             pipeline.circuit_snapshot(
                 "plugin.hook-refresh",
@@ -3854,7 +3860,9 @@ mod tests {
             1
         );
 
-        pipeline.replace_plugins(vec![plugin("plugin.b", 20, vec!["request.body.read"])]);
+        pipeline
+            .refresh_plugins_with(|| Ok(vec![plugin("plugin.b", 20, vec!["request.body.read"])]))
+            .expect("test refresh should succeed");
 
         assert_eq!(
             pipeline.plugins_for_hook_count_for_tests(GatewayPluginHookName::RequestAfterBodyRead),
