@@ -260,6 +260,14 @@ pub(super) fn swap_grok_local_servers(
     Ok(stash.to_string().into_bytes())
 }
 
+pub(super) fn capture_grok_local_servers(
+    document: &DocumentMut,
+    managed_keys: &HashSet<String>,
+) -> Result<Vec<u8>, String> {
+    let mut snapshot = document.clone();
+    swap_grok_local_servers(&mut snapshot, managed_keys, None)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

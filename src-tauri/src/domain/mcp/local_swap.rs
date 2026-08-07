@@ -1,6 +1,8 @@
 use crate::app_paths;
 use crate::mcp_sync;
-use crate::shared::fs::{read_file_with_max_len, read_optional_file_with_max_len};
+use crate::shared::fs::{
+    read_file_with_max_len, read_optional_file_with_max_len, write_file_atomic,
+};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -94,8 +96,7 @@ fn json_write_stash(
     let bytes = serde_json::to_vec_pretty(&Value::Object(map.clone()))
         .map_err(|e| format!("failed to serialize stash json: {e}"))?;
     ensure_stash_bytes_len(&bytes)?;
-    std::fs::write(path, bytes)
-        .map_err(|e| format!("failed to write {}: {e}", path.display()).into())
+    write_file_atomic(path, &bytes)
 }
 
 fn json_read_stash(path: &Path) -> serde_json::Map<String, Value> {
@@ -181,8 +182,7 @@ fn codex_write_stash(path: &Path, lines: &[String]) -> crate::shared::error::App
     let mut out = lines.join("\n");
     out.push('\n');
     ensure_stash_bytes_len(out.as_bytes())?;
-    std::fs::write(path, out.as_bytes())
-        .map_err(|e| format!("failed to write {}: {e}", path.display()).into())
+    write_file_atomic(path, out.as_bytes())
 }
 
 fn codex_read_stash(path: &Path) -> Vec<String> {
@@ -205,31 +205,23 @@ fn ensure_stash_bytes_len(bytes: &[u8]) -> crate::shared::error::AppResult<()> {
     Ok(())
 }
 
-pub(crate) fn swap_local_mcp_servers_for_workspace_switch<R: tauri::Runtime>(
+pub(crate) fn capture_local_mcp_servers_for_workspace_switch<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     cli_key: &str,
     managed_server_keys: &HashSet<String>,
     from_workspace_id: Option<i64>,
-    to_workspace_id: i64,
 ) -> crate::shared::error::AppResult<()> {
     crate::shared::cli_key::validate_cli_key(cli_key)?;
 
     let from_bucket = stash_bucket_name(from_workspace_id);
-    let to_bucket = to_workspace_id.to_string();
-
     let from_path = stash_file_path(app, cli_key, &from_bucket)?;
-    let to_path = stash_file_path(app, cli_key, &to_bucket)?;
 
     match cli_key {
         "grok" => {
-            let target_stash =
-                read_optional_file_with_max_len(&to_path, MCP_LOCAL_STASH_MAX_BYTES)?;
-            mcp_sync::swap_grok_local_servers_for_workspace(
-                app,
-                managed_server_keys,
-                &from_path,
-                target_stash,
-            )?;
+            let stash =
+                mcp_sync::capture_grok_local_servers_for_workspace(app, managed_server_keys)?;
+            ensure_stash_bytes_len(&stash)?;
+            write_file_atomic(&from_path, &stash)?;
         }
         "codex" => {
             let current_bytes = mcp_sync::read_target_bytes(app, cli_key)?;
@@ -237,20 +229,8 @@ pub(crate) fn swap_local_mcp_servers_for_workspace_switch<R: tauri::Runtime>(
                 .as_deref()
                 .map(|b| String::from_utf8_lossy(b).to_string())
                 .unwrap_or_default();
-            let (mut kept, local_current) = codex_split_local_blocks(&input, managed_server_keys);
+            let (_, local_current) = codex_split_local_blocks(&input, managed_server_keys);
             codex_write_stash(&from_path, &local_current)?;
-
-            let local_to = codex_read_stash(&to_path);
-            if !local_to.is_empty() {
-                if !kept.is_empty() {
-                    kept.push(String::new());
-                }
-                kept.extend(local_to);
-            }
-
-            let mut out = kept.join("\n");
-            out.push('\n');
-            mcp_sync::restore_target_bytes(app, cli_key, Some(out.into_bytes()))?;
         }
         _ => {
             let current_bytes = mcp_sync::read_target_bytes(app, cli_key)?;
@@ -260,23 +240,86 @@ pub(crate) fn swap_local_mcp_servers_for_workspace_switch<R: tauri::Runtime>(
                 json_collect_local_servers(servers_obj, managed_server_keys)
             };
             json_write_stash(&from_path, &local_current)?;
-
-            let local_to = json_read_stash(&to_path);
-
-            let servers_obj = json_mcp_servers_obj_mut(&mut root);
-            json_remove_local_servers(servers_obj, managed_server_keys);
-            for (k, v) in local_to {
-                servers_obj.insert(k, v);
-            }
-
-            let mut bytes = serde_json::to_vec_pretty(&root)
-                .map_err(|e| format!("failed to serialize mcp config json: {e}"))?;
-            bytes.push(b'\n');
-            mcp_sync::restore_target_bytes(app, cli_key, Some(bytes))?;
         }
     }
 
     Ok(())
+}
+
+pub(crate) fn restore_local_mcp_servers_for_workspace_switch<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    cli_key: &str,
+    managed_server_keys: &HashSet<String>,
+    to_workspace_id: i64,
+) -> crate::shared::error::AppResult<()> {
+    crate::shared::cli_key::validate_cli_key(cli_key)?;
+
+    let to_path = stash_file_path(app, cli_key, &to_workspace_id.to_string())?;
+    match cli_key {
+        "grok" => {
+            let target_stash =
+                read_optional_file_with_max_len(&to_path, MCP_LOCAL_STASH_MAX_BYTES)?;
+            mcp_sync::restore_grok_local_servers_for_workspace(
+                app,
+                managed_server_keys,
+                target_stash,
+            )?;
+        }
+        "codex" => {
+            let current_bytes = mcp_sync::read_target_bytes(app, cli_key)?;
+            let input = current_bytes
+                .as_deref()
+                .map(|bytes| String::from_utf8_lossy(bytes).to_string())
+                .unwrap_or_default();
+            let (mut kept, _) = codex_split_local_blocks(&input, managed_server_keys);
+            let local_to = codex_read_stash(&to_path);
+            if !local_to.is_empty() {
+                if !kept.is_empty() {
+                    kept.push(String::new());
+                }
+                kept.extend(local_to);
+            }
+            let mut out = kept.join("\n");
+            out.push('\n');
+            mcp_sync::restore_target_bytes(app, cli_key, Some(out.into_bytes()))?;
+        }
+        _ => {
+            let current_bytes = mcp_sync::read_target_bytes(app, cli_key)?;
+            let mut root = json_root_from_bytes(current_bytes);
+            let local_to = json_read_stash(&to_path);
+            let servers_obj = json_mcp_servers_obj_mut(&mut root);
+            json_remove_local_servers(servers_obj, managed_server_keys);
+            for (key, value) in local_to {
+                servers_obj.insert(key, value);
+            }
+            let mut bytes = serde_json::to_vec_pretty(&root)
+                .map_err(|error| format!("failed to serialize mcp config json: {error}"))?;
+            bytes.push(b'\n');
+            mcp_sync::restore_target_bytes(app, cli_key, Some(bytes))?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn swap_local_mcp_servers_for_workspace_switch<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    cli_key: &str,
+    managed_server_keys: &HashSet<String>,
+    from_workspace_id: Option<i64>,
+    to_workspace_id: i64,
+) -> crate::shared::error::AppResult<()> {
+    capture_local_mcp_servers_for_workspace_switch(
+        app,
+        cli_key,
+        managed_server_keys,
+        from_workspace_id,
+    )?;
+    restore_local_mcp_servers_for_workspace_switch(
+        app,
+        cli_key,
+        managed_server_keys,
+        to_workspace_id,
+    )
 }
 
 #[cfg(test)]

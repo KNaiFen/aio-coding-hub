@@ -1,6 +1,7 @@
 //! Usage: Prompt templates related Tauri commands.
 
 use crate::app_state::{ensure_db_ready, DbInitState};
+use crate::infra::recovery_journal::{self, JournalContext};
 use crate::{blocking, prompts};
 
 #[tauri::command]
@@ -42,9 +43,14 @@ pub(crate) async fn prompts_default_sync_from_files(
     #[cfg(windows)]
     let app_for_wsl = app.clone();
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
-    let result = blocking::run("prompts_default_sync_from_files", move || {
-        prompts::default_sync_from_files(&app, &db)
-    })
+    let result = recovery_journal::run_blocking_operation(
+        "prompts_default_sync_from_files",
+        app.clone(),
+        db.clone(),
+        "prompt.default_sync",
+        JournalContext::default(),
+        move |_operation| prompts::default_sync_from_files(&app, &db),
+    )
     .await
     .map_err(Into::into);
     #[cfg(windows)]
@@ -68,9 +74,30 @@ pub(crate) async fn prompt_upsert(
     #[cfg(windows)]
     let app_for_wsl = app.clone();
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
-    let result = blocking::run("prompt_upsert", move || {
-        prompts::upsert(&app, &db, prompt_id, workspace_id, &name, &content, enabled)
-    })
+    let context = JournalContext {
+        workspace_id: Some(workspace_id),
+        entity_id: prompt_id,
+        ..JournalContext::default()
+    };
+    let result = recovery_journal::run_blocking_operation(
+        "prompt_upsert",
+        app.clone(),
+        db.clone(),
+        "prompt.upsert",
+        context,
+        move |operation| {
+            prompts::upsert(
+                &app,
+                &db,
+                prompt_id,
+                workspace_id,
+                &name,
+                &content,
+                enabled,
+                operation,
+            )
+        },
+    )
     .await
     .map_err(Into::into);
     #[cfg(windows)]
@@ -91,9 +118,14 @@ pub(crate) async fn prompt_set_enabled(
     #[cfg(windows)]
     let app_for_wsl = app.clone();
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
-    let result = blocking::run("prompt_set_enabled", move || {
-        prompts::set_enabled(&app, &db, prompt_id, enabled)
-    })
+    let result = recovery_journal::run_blocking_operation(
+        "prompt_set_enabled",
+        app.clone(),
+        db.clone(),
+        "prompt.set_enabled",
+        JournalContext::for_entity(prompt_id),
+        move |operation| prompts::set_enabled(&app, &db, prompt_id, enabled, operation),
+    )
     .await
     .map_err(Into::into);
     #[cfg(windows)]
@@ -113,10 +145,14 @@ pub(crate) async fn prompt_delete(
     #[cfg(windows)]
     let app_for_wsl = app.clone();
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
-    let result = blocking::run(
+    let result = recovery_journal::run_blocking_operation(
         "prompt_delete",
-        move || -> crate::shared::error::AppResult<bool> {
-            prompts::delete(&app, &db, prompt_id)?;
+        app.clone(),
+        db.clone(),
+        "prompt.delete",
+        JournalContext::for_entity(prompt_id),
+        move |operation| -> crate::shared::error::AppResult<bool> {
+            prompts::delete(&app, &db, prompt_id, operation)?;
             Ok(true)
         },
     )

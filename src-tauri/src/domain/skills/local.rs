@@ -1,18 +1,17 @@
 use super::fs_ops::{
-    copy_dir_recursive, is_managed_dir, is_managed_link_to_ssot, is_symlink,
-    is_symlink_or_junction, read_source_metadata, remove_marker, skill_dir_content_hash,
-    skill_md_path, write_marker, write_source_metadata, SkillSourceMetadata,
+    is_managed_dir, is_managed_link_to_ssot, is_symlink, is_symlink_or_junction,
+    read_source_metadata, skill_md_path, SkillSourceMetadata,
 };
 use super::installed::{get_skill_by_id, skill_key_exists};
 use super::npx_lock::NpxSkillLock;
 use super::paths::{cli_skills_root, ensure_skills_roots, ssot_skills_root, validate_cli_key};
+use super::recovery::{stage_artifact, SkillRecoveryContext};
 use super::repo_cache::ensure_repo_cache;
 use super::skill_md::parse_skill_md;
-use super::types::{
-    InstalledSkillSummary, LocalSkillSummary, SkillImportIssue, SkillImportLocalBatchReport,
-};
+use super::types::{InstalledSkillSummary, LocalSkillSummary};
 use super::util::{validate_dir_name, validate_relative_subdir};
 use crate::db;
+use crate::infra::recovery_journal::RecoveryOperation;
 use crate::shared::error::db_err;
 use crate::shared::text::normalize_name;
 use crate::shared::time::now_unix_seconds;
@@ -115,11 +114,13 @@ fn suggested_local_dir_name(source_subdir: &str, skill_name: &str) -> String {
         .to_string()
 }
 
-fn next_available_local_dir_name(root: &Path, preferred: &str) -> String {
-    let base = preferred.trim();
-    let base = if base.is_empty() { "skill" } else { base };
+fn next_available_local_dir_name(
+    root: &Path,
+    preferred: &str,
+) -> crate::shared::error::AppResult<String> {
+    let base = validate_dir_name(preferred)?;
 
-    let mut candidate = base.to_string();
+    let mut candidate = base.clone();
     let mut idx = 2;
     while root.join(&candidate).exists() && idx < 1000 {
         candidate = format!("{base}-{idx}");
@@ -127,10 +128,10 @@ fn next_available_local_dir_name(root: &Path, preferred: &str) -> String {
     }
 
     if root.join(&candidate).exists() {
-        return format!("{base}-{}", now_unix_seconds());
+        return Ok(validate_dir_name(&format!("{base}-{}", now_unix_seconds()))?);
     }
 
-    candidate
+    Ok(validate_dir_name(&candidate)?)
 }
 
 fn find_local_skill_by_source(
@@ -215,6 +216,7 @@ pub fn install_to_local<R: tauri::Runtime>(
     git_url: &str,
     branch: &str,
     source_subdir: &str,
+    operation: &RecoveryOperation,
 ) -> crate::shared::error::AppResult<LocalSkillSummary> {
     ensure_skills_roots(app)?;
     validate_relative_subdir(source_subdir)?;
@@ -270,7 +272,7 @@ pub fn install_to_local<R: tauri::Runtime>(
             .into());
     };
 
-    let (name, _description) = match parse_skill_md(&skill_md) {
+    let (name, description) = match parse_skill_md(&skill_md) {
         Ok(v) => v,
         Err(_) => {
             return Err(
@@ -284,20 +286,29 @@ pub fn install_to_local<R: tauri::Runtime>(
     let dir_name = next_available_local_dir_name(
         &cli_root,
         &suggested_local_dir_name(&source.source_subdir, &name),
-    );
-    let local_dir = cli_root.join(&dir_name);
-    if let Err(err) = copy_dir_recursive(&src_dir, &local_dir) {
-        let _ = std::fs::remove_dir_all(&local_dir);
-        return Err(err);
-    }
+    )?;
+    let context = SkillRecoveryContext::InstallToLocal {
+        workspace_id,
+        cli_key: cli_key.clone(),
+        dir_name: dir_name.clone(),
+    };
+    let _artifact = stage_artifact(
+        app,
+        operation,
+        &context,
+        &[("desired", src_dir.as_path())],
+        Some(&source),
+    )?;
 
-    if let Err(err) = write_source_metadata(&local_dir, &source) {
-        let _ = std::fs::remove_dir_all(&local_dir);
-        return Err(err);
-    }
-
-    summarize_local_skill_dir(&local_dir, &ssot_root, None)?
-        .ok_or_else(|| "SKILL_LOCAL_INSTALL_FAILED: local skill summary unavailable".into())
+    Ok(LocalSkillSummary {
+        dir_name: dir_name.clone(),
+        path: cli_root.join(&dir_name).to_string_lossy().to_string(),
+        name,
+        description,
+        source_git_url: Some(source.source_git_url),
+        source_branch: Some(source.source_branch),
+        source_subdir: Some(source.source_subdir),
+    })
 }
 
 pub fn delete_local<R: tauri::Runtime>(
@@ -305,6 +316,7 @@ pub fn delete_local<R: tauri::Runtime>(
     db: &db::Db,
     workspace_id: i64,
     dir_name: &str,
+    operation: &RecoveryOperation,
 ) -> crate::shared::error::AppResult<()> {
     let dir_name = validate_dir_name(dir_name)?;
 
@@ -351,8 +363,19 @@ pub fn delete_local<R: tauri::Runtime>(
             .into());
     }
 
-    std::fs::remove_dir_all(&local_dir)
-        .map_err(|e| format!("failed to remove {}: {e}", local_dir.display()))?;
+    let source_metadata = read_source_metadata(&local_dir)?;
+    let context = SkillRecoveryContext::DeleteLocal {
+        workspace_id,
+        cli_key,
+        dir_name,
+    };
+    let _artifact = stage_artifact(
+        app,
+        operation,
+        &context,
+        &[("previous", local_dir.as_path())],
+        source_metadata.as_ref(),
+    )?;
     Ok(())
 }
 
@@ -361,6 +384,7 @@ pub fn import_local<R: tauri::Runtime>(
     db: &db::Db,
     workspace_id: i64,
     dir_name: &str,
+    operation: &RecoveryOperation,
 ) -> crate::shared::error::AppResult<InstalledSkillSummary> {
     ensure_skills_roots(app)?;
 
@@ -382,7 +406,7 @@ pub fn import_local<R: tauri::Runtime>(
     if !local_dir.exists() {
         return Err(format!("SKILL_LOCAL_NOT_FOUND: {}", local_dir.display()).into());
     }
-    if !local_dir.is_dir() {
+    if is_symlink(&local_dir)? || is_symlink_or_junction(&local_dir) || !local_dir.is_dir() {
         return Err("SEC_INVALID_INPUT: local skill path is not a directory"
             .to_string()
             .into());
@@ -432,6 +456,20 @@ pub fn import_local<R: tauri::Runtime>(
             .to_string()
             .into());
     }
+    let context = SkillRecoveryContext::ImportLocal {
+        workspace_id,
+        cli_key: cli_key.clone(),
+        skill_key: dir_name.clone(),
+        local_dir_name: dir_name.clone(),
+    };
+    let artifact = stage_artifact(
+        app,
+        operation,
+        &context,
+        &[("desired", local_dir.as_path())],
+        source_meta.as_ref(),
+    )?;
+    let installed_content_hash = artifact.role_hash("desired")?.to_string();
 
     let tx = conn
         .transaction()
@@ -450,7 +488,7 @@ INSERT INTO skills(
   installed_content_hash,
   created_at,
   updated_at
-) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8, ?9)
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
 "#,
         params![
             dir_name,
@@ -469,6 +507,7 @@ INSERT INTO skills(
                 .as_ref()
                 .map(|item| item.source_subdir.clone())
                 .unwrap_or_else(|| dir_name.clone()),
+            installed_content_hash,
             now,
             now
         ],
@@ -488,106 +527,25 @@ ON CONFLICT(workspace_id, skill_id) DO UPDATE SET
     )
     .map_err(|e| db_err!("failed to enable imported skill for workspace: {e}"))?;
 
-    if let Err(err) = copy_dir_recursive(&local_dir, &ssot_dir) {
-        let _ = std::fs::remove_dir_all(&ssot_dir);
-        let _ = tx.execute("DELETE FROM skills WHERE id = ?1", params![skill_id]);
-        return Err(err);
-    }
+    tx.commit().map_err(|err| db_err!("failed to commit: {err}"))?;
 
-    let installed_content_hash = match skill_dir_content_hash(&ssot_dir) {
-        Ok(hash) => hash,
-        Err(err) => {
-            let _ = std::fs::remove_dir_all(&ssot_dir);
-            let _ = tx.execute("DELETE FROM skills WHERE id = ?1", params![skill_id]);
-            return Err(err);
-        }
-    };
-    if let Err(err) = tx.execute(
-        "UPDATE skills SET installed_content_hash = ?1 WHERE id = ?2",
-        params![installed_content_hash, skill_id],
-    ) {
-        let _ = std::fs::remove_dir_all(&ssot_dir);
-        let _ = tx.execute("DELETE FROM skills WHERE id = ?1", params![skill_id]);
-        return Err(db_err!(
-            "failed to update imported skill content hash: {err}"
-        ));
-    }
-
-    if let Err(err) = write_marker(&local_dir) {
-        let _ = std::fs::remove_dir_all(&ssot_dir);
-        let _ = tx.execute("DELETE FROM skills WHERE id = ?1", params![skill_id]);
-        return Err(err);
-    }
-
-    if let Err(err) = tx.commit() {
-        let _ = std::fs::remove_dir_all(&ssot_dir);
-        remove_marker(&local_dir);
-        return Err(db_err!("failed to commit: {err}"));
-    }
-
+    operation.mark_authoritative_committed();
     get_skill_by_id(&conn, skill_id)
 }
 
-pub fn import_local_batch<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-    db: &db::Db,
-    workspace_id: i64,
-    dir_names: Vec<String>,
-) -> crate::shared::error::AppResult<SkillImportLocalBatchReport> {
-    if dir_names.is_empty() {
-        return Err("SEC_INVALID_INPUT: dir_names is required"
-            .to_string()
-            .into());
-    }
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    let mut imported = Vec::new();
-    let mut skipped = Vec::new();
-    let mut failed = Vec::new();
-
-    for dir_name in dir_names {
-        let trimmed = dir_name.trim().to_string();
-        if trimmed.is_empty() {
-            skipped.push(SkillImportIssue {
-                dir_name,
-                error_code: Some("SEC_INVALID_INPUT".to_string()),
-                message: "SEC_INVALID_INPUT: dir_name is required".to_string(),
-            });
-            continue;
+    #[test]
+    fn local_directory_allocation_rejects_skill_name_path_escape() {
+        let root = tempfile::tempdir().expect("tempdir");
+        for value in ["../escape", "nested/name", "nested\\name"] {
+            assert!(next_available_local_dir_name(root.path(), value).is_err());
         }
-
-        match import_local(app, db, workspace_id, &trimmed) {
-            Ok(row) => imported.push(row),
-            Err(err) => {
-                let message = err.to_string();
-                let error_code = message
-                    .split(':')
-                    .next()
-                    .map(str::trim)
-                    .filter(|code| !code.is_empty())
-                    .map(ToString::to_string);
-
-                let issue = SkillImportIssue {
-                    dir_name: trimmed,
-                    error_code,
-                    message: message.clone(),
-                };
-
-                if message.starts_with("SKILL_IMPORT_CONFLICT")
-                    || message.starts_with("SKILL_ALREADY_MANAGED")
-                    || message.starts_with("SKILL_LOCAL_NOT_FOUND")
-                    || message.starts_with("SEC_INVALID_INPUT")
-                {
-                    skipped.push(issue);
-                } else {
-                    failed.push(issue);
-                }
-            }
-        }
+        assert_eq!(
+            next_available_local_dir_name(root.path(), "safe-skill").unwrap(),
+            "safe-skill"
+        );
     }
-
-    Ok(SkillImportLocalBatchReport {
-        imported,
-        skipped,
-        failed,
-    })
 }

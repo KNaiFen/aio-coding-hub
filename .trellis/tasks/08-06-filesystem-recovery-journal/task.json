@@ -3,7 +3,7 @@
   "name": "filesystem-recovery-journal",
   "title": "AUD-002 SQLite 文件系统双写恢复",
   "description": "以已提交 SQLite 为权威，为 Prompt、MCP、Skills 和工作区切换建立 prepare-first recovery journal 与阻断式启动对账。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": "backend",
   "scope": "persistence-recovery",
   "package": "aio-coding-hub",

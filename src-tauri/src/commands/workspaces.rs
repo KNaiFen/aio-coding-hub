@@ -1,6 +1,7 @@
 //! Usage: Workspace (profile) related Tauri commands.
 
 use crate::app_state::{ensure_db_ready, DbInitState};
+use crate::infra::recovery_journal::{self, JournalContext};
 use crate::{blocking, workspace_switch, workspaces};
 
 #[tauri::command]
@@ -89,9 +90,14 @@ pub(crate) async fn workspace_apply(
     workspace_id: i64,
 ) -> Result<workspace_switch::WorkspaceApplyReport, String> {
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
-    blocking::run("workspace_apply", move || {
-        workspace_switch::apply(&app, &db, workspace_id)
-    })
+    recovery_journal::run_blocking_operation(
+        "workspace_apply",
+        app.clone(),
+        db.clone(),
+        "workspace.apply",
+        JournalContext::for_workspace(workspace_id),
+        move |operation| workspace_switch::apply_with_recovery(&app, &db, workspace_id, operation),
+    )
     .await
     .map_err(Into::into)
 }

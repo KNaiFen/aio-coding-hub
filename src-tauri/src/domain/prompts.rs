@@ -1,6 +1,7 @@
 //! Usage: Prompt templates persistence and CLI sync orchestration.
 
 use crate::db;
+use crate::infra::recovery_journal::RecoveryOperation;
 use crate::prompt_sync;
 use crate::shared::error::db_err;
 use crate::shared::sqlite::enabled_to_int;
@@ -192,8 +193,8 @@ fn list_cli_keys() -> impl Iterator<Item = &'static str> {
     crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::Prompts)
 }
 
-fn read_prompt_file_utf8(
-    app: &tauri::AppHandle,
+fn read_prompt_file_utf8<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     cli_key: &str,
 ) -> crate::shared::error::AppResult<Option<String>> {
     let Some(bytes) = prompt_sync::read_target_bytes(app, cli_key)? else {
@@ -239,8 +240,8 @@ fn count_prompts_by_workspace(
     .map_err(|e| db_err!("failed to count prompts: {e}"))
 }
 
-pub fn default_sync_from_files(
-    app: &tauri::AppHandle,
+pub fn default_sync_from_files<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     db: &db::Db,
 ) -> crate::shared::error::AppResult<DefaultPromptSyncReport> {
     let conn = db.open_connection()?;
@@ -416,13 +417,14 @@ fn normalize_prompt_content(content: &str) -> String {
 }
 
 pub fn upsert(
-    app: &tauri::AppHandle,
+    _app: &tauri::AppHandle,
     db: &db::Db,
     prompt_id: Option<i64>,
     workspace_id: i64,
     name: &str,
     content: &str,
     enabled: bool,
+    operation: &RecoveryOperation,
 ) -> crate::shared::error::AppResult<PromptSummary> {
     let name = normalize_prompt_name(name)?;
     let content = normalize_prompt_content(content);
@@ -432,25 +434,14 @@ pub fn upsert(
     validate_cli_key(&cli_key)?;
     let now = now_unix_seconds();
 
-    match prompt_id {
+    let id = match prompt_id {
         None => {
             let tx = conn
                 .transaction()
                 .map_err(|e| db_err!("failed to start transaction: {e}"))?;
-
-            let should_sync = workspaces::is_active_workspace(&tx, workspace_id)?;
-            let touched_files = enabled && should_sync;
-            let mut prev_target_bytes: Option<Vec<u8>> = None;
-            let mut prev_manifest_bytes: Option<Vec<u8>> = None;
-
             if enabled {
                 clear_enabled_for_workspace(&tx, workspace_id)?;
             }
-            if touched_files {
-                prev_target_bytes = prompt_sync::read_target_bytes(app, &cli_key)?;
-                prev_manifest_bytes = prompt_sync::read_manifest_bytes(app, &cli_key)?;
-            }
-
             tx.execute(
                 r#"
 INSERT INTO prompts(
@@ -486,24 +477,9 @@ INSERT INTO prompts(
             })?;
 
             let id = tx.last_insert_rowid();
-
-            if touched_files {
-                if let Err(err) = prompt_sync::apply_enabled_prompt(app, &cli_key, id, &content) {
-                    let _ = prompt_sync::restore_target_bytes(app, &cli_key, prev_target_bytes);
-                    let _ = prompt_sync::restore_manifest_bytes(app, &cli_key, prev_manifest_bytes);
-                    return Err(err);
-                }
-            }
-
-            if let Err(err) = tx.commit() {
-                if touched_files {
-                    let _ = prompt_sync::restore_target_bytes(app, &cli_key, prev_target_bytes);
-                    let _ = prompt_sync::restore_manifest_bytes(app, &cli_key, prev_manifest_bytes);
-                }
-                return Err(db_err!("failed to commit: {err}"));
-            }
-
-            Ok(get_by_id(&conn, id)?)
+            tx.commit()
+                .map_err(|e| db_err!("failed to commit: {e}"))?;
+            id
         }
         Some(id) => {
             let before = get_by_id(&conn, id)?;
@@ -516,18 +492,6 @@ INSERT INTO prompts(
             let tx = conn
                 .transaction()
                 .map_err(|e| db_err!("failed to start transaction: {e}"))?;
-
-            let should_sync = workspaces::is_active_workspace(&tx, workspace_id)?;
-            let needs_file_apply = enabled && should_sync;
-            let needs_file_restore = should_sync && before.enabled && !enabled;
-            let touched_files = needs_file_apply || needs_file_restore;
-            let mut prev_target_bytes: Option<Vec<u8>> = None;
-            let mut prev_manifest_bytes: Option<Vec<u8>> = None;
-            if touched_files {
-                prev_target_bytes = prompt_sync::read_target_bytes(app, &cli_key)?;
-                prev_manifest_bytes = prompt_sync::read_manifest_bytes(app, &cli_key)?;
-            }
-
             if enabled {
                 clear_enabled_for_workspace(&tx, workspace_id)?;
             }
@@ -551,66 +515,30 @@ WHERE id = ?5
                 other => db_err!("failed to update prompt: {other}"),
             })?;
 
-            if touched_files {
-                let file_result = if needs_file_restore {
-                    prompt_sync::restore_disabled_prompt(app, &cli_key)
-                } else {
-                    Ok(())
-                }
-                .and_then(|_| {
-                    if needs_file_apply {
-                        prompt_sync::apply_enabled_prompt(app, &cli_key, id, &content)
-                    } else {
-                        Ok(())
-                    }
-                });
-
-                if let Err(err) = file_result {
-                    let _ = prompt_sync::restore_target_bytes(app, &cli_key, prev_target_bytes);
-                    let _ = prompt_sync::restore_manifest_bytes(app, &cli_key, prev_manifest_bytes);
-                    return Err(err);
-                }
-            }
-
-            if let Err(err) = tx.commit() {
-                if touched_files {
-                    let _ = prompt_sync::restore_target_bytes(app, &cli_key, prev_target_bytes);
-                    let _ = prompt_sync::restore_manifest_bytes(app, &cli_key, prev_manifest_bytes);
-                }
-                return Err(db_err!("failed to commit: {err}"));
-            }
-
-            Ok(get_by_id(&conn, id)?)
+            tx.commit()
+                .map_err(|e| db_err!("failed to commit: {e}"))?;
+            id
         }
-    }
+    };
+
+    operation.mark_authoritative_committed();
+    get_by_id(&conn, id)
 }
 
 pub fn set_enabled(
-    app: &tauri::AppHandle,
+    _app: &tauri::AppHandle,
     db: &db::Db,
     prompt_id: i64,
     enabled: bool,
+    operation: &RecoveryOperation,
 ) -> crate::shared::error::AppResult<PromptSummary> {
     let mut conn = db.open_connection()?;
     let before = get_by_id(&conn, prompt_id)?;
-    let cli_key = before.cli_key.as_str();
-    let should_sync = workspaces::is_active_workspace(&conn, before.workspace_id)?;
-
     let now = now_unix_seconds();
 
     let tx = conn
         .transaction()
         .map_err(|e| db_err!("failed to start transaction: {e}"))?;
-
-    let needs_file_apply = enabled && should_sync;
-    let needs_file_restore = should_sync && before.enabled && !enabled;
-    let touched_files = needs_file_apply || needs_file_restore;
-    let mut prev_target_bytes: Option<Vec<u8>> = None;
-    let mut prev_manifest_bytes: Option<Vec<u8>> = None;
-    if touched_files {
-        prev_target_bytes = prompt_sync::read_target_bytes(app, cli_key)?;
-        prev_manifest_bytes = prompt_sync::read_manifest_bytes(app, cli_key)?;
-    }
 
     if enabled {
         clear_enabled_for_workspace(&tx, before.workspace_id)?;
@@ -637,67 +565,23 @@ pub fn set_enabled(
         }
     }
 
-    if touched_files {
-        let file_result = if needs_file_restore {
-            prompt_sync::restore_disabled_prompt(app, cli_key)
-        } else {
-            Ok(())
-        }
-        .and_then(|_| {
-            if needs_file_apply {
-                prompt_sync::apply_enabled_prompt(app, cli_key, prompt_id, &before.content)
-            } else {
-                Ok(())
-            }
-        });
+    tx.commit()
+        .map_err(|e| db_err!("failed to commit: {e}"))?;
 
-        if let Err(err) = file_result {
-            let _ = prompt_sync::restore_target_bytes(app, cli_key, prev_target_bytes);
-            let _ = prompt_sync::restore_manifest_bytes(app, cli_key, prev_manifest_bytes);
-            return Err(err);
-        }
-    }
-
-    if let Err(err) = tx.commit() {
-        if touched_files {
-            let _ = prompt_sync::restore_target_bytes(app, cli_key, prev_target_bytes);
-            let _ = prompt_sync::restore_manifest_bytes(app, cli_key, prev_manifest_bytes);
-        }
-        return Err(db_err!("failed to commit: {err}"));
-    }
-
+    operation.mark_authoritative_committed();
     get_by_id(&conn, prompt_id)
 }
 
 pub fn delete(
-    app: &tauri::AppHandle,
+    _app: &tauri::AppHandle,
     db: &db::Db,
     prompt_id: i64,
+    operation: &RecoveryOperation,
 ) -> crate::shared::error::AppResult<()> {
     let mut conn = db.open_connection()?;
-    let before = get_by_id(&conn, prompt_id)?;
-
-    let cli_key = before.cli_key.as_str();
-    let should_sync = workspaces::is_active_workspace(&conn, before.workspace_id)?;
-    let needs_file_restore = should_sync && before.enabled;
-
     let tx = conn
         .transaction()
         .map_err(|e| db_err!("failed to start transaction: {e}"))?;
-
-    let mut prev_target_bytes: Option<Vec<u8>> = None;
-    let mut prev_manifest_bytes: Option<Vec<u8>> = None;
-
-    if needs_file_restore {
-        prev_target_bytes = prompt_sync::read_target_bytes(app, cli_key)?;
-        prev_manifest_bytes = prompt_sync::read_manifest_bytes(app, cli_key)?;
-
-        if let Err(err) = prompt_sync::restore_disabled_prompt(app, cli_key) {
-            let _ = prompt_sync::restore_target_bytes(app, cli_key, prev_target_bytes);
-            let _ = prompt_sync::restore_manifest_bytes(app, cli_key, prev_manifest_bytes);
-            return Err(err);
-        }
-    }
 
     let changed = tx
         .execute("DELETE FROM prompts WHERE id = ?1", params![prompt_id])
@@ -707,14 +591,10 @@ pub fn delete(
         return Err("DB_NOT_FOUND: prompt not found".to_string().into());
     }
 
-    if let Err(err) = tx.commit() {
-        if needs_file_restore {
-            let _ = prompt_sync::restore_target_bytes(app, cli_key, prev_target_bytes);
-            let _ = prompt_sync::restore_manifest_bytes(app, cli_key, prev_manifest_bytes);
-        }
-        return Err(db_err!("failed to commit: {err}"));
-    }
+    tx.commit()
+        .map_err(|e| db_err!("failed to commit: {e}"))?;
 
+    operation.mark_authoritative_committed();
     Ok(())
 }
 

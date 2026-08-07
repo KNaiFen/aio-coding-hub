@@ -9,7 +9,7 @@ use super::claude_json::build_claude_config_json;
 use super::codex_toml::build_codex_config_toml;
 use super::fs::{read_optional_file_with_max_len, write_file_atomic, write_file_atomic_if_changed};
 use super::gemini_json::build_gemini_settings_json;
-use super::grok_toml::apply_grok_mcp_servers;
+use super::grok_toml::{apply_grok_mcp_servers, capture_grok_local_servers};
 use super::manifest::{backup_for_enable, read_manifest, write_manifest};
 use super::paths::{
     backup_file_name, mcp_sync_files_dir, mcp_sync_manifest_path, mcp_sync_root_dir,
@@ -268,6 +268,60 @@ pub(crate) fn swap_grok_local_servers_for_workspace<R: tauri::Runtime>(
         }
         super::fs::write_file_atomic(from_stash_path, &current_stash)?;
         Ok(())
+    })
+}
+
+pub(crate) fn capture_grok_local_servers_for_workspace<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    managed_keys: &HashSet<String>,
+) -> crate::shared::error::AppResult<Vec<u8>> {
+    let config_path = crate::grok_config::config_path(app)?;
+    let bytes = crate::grok_config::read_bytes_path(&config_path)?.unwrap_or_default();
+    let source = std::str::from_utf8(&bytes)
+        .map_err(|error| format!("GROK_CONFIG_INVALID_UTF8: {error}"))?;
+    let document = if source.trim().is_empty() {
+        toml_edit::DocumentMut::new()
+    } else {
+        source
+            .parse::<toml_edit::DocumentMut>()
+            .map_err(|error| format!("GROK_CONFIG_INVALID_TOML: {error}"))?
+    };
+    let stash = capture_grok_local_servers(&document, managed_keys)?;
+    if stash.len() > super::MCP_SYNC_TARGET_MAX_BYTES {
+        return Err(format!(
+            "SEC_INVALID_INPUT: MCP local stash too large (max {} bytes)",
+            super::MCP_SYNC_TARGET_MAX_BYTES
+        )
+        .into());
+    }
+    Ok(stash)
+}
+
+pub(crate) fn restore_grok_local_servers_for_workspace<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    managed_keys: &HashSet<String>,
+    target_stash: Option<Vec<u8>>,
+) -> crate::shared::error::AppResult<()> {
+    if target_stash
+        .as_ref()
+        .is_some_and(|bytes| bytes.len() > super::MCP_SYNC_TARGET_MAX_BYTES)
+    {
+        return Err(format!(
+            "SEC_INVALID_INPUT: MCP local stash too large (max {} bytes)",
+            super::MCP_SYNC_TARGET_MAX_BYTES
+        )
+        .into());
+    }
+
+    let config_path = crate::grok_config::config_path(app)?;
+    crate::grok_config::mutate_path(&config_path, |document| {
+        super::grok_toml::swap_grok_local_servers(
+            document,
+            managed_keys,
+            target_stash.as_deref(),
+        )
+        .map(|_| ())
+        .map_err(crate::shared::error::AppError::from)
     })
 }
 

@@ -26,6 +26,7 @@ pub(crate) mod prompt_sync;
 pub(crate) mod provider_circuit_breakers;
 pub(crate) mod request_attempt_logs;
 pub(crate) mod request_logs;
+pub(crate) mod recovery_journal;
 pub(crate) mod settings;
 pub(crate) mod usage_ledger;
 pub(crate) mod usage_provider_daily_rollup;
