@@ -1,9 +1,11 @@
 //! Usage: Async startup task pipeline extracted from bootstrap setup.
 
-use super::app_state::{ensure_db_ready, DbInitState};
+use super::app_state::{ensure_db_ready_for_recovery, DbInitState};
+use super::plugins::extension_host_registry::ExtensionHostRuntimeState;
 use super::startup_state::{
     fail_startup_run, finish_startup_run, set_startup_stage, try_begin_startup_run, AppStartupStage,
 };
+#[cfg(test)]
 use std::future::Future;
 use tauri::Manager;
 
@@ -14,6 +16,7 @@ pub(crate) fn spawn(app_handle: tauri::AppHandle) -> bool {
     if !try_begin_startup_run(&app_handle) {
         return false;
     }
+    crate::app::maintenance::begin_recovery_replay(&app_handle);
 
     tauri::async_runtime::spawn(async move {
         run(app_handle).await;
@@ -24,12 +27,33 @@ pub(crate) fn spawn(app_handle: tauri::AppHandle) -> bool {
 async fn run(app_handle: tauri::AppHandle) {
     let db_state = app_handle.state::<DbInitState>();
     let init_app = app_handle.clone();
-    let db = match initialize_db_stage(&app_handle, || ensure_db_ready(init_app, db_state.inner()))
-        .await
-    {
-        Some(db) => db,
-        None => return,
+    let db = match ensure_db_ready_for_recovery(init_app, db_state.inner()).await {
+        Ok(db) => db,
+        Err(error) => {
+            tracing::error!(code = error.code(), "database initialization for recovery failed");
+            crate::app::maintenance::fail_recovery_replay(&app_handle, error);
+            return;
+        }
     };
+
+    let recovery_app = app_handle.clone();
+    let recovery_db = db.clone();
+    match crate::blocking::run("startup_recovery_journal", move || {
+        crate::infra::recovery_journal::replay_pending(&recovery_app, &recovery_db)
+    })
+    .await
+    {
+        Ok(count) => {
+            crate::app::maintenance::finish_recovery_replay_for_startup(&app_handle);
+            if count > 0 {
+                tracing::info!(replayed_count = count, "startup replayed external projections");
+            }
+        }
+        Err(error) => {
+            crate::app::maintenance::fail_recovery_replay(&app_handle, error);
+            return;
+        }
+    }
 
     match crate::request_logs::reconcile_unresolved_pending(
         &db,
@@ -53,6 +77,25 @@ async fn run(app_handle: tauri::AppHandle) {
             );
             return;
         }
+    }
+
+    let extension_host_state = app_handle.state::<ExtensionHostRuntimeState>();
+    match extension_host_state
+        .registry(app_handle.clone(), db_state.inner())
+        .await
+    {
+        Ok(registry) => match crate::app::plugin_service::activate_startup_plugins(&db, &registry).await {
+            Ok(true) => crate::app::gateway_control::app_refresh_gateway_plugins(&app_handle, &db),
+            Ok(false) => {}
+            Err(error) => tracing::warn!(
+                error = %error,
+                "failed to enumerate plugins for startup activation"
+            ),
+        },
+        Err(error) => tracing::warn!(
+            error = %error,
+            "extension host registry was unavailable for startup activation"
+        ),
     }
 
     crate::request_logs::spawn_retention_task(app_handle.clone(), db.clone());
@@ -90,6 +133,7 @@ async fn run(app_handle: tauri::AppHandle) {
     finish_startup_run(&app_handle);
 }
 
+#[cfg(test)]
 async fn initialize_db_stage<R, F, Fut>(
     app_handle: &tauri::AppHandle<R>,
     initialize: F,

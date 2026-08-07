@@ -217,10 +217,14 @@ pub(crate) async fn plugin_execute_command(
     input: PluginExecuteCommandInput,
 ) -> Result<serde_json::Value, String> {
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
-    let registry = registry_state.registry(app, db_state.inner()).await?;
-    plugin_service::execute_plugin_command(&db, registry.as_ref(), &input.command, input.args)
-        .await
-        .map_err(Into::into)
+    let registry = registry_state.registry(app.clone(), db_state.inner()).await?;
+    let result =
+        plugin_service::execute_plugin_command(&db, registry.as_ref(), &input.command, input.args)
+            .await;
+    if result.is_err() {
+        crate::app::gateway_control::app_refresh_gateway_plugins(&app, &db);
+    }
+    result.map_err(Into::into)
 }
 
 #[tauri::command]
@@ -575,7 +579,30 @@ pub(crate) async fn plugin_quarantine_revoked(
         plugin_service::quarantine_revoked_plugin(
             &db,
             &input.plugin_id,
-            "Plugin revoked by market index",
+        )
+        .and_then(|detail| refresh_running_gateway_plugins(&app, &db, detail))
+    })
+    .await
+    .map_err(String::from)?;
+    dispose_plugin_extension_host_after_lifecycle_change(&registry_state, &detail).await;
+    Ok(detail)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn plugin_revalidate(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    registry_state: tauri::State<'_, ExtensionHostRuntimeState>,
+    input: PluginGetInput,
+) -> Result<PluginDetail, String> {
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
+    let detail = blocking::run("plugin_revalidate", move || {
+        plugin_service::revalidate_quarantined_plugin(
+            &db,
+            &input.plugin_id,
+            env!("CARGO_PKG_VERSION"),
+            &crate::app_paths::plugins_cache_dir(&app)?,
         )
         .and_then(|detail| refresh_running_gateway_plugins(&app, &db, detail))
     })

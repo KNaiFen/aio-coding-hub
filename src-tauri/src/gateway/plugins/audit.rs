@@ -2,9 +2,7 @@
 
 use super::permissions::GatewayPluginError;
 use super::pipeline::{GatewayPluginAuditEvent, GatewayPluginHookExecutionReport};
-use crate::infra::plugins::repository::{
-    self, AppendPluginAuditLogInput, RecordPluginRuntimeFailureInput,
-};
+use crate::infra::plugins::repository::{self, AppendPluginAuditLogInput};
 use crate::infra::plugins::runtime_reports::{self, RecordPluginHookExecutionReportInput};
 
 pub(crate) fn persist_gateway_plugin_error_audit_events(
@@ -41,32 +39,6 @@ pub(crate) fn persist_gateway_plugin_diagnostics(
                 error = %err,
                 "failed to persist gateway plugin audit event"
             );
-        }
-
-        if event.event_type == "plugin.hook.failed" {
-            let failure_kind = event
-                .details
-                .get("failureKind")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("hook_error")
-                .to_string();
-            if let Err(err) = repository::record_runtime_failure(
-                db,
-                RecordPluginRuntimeFailureInput {
-                    plugin_id: event.plugin_id.clone(),
-                    hook_name: Some(event.hook_name.clone()),
-                    failure_kind,
-                    message: event.message,
-                    trace_id: Some(trace_id.to_string()),
-                },
-            ) {
-                tracing::warn!(
-                    plugin_id = %event.plugin_id,
-                    hook_name = %event.hook_name,
-                    error = %err,
-                    "failed to persist gateway plugin runtime failure"
-                );
-            }
         }
     }
 

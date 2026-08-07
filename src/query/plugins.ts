@@ -19,6 +19,7 @@ import {
   pluginPreviewUpdateFromFile,
   pluginExportReplayFixture,
   pluginQuarantineRevoked,
+  pluginRevalidate,
   pluginRollback,
   pluginSaveConfig,
   pluginUninstall,
@@ -352,6 +353,21 @@ export function usePluginQuarantineRevokedMutation() {
       queryClient.invalidateQueries({ queryKey: pluginKeys.list() });
       queryClient.invalidateQueries({ queryKey: pluginKeys.detail(normalizedPluginId) });
       queryClient.invalidateQueries({ queryKey: pluginContributionKeys.active() });
+    },
+  });
+}
+
+export function usePluginRevalidateMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (pluginId: string) => pluginRevalidate(pluginId),
+    onSuccess: (next, pluginId) => {
+      const normalizedPluginId = normalizePluginId(pluginId);
+      if (next) {
+        setPluginDetailAndSummary(queryClient, normalizedPluginId, next);
+      }
+      refreshPluginMutationQueries(queryClient, normalizedPluginId);
     },
   });
 }

@@ -9,6 +9,13 @@ use crate::shared::time::now_unix_seconds;
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 
 const PLUGIN_STORAGE_MAX_BYTES: usize = 64 * 1024;
+pub(crate) const PLUGIN_RUNTIME_FAILURE_WINDOW_SECONDS: i64 = 10 * 60;
+pub(crate) const PLUGIN_RUNTIME_FAILURE_THRESHOLD: i64 = 3;
+pub(crate) const PLUGIN_RUNTIME_QUARANTINE_REASON: &str =
+    "Plugin quarantined after repeated severe runtime failures";
+pub(crate) const PLUGIN_DEPRECATED_ACTIVATION_EVENTS_REASON: &str =
+    "Plugin uses deprecated activation events and was disabled";
+pub(crate) const PLUGIN_MARKET_REVOKED_REASON: &str = "Plugin revoked by market index";
 
 pub(crate) struct InsertPluginInput {
     pub manifest: PluginManifest,
@@ -32,6 +39,11 @@ pub(crate) struct RecordPluginRuntimeFailureInput {
     pub failure_kind: String,
     pub message: String,
     pub trace_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RecordPluginRuntimeFailureResult {
+    pub(crate) quarantined: bool,
 }
 
 pub(crate) fn trusted_market_public_key_for_url(
@@ -367,6 +379,62 @@ WHERE plugin_id = ?4
     get_plugin_with_conn(&conn, plugin_id)
 }
 
+/// Records a market revocation as one lifecycle transition. Keeping the state
+/// change and audit row in the same immediate transaction prevents revalidation
+/// from observing a quarantined plugin without its revocation cause.
+pub(crate) fn quarantine_plugin_for_market_revocation(
+    db: &db::Db,
+    plugin_id: &str,
+) -> AppResult<PluginDetail> {
+    with_immediate_plugin_transaction(db, |tx| {
+        ensure_plugin_exists(tx, plugin_id)?;
+        let now = now_unix_seconds();
+        let changed = tx
+            .execute(
+                r#"
+UPDATE plugins
+SET status = ?1,
+    last_error = ?2,
+    updated_at = ?3
+WHERE plugin_id = ?4
+  AND (status != 'quarantined' OR COALESCE(last_error, '') != ?2)
+"#,
+                params![
+                    PluginStatus::Quarantined.as_str(),
+                    PLUGIN_MARKET_REVOKED_REASON,
+                    now,
+                    plugin_id,
+                ],
+            )
+            .map_err(|e| db_err!("failed to quarantine revoked plugin: {e}"))?;
+        if changed > 0 {
+            let version = tx
+                .query_row(
+                    "SELECT current_version FROM plugins WHERE plugin_id = ?1",
+                    params![plugin_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(|e| db_err!("failed to read revoked plugin version: {e}"))?;
+            append_audit_log_with_tx(
+                tx,
+                AppendPluginAuditLogInput {
+                    plugin_id: Some(plugin_id.to_string()),
+                    trace_id: None,
+                    event_type: "plugin.quarantined".to_string(),
+                    risk_level: "critical".to_string(),
+                    message: "Plugin quarantined by market revocation".to_string(),
+                    details: serde_json::json!({
+                        "reason": PLUGIN_MARKET_REVOKED_REASON,
+                        "source": "market_revoked",
+                        "version": version,
+                    }),
+                },
+            )?;
+        }
+        get_plugin_with_conn(tx, plugin_id)
+    })
+}
+
 #[allow(dead_code)]
 pub(crate) fn update_plugin_manifest(
     db: &db::Db,
@@ -405,10 +473,16 @@ fn update_plugin_manifest_with_conn(
 UPDATE plugins
 SET name = ?1,
     current_version = ?2,
-    status = ?3,
+    status = CASE
+      WHEN status = 'quarantined' THEN 'quarantined'
+      ELSE ?3
+    END,
     manifest_json = ?4,
     installed_dir = ?5,
-    last_error = NULL,
+    last_error = CASE
+      WHEN status = 'quarantined' THEN last_error
+      ELSE NULL
+    END,
     updated_at = ?6
 WHERE plugin_id = ?7
 "#,
@@ -827,6 +901,239 @@ INSERT INTO plugin_runtime_failures(
 
     let id = conn.last_insert_rowid();
     get_runtime_failure_by_id(&conn, id)
+}
+
+/// Persists a severe runtime failure and transitions an enabled plugin to
+/// quarantine once its rolling failure window reaches the fixed threshold.
+///
+/// The insert, count, state transition, and audit rows share one immediate
+/// transaction so concurrent hook failures cannot race into multiple lifecycle
+/// transitions or leave a quarantined status without an audit record.
+pub(crate) fn record_severe_runtime_failure_and_maybe_quarantine(
+    db: &db::Db,
+    input: RecordPluginRuntimeFailureInput,
+) -> AppResult<RecordPluginRuntimeFailureResult> {
+    if !matches!(
+        input.failure_kind.as_str(),
+        "host_crash" | "runtime_error" | "timeout"
+    ) {
+        return Err(AppError::new(
+            "PLUGIN_INVALID_RUNTIME_FAILURE_KIND",
+            "runtime quarantine only accepts severe failure kinds",
+        ));
+    }
+
+    with_immediate_plugin_transaction(db, |tx| {
+        ensure_plugin_exists(tx, &input.plugin_id)?;
+        let now = now_unix_seconds();
+        tx.execute(
+            r#"
+INSERT INTO plugin_runtime_failures(
+  plugin_id,
+  hook_name,
+  failure_kind,
+  message,
+  trace_id,
+  created_at
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+"#,
+            params![
+                input.plugin_id,
+                input.hook_name,
+                input.failure_kind,
+                input.message,
+                input.trace_id,
+                now
+            ],
+        )
+        .map_err(|e| db_err!("failed to record severe plugin runtime failure: {e}"))?;
+
+        let recent_failure_count = tx
+            .query_row(
+                r#"
+SELECT COUNT(*)
+FROM plugin_runtime_failures
+WHERE plugin_id = ?1
+  AND failure_kind IN ('host_crash', 'runtime_error', 'timeout')
+  AND created_at >= ?2
+"#,
+                params![
+                    input.plugin_id,
+                    now.saturating_sub(PLUGIN_RUNTIME_FAILURE_WINDOW_SECONDS)
+                ],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|e| db_err!("failed to count severe plugin runtime failures: {e}"))?;
+
+        append_audit_log_with_tx(
+            tx,
+            AppendPluginAuditLogInput {
+                plugin_id: Some(input.plugin_id.clone()),
+                trace_id: input.trace_id.clone(),
+                event_type: "plugin.runtime_failure".to_string(),
+                risk_level: "high".to_string(),
+                message: "Severe plugin runtime failure recorded".to_string(),
+                details: serde_json::json!({
+                    "failureKind": input.failure_kind,
+                    "hookName": input.hook_name,
+                    "windowSeconds": PLUGIN_RUNTIME_FAILURE_WINDOW_SECONDS,
+                    "recentFailureCount": recent_failure_count,
+                }),
+            },
+        )?;
+
+        let quarantined = if recent_failure_count >= PLUGIN_RUNTIME_FAILURE_THRESHOLD {
+            let changed = tx
+                .execute(
+                    r#"
+UPDATE plugins
+SET status = ?1,
+    last_error = ?2,
+    updated_at = ?3
+WHERE plugin_id = ?4
+  AND status = 'enabled'
+"#,
+                    params![
+                        PluginStatus::Quarantined.as_str(),
+                        PLUGIN_RUNTIME_QUARANTINE_REASON,
+                        now,
+                        input.plugin_id
+                    ],
+                )
+                .map_err(|e| db_err!("failed to quarantine plugin after runtime failures: {e}"))?;
+            if changed > 0 {
+                append_audit_log_with_tx(
+                    tx,
+                    AppendPluginAuditLogInput {
+                        plugin_id: Some(input.plugin_id.clone()),
+                        trace_id: input.trace_id.clone(),
+                        event_type: "plugin.quarantined".to_string(),
+                        risk_level: "critical".to_string(),
+                        message: "Plugin quarantined after repeated severe runtime failures"
+                            .to_string(),
+                        details: serde_json::json!({
+                            "source": "runtime_failure_threshold",
+                            "failureKind": input.failure_kind,
+                            "threshold": PLUGIN_RUNTIME_FAILURE_THRESHOLD,
+                            "windowSeconds": PLUGIN_RUNTIME_FAILURE_WINDOW_SECONDS,
+                        }),
+                    },
+                )?;
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        Ok(RecordPluginRuntimeFailureResult { quarantined })
+    })
+}
+
+pub(crate) fn disable_plugin_for_deprecated_activation_events(
+    db: &db::Db,
+    plugin_id: &str,
+) -> AppResult<bool> {
+    with_immediate_plugin_transaction(db, |tx| {
+        let now = now_unix_seconds();
+        let changed = tx
+            .execute(
+                r#"
+UPDATE plugins
+SET status = ?1,
+    last_error = ?2,
+    updated_at = ?3
+WHERE plugin_id = ?4
+  AND status NOT IN ('quarantined', 'uninstalled')
+  AND (status != 'disabled' OR COALESCE(last_error, '') != ?2)
+"#,
+                params![
+                    PluginStatus::Disabled.as_str(),
+                    PLUGIN_DEPRECATED_ACTIVATION_EVENTS_REASON,
+                    now,
+                    plugin_id
+                ],
+            )
+            .map_err(|e| db_err!("failed to disable plugin with deprecated activation events: {e}"))?;
+        if changed > 0 {
+            append_audit_log_with_tx(
+                tx,
+                AppendPluginAuditLogInput {
+                    plugin_id: Some(plugin_id.to_string()),
+                    trace_id: None,
+                    event_type: "plugin.activation_events.deprecated".to_string(),
+                    risk_level: "medium".to_string(),
+                    message: "Plugin disabled because its activation events are no longer supported"
+                        .to_string(),
+                    details: serde_json::json!({
+                        "reason": PLUGIN_DEPRECATED_ACTIVATION_EVENTS_REASON,
+                    }),
+                },
+            )?;
+        }
+        Ok(changed > 0)
+    })
+}
+
+pub(crate) fn revalidate_quarantined_plugin_to_disabled(
+    db: &db::Db,
+    plugin_id: &str,
+) -> AppResult<PluginDetail> {
+    with_immediate_plugin_transaction(db, |tx| {
+        let market_revoked = tx
+            .query_row(
+                r#"
+SELECT EXISTS(
+  SELECT 1
+  FROM plugins
+  WHERE plugin_id = ?1
+    AND status = 'quarantined'
+    AND last_error = ?2
+)
+"#,
+                params![plugin_id, PLUGIN_MARKET_REVOKED_REASON],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|e| db_err!("failed to read plugin revocation state: {e}"))?;
+        if market_revoked != 0 {
+            return Err(AppError::new(
+                "PLUGIN_REVALIDATE_MARKET_REVOKED",
+                "plugins quarantined by market revocation cannot be revalidated",
+            ));
+        }
+        let changed = tx
+            .execute(
+                r#"
+UPDATE plugins
+SET status = ?1,
+    last_error = NULL,
+    updated_at = ?2
+WHERE plugin_id = ?3
+  AND status = 'quarantined'
+"#,
+                params![PluginStatus::Disabled.as_str(), now_unix_seconds(), plugin_id],
+            )
+            .map_err(|e| db_err!("failed to revalidate quarantined plugin: {e}"))?;
+        if changed == 0 {
+            return Err(AppError::new(
+                "PLUGIN_REVALIDATE_STATUS_INVALID",
+                "only quarantined plugins can be revalidated",
+            ));
+        }
+        append_audit_log_with_tx(
+            tx,
+            AppendPluginAuditLogInput {
+                plugin_id: Some(plugin_id.to_string()),
+                trace_id: None,
+                event_type: "plugin.revalidated".to_string(),
+                risk_level: "medium".to_string(),
+                message: "Plugin revalidated and restored to disabled state".to_string(),
+                details: serde_json::json!({ "restoredStatus": "disabled" }),
+            },
+        )?;
+        get_plugin_with_conn(tx, plugin_id)
+    })
 }
 
 struct PluginDetailRow {
@@ -1413,6 +1720,43 @@ mod tests {
     }
 
     #[test]
+    fn manifest_update_preserves_quarantine_until_explicit_revalidation() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::init_for_tests(&dir.path().join("plugins.db")).unwrap();
+        insert_plugin(
+            &db,
+            InsertPluginInput {
+                manifest: test_manifest("quarantine.update", "1.0.0"),
+                install_source: PluginInstallSource::Local,
+                status: PluginStatus::Enabled,
+                installed_dir: Some("/tmp/plugin-v1".to_string()),
+            },
+        )
+        .unwrap();
+        update_plugin_status(
+            &db,
+            "quarantine.update",
+            PluginStatus::Quarantined,
+            Some(PLUGIN_RUNTIME_QUARANTINE_REASON),
+        )
+        .unwrap();
+
+        let updated = update_plugin_manifest(
+            &db,
+            test_manifest("quarantine.update", "1.1.0"),
+            Some("/tmp/plugin-v2".to_string()),
+        )
+        .unwrap();
+
+        assert_eq!(updated.summary.current_version.as_deref(), Some("1.1.0"));
+        assert_eq!(updated.summary.status, PluginStatus::Quarantined);
+        assert_eq!(
+            updated.summary.last_error.as_deref(),
+            Some(PLUGIN_RUNTIME_QUARANTINE_REASON)
+        );
+    }
+
+    #[test]
     fn repository_round_trips_plugin_state_config_permissions_and_audit() {
         let dir = tempfile::tempdir().unwrap();
         let db = crate::db::init_for_tests(&dir.path().join("plugins.db")).unwrap();
@@ -1490,6 +1834,121 @@ mod tests {
         );
         assert_eq!(detail.audit_logs.len(), 1);
         assert_eq!(detail.runtime_failures.len(), 1);
+    }
+
+    #[test]
+    fn severe_runtime_failures_quarantine_once_within_the_rolling_window_and_survive_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("plugins.db");
+        let db = crate::db::init_for_tests(&db_path).unwrap();
+        insert_plugin(
+            &db,
+            InsertPluginInput {
+                manifest: manifest(),
+                install_source: PluginInstallSource::Local,
+                status: PluginStatus::Enabled,
+                installed_dir: None,
+            },
+        )
+        .unwrap();
+
+        let conn = db.open_connection().unwrap();
+        conn.execute(
+            r#"
+INSERT INTO plugin_runtime_failures(
+  plugin_id,
+  hook_name,
+  failure_kind,
+  message,
+  trace_id,
+  created_at
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+"#,
+            params![
+                "community.prompt-helper",
+                "gateway.request.afterBodyRead",
+                "timeout",
+                "outside rolling window",
+                "trace-old",
+                now_unix_seconds().saturating_sub(PLUGIN_RUNTIME_FAILURE_WINDOW_SECONDS + 1),
+            ],
+        )
+        .unwrap();
+
+        for index in 1..=2 {
+            let result = record_severe_runtime_failure_and_maybe_quarantine(
+                &db,
+                RecordPluginRuntimeFailureInput {
+                    plugin_id: "community.prompt-helper".to_string(),
+                    hook_name: Some("gateway.request.afterBodyRead".to_string()),
+                    failure_kind: "timeout".to_string(),
+                    message: "stable severe failure".to_string(),
+                    trace_id: Some(format!("trace-{index}")),
+                },
+            )
+            .unwrap();
+            assert!(!result.quarantined);
+            assert_eq!(
+                get_plugin(&db, "community.prompt-helper").unwrap().summary.status,
+                PluginStatus::Enabled
+            );
+        }
+
+        let third = record_severe_runtime_failure_and_maybe_quarantine(
+            &db,
+            RecordPluginRuntimeFailureInput {
+                plugin_id: "community.prompt-helper".to_string(),
+                hook_name: Some("gateway.request.afterBodyRead".to_string()),
+                failure_kind: "runtime_error".to_string(),
+                message: "stable severe failure".to_string(),
+                trace_id: Some("trace-third".to_string()),
+            },
+        )
+        .unwrap();
+        assert!(third.quarantined);
+        let quarantined = get_plugin(&db, "community.prompt-helper").unwrap();
+        assert_eq!(quarantined.summary.status, PluginStatus::Quarantined);
+        assert_eq!(
+            quarantined.summary.last_error.as_deref(),
+            Some(PLUGIN_RUNTIME_QUARANTINE_REASON)
+        );
+        assert_eq!(
+            quarantined
+                .audit_logs
+                .iter()
+                .filter(|audit| audit.event_type == "plugin.quarantined")
+                .count(),
+            1
+        );
+
+        let after_quarantine = record_severe_runtime_failure_and_maybe_quarantine(
+            &db,
+            RecordPluginRuntimeFailureInput {
+                plugin_id: "community.prompt-helper".to_string(),
+                hook_name: Some("gateway.request.afterBodyRead".to_string()),
+                failure_kind: "host_crash".to_string(),
+                message: "stable severe failure".to_string(),
+                trace_id: Some("trace-after-quarantine".to_string()),
+            },
+        )
+        .unwrap();
+        assert!(!after_quarantine.quarantined);
+
+        drop(conn);
+        let reopened = crate::db::init_for_tests(&db_path).unwrap();
+        assert_eq!(
+            get_plugin(&reopened, "community.prompt-helper")
+                .unwrap()
+                .summary
+                .status,
+            PluginStatus::Quarantined
+        );
+        let revalidated = revalidate_quarantined_plugin_to_disabled(
+            &reopened,
+            "community.prompt-helper",
+        )
+        .unwrap();
+        assert_eq!(revalidated.summary.status, PluginStatus::Disabled);
     }
 
     #[test]

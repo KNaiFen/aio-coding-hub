@@ -210,6 +210,7 @@ macro_rules! generated_command_registry {
             plugin_update_remote => crate::commands::plugins::plugin_update_remote,
             plugin_install_official => crate::commands::plugins::plugin_install_official,
             plugin_quarantine_revoked => crate::commands::plugins::plugin_quarantine_revoked,
+            plugin_revalidate => crate::commands::plugins::plugin_revalidate,
             plugin_enable => crate::commands::plugins::plugin_enable,
             plugin_disable => crate::commands::plugins::plugin_disable,
             plugin_uninstall => crate::commands::plugins::plugin_uninstall,
