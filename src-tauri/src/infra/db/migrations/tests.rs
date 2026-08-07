@@ -46,7 +46,7 @@ PRAGMA user_version = 37;
     assert_eq!(rows[0].0, "codex");
     assert_eq!(
         rows[0].1.as_deref(),
-        Some(r#"{"version":1,"mode":"all","rules":[]}"#)
+        Some(r#"{"version":1,"mode":"all","modelPatterns":[],"mappings":[]}"#)
     );
     assert_eq!(rows[0].2, r#"{"legacy":3}"#);
     assert_eq!(rows[0].3, r#"{"legacy":4}"#);
@@ -69,7 +69,7 @@ PRAGMA user_version = 37;
         .expect("read v38 model policy default");
     assert_eq!(
         default_policy.as_deref(),
-        Some(r#"{"version":1,"mode":"all","rules":[]}"#)
+        Some(r#"{"version":1,"mode":"all","modelPatterns":[],"mappings":[]}"#)
     );
 
     v37_to_v38::migrate_v37_to_v38(&mut conn).expect("migrate v37->v38 twice");

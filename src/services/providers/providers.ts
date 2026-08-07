@@ -9,7 +9,7 @@ import {
   type ProviderModelMode as GeneratedProviderModelMode,
   type ProviderModelPolicyStatus as GeneratedProviderModelPolicyStatus,
   type ProviderModelPolicyV1 as GeneratedProviderModelPolicyV1,
-  type ProviderModelRule as GeneratedProviderModelRule,
+  type ProviderModelMapping as GeneratedProviderModelMapping,
   type ProviderModelDiscoveryErrorCode as GeneratedProviderModelDiscoveryErrorCode,
   type ProviderModelDiscoveryInput as GeneratedProviderModelDiscoveryInput,
   type ProviderModelDiscoveryResult as GeneratedProviderModelDiscoveryResult,
@@ -64,7 +64,7 @@ export type ProviderBaseUrlMode = GeneratedProviderBaseUrlMode;
 export type ProviderModelMode = GeneratedProviderModelMode;
 export type ProviderModelPolicyStatus = GeneratedProviderModelPolicyStatus;
 export type ProviderModelPolicyV1 = GeneratedProviderModelPolicyV1;
-export type ProviderModelRule = GeneratedProviderModelRule;
+export type ProviderModelMapping = GeneratedProviderModelMapping;
 export type ProviderModelDiscoveryErrorCode = GeneratedProviderModelDiscoveryErrorCode;
 export type ProviderModelDiscoveryResult = GeneratedProviderModelDiscoveryResult;
 export type ProviderModelDiscoveryUnsupportedReason =

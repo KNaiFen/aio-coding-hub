@@ -261,7 +261,9 @@ export const handlers = [
         input.modelPolicy && typeof input.modelPolicy === "object"
           ? (input.modelPolicy as ProviderSummary["model_policy"])
           : (existing?.model_policy ??
-            (cliKey === "claude" ? null : { version: 1, mode: "all", rules: [] })),
+            (cliKey === "claude"
+              ? null
+              : { version: 1, mode: "all", modelPatterns: [], mappings: [] })),
       api_key_configured:
         input.authMode === "oauth"
           ? false

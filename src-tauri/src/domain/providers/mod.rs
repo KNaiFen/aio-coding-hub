@@ -6,9 +6,10 @@ mod types;
 mod validation;
 
 pub(crate) use model_policy::normalize_concrete_model_id;
+pub(crate) use model_policy::ProviderModelEligibility;
 #[allow(unused_imports)]
 pub use model_policy::{
-    ProviderModelMode, ProviderModelPolicyStatus, ProviderModelPolicyV1, ProviderModelRule,
+    ProviderModelMapping, ProviderModelMode, ProviderModelPolicyStatus, ProviderModelPolicyV1,
 };
 pub use types::{
     ClaudeModels, DailyResetMode, ProviderAuthMode, ProviderBaseUrlMode,

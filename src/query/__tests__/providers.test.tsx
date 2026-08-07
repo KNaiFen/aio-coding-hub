@@ -102,7 +102,12 @@ function makeProvider(
     source_provider_id: partial.source_provider_id ?? null,
     bridge_type: partial.bridge_type ?? null,
     model_policy_status: partial.model_policy_status ?? "ready",
-    model_policy: partial.model_policy ?? { version: 1, mode: "all", rules: [] },
+    model_policy: partial.model_policy ?? {
+      version: 1,
+      mode: "all",
+      modelPatterns: [],
+      mappings: [],
+    },
     stream_idle_timeout_seconds: partial.stream_idle_timeout_seconds ?? null,
     extension_values: partial.extension_values ?? [],
     api_key_configured: partial.api_key_configured ?? false,

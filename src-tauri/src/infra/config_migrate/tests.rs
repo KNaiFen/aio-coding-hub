@@ -267,7 +267,7 @@ INSERT INTO providers(
         ready
             .model_policy
             .as_ref()
-            .and_then(|policy| policy.resolve("gpt-5")),
+            .map(|policy| policy.resolve_mapping("gpt-5")),
         Some("upstream-5".to_string())
     );
     assert!(ready.claude_models.is_none());
@@ -622,7 +622,7 @@ fn config_import_v2_restores_full_prompt_and_skill_payload() {
         .expect("model policy");
     assert_eq!(
         model_policy_json.as_deref(),
-        Some(r#"{"version":1,"mode":"all","rules":[]}"#)
+        Some(r#"{"version":1,"mode":"all","modelPatterns":[],"mappings":[]}"#)
     );
 
     let skill_enabled_count: i64 = conn

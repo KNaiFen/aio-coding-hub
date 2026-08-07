@@ -25,7 +25,7 @@ pub(super) fn migrate_v37_to_v38(conn: &mut Connection) -> Result<(), String> {
 
         if !has_column {
             tx.execute_batch(
-                "ALTER TABLE providers ADD COLUMN model_policy_json TEXT NULL DEFAULT '{\"version\":1,\"mode\":\"all\",\"rules\":[]}';",
+                "ALTER TABLE providers ADD COLUMN model_policy_json TEXT NULL DEFAULT '{\"version\":1,\"mode\":\"all\",\"modelPatterns\":[],\"mappings\":[]}';",
             )
             .map_err(|error| format!("failed to add provider model policy: {error}"))?;
         }
@@ -34,7 +34,7 @@ pub(super) fn migrate_v37_to_v38(conn: &mut Connection) -> Result<(), String> {
 UPDATE providers
 SET model_policy_json = CASE
   WHEN cli_key = 'claude' THEN NULL
-  ELSE COALESCE(model_policy_json, '{"version":1,"mode":"all","rules":[]}')
+  ELSE COALESCE(model_policy_json, '{"version":1,"mode":"all","modelPatterns":[],"mappings":[]}')
 END
 "#,
             [],

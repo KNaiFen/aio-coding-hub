@@ -24,7 +24,8 @@ function makeContext(
     modelPolicy: {
       version: 1,
       mode: "all",
-      rules: [],
+      modelPatterns: [],
+      mappings: [],
     },
     formValues: {
       ...DEFAULT_FORM_VALUES,
@@ -137,7 +138,7 @@ describe("pages/providers/providerEditorSubmitModel", () => {
   it("blocks an empty selected policy", () => {
     const result = buildProviderEditorUpsertInput(
       makeContext({
-        modelPolicy: { version: 1, mode: "selected", rules: [] },
+        modelPolicy: { version: 1, mode: "selected", modelPatterns: [], mappings: [] },
       })
     );
 
@@ -145,7 +146,7 @@ describe("pages/providers/providerEditorSubmitModel", () => {
       ok: false,
       error: {
         kind: "message",
-        message: "选定模型模式至少需要一条规则",
+        message: "仅这些可用模式至少需要一个模型或映射",
       },
     });
   });

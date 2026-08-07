@@ -98,7 +98,7 @@ function createProviderSummary(overrides: Partial<ProviderSummary> = {}): Provid
     source_provider_id: null,
     bridge_type: null,
     model_policy_status: "ready",
-    model_policy: { version: 1, mode: "all", rules: [] },
+    model_policy: { version: 1, mode: "all", modelPatterns: [], mappings: [] },
     stream_idle_timeout_seconds: null,
     extension_values: [],
     api_key_configured: false,

@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS providers (
   supported_models_json TEXT NOT NULL DEFAULT '{}',
   model_mapping_json TEXT NOT NULL DEFAULT '{}',
   claude_models_json TEXT NOT NULL DEFAULT '{}',
-  model_policy_json TEXT NULL DEFAULT '{"version":1,"mode":"all","rules":[]}',
+  model_policy_json TEXT NULL DEFAULT '{"version":1,"mode":"all","modelPatterns":[],"mappings":[]}',
   UNIQUE(cli_key, name)
 );
 

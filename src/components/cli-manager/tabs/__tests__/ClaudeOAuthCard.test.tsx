@@ -58,7 +58,7 @@ function makeProvider(overrides: Partial<ProviderSummary> = {}): ProviderSummary
     source_provider_id: null,
     bridge_type: null,
     model_policy_status: "ready",
-    model_policy: { version: 1, mode: "all", rules: [] },
+    model_policy: { version: 1, mode: "all", modelPatterns: [], mappings: [] },
     api_key_configured: overrides.api_key_configured ?? false,
     ...overrides,
     stream_idle_timeout_seconds: overrides.stream_idle_timeout_seconds ?? null,

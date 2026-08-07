@@ -23,7 +23,7 @@ import {
   deriveCx2ccSourceValue,
   withCx2ccDefaultModel,
 } from "./providerEditorUtils";
-import { DEFAULT_PROVIDER_MODEL_POLICY } from "./providerModelPolicy";
+import { cloneProviderModelPolicy, DEFAULT_PROVIDER_MODEL_POLICY } from "./providerModelPolicy";
 
 export type EffectDeps = {
   open: boolean;
@@ -134,7 +134,7 @@ export function useProviderEditorEffects(d: EffectDeps) {
           ? withCx2ccDefaultModel(createInitialValues?.claude_models ?? {})
           : (createInitialValues?.claude_models ?? {})
       );
-      setModelPolicy({ ...DEFAULT_PROVIDER_MODEL_POLICY, rules: [] });
+      setModelPolicy(cloneProviderModelPolicy(DEFAULT_PROVIDER_MODEL_POLICY));
       setModelPolicyStatus("ready");
       setModelPolicyDirty(false);
       setTags(
@@ -180,7 +180,7 @@ export function useProviderEditorEffects(d: EffectDeps) {
     );
     setModelPolicy(
       initialModelPolicyStatus === "ready"
-        ? (snapshot.model_policy ?? { ...DEFAULT_PROVIDER_MODEL_POLICY, rules: [] })
+        ? (snapshot.model_policy ?? cloneProviderModelPolicy(DEFAULT_PROVIDER_MODEL_POLICY))
         : null
     );
     setModelPolicyStatus(initialModelPolicyStatus);

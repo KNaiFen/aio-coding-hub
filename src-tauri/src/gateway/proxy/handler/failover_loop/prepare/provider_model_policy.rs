@@ -28,7 +28,7 @@ pub(super) fn apply_if_needed<R: tauri::Runtime>(
     }
     let policy = provider.model_policy.as_ref()?;
     let requested_model = ctx.requested_model.as_deref()?;
-    let effective_model = policy.resolve(requested_model)?;
+    let effective_model = policy.resolve_mapping(requested_model);
     if effective_model == requested_model {
         return None;
     }

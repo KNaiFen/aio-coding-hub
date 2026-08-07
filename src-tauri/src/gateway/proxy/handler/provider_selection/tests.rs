@@ -44,15 +44,34 @@ fn selected_policy(source: &str) -> providers::ProviderModelPolicyV1 {
     providers::ProviderModelPolicyV1 {
         version: 1,
         mode: providers::ProviderModelMode::Selected,
-        rules: vec![providers::ProviderModelRule {
+        model_patterns: vec![source.to_string()],
+        mappings: vec![],
+    }
+}
+
+fn mapping_policy(source: &str, target: &str) -> providers::ProviderModelPolicyV1 {
+    providers::ProviderModelPolicyV1 {
+        version: 1,
+        mode: providers::ProviderModelMode::All,
+        model_patterns: vec![],
+        mappings: vec![providers::ProviderModelMapping {
             source: source.to_string(),
-            target: None,
+            target: target.to_string(),
         }],
     }
 }
 
+fn excluded_policy(source: &str) -> providers::ProviderModelPolicyV1 {
+    providers::ProviderModelPolicyV1 {
+        version: 1,
+        mode: providers::ProviderModelMode::Excluded,
+        model_patterns: vec![source.to_string()],
+        mappings: vec![],
+    }
+}
+
 #[test]
-fn model_policy_filter_preserves_order_and_recomputes_from_full_candidates() {
+fn model_policy_filter_prefers_explicit_matches_and_preserves_order() {
     let mut providers = vec![
         gateway_provider(
             1,
@@ -61,23 +80,23 @@ fn model_policy_filter_preserves_order_and_recomputes_from_full_candidates() {
         ),
         gateway_provider(
             2,
-            Some(selected_policy("gpt-5.4")),
+            Some(mapping_policy("gpt-5.6-luna", "deepseek-v4-flash")),
             providers::ProviderModelPolicyStatus::Ready,
         ),
         gateway_provider(
             3,
-            Some(selected_policy("gpt-5.5")),
+            Some(providers::ProviderModelPolicyV1::all()),
             providers::ProviderModelPolicyStatus::Ready,
         ),
     ];
 
-    let first = filter_providers_by_model_policy(&mut providers, Some("gpt-5.4"));
-    assert_eq!(ids(&providers), vec![1, 2]);
+    let first = filter_providers_by_model_policy(&mut providers, Some("gpt-5.6-luna"));
+    assert_eq!(ids(&providers), vec![2]);
     assert_eq!(
         first,
         ModelPolicyFilterResult {
             original_provider_ids: vec![1, 2, 3],
-            ineligible_provider_ids: vec![3],
+            ineligible_provider_ids: vec![1, 3],
             invalid_provider_ids: vec![],
         }
     );
@@ -95,12 +114,47 @@ fn model_policy_filter_preserves_order_and_recomputes_from_full_candidates() {
         ),
         gateway_provider(
             3,
-            Some(selected_policy("gpt-5.5")),
+            Some(selected_policy("gpt-5.4")),
+            providers::ProviderModelPolicyStatus::Ready,
+        ),
+    ];
+    filter_providers_by_model_policy(&mut providers, Some("gpt-5.4"));
+    assert_eq!(ids(&providers), vec![2, 3]);
+
+    let mut providers = vec![
+        gateway_provider(
+            1,
+            Some(providers::ProviderModelPolicyV1::all()),
+            providers::ProviderModelPolicyStatus::Ready,
+        ),
+        gateway_provider(
+            2,
+            Some(selected_policy("gpt-5.4")),
             providers::ProviderModelPolicyStatus::Ready,
         ),
     ];
     filter_providers_by_model_policy(&mut providers, Some("gpt-5.5"));
-    assert_eq!(ids(&providers), vec![1, 3]);
+    assert_eq!(ids(&providers), vec![1]);
+}
+
+#[test]
+fn model_policy_filter_blocks_excluded_matches() {
+    let mut providers = vec![
+        gateway_provider(
+            1,
+            Some(excluded_policy("gpt-5.6-*")),
+            providers::ProviderModelPolicyStatus::Ready,
+        ),
+        gateway_provider(
+            2,
+            Some(providers::ProviderModelPolicyV1::all()),
+            providers::ProviderModelPolicyStatus::Ready,
+        ),
+    ];
+
+    let result = filter_providers_by_model_policy(&mut providers, Some("gpt-5.6-luna"));
+    assert_eq!(ids(&providers), vec![2]);
+    assert_eq!(result.ineligible_provider_ids, vec![1]);
 }
 
 #[test]

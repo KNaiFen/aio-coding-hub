@@ -3659,14 +3659,15 @@ export type ProviderModelDiscoveryResult =
   | { status: "unsupported"; reason: ProviderModelDiscoveryUnsupportedReason }
   | { status: "error"; code: ProviderModelDiscoveryErrorCode; http_status: number | null };
 export type ProviderModelDiscoveryUnsupportedReason = "oauth" | "cx_2cc";
-export type ProviderModelMode = "all" | "selected";
+export type ProviderModelMapping = { source: string; target: string };
+export type ProviderModelMode = "all" | "selected" | "excluded";
 export type ProviderModelPolicyStatus = "legacy" | "ready" | "invalid";
 export type ProviderModelPolicyV1 = {
   version: number;
   mode: ProviderModelMode;
-  rules: ProviderModelRule[];
+  modelPatterns: string[];
+  mappings: ProviderModelMapping[];
 };
-export type ProviderModelRule = { source: string; target: string | null };
 export type ProviderOAuthDeviceCodeCancelResult = { cancelled: boolean };
 export type ProviderOAuthDeviceCodePollInput = {
   providerId: number;

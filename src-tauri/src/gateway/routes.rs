@@ -711,10 +711,19 @@ mod tests {
         providers::ProviderModelPolicyV1 {
             version: 1,
             mode: providers::ProviderModelMode::Selected,
-            rules: vec![providers::ProviderModelRule {
-                source: source.to_string(),
-                target: target.map(str::to_string),
-            }],
+            model_patterns: target
+                .is_none()
+                .then(|| source.to_string())
+                .into_iter()
+                .collect(),
+            mappings: target
+                .map(|target| {
+                    vec![providers::ProviderModelMapping {
+                        source: source.to_string(),
+                        target: target.to_string(),
+                    }]
+                })
+                .unwrap_or_default(),
         }
     }
 

@@ -669,10 +669,8 @@ mod tests {
         policy_changed.model_policy = Some(providers::ProviderModelPolicyV1 {
             version: 1,
             mode: providers::ProviderModelMode::Selected,
-            rules: vec![providers::ProviderModelRule {
-                source: "claude-sonnet-*".to_string(),
-                target: None,
-            }],
+            model_patterns: vec!["claude-sonnet-*".to_string()],
+            mappings: vec![],
         });
         assert_eq!(
             provider_runtime_reset_decision(Some(&previous), Some("sk-old"), &policy_changed, None,),

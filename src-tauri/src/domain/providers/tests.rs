@@ -947,9 +947,10 @@ fn provider_model_policy_round_trips_and_invalid_rows_fail_closed() {
         ProviderModelPolicyV1 {
             version: 1,
             mode: ProviderModelMode::Selected,
-            rules: vec![ProviderModelRule {
+            model_patterns: vec![],
+            mappings: vec![ProviderModelMapping {
                 source: "gpt-*".to_string(),
-                target: Some("upstream-*".to_string()),
+                target: "upstream-*".to_string(),
             }],
         }
         .normalized()
@@ -959,8 +960,12 @@ fn provider_model_policy_round_trips_and_invalid_rows_fail_closed() {
     let saved = upsert(&db, params).expect("save model policy");
     assert_eq!(saved.model_policy_status, ProviderModelPolicyStatus::Ready);
     assert_eq!(
-        saved.model_policy.as_ref().unwrap().resolve("gpt-5"),
-        Some("upstream-5".to_string())
+        saved
+            .model_policy
+            .as_ref()
+            .unwrap()
+            .resolve_mapping("gpt-5"),
+        "upstream-5"
     );
 
     let conn = db.open_connection().expect("open db");
