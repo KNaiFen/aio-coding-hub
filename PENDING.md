@@ -16,11 +16,12 @@
 
 ### AIO-PENDING-017 - Provider Sync session-only 快照
 
-- **状态**：`planned`
+- **状态**：`pending`
 - **日期**：2026-08-06
 - **观察问题**：Provider Sync 当前扫描并备份 `archived_sessions`、SQLite 与全局状态，且旧格式 managed backup 最多保留五代，造成与恢复目标无关的空间增长。
 - **锁定决策**：新格式只处理活动 `sessions`，不再扫描、改写或备份 `archived_sessions`；只保留最新一代新格式 managed backup；只删除 manifest 精确证明所有权的旧格式 managed backup。
 - **拟议方向**：引入 v2 session-only manifest 和严格 managed/unmanaged 分类，在首次成功创建 v2 后迁移清理 v1，并保留同步失败的完整回滚。
+- **当前阻断**：清理器在完成 quarantine 目录校验后仍按路径递归删除，存在可被并发路径替换利用的 TOCTOU 窗口；必须先实现跨平台、身份绑定且不跟随链接的目录删除，再恢复合并流程。
 - **验收标准**：归档会话字节不变；成功后最多一代 v2；v1 managed 可迁移、非受管/损坏/symlink 保留；云端 Rust 覆盖迁移、回滚和所有权边界。
 - **Trellis**：[`08-06-provider-sync-session-snapshot`](./.trellis/tasks/08-06-provider-sync-session-snapshot/)
 
