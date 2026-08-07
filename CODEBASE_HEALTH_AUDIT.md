@@ -339,6 +339,7 @@ Rust 运行时状态 / 请求日志
 - 2026-08-06 最新主线复核：`origin/main@ff09a81a` 仍只停止网关并取走 `DbInitState` 缓存；observer、两个 retention task 与 usage backfill 继续持有独立或 clone 的 DB pool，删除仍按 settings 后 SQLite 的不可回滚顺序执行。#76 仅修改前端 FormField 文件，无相关实现。没有可独立保证安全的窄修复：退出式 marker、进程内统一 cancel/join 或暂时禁用入口会改变产品生命周期合同，保持 `confirmed`，等待用户统一决策。
 - 2026-08-06 最新主线复核：以 `origin/main@4ee5faa8` 逐点确认 `app_data_reset` 仍只锁 gateway/DbInitState；startup retention、provider availability、usage backfill、observer 独立只读 pool 和已分发的 Db clone 都可能继续存活，文件删除仍逐个 `remove_file` 且首错即返。基础测试不覆盖真实 IPC、后台 task、in-flight clone 或跨平台失败。AUD008 没有不改变生命周期契约的安全窄修复，继续 `confirmed`。
 - 2026-08-06 最终治理计划：任务 `.trellis/tasks/08-06-cross-restart-data-reset`。reset IPC 只原子持久化 marker 后走禁止 `ensure_db_ready` 的专用退出；下次进程在 DB、observer、gateway、retention、usage backfill 和前端后台任务前执行幂等清理。任一删除失败保留 marker，应用进入仅允许 retry/exit 的 maintenance 状态；全部成功才清 marker并首次正常启动。该 coordinator 随后作为 AUD-002 的共享阻断 gate。
+- 2026-08-07 代码完成、交付待执行：独立候选分支 `codex/aud020-cross-restart-data-reset` 的 `5ab4e48b` 已实现 durable reset marker、启动前 maintenance coordinator、失败 retry/exit gate、专用退出路径和前端维护态投影。它在数据库、observer、gateway、retention 与后台任务之前消费 marker，并按 reset 优先规则使旧 recovery journal 失效。本地仅运行 cloud-only checker/self-test 与 `git diff --check`；跨平台故障注入、Rust/前端测试、bindings 和合并仍由 Actions 验证，故保持 `planned`。
 
 ### AUD-009：脚手架生成的三个 hook 示例读取了不存在的顶层上下文
 
