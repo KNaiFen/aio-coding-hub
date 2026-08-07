@@ -3094,6 +3094,8 @@ INSERT INTO codex_managed_profiles(
         app_settings.failover_max_providers_to_try = 1;
         disable_upstream_retry_policy(&mut app_settings);
         settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
 
         let db_dir = tempfile::tempdir().expect("db dir");
         let db = db::init_for_tests(&db_dir.path().join("gateway-route-test.sqlite"))
@@ -7081,7 +7083,7 @@ INSERT INTO codex_managed_profiles(
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn forced_limited_provider_does_not_fall_back_to_another_route_member() {
+    async fn limited_default_candidate_falls_back_to_next_route_member() {
         let _env_lock = crate::test_support::test_env_lock();
         let home = tempfile::tempdir().expect("home dir");
         let _env = isolate_app_env(home.path());
@@ -7101,7 +7103,7 @@ INSERT INTO codex_managed_profiles(
         let (fallback_url, fallback_calls, fallback_task) =
             spawn_counting_status_upstream(StatusCode::OK, response_body).await;
         let limited_id = insert_codex_provider_with_priority(&db, "Forced Limited", limited_url, 0);
-        let _fallback_id =
+        let fallback_id =
             insert_codex_provider_with_priority(&db, "Forced Fallback", fallback_url, 1);
         db.open_connection()
             .expect("open database")
@@ -7123,20 +7125,18 @@ INSERT INTO codex_managed_profiles(
             .expect("request");
 
         let response = router.oneshot(request).await.expect("route response");
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-        let body = to_bytes(response.into_body(), usize::MAX)
-            .await
-            .expect("response body");
-        let payload: Value = serde_json::from_slice(&body).expect("response JSON");
-        assert_eq!(
-            payload.get("error_code").and_then(Value::as_str),
-            Some(crate::gateway::proxy::GatewayErrorCode::NoEnabledProvider.as_str())
-        );
+        assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(limited_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
-        assert_eq!(fallback_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(fallback_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
 
         let log = recv_terminal_request_log(&mut log_rx).await;
-        assert_eq!(log.attempts_json, "[]");
+        let attempts: Value = serde_json::from_str(&log.attempts_json).expect("attempts json");
+        let attempts = attempts.as_array().expect("attempt array");
+        assert_eq!(attempts.len(), 1);
+        assert_eq!(
+            attempts[0].get("provider_id").and_then(Value::as_i64),
+            Some(fallback_id)
+        );
 
         limited_task.abort();
         fallback_task.abort();
@@ -7569,6 +7569,8 @@ INSERT INTO codex_managed_profiles(
         app_settings.provider_cooldown_seconds = 0;
         disable_upstream_retry_policy(&mut app_settings);
         settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
 
         let db_dir = tempfile::tempdir().expect("db dir");
         let db = db::init_for_tests(&db_dir.path().join("gateway-route-large-5xx-test.sqlite"))
@@ -7679,6 +7681,8 @@ INSERT INTO codex_managed_profiles(
         app_settings.failover_max_providers_to_try = 1;
         app_settings.provider_cooldown_seconds = 0;
         settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "claude", true, "http://127.0.0.1:37123")
+            .expect("enable claude cli proxy");
 
         let db_dir = tempfile::tempdir().expect("db dir");
         let db = db::init_for_tests(
@@ -7763,6 +7767,8 @@ INSERT INTO codex_managed_profiles(
         app_settings.failover_max_providers_to_try = 1;
         app_settings.provider_cooldown_seconds = 0;
         settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "claude", true, "http://127.0.0.1:37123")
+            .expect("enable claude cli proxy");
 
         let db_dir = tempfile::tempdir().expect("db dir");
         let db = db::init_for_tests(
@@ -9309,6 +9315,8 @@ INSERT INTO codex_managed_profiles(
         app_settings.failover_max_attempts_per_provider = 1;
         app_settings.failover_max_providers_to_try = 1;
         settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "claude", true, "http://127.0.0.1:37123")
+            .expect("enable claude cli proxy");
 
         let db_dir = tempfile::tempdir().expect("db dir");
         let db = db::init_for_tests(
@@ -9412,6 +9420,8 @@ INSERT INTO codex_managed_profiles(
 
         let app_settings = settings::AppSettings::default();
         settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "claude", true, "http://127.0.0.1:37123")
+            .expect("enable claude cli proxy");
 
         let db_dir = tempfile::tempdir().expect("db dir");
         let db = db::init_for_tests(&db_dir.path().join("gateway-route-compact-kind-test.sqlite"))
@@ -9497,6 +9507,8 @@ INSERT INTO codex_managed_profiles(
         app_settings.failover_max_attempts_per_provider = 1;
         app_settings.failover_max_providers_to_try = 1;
         settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "claude", true, "http://127.0.0.1:37123")
+            .expect("enable claude cli proxy");
 
         let db_dir = tempfile::tempdir().expect("db dir");
         let db = db::init_for_tests(
