@@ -37,8 +37,8 @@ use middleware::{
     CodexRequestClassifierMiddleware, CodexSessionCompletionMiddleware,
     Cx2ccCountTokensInterceptorMiddleware, ManagedModelRouteMiddleware, MiddlewareAction,
     ModelInferenceMiddleware, ProbeInterceptorMiddleware, ProviderResolutionMiddleware,
-    ProxyContext, RequestFingerprintMiddleware,
-    RuntimeSettingsMiddleware, WarmupInterceptorMiddleware,
+    ProxyContext, RequestFingerprintMiddleware, RuntimeSettingsMiddleware,
+    WarmupInterceptorMiddleware,
 };
 
 type SpecialSettings = Arc<Mutex<Vec<serde_json::Value>>>;

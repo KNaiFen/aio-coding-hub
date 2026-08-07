@@ -79,7 +79,9 @@ struct PersistedGatewayBearerToken {
 impl PersistedGatewayBearerToken {
     fn decoded_digest(&self) -> Result<[u8; TOKEN_BYTES], String> {
         if self.schema_version != SIDECAR_SCHEMA_VERSION || self.generation == 0 {
-            return Err("GATEWAY_BEARER_STATE_INVALID: unsupported private token state".to_string());
+            return Err(
+                "GATEWAY_BEARER_STATE_INVALID: unsupported private token state".to_string(),
+            );
         }
         let decoded = URL_SAFE_NO_PAD
             .decode(self.token_sha256.as_bytes())
@@ -118,9 +120,7 @@ pub(crate) struct GatewayBearerTokenReveal {
     pub wsl_sync_error: Option<String>,
 }
 
-pub(crate) fn access_control<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-) -> GatewayAccessControl {
+pub(crate) fn access_control<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> GatewayAccessControl {
     app.state::<GatewayBearerTokenState>().access.clone()
 }
 
@@ -151,9 +151,11 @@ pub(crate) fn rotate<R: tauri::Runtime>(
 ) -> crate::shared::error::AppResult<()> {
     let settings = crate::settings::read(app)?;
     if !super::listener_accepts_non_loopback(&settings)? {
-        return Err("SEC_INVALID_INPUT: gateway bearer token is only used by non-loopback listeners"
-            .to_string()
-            .into());
+        return Err(
+            "SEC_INVALID_INPUT: gateway bearer token is only used by non-loopback listeners"
+                .to_string()
+                .into(),
+        );
     }
 
     let path = sidecar_path(app)?;
@@ -192,9 +194,11 @@ pub(crate) fn acknowledge_reveal<R: tauri::Runtime>(
         "GATEWAY_BEARER_STATE_INVALID: private token state is unavailable".to_string()
     })?;
     if persisted.generation != generation {
-        return Err("GATEWAY_BEARER_REVEAL_STALE: token generation changed before confirmation"
-            .to_string()
-            .into());
+        return Err(
+            "GATEWAY_BEARER_REVEAL_STALE: token generation changed before confirmation"
+                .to_string()
+                .into(),
+        );
     }
     persisted.confirmed = true;
     write_persisted(&path, &persisted)?;
@@ -316,8 +320,10 @@ fn read_persisted(
     else {
         return Ok(None);
     };
-    let persisted = serde_json::from_slice::<PersistedGatewayBearerToken>(&bytes)
-        .map_err(|_| "GATEWAY_BEARER_STATE_INVALID: private token state is malformed".to_string())?;
+    let persisted =
+        serde_json::from_slice::<PersistedGatewayBearerToken>(&bytes).map_err(|_| {
+            "GATEWAY_BEARER_STATE_INVALID: private token state is malformed".to_string()
+        })?;
     persisted.decoded_digest()?;
     Ok(Some(persisted))
 }
@@ -329,17 +335,19 @@ fn write_persisted(
     let encoded = serde_json::to_vec(persisted)
         .map_err(|_| "GATEWAY_BEARER_STATE_INVALID: failed to encode private token state")?;
     if encoded.len() > SIDECAR_MAX_BYTES {
-        return Err("GATEWAY_BEARER_STATE_INVALID: private token state is too large"
-            .to_string()
-            .into());
+        return Err(
+            "GATEWAY_BEARER_STATE_INVALID: private token state is too large"
+                .to_string()
+                .into(),
+        );
     }
     crate::shared::fs::write_file_atomic(path, &encoded)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(|error| {
-            format!("failed to secure gateway bearer token state permissions: {error}")
-        })?;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(
+            |error| format!("failed to secure gateway bearer token state permissions: {error}"),
+        )?;
     }
     Ok(())
 }
@@ -382,8 +390,16 @@ mod tests {
         };
         write_persisted(&path, &persisted).expect("write sidecar");
         let bytes = std::fs::read(&path).expect("read sidecar");
-        assert!(!bytes.windows(token_a.len()).any(|window| window == token_a.as_bytes()));
-        assert_eq!(read_persisted(&path).expect("read state").unwrap().generation, 1);
+        assert!(!bytes
+            .windows(token_a.len())
+            .any(|window| window == token_a.as_bytes()));
+        assert_eq!(
+            read_persisted(&path)
+                .expect("read state")
+                .unwrap()
+                .generation,
+            1
+        );
     }
 
     #[test]

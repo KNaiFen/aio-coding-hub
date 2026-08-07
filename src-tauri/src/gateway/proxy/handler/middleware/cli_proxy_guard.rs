@@ -49,12 +49,8 @@ impl CliProxyGuardMiddleware {
         );
         // observe_request not yet computed; derive it for the error log.
         let mut ctx = ctx;
-        ctx.observe_request = compute_observe_request(
-            &ctx.cli_key,
-            &ctx.req_method,
-            &ctx.forwarded_path,
-            None,
-        );
+        ctx.observe_request =
+            compute_observe_request(&ctx.cli_key, &ctx.req_method, &ctx.forwarded_path, None);
         let log_ctx = build_early_error_log_ctx(&ctx);
 
         let resp = respond_early_error_with_enqueue(

@@ -188,12 +188,10 @@ mod tests {
             cli_backups: vec![
                 WslCliBackup {
                     cli_key: "claude".to_string(),
-                    injected_keys: [
-                        (
-                            "ANTHROPIC_BASE_URL".to_string(),
-                            "http://172.20.0.1:12345/claude".to_string(),
-                        ),
-                    ]
+                    injected_keys: [(
+                        "ANTHROPIC_BASE_URL".to_string(),
+                        "http://172.20.0.1:12345/claude".to_string(),
+                    )]
                     .into_iter()
                     .collect(),
                     original_values: [
@@ -246,12 +244,10 @@ mod tests {
             wsl_home_unc: None,
             cli_backups: vec![WslCliBackup {
                 cli_key: "claude".to_string(),
-                injected_keys: [
-                    (
-                        "ANTHROPIC_BASE_URL".to_string(),
-                        "http://172.20.0.1:9999/claude".to_string(),
-                    ),
-                ]
+                injected_keys: [(
+                    "ANTHROPIC_BASE_URL".to_string(),
+                    "http://172.20.0.1:9999/claude".to_string(),
+                )]
                 .into_iter()
                 .collect(),
                 original_values: [

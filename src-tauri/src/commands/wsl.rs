@@ -307,7 +307,8 @@ pub(crate) async fn wsl_auto_sync_core(app: &tauri::AppHandle) -> Result<(), Str
     let proxy_origin = format!("http://{}", gateway::listen::format_host_port(&host, port));
     let targets = cfg.wsl_target_cli;
     let distros = detection.distros;
-    let gateway_bearer_token = crate::gateway::access_token::pending_plaintext_for_internal_sync(app);
+    let gateway_bearer_token =
+        crate::gateway::access_token::pending_plaintext_for_internal_sync(app);
 
     // 5. Gather MCP, Prompt, and Skills sync data
     let db_state = app.state::<DbInitState>();
@@ -558,7 +559,8 @@ async fn do_wsl_auto_configure(
     let proxy_origin = format!("http://{}", gateway::listen::format_host_port(&host, port));
 
     let targets = cfg.wsl_target_cli;
-    let gateway_bearer_token = crate::gateway::access_token::pending_plaintext_for_internal_sync(app);
+    let gateway_bearer_token =
+        crate::gateway::access_token::pending_plaintext_for_internal_sync(app);
 
     // Gather MCP, Prompt, and Skills sync data
     let (mcp_data, prompt_data, skills_data) = blocking::run("wsl_startup_gather_sync_data", {

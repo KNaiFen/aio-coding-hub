@@ -97,8 +97,9 @@ pub(super) fn read_all_wsl_manifests<R: tauri::Runtime>(
         };
         match serde_json::from_slice::<WslDistroManifest>(&bytes)
             .map_err(|error| error.to_string())
-            .and_then(|manifest| normalize_wsl_manifest(manifest).map_err(|error| error.to_string()))
-        {
+            .and_then(|manifest| {
+                normalize_wsl_manifest(manifest).map_err(|error| error.to_string())
+            }) {
             Ok(manifest) => manifests.push(manifest),
             Err(e) => {
                 tracing::warn!("failed to parse WSL manifest {}: {e}", path.display());

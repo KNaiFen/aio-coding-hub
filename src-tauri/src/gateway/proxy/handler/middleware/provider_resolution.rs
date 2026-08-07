@@ -237,13 +237,14 @@ fn no_enabled_provider_diagnostic(args: &NoEnabledProviderDiagnosticArgs<'_>) ->
         Some(id) => serde_json::json!({"kind": "custom", "modeId": id}),
         None => serde_json::json!({"kind": "default", "modeId": serde_json::Value::Null}),
     };
-    let cleared_reason = if !args.limit_excluded_provider_ids.is_empty() && args.final_provider_ids.is_empty() {
-        "all_candidates_limit_excluded"
-    } else if args.effective_sort_mode_id.is_some() {
-        "empty_sort_mode_candidates"
-    } else {
-        "empty_default_candidates"
-    };
+    let cleared_reason =
+        if !args.limit_excluded_provider_ids.is_empty() && args.final_provider_ids.is_empty() {
+            "all_candidates_limit_excluded"
+        } else if args.effective_sort_mode_id.is_some() {
+            "empty_sort_mode_candidates"
+        } else {
+            "empty_default_candidates"
+        };
 
     serde_json::json!({
         "type": "provider_selection_diagnostic",
@@ -346,9 +347,7 @@ mod tests {
         );
         assert!(!value.to_string().contains("01234567-89ab-cdef"));
         assert_eq!(
-            value
-                .get("candidateProviderCount")
-                .and_then(|v| v.as_u64()),
+            value.get("candidateProviderCount").and_then(|v| v.as_u64()),
             Some(0)
         );
     }

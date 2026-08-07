@@ -390,9 +390,8 @@ pub fn configure_clients(
                 results.push(WslConfigureCliReport {
                     cli_key: "manifest".to_string(),
                     ok: false,
-                    message:
-                        "WSL_MANIFEST_INVALID: existing client backup could not be validated"
-                            .to_string(),
+                    message: "WSL_MANIFEST_INVALID: existing client backup could not be validated"
+                        .to_string(),
                 });
                 (None, false)
             }

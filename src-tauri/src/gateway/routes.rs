@@ -219,15 +219,17 @@ mod access_contract_tests {
             .uri(path)
             .body(Body::empty())
             .expect("request");
-        request.extensions_mut().insert(ConnectInfo(
-            std::net::SocketAddr::from((peer, 37123)),
-        ));
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(std::net::SocketAddr::from((peer, 37123))));
         request
     }
 
     #[test]
     fn legacy_provider_paths_are_rejected_before_proxy_dispatch() {
-        assert!(is_removed_provider_path("/codex/_aio/provider/3/v1/responses"));
+        assert!(is_removed_provider_path(
+            "/codex/_aio/provider/3/v1/responses"
+        ));
         assert!(!is_removed_provider_path("/codex/v1/responses"));
     }
 
@@ -243,9 +245,7 @@ mod access_contract_tests {
             let mut wrong = request_for_peer(path, [192, 168, 1, 20]);
             wrong.headers_mut().insert(
                 header::AUTHORIZATION,
-                HeaderValue::from_static(
-                    "Bearer BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
-                ),
+                HeaderValue::from_static("Bearer BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"),
             );
             let response = contract_router()
                 .oneshot(wrong)
@@ -296,7 +296,10 @@ mod access_contract_tests {
     async fn authenticated_request_drops_auth_provider_and_forwarding_headers() {
         let mut request = request_for_peer("/codex/v1/responses", [192, 168, 1, 20]);
         for (name, value) in [
-            (header::AUTHORIZATION.as_str(), format!("Bearer {TEST_TOKEN}")),
+            (
+                header::AUTHORIZATION.as_str(),
+                format!("Bearer {TEST_TOKEN}"),
+            ),
             ("x-aio-provider-id", "99".to_string()),
             ("x-aio-gateway-forwarded", "aio-coding-hub".to_string()),
             ("forwarded", "for=127.0.0.1".to_string()),
@@ -318,7 +321,10 @@ mod access_contract_tests {
             .await
             .expect("response body");
         let remaining: Vec<String> = serde_json::from_slice(&body).expect("header list");
-        assert!(remaining.is_empty(), "identity headers leaked: {remaining:?}");
+        assert!(
+            remaining.is_empty(),
+            "identity headers leaked: {remaining:?}"
+        );
     }
 
     #[tokio::test]

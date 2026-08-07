@@ -88,9 +88,7 @@ pub(crate) async fn gateway_bearer_token_rotate(
 
 #[tauri::command]
 #[specta::specta]
-pub(crate) fn gateway_bearer_token_acknowledge(
-    app: tauri::AppHandle,
-) -> Result<bool, String> {
+pub(crate) fn gateway_bearer_token_acknowledge(app: tauri::AppHandle) -> Result<bool, String> {
     gateway::access_token::acknowledge_reveal(&app).map_err(|error| error.to_string())
 }
 
