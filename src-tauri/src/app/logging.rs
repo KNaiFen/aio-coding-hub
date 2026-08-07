@@ -183,9 +183,7 @@ fn parse_rolling_log_date(name: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(suffix, LOG_FILE_DATE_FORMAT).ok()
 }
 
-fn collect_rolling_logs(
-    log_dir: &Path,
-) -> crate::shared::error::AppResult<Vec<RollingLogFile>> {
+fn collect_rolling_logs(log_dir: &Path) -> crate::shared::error::AppResult<Vec<RollingLogFile>> {
     let mut files = Vec::new();
     let entries = std::fs::read_dir(log_dir).map_err(|e| format!("read_dir failed: {e}"))?;
     for entry in entries {
@@ -256,12 +254,7 @@ fn cleanup_logs(
     retention_days: u32,
 ) -> crate::shared::error::AppResult<LogCleanupReport> {
     let today = DateTime::<Utc>::from(SystemTime::now()).date_naive();
-    cleanup_logs_at(
-        log_dir,
-        retention_days,
-        LOG_SOFT_LIMIT_BYTES,
-        today,
-    )
+    cleanup_logs_at(log_dir, retention_days, LOG_SOFT_LIMIT_BYTES, today)
 }
 
 fn cleanup_logs_at(

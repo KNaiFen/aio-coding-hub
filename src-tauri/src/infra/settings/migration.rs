@@ -2791,7 +2791,10 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(migrate_set_request_log_retention_default(&mut settings, true));
+        assert!(migrate_set_request_log_retention_default(
+            &mut settings,
+            true
+        ));
         assert_eq!(
             settings.schema_version,
             SCHEMA_VERSION_SET_REQUEST_LOG_RETENTION_DEFAULT
@@ -2809,7 +2812,10 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(migrate_set_request_log_retention_default(&mut settings, false));
+        assert!(migrate_set_request_log_retention_default(
+            &mut settings,
+            false
+        ));
         assert_eq!(
             settings.schema_version,
             SCHEMA_VERSION_SET_REQUEST_LOG_RETENTION_DEFAULT
@@ -2827,7 +2833,10 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(!migrate_set_request_log_retention_default(&mut settings, true));
+        assert!(!migrate_set_request_log_retention_default(
+            &mut settings,
+            true
+        ));
         assert_eq!(settings.request_log_retention_days, 0);
     }
 }

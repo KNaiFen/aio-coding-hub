@@ -86,11 +86,9 @@ fn settings_rejects_zero_request_log_retention_on_write() {
 
     let error = aio_coding_hub_lib::test_support::settings_set_json(&handle, settings)
         .expect_err("zero request-log retention must be rejected");
-    assert!(
-        error
-            .to_string()
-            .contains("request_log_retention_days must be >= 1")
-    );
+    assert!(error
+        .to_string()
+        .contains("request_log_retention_days must be >= 1"));
 }
 
 #[test]

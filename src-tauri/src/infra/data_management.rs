@@ -81,10 +81,7 @@ fn sqlite_reclaimable_bytes(db: &db::Db) -> crate::shared::error::AppResult<u64>
     Ok((freelist_count as u64).saturating_mul(page_size as u64))
 }
 
-fn disk_usage_at(
-    db_path: &Path,
-    db: &db::Db,
-) -> crate::shared::error::AppResult<DbDiskUsage> {
+fn disk_usage_at(db_path: &Path, db: &db::Db) -> crate::shared::error::AppResult<DbDiskUsage> {
     let (wal_path, shm_path) = db_related_paths(db_path);
 
     let db_bytes = file_len_or_zero(db_path)?;
@@ -301,8 +298,7 @@ INSERT INTO request_logs (
             let rows = statement
                 .query_map([], |row| row.get::<_, String>(0))
                 .expect("query trace ids");
-            rows
-                .collect::<Result<Vec<_>, _>>()
+            rows.collect::<Result<Vec<_>, _>>()
                 .expect("collect trace ids")
         };
         for trace_id in trace_ids {
