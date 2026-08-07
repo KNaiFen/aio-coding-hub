@@ -1232,9 +1232,8 @@ pub fn observer_persisted_trace_ids(
             })
             .map_err(|e| db_err!("failed to query observer persisted traces: {e}"))?;
         for row in rows {
-            persisted.insert(
-                row.map_err(|e| db_err!("failed to read observer persisted trace: {e}"))?,
-            );
+            persisted
+                .insert(row.map_err(|e| db_err!("failed to read observer persisted trace: {e}"))?);
         }
     }
 
@@ -1246,9 +1245,9 @@ mod tests {
     use super::{
         final_provider_from_attempts, get_by_id, get_by_trace_id, list_after_id_all,
         list_observer_recent_terminal, list_observer_terminal_inferences, list_recent,
-        list_recent_all, load_source_provider_info_map, page_all, page_all_excluding_traces,
-        parse_attempts, route_from_attempts, snapshot_membership_excluding_traces,
-        observer_persisted_trace_ids, start_provider_from_attempts, summaries_by_ids,
+        list_recent_all, load_source_provider_info_map, observer_persisted_trace_ids, page_all,
+        page_all_excluding_traces, parse_attempts, route_from_attempts,
+        snapshot_membership_excluding_traces, start_provider_from_attempts, summaries_by_ids,
         terminal_trace_ids,
     };
     use crate::db;
@@ -1729,12 +1728,7 @@ INSERT INTO providers (id, name, source_provider_id, bridge_type) VALUES (12, 'C
                 "gemini",
                 "/v1beta/models/gemini:streamGenerateContent?alt=sse",
             ),
-            (
-                7,
-                "codex-compact",
-                "codex",
-                "/v1/codex/responses/compact/",
-            ),
+            (7, "codex-compact", "codex", "/v1/codex/responses/compact/"),
             (8, "claude-alias", "claude", "/messages"),
             (9, "codex-get", "codex", "/v1/responses"),
         ] {
