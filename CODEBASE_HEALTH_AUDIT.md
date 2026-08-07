@@ -764,6 +764,7 @@ Rust 运行时状态 / 请求日志
 - 当前决定：性能问题仍成立，但本轮不实施。后续应先把“recent 列表上限”与“摘要统计/终态去重所需窗口”拆成明确合同，再选择专用聚合查询、只为实际投影的 active/last/recent 条目解析 folder，或建立可失效 session-folder 索引；需用大 session 树基准验证收益和一致性。本项保持 `confirmed`，不按旧报告建议直接裁剪。
 - 2026-08-06 最新主线复核：`origin/main@4ee5faa8` 仍无条件读取最多 500 条日志，并用其派生 last request、dominant provider、active 去重、`scope=all` 首选 provider 与 folder lookup；TUI 仍以 `snapshot(scope, 0)` 请求。直接把零 history 变成零扫描会改变状态栏/协议语义，且没有现成摘要查询或扫描量回归。AUD035 继续 `confirmed`，先定义摘要窗口与历史列表分离合同，再做专用聚合/索引和大树基准。
 - 2026-08-06 最终治理计划：任务 `.trellis/tasks/08-06-observer-zero-history-query`。保留 last 为当前 scope 最新 terminal inference、dominant 为最近最多十条且平手优先较新、active/all-scope/Claude 可见性以及 recent ready-empty 语义；分别使用受限查询，`history_limit=0` 跳过 500-row recent 投影。folder lookup 只接收实际渲染的 active/last/recent 键，并在 Observer state 使用 `(source, session_id)` 隔离、容量与正/负 TTL 均受限的缓存。
+- 2026-08-07 代码完成、交付待执行：独立候选分支 `codex/aud022-observer-zero-history-query` 的 `1f64f787`、`6b77a6dc` 已实现受限 last/dominant/recent 查询、zero-history ready-empty 投影、Claude 可见性过滤与 source-aware 有界 folder cache。缓存命中不占 miss 扫描预算，`history_limit=0` 不调用 recent 查询；本地仅执行 cloud-only checker/self-test 与 `git diff --check`，完整 Rust 查询/缓存回归、bindings 与合并仍由 Actions 验证，条目保持 `planned`。
 
 ### AUD-036：插件详情占位数据可被提交到新选中的插件
 
@@ -1546,12 +1547,12 @@ AUD-014 执行结果：只修改 CLI proxy controls hook、Sidebar 和对应两�
 | 顺序 | Trellis 任务 / 分支 | 报告项 | 实施边界 | 云端门与交接 |
 | --- | --- | --- | --- | --- |
 | 1 | `.trellis/tasks/08-06-cloud-only-zero-artifact-contract` / `codex/cloud-only-zero-artifact-contract` | `AUD-054` | `resolved`：规则、README、活跃 spec/template、package/workspace scripts 与零依赖合同由 `c5b3c6b9` 建立，自测修正为 `2334403b`。 | PR #86 / merge `d32106c3`；PR run `31103175487` 与 workflow_dispatch `31103187154` 全绿；24 个精确仓库产物目录已清理。 |
-| 2 | `.trellis/tasks/08-06-provider-sync-session-snapshot` / `codex/provider-sync-session-only-backup` | `AUD-055` | sessions-only v2 manifest、v1 managed 迁移、单代 backup、回滚和非受管保护。 | 云端 Rust tests/format/bindings/Clippy；本候选已补 AUD-054 的 PR/CI/提交证据。 |
+| 2 | `.trellis/tasks/08-06-provider-sync-session-snapshot` / `codex/provider-sync-session-only-backup` | `AUD-055` | sessions-only v2 manifest、v1 managed 迁移、单代 backup、回滚和非受管保护。 | PR #87 依用户决策延期到剩余顺序任务收口后合并；届时重跑精确 Actions。 |
 | 3 | `.trellis/tasks/08-06-request-runtime-log-retention` / `codex/aud018-request-runtime-log-retention` | `AUD-056` | `resolved`：PR #89 候选 `73ff1d29` 提供 7 天请求/运行日志、ledger 永久保留、256 MiB 软上限、活动文件保护、freelist 可见和不自动 VACUUM。 | PR #89 合并为 `d7679695`；PR run `31174497952` 与 workflow_dispatch `31186468782` 均在该精确 head 全绿。 |
 | 4 | `.trellis/tasks/08-06-gateway-lan-bearer-token` / `codex/aud019-gateway-lan-bearer-token` | `AUD-016` | `resolved`：最终候选 `948dc5fa` 提供真实 peer 全路由 token、一次性展示/轮换、header 脱敏、WSL manifest v2/同步和 provider 专用路径移除。 | PR #90 的 PR CI `31197560686` 与 workflow_dispatch `31197593860` 全绿；squash 合并为 `c5b2333d`。 |
 | 5 | `.trellis/tasks/08-06-cross-restart-data-reset` / `codex/aud020-cross-restart-data-reset` | `AUD-008` | `resolved`：最终候选 `59bc7b7c` 提供 durable marker/tombstone、专用硬退出、启动前清理、失败 maintenance retry/exit 闸门和前端生命周期卸载。 | PR #91 的 PR CI `31239694948` 与 workflow_dispatch `31239707625` 全绿；squash 合并为 `99de56bb`，并为 AUD-002 提供共享 coordinator。 |
 | 6 | `.trellis/tasks/08-06-filesystem-recovery-journal` / `codex/aud021-filesystem-recovery-journal` | `AUD-002` | 产品候选 `699f0c0b`：prepare-first journal、SQLite 权威 replay、Skills 受管 artifact、补偿错误聚合。 | 已直接重放到 `origin/main@99de56bb`；待更新 PR #92 的远端 head/base，并对新的精确 head 运行云端故障注入/重启/脱敏/并发门与 bindings 核验。 |
-| 7 | `.trellis/tasks/08-06-observer-zero-history-query` / `codex/observer-zero-history-query` | `AUD-035` | last/dominant/recent 受限查询和 source-aware 有界 folder cache，保持摘要语义。 | 云端查询 spy/缓存/协议回归；下一候选补 AUD-002 证据。 |
+| 7 | `.trellis/tasks/08-06-observer-zero-history-query` / `codex/aud022-observer-zero-history-query` | `AUD-035` | 受限 last/dominant/recent 查询、zero-history ready-empty 与 source-aware 有界 folder cache。 | 正在重放到 AUD-056 主线；完成后以新精确 head 运行查询/缓存回归与 bindings 门。 |
 | 8 | `.trellis/tasks/08-06-plugin-activation-quarantine` / `codex/plugin-activation-quarantine` | `AUD-033` | 精确 activation policy、startup/command/hook gate、600 秒三次严重故障 quarantine、revalidate。 | 云端跨重启/并发/fail-open-close/snapshot 门；合并后只开纯文档收口 PR。 |
 
 本地不运行 `pnpm`、Cargo、Tauri、安装器、dev server、类型检查、Lint、测试、构建或任何间接产物命令；不删除全局 `~/.cargo`、pnpm store 或其他项目文件。每次 PR 创建/合并前重新 fetch `origin/main`，检查功能、接口、实现和效果重叠；兼容漂移先重放并重验，根本冲突保留候选并登记待决策。保留现有 `workflow_dispatch` 全量 CI 与按需 `dev-build`，不把桌面打包升级为每个 PR 必需任务。
