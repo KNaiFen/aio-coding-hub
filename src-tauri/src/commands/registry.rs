@@ -14,7 +14,7 @@ const HANDWRITTEN_RUNTIME_ONLY_REASON: &str =
     "Requires a Tauri Channel callback, so this desktop updater path stays as the single handwritten desktop IPC exception.";
 
 macro_rules! generated_command_registry {
-    ($callback:ident) => {
+    ($callback:ident) => {{
         $callback! {
             // ── settings ──
             settings_get => crate::commands::settings::settings_get,
@@ -283,7 +283,7 @@ macro_rules! generated_command_registry {
             workspace_preview => crate::commands::workspaces::workspace_preview,
             workspace_apply => crate::commands::workspaces::workspace_apply,
         }
-    };
+    }};
 }
 
 pub(crate) fn register_runtime_commands(
