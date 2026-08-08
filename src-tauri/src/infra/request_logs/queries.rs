@@ -2102,11 +2102,9 @@ INSERT INTO providers (id, name, source_provider_id, bridge_type) VALUES (12, 'C
         let bounded_trace_ids = (0..OBSERVER_TRACE_ID_QUERY_LIMIT)
             .map(|index| format!("bounded-trace-{index}"))
             .collect::<Vec<_>>();
-        assert!(
-            observer_persisted_trace_ids(&db, &bounded_trace_ids)
-                .expect("exact trace-id limit should be accepted")
-                .is_empty()
-        );
+        assert!(observer_persisted_trace_ids(&db, &bounded_trace_ids)
+            .expect("exact trace-id limit should be accepted")
+            .is_empty());
         assert!(
             list_observer_recent_terminal(&db, None, 1, &bounded_trace_ids)
                 .expect("exact exclusion limit should be accepted")

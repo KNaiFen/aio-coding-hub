@@ -659,10 +659,7 @@ fn refresh_running_gateway_plugins(
     detail: PluginDetail,
 ) -> crate::shared::error::AppResult<PluginDetail> {
     if detail.summary.status != PluginStatus::Enabled {
-        crate::app::gateway_control::app_remove_gateway_plugin(
-            app,
-            &detail.summary.plugin_id,
-        );
+        crate::app::gateway_control::app_remove_gateway_plugin(app, &detail.summary.plugin_id);
     }
     crate::app::gateway_control::app_refresh_gateway_plugins(app, db);
     Ok(detail)

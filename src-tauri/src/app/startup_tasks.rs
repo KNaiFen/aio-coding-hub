@@ -75,10 +75,7 @@ async fn run(app_handle: tauri::AppHandle) {
         {
             Ok(quarantined_plugin_ids) => {
                 for plugin_id in &quarantined_plugin_ids {
-                    crate::app::gateway_control::app_remove_gateway_plugin(
-                        &app_handle,
-                        plugin_id,
-                    );
+                    crate::app::gateway_control::app_remove_gateway_plugin(&app_handle, plugin_id);
                 }
                 if !quarantined_plugin_ids.is_empty() {
                     crate::app::gateway_control::app_refresh_gateway_plugins(&app_handle, &db);

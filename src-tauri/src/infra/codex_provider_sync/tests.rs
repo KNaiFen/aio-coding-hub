@@ -206,8 +206,8 @@ fn full_candidate_work_fits_without_relaxing_single_tree_limits() {
         .expect("second ownership manifest should fit");
 
     let future_entries = PROVIDER_SYNC_PRUNE_MAX_ENTRIES * 2;
-    let future_hashed_bytes = PROVIDER_SYNC_PRUNE_MAX_TREE_HASHED_BYTES * 5
-        + PROVIDER_SYNC_MAX_BYTES as u64 * 4;
+    let future_hashed_bytes =
+        PROVIDER_SYNC_PRUNE_MAX_TREE_HASHED_BYTES * 5 + PROVIDER_SYNC_MAX_BYTES as u64 * 4;
     operation_budget
         .ensure_capacity(future_entries, future_hashed_bytes)
         .expect("a full legal tree must reserve all remaining work before isolation");
@@ -219,9 +219,7 @@ fn full_candidate_work_fits_without_relaxing_single_tree_limits() {
     );
 
     assert!(
-        full_tree_snapshot
-            .reserve_file_hash(1)
-            .is_err(),
+        full_tree_snapshot.reserve_file_hash(1).is_err(),
         "aggregate operation capacity must not relax the single-tree byte limit"
     );
     assert!(
@@ -295,7 +293,10 @@ fn removal_budget_is_reserved_before_candidate_isolation() {
             .is_some_and(|value| value.contains("would exhaust the prune budget")),
         "{warning:?}"
     );
-    assert!(candidate.exists(), "candidate must remain at its original path");
+    assert!(
+        candidate.exists(),
+        "candidate must remain at its original path"
+    );
     assert!(
         std::fs::read_dir(&root)
             .expect("read backup root")

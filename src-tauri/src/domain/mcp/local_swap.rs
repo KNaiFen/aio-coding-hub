@@ -110,14 +110,11 @@ fn invalid_stash(message: &str) -> AppError {
 }
 
 fn read_stash_bytes(path: &Path) -> crate::shared::error::AppResult<Option<Vec<u8>>> {
-    read_optional_file_with_max_len(path, MCP_LOCAL_STASH_MAX_BYTES).map_err(|_| {
-        invalid_stash("MCP local stash is unreadable or exceeds the supported size")
-    })
+    read_optional_file_with_max_len(path, MCP_LOCAL_STASH_MAX_BYTES)
+        .map_err(|_| invalid_stash("MCP local stash is unreadable or exceeds the supported size"))
 }
 
-fn json_read_stash(
-    path: &Path,
-) -> crate::shared::error::AppResult<serde_json::Map<String, Value>> {
+fn json_read_stash(path: &Path) -> crate::shared::error::AppResult<serde_json::Map<String, Value>> {
     let Some(bytes) = read_stash_bytes(path)? else {
         return Ok(serde_json::Map::new());
     };
@@ -223,13 +220,11 @@ fn codex_read_stash(path: &Path) -> crate::shared::error::AppResult<Vec<String>>
     if document.iter().any(|(key, item)| {
         key != "mcp_servers"
             || item.as_table_like().is_none()
-            || item
-                .as_table_like()
-                .is_some_and(|servers| {
-                    servers
-                        .iter()
-                        .any(|(_, server)| server.as_table_like().is_none())
-                })
+            || item.as_table_like().is_some_and(|servers| {
+                servers
+                    .iter()
+                    .any(|(_, server)| server.as_table_like().is_none())
+            })
     }) {
         return Err(invalid_stash(
             "MCP local Codex stash contains unsupported entries",
@@ -455,21 +450,15 @@ mod tests {
     fn missing_stashes_remain_valid_empty_workspace_state() {
         let temp = tempfile::tempdir().expect("tempdir");
 
-        assert!(
-            json_read_stash(&temp.path().join("missing.json"))
-                .expect("missing JSON stash")
-                .is_empty()
-        );
-        assert!(
-            codex_read_stash(&temp.path().join("missing.toml"))
-                .expect("missing Codex stash")
-                .is_empty()
-        );
-        assert!(
-            grok_read_stash(&temp.path().join("missing-grok.toml"))
-                .expect("missing Grok stash")
-                .is_none()
-        );
+        assert!(json_read_stash(&temp.path().join("missing.json"))
+            .expect("missing JSON stash")
+            .is_empty());
+        assert!(codex_read_stash(&temp.path().join("missing.toml"))
+            .expect("missing Codex stash")
+            .is_empty());
+        assert!(grok_read_stash(&temp.path().join("missing-grok.toml"))
+            .expect("missing Grok stash")
+            .is_none());
     }
 
     #[test]

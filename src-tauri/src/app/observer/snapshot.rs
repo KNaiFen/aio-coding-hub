@@ -1549,8 +1549,7 @@ mod tests {
             .map(|index| active_snapshot(format!("claude-{index}"), "claude", index))
             .collect::<Vec<_>>();
         active.extend(
-            (0..250)
-                .map(|index| active_snapshot(format!("codex-{index}"), "codex", index + 1_000)),
+            (0..250).map(|index| active_snapshot(format!("codex-{index}"), "codex", index + 1_000)),
         );
 
         let trace_ids = observer_active_trace_ids(&active);

@@ -3697,7 +3697,10 @@ mod tests {
                 },
             )
             .expect("seed severe failure");
-            assert!(!result.quarantined, "first two failures must not quarantine");
+            assert!(
+                !result.quarantined,
+                "first two failures must not quarantine"
+            );
         }
     }
 
@@ -3843,11 +3846,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let db = crate::db::init_for_tests(&dir.path().join("plugins.db")).expect("db");
         let plugin_id = "acme.startup-failure";
-        install_enabled_throwing_startup_extension(
-            &db,
-            &dir.path().join(plugin_id),
-            plugin_id,
-        );
+        install_enabled_throwing_startup_extension(&db, &dir.path().join(plugin_id), plugin_id);
         seed_two_severe_runtime_failures(&db, plugin_id, "onStartup");
         let registry = ExtensionHostInstanceRegistry::new(db.clone());
 

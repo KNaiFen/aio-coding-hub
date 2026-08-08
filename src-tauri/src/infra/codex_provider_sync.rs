@@ -825,10 +825,8 @@ fn prune_managed_backups_with_budget(
     let mut warnings = Vec::new();
     let mut suppressed_warnings = 0usize;
     let mut root_enumeration_budget = ProviderSyncPruneBudget::tree_limits();
-    let names_result = provider_sync_backup_root_directory_names(
-        &root_handle,
-        &mut root_enumeration_budget,
-    );
+    let names_result =
+        provider_sync_backup_root_directory_names(&root_handle, &mut root_enumeration_budget);
     if let Err(err) = budget.consume(&root_enumeration_budget) {
         return Ok(Some(format!(
             "provider sync backup prune preserved all existing backups because root enumeration exhausted the prune budget: {err}"
@@ -1336,9 +1334,7 @@ impl ProviderSyncPruneBudget {
                 "SEC_INVALID_INPUT: provider sync backup entry count overflow".to_string()
             })?;
         if entries > self.max_entries {
-            return Err(
-                "SEC_INVALID_INPUT: provider sync backup tree has too many entries".into(),
-            );
+            return Err("SEC_INVALID_INPUT: provider sync backup tree has too many entries".into());
         }
         let hashed_bytes = self
             .hashed_bytes
@@ -1348,8 +1344,7 @@ impl ProviderSyncPruneBudget {
             })?;
         if hashed_bytes > self.max_hashed_bytes {
             return Err(
-                "SEC_INVALID_INPUT: provider sync backup tree is too large to verify safely"
-                    .into(),
+                "SEC_INVALID_INPUT: provider sync backup tree is too large to verify safely".into(),
             );
         }
         Ok(())

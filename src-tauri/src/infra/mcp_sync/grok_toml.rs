@@ -261,8 +261,7 @@ pub(super) fn swap_grok_local_servers(
                 .any(|(_, server)| server.as_table_like().is_none())
             {
                 return Err(
-                    "MCP_LOCAL_STASH_INVALID_SCHEMA: MCP server entries must be tables"
-                        .to_string(),
+                    "MCP_LOCAL_STASH_INVALID_SCHEMA: MCP server entries must be tables".to_string(),
                 );
             }
             let target_items: Vec<(String, Item)> = target_root

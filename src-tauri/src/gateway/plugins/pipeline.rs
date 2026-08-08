@@ -2493,7 +2493,10 @@ mod tests {
         }
 
         fn dispose_plugin(&self, plugin_id: &str) {
-            self.disposed_ids.lock().unwrap().push(plugin_id.to_string());
+            self.disposed_ids
+                .lock()
+                .unwrap()
+                .push(plugin_id.to_string());
         }
 
         fn execute_request_hook(
@@ -3570,7 +3573,9 @@ mod tests {
             .refresh_plugins_with(|| Err("forced plugin reload failure".into()))
             .expect_err("full refresh should fail");
 
-        assert!(refresh_error.to_string().contains("forced plugin reload failure"));
+        assert!(refresh_error
+            .to_string()
+            .contains("forced plugin reload failure"));
         assert_eq!(executor.disposed_ids(), vec!["plugin.quarantined"]);
         assert_eq!(executor.last_retain_ids(), vec!["plugin.healthy"]);
         assert_eq!(
