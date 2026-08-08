@@ -15,12 +15,12 @@
   "branch": "codex/aud023-plugin-activation-quarantine",
   "base_branch": "codex/aud021-filesystem-recovery-journal",
   "worktree_path": "/private/tmp/aio-aud023-clean",
-  "commit": "8bb2bbf8",
+  "commit": "d0daf065",
   "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/94",
   "subtasks": [],
   "children": [],
   "parent": "08-06-final-hardening-zero-artifact",
   "relatedFiles": [],
-  "notes": "本批第 8 项；PR #94 已在 AUD-002 最新候选 c97ad431 上净重建为产品候选 8bb2bbf8，只保留 AUD-033 插件提交并保留 Gateway Bearer Token 合同。revalidate 成功只恢复为 disabled；精确 head Actions、bindings 与完整回归待执行。按用户最新决定，本分支处理完成后不单独合并，改并入剩余事项的统一集成 PR。",
+  "notes": "本批第 8 项；PR #94 已在 AUD-002 最新候选 c97ad431 上净重建为产品候选 d0daf065，只保留 AUD-033 插件提交并收紧 severe failure/quarantine 分类，保留 Gateway Bearer Token 合同。revalidate 成功只恢复为 disabled；Market 当前签名状态不可用时保持 quarantined。精确 head Actions、bindings 与完整回归待执行。按用户最新决定，本分支处理完成后不单独合并，改并入剩余事项的统一集成 PR。",
   "meta": {}
 }
