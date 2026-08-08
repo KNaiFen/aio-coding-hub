@@ -1910,6 +1910,14 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async pluginRevalidate(input: PluginGetInput): Promise<Result<PluginDetail, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("plugin_revalidate", { input }) };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async pluginEnable(input: PluginGetInput): Promise<Result<PluginDetail, string>> {
     try {
       return { status: "ok", data: await TAURI_INVOKE("plugin_enable", { input }) };
