@@ -7,7 +7,7 @@ import noticeSource from "../../../src-tauri/src/app/notice.rs?raw";
 import startupStateSource from "../../../src-tauri/src/app/startup_state.rs?raw";
 
 function extractStringUnionLiterals(source: string, typeName: string) {
-  const match = source.match(new RegExp(`export type ${typeName} = (.+)$`, "m"));
+  const match = source.match(new RegExp(`export type ${typeName}\\s*=\\s*([^;]+);`));
   expect(match).toBeTruthy();
   return Array.from(match![1].matchAll(/"([^"]+)"/g), (item) => item[1]);
 }
@@ -126,6 +126,18 @@ describe("generated/bindings.ts contract", () => {
     expect(extractTypeBody(bindingsSource, "TrayProviderMiniProvider")).toContain(
       "availability: ProviderAvailabilityState[]"
     );
+    expect(extractTypeBody(bindingsSource, "TrayProviderMiniProvider")).toContain(
+      "unavailableReasons: TrayProviderMiniUnavailableReason[]"
+    );
+    expect(extractTypeBody(bindingsSource, "TrayProviderMiniProvider")).toContain(
+      "successCount: number"
+    );
+    expect(extractTypeBody(bindingsSource, "TrayProviderMiniProvider")).toContain(
+      "failureCount: number"
+    );
+    expect(
+      extractStringUnionLiterals(bindingsSource, "TrayProviderMiniUnavailableReason")
+    ).toEqual(["circuit_open", "cooldown", "spend_limit", "oauth_limit"]);
     expect(extractGeneratedCommand(bindingsSource, "trayProviderMiniSnapshotGet")).toContain(
       'TAURI_INVOKE("tray_provider_mini_snapshot_get")'
     );

@@ -4679,7 +4679,7 @@ export type TrayProviderMiniUnavailableReason =
   | "circuit_open"
   | "cooldown"
   | "spend_limit"
-  | "o_auth_limit";
+  | "oauth_limit";
 export type UiContribution = {
   id: string;
   title?: string | null;
