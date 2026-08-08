@@ -62,7 +62,7 @@ fn backup_prune_limits_accept_exact_boundaries_and_reject_overflow() {
 
     let mut exact_entries = ProviderSyncPruneBudget {
         entries_seen: PROVIDER_SYNC_PRUNE_MAX_ENTRIES - 1,
-        ..Default::default()
+        ..ProviderSyncPruneBudget::tree_limits()
     };
     exact_entries
         .record_entry()
@@ -171,6 +171,66 @@ fn backup_root_enumeration_is_bounded_before_candidate_collection() {
 }
 
 #[test]
+fn full_candidate_work_fits_without_relaxing_single_tree_limits() {
+    let mut operation_budget = ProviderSyncPruneBudget::default();
+    let mut full_root_enumeration = ProviderSyncPruneBudget::tree_limits();
+    full_root_enumeration.entries_seen = PROVIDER_SYNC_PRUNE_MAX_ENTRIES;
+    operation_budget
+        .consume(&full_root_enumeration)
+        .expect("full root enumeration should fit");
+
+    let mut full_candidate_classification = ProviderSyncPruneBudget::tree_limits();
+    full_candidate_classification.entries_seen = PROVIDER_SYNC_PRUNE_MAX_ENTRIES;
+    operation_budget
+        .consume(&full_candidate_classification)
+        .expect("full candidate classification should fit");
+    operation_budget
+        .reserve_file_hash(PROVIDER_SYNC_MAX_BYTES as u64)
+        .expect("classification manifest should fit");
+
+    operation_budget
+        .reserve_file_hash(PROVIDER_SYNC_MAX_BYTES as u64)
+        .expect("first ownership manifest should fit");
+    let mut full_tree_snapshot = ProviderSyncPruneBudget::tree_limits();
+    full_tree_snapshot.entries_seen = PROVIDER_SYNC_PRUNE_MAX_ENTRIES;
+    for _ in 0..4 {
+        full_tree_snapshot
+            .reserve_file_hash(PROVIDER_SYNC_PRUNE_MAX_FILE_BYTES)
+            .expect("four bounded files should fill the tree hash budget");
+    }
+    operation_budget
+        .consume(&full_tree_snapshot)
+        .expect("full initial tree snapshot should fit");
+    operation_budget
+        .reserve_file_hash(PROVIDER_SYNC_MAX_BYTES as u64)
+        .expect("second ownership manifest should fit");
+
+    let future_entries = PROVIDER_SYNC_PRUNE_MAX_ENTRIES * 2;
+    let future_hashed_bytes = PROVIDER_SYNC_PRUNE_MAX_TREE_HASHED_BYTES * 5
+        + PROVIDER_SYNC_MAX_BYTES as u64 * 4;
+    operation_budget
+        .ensure_capacity(future_entries, future_hashed_bytes)
+        .expect("a full legal tree must reserve all remaining work before isolation");
+    assert!(
+        operation_budget
+            .ensure_capacity(future_entries + 1, future_hashed_bytes)
+            .is_err(),
+        "the aggregate work budget must remain bounded"
+    );
+
+    assert!(
+        full_tree_snapshot
+            .reserve_file_hash(1)
+            .is_err(),
+        "aggregate operation capacity must not relax the single-tree byte limit"
+    );
+    assert!(
+        full_tree_snapshot.record_entry().is_err(),
+        "aggregate operation capacity must not relax the single-tree entry limit"
+    );
+}
+
+#[test]
 fn prune_budget_exhaustion_preserves_current_and_existing_backups() {
     let temp = tempfile::tempdir().expect("tempdir");
     let home = temp.path();
@@ -193,11 +253,56 @@ fn prune_budget_exhaustion_preserves_current_and_existing_backups() {
     assert!(
         warning
             .as_deref()
-            .is_some_and(|value| value.contains("failed closed")),
+            .is_some_and(|value| value.contains("root enumeration exhausted")),
         "{warning:?}"
     );
     assert!(old.exists(), "existing managed backup must be preserved");
     assert!(current.exists(), "current managed backup must be preserved");
+}
+
+#[test]
+fn removal_budget_is_reserved_before_candidate_isolation() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path().join(PROVIDER_SYNC_BACKUP_ROOT);
+    std::fs::create_dir_all(&root).expect("create backup root");
+    let candidate = root.join("candidate");
+    write_managed_manifest(&candidate, 1, "1", PROVIDER_SYNC_MANAGED_BY);
+    std::fs::write(candidate.join("config.toml"), b"managed payload")
+        .expect("write managed payload");
+    let expected = managed_backup_version(&candidate)
+        .expect("classify candidate")
+        .expect("managed candidate");
+    let root_handle = open_provider_sync_backup_dir_no_follow(&root).expect("open backup root");
+    let mut budget = ProviderSyncPruneBudget::with_limits(
+        8,
+        100,
+        PROVIDER_SYNC_MAX_BYTES as u64,
+        (PROVIDER_SYNC_MAX_BYTES as u64) * 2,
+    );
+
+    let warning = remove_managed_backup_candidate_with_root(
+        &root,
+        &root_handle,
+        &candidate,
+        expected,
+        &mut budget,
+    )
+    .expect("budget exhaustion should be a non-fatal prune warning");
+
+    assert!(
+        warning
+            .as_deref()
+            .is_some_and(|value| value.contains("would exhaust the prune budget")),
+        "{warning:?}"
+    );
+    assert!(candidate.exists(), "candidate must remain at its original path");
+    assert!(
+        std::fs::read_dir(&root)
+            .expect("read backup root")
+            .filter_map(Result::ok)
+            .all(|entry| !entry.file_name().to_string_lossy().contains("prune")),
+        "budget rejection must happen before a quarantine is created"
+    );
 }
 
 #[test]

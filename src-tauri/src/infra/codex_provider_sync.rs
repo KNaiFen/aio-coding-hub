@@ -30,7 +30,14 @@ const CODEX_APP_RUNNING_OVERRIDE_TRUE: u8 = 2;
 const PROVIDER_SYNC_PRUNE_MAX_DEPTH: usize = 128;
 const PROVIDER_SYNC_PRUNE_MAX_ENTRIES: usize = 100_000;
 const PROVIDER_SYNC_PRUNE_MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
-const PROVIDER_SYNC_PRUNE_MAX_HASHED_BYTES: u64 = 256 * 1024 * 1024;
+const PROVIDER_SYNC_PRUNE_MAX_TREE_HASHED_BYTES: u64 = 256 * 1024 * 1024;
+// A single prune operation may enumerate the root, inspect a candidate, take
+// one snapshot, validate it twice after isolation, and hash files at deletion
+// boundaries. Keep that aggregate work bounded without shrinking the per-tree
+// contract below 100,000 entries / 256 MiB.
+const PROVIDER_SYNC_PRUNE_MAX_WORK_ENTRIES: usize = PROVIDER_SYNC_PRUNE_MAX_ENTRIES * 5;
+const PROVIDER_SYNC_PRUNE_MAX_HASHED_BYTES: u64 =
+    PROVIDER_SYNC_PRUNE_MAX_TREE_HASHED_BYTES * 6 + PROVIDER_SYNC_MAX_BYTES as u64 * 7;
 const PROVIDER_SYNC_PRUNE_HASH_CHUNK_BYTES: usize = 64 * 1024;
 const PROVIDER_SYNC_PRUNE_MAX_WARNINGS: usize = 32;
 
@@ -817,7 +824,17 @@ fn prune_managed_backups_with_budget(
     })?;
     let mut warnings = Vec::new();
     let mut suppressed_warnings = 0usize;
-    let names = match provider_sync_backup_root_directory_names(&root_handle, budget) {
+    let mut root_enumeration_budget = ProviderSyncPruneBudget::tree_limits();
+    let names_result = provider_sync_backup_root_directory_names(
+        &root_handle,
+        &mut root_enumeration_budget,
+    );
+    if let Err(err) = budget.consume(&root_enumeration_budget) {
+        return Ok(Some(format!(
+            "provider sync backup prune preserved all existing backups because root enumeration exhausted the prune budget: {err}"
+        )));
+    }
+    let names = match names_result {
         Ok(names) => names,
         Err(err) => {
             return Ok(Some(format!(
@@ -853,7 +870,21 @@ fn prune_managed_backups_with_budget(
                 continue;
             }
         };
-        match provider_sync_backup_dir_has_regular_manifest(&candidate, budget) {
+        let mut classification_budget = ProviderSyncPruneBudget::tree_limits();
+        let manifest_result =
+            provider_sync_backup_dir_has_regular_manifest(&candidate, &mut classification_budget);
+        if let Err(err) = budget.consume(&classification_budget) {
+            push_provider_sync_prune_warning(
+                &mut warnings,
+                &mut suppressed_warnings,
+                provider_sync_backup_preserved_warning(
+                    &path,
+                    &format!("candidate classification exhausted the prune budget: {err}"),
+                ),
+            );
+            break;
+        }
+        match manifest_result {
             Ok(true) => {}
             Ok(false) => continue,
             Err(err) => {
@@ -1045,18 +1076,27 @@ fn remove_managed_backup_candidate_with_root(
             "candidate identity changed before validation",
         )));
     }
-    let expected_snapshot =
-        match validated_provider_sync_backup_snapshot(&validation_handle, expected_version, budget)
-        {
-            Ok(snapshot) => snapshot,
-            Err(err) => {
-                return Ok(Some(provider_sync_backup_preserved_warning(
-                    path,
-                    &format!("ownership or tree validation changed before isolation: {err}"),
-                )));
-            }
-        };
+    let snapshot_result =
+        validated_provider_sync_backup_snapshot(&validation_handle, expected_version, budget);
+    let expected_snapshot = match snapshot_result {
+        Ok(snapshot) => snapshot,
+        Err(err) => {
+            return Ok(Some(provider_sync_backup_preserved_warning(
+                path,
+                &format!("ownership or tree validation changed before isolation: {err}"),
+            )));
+        }
+    };
     drop(validation_handle);
+
+    let (future_entries, future_hashed_bytes) =
+        expected_snapshot.remaining_removal_work_upper_bound()?;
+    if let Err(err) = budget.ensure_capacity(future_entries, future_hashed_bytes) {
+        return Ok(Some(provider_sync_backup_preserved_warning(
+            path,
+            &format!("candidate removal would exhaust the prune budget: {err}"),
+        )));
+    }
 
     #[cfg(test)]
     run_before_provider_sync_backup_isolation_test_hook();
@@ -1194,7 +1234,7 @@ impl Default for ProviderSyncPruneBudget {
     fn default() -> Self {
         Self {
             max_depth: PROVIDER_SYNC_PRUNE_MAX_DEPTH,
-            max_entries: PROVIDER_SYNC_PRUNE_MAX_ENTRIES,
+            max_entries: PROVIDER_SYNC_PRUNE_MAX_WORK_ENTRIES,
             max_file_bytes: PROVIDER_SYNC_PRUNE_MAX_FILE_BYTES,
             max_hashed_bytes: PROVIDER_SYNC_PRUNE_MAX_HASHED_BYTES,
             entries_seen: 0,
@@ -1242,7 +1282,6 @@ impl ProviderSyncPruneBudget {
         self.entries_seen >= self.max_entries || self.hashed_bytes >= self.max_hashed_bytes
     }
 
-    #[cfg(test)]
     fn with_limits(
         max_depth: usize,
         max_entries: usize,
@@ -1257,6 +1296,63 @@ impl ProviderSyncPruneBudget {
             entries_seen: 0,
             hashed_bytes: 0,
         }
+    }
+
+    fn tree_limits() -> Self {
+        Self::with_limits(
+            PROVIDER_SYNC_PRUNE_MAX_DEPTH,
+            PROVIDER_SYNC_PRUNE_MAX_ENTRIES,
+            PROVIDER_SYNC_PRUNE_MAX_FILE_BYTES,
+            PROVIDER_SYNC_PRUNE_MAX_TREE_HASHED_BYTES,
+        )
+    }
+
+    fn consume(&mut self, consumed: &Self) -> AppResult<()> {
+        self.ensure_capacity(consumed.entries_seen, consumed.hashed_bytes)?;
+        self.entries_seen = self
+            .entries_seen
+            .checked_add(consumed.entries_seen)
+            .ok_or_else(|| {
+                "SEC_INVALID_INPUT: provider sync backup entry count overflow".to_string()
+            })?;
+        self.hashed_bytes = self
+            .hashed_bytes
+            .checked_add(consumed.hashed_bytes)
+            .ok_or_else(|| {
+                "SEC_INVALID_INPUT: provider sync backup hash byte count overflow".to_string()
+            })?;
+        Ok(())
+    }
+
+    fn ensure_capacity(
+        &self,
+        additional_entries: usize,
+        additional_hashed_bytes: u64,
+    ) -> AppResult<()> {
+        let entries = self
+            .entries_seen
+            .checked_add(additional_entries)
+            .ok_or_else(|| {
+                "SEC_INVALID_INPUT: provider sync backup entry count overflow".to_string()
+            })?;
+        if entries > self.max_entries {
+            return Err(
+                "SEC_INVALID_INPUT: provider sync backup tree has too many entries".into(),
+            );
+        }
+        let hashed_bytes = self
+            .hashed_bytes
+            .checked_add(additional_hashed_bytes)
+            .ok_or_else(|| {
+                "SEC_INVALID_INPUT: provider sync backup hash byte count overflow".to_string()
+            })?;
+        if hashed_bytes > self.max_hashed_bytes {
+            return Err(
+                "SEC_INVALID_INPUT: provider sync backup tree is too large to verify safely"
+                    .into(),
+            );
+        }
+        Ok(())
     }
 }
 
@@ -1285,6 +1381,59 @@ struct ProviderSyncBackupTreeSnapshot {
     entries: Vec<ProviderSyncBackupEntrySnapshot>,
 }
 
+impl ProviderSyncBackupTreeSnapshot {
+    fn remaining_removal_work_upper_bound(&self) -> AppResult<(usize, u64)> {
+        let (entries, hashed_bytes) = provider_sync_backup_snapshot_work(&self.entries)?;
+        // Two full isolated-tree validations remain. Deletion then hashes every
+        // file at three handle-bound boundaries. Each validation also reads the
+        // manifest twice outside the tree walk.
+        let future_entries = entries.checked_mul(2).ok_or_else(|| {
+            "SEC_INVALID_INPUT: provider sync backup entry count overflow".to_string()
+        })?;
+        let future_hashed_bytes = hashed_bytes
+            .checked_mul(5)
+            .and_then(|value| {
+                (PROVIDER_SYNC_MAX_BYTES as u64)
+                    .checked_mul(4)
+                    .and_then(|manifest_bytes| value.checked_add(manifest_bytes))
+            })
+            .ok_or_else(|| {
+                "SEC_INVALID_INPUT: provider sync backup hash byte count overflow".to_string()
+            })?;
+        Ok((future_entries, future_hashed_bytes))
+    }
+}
+
+fn provider_sync_backup_snapshot_work(
+    entries: &[ProviderSyncBackupEntrySnapshot],
+) -> AppResult<(usize, u64)> {
+    let mut entry_count = 0usize;
+    let mut hashed_bytes = 0u64;
+    for entry in entries {
+        entry_count = entry_count.checked_add(1).ok_or_else(|| {
+            "SEC_INVALID_INPUT: provider sync backup entry count overflow".to_string()
+        })?;
+        if entry.kind == ProviderSyncBackupEntryKind::File {
+            hashed_bytes = hashed_bytes
+                .checked_add(entry.fingerprint.size)
+                .ok_or_else(|| {
+                    "SEC_INVALID_INPUT: provider sync backup hash byte count overflow".to_string()
+                })?;
+        }
+        let (child_entries, child_hashed_bytes) =
+            provider_sync_backup_snapshot_work(&entry.children)?;
+        entry_count = entry_count.checked_add(child_entries).ok_or_else(|| {
+            "SEC_INVALID_INPUT: provider sync backup entry count overflow".to_string()
+        })?;
+        hashed_bytes = hashed_bytes
+            .checked_add(child_hashed_bytes)
+            .ok_or_else(|| {
+                "SEC_INVALID_INPUT: provider sync backup hash byte count overflow".to_string()
+            })?;
+    }
+    Ok((entry_count, hashed_bytes))
+}
+
 fn validated_provider_sync_backup_snapshot(
     dir: &std::fs::File,
     expected_version: ManagedBackupVersion,
@@ -1293,11 +1442,21 @@ fn validated_provider_sync_backup_snapshot(
     if managed_backup_version_from_dir_handle(dir, budget)? != Some(expected_version) {
         return Err("SEC_INVALID_INPUT: provider sync backup ownership changed".into());
     }
-    let snapshot = capture_provider_sync_backup_tree(dir, budget)?;
+    let snapshot = capture_provider_sync_backup_tree_bounded(dir, budget)?;
     if managed_backup_version_from_dir_handle(dir, budget)? != Some(expected_version) {
         return Err("SEC_INVALID_INPUT: provider sync backup ownership changed".into());
     }
     Ok(snapshot)
+}
+
+fn capture_provider_sync_backup_tree_bounded(
+    dir: &std::fs::File,
+    budget: &mut ProviderSyncPruneBudget,
+) -> AppResult<ProviderSyncBackupTreeSnapshot> {
+    let mut tree_budget = ProviderSyncPruneBudget::tree_limits();
+    let snapshot_result = capture_provider_sync_backup_tree(dir, &mut tree_budget);
+    budget.consume(&tree_budget)?;
+    snapshot_result
 }
 
 fn validate_isolated_provider_sync_backup(
@@ -2205,7 +2364,7 @@ fn remove_quarantined_provider_sync_backup(
         )
         .into());
     }
-    if !capture_provider_sync_backup_tree(&final_handle, budget)?
+    if !capture_provider_sync_backup_tree_bounded(&final_handle, budget)?
         .entries
         .is_empty()
     {
@@ -2280,7 +2439,7 @@ fn remove_provider_sync_backup_snapshot_entries_at(
                 )
                 .into());
             }
-            if !capture_provider_sync_backup_tree(&final_handle, budget)?
+            if !capture_provider_sync_backup_tree_bounded(&final_handle, budget)?
                 .entries
                 .is_empty()
             {
@@ -2321,7 +2480,7 @@ fn remove_provider_sync_backup_snapshot_entries_at(
         )
         .map_err(|err| format!("failed to remove provider sync backup entry: {err}"))?;
     }
-    if !capture_provider_sync_backup_tree(dir, budget)?
+    if !capture_provider_sync_backup_tree_bounded(dir, budget)?
         .entries
         .is_empty()
     {
@@ -2387,7 +2546,7 @@ fn remove_windows_provider_sync_backup_snapshot_entries(
                         .into(),
                 );
             }
-            if !capture_provider_sync_backup_tree(&child, budget)?
+            if !capture_provider_sync_backup_tree_bounded(&child, budget)?
                 .entries
                 .is_empty()
             {
@@ -2407,7 +2566,7 @@ fn remove_windows_provider_sync_backup_snapshot_entries(
         delete_windows_provider_sync_backup_handle(&child)?;
         drop(child);
     }
-    if !capture_provider_sync_backup_tree(dir, budget)?
+    if !capture_provider_sync_backup_tree_bounded(dir, budget)?
         .entries
         .is_empty()
     {
