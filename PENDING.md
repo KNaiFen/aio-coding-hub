@@ -14,53 +14,22 @@
 
 ## 未解决条目
 
-### AIO-PENDING-016 - 云端验证与本地零产物合同
-
-- **状态**：`planned`
-- **日期**：2026-08-06
-- **观察问题**：仓库文档、package/workspace 脚本和 Trellis 模板仍保留会安装依赖或产生 Node/Rust/Tauri 本地产物的入口，与云端构建策略冲突。
-- **锁定决策**：本地禁止依赖安装、dev、类型检查、Lint、测试、构建、Cargo 与 Tauri；只允许零依赖 Node 源码合同/解析检查和 `git diff --check`。跨平台桌面打包不升级为每个 PR 的必需任务。
-- **拟议方向**：更新活跃规则与 README，限制受控脚本为 GitHub Actions 使用，演进零依赖合同检查并加强 CI 静态质量门；历史任务和归档不改写。
-- **验收标准**：本地入口检查能拒绝仓库受控的依赖/构建命令；`ci.yml` 全量 workflow_dispatch 的 rustfmt、bindings、Clippy、Rust tests、前端质量门和 audit 均通过；合并后只清理重新核验过的仓库级产物。
-- **Trellis**：[`08-06-cloud-only-zero-artifact-contract`](./.trellis/tasks/08-06-cloud-only-zero-artifact-contract/)
-
 ### AIO-PENDING-017 - Provider Sync session-only 快照
 
 - **状态**：`planned`
 - **日期**：2026-08-06
+- **待执行交付**：session-only v2、v1 managed 迁移、单代保留、回滚及句柄相对清理加固已汇入 `codex/final-hardening-unified`。本项不再单独更新或合并 PR #87；由统一 PR 的精确远端 head 执行全量 Actions、跨平台竞态/预算回归与主线门后，与 AUD-002、AUD-035、AUD-033 一起合并。
 - **观察问题**：Provider Sync 当前扫描并备份 `archived_sessions`、SQLite 与全局状态，且旧格式 managed backup 最多保留五代，造成与恢复目标无关的空间增长。
 - **锁定决策**：新格式只处理活动 `sessions`，不再扫描、改写或备份 `archived_sessions`；只保留最新一代新格式 managed backup；只删除 manifest 精确证明所有权的旧格式 managed backup。
 - **拟议方向**：引入 v2 session-only manifest 和严格 managed/unmanaged 分类，在首次成功创建 v2 后迁移清理 v1，并保留同步失败的完整回滚。
 - **验收标准**：归档会话字节不变；成功后最多一代 v2；v1 managed 可迁移、非受管/损坏/symlink 保留；云端 Rust 覆盖迁移、回滚和所有权边界。
 - **Trellis**：[`08-06-provider-sync-session-snapshot`](./.trellis/tasks/08-06-provider-sync-session-snapshot/)
 
-### AIO-PENDING-019 - 非回环 Gateway Bearer Token
-
-- **状态**：`planned`
-- **日期**：2026-08-06
-- **待执行交付**：代码最终候选为 `948dc5fa`；PR #90 的 PR CI `31197560686` 与 workflow_dispatch 全量 CI `31197593860` 均在该精确 head 全绿，随后 squash 合并为 `c5b2333d`。产品交付已经完成；按本批约定，条目在最终纯文档收口 PR 迁入 `PENDING_COMPLETED.md` 前暂留 `planned`。
-- **观察问题**：现有 LAN/custom 非回环 Gateway 缺少统一路由鉴权，provider/forwarded header 和 provider 专用路由扩大了可伪造信任面。
-- **锁定决策**：保留 LAN；真实 TCP peer 非回环时所有路由含 health 必须使用应用生成 Bearer Token；loopback 兼容。Token 只展示一次、仅持久化摘要；删除 provider 专用路由、forced-provider 数据流和 Claude Terminal 入口。
-- **拟议方向**：在最外层 Axum middleware 基于 `ConnectInfo<SocketAddr>` 鉴权并剥离敏感/转发身份头，支持旧 LAN 迁移、未确认重启轮换、主动轮换和 WSL 明文即时同步。
-- **验收标准**：非回环无/错 token 在任何副作用前返回 401，正确 token 可用且认证/伪造头不外传；旧 token 立即失效；一次性明文不进入持久化、cache、日志或错误；WSL 同步成功或明确失败。
-- **Trellis**：[`08-06-gateway-lan-bearer-token`](./.trellis/tasks/08-06-gateway-lan-bearer-token/)
-
-### AIO-PENDING-020 - 跨重启数据重置
-
-- **状态**：`planned`
-- **日期**：2026-08-06
-- **待执行交付**：代码最终候选为 `59bc7b7c`；PR #91 的 PR CI `31239694948` 与 workflow_dispatch 全量 CI `31239707625` 均在该精确 head 全绿，随后 squash 合并为 `99de56bb`。产品交付已经完成；按本批约定，条目在最终纯文档收口 PR 迁入 `PENDING_COMPLETED.md` 前暂留 `planned`。
-- **观察问题**：数据重置在当前进程逐文件删除，而退出清理可能再次初始化数据库；文件占用或部分失败会让应用带着不完整清理继续运行。
-- **锁定决策**：reset IPC 只持久写 marker 后走专用退出；下次启动在 DB、observer、gateway 和后台任务前删除；失败保留 marker 并进入 retry/exit 维护态。
-- **拟议方向**：建立应用级 maintenance coordinator、幂等 marker 生命周期和专用退出路径，并 gate 原生/前端启动任务。
-- **验收标准**：marker durable；失败不清 marker、不启动普通服务；重试完整目标集合；成功清 marker 后首次正常启动；云端覆盖跨平台文件占用与 UI 文案。
-- **Trellis**：[`08-06-cross-restart-data-reset`](./.trellis/tasks/08-06-cross-restart-data-reset/)
-
 ### AIO-PENDING-021 - SQLite/文件系统双写恢复
 
 - **状态**：`planned`
 - **日期**：2026-08-06
-- **待执行交付**：代码产品候选已重放为 `699f0c0b`，直接基于 `origin/main@99de56bb`；该主线已包含 PR #90 / AUD-016 的 `c5b2333d` 与 PR #91 / AUD-008 的 `99de56bb`。本地 cloud-only checker/self-test 与 `git diff --check` 通过，未运行 Cargo、pnpm、Tauri、生成器、类型检查、Lint、测试或构建。下一步把 PR #92 更新到该重放结果并改为 `main` base，再对新的精确远端 head 运行 PR CI、workflow_dispatch 全量 CI、生成绑定核验与主线门；合并前保持 `planned`。
+- **待执行交付**：prepare-first journal、SQLite 权威 replay、Skills 受管 artifact 和补偿错误聚合已汇入 `codex/final-hardening-unified`，直接基于 `origin/main@99de56bb`。本项不再更新或单独合并 PR #92；由统一 PR 的精确远端 head 运行 PR CI、workflow_dispatch 全量 CI、故障注入、bindings、并发与主线门后，与 AUD-055、AUD-035、AUD-033 一起合并；合并前保持 `planned`。
 - **观察问题**：Prompt、MCP、Skills 和 workspace switch 在 SQLite 与外部文件之间双写，多处补偿吞错；进程中断或 commit/恢复失败可留下跨重启漂移。
 - **锁定决策**：已提交 SQLite 状态为权威；任何外部副作用前 durable journal；启动前阻断自动对账并复用 AUD-008 维护态；补偿失败必须可见且错误摘要脱敏。
 - **拟议方向**：统一 prepare-first 操作协议。Skills 的不可由 metadata 重建内容使用 journal 专属、带 ownership/hash 的临时 staging/backup，resolved 后回收。
@@ -71,7 +40,7 @@
 
 - **状态**：`planned`
 - **日期**：2026-08-06
-- **待执行交付**：代码已在独立候选分支 `codex/aud022-observer-zero-history-query` 提交为 `1f64f787`、`6b77a6dc`；本地 cloud-only checker/self-test 与 `git diff --check` 通过，未运行 Cargo、pnpm、Tauri、生成器、类型检查、Lint、测试或构建。PR、精确 head 全量 CI、bindings 核验、主线门和合并统一后置；在云端验证和合并前保持 `planned`。
+- **待执行交付**：受限 last/dominant/recent 查询、zero-history ready-empty 和 source-aware 有界 folder cache 已汇入 `codex/final-hardening-unified`。旧独立候选不再作为验证或合并表面；由统一 PR 的精确远端 head 运行查询/缓存回归、bindings、全量 CI 与主线门后，与 AUD-055、AUD-002、AUD-033 一起合并；合并前保持 `planned`。
 - **观察问题**：`history_limit=0` 只在投影末端生效，之前仍读取并构造 500 条日志，并基于隐藏历史触发完整 Claude/Codex session-folder 扫描。
 - **锁定决策**：保持 last/dominant/active/all-scope 与 recent ready-empty 语义；改用受限查询；folder lookup 只服务实际渲染投影并使用有界内存缓存。
 - **拟议方向**：拆分 last/dominant/recent SQL，zero-history 跳过 recent；以 `(source, session_id)` 为键增加容量和正/负 TTL 均受限的 Observer folder cache。
@@ -82,7 +51,7 @@
 
 - **状态**：`planned`
 - **日期**：2026-08-06
-- **待执行交付**：PR #94 已在 `codex/aud021-filesystem-recovery-journal@c97ad431` 上净重建，产品候选为 `8bb2bbf8`；只重放 AUD-033 的 7 个插件代码/测试提交，未带入旧 AUD-008/AUD-002 历史或旧 generated bindings blob，并保留 Gateway Bearer Token 合同。精确 head 的 Actions 漂移、bindings 和完整回归仍待执行；按用户最新决定，该分支处理完成后不单独合并，改并入剩余事项的统一集成 PR，在统一合并前保持 `planned`。
+- **待执行交付**：精确 activation policy、startup/command/gateway gate、600 秒三次严重故障 quarantine、revalidate 与废弃事件迁移已汇入 `codex/final-hardening-unified`，并继承主线 Gateway Bearer Token 合同。本项不再单独验证或合并 PR #94；由统一 PR 的精确远端 head 执行 Actions 漂移、bindings 和完整回归后，与 AUD-055、AUD-002、AUD-035 一起合并；合并前保持 `planned`。
 - **观察问题**：`activationEvents` 当前基本不参与 command/gateway 调度，重复 runtime failure 只触发进程内 circuit breaker，重启后清零且没有校验恢复路径。
 - **锁定决策**：仅支持 `onStartup`、`onCommand:*`、`onGatewayHook:*`，空数组保持 legacy；显式拒绝两种废弃事件；10 分钟内 3 次严重故障持久 quarantine；revalidate 成功只到 disabled。
 - **拟议方向**：引入精确 ActivationPolicy gate，统一 startup/command/gateway 严重故障分类和原子阈值事务，隔离后刷新 gateway snapshot/host，增加 quarantined-only revalidate。
