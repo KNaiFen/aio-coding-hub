@@ -939,9 +939,7 @@ fn managed_backup_version_from_bytes(bytes: &[u8]) -> Option<ManagedBackupVersio
     if manifest.get("managed_by").and_then(Value::as_str) != Some(PROVIDER_SYNC_MANAGED_BY) {
         return None;
     }
-    let Some(created_at) = manifest.get("created_at").and_then(Value::as_str) else {
-        return None;
-    };
+    let created_at = manifest.get("created_at").and_then(Value::as_str)?;
     if created_at.parse::<u128>().is_err()
         || !manifest.get("trigger").is_some_and(Value::is_string)
         || !manifest

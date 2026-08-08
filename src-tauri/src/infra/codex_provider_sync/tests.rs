@@ -60,8 +60,10 @@ fn backup_prune_limits_accept_exact_boundaries_and_reject_overflow() {
         "depth above the limit must fail closed"
     );
 
-    let mut exact_entries = ProviderSyncPruneBudget::default();
-    exact_entries.entries_seen = PROVIDER_SYNC_PRUNE_MAX_ENTRIES - 1;
+    let mut exact_entries = ProviderSyncPruneBudget {
+        entries_seen: PROVIDER_SYNC_PRUNE_MAX_ENTRIES - 1,
+        ..Default::default()
+    };
     exact_entries
         .record_entry()
         .expect("maximum supported entry count should be accepted");
@@ -71,8 +73,10 @@ fn backup_prune_limits_accept_exact_boundaries_and_reject_overflow() {
         "entry count above the limit must fail closed"
     );
 
-    let mut overflow = ProviderSyncPruneBudget::default();
-    overflow.entries_seen = usize::MAX;
+    let mut overflow = ProviderSyncPruneBudget {
+        entries_seen: usize::MAX,
+        ..Default::default()
+    };
     assert!(
         overflow.record_entry().is_err(),
         "entry counter overflow must fail closed"
