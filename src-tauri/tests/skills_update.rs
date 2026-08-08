@@ -168,7 +168,7 @@ WHERE skill_id = ?1 AND workspace_id = ?2
 }
 
 #[test]
-fn skill_update_sync_failure_restores_previous_content_and_metadata() {
+fn skill_update_projection_failure_preserves_authoritative_commit() {
     let app = support::TestApp::new();
     let handle = app.handle();
 
@@ -260,7 +260,8 @@ VALUES (?1, ?2, 1, 1)
         .expect_err("update should fail when sync fails")
         .to_string();
     assert!(
-        err.contains("SKILL_UPDATE_SYNC_FAILED"),
+        err.contains("RECOVERY_REPLAY_FAILED")
+            && err.contains("SKILL_TARGET_EXISTS_UNMANAGED"),
         "unexpected error: {err}"
     );
 
@@ -270,7 +271,7 @@ VALUES (?1, ?2, 1, 1)
         .join("skills")
         .join(&skill_key)
         .join("guide.md");
-    assert_file_text_normalized(&guide_path, "guide v1\n");
+    assert_file_text_normalized(&guide_path, "guide v2\n");
 
     let (name, content_hash): (String, Option<String>) = conn
         .query_row(
@@ -278,7 +279,21 @@ VALUES (?1, ?2, 1, 1)
             params![skill_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .expect("query restored metadata");
-    assert_eq!(name, "Context7 v1");
-    assert_eq!(content_hash, old_content_hash);
+        .expect("query authoritative metadata");
+    assert_eq!(name, "Context7 v2");
+    assert!(
+        content_hash
+            .as_deref()
+            .is_some_and(|hash| hash.starts_with("sha256:")),
+        "authoritative content hash should remain bound, got {content_hash:?}"
+    );
+    assert_ne!(content_hash, old_content_hash);
+    assert_eq!(
+        aio_coding_hub_lib::test_support::recovery_journal_statuses_for_kind(
+            &handle,
+            "skill.update",
+        )
+        .expect("read update journal status"),
+        vec!["failed"]
+    );
 }
