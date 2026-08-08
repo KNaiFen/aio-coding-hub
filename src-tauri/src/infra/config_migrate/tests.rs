@@ -237,7 +237,7 @@ INSERT INTO providers(
   model_policy_json, created_at, updated_at
 ) VALUES
   ('claude', 'legacy-policy-export', 'https://example.com', 'sk', '{"main_model":"legacy-main"}', NULL, 1, 1),
-  ('codex', 'ready-policy-export', 'https://example.com', 'sk', '{}', '{"version":1,"mode":"selected","rules":[{"source":"gpt-*","target":"upstream-*"}]}', 1, 1);
+  ('codex', 'ready-policy-export', 'https://example.com', 'sk', '{}', '{"version":1,"mode":"selected","modelPatterns":[],"mappings":[{"source":"gpt-*","target":"upstream-*"}]}', 1, 1);
         "#,
     )
     .expect("insert policy providers");

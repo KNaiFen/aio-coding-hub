@@ -10,7 +10,6 @@ use std::time::Duration;
 
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
 const DISCOVERY_BODY_LIMIT: usize = 8 * 1024 * 1024;
-const DISCOVERY_MODEL_LIMIT: usize = 500;
 
 #[derive(Debug, Clone, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -76,7 +75,6 @@ enum ModelCatalogFormat {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DiscoveryParseError {
     InvalidResponse,
-    TooManyModels,
 }
 
 fn catalog_format(cli_key: &str) -> Option<ModelCatalogFormat> {
@@ -152,7 +150,7 @@ fn parse_model_catalog_with_format(
     }
 
     let items = catalog_items(&root, format).ok_or(DiscoveryParseError::InvalidResponse)?;
-    let mut models = Vec::with_capacity(items.len().min(DISCOVERY_MODEL_LIMIT));
+    let mut models = Vec::with_capacity(items.len());
     for item in items {
         let object = item
             .as_object()
@@ -181,9 +179,6 @@ fn parse_model_catalog_with_format(
 
     models.sort_unstable();
     models.dedup();
-    if models.len() > DISCOVERY_MODEL_LIMIT {
-        return Err(DiscoveryParseError::TooManyModels);
-    }
     Ok(models)
 }
 
@@ -406,9 +401,6 @@ async fn fetch_model_catalog_with_descriptor(
 
     let models = match parse_model_catalog_with_format(descriptor.format(), &body) {
         Ok(models) => models,
-        Err(DiscoveryParseError::TooManyModels) => {
-            return discovery_error(ProviderModelDiscoveryErrorCode::TooLarge, None)
-        }
         Err(DiscoveryParseError::InvalidResponse) => {
             return discovery_error(ProviderModelDiscoveryErrorCode::InvalidResponse, None)
         }
@@ -516,44 +508,20 @@ pub(crate) async fn provider_models_discover<R: tauri::Runtime>(
                 reason: ProviderModelDiscoveryUnsupportedReason::Oauth,
             });
         };
-        let client = crate::gateway::http_client::get_no_redirect();
-        let token_set = match crate::gateway::oauth::refresh::resolve_saved_oauth_token(
-            &db, &client, &details, adapter, deadline,
-        )
-        .await
-        {
-            Ok(token_set) => token_set,
-            Err(crate::gateway::oauth::refresh::SavedOAuthTokenError::Invalid) => {
-                return Ok(discovery_error(
-                    ProviderModelDiscoveryErrorCode::InvalidConfig,
-                    None,
-                ))
-            }
-            Err(crate::gateway::oauth::refresh::SavedOAuthTokenError::Timeout) => {
-                return Ok(discovery_error(
-                    ProviderModelDiscoveryErrorCode::Timeout,
-                    None,
-                ))
-            }
-            Err(crate::gateway::oauth::refresh::SavedOAuthTokenError::Unauthorized) => {
-                return Ok(discovery_error(
-                    ProviderModelDiscoveryErrorCode::Unauthorized,
-                    None,
-                ))
-            }
-            Err(crate::gateway::oauth::refresh::SavedOAuthTokenError::Network) => {
-                return Ok(discovery_error(
-                    ProviderModelDiscoveryErrorCode::Network,
-                    None,
-                ))
-            }
-        };
+        let client = crate::gateway::http_client::get_no_redirect()?;
+        let access_token = details.oauth_access_token.trim();
+        if access_token.is_empty() {
+            return Ok(discovery_error(
+                ProviderModelDiscoveryErrorCode::InvalidConfig,
+                None,
+            ));
+        }
         let mut headers = HeaderMap::new();
         if adapter
             .inject_model_discovery_headers(
                 &mut headers,
-                token_set.access_token.trim(),
-                token_set.id_token.as_deref(),
+                access_token,
+                details.oauth_id_token.as_deref(),
             )
             .is_err()
         {
@@ -605,10 +573,11 @@ pub(crate) async fn provider_models_discover<R: tauri::Runtime>(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
-    let api_key = if let Some(provider_id) = input.provider_id {
+    let api_key = if let Some(submitted_key) = submitted_key {
+        submitted_key
+    } else if let Some(provider_id) = input.provider_id {
         let db = ensure_db_ready(app.clone(), db_state).await?;
         let cli_key = input.cli_key.clone();
-        let needs_key = submitted_key.is_none();
         let lookup = blocking::run("provider_models_discover_provider", move || {
             let conn = db.open_connection()?;
             let provider = providers::get_by_id(&conn, provider_id)?;
@@ -619,17 +588,12 @@ pub(crate) async fn provider_models_discover<R: tauri::Runtime>(
             {
                 return Err("SEC_INVALID_INPUT: provider connection mismatch".to_string());
             }
-            if needs_key {
-                drop(conn);
-                Ok(Some(providers::get_api_key_plaintext(&db, provider_id)?))
-            } else {
-                Ok(None)
-            }
+            drop(conn);
+            Ok(providers::get_api_key_plaintext(&db, provider_id)?)
         })
         .await;
         match lookup {
-            Ok(Some(stored_key)) => stored_key,
-            Ok(None) => submitted_key.clone().unwrap_or_default(),
+            Ok(stored_key) => stored_key,
             Err(error) if is_expected_provider_input_error(&error) => {
                 return Ok(discovery_error(
                     ProviderModelDiscoveryErrorCode::InvalidConfig,
@@ -638,8 +602,6 @@ pub(crate) async fn provider_models_discover<R: tauri::Runtime>(
             }
             Err(error) => return Err(error.into()),
         }
-    } else if let Some(submitted_key) = submitted_key {
-        submitted_key
     } else {
         return Ok(discovery_error(
             ProviderModelDiscoveryErrorCode::InvalidConfig,
@@ -672,7 +634,7 @@ pub(crate) async fn provider_models_discover<R: tauri::Runtime>(
         .iter()
         .position(|value| value == &selected_base_url)
         .and_then(|index| u32::try_from(index + 1).ok());
-    let client = crate::gateway::http_client::get_no_redirect();
+    let client = crate::gateway::http_client::get_no_redirect()?;
 
     let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
     if remaining.is_zero() {
@@ -964,6 +926,122 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn submitted_api_key_does_not_validate_saved_auth_mode() {
+        let (origin, request_task) = fixture_server(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{\"data\":[{\"id\":\"gpt-5.4\"}]} ",
+        )
+        .await;
+        let app = tauri::test::mock_app();
+        let db_state = DbInitState(tokio::sync::Mutex::new(None));
+
+        let result = provider_models_discover(
+            app.handle().clone(),
+            &db_state,
+            api_key_input(Some(42), origin, Some("draft-secret")),
+        )
+        .await
+        .expect("draft API key discovery should not read the saved provider");
+        let request = request_task.await.expect("fixture request task");
+
+        assert!(request
+            .to_ascii_lowercase()
+            .contains("authorization: bearer draft-secret"));
+        assert!(matches!(result, ProviderModelDiscoveryResult::Ready { .. }));
+    }
+
+    #[tokio::test]
+    async fn oauth_discovery_does_not_refresh_or_write_saved_tokens() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir
+            .path()
+            .join("provider-model-discovery-oauth-read-only.db");
+        let db = crate::db::init_for_tests(&db_path).expect("init db");
+        let saved = crate::providers::upsert(
+            &db,
+            crate::providers::ProviderUpsertParams {
+                provider_id: None,
+                cli_key: "codex".to_string(),
+                name: "oauth-read-only-discovery".to_string(),
+                base_urls: vec!["https://example.com".to_string()],
+                base_url_mode: crate::providers::ProviderBaseUrlMode::Order,
+                auth_mode: Some(crate::providers::ProviderAuthMode::ApiKey),
+                api_key: Some("bootstrap-key".to_string()),
+                enabled: true,
+                cost_multiplier: 1.0,
+                priority: Some(100),
+                claude_models: None,
+                model_policy: None,
+                limit_5h_usd: None,
+                limit_daily_usd: None,
+                daily_reset_mode: Some(crate::providers::DailyResetMode::Fixed),
+                daily_reset_time: Some("00:00:00".to_string()),
+                limit_weekly_usd: None,
+                limit_monthly_usd: None,
+                limit_total_usd: None,
+                tags: None,
+                note: None,
+                source_provider_id: None,
+                bridge_type: None,
+                stream_idle_timeout_seconds: None,
+                extension_values: None,
+            },
+        )
+        .expect("save provider");
+        crate::providers::update_oauth_tokens(
+            &db,
+            saved.id,
+            crate::providers::ProviderAuthMode::Oauth.as_str(),
+            "codex_oauth",
+            "",
+            Some("refresh-unchanged"),
+            Some("id-unchanged"),
+            "http://127.0.0.1:1/token",
+            "client-id",
+            Some("client-secret"),
+            Some(0),
+            Some("user@example.com"),
+        )
+        .expect("save OAuth tokens");
+        let before = crate::providers::get_oauth_details(&db, saved.id).expect("OAuth details");
+        let app = tauri::test::mock_app();
+        let db_state = DbInitState(tokio::sync::Mutex::new(Some(Ok(db.clone()))));
+
+        let result = provider_models_discover(
+            app.handle().clone(),
+            &db_state,
+            ProviderModelDiscoveryInput {
+                provider_id: Some(saved.id),
+                cli_key: "codex".to_string(),
+                auth_mode: crate::providers::ProviderAuthMode::Oauth,
+                base_urls: Vec::new(),
+                base_url_mode: crate::providers::ProviderBaseUrlMode::Order,
+                api_key: None,
+                source_provider_id: None,
+                bridge_type: None,
+            },
+        )
+        .await
+        .expect("OAuth discovery result");
+        let after = crate::providers::get_oauth_details(&db, saved.id).expect("OAuth details");
+
+        assert!(matches!(
+            result,
+            ProviderModelDiscoveryResult::Error {
+                code: ProviderModelDiscoveryErrorCode::InvalidConfig,
+                http_status: None,
+            }
+        ));
+        assert_eq!(after.oauth_access_token, before.oauth_access_token);
+        assert_eq!(after.oauth_refresh_token, before.oauth_refresh_token);
+        assert_eq!(after.oauth_id_token, before.oauth_id_token);
+        assert_eq!(after.oauth_expires_at, before.oauth_expires_at);
+        assert_eq!(
+            after.oauth_last_refreshed_at,
+            before.oauth_last_refreshed_at
+        );
+    }
+
+    #[tokio::test]
     async fn maps_auth_statuses_to_unauthorized_without_following_redirects() {
         for status in [401, 403] {
             let (origin, request_task) = fixture_server(&format!(
@@ -1190,7 +1268,7 @@ mod tests {
     }
 
     #[test]
-    fn accepts_empty_catalog_and_rejects_more_than_500_unique_models() {
+    fn accepts_empty_and_large_catalogs() {
         assert_eq!(
             parse_model_catalog("codex", r#"{"data":[]}"#),
             Ok(Vec::new())
@@ -1203,9 +1281,7 @@ mod tests {
         })
         .to_string();
 
-        assert_eq!(
-            parse_model_catalog("codex", &body),
-            Err(DiscoveryParseError::TooManyModels)
-        );
+        let models = parse_model_catalog("codex", &body).expect("large catalog should parse");
+        assert_eq!(models.len(), 501);
     }
 }

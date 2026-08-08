@@ -18,7 +18,7 @@ fn decode_provider_row(
     let base_urls_json: String = row.get("base_urls_json")?;
     let base_url_mode_raw: String = row.get("base_url_mode")?;
     let claude_models_json: String = row.get("claude_models_json")?;
-    let model_policy_json: Option<String> = row.get("model_policy_json").unwrap_or(None);
+    let model_policy_json: Option<String> = row.get("model_policy_json")?;
     let daily_reset_mode_raw: String = row.get("daily_reset_mode")?;
     let daily_reset_time_raw: String = row.get("daily_reset_time")?;
     let (model_policy, model_policy_status) =
@@ -50,7 +50,7 @@ fn decode_provider_row(
             .unwrap_or_else(|| "api_key".to_string()),
         oauth_provider_type: row.get("oauth_provider_type")?,
         source_provider_id: row.get("source_provider_id")?,
-        bridge_type: row.get("bridge_type").unwrap_or(None),
+        bridge_type: row.get("bridge_type")?,
     })
 }
 
@@ -90,12 +90,11 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<ProviderSummary, rusqlite::
         source_provider_id: decoded.source_provider_id,
         bridge_type: decoded.bridge_type,
         stream_idle_timeout_seconds: parse_positive_optional_u32(
-            row.get("stream_idle_timeout_seconds").unwrap_or(None),
+            row.get("stream_idle_timeout_seconds")?,
         ),
         extension_values: Vec::new(),
         api_key_configured: row
-            .get::<_, Option<i64>>("api_key_configured")
-            .unwrap_or(None)
+            .get::<_, Option<i64>>("api_key_configured")?
             .unwrap_or(0)
             != 0,
     })
@@ -760,7 +759,7 @@ fn map_gateway_provider_row(
         source_provider_id: decoded.source_provider_id,
         bridge_type: decoded.bridge_type,
         stream_idle_timeout_seconds: parse_positive_optional_u32(
-            row.get("stream_idle_timeout_seconds").unwrap_or(None),
+            row.get("stream_idle_timeout_seconds")?,
         ),
         extension_values: Vec::new(),
     })

@@ -145,9 +145,8 @@ export type ProviderUpsertInput = Omit<
 
 type ProviderUpsertTransportInput = Omit<
   GeneratedProviderUpsertInput,
-  "modelPolicy" | "streamIdleTimeoutSeconds"
+  "streamIdleTimeoutSeconds"
 > & {
-  modelPolicy?: GeneratedProviderUpsertInput["modelPolicy"];
   streamIdleTimeoutSeconds?: GeneratedProviderUpsertInput["streamIdleTimeoutSeconds"];
 };
 
@@ -202,6 +201,7 @@ function toProviderUpsertPayload(input: ProviderUpsertInput): ProviderUpsertTran
     costMultiplier: input.costMultiplier,
     priority: input.priority ?? null,
     claudeModels: input.claudeModels ?? null,
+    modelPolicy: input.modelPolicy ?? null,
     limit5hUsd: input.limit5hUsd ?? null,
     limitDailyUsd: input.limitDailyUsd ?? null,
     dailyResetMode: input.dailyResetMode ?? null,
@@ -214,20 +214,16 @@ function toProviderUpsertPayload(input: ProviderUpsertInput): ProviderUpsertTran
     sourceProviderId,
     bridgeType: input.bridgeType ?? null,
     extensionValues: input.extensionValues ?? null,
-  } satisfies Omit<GeneratedProviderUpsertInput, "modelPolicy" | "streamIdleTimeoutSeconds">;
-
-  const payloadWithModelPolicy = Object.prototype.hasOwnProperty.call(input, "modelPolicy")
-    ? { ...payloadBase, modelPolicy: input.modelPolicy ?? null }
-    : payloadBase;
+  } satisfies Omit<GeneratedProviderUpsertInput, "streamIdleTimeoutSeconds">;
 
   if (Object.prototype.hasOwnProperty.call(input, "streamIdleTimeoutSeconds")) {
     return {
-      ...payloadWithModelPolicy,
+      ...payloadBase,
       streamIdleTimeoutSeconds: input.streamIdleTimeoutSeconds ?? 0,
     } satisfies ProviderUpsertTransportInput;
   }
 
-  return payloadWithModelPolicy;
+  return payloadBase;
 }
 
 function validateOrderedProviderIds(orderedProviderIds: number[]) {

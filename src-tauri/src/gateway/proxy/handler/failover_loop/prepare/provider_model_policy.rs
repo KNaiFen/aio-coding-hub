@@ -1,7 +1,7 @@
 //! Usage: Apply a ready Provider model policy to one upstream attempt.
 
 use super::context::{CommonCtx, ProviderCtx};
-use crate::gateway::events::{ModelRedirect, ModelRedirectStep};
+use crate::gateway::events::ModelRedirect;
 use crate::gateway::proxy::model_rewrite::{
     replace_model_in_body_json, replace_model_in_path, replace_model_in_query,
 };
@@ -16,22 +16,32 @@ pub(super) struct UpstreamRequestMut<'a> {
     pub(super) strip_request_content_encoding: &'a mut bool,
 }
 
+pub(super) fn resolve_target_model(
+    provider: &providers::ProviderForGateway,
+    requested_model: Option<&str>,
+) -> Option<String> {
+    if provider.model_policy_status != providers::ProviderModelPolicyStatus::Ready {
+        return None;
+    }
+    let requested_model = requested_model?;
+    let effective_model = provider
+        .model_policy
+        .as_ref()?
+        .resolve_mapping(requested_model);
+    (effective_model != requested_model).then_some(effective_model)
+}
+
 pub(super) fn apply_if_needed<R: tauri::Runtime>(
     ctx: CommonCtx<'_, R>,
     provider: &providers::ProviderForGateway,
     provider_ctx: ProviderCtx<'_>,
     requested_model_location: Option<RequestedModelLocation>,
+    effective_model: Option<&str>,
+    model_already_applied: bool,
     upstream: UpstreamRequestMut<'_>,
 ) -> Option<ModelRedirect> {
-    if provider.model_policy_status != providers::ProviderModelPolicyStatus::Ready {
-        return None;
-    }
-    let policy = provider.model_policy.as_ref()?;
     let requested_model = ctx.requested_model.as_deref()?;
-    let effective_model = policy.resolve_mapping(requested_model);
-    if effective_model == requested_model {
-        return None;
-    }
+    let effective_model = effective_model?;
 
     let UpstreamRequestMut {
         forwarded_path,
@@ -39,16 +49,18 @@ pub(super) fn apply_if_needed<R: tauri::Runtime>(
         body_bytes,
         strip_request_content_encoding,
     } = upstream;
-    let location = requested_model_location.unwrap_or(RequestedModelLocation::BodyJson);
-    if !rewrite_model(
-        location,
-        &effective_model,
-        forwarded_path,
-        query,
-        body_bytes,
-        strip_request_content_encoding,
-    ) {
-        return None;
+    if !model_already_applied {
+        let location = requested_model_location.unwrap_or(RequestedModelLocation::BodyJson);
+        if !rewrite_model(
+            location,
+            effective_model,
+            forwarded_path,
+            query,
+            body_bytes,
+            strip_request_content_encoding,
+        ) {
+            return None;
+        }
     }
 
     let stage = if provider.is_cx2cc_bridge() {
@@ -57,13 +69,11 @@ pub(super) fn apply_if_needed<R: tauri::Runtime>(
         "provider"
     };
     let redirect = ModelRedirect {
-        steps: vec![ModelRedirectStep {
-            stage: stage.to_string(),
-            provider_id: provider_ctx.provider_id,
-            provider_name: provider_ctx.provider_name_base.clone(),
-            source_model: requested_model.to_string(),
-            target_model: effective_model.clone(),
-        }],
+        stage: stage.to_string(),
+        provider_id: provider_ctx.provider_id,
+        provider_name: provider_ctx.provider_name_base.clone(),
+        source_model: requested_model.to_string(),
+        target_model: effective_model.to_string(),
     };
     crate::gateway::response_fixer::push_special_setting(
         ctx.special_settings,
@@ -71,13 +81,11 @@ pub(super) fn apply_if_needed<R: tauri::Runtime>(
             "type": "model_redirect",
             "scope": "attempt",
             "hit": true,
-            "steps": [{
-                "stage": stage,
-                "providerId": provider_ctx.provider_id,
-                "providerName": provider_ctx.provider_name_base,
-                "sourceModel": requested_model,
-                "targetModel": &effective_model,
-            }],
+            "stage": stage,
+            "providerId": provider_ctx.provider_id,
+            "providerName": provider_ctx.provider_name_base,
+            "sourceModel": requested_model,
+            "targetModel": effective_model,
         }),
     );
     Some(redirect)

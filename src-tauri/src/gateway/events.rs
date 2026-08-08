@@ -123,18 +123,12 @@ pub(super) struct ClaudeModelMapping {
 
 #[derive(Debug, Serialize, Clone, PartialEq, Eq, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub(super) struct ModelRedirectStep {
+pub(super) struct ModelRedirect {
     pub(super) stage: String,
     pub(super) provider_id: i64,
     pub(super) provider_name: String,
     pub(super) source_model: String,
     pub(super) target_model: String,
-}
-
-#[derive(Debug, Serialize, Clone, PartialEq, Eq, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct ModelRedirect {
-    pub(super) steps: Vec<ModelRedirectStep>,
 }
 
 #[derive(Debug, Serialize, Clone, specta::Type)]
@@ -352,21 +346,19 @@ fn bound_optional_claude_model_mapping(
 }
 
 fn bound_model_redirect(mut redirect: ModelRedirect) -> ModelRedirect {
-    for step in &mut redirect.steps {
-        step.stage = truncate_chars(std::mem::take(&mut step.stage), EVENT_STATE_MAX_CHARS);
-        step.provider_name = truncate_chars(
-            std::mem::take(&mut step.provider_name),
-            EVENT_SHORT_TEXT_MAX_CHARS,
-        );
-        step.source_model = truncate_chars(
-            std::mem::take(&mut step.source_model),
-            EVENT_SHORT_TEXT_MAX_CHARS,
-        );
-        step.target_model = truncate_chars(
-            std::mem::take(&mut step.target_model),
-            EVENT_SHORT_TEXT_MAX_CHARS,
-        );
-    }
+    redirect.stage = truncate_chars(std::mem::take(&mut redirect.stage), EVENT_STATE_MAX_CHARS);
+    redirect.provider_name = truncate_chars(
+        std::mem::take(&mut redirect.provider_name),
+        EVENT_SHORT_TEXT_MAX_CHARS,
+    );
+    redirect.source_model = truncate_chars(
+        std::mem::take(&mut redirect.source_model),
+        EVENT_SHORT_TEXT_MAX_CHARS,
+    );
+    redirect.target_model = truncate_chars(
+        std::mem::take(&mut redirect.target_model),
+        EVENT_SHORT_TEXT_MAX_CHARS,
+    );
     redirect
 }
 
@@ -653,13 +645,11 @@ mod tests {
 
     fn sample_redirect() -> ModelRedirect {
         ModelRedirect {
-            steps: vec![ModelRedirectStep {
-                stage: "provider".to_string(),
-                provider_id: 7,
-                provider_name: "Provider A".to_string(),
-                source_model: "gpt-original".to_string(),
-                target_model: "gpt-upstream".to_string(),
-            }],
+            stage: "provider".to_string(),
+            provider_id: 7,
+            provider_name: "Provider A".to_string(),
+            source_model: "gpt-original".to_string(),
+            target_model: "gpt-upstream".to_string(),
         }
     }
 
@@ -1149,13 +1139,11 @@ mod tests {
         assert_eq!(
             value.get("model_redirect"),
             Some(&json!({
-                "steps": [{
-                    "stage": "provider",
-                    "providerId": 7,
-                    "providerName": "Provider A",
-                    "sourceModel": "gpt-original",
-                    "targetModel": "gpt-upstream"
-                }]
+                "stage": "provider",
+                "providerId": 7,
+                "providerName": "Provider A",
+                "sourceModel": "gpt-original",
+                "targetModel": "gpt-upstream"
             }))
         );
     }

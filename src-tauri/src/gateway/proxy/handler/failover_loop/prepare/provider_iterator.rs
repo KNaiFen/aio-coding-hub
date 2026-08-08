@@ -179,6 +179,8 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
         Some(adapter) => adapter,
         None => return PreparationOutcome::Skipped,
     };
+    let policy_target_model =
+        provider_model_policy::resolve_target_model(provider, input.requested_model.as_deref());
 
     let mut upstream_forwarded_path = input.forwarded_path.clone();
     let mut upstream_query = input.query.clone();
@@ -192,6 +194,9 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
                 input,
                 &effective_credential,
                 &mut provider_base_url_base,
+                policy_target_model
+                    .as_deref()
+                    .or(input.requested_model.as_deref()),
             )
             .await
             {
@@ -293,6 +298,8 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
         provider,
         provider_ctx,
         input.requested_model_location,
+        policy_target_model.as_deref(),
+        gemini_oauth_response_mode.is_some(),
         provider_model_policy::UpstreamRequestMut {
             forwarded_path: &mut upstream_forwarded_path,
             query: &mut upstream_query,

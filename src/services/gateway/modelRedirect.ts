@@ -1,14 +1,14 @@
 import { GATEWAY_EVENT_TEXT_LIMITS } from "../../constants/gatewayEvents";
-import type { ModelRedirect, ModelRedirectStep } from "../../generated/bindings";
+import type { ModelRedirect } from "../../generated/bindings";
 import { normalizeClaudeModelMapping, type ClaudeModelMapping } from "./claudeModelMapping";
 
-export type { ModelRedirect, ModelRedirectStep } from "../../generated/bindings";
+export type { ModelRedirect } from "../../generated/bindings";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function readStep(value: unknown): ModelRedirectStep | null {
+export function normalizeModelRedirect(value: unknown): ModelRedirect | null {
   if (!isRecord(value)) return null;
   const stage = typeof value.stage === "string" ? value.stage.trim() : "";
   const providerName = typeof value.providerName === "string" ? value.providerName.trim() : "";
@@ -33,27 +33,16 @@ function readStep(value: unknown): ModelRedirectStep | null {
   return { stage, providerId, providerName, sourceModel, targetModel };
 }
 
-export function normalizeModelRedirect(value: unknown): ModelRedirect | null {
-  if (!isRecord(value) || !Array.isArray(value.steps) || value.steps.length === 0) return null;
-  const steps = value.steps.map(readStep);
-  if (steps.some((step) => step == null)) return null;
-  return { steps: steps as ModelRedirectStep[] };
-}
-
 export function modelRedirectFromClaudeModelMapping(
   mapping: ClaudeModelMapping | null | undefined
 ): ModelRedirect | null {
   const normalized = normalizeClaudeModelMapping(mapping);
   if (!normalized) return null;
   return {
-    steps: [
-      {
-        stage: "legacy",
-        providerId: normalized.providerId,
-        providerName: normalized.providerName,
-        sourceModel: normalized.requestedModel,
-        targetModel: normalized.effectiveModel,
-      },
-    ],
+    stage: "legacy",
+    providerId: normalized.providerId,
+    providerName: normalized.providerName,
+    sourceModel: normalized.requestedModel,
+    targetModel: normalized.effectiveModel,
   };
 }

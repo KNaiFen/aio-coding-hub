@@ -3194,8 +3194,7 @@ export type ModelPricesSyncReport = {
   skipped: number;
   total: number;
 };
-export type ModelRedirect = { steps: ModelRedirectStep[] };
-export type ModelRedirectStep = {
+export type ModelRedirect = {
   stage: string;
   providerId: number;
   providerName: string;

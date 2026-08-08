@@ -305,15 +305,19 @@ describe("pages/providers/ProviderEditorDialog", () => {
     });
 
     fireEvent.click(dialog.getByText("模型路由"));
-    fireEvent.click(dialog.getByRole("button", { name: "添加映射" }));
-    fireEvent.change(dialog.getByLabelText("请求模型 1"), {
-      target: { value: "x".repeat(201) },
+    fireEvent.change(dialog.getByLabelText("映射请求模型"), {
+      target: { value: "gpt-**" },
     });
+    fireEvent.change(dialog.getByLabelText("映射上游模型"), {
+      target: { value: "upstream-ok" },
+    });
+    fireEvent.click(dialog.getByRole("button", { name: "添加映射" }));
     fireEvent.click(dialog.getByRole("button", { name: "保存" }));
-    expect(vi.mocked(toast)).toHaveBeenCalledWith(expect.stringContaining("请求模型最多 200"));
+    expect(vi.mocked(toast)).toHaveBeenCalledWith(
+      expect.stringContaining("请求模型最多包含一个 *")
+    );
 
     fireEvent.change(dialog.getByLabelText("请求模型 1"), { target: { value: "ok" } });
-    fireEvent.change(dialog.getByLabelText("上游模型 1"), { target: { value: "upstream-ok" } });
     fireEvent.click(dialog.getByRole("button", { name: "保存" }));
 
     await waitFor(() =>
@@ -976,17 +980,17 @@ describe("pages/providers/ProviderEditorDialog", () => {
 
     const dialog = within(screen.getByRole("dialog"));
     fireEvent.click(dialog.getByText("模型路由"));
-    fireEvent.click(dialog.getByRole("button", { name: "添加映射" }));
-    fireEvent.change(dialog.getByLabelText("请求模型 1"), { target: { value: "gpt-*" } });
-    fireEvent.change(dialog.getByLabelText("上游模型 1"), {
+    fireEvent.change(dialog.getByLabelText("映射请求模型"), { target: { value: "gpt-*" } });
+    fireEvent.change(dialog.getByLabelText("映射上游模型"), {
       target: { value: "upstream-*" },
     });
+    fireEvent.click(dialog.getByRole("button", { name: "添加映射" }));
 
     expect(dialog.getByLabelText("请求模型 1")).toHaveValue("gpt-*");
     expect(dialog.getByLabelText("上游模型 1")).toHaveValue("upstream-*");
   });
 
-  it("discovers API-key models and merges them into the unsaved policy draft", async () => {
+  it("keeps discovered API-key models as candidates until the user selects one", async () => {
     vi.mocked(providerModelsDiscover).mockResolvedValueOnce({
       status: "ready",
       models: ["gpt-5.4", "claude-3"],
@@ -1014,11 +1018,14 @@ describe("pages/providers/ProviderEditorDialog", () => {
     fireEvent.click(dialog.getByText("模型路由"));
     fireEvent.click(dialog.getByRole("button", { name: "获取上游模型" }));
 
-    await waitFor(() => expect(dialog.getByLabelText("优先模型 1")).toHaveValue("claude-3"));
+    await waitFor(() => expect(dialog.getByText(/已获取 2 个候选/)).toBeInTheDocument());
+    expect(dialog.queryByLabelText("显式模型 1")).not.toBeInTheDocument();
+    fireEvent.change(dialog.getByLabelText("新增显式模型"), {
+      target: { value: "claude-3" },
+    });
+    await waitFor(() => expect(dialog.getByLabelText("显式模型 1")).toHaveValue("claude-3"));
     expect(dialog.queryByLabelText("上游模型 1")).not.toBeInTheDocument();
-    expect(
-      dialog.getByText("已获取 2 个 · 新增 2 · https://example.com · 地址 1")
-    ).toBeInTheDocument();
+    expect(dialog.getByText("已获取 2 个候选 · https://example.com · 地址 1")).toBeInTheDocument();
     expect(providerModelsDiscover).toHaveBeenCalledWith({
       providerId: null,
       cliKey: "codex",
@@ -1031,7 +1038,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
     });
   });
 
-  it("discovers models from a legacy Claude edit into a generic policy draft", async () => {
+  it("keeps legacy Claude discovery as candidates until explicit cutover", async () => {
     vi.mocked(providerModelsDiscover).mockResolvedValueOnce({
       status: "ready",
       models: ["claude-3-5-sonnet"],
@@ -1059,9 +1066,14 @@ describe("pages/providers/ProviderEditorDialog", () => {
     await waitFor(() => expect(dialog.getByText("当前 Claude 使用旧版模型映射")).toBeVisible());
     fireEvent.click(dialog.getByRole("button", { name: "获取上游模型" }));
 
-    await waitFor(() =>
-      expect(dialog.getByLabelText("优先模型 1")).toHaveValue("claude-3-5-sonnet")
-    );
+    await waitFor(() => expect(dialog.getByText(/已获取 1 个候选/)).toBeInTheDocument());
+    expect(dialog.getByText("当前 Claude 使用旧版模型映射")).toBeVisible();
+    expect(dialog.queryByLabelText("新增显式模型")).not.toBeInTheDocument();
+    fireEvent.click(dialog.getByRole("button", { name: "改用通用模型策略" }));
+    fireEvent.change(dialog.getByLabelText("新增显式模型"), {
+      target: { value: "claude-3-5-sonnet" },
+    });
+    expect(dialog.getByLabelText("显式模型 1")).toHaveValue("claude-3-5-sonnet");
     expect(dialog.getByText("保存后无法在界面切回旧策略")).toBeInTheDocument();
     expect(providerModelsDiscover).toHaveBeenCalledWith({
       providerId: 1,
@@ -1075,7 +1087,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
     });
   });
 
-  it("recovers an invalid policy through successful model discovery", async () => {
+  it("keeps invalid policy blocked after discovery until explicit reset", async () => {
     vi.mocked(providerModelsDiscover).mockResolvedValueOnce({
       status: "ready",
       models: ["gpt-5.4"],
@@ -1103,9 +1115,16 @@ describe("pages/providers/ProviderEditorDialog", () => {
     await waitFor(() => expect(dialog.getByText(/模型策略无效/)).toBeVisible());
     fireEvent.click(dialog.getByRole("button", { name: "获取上游模型" }));
 
-    await waitFor(() => expect(dialog.getByLabelText("优先模型 1")).toHaveValue("gpt-5.4"));
+    await waitFor(() => expect(dialog.getByText(/已获取 1 个候选/)).toBeInTheDocument());
+    expect(dialog.getByText(/模型策略无效/)).toBeVisible();
+    expect(dialog.queryByLabelText("新增显式模型")).not.toBeInTheDocument();
+    fireEvent.click(dialog.getByRole("button", { name: "重置为全部可用" }));
+    fireEvent.change(dialog.getByLabelText("新增显式模型"), {
+      target: { value: "gpt-5.4" },
+    });
+    expect(dialog.getByLabelText("显式模型 1")).toHaveValue("gpt-5.4");
     expect(dialog.queryByText("保存后无法在界面切回旧策略")).not.toBeInTheDocument();
-    expect(dialog.queryByRole("button", { name: /重置为全部模型/ })).not.toBeInTheDocument();
+    expect(dialog.queryByRole("button", { name: "重置为全部可用" })).not.toBeInTheDocument();
   });
 
   it("keeps the latest discovery result when an earlier request finishes later", async () => {
@@ -1139,7 +1158,13 @@ describe("pages/providers/ProviderEditorDialog", () => {
       origin: "https://new.example.com",
       base_url_index: 1,
     });
-    await waitFor(() => expect(dialog.getByLabelText("优先模型 1")).toHaveValue("new-model"));
+    await waitFor(() =>
+      expect(dialog.getByText(/https:\/\/new\.example\.com/)).toBeInTheDocument()
+    );
+    fireEvent.change(dialog.getByLabelText("新增显式模型"), {
+      target: { value: "new-model" },
+    });
+    expect(dialog.getByLabelText("显式模型 1")).toHaveValue("new-model");
 
     resolveFirst({
       status: "ready",
@@ -1147,7 +1172,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
       origin: "https://old.example.com",
       base_url_index: 1,
     });
-    await waitFor(() => expect(dialog.getByLabelText("优先模型 1")).toHaveValue("new-model"));
+    await waitFor(() => expect(dialog.getByLabelText("显式模型 1")).toHaveValue("new-model"));
     expect(dialog.queryByDisplayValue("old-model")).not.toBeInTheDocument();
   });
 
@@ -1224,10 +1249,10 @@ describe("pages/providers/ProviderEditorDialog", () => {
     });
 
     await waitFor(() => expect(dialog.getByText("连接已变化，请重新获取")).toBeInTheDocument());
-    expect(dialog.queryByLabelText("优先模型 1")).not.toBeInTheDocument();
+    expect(dialog.queryByLabelText("显式模型 1")).not.toBeInTheDocument();
   });
 
-  it("supports searching and deleting a generic model rule", () => {
+  it("supports creating and deleting a generic model rule", () => {
     render(
       <ProviderEditorDialog
         mode="create"
@@ -1240,15 +1265,15 @@ describe("pages/providers/ProviderEditorDialog", () => {
 
     const dialog = within(screen.getByRole("dialog"));
     fireEvent.click(dialog.getByText("模型路由"));
-    fireEvent.click(dialog.getByRole("button", { name: "添加优先模型" }));
-    fireEvent.change(dialog.getByLabelText("优先模型 1"), { target: { value: "gpt-5.4" } });
-    fireEvent.change(dialog.getByLabelText("搜索模型"), { target: { value: "5.4" } });
-    expect(dialog.getByLabelText("优先模型 1")).toBeInTheDocument();
-    fireEvent.click(dialog.getByRole("button", { name: "删除优先模型 1" }));
-    expect(dialog.getByRole("button", { name: "添加优先模型" })).toHaveFocus();
+    const composer = dialog.getByLabelText("新增显式模型");
+    fireEvent.change(composer, { target: { value: "gpt-5.4" } });
+    fireEvent.keyDown(composer, { key: "Enter" });
+    expect(dialog.getByLabelText("显式模型 1")).toBeInTheDocument();
+    fireEvent.click(dialog.getByRole("button", { name: "删除显式模型 1" }));
+    expect(composer).toHaveFocus();
   });
 
-  it("guards unsaved model policy changes but ignores search-only changes", () => {
+  it("guards committed model policy changes but ignores uncommitted composer text", () => {
     const onOpenChange = vi.fn();
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
 
@@ -1264,7 +1289,9 @@ describe("pages/providers/ProviderEditorDialog", () => {
 
     const dialog = within(screen.getByRole("dialog"));
     fireEvent.click(dialog.getByText("模型路由"));
-    fireEvent.click(dialog.getByRole("button", { name: "添加优先模型" }));
+    const composer = dialog.getByLabelText("新增显式模型");
+    fireEvent.change(composer, { target: { value: "gpt-5.4" } });
+    fireEvent.keyDown(composer, { key: "Enter" });
     fireEvent.click(dialog.getByRole("button", { name: "取消" }));
     expect(confirmSpy).toHaveBeenCalledWith("有未保存的修改，确定关闭吗？");
     expect(onOpenChange).not.toHaveBeenCalled();
@@ -1285,10 +1312,12 @@ describe("pages/providers/ProviderEditorDialog", () => {
         onOpenChange={onOpenChange}
       />
     );
-    const searchDialog = within(screen.getByRole("dialog"));
-    fireEvent.click(searchDialog.getByText("模型路由"));
-    fireEvent.change(searchDialog.getByLabelText("搜索模型"), { target: { value: "gpt" } });
-    fireEvent.click(searchDialog.getByRole("button", { name: "取消" }));
+    const composerDialog = within(screen.getByRole("dialog"));
+    fireEvent.click(composerDialog.getByText("模型路由"));
+    fireEvent.change(composerDialog.getByLabelText("新增显式模型"), {
+      target: { value: "gpt" },
+    });
+    fireEvent.click(composerDialog.getByRole("button", { name: "取消" }));
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
@@ -1343,9 +1372,11 @@ describe("pages/providers/ProviderEditorDialog", () => {
 
     // Drive generic model policy handlers
     fireEvent.click(dialog.getByText("模型路由"));
+    fireEvent.change(dialog.getByLabelText("映射请求模型"), { target: { value: "gpt-*" } });
+    fireEvent.change(dialog.getByLabelText("映射上游模型"), {
+      target: { value: "upstream-*" },
+    });
     fireEvent.click(dialog.getByRole("button", { name: "添加映射" }));
-    fireEvent.change(dialog.getByLabelText("请求模型 1"), { target: { value: "gpt-*" } });
-    fireEvent.change(dialog.getByLabelText("上游模型 1"), { target: { value: "upstream-*" } });
 
     // Start saving and block close while saving
     fireEvent.click(dialog.getByRole("button", { name: "保存" }));

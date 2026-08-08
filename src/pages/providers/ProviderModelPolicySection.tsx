@@ -1,4 +1,4 @@
-import { ArrowRight, ChevronDown, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
+import { ArrowRight, ChevronDown, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "../../ui/Button";
 import { FormField } from "../../ui/FormField";
@@ -31,7 +31,11 @@ export type ProviderModelPolicySectionProps = {
 };
 
 const MODE_OPTIONS = [
-  { value: "all", label: "全部可用", description: "默认可用，显式模型优先路由到此 Provider" },
+  {
+    value: "all",
+    label: "全部可用",
+    description: "默认可用；显式匹配 Provider 集合为最终候选集",
+  },
   { value: "selected", label: "仅这些可用", description: "只接收列出或映射的模型" },
   { value: "excluded", label: "排除这些", description: "列出的模型不可用，其余模型默认可用" },
 ];
@@ -47,16 +51,18 @@ export function ProviderModelPolicySection({
   onDiscoverModels,
   hasMultipleBaseUrls,
 }: ProviderModelPolicySectionProps) {
-  const [search, setSearch] = useState("");
   const [localDraft, setLocalDraft] = useState<ProviderModelPolicyV1>(() =>
     cloneProviderModelPolicy(policy ?? DEFAULT_PROVIDER_MODEL_POLICY)
   );
+  const [patternInput, setPatternInput] = useState("");
+  const [mappingSourceInput, setMappingSourceInput] = useState("");
+  const [mappingTargetInput, setMappingTargetInput] = useState("");
   const [editingLegacy, setEditingLegacy] = useState(false);
   const [showCutoverWarning, setShowCutoverWarning] = useState(false);
   const patternRefs = useRef<Record<number, HTMLInputElement | null>>({});
   const mappingRefs = useRef<Record<number, HTMLInputElement | null>>({});
-  const patternAddButtonRef = useRef<HTMLButtonElement | null>(null);
-  const mappingAddButtonRef = useRef<HTMLButtonElement | null>(null);
+  const patternComposerRef = useRef<HTMLInputElement | null>(null);
+  const mappingComposerRef = useRef<HTMLInputElement | null>(null);
   const focusRef = useRef<{ kind: "pattern" | "mapping"; index: number } | null>(null);
   const previousStatusRef = useRef(status);
 
@@ -76,21 +82,10 @@ export function ProviderModelPolicySection({
   }, [status]);
 
   const currentPolicy = status === "ready" && policy ? policy : localDraft;
-  const query = search.trim().toLowerCase();
-  const visiblePatterns = currentPolicy.modelPatterns
-    .map((pattern, index) => ({ pattern, index }))
-    .filter(({ pattern }) => !query || pattern.toLowerCase().includes(query));
-  const visibleMappings = currentPolicy.mappings
-    .map((mapping, index) => ({ mapping, index }))
-    .filter(
-      ({ mapping }) => !query || `${mapping.source} ${mapping.target}`.toLowerCase().includes(query)
-    );
+  const candidateModels = modelDiscoveryState.status === "ready" ? modelDiscoveryState.models : [];
+  const candidateListId = `${cliKey}-provider-model-candidates`;
   const policyError = validateProviderModelPolicy(currentPolicy);
   const canEdit = status === "ready" || editingLegacy;
-  const entryCount = new Set([
-    ...currentPolicy.modelPatterns,
-    ...currentPolicy.mappings.map((mapping) => mapping.source),
-  ]).size;
 
   const emit = (next: ProviderModelPolicyV1) => {
     const normalized = normalizeProviderModelPolicyDraft(next);
@@ -107,10 +102,13 @@ export function ProviderModelPolicySection({
     });
   };
 
-  const addPattern = () => {
-    const index = currentPolicy.modelPatterns.length;
-    emit({ ...currentPolicy, modelPatterns: [...currentPolicy.modelPatterns, ""] });
-    focusRef.current = { kind: "pattern", index };
+  const addPattern = (rawValue = patternInput) => {
+    const value = rawValue.trim();
+    if (!value) return;
+    if (!currentPolicy.modelPatterns.some((pattern) => pattern.trim() === value)) {
+      emit({ ...currentPolicy, modelPatterns: [...currentPolicy.modelPatterns, value] });
+    }
+    setPatternInput("");
   };
 
   const deletePattern = (index: number) => {
@@ -118,7 +116,7 @@ export function ProviderModelPolicySection({
       (_, patternIndex) => patternIndex !== index
     );
     emit({ ...currentPolicy, modelPatterns });
-    if (modelPatterns.length === 0) patternAddButtonRef.current?.focus();
+    if (modelPatterns.length === 0) patternComposerRef.current?.focus();
     else focusRef.current = { kind: "pattern", index: Math.min(index, modelPatterns.length - 1) };
   };
 
@@ -132,18 +130,22 @@ export function ProviderModelPolicySection({
   };
 
   const addMapping = () => {
-    const index = currentPolicy.mappings.length;
+    const source = mappingSourceInput.trim();
+    const target = mappingTargetInput.trim();
+    if (!source || !target) return;
     emit({
       ...currentPolicy,
-      mappings: [...currentPolicy.mappings, { source: "", target: "" }],
+      mappings: [...currentPolicy.mappings, { source, target }],
     });
-    focusRef.current = { kind: "mapping", index };
+    setMappingSourceInput("");
+    setMappingTargetInput("");
+    mappingComposerRef.current?.focus();
   };
 
   const deleteMapping = (index: number) => {
     const mappings = currentPolicy.mappings.filter((_, mappingIndex) => mappingIndex !== index);
     emit({ ...currentPolicy, mappings });
-    if (mappings.length === 0) mappingAddButtonRef.current?.focus();
+    if (mappings.length === 0) mappingComposerRef.current?.focus();
     else focusRef.current = { kind: "mapping", index: Math.min(index, mappings.length - 1) };
   };
 
@@ -169,10 +171,10 @@ export function ProviderModelPolicySection({
   const discoveryRow = (legacy: boolean) => (
     <div className="flex flex-wrap items-center justify-between gap-2">
       <p role="status" aria-live="polite" className="min-w-0 text-xs text-muted-foreground">
-        {discoveryMessage(modelDiscoveryState, currentPolicy.mode)}
+        {discoveryMessage(modelDiscoveryState)}
         {discoveryEndpoint(modelDiscoveryState)}
         {hasMultipleBaseUrls ? " · 多地址建议拆分 Provider" : ""}
-        {legacy ? " · 获取后生成通用策略草稿" : ""}
+        {legacy && modelDiscoveryState.status === "ready" ? " · 切换后可选" : ""}
       </p>
       <Button
         type="button"
@@ -251,6 +253,12 @@ export function ProviderModelPolicySection({
           </div>
         ) : (
           <>
+            <datalist id={candidateListId}>
+              {candidateModels.map((model) => (
+                <option key={model} value={model} />
+              ))}
+            </datalist>
+
             {showCutoverWarning ? (
               <p
                 role="alert"
@@ -287,26 +295,33 @@ export function ProviderModelPolicySection({
 
               {discoveryRow(false)}
 
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-                <FormField label="搜索模型">
-                  <div className="relative">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      aria-label="搜索模型"
-                      value={search}
-                      onChange={(event) => setSearch(event.currentTarget.value)}
-                      placeholder="搜索范围或映射"
-                      className="pl-8"
-                      disabled={saving}
-                    />
-                  </div>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                <FormField label={rangeAddLabel(currentPolicy.mode)}>
+                  <Input
+                    ref={patternComposerRef}
+                    aria-label={`新增${rangeItemLabel(currentPolicy.mode)}`}
+                    list={candidateListId}
+                    value={patternInput}
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      if (candidateModels.includes(value.trim())) addPattern(value);
+                      else setPatternInput(value);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter") return;
+                      event.preventDefault();
+                      addPattern();
+                    }}
+                    placeholder="例如 gpt-5.6-luna 或 gpt-*"
+                    disabled={saving || !canEdit}
+                    mono
+                  />
                 </FormField>
                 <Button
-                  ref={patternAddButtonRef}
                   type="button"
                   variant="secondary"
-                  onClick={addPattern}
-                  disabled={saving || !canEdit || entryCount >= 500}
+                  onClick={() => addPattern()}
+                  disabled={saving || !canEdit || !patternInput.trim()}
                 >
                   <Plus className="h-4 w-4" aria-hidden="true" />
                   {rangeAddLabel(currentPolicy.mode)}
@@ -317,12 +332,12 @@ export function ProviderModelPolicySection({
                 <p className="text-xs font-semibold text-muted-foreground">
                   {rangeListLabel(currentPolicy.mode)}
                 </p>
-                {visiblePatterns.length === 0 ? (
+                {currentPolicy.modelPatterns.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
                     暂无{rangeListLabel(currentPolicy.mode)}
                   </p>
                 ) : null}
-                {visiblePatterns.map(({ pattern, index }) => (
+                {currentPolicy.modelPatterns.map((pattern, index) => (
                   <div key={index} className="flex items-end gap-2">
                     <FormField label={`${rangeItemLabel(currentPolicy.mode)} ${index + 1}`}>
                       <Input
@@ -358,30 +373,69 @@ export function ProviderModelPolicySection({
               className="space-y-3 border-t border-border pt-4"
               aria-labelledby={`${cliKey}-model-mapping-title`}
             >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3
-                  id={`${cliKey}-model-mapping-title`}
-                  className="text-sm font-semibold text-foreground"
-                >
-                  模型映射（可选）
-                </h3>
+              <h3
+                id={`${cliKey}-model-mapping-title`}
+                className="text-sm font-semibold text-foreground"
+              >
+                模型映射（可选）
+              </h3>
+
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_1rem_minmax(0,1fr)_auto] md:items-end">
+                <FormField label="请求模型">
+                  <Input
+                    ref={mappingComposerRef}
+                    aria-label="映射请求模型"
+                    list={candidateListId}
+                    value={mappingSourceInput}
+                    onChange={(event) => setMappingSourceInput(event.currentTarget.value)}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter") return;
+                      event.preventDefault();
+                      addMapping();
+                    }}
+                    placeholder="例如 gpt-5.6-luna"
+                    disabled={saving || !canEdit}
+                    mono
+                  />
+                </FormField>
+                <ArrowRight
+                  className="mb-3 hidden h-4 w-4 text-muted-foreground md:block"
+                  aria-hidden="true"
+                />
+                <FormField label="上游模型">
+                  <Input
+                    aria-label="映射上游模型"
+                    list={candidateListId}
+                    value={mappingTargetInput}
+                    onChange={(event) => setMappingTargetInput(event.currentTarget.value)}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter") return;
+                      event.preventDefault();
+                      addMapping();
+                    }}
+                    placeholder="例如 deepseek-v4-flash"
+                    disabled={saving || !canEdit}
+                    mono
+                  />
+                </FormField>
                 <Button
-                  ref={mappingAddButtonRef}
                   type="button"
                   variant="secondary"
                   onClick={addMapping}
-                  disabled={saving || !canEdit || entryCount >= 500}
+                  disabled={
+                    saving || !canEdit || !mappingSourceInput.trim() || !mappingTargetInput.trim()
+                  }
                 >
                   <Plus className="h-4 w-4" aria-hidden="true" />
                   添加映射
                 </Button>
               </div>
 
-              {visibleMappings.length === 0 ? (
+              {currentPolicy.mappings.length === 0 ? (
                 <p className="text-sm text-muted-foreground">暂无模型映射</p>
               ) : null}
               <div className="space-y-2">
-                {visibleMappings.map(({ mapping, index }) => (
+                {currentPolicy.mappings.map((mapping, index) => (
                   <div
                     key={index}
                     className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_1rem_minmax(0,1fr)_2.5rem] md:items-end"
@@ -451,7 +505,7 @@ function policySummary(status: ProviderModelPolicyStatus, policy: ProviderModelP
   if (status === "invalid") return "无效";
   const mapping = policy.mappings.length ? ` · 映射 ${policy.mappings.length}` : "";
   if (policy.mode === "all") {
-    const explicit = policy.modelPatterns.length ? ` · 优先 ${policy.modelPatterns.length}` : "";
+    const explicit = policy.modelPatterns.length ? ` · 显式 ${policy.modelPatterns.length}` : "";
     return `全部可用${explicit}${mapping}`;
   }
   if (policy.mode === "selected") {
@@ -461,41 +515,38 @@ function policySummary(status: ProviderModelPolicyStatus, policy: ProviderModelP
 }
 
 function modeHint(mode: ProviderModelPolicyV1["mode"]) {
-  if (mode === "all") return "未列出的模型也可用；列出的模型会优先路由到此 Provider。";
+  if (mode === "all") return "未列出的模型也可用；存在显式匹配时只在匹配 Provider 集合内路由。";
   if (mode === "selected") return "只接收下列模型和映射中的请求模型。";
   return "下列模型不可用；其余模型保持可用。";
 }
 
 function rangeListLabel(mode: ProviderModelPolicyV1["mode"]) {
-  if (mode === "all") return "优先模型";
+  if (mode === "all") return "显式模型";
   if (mode === "selected") return "可用模型";
   return "排除模型";
 }
 
 function rangeItemLabel(mode: ProviderModelPolicyV1["mode"]) {
-  if (mode === "all") return "优先模型";
+  if (mode === "all") return "显式模型";
   if (mode === "selected") return "可用模型";
   return "排除模型";
 }
 
 function rangeAddLabel(mode: ProviderModelPolicyV1["mode"]) {
-  if (mode === "all") return "添加优先模型";
+  if (mode === "all") return "添加显式模型";
   if (mode === "selected") return "添加可用模型";
   return "添加排除模型";
 }
 
 function discoveryEndpoint(state: ProviderModelDiscoveryUiState) {
-  if (state.status !== "ready" && state.status !== "empty" && state.status !== "capacity") {
+  if (state.status !== "ready" && state.status !== "empty") {
     return "";
   }
   const index = state.baseUrlIndex == null ? "" : ` · 地址 ${state.baseUrlIndex}`;
   return ` · ${state.origin}${index}`;
 }
 
-function discoveryMessage(
-  state: ProviderModelDiscoveryUiState,
-  mode: ProviderModelPolicyV1["mode"]
-) {
+function discoveryMessage(state: ProviderModelDiscoveryUiState) {
   switch (state.status) {
     case "idle":
       return "尚未获取上游模型";
@@ -504,19 +555,26 @@ function discoveryMessage(
     case "changed":
       return "连接已变化，请重新获取";
     case "ready":
-      if (mode === "excluded") return `已获取 ${state.discoveredCount} 个 · 排除列表未修改`;
-      return state.addedCount > 0
-        ? `已获取 ${state.discoveredCount} 个 · 新增 ${state.addedCount}`
-        : `已获取 ${state.discoveredCount} 个 · 无新增`;
+      return `已获取 ${state.models.length} 个候选`;
     case "empty":
       return "上游未返回模型";
-    case "capacity":
-      return `发现 ${state.discoveredCount} 个，超过 500 个上限`;
     case "unsupported":
       return state.reason === "cx_2cc"
         ? "CX2CC 请在对应 Codex Provider 获取"
         : "当前 OAuth 连接不支持获取";
-    case "error":
+    case "error": {
+      if (state.httpStatus === 429) return "上游限流（HTTP 429），请稍后重试";
+      if (state.httpStatus != null && state.httpStatus >= 500) {
+        return `上游服务异常（HTTP ${state.httpStatus}），请稍后重试`;
+      }
+      if (state.httpStatus === 401 || state.httpStatus === 403) {
+        return `认证失败（HTTP ${state.httpStatus}），请检查 API Key 或 OAuth 登录状态`;
+      }
+      if (state.httpStatus != null && state.httpStatus >= 300) {
+        return state.code === "redirect"
+          ? `端点发生重定向（HTTP ${state.httpStatus}），请配置最终 endpoint`
+          : `上游请求失败（HTTP ${state.httpStatus}）`;
+      }
       return {
         invalid_config: "连接配置不完整，请检查 Base URL、认证方式和 API Key",
         redirect: "端点发生重定向，请配置最终 endpoint",
@@ -524,8 +582,9 @@ function discoveryMessage(
         timeout: "获取超时，请重试",
         network: "无法连接上游，请检查 endpoint、代理和网络",
         invalid_response: "上游模型目录格式无法使用",
-        too_large: "上游模型目录过大，无法合并",
+        too_large: "上游模型目录响应超过 8 MiB",
       }[state.code];
+    }
     case "unexpected_error":
       return "获取失败，请查看应用日志后重试";
   }

@@ -983,6 +983,30 @@ fn provider_model_policy_round_trips_and_invalid_rows_fail_closed() {
 }
 
 #[test]
+fn non_claude_null_model_policy_is_invalid() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = crate::db::init_for_tests(&dir.path().join("provider-model-policy-null.db"))
+        .expect("init db");
+    let mut params = default_provider_params("model-policy-null");
+    params.cli_key = "codex".to_string();
+    params.model_policy = Some(ProviderModelPolicyV1::all());
+    let saved = upsert(&db, params).expect("save codex provider");
+
+    let conn = db.open_connection().expect("open db");
+    conn.execute(
+        "UPDATE providers SET model_policy_json = NULL WHERE id = ?1",
+        rusqlite::params![saved.id],
+    )
+    .expect("clear policy");
+    let invalid = get_by_id(&conn, saved.id).expect("read invalid provider");
+    assert_eq!(invalid.model_policy, None);
+    assert_eq!(
+        invalid.model_policy_status,
+        ProviderModelPolicyStatus::Invalid
+    );
+}
+
+#[test]
 fn provider_model_policy_preserves_legacy_fields_until_explicit_cutover() {
     let dir = tempfile::tempdir().expect("tempdir");
     let db = crate::db::init_for_tests(&dir.path().join("provider-model-policy-legacy.db"))

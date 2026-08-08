@@ -622,15 +622,14 @@ pub fn get() -> Client {
 }
 
 /// Get the shared client with automatic redirects disabled for credentialed control-plane calls.
-pub fn get_no_redirect() -> Client {
-    GLOBAL_NO_REDIRECT_CLIENT
-        .get()
-        .and_then(|lock| lock.read().ok())
-        .map(|c| c.clone())
-        .unwrap_or_else(|| {
-            tracing::warn!("[HttpClient] No-redirect client not initialized, using fallback");
-            build_no_redirect_client(None).unwrap_or_default()
-        })
+pub fn get_no_redirect() -> Result<Client, String> {
+    match GLOBAL_NO_REDIRECT_CLIENT.get() {
+        Some(lock) => lock
+            .read()
+            .map(|client| client.clone())
+            .map_err(|_| "No-redirect HTTP client lock is poisoned".to_string()),
+        None => build_no_redirect_client(None),
+    }
 }
 
 /// Get the current proxy URL.

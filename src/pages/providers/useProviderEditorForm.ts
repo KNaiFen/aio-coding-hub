@@ -43,7 +43,6 @@ import {
 import {
   cloneProviderModelPolicy,
   DEFAULT_PROVIDER_MODEL_POLICY,
-  mergeDiscoveredModelIds,
   type ProviderModelDiscoveryUiState,
 } from "./providerModelPolicy";
 import { copyApiKey as copyApiKeyAction } from "./useProviderEditorActions";
@@ -267,11 +266,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
   const oauthLoginAttemptSeqRef = useRef(0);
   const activeOAuthDeviceFlowRef = useRef<string | null>(null);
   const discoveryEpochRef = useRef(0);
-  const modelPolicyRef = useRef(modelPolicy);
-  const modelPolicyStatusRef = useRef(modelPolicyStatus);
   const baseUrlRowsRef = useRef(baseUrlRows);
-  modelPolicyRef.current = modelPolicy;
-  modelPolicyStatusRef.current = modelPolicyStatus;
   baseUrlRowsRef.current = baseUrlRows;
   const queryClient = useQueryClient();
   const providerUpsertMutation = useProviderUpsertMutation();
@@ -563,8 +558,6 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
   );
 
   const setModelPolicyFromUi = useCallback((next: ProviderModelPolicyV1) => {
-    modelPolicyRef.current = next;
-    modelPolicyStatusRef.current = "ready";
     setModelPolicy(next);
     setModelPolicyStatus("ready");
     setModelPolicyDirty(true);
@@ -639,33 +632,9 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
       if (discoveryEpochRef.current !== epoch) return;
 
       if (result.status === "ready") {
-        const currentStatus = modelPolicyStatusRef.current;
-        const currentPolicy =
-          currentStatus === "legacy" || currentStatus === "invalid"
-            ? cloneProviderModelPolicy(DEFAULT_PROVIDER_MODEL_POLICY)
-            : modelPolicyRef.current;
-        if (
-          !currentPolicy ||
-          (currentStatus !== "ready" && currentStatus !== "legacy" && currentStatus !== "invalid")
-        ) {
-          setModelDiscoveryState({ status: "unexpected_error" });
-          return;
-        }
-        const merged = mergeDiscoveredModelIds(currentPolicy, result.models);
-        if (merged.capacityExceeded) {
-          setModelDiscoveryState({
-            status: "capacity",
-            discoveredCount: result.models.length,
-            origin: result.origin,
-            baseUrlIndex: result.base_url_index,
-          });
-          return;
-        }
-        if (merged.addedCount > 0) setModelPolicyFromUi(merged.policy);
         setModelDiscoveryState({
           status: "ready",
-          discoveredCount: result.models.length,
-          addedCount: merged.addedCount,
+          models: result.models,
           origin: result.origin,
           baseUrlIndex: result.base_url_index,
         });
@@ -686,22 +655,17 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
         return;
       }
 
-      setModelDiscoveryState({ status: "error", code: result.code });
+      setModelDiscoveryState({
+        status: "error",
+        code: result.code,
+        httpStatus: result.http_status,
+      });
     } catch {
       if (discoveryEpochRef.current === epoch) {
         setModelDiscoveryState({ status: "unexpected_error" });
       }
     }
-  }, [
-    authMode,
-    baseUrlMode,
-    baseUrlRows,
-    cliKey,
-    editingProviderId,
-    form,
-    setModelPolicyFromUi,
-    sourceProviderId,
-  ]);
+  }, [authMode, baseUrlMode, baseUrlRows, cliKey, editingProviderId, form, sourceProviderId]);
 
   const buildPayloadContext = useCallback(
     (): ProviderEditorPayloadContext => ({

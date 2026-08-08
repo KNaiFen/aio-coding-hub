@@ -34,9 +34,7 @@ export function formatModelRedirectText(
 ) {
   const normalizedRedirect = normalizeModelRedirect(redirect);
   if (normalizedRedirect) {
-    const first = normalizedRedirect.steps[0];
-    const last = normalizedRedirect.steps[normalizedRedirect.steps.length - 1];
-    return `${first.sourceModel} → ${last.targetModel}`;
+    return `${normalizedRedirect.sourceModel} → ${normalizedRedirect.targetModel}`;
   }
   return formatClaudeModelMappingText(requestedModel, legacyMapping);
 }

@@ -1,52 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { mergeDiscoveredModelIds, validateProviderModelPolicy } from "../providerModelPolicy";
+import { validateProviderModelPolicy } from "../providerModelPolicy";
 
 describe("providerModelPolicy", () => {
-  it("merges discovered models into the range without creating mappings", () => {
-    const policy = {
-      version: 1 as const,
-      mode: "all" as const,
-      modelPatterns: [],
-      mappings: [{ source: "gpt-*", target: "upstream-*" }],
-    };
-
-    expect(mergeDiscoveredModelIds(policy, ["gpt-5.4", "claude-3", " claude-3 "])).toEqual({
-      capacityExceeded: false,
-      addedCount: 1,
-      policy: {
-        ...policy,
-        modelPatterns: ["claude-3"],
-      },
-    });
-  });
-
-  it("does not change an excluded draft during discovery", () => {
-    const policy = {
-      version: 1 as const,
-      mode: "excluded" as const,
-      modelPatterns: ["legacy-model"],
-      mappings: [],
-    };
-    expect(mergeDiscoveredModelIds(policy, ["new-model"])).toEqual({
-      capacityExceeded: false,
-      addedCount: 0,
-      policy,
-    });
-  });
-
-  it("keeps the draft unchanged when discovery would exceed capacity", () => {
-    const policy = {
-      version: 1 as const,
-      mode: "selected" as const,
-      modelPatterns: Array.from({ length: 500 }, (_, index) => `model-${index}`),
-      mappings: [],
-    };
-
-    expect(mergeDiscoveredModelIds(policy, ["new-model"])).toEqual({
-      capacityExceeded: true,
-      addedCount: 0,
-      policy,
-    });
+  it("accepts large policies and long Unicode model names", () => {
+    expect(
+      validateProviderModelPolicy({
+        version: 1,
+        mode: "selected",
+        modelPatterns: ["模型".repeat(201), ...Array.from({ length: 500 }, (_, i) => `model-${i}`)],
+        mappings: [],
+      })
+    ).toBeNull();
   });
 
   it("requires mapping targets and accepts a mapping as selected-model support", () => {

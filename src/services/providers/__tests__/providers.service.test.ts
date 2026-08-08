@@ -138,6 +138,34 @@ describe("services/providers/providers", () => {
     expect(commands.providerModelsDiscover).toHaveBeenCalledWith(input);
   });
 
+  it("preserves discovery HTTP status details", async () => {
+    vi.mocked(commands.providerModelsDiscover).mockResolvedValueOnce({
+      status: "ok",
+      data: {
+        status: "error",
+        code: "invalid_response",
+        http_status: 429,
+      },
+    });
+
+    await expect(
+      providerModelsDiscover({
+        providerId: null,
+        cliKey: "codex",
+        authMode: "api_key",
+        baseUrls: ["https://example.com/v1"],
+        baseUrlMode: "order",
+        apiKey: "sk-secret",
+        sourceProviderId: null,
+        bridgeType: null,
+      })
+    ).resolves.toEqual({
+      status: "error",
+      code: "invalid_response",
+      http_status: 429,
+    });
+  });
+
   it("redacts discovery API keys when the command fails", async () => {
     vi.mocked(commands.providerModelsDiscover).mockRejectedValueOnce(new Error("discover failed"));
 
@@ -221,6 +249,7 @@ describe("services/providers/providers", () => {
         baseUrlMode: "order",
         limit5hUsd: null,
         dailyResetMode: "fixed",
+        modelPolicy: null,
         extensionValues: null,
       })
     );

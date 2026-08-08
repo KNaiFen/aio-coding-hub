@@ -94,7 +94,7 @@ export function resolveModelRedirectFromSpecialSettings(
       const finalProviderRedirect = redirects
         .slice()
         .reverse()
-        .find((redirect) => redirect.steps.some((step) => step.providerId === finalProviderId));
+        .find((redirect) => redirect.providerId === finalProviderId);
       if (finalProviderRedirect) return finalProviderRedirect;
     }
     return redirects[redirects.length - 1] ?? null;

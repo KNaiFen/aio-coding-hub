@@ -3528,21 +3528,16 @@ module.exports.activate = function activate(api) {
             (redirects[0], first_provider_id, "model-a"),
             (redirects[1], second_provider_id, "model-b"),
         ] {
-            let step = redirect
-                .get("steps")
-                .and_then(Value::as_array)
-                .and_then(|steps| steps.first())
-                .expect("model redirect step");
             assert_eq!(
-                step.get("providerId").and_then(Value::as_i64),
+                redirect.get("providerId").and_then(Value::as_i64),
                 Some(provider_id)
             );
             assert_eq!(
-                step.get("sourceModel").and_then(Value::as_str),
+                redirect.get("sourceModel").and_then(Value::as_str),
                 Some("gpt-original")
             );
             assert_eq!(
-                step.get("targetModel").and_then(Value::as_str),
+                redirect.get("targetModel").and_then(Value::as_str),
                 Some(target)
             );
         }
@@ -3688,23 +3683,21 @@ module.exports.activate = function activate(api) {
             .filter(|setting| setting.get("type").and_then(Value::as_str) == Some("model_redirect"))
             .collect();
         assert_eq!(redirects.len(), 1);
-        let steps = redirects[0]
-            .get("steps")
-            .and_then(Value::as_array)
-            .expect("model redirect steps");
-        assert_eq!(steps.len(), 1);
-        let step = &steps[0];
-        assert_eq!(step.get("stage").and_then(Value::as_str), Some("bridge"));
+        let redirect = redirects[0];
         assert_eq!(
-            step.get("providerId").and_then(Value::as_i64),
+            redirect.get("stage").and_then(Value::as_str),
+            Some("bridge")
+        );
+        assert_eq!(
+            redirect.get("providerId").and_then(Value::as_i64),
             Some(bridge_provider_id)
         );
         assert_eq!(
-            step.get("sourceModel").and_then(Value::as_str),
+            redirect.get("sourceModel").and_then(Value::as_str),
             Some("claude-3-5-sonnet")
         );
         assert_eq!(
-            step.get("targetModel").and_then(Value::as_str),
+            redirect.get("targetModel").and_then(Value::as_str),
             Some("bridge-target")
         );
 

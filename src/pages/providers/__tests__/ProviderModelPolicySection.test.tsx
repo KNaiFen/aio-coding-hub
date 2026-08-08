@@ -55,7 +55,7 @@ describe("pages/providers/ProviderModelPolicySection", () => {
     }
   );
 
-  it("edits range models, searches, adds, and deletes with focus recovery", () => {
+  it("commits a complete range model and restores focus after deletion", () => {
     const onChange = renderSection("codex", "ready", {
       version: 1,
       mode: "selected",
@@ -63,37 +63,81 @@ describe("pages/providers/ProviderModelPolicySection", () => {
       mappings: [],
     });
 
-    fireEvent.change(screen.getByLabelText("搜索模型"), { target: { value: "gpt-5" } });
-    expect(screen.getByDisplayValue("gpt-5.4")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "添加可用模型" }));
+    const composer = screen.getByLabelText("新增可用模型");
+    fireEvent.change(composer, { target: { value: "new-model" } });
+    fireEvent.keyDown(composer, { key: "Enter" });
     expect(onChange).toHaveBeenCalledWith({
       version: 1,
       mode: "selected",
-      modelPatterns: ["gpt-5.4", ""],
+      modelPatterns: ["gpt-5.4", "new-model"],
       mappings: [],
     });
 
     fireEvent.click(screen.getByRole("button", { name: "删除可用模型 1" }));
-    expect(screen.getByRole("button", { name: "添加可用模型" })).toHaveFocus();
+    expect(composer).toHaveFocus();
   });
 
-  it("keeps mapping source and target in a separate required-target section", () => {
+  it.each(["all", "selected", "excluded"] as const)(
+    "selects a discovery candidate in %s mode without creating an empty row",
+    (mode) => {
+      const onChange = renderSection(
+        "codex",
+        "ready",
+        { version: 1, mode, modelPatterns: [], mappings: [] },
+        {
+          status: "ready",
+          models: ["candidate-model"],
+          origin: "https://example.com",
+          baseUrlIndex: 1,
+        }
+      );
+
+      fireEvent.change(
+        screen.getByLabelText(
+          `新增${mode === "all" ? "显式" : mode === "selected" ? "可用" : "排除"}模型`
+        ),
+        {
+          target: { value: "candidate-model" },
+        }
+      );
+
+      expect(onChange).toHaveBeenCalledWith({
+        version: 1,
+        mode,
+        modelPatterns: ["candidate-model"],
+        mappings: [],
+      });
+      expect(onChange).not.toHaveBeenCalledWith(
+        expect.objectContaining({ modelPatterns: expect.arrayContaining([""]) })
+      );
+    }
+  );
+
+  it("adds a mapping only after source and target are complete", () => {
     const onChange = renderSection("codex");
+    fireEvent.change(screen.getByLabelText("映射请求模型"), {
+      target: { value: "gpt-5.6-luna" },
+    });
+    expect(screen.getByRole("button", { name: "添加映射" })).toBeDisabled();
+    expect(onChange).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText("映射上游模型"), {
+      target: { value: "deepseek-v4-flash" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "添加映射" }));
     expect(onChange).toHaveBeenCalledWith({
       version: 1,
       mode: "all",
       modelPatterns: [],
-      mappings: [{ source: "", target: "" }],
+      mappings: [{ source: "gpt-5.6-luna", target: "deepseek-v4-flash" }],
     });
   });
 
-  it("counts Unicode scalar values for the 200-character boundary", () => {
+  it("accepts model names longer than 200 Unicode characters", () => {
     renderSection("codex", "ready", {
       version: 1,
       mode: "selected",
-      modelPatterns: ["😀".repeat(200)],
+      modelPatterns: ["😀".repeat(201)],
       mappings: [],
     });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
@@ -153,8 +197,8 @@ describe("pages/providers/ProviderModelPolicySection", () => {
     );
 
     expect(screen.getByRole("button", { name: "获取上游模型" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "添加优先模型" })).toBeEnabled();
-    expect(screen.getByLabelText("优先模型 1")).toBeEnabled();
+    expect(screen.getByLabelText("新增显式模型")).toBeEnabled();
+    expect(screen.getByLabelText("显式模型 1")).toBeEnabled();
     expect(screen.getByText("正在获取上游模型…")).toBeInTheDocument();
   });
 
@@ -167,7 +211,11 @@ describe("pages/providers/ProviderModelPolicySection", () => {
     expect(screen.queryByText("仅代表当前端点")).not.toBeInTheDocument();
 
     cleanup();
-    renderSection("grok", "ready", allPolicy, { status: "error", code: "redirect" });
+    renderSection("grok", "ready", allPolicy, {
+      status: "error",
+      code: "redirect",
+      httpStatus: null,
+    });
     expect(screen.getByText("端点发生重定向，请配置最终 endpoint")).toBeInTheDocument();
     expect(screen.queryByText("仅代表当前端点")).not.toBeInTheDocument();
   });
@@ -175,7 +223,7 @@ describe("pages/providers/ProviderModelPolicySection", () => {
   it("describes all, selected, and excluded modes plainly", () => {
     renderSection("codex");
     expect(
-      screen.getByText("未列出的模型也可用；列出的模型会优先路由到此 Provider。")
+      screen.getByText("未列出的模型也可用；存在显式匹配时只在匹配 Provider 集合内路由。")
     ).toBeInTheDocument();
 
     cleanup();
@@ -200,14 +248,28 @@ describe("pages/providers/ProviderModelPolicySection", () => {
   it("does not claim a route boundary twice in discovery status", () => {
     renderSection("codex", "ready", allPolicy, {
       status: "ready",
-      discoveredCount: 3,
-      addedCount: 2,
+      models: ["a", "b", "c"],
       origin: "https://example.com:8443",
       baseUrlIndex: 2,
     });
 
-    expect(screen.getByText(/已获取 3 个 · 新增 2/)).toBeInTheDocument();
+    expect(screen.getByText(/已获取 3 个候选/)).toBeInTheDocument();
     expect(screen.getByText(/https:\/\/example\.com:8443 · 地址 2/)).toBeInTheDocument();
     expect(screen.queryByText("仅代表当前端点")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [429, "上游限流（HTTP 429），请稍后重试"],
+    [503, "上游服务异常（HTTP 503），请稍后重试"],
+    [418, "上游请求失败（HTTP 418）"],
+  ] as const)("shows HTTP %s discovery failures accurately", (httpStatus, message) => {
+    renderSection("codex", "ready", allPolicy, {
+      status: "error",
+      code: "invalid_response",
+      httpStatus,
+    });
+
+    expect(screen.getByText(message)).toBeInTheDocument();
+    expect(screen.queryByText("上游模型目录格式无法使用")).not.toBeInTheDocument();
   });
 });

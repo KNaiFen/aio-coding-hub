@@ -1,9 +1,7 @@
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 pub const PROVIDER_MODEL_POLICY_VERSION: u32 = 1;
-pub const PROVIDER_MODEL_POLICY_MAX_RULES: usize = 500;
-pub const PROVIDER_MODEL_POLICY_MAX_VALUE_CHARS: usize = 200;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, specta::Type, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -28,8 +26,8 @@ pub struct ProviderModelMapping {
     pub target: String,
 }
 
-#[derive(Debug, Clone, Serialize, specta::Type, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProviderModelPolicyV1 {
     pub version: u32,
     pub mode: ProviderModelMode,
@@ -42,75 +40,6 @@ pub(crate) enum ProviderModelEligibility {
     Blocked,
     Explicit,
     Fallback,
-}
-
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum ProviderModelPolicyWire {
-    Current(CurrentProviderModelPolicyWire),
-    Legacy(LegacyProviderModelPolicyWire),
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CurrentProviderModelPolicyWire {
-    version: u32,
-    mode: ProviderModelMode,
-    model_patterns: Vec<String>,
-    mappings: Vec<ProviderModelMapping>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct LegacyProviderModelPolicyWire {
-    version: u32,
-    mode: ProviderModelMode,
-    rules: Vec<LegacyProviderModelRule>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct LegacyProviderModelRule {
-    source: String,
-    target: Option<String>,
-}
-
-impl<'de> Deserialize<'de> for ProviderModelPolicyV1 {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let wire = ProviderModelPolicyWire::deserialize(deserializer)?;
-        Ok(match wire {
-            ProviderModelPolicyWire::Current(policy) => Self {
-                version: policy.version,
-                mode: policy.mode,
-                model_patterns: policy.model_patterns,
-                mappings: policy.mappings,
-            },
-            ProviderModelPolicyWire::Legacy(policy) => {
-                let mut model_patterns = Vec::new();
-                let mut mappings = Vec::new();
-                for rule in policy.rules {
-                    if policy.mode == ProviderModelMode::Selected {
-                        model_patterns.push(rule.source.clone());
-                    }
-                    if let Some(target) = rule.target.filter(|target| !target.trim().is_empty()) {
-                        mappings.push(ProviderModelMapping {
-                            source: rule.source,
-                            target,
-                        });
-                    }
-                }
-                Self {
-                    version: policy.version,
-                    mode: policy.mode,
-                    model_patterns,
-                    mappings,
-                }
-            }
-        })
-    }
 }
 
 impl ProviderModelPolicyV1 {
@@ -130,15 +59,6 @@ impl ProviderModelPolicyV1 {
                 self.version
             ));
         }
-        if self.model_patterns.len() > PROVIDER_MODEL_POLICY_MAX_RULES
-            || self.mappings.len() > PROVIDER_MODEL_POLICY_MAX_RULES
-        {
-            return Err(format!(
-                "SEC_INVALID_INPUT: provider model policy supports at most {} entries",
-                PROVIDER_MODEL_POLICY_MAX_RULES
-            ));
-        }
-
         let mut seen_patterns = HashSet::with_capacity(self.model_patterns.len());
         for pattern in &mut self.model_patterns {
             *pattern = pattern.trim().to_string();
@@ -166,14 +86,10 @@ impl ProviderModelPolicyV1 {
             }
         }
 
-        let unique_sources = seen_patterns.union(&seen_mappings).count();
-        if unique_sources > PROVIDER_MODEL_POLICY_MAX_RULES {
-            return Err(format!(
-                "SEC_INVALID_INPUT: provider model policy supports at most {} entries",
-                PROVIDER_MODEL_POLICY_MAX_RULES
-            ));
-        }
-        if self.mode == ProviderModelMode::Selected && unique_sources == 0 {
+        if self.mode == ProviderModelMode::Selected
+            && seen_patterns.is_empty()
+            && seen_mappings.is_empty()
+        {
             return Err(
                 "SEC_INVALID_INPUT: selected provider model policy needs a pattern or mapping"
                     .into(),
@@ -189,11 +105,12 @@ impl ProviderModelPolicyV1 {
 
     pub fn decode(raw: Option<&str>, cli_key: &str) -> (Option<Self>, ProviderModelPolicyStatus) {
         let Some(raw) = raw else {
-            return if cli_key == "claude" {
-                (None, ProviderModelPolicyStatus::Legacy)
+            let status = if cli_key == "claude" {
+                ProviderModelPolicyStatus::Legacy
             } else {
-                (Some(Self::all()), ProviderModelPolicyStatus::Ready)
+                ProviderModelPolicyStatus::Invalid
             };
+            return (None, status);
         };
 
         match serde_json::from_str::<Self>(raw)
@@ -241,54 +158,12 @@ impl ProviderModelPolicyV1 {
         }
         source_model.to_string()
     }
-
-    #[allow(dead_code)]
-    pub fn merge_discovered_model_ids(
-        &self,
-        discovered_model_ids: impl IntoIterator<Item = String>,
-    ) -> Result<Self, String> {
-        if self.mode == ProviderModelMode::Excluded {
-            return Ok(self.clone());
-        }
-
-        let mut merged = self.clone();
-        let mut known = merged
-            .model_patterns
-            .iter()
-            .cloned()
-            .chain(merged.mappings.iter().map(|mapping| mapping.source.clone()))
-            .collect::<HashSet<_>>();
-        for model_id in discovered_model_ids {
-            let model_id = model_id.trim();
-            if model_id.is_empty()
-                || self
-                    .model_patterns
-                    .iter()
-                    .any(|pattern| match_pattern(pattern, model_id).is_some())
-                || self
-                    .mappings
-                    .iter()
-                    .any(|mapping| match_pattern(&mapping.source, model_id).is_some())
-                || !known.insert(model_id.into())
-            {
-                continue;
-            }
-            merged.model_patterns.push(model_id.to_string());
-        }
-        merged.normalized()
-    }
 }
 
 fn validate_policy_value(field: &str, value: &str) -> Result<(), String> {
     if value.is_empty() {
         return Err(format!(
             "SEC_INVALID_INPUT: provider model policy {field} is required"
-        ));
-    }
-    if value.chars().count() > PROVIDER_MODEL_POLICY_MAX_VALUE_CHARS {
-        return Err(format!(
-            "SEC_INVALID_INPUT: provider model policy {field} exceeds {} characters",
-            PROVIDER_MODEL_POLICY_MAX_VALUE_CHARS
         ));
     }
     if value.matches('*').count() > 1 {
@@ -306,12 +181,6 @@ pub(crate) fn normalize_concrete_model_id(value: &str) -> Result<String, String>
     }
     if value.contains('*') {
         return Err("SEC_INVALID_INPUT: model id cannot contain wildcard".into());
-    }
-    if value.chars().count() > PROVIDER_MODEL_POLICY_MAX_VALUE_CHARS {
-        return Err(format!(
-            "SEC_INVALID_INPUT: model id exceeds {} characters",
-            PROVIDER_MODEL_POLICY_MAX_VALUE_CHARS
-        ));
     }
     Ok(value.to_string())
 }
@@ -459,21 +328,17 @@ mod tests {
     }
 
     #[test]
-    fn provider_model_policy_decodes_legacy_rules_and_serializes_current_shape() {
-        let (policy, status) = ProviderModelPolicyV1::decode(
+    fn provider_model_policy_rejects_unpublished_wire_shape() {
+        let (decoded, status) = ProviderModelPolicyV1::decode(
             Some(
                 r#"{"version":1,"mode":"selected","rules":[{"source":"gpt-5.6-luna","target":"deepseek-v4-flash"},{"source":"gpt-5.5","target":null}]}"#,
             ),
             "codex",
         );
-        assert_eq!(status, ProviderModelPolicyStatus::Ready);
-        let policy = policy.expect("decoded policy");
-        assert_eq!(policy.model_patterns, vec!["gpt-5.6-luna", "gpt-5.5"]);
-        assert_eq!(
-            policy.mappings,
-            vec![mapping("gpt-5.6-luna", "deepseek-v4-flash")]
-        );
+        assert_eq!(status, ProviderModelPolicyStatus::Invalid);
+        assert_eq!(decoded, None);
 
+        let policy = policy(ProviderModelMode::All, vec!["gpt-5.6-luna"], vec![]);
         let json = policy.to_json().expect("serialize current policy");
         assert!(json.contains(r#""modelPatterns""#));
         assert!(json.contains(r#""mappings""#));
@@ -481,38 +346,35 @@ mod tests {
     }
 
     #[test]
-    fn provider_model_policy_enforces_capacity_and_unicode_scalar_limits() {
-        let max_patterns = (0..500).map(|index| format!("model-{index}")).collect();
-        assert!(ProviderModelPolicyV1 {
+    fn provider_model_policy_accepts_large_catalogs_and_long_unicode_ids() {
+        let long_source = format!("model-{}", "模".repeat(201));
+        let long_target = format!("upstream-{}", "型".repeat(201));
+        let model_patterns = (0..501).map(|index| format!("model-{index}")).collect();
+        let value = ProviderModelPolicyV1 {
             version: 1,
             mode: ProviderModelMode::Selected,
-            model_patterns: max_patterns,
-            mappings: vec![],
+            model_patterns,
+            mappings: vec![mapping(&long_source, &long_target)],
         }
         .normalized()
-        .is_ok());
+        .expect("large policy should be valid");
 
-        let too_many_patterns = (0..501).map(|index| format!("model-{index}")).collect();
-        assert!(ProviderModelPolicyV1 {
-            version: 1,
-            mode: ProviderModelMode::Selected,
-            model_patterns: too_many_patterns,
-            mappings: vec![],
-        }
-        .normalized()
-        .is_err());
-
-        assert!(policy(
-            ProviderModelMode::Selected,
-            vec![&"模".repeat(200)],
-            vec![mapping("target-*", &"型".repeat(200))]
-        )
-        .normalized()
-        .is_ok());
-        assert!(
-            policy(ProviderModelMode::Selected, vec![&"模".repeat(201)], vec![])
-                .normalized()
-                .is_err()
+        assert_eq!(value.model_patterns.len(), 501);
+        assert_eq!(value.resolve_mapping(&long_source), long_target);
+        assert_eq!(
+            super::normalize_concrete_model_id(&long_source),
+            Ok(long_source)
         );
+    }
+
+    #[test]
+    fn provider_model_policy_null_is_legacy_only_for_claude() {
+        let (claude_policy, claude_status) = ProviderModelPolicyV1::decode(None, "claude");
+        assert_eq!(claude_policy, None);
+        assert_eq!(claude_status, ProviderModelPolicyStatus::Legacy);
+
+        let (codex_policy, codex_status) = ProviderModelPolicyV1::decode(None, "codex");
+        assert_eq!(codex_policy, None);
+        assert_eq!(codex_status, ProviderModelPolicyStatus::Invalid);
     }
 }

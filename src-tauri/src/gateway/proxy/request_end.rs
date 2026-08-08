@@ -5,7 +5,7 @@ use super::status_override;
 use super::{spawn_enqueue_request_log_with_backpressure, RequestLogEnqueueArgs};
 use crate::gateway::active_requests::{ActiveRequestFinishReason, ActiveRequestRegistry};
 use crate::gateway::events::{
-    emit_request_event, ClaudeModelMapping, FailoverAttempt, ModelRedirect, ModelRedirectStep,
+    emit_request_event, ClaudeModelMapping, FailoverAttempt, ModelRedirect,
 };
 use crate::gateway::plugins::pipeline::GatewayPluginPipeline;
 use crate::{db, request_logs};
@@ -399,8 +399,11 @@ fn select_claude_model_mapping(
     mappings.pop()
 }
 
-fn parse_model_redirect_step(value: &Value) -> Option<ModelRedirectStep> {
+fn parse_model_redirect_setting(value: &Value) -> Option<ModelRedirect> {
     let obj = value.as_object()?;
+    if obj.get("type").and_then(Value::as_str) != Some("model_redirect") {
+        return None;
+    }
     let stage = obj
         .get("stage")
         .and_then(Value::as_str)
@@ -421,27 +424,13 @@ fn parse_model_redirect_step(value: &Value) -> Option<ModelRedirectStep> {
         return None;
     }
 
-    Some(ModelRedirectStep {
+    Some(ModelRedirect {
         stage: stage.to_string(),
         provider_id: obj.get("providerId").and_then(Value::as_i64)?,
         provider_name: provider_name.to_string(),
         source_model: source_model.to_string(),
         target_model: target_model.to_string(),
     })
-}
-
-fn parse_model_redirect_setting(value: &Value) -> Option<ModelRedirect> {
-    let obj = value.as_object()?;
-    if obj.get("type").and_then(Value::as_str) != Some("model_redirect") {
-        return None;
-    }
-    let steps: Vec<ModelRedirectStep> = obj
-        .get("steps")?
-        .as_array()?
-        .iter()
-        .filter_map(parse_model_redirect_step)
-        .collect();
-    (!steps.is_empty()).then_some(ModelRedirect { steps })
 }
 
 fn select_model_redirect(
@@ -464,12 +453,11 @@ fn select_model_redirect(
         .find(|attempt| attempt.outcome == "success")
         .map(|attempt| attempt.provider_id)
     {
-        if let Some(redirect) = redirects.iter().rev().find(|redirect| {
-            redirect
-                .steps
-                .iter()
-                .any(|step| step.provider_id == success_provider_id)
-        }) {
+        if let Some(redirect) = redirects
+            .iter()
+            .rev()
+            .find(|redirect| redirect.provider_id == success_provider_id)
+        {
             return Some(redirect.clone());
         }
     }
@@ -1614,23 +1602,19 @@ mod tests {
         let special_settings_json = json!([
             {
                 "type": "model_redirect",
-                "steps": [{
-                    "stage": "provider",
-                    "providerId": 1,
-                    "providerName": "Provider A",
-                    "sourceModel": "gpt-original",
-                    "targetModel": "model-a"
-                }]
+                "stage": "provider",
+                "providerId": 1,
+                "providerName": "Provider A",
+                "sourceModel": "gpt-original",
+                "targetModel": "model-a"
             },
             {
                 "type": "model_redirect",
-                "steps": [{
-                    "stage": "provider",
-                    "providerId": 2,
-                    "providerName": "Provider B",
-                    "sourceModel": "gpt-original",
-                    "targetModel": "model-b"
-                }]
+                "stage": "provider",
+                "providerId": 2,
+                "providerName": "Provider B",
+                "sourceModel": "gpt-original",
+                "targetModel": "model-b"
             }
         ])
         .to_string();
@@ -1641,10 +1625,9 @@ mod tests {
         )
         .expect("selected redirect");
 
-        assert_eq!(redirect.steps.len(), 1);
-        assert_eq!(redirect.steps[0].provider_id, 2);
-        assert_eq!(redirect.steps[0].source_model, "gpt-original");
-        assert_eq!(redirect.steps[0].target_model, "model-b");
+        assert_eq!(redirect.provider_id, 2);
+        assert_eq!(redirect.source_model, "gpt-original");
+        assert_eq!(redirect.target_model, "model-b");
     }
 
     #[test]
