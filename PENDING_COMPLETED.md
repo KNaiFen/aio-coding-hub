@@ -20,6 +20,7 @@
 - `AIO-PENDING-015` 续作已由功能 PR #27 合并到 `main`，实现提交为 `b6a5f973a31991d7261e4d682b4d84fd2d2eadc5`，合并提交为 `22917a9a69e2e719bf980672d0f2f06bb26c1dac`；完整 CI `30810717682` 已通过前端、Rust、格式/绑定、Clippy、Rust 全工作区测试和依赖审计。
 - 发布准备 PR #28 已合并，精确发布提交为 `c1dca6b25b58c0307f54183d1319b7bb1316aca2`；PR CI `30812790883` 与精确主分支候选 CI `30814365441` 均成功，后者生成并组装 Windows/macOS 桌面及四个平台 TUI 候选。
 - 正式版本为 [`aio-coding-hub-v0.60.46`](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.46)，发布工作流 `30818164026` 已成功。标签触发运行 `30818031580` 仅因已知的注解标签 checkout `would clobber existing tag` 冲突失败，随后从 `main` 手动 dispatch 同一标签并复用精确候选；12 个 Release 资产已上传，`SHA256SUMS.txt` 中 11 个有效载荷逐项通过校验，发布后的校验和与 `latest.json` 和候选产物逐字节一致。
+- `AIO-PENDING-016`、`018`、`019`、`020` 已分别由 PR #86/#89/#90/#91 合并；`AIO-PENDING-017`、`021`、`022`、`023` 已由统一 PR #96 合并。#96 的精确 head `40423eda34ae3e448c7347199436bc7f49e27972` 在 PR CI `31272904696` 与 workflow_dispatch `31272906922` 中均通过完整 frontend、Rust format/bindings、Clippy、Rust tests、依赖审计、Provider 百万行 benchmark 和 `ci-gate`，并以 `ab76a30746ae9393f2b5c883de4e3ea145e1b964` 合并到 `main`。
 
 ## 条目
 
@@ -414,7 +415,8 @@
 - 2026-08-03：`AIO-PENDING-012`、`AIO-PENDING-014` 已完成并随 `aio-coding-hub-v0.60.45` 发布，证据见“本批次完成证据”。
 - 2026-08-03：`AIO-PENDING-015` 已完成并随 `aio-coding-hub-v0.60.46` 发布，证据见“本批次完成证据”。
 - 2026-08-06：`AIO-PENDING-016` 已完成并合并，仓库级本地产物已按核验清单清理。
-- 2026-08-08：`AIO-PENDING-019`、`AIO-PENDING-020` 已完成并合并，精确候选与全量 Actions 证据如下。
+- 2026-08-07 至 2026-08-08：`AIO-PENDING-018`、`019`、`020` 已分别完成并合并。
+- 2026-08-09：`AIO-PENDING-017`、`021`、`022`、`023` 已由统一 PR #96 完成合并和精确 head 全量 Actions 验证；最终治理批次无活跃待办。
 
 ### AIO-PENDING-016 - 云端验证与本地零产物合同
 
@@ -425,8 +427,21 @@
 - **锁定决策**：本地禁止依赖安装、dev、类型检查、Lint、测试、构建、Cargo 与 Tauri；只允许零依赖 Node 源码合同/解析检查和 `git diff --check`。跨平台桌面打包不升级为每个 PR 的必需任务。
 - **拟议方向**：更新活跃规则与 README，限制受控脚本为 GitHub Actions 使用，演进零依赖合同检查并加强 CI 静态质量门；历史任务和归档不改写。
 - **验收标准**：本地入口检查能拒绝仓库受控的依赖/构建命令；`ci.yml` 全量 workflow_dispatch 的 rustfmt、bindings、Clippy、Rust tests、前端质量门和 audit 均通过；合并后只清理重新核验过的仓库级产物。
-- **Trellis**：[`08-06-cloud-only-zero-artifact-contract`](./.trellis/tasks/08-06-cloud-only-zero-artifact-contract/)
+- **Trellis**：[`08-06-cloud-only-zero-artifact-contract`](./.trellis/tasks/archive/2026-08/08-06-cloud-only-zero-artifact-contract/)
 - **交付证据**：PR [#86](https://github.com/KNaiFen/aio-coding-hub/pull/86) 的候选提交为 `c5b3c6b9`、零产物自测修正为 `2334403b`；PR CI `31103175487` 与 workflow_dispatch 全量 CI `31103187154` 均通过，squash 合并为 `d32106c3706edc7535ea074d4c352c6b7e701dbf`。合并后重新核验并清理 24 个精确仓库级产物目录，未删除全局 Cargo/pnpm 缓存或其他项目文件。
+
+### AIO-PENDING-017 - Provider Sync session-only 快照
+
+- **状态**：`done`
+- **日期**：2026-08-06
+- **完成日期**：2026-08-09
+- **交付结果**：session-only v2、v1 managed 迁移、单代保留、回滚及句柄相对清理加固已汇入 `codex/final-hardening-unified`；旧 PR #87 已关闭并由统一 PR #96 取代。
+- **观察问题**：Provider Sync 扫描并备份 `archived_sessions`、SQLite 与全局状态，且旧格式 managed backup 最多保留五代，造成与恢复目标无关的空间增长。
+- **锁定决策**：新格式只处理活动 `sessions`，不再扫描、改写或备份 `archived_sessions`；只保留最新一代新格式 managed backup；只删除 manifest 精确证明所有权的旧格式 managed backup。
+- **拟议方向**：引入 v2 session-only manifest 和严格 managed/unmanaged 分类，在首次成功创建 v2 后迁移清理 v1，并保留同步失败的完整回滚。
+- **验收标准**：归档会话字节不变；成功后最多一代 v2；v1 managed 可迁移、非受管/损坏/symlink 保留；云端 Rust 覆盖迁移、回滚和所有权边界。
+- **Trellis**：[`08-06-provider-sync-session-snapshot`](./.trellis/tasks/archive/2026-08/08-06-provider-sync-session-snapshot/)
+- **交付证据**：统一候选 head `40423eda34ae3e448c7347199436bc7f49e27972` 的 PR [#96](https://github.com/KNaiFen/aio-coding-hub/pull/96) CI `31272904696` 与 workflow_dispatch `31272906922` 均通过跨平台 Rust、竞态/预算回归、bindings、依赖审计和 `ci-gate`；merge commit 为 `ab76a30746ae9393f2b5c883de4e3ea145e1b964`。双 tombstone、摘要与末次复验缩小但不宣称消除同 UID/同权限恶意并发写者的最终 syscall 竞态。
 
 ### AIO-PENDING-018 - 请求日志与运行日志留存
 
@@ -437,7 +452,7 @@
 - **锁定决策**：请求日志默认七天并迁移历史 0；`usage_ledger` 与聚合统计永久保留；运行日志七天加 256 MiB 软上限，只回收最旧已关闭滚动文件；不自动 VACUUM。
 - **拟议方向**：统一 settings/IPC/UI 留存边界，保持 ledger 覆盖检查，按日龄与容量清理运行日志，并用 SQLite freelist 展示可回收空间。
 - **验收标准**：旧配置持久迁移、所有写入拒绝 0；上月用量/Token/成本/趋势/排行保持；活动日志不被删除；清理后显示可回收字节，只有手动压缩归还空间。
-- **Trellis**：[`08-06-request-runtime-log-retention`](./.trellis/tasks/08-06-request-runtime-log-retention/)
+- **Trellis**：[`08-06-request-runtime-log-retention`](./.trellis/tasks/archive/2026-08/08-06-request-runtime-log-retention/)
 - **交付证据**：PR [#89](https://github.com/KNaiFen/aio-coding-hub/pull/89) 的精确候选提交为 `73ff1d2942199ab36ecc24286fb9c29691719510`，PR CI `31174497952` 与 workflow_dispatch 全量 CI `31186468782` 均通过；已合并到 `main`，合并提交为 `d7679695acbe4f67ebcdc517405cb123cfc58318`。
 
 ### AIO-PENDING-019 - 非回环 Gateway Bearer Token
@@ -449,7 +464,7 @@
 - **锁定决策**：保留 LAN；真实 TCP peer 非回环时所有路由含 health 必须使用应用生成 Bearer Token；loopback 兼容。Token 只展示一次、仅持久化摘要；删除 provider 专用路由、forced-provider 数据流和 Claude Terminal 入口。
 - **拟议方向**：在最外层 Axum middleware 基于 `ConnectInfo<SocketAddr>` 鉴权并剥离敏感/转发身份头，支持旧 LAN 迁移、未确认重启轮换、主动轮换和 WSL 明文即时同步。
 - **验收标准**：非回环无/错 token 在任何副作用前返回 401，正确 token 可用且认证/伪造头不外传；旧 token 立即失效；一次性明文不进入持久化、cache、日志或错误；WSL 同步成功或明确失败。
-- **Trellis**：[`08-06-gateway-lan-bearer-token`](./.trellis/tasks/08-06-gateway-lan-bearer-token/)
+- **Trellis**：[`08-06-gateway-lan-bearer-token`](./.trellis/tasks/archive/2026-08/08-06-gateway-lan-bearer-token/)
 - **交付证据**：最终候选为 `948dc5fa`；PR [#90](https://github.com/KNaiFen/aio-coding-hub/pull/90) 的 PR CI `31197560686` 与 workflow_dispatch 全量 CI `31197593860` 均在该精确 head 全绿，随后合并为 `c5b2333d82086989e9b3b1fb3467c5fbded54dbc`。
 
 ### AIO-PENDING-020 - 跨重启数据重置
@@ -461,5 +476,44 @@
 - **锁定决策**：reset IPC 只持久写 marker 后走专用退出；下次启动在 DB、observer、gateway 和后台任务前删除；失败保留 marker 并进入 retry/exit 维护态。
 - **拟议方向**：建立应用级 maintenance coordinator、幂等 marker 生命周期和专用退出路径，并 gate 原生/前端启动任务。
 - **验收标准**：marker durable；失败不清 marker、不启动普通服务；重试完整目标集合；成功清 marker 后首次正常启动；云端覆盖跨平台文件占用与 UI 文案。
-- **Trellis**：[`08-06-cross-restart-data-reset`](./.trellis/tasks/08-06-cross-restart-data-reset/)
+- **Trellis**：[`08-06-cross-restart-data-reset`](./.trellis/tasks/archive/2026-08/08-06-cross-restart-data-reset/)
 - **交付证据**：最终候选为 `59bc7b7c`；PR [#91](https://github.com/KNaiFen/aio-coding-hub/pull/91) 的 PR CI `31239694948` 与 workflow_dispatch 全量 CI `31239707625` 均在该精确 head 全绿，随后 squash 合并为 `99de56bb9c4d718bb0d2297239f8c88325be2c26`。合并后主线树与候选一致，并为 AUD-002 提供共享 maintenance coordinator。
+
+### AIO-PENDING-021 - SQLite/文件系统双写恢复
+
+- **状态**：`done`
+- **日期**：2026-08-06
+- **完成日期**：2026-08-09
+- **交付结果**：prepare-first journal、SQLite 权威 replay、Skills 受管 artifact 和补偿错误聚合已汇入 `codex/final-hardening-unified`；旧 PR #92 已关闭并由统一 PR #96 取代。
+- **观察问题**：Prompt、MCP、Skills 和 workspace switch 在 SQLite 与外部文件之间双写，多处补偿吞错；进程中断或 commit/恢复失败可留下跨重启漂移。
+- **锁定决策**：已提交 SQLite 状态为权威；任何外部副作用前 durable journal；启动前阻断自动对账并复用 AUD-008 维护态；补偿失败必须可见且错误摘要脱敏。
+- **拟议方向**：统一 prepare-first 操作协议。Skills 的不可由 metadata 重建内容使用 journal 专属、带 ownership/hash 的临时 staging/backup，resolved 后回收。
+- **验收标准**：外部写、commit、补偿、重启各故障点最终收敛到 DB；artifact 缺失/越界/hash 不符保持维护态；普通写 IPC 不与 replay 交错；journal/错误不泄露正文、env/header 或密钥。
+- **Trellis**：[`08-06-filesystem-recovery-journal`](./.trellis/tasks/archive/2026-08/08-06-filesystem-recovery-journal/)
+- **交付证据**：统一候选 head `40423eda34ae3e448c7347199436bc7f49e27972` 的 PR [#96](https://github.com/KNaiFen/aio-coding-hub/pull/96) CI `31272904696` 与 workflow_dispatch `31272906922` 均通过故障注入、重启、脱敏、并发门、bindings、Rust tests 与 `ci-gate`；merge commit 为 `ab76a30746ae9393f2b5c883de4e3ea145e1b964`。
+
+### AIO-PENDING-022 - history_limit=0 Observer I/O
+
+- **状态**：`done`
+- **日期**：2026-08-06
+- **完成日期**：2026-08-09
+- **交付结果**：受限 last/dominant/recent 查询、zero-history ready-empty 和 source-aware 有界 folder cache 已汇入 `codex/final-hardening-unified`；旧 PR #93 已关闭并由统一 PR #96 取代。
+- **观察问题**：`history_limit=0` 只在投影末端生效，之前仍读取并构造 500 条日志，并基于隐藏历史触发完整 Claude/Codex session-folder 扫描。
+- **锁定决策**：保持 last/dominant/active/all-scope 与 recent ready-empty 语义；改用受限查询；folder lookup 只服务实际渲染投影并使用有界内存缓存。
+- **拟议方向**：拆分 last/dominant/recent SQL，zero-history 跳过 recent；以 `(source, session_id)` 为键增加容量和正/负 TTL 均受限的 Observer folder cache。
+- **验收标准**：zero-history 不发起 500-row 查询；摘要与可见性一致；folder keys 不来自隐藏行；缓存 source 隔离、可淘汰、未命中后文件出现可被发现。
+- **Trellis**：[`08-06-observer-zero-history-query`](./.trellis/tasks/archive/2026-08/08-06-observer-zero-history-query/)
+- **交付证据**：统一候选 head `40423eda34ae3e448c7347199436bc7f49e27972` 的 PR [#96](https://github.com/KNaiFen/aio-coding-hub/pull/96) CI `31272904696` 与 workflow_dispatch `31272906922` 均通过查询/缓存回归、bindings、Provider 百万行 benchmark 和 `ci-gate`；merge commit 为 `ab76a30746ae9393f2b5c883de4e3ea145e1b964`。
+
+### AIO-PENDING-023 - 插件激活与持久隔离
+
+- **状态**：`done`
+- **日期**：2026-08-06
+- **完成日期**：2026-08-09
+- **交付结果**：精确 activation policy、startup/command/gateway gate、600 秒三次严重故障 quarantine、revalidate 与废弃事件迁移已汇入 `codex/final-hardening-unified`；旧 PR #94 已关闭并由统一 PR #96 取代。
+- **观察问题**：`activationEvents` 基本不参与 command/gateway 调度，重复 runtime failure 只触发进程内 circuit breaker，重启后清零且没有校验恢复路径。
+- **锁定决策**：仅支持 `onStartup`、`onCommand:*`、`onGatewayHook:*`，空数组保持 legacy；显式拒绝两种废弃事件；10 分钟内 3 次严重故障持久 quarantine；revalidate 成功只到 disabled。
+- **拟议方向**：引入精确 ActivationPolicy gate，统一 startup/command/gateway 严重故障分类和原子阈值事务，隔离后刷新 gateway snapshot/host，增加 quarantined-only revalidate。
+- **验收标准**：不匹配事件不启动 host；legacy 兼容；第三次 crash/runtime/timeout 跨重启隔离且保留当前 fail-open/fail-closed；policy rejection 不计数；恢复不自动启用，历史废弃事件迁移原因可见。
+- **Trellis**：[`08-06-plugin-activation-quarantine`](./.trellis/tasks/archive/2026-08/08-06-plugin-activation-quarantine/)
+- **交付证据**：统一候选 head `40423eda34ae3e448c7347199436bc7f49e27972` 的 PR [#96](https://github.com/KNaiFen/aio-coding-hub/pull/96) CI `31272904696` 与 workflow_dispatch `31272906922` 均通过并发阈值、跨重启、恢复、legacy、gateway snapshot、bindings 和 `ci-gate`；merge commit 为 `ab76a30746ae9393f2b5c883de4e3ea145e1b964`。

@@ -3,7 +3,7 @@
   "name": "observer-zero-history-query",
   "title": "AUD-035 history_limit=0 Observer I/O",
   "description": "用受限查询和有界 folder cache 消除 history_limit=0 的 500 行投影与完整会话树重复扫描。",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": "backend",
   "scope": "observer-performance",
   "package": "aio-coding-hub",
@@ -11,16 +11,22 @@
   "creator": "KNaiFen",
   "assignee": "KNaiFen",
   "createdAt": "2026-08-06",
-  "completedAt": null,
+  "completedAt": "2026-08-09",
   "branch": "codex/final-hardening-unified",
   "base_branch": "main",
   "worktree_path": "/private/tmp/aio-final-hardening-unified",
-  "commit": null,
-  "pr_url": null,
+  "commit": "ab76a30746ae9393f2b5c883de4e3ea145e1b964",
+  "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/96",
   "subtasks": [],
   "children": [],
   "parent": "08-06-final-hardening-zero-artifact",
   "relatedFiles": [],
-  "notes": "本批第 7 项；产品实现已汇入 codex/final-hardening-unified，保持 last、dominant、active、all-scope 与 recent ready-empty 语义，并与 AUD-055、AUD-002、AUD-033 通过同一个 PR 验证和合并。旧独立候选不再作为验证或合并表面。",
-  "meta": {}
+  "notes": "本批第 7 项；产品实现由统一 PR #96 验证并合并，保持 last、dominant、active、all-scope 与 recent ready-empty 语义；旧 PR #93 已关闭并由 #96 取代。",
+  "meta": {
+    "implementation_head": "40423eda34ae3e448c7347199436bc7f49e27972",
+    "merge_commit": "ab76a30746ae9393f2b5c883de4e3ea145e1b964",
+    "pr_ci_run": "31272904696",
+    "workflow_dispatch_run": "31272906922",
+    "replaced_pr": "93"
+  }
 }

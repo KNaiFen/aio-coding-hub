@@ -3,7 +3,7 @@
   "name": "final-hardening-zero-artifact",
   "title": "最终修复与本地零产物",
   "description": "交付八项审计修复：AUD-054、AUD-056、AUD-016、AUD-008 已进入主线，剩余 AUD-055、AUD-002、AUD-035、AUD-033 由单一统一 PR 通过 GitHub Actions 全量验证并完成治理收口。",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": "cross-layer",
   "scope": "release-governance",
   "package": "aio-coding-hub",
@@ -11,12 +11,12 @@
   "creator": "KNaiFen",
   "assignee": "KNaiFen",
   "createdAt": "2026-08-06",
-  "completedAt": null,
+  "completedAt": "2026-08-09",
   "branch": "codex/final-hardening-unified",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": null,
-  "pr_url": null,
+  "commit": "ab76a30746ae9393f2b5c883de4e3ea145e1b964",
+  "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/96",
   "subtasks": [],
   "children": [
     "08-06-cloud-only-zero-artifact-contract",
@@ -30,6 +30,18 @@
   ],
   "parent": null,
   "relatedFiles": [],
-  "notes": "AUD-054、AUD-056、AUD-016、AUD-008 已在 main；AUD-055、AUD-002、AUD-035、AUD-033 汇集到 codex/final-hardening-unified，由一个 PR 验证和合并，收口文档随同该 PR 交付，不再创建纯文档 PR。",
-  "meta": {}
+  "notes": "八项产品实现均已进入 main：AUD-054、AUD-056、AUD-016、AUD-008 分别由 PR #86/#89/#90/#91 合并，AUD-055、AUD-002、AUD-035、AUD-033 由统一 PR #96 验证并合并；合并后通过独立纯文档 PR 收口报告、PENDING 与 Trellis。",
+  "meta": {
+    "delivery_prs": [
+      "86",
+      "89",
+      "90",
+      "91",
+      "96"
+    ],
+    "final_implementation_head": "40423eda34ae3e448c7347199436bc7f49e27972",
+    "final_merge_commit": "ab76a30746ae9393f2b5c883de4e3ea145e1b964",
+    "final_pr_ci_run": "31272904696",
+    "final_workflow_dispatch_run": "31272906922"
+  }
 }

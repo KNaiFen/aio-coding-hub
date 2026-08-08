@@ -8,5 +8,5 @@
 - [x] 实现 quarantined-only revalidate 与废弃历史事件迁移为 disabled。
 - [x] 同步 SDK、合同、文档、前端 lifecycle UI；bindings 留给 CI。
 - [x] 本地只运行零依赖源码合同、解析与 `git diff --check`。
-- [ ] 由统一 PR 精确 head 的云端 Actions 覆盖并发阈值、跨重启、恢复、legacy、snapshot 刷新、bindings 与完整回归。
-- [ ] 在统一 PR 内记录精确 head、CI 与替代旧 PR #94 的证据，并与 AUD-055、AUD-002、AUD-035 一起合并；不再创建纯文档收口 PR。
+- [x] 由统一 PR 精确 head 的云端 Actions 覆盖并发阈值、跨重启、恢复、legacy、snapshot 刷新、bindings 与完整回归。
+- [x] 在统一 PR 内记录精确 head、CI 与替代旧 PR #94 的证据，并与 AUD-055、AUD-002、AUD-035 一起合并；合并后由独立纯文档 PR 收口治理状态。

@@ -1,0 +1,32 @@
+{
+  "id": "provider-sync-session-snapshot",
+  "name": "provider-sync-session-snapshot",
+  "title": "AUD-055 Provider Sync 快照体积",
+  "description": "将 Provider Sync 快照收窄为 active sessions，并将可证明所有权的 managed backup 限制为最新一代。",
+  "status": "completed",
+  "dev_type": "backend",
+  "scope": "provider-sync",
+  "package": "aio-coding-hub",
+  "priority": "P2",
+  "creator": "KNaiFen",
+  "assignee": "KNaiFen",
+  "createdAt": "2026-08-06",
+  "completedAt": "2026-08-09",
+  "branch": "codex/final-hardening-unified",
+  "base_branch": "main",
+  "worktree_path": "/private/tmp/aio-final-hardening-unified",
+  "commit": "ab76a30746ae9393f2b5c883de4e3ea145e1b964",
+  "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/96",
+  "subtasks": [],
+  "children": [],
+  "parent": "08-06-final-hardening-zero-artifact",
+  "relatedFiles": [],
+  "notes": "本批第 2 项；产品实现与安全加固由统一 PR #96 验证并合并。只清理 manifest 精确证明的 v1/v2 managed backup，观察到并发变化时 fail closed；句柄相对操作、摘要和末次复验只缩小竞态窗口，不宣称消除同权限恶意并发写者的最终删除竞态。",
+  "meta": {
+    "implementation_head": "40423eda34ae3e448c7347199436bc7f49e27972",
+    "merge_commit": "ab76a30746ae9393f2b5c883de4e3ea145e1b964",
+    "pr_ci_run": "31272904696",
+    "workflow_dispatch_run": "31272906922",
+    "replaced_pr": "87"
+  }
+}

@@ -7,5 +7,5 @@
 - [x] 在 Observer state 增加 source-aware、有容量与正/负 TTL 的 folder cache。
 - [x] 覆盖 All/Claude scope、摘要平手、active count、cache key、淘汰和 miss 后出现。
 - [x] 本地只运行零依赖源码合同、解析与 `git diff --check`。
-- [ ] 由统一 PR 精确 head 的全量 Actions 验证 rustfmt、bindings、Clippy、Rust tests 与 audit。
-- [ ] 在统一 PR 内记录精确 head、CI 与替代旧 PR #93 的证据，并与 AUD-055、AUD-002、AUD-033 一起合并。
+- [x] 由统一 PR 精确 head 的全量 Actions 验证 rustfmt、bindings、Clippy、Rust tests 与 audit。
+- [x] 在统一 PR 内记录精确 head、CI 与替代旧 PR #93 的证据，并与 AUD-055、AUD-002、AUD-033 一起合并。

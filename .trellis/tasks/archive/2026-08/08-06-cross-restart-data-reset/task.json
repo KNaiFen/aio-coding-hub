@@ -3,7 +3,7 @@
   "name": "cross-restart-data-reset",
   "title": "AUD-008 跨重启数据重置",
   "description": "将数据重置改为 durable marker 加下次启动前清理，并提供失败可重试、不可越过的应用级维护态。",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": "cross-layer",
   "scope": "data-management",
   "package": "aio-coding-hub",
@@ -11,16 +11,21 @@
   "creator": "KNaiFen",
   "assignee": "KNaiFen",
   "createdAt": "2026-08-06",
-  "completedAt": null,
+  "completedAt": "2026-08-09",
   "branch": "codex/aud020-cross-restart-data-reset",
   "base_branch": "main",
   "worktree_path": "/private/tmp/aio-aud020-reset",
-  "commit": "c4c069e2",
+  "commit": "99de56bb9c4d718bb0d2297239f8c88325be2c26",
   "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/91",
   "subtasks": [],
   "children": [],
   "parent": "08-06-final-hardening-zero-artifact",
   "relatedFiles": [],
-  "notes": "本批第 5 项；候选已在 AUD-056 合并后的 main 重放为 c4c069e2。PR #91 的精确 head 全量 CI、跨平台故障注入、绑定核验和顺序合并仍待执行；先建立 AUD-002 将复用的 maintenance coordinator。",
-  "meta": {}
+  "notes": "本批第 5 项；最终候选 59bc7b7c 通过精确 PR CI 与 workflow_dispatch 后由 PR #91 合并，并为 AUD-002 提供共享 maintenance coordinator。",
+  "meta": {
+    "implementation_head": "59bc7b7c7bb1f63814e1e70a48944fe0857e977e",
+    "merge_commit": "99de56bb9c4d718bb0d2297239f8c88325be2c26",
+    "pr_ci_run": "31239694948",
+    "workflow_dispatch_run": "31239707625"
+  }
 }

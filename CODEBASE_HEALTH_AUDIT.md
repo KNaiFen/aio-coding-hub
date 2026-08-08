@@ -4,9 +4,10 @@
 
 ## 0. 审计元数据
 
-- 审计状态：`revalidated-planning`
+- 审计状态：`complete`
 - 开始日期：2026-08-03（Asia/Shanghai）
 - 完成日期：2026-08-03（Asia/Shanghai）
+- 最终收口日期：2026-08-09（Asia/Shanghai）
 - 基线提交：`9d1fb9664b4a783622d937a84381cdd103f7bcc2`
 - 初始分支：`main...origin/main`
 - 初始工作区：无已跟踪文件改动；存在审计开始前的未跟踪目录/文件 `.impeccable/`、`.playwright-cli/`、`.trellis/tasks/08-02-tui-summary-local-time/`、`.trellis/workspace/KNaiFen/`、`PRODUCT.md`、`upgrade-tui.command`。这些内容由用户或另一 Session 所有，本审计不修改。
@@ -54,6 +55,7 @@
 - 插件配置与 Storage 原子合并批次（`resolved`）：最终候选 `c669b522` 严格五文件；Actions `31073434744` 的 frontend、Rust format/bindings、Clippy、Rust tests、依赖审计及全部合同门全绿。合并前 `origin/main`、base 与 merge-base 均为 `4ee5faa8`，只有自身 PR 开放且 CLEAN/MERGEABLE；Ready PR #84 squash 合并为 `4800bc87`，合并后五个目标文件树与候选一致。
 - 插件 hook 单次调用绝对截止时间批次（`resolved`）：逻辑候选 `1417c045`、云端格式 head `27efd051` 严格四文件；同一 absolute deadline 覆盖 gate、单插件队列、清理、cold start、activation 与 RPC，warm/cold/LRU 超时实例按身份摘除并强制终止。Actions `31077183327` 的 frontend、Rust format/bindings、Clippy、Rust tests、依赖审计及全部合同门全绿；合并前 `origin/main`、base 与 merge-base 均为 `4800bc87`，只有自身 PR 开放且 CLEAN/MERGEABLE。Ready PR #85 squash 合并为 `735cec12`，合并后四个目标文件树与候选一致。
 - 最终治理批次基线：2026-08-06 以已核验的 `origin/main@735cec12` 建立隔离候选。加入新问题前，索引的正确现状为 48 项 `resolved`、5 项 `confirmed`；旧的 47 resolved / 5 confirmed / 1 pr_open 统计未吸收 PR #85 终态，现已纠正。新增 `AUD-054` 至 `AUD-056` 后，用户锁定按 054、055、056、016、008、002、035、033 的顺序逐项实施，八项全部转为 `planned`。
+- 最终治理批次交付结果（`resolved`）：AUD-054、AUD-056、AUD-016、AUD-008 分别由 PR #86/#89/#90/#91 合并；AUD-055、AUD-002、AUD-035、AUD-033 由统一 PR #96 的精确 head `40423eda34ae3e448c7347199436bc7f49e27972` 合并为 `ab76a30746ae9393f2b5c883de4e3ea145e1b964`。PR CI `31272904696` 与 workflow_dispatch `31272906922` 均通过完整 frontend、Rust format/bindings、Clippy、Rust tests、依赖审计、Provider 百万行 benchmark 和 `ci-gate`。最终统计为 56 项 `resolved`、0 项未解决。
 - 最终治理批次本地约束：禁止依赖安装、dev、类型检查、Lint、测试、构建、Cargo、Tauri 及任何会生成 Node/Rust 产物的仓库脚本；本地只运行零依赖 Node 源码合同/解析检查和 `git diff --check`。完整前端、rustfmt、bindings、Clippy、Rust tests、audit 与原生制品验证由 GitHub Actions 负责。
 
 ## 1. 扫描进度与覆盖模块
@@ -113,9 +115,9 @@ Rust 运行时状态 / 请求日志
 
 ### 2.3 健康度结论
 
-- 当前索引共 56 项：`P1` 20 项、`P2` 35 项、`P3` 1 项；其中 48 项 `resolved`、8 项 `planned`，没有 `confirmed`、`pr_open` 或 `not_recommended`。加入新问题前的基线为 48 resolved / 5 confirmed；现有八项均已获得用户决策并进入固定顺序实施。原 5 项假设中，3 项仍需运行时/策略验证，`HYP-004` 已被现行修复取代，`HYP-005` 的机制已晋升为生产可达的 `AUD-052`。
+- 当前索引共 56 项：`P1` 20 项、`P2` 35 项、`P3` 1 项；56 项全部为 `resolved`，没有 `planned`、`confirmed`、`pr_open` 或 `not_recommended`。最终八项治理修复已按锁定顺序进入 `main`；原 5 项假设中，3 项仍需运行时/策略验证，`HYP-004` 已被现行修复取代，`HYP-005` 的机制已晋升为生产可达并已解决的 `AUD-052`。
 - 代码目录和主要层次仍具可辨识的模块边界，前端 service/query 与 Rust command/domain/infra 的常规路径没有发现需要单列的循环依赖；问题更集中在跨层合同没有单一事实源或原子语义，例如 Plugin SDK/Host、TUI/Observer、UI cache/backend DTO、manifest/runtime policy。
-- 当前最高风险不是一般可维护性，而是几组可直接影响用户的工程缺口：非回环网关缺少可信调用者边界；插件 fail-closed/timeout 没有端到端兑现；诊断链可能泄露秘密；上游同步仍缺少人工 fork 语义审查门。Release tag 与资产不可变性已由 #40 解决，不再列为现存根因。
+- 审计确认的工程缺口均已交付对应修复；非回环网关、插件 fail-closed/timeout、诊断脱敏与上游同步人工审查门均已有合并和云端验证证据。剩余风险属于各条目明确记录的运行时盲点与验证假设，不再作为未解决审计项计数。
 - 数据完整性的共性根因是“基于旧快照的整文档写回”：全局设置、插件 config/storage、模型别名和多个前端 mutation 都缺少 revision/CAS、字段级原子 patch 或统一串行化。
 - 资源治理的共性根因是各层分别设置局部上限，却没有端到端总预算：网关 body、QuickJS heap、插件队列/stream、observer 查询、缓存、图片下载和图表数据点之间均存在预算断层。
 
@@ -124,13 +126,13 @@ Rust 运行时状态 / 请求日志
 | ID | 状态 | 优先级 | 模块 | 摘要 | 证据位置 |
 | --- | --- | --- | --- | --- | --- |
 | AUD-001 | `resolved` | `P1` | CI / 上游同步治理 | 定时同步以 Git 可合并性代替 fork 语义审查，可无人审核更新 `main` | PR #53 已合并：`891c9eb3`；同步 PR 人工审查合同与 self-test |
-| AUD-002 | `planned` | `P2` | Rust 数据完整性 | SQLite 与 CLI/技能文件双写依赖补偿事务，但多个失败路径吞掉补偿失败 | `.trellis/tasks/08-06-filesystem-recovery-journal`；`src-tauri/src/domain/prompts.rs:490-503` 等 |
+| AUD-002 | `resolved` | `P2` | Rust 数据完整性 | SQLite 与 CLI/技能文件双写依赖补偿事务，但多个失败路径吞掉补偿失败 | PR #96 已合并：`ab76a307`；prepare-first recovery journal 与阻断重放 |
 | AUD-003 | `resolved` | `P2` | 发布 / Homebrew | Cask 生成器与文档仍依赖正式 Release 不产出的 Intel 桌面包，并虚构自动 tap 同步 | PR #75 已合并：`ff09a81a`；ARM-only Cask 与真实手动 tap 流程 |
 | AUD-004 | `resolved` | `P1` | Rust 启动恢复 | 数据库初始化错误被永久缓存，UI 的“重试启动”会重复返回同一旧错误 | PR #51 已合并：`02b9980d`；`src-tauri/src/app/app_state.rs`、`src-tauri/src/app/startup_tasks.rs` |
 | AUD-005 | `resolved` | `P2` | CI / Rust 正确性门 | 已知会导致 `Instant` 下溢 panic 的静态防线只在可选 precommit 中，CI 与 prepush 均未执行 | PR #57 已合并：`0062c907` |
 | AUD-006 | `resolved` | `P2` | 插件脚手架 / CI | `create-aio-plugin` 声明了严格 typecheck，但根聚合门与 CI 只运行其 Vitest | PR #57 已合并：`0062c907` |
 | AUD-007 | `resolved` | `P2` | Rust 依赖治理 | 两个 CVSS 7.5 `quick-xml` 公告被无期限全局忽略，依赖可达性变化后 CI 仍会绿灯 | PR #80 已合并：`b0698f57`；Actions `31054953851` 全绿 |
-| AUD-008 | `planned` | `P1` | Rust 数据重置 / 资源生命周期 | 数据重置未停止长期持有 DB pool 的后台任务，就按非原子顺序删除设置与 SQLite 文件 | 候选 `c4c069e2`；`.trellis/tasks/08-06-cross-restart-data-reset`；`src-tauri/src/app/maintenance.rs`、`src-tauri/src/commands/data_management.rs` |
+| AUD-008 | `resolved` | `P1` | Rust 数据重置 / 资源生命周期 | 数据重置未停止长期持有 DB pool 的后台任务，就按非原子顺序删除设置与 SQLite 文件 | PR #91 已合并：`99de56bb`；durable marker 与启动前维护态 |
 | AUD-009 | `resolved` | `P1` | 插件脚手架 / 运行时合同 | 三个官方脚手架模板读取错误的 hook 参数层级，生成插件会静默跳过核心逻辑 | PR #51 已合并：`02b9980d`；三模板行为回归与公开文档修正 |
 | AUD-010 | `resolved` | `P1` | 插件 SDK / 序列化合同 | Hook 可见上下文运行时使用 snake_case，公开合同与 SDK 却声明 camelCase | PR #82 已合并：`e6cf04d3`；Actions `31063487534` 全绿 |
 | AUD-011 | `resolved` | `P1` | 前端启动状态 | 旧的 GET/重试响应可覆盖更新的启动事件，隐藏真实失败或让成功状态回退 | PR #51 已合并：`02b9980d`；启动 store、监听/bootstrap/Banner 与定向回归 |
@@ -138,7 +140,7 @@ Rust 运行时状态 / 请求日志
 | AUD-013 | `resolved` | `P2` | 前端 Provider 缓存 | 删除 Provider 后未失效默认路由与排序方案缓存，页面可继续提交已删除 ID | `src/query/providers.ts:332-380` 等 |
 | AUD-014 | `resolved` | `P2` | 前端 CLI 代理状态 | 多个 CLI 的异步冲突检查共用单个 pending 槽位，状态和确认内容可互相覆盖 | PR #51 已合并：`02b9980d`；`useCliProxyControls`、Sidebar 与定向回归 |
 | AUD-015 | `resolved` | `P2` | 前端布局 / 故障恢复 | 启动失败横幅与 `h-full` 页面叠加超过容器高度，设置页底部可被裁掉 | PR #60 已合并：`d12dbfe3`；AppLayout 剩余高度容器与 21 项回归 |
-| AUD-016 | `planned` | `P1` | 网关安全 / 观测完整性 | 非回环监听没有入站认证，且信任客户端可伪造的内部 header，允许借用已存凭据并逃逸日志/用量 | `.trellis/tasks/08-06-gateway-lan-bearer-token`；`src-tauri/src/gateway/routes.rs:36-118` 等 |
+| AUD-016 | `resolved` | `P1` | 网关安全 / 观测完整性 | 非回环监听没有入站认证，且信任客户端可伪造的内部 header，允许借用已存凭据并逃逸日志/用量 | PR #90 已合并：`c5b2333d`；真实 peer Bearer Token 边界 |
 | AUD-017 | `resolved` | `P1` | 网关性能 / 内存 | Responses 连续性缓存只限条目数量、不限字节数，可长期复制并保留接近请求上限的大型 JSON | PR #67 已合并：`0854d830`；1 MiB/32 MiB 最终 JSON 载荷预算 |
 | AUD-018 | `resolved` | `P1` | 发布自动化 | tag 触发的 Release 对 annotated tag 会 fetch 同名本地 ref 后再推送，导致 tag clobber 失败 | `.github/workflows/release.yml:48-52` 等 |
 | AUD-019 | `resolved` | `P1` | 发布供应链 / 不可变性 | Release 可从同 SHA 的“最新”候选重取资产并用 overwrite 覆盖既有 tag 文件，制品不是不可变的 | PR #40 已合并：`cec2353f`；`.github/workflows/release.yml`、`scripts/release-promotion.mjs` |
@@ -155,9 +157,9 @@ Rust 运行时状态 / 请求日志
 | AUD-030 | `resolved` | `P2` | Observer 缓存 / 内存 | 快照缓存没有容量或过期删除，合法参数组合可长期保留数百个大快照 | PR #65 已合并：`405a545f`；TTL 访问清理与 64 项上限 |
 | AUD-031 | `resolved` | `P2` | Observer 查询性能 | 每个快照对 OAuth Provider 逐一查询 gate，活动轮询形成 N+1 SQLite 压力 | PR #71 已合并：`7c395d15`；分批 display snapshot 查询 |
 | AUD-032 | `resolved` | `P2` | 插件失败策略合同 | fail-open 插件的非法/保留 header patch 仍无条件中断请求，与公开 fail-open 语义冲突 | PR #72 已合并：`d26524f2`；事务 patch + request/response policy 回归 |
-| AUD-033 | `planned` | `P2` | 插件生命周期合同 | `activationEvents` 只验证/展示而不驱动激活，连续运行时失败也不会持久 quarantine | `.trellis/tasks/08-06-plugin-activation-quarantine`；`src-tauri/src/domain/plugins.rs:760-784` 等 |
+| AUD-033 | `resolved` | `P2` | 插件生命周期合同 | `activationEvents` 只验证/展示而不驱动激活，连续运行时失败也不会持久 quarantine | PR #96 已合并：`ab76a307`；精确激活策略与持久 quarantine |
 | AUD-034 | `resolved` | `P2` | 插件配置 / 数据完整性 | 插件 storage 与 UI 配置都对整份 JSON 无 CAS 地 read-modify-write，并发会丢更新 | PR #84 已合并：`4800bc87`；Actions `31073434744` 全绿 |
-| AUD-035 | `planned` | `P2` | TUI / Observer I/O | `history_limit=0` 的状态栏仍读 500 条日志并全量遍历 Codex session 文件树，每 500ms 重复 | `.trellis/tasks/08-06-observer-zero-history-query`；`src-tauri/src/app/observer/snapshot.rs:24,264-285` 等 |
+| AUD-035 | `resolved` | `P2` | TUI / Observer I/O | `history_limit=0` 的状态栏仍读 500 条日志并全量遍历 Codex session 文件树，每 500ms 重复 | PR #96 已合并：`ab76a307`；受限查询与有界 folder cache |
 | AUD-036 | `resolved` | `P1` | 前端插件状态 | 切换到慢加载插件详情时，旧插件的配置/版本可作用于新插件的保存或回滚目标 | PR #51 已合并：`02b9980d`；插件详情 identity guard 与定向测试 |
 | AUD-037 | `resolved` | `P1` | 定价配置 / 数据完整性 | 模型价格别名读取失败被伪装为空配置，保存会覆盖原有别名规则 | PR #56 已合并：`db92a480`；严格编辑读取、v2 对齐与错误态回归 |
 | AUD-038 | `resolved` | `P1` | 前端会话历史 | 十页窗口淘汰较早页面后没有反向取回入口，页面还把窗口起点误标为会话开始 | PR #63 已合并：`e57acb54`；双向取页、真实边界与响应式操作控件 |
@@ -176,9 +178,9 @@ Rust 运行时状态 / 请求日志
 | AUD-051 | `resolved` | `P2` | 插件 SDK / 合同漂移 | Host 和文档已公开 storage/diagnostics，SDK 的 `PluginApi` 类型却没有声明 | PR #61 已合并：`ba06dabb`；SDK、跨层合同与 Actions 全绿 |
 | AUD-052 | `resolved` | `P2` | 前端编辑器 / 异常恢复 | `CodeEditor` 首次动态 import 失败后永久复用 rejected Promise，当前会话无法恢复 | PR #58 已合并：`5b13683b` |
 | AUD-053 | `resolved` | `P2` | 供应商页 / 路由状态 | “调用顺序”始终以 Default 初始化，未默认展示当前实际活动路由 | PR #55 已合并：`ed72549b`；活动路由初始化回归 |
-| AUD-054 | `planned` | `P1` | CI / 本地环境治理 | 文档与受控脚本仍引导安装依赖、dev、测试和前端构建，无法保证本地零产物 | `.trellis/tasks/08-06-cloud-only-zero-artifact-contract`；`AGENTS.md:10-11`、`README.md:193-202` |
-| AUD-055 | `planned` | `P2` | Provider Sync / 磁盘治理 | 快照扫描活动与归档 sessions、SQLite/global state，并保留五代 managed backup | `.trellis/tasks/08-06-provider-sync-session-snapshot`；`src-tauri/src/infra/codex_provider_sync.rs:571,1003-1228` |
-| AUD-056 | `planned` | `P1` | 请求/运行日志 / 磁盘治理 | 请求日志默认永久，运行日志只有日龄没有容量上限，清空请求日志还自动 VACUUM | `.trellis/tasks/08-06-request-runtime-log-retention`；`src-tauri/src/infra/settings/defaults.rs:65-70` 等 |
+| AUD-054 | `resolved` | `P1` | CI / 本地环境治理 | 文档与受控脚本仍引导安装依赖、dev、测试和前端构建，无法保证本地零产物 | PR #86 已合并：`d32106c3`；零依赖合同与云端质量门 |
+| AUD-055 | `resolved` | `P2` | Provider Sync / 磁盘治理 | 快照扫描活动与归档 sessions、SQLite/global state，并保留五代 managed backup | PR #96 已合并：`ab76a307`；session-only v2 与单代 managed backup |
+| AUD-056 | `resolved` | `P1` | 请求/运行日志 / 磁盘治理 | 请求日志默认永久，运行日志只有日龄没有容量上限，清空请求日志还自动 VACUUM | PR #89 已合并：`d7679695`；7 天留存、256 MiB 软上限与手动压缩 |
 
 优先级口径：
 
@@ -211,7 +213,7 @@ Rust 运行时状态 / 请求日志
 
 ### AUD-002：跨 SQLite/文件系统双写吞掉补偿失败，可能留下状态分裂
 
-- 状态：`planned`
+- 状态：`resolved`
 - 优先级：`P2`
 - 判断依据：触发需要“原操作失败 + 恢复写也失败”的复合条件，概率低于常规错误路径；但一旦发生，数据库中的启用状态与 CLI 实际配置、manifest 或技能目录会分裂，且当前返回值和日志无法指出恢复失败，用户也没有可靠的自动修复入口。
 - 文件和行号：
@@ -228,8 +230,9 @@ Rust 运行时状态 / 请求日志
 - 最小修复建议：先统一所有补偿函数返回并聚合 `Result`，任何恢复失败都返回稳定的 `*_ROLLBACK_FAILED` 错误并保留快照；同时写入一个有界的“需要对账”标记，在下次启动或显式同步时按 SQLite 权威状态重放 Prompt/MCP/Skills 配置。不要在补偿尚未确认成功时仅返回原始错误。
 - 验证及回归测试：为 Prompt、MCP、Skills 的文件适配器增加故障注入点，分别覆盖首个外部写失败、第二个写失败、SQLite commit 失败、恢复目标失败和恢复 manifest/链接失败；断言成功补偿时 DB/文件一致，补偿失败时错误码包含原始错误与恢复错误、快照未删且对账标记存在；重启对账后再次断言两侧恢复一致。
 - 2026-08-06 最新主线复核：`origin/main@4ee5faa8` 仍在 prompts、MCP backups/db/import、workspace switch 与 Skills ops/local 的失败分支以 `let _ =` 吞掉恢复/清理错误；现有测试只覆盖“业务失败但恢复成功”，没有恢复失败注入或 `RECOVERY_REQUIRED` 断言。AUD002 仍成立，但至少跨 Prompt/MCP/workspace/Skills 多个写路径；仅把单点 `?` 化会提前停止补偿，完整修复需要错误聚合与持久化对账/journal，故本批不 planned。
-- 2026-08-06 最终治理计划：任务 `.trellis/tasks/08-06-filesystem-recovery-journal`，在 AUD-008 maintenance coordinator 合并后实施。所有外部副作用前以独立事务提交 journal，启动时以已提交 SQLite 为权威阻断重放；Prompt/MCP/Skills/workspace switch 的补偿失败不再吞掉。Skills 不可由 metadata 重建的 SSOT 内容使用 journal 专属、带 ownership/hash 的临时 staging/backup，缺失或校验失败时保持维护态。journal 与错误摘要禁止保存正文、env/header、token/secret 或原始敏感路径。
+- 2026-08-06 最终治理计划：任务 `.trellis/tasks/archive/2026-08/08-06-filesystem-recovery-journal`，在 AUD-008 maintenance coordinator 合并后实施。所有外部副作用前以独立事务提交 journal，启动时以已提交 SQLite 为权威阻断重放；Prompt/MCP/Skills/workspace switch 的补偿失败不再吞掉。Skills 不可由 metadata 重建的 SSOT 内容使用 journal 专属、带 ownership/hash 的临时 staging/backup，缺失或校验失败时保持维护态。journal 与错误摘要禁止保存正文、env/header、token/secret 或原始敏感路径。
 - 2026-08-08 主线重放、交付待执行：`codex/aud021-filesystem-recovery-journal` 的产品候选已重放为 `699f0c0b`，直接基于 `origin/main@99de56bb`；该主线已包含 PR #90 / AUD-016 的合并 `c5b2333d` 与 PR #91 / AUD-008 的合并 `99de56bb`。候选新增 durable recovery journal、SQLite 权威 replay、Skills 受管 artifact ownership/hash 边界、Prompt/MCP/Skills/workspace switch 的 prepare-first 协议与 maintenance retry/exit gate；错误摘要保持定长脱敏。PR #92 仍须更新为该重放结果并切换到 `main` base，再对新的精确远端 head 运行 PR CI、workflow_dispatch 全量 CI、生成绑定核验与主线门；本地只执行零依赖合同检查与差异检查，条目继续保持 `planned`。
+- 2026-08-09 交付证据：最终实现并入统一候选 `40423eda34ae3e448c7347199436bc7f49e27972`，PR [#96](https://github.com/KNaiFen/aio-coding-hub/pull/96) 的 PR CI `31272904696` 与 workflow_dispatch `31272906922` 均通过 Rust format/bindings、Clippy、Rust tests、依赖审计和 `ci-gate`；PR 以 `ab76a30746ae9393f2b5c883de4e3ea145e1b964` 合并至 `main`。旧 PR #92 已关闭并由 #96 取代。
 
 ### AUD-003：Homebrew Cask 合同与真实 Release 资产矩阵分裂
 
@@ -321,7 +324,7 @@ Rust 运行时状态 / 请求日志
 
 ### AUD-008：应用数据重置未收口 DB 后台所有者，且删除过程可部分提交
 
-- 状态：`planned`
+- 状态：`resolved`
 - 优先级：`P1`
 - 判断依据：这是用户主动触发的破坏性操作，但命令可在已经删除设置后因数据库文件仍被占用而失败，或让旧后台任务继续操作已删除的数据库 inode；结果可能是明确的数据丢失/状态分裂。影响跨设置、数据库和网关生命周期，且当前没有事务性恢复。
 - 文件和行号：
@@ -339,8 +342,9 @@ Rust 运行时状态 / 请求日志
 - 验证及回归测试：在 Windows/macOS/Linux CI 做真实命令集成测试：启动所有后台任务并确保 pool 有活跃连接后执行 reset，断言不会部分删除、旧任务全部退出、同一路径只存在一个新 DB、设置和 DB 同时为空；分别注入 settings rename、WAL/DB rename、后台 join 超时失败，断言要么完整回滚，要么下次启动可根据 marker 完成恢复。前端失败时必须明确要求退出/重启，不能继续在半重置进程内工作。
 - 2026-08-06 最新主线复核：`origin/main@ff09a81a` 仍只停止网关并取走 `DbInitState` 缓存；observer、两个 retention task 与 usage backfill 继续持有独立或 clone 的 DB pool，删除仍按 settings 后 SQLite 的不可回滚顺序执行。#76 仅修改前端 FormField 文件，无相关实现。没有可独立保证安全的窄修复：退出式 marker、进程内统一 cancel/join 或暂时禁用入口会改变产品生命周期合同，保持 `confirmed`，等待用户统一决策。
 - 2026-08-06 最新主线复核：以 `origin/main@4ee5faa8` 逐点确认 `app_data_reset` 仍只锁 gateway/DbInitState；startup retention、provider availability、usage backfill、observer 独立只读 pool 和已分发的 Db clone 都可能继续存活，文件删除仍逐个 `remove_file` 且首错即返。基础测试不覆盖真实 IPC、后台 task、in-flight clone 或跨平台失败。AUD008 没有不改变生命周期契约的安全窄修复，继续 `confirmed`。
-- 2026-08-06 最终治理计划：任务 `.trellis/tasks/08-06-cross-restart-data-reset`。reset IPC 只原子持久化 marker 后走禁止 `ensure_db_ready` 的专用退出；下次进程在 DB、observer、gateway、retention、usage backfill 和前端后台任务前执行幂等清理。任一删除失败保留 marker，应用进入仅允许 retry/exit 的 maintenance 状态；全部成功才清 marker并首次正常启动。该 coordinator 随后作为 AUD-002 的共享阻断 gate。
+- 2026-08-06 最终治理计划：任务 `.trellis/tasks/archive/2026-08/08-06-cross-restart-data-reset`。reset IPC 只原子持久化 marker 后走禁止 `ensure_db_ready` 的专用退出；下次进程在 DB、observer、gateway、retention、usage backfill 和前端后台任务前执行幂等清理。任一删除失败保留 marker，应用进入仅允许 retry/exit 的 maintenance 状态；全部成功才清 marker并首次正常启动。该 coordinator 随后作为 AUD-002 的共享阻断 gate。
 - 2026-08-07 代码完成、交付待执行：独立候选分支 `codex/aud020-cross-restart-data-reset` 已重放为 `c4c069e2`，实现 durable reset marker、启动前 maintenance coordinator、失败 retry/exit gate、专用退出路径和前端维护态投影。它在数据库、observer、gateway、retention 与后台任务之前消费 marker，并按 reset 优先规则使旧 recovery journal 失效。本地仅运行 cloud-only checker/self-test 与 `git diff --check`；跨平台故障注入、Rust/前端测试、bindings 和合并仍由 Actions 验证，故保持 `planned`。
+- 2026-08-08 交付证据：最终候选 `59bc7b7c7bb1f63814e1e70a48944fe0857e977e` 的 PR [#91](https://github.com/KNaiFen/aio-coding-hub/pull/91) CI `31239694948` 与 workflow_dispatch `31239707625` 均通过完整云端门，随后 squash 合并为 `99de56bb9c4d718bb0d2297239f8c88325be2c26`。合并后主线树与候选一致，并为 AUD-002 提供共享 maintenance coordinator。
 
 ### AUD-009：脚手架生成的三个 hook 示例读取了不存在的顶层上下文
 
@@ -450,7 +454,7 @@ Rust 运行时状态 / 请求日志
 
 ### AUD-016：网关缺少可信调用者边界，非回环模式会暴露带凭据代理并允许观测逃逸
 
-- 状态：`planned`
+- 状态：`resolved`
 - 优先级：`P1`
 - 判断依据：攻击者不需要读取磁盘中的密钥即可让应用使用已保存的供应商凭据发起请求，造成配额/费用与数据外发；还可让请求不进入日志和用量账本。风险需要用户选择 LAN/通配地址或本地恶意进程，因此不定为 `P0`。
 - 文件和行号：监听地址 `src-tauri/src/gateway/binder.rs:43-69`；公开路由 `src-tauri/src/gateway/routes.rs:36-118`；Provider 绕过 `src-tauri/src/gateway/proxy/handler/middleware/cli_proxy_guard.rs:15-26`；真实凭据注入 `src-tauri/src/gateway/proxy/handler/failover_loop/attempt/attempt_auth.rs:160-184`；可伪造标记 `src-tauri/src/gateway/proxy/mod.rs:42-43, 101-130`；请求收口跳过 `src-tauri/src/gateway/proxy/request_end.rs:932-940, 985-993`；已锁定行为的测试 `src-tauri/src/gateway/routes.rs:7185-7236`；UI 警告 `src/components/cli-manager/NetworkSettingsCard.tsx:187-225`。
@@ -463,8 +467,9 @@ Rust 运行时状态 / 请求日志
 - 最小修复建议：所有非回环监听强制启用高熵网关访问令牌（按客户端/设备可轮换更佳），在路由最外层、读取 body 和选择 Provider 之前统一鉴权；Provider 强制路由至少需要同等或更高权限。入口无条件移除客户端的内部 marker，内部递归状态改为进程内 request extension、不可伪造的通道，或经认证的短期签名。启用 LAN/通配地址时阻止无令牌配置，而不是只显示警告。
 - 验证及回归测试：在真实 socket 上分别绑定 loopback 与 `0.0.0.0`；无 token、错误 token、过期 token访问所有三类代理路由均应在任何上游请求/DB 日志前返回 401/403，正确 token 才可代理。用正确 token但伪造内部 header 的请求仍必须被记录；只有宿主内部构造的递归 hop 可被识别。加入上游计数器断言未授权请求绝不注入/使用 Provider 凭据，并验证轮换撤销旧 token。
 - 2026-08-06 最新主线复核：`origin/main@4ee5faa8` 仍让 LAN 绑定 `0.0.0.0`，路由无入站认证；公开 provider 专用路径会注入 forced provider 并绕过 CLI enable guard，客户端仍可伪造固定 `x-aio-gateway-forwarded` 以跳过观测。删除 bypass 会改变 Claude Terminal 现有启动路径，marker 清理也涉及递归/观测兼容性。AUD016 需先决定 LAN token/代理信任模型、provider 专用路由权限和 marker 语义，继续 `confirmed`。
-- 2026-08-06 最终治理计划：任务 `.trellis/tasks/08-06-gateway-lan-bearer-token`。loopback 保持兼容；基于 Axum `ConnectInfo<SocketAddr>` 的真实 peer 对全部非回环 route（含 `/health`）执行最外层 Bearer 鉴权。高熵 token 只展示一次、磁盘只存摘要，旧 LAN/custom 配置自动生成，未确认即退出则下次轮换；认证后剥离 Authorization 与转发/provider 身份头。删除 provider 专用路由、全部 forced-provider 数据流和 Claude Terminal 入口。WSL 非回环连接同样带 token，一次性明文仅在生成/轮换时直接同步，失败必须可见。
+- 2026-08-06 最终治理计划：任务 `.trellis/tasks/archive/2026-08/08-06-gateway-lan-bearer-token`。loopback 保持兼容；基于 Axum `ConnectInfo<SocketAddr>` 的真实 peer 对全部非回环 route（含 `/health`）执行最外层 Bearer 鉴权。高熵 token 只展示一次、磁盘只存摘要，旧 LAN/custom 配置自动生成，未确认即退出则下次轮换；认证后剥离 Authorization 与转发/provider 身份头。删除 provider 专用路由、全部 forced-provider 数据流和 Claude Terminal 入口。WSL 非回环连接同样带 token，一次性明文仅在生成/轮换时直接同步，失败必须可见。
 - 2026-08-07 代码完成、交付待执行：独立候选分支 `codex/aud019-gateway-lan-bearer-token` 的 `dfe4579e`、`3781b005`、`30d8db1b` 已实现私有摘要 sidecar、未确认重启轮换、真实 peer 全路由鉴权、严格单 Bearer、敏感/身份头剥离、旧 provider URL 404、forced-provider/Claude Terminal 全链删除，以及 Claude/Codex WSL token 同步与 Gemini 明确不兼容。WSL manifest 升至 v2 并拒绝持久化 Gateway credential；前端提供一次性 reveal、复制、确认和主动轮换，并显示 WSL 同步失败。附加修正保留 Provider 编辑器仍在使用的复制 API Key/Base URL ping IPC，并向 Codex compaction classifier 传递已净化的 headers。本地 cloud-only checker/self-test 与 `git diff --check` 通过；按用户决定，PR、Actions、bindings/native/frontend 云端门和合并后置，当前继续保持 `planned`。
+- 2026-08-08 交付证据：最终候选 `948dc5fa0824fe2dc59cccd65c3523c39e513f32` 的 PR [#90](https://github.com/KNaiFen/aio-coding-hub/pull/90) CI `31197560686` 与 workflow_dispatch `31197593860` 均在该精确 head 全绿，随后 squash 合并为 `c5b2333d82086989e9b3b1fb3467c5fbded54dbc`。
 
 ### AUD-017：Responses 连续性缓存没有字节预算，可由少量大请求耗尽内存
 
@@ -722,7 +727,7 @@ Rust 运行时状态 / 请求日志
 
 ### AUD-033：插件激活与隔离生命周期只存在于合同，运行时未实现对应状态转换
 
-- 状态：`planned`
+- 状态：`resolved`
 - 优先级：`P2`
 - 判断依据：声明 `onStartup` 的插件不会启动，未声明 hook/command event 的插件却仍执行；重复崩溃/timeout 仅短暂内存熔断而不持久隔离，直接偏离对外插件安全与可用性合同。
 - 文件和行号：activation 验证 `src-tauri/src/domain/plugins.rs:760-784`、`packages/plugin-sdk/src/index.ts:428-445`；无条件 activation `src-tauri/src/app/plugins/extension_host.rs:205-264, 639-774`；内存 circuit `src-tauri/src/gateway/plugins/pipeline.rs:1216-1228`；审计/状态 `src-tauri/src/gateway/plugins/audit.rs:20-102`、`src-tauri/src/app/plugin_service.rs:2008`；公开合同 `docs/plugins/plugin-api-v1-contract.json:21-26`、`docs/plugins/architecture/security.md:15`。
@@ -731,8 +736,9 @@ Rust 运行时状态 / 请求日志
 - 最小修复建议：实现 event dispatcher 与贡献-事件校验，或删除/拒绝未实现事件；持久化失败窗口/阈值，达到阈值原子切换 Quarantined 并提供显式恢复动作。
 - 验证及回归测试：覆盖 onStartup exactly-once、未声明 event 不执行、连续 timeout/crash 跨重启仍 Quarantined、手动恢复后成功执行。
 - 2026-08-06 最新主线复核：`origin/main@4ee5faa8` 的 `activationEvents` 仍只有 manifest 校验，没有 dispatcher；运行时 circuit 只在内存中短暂 cooldown，重启后清零，`Quarantined` 仅用于显式市场撤销且没有 revalidate/recover 转换。公开文档仍承诺 repeated failure 可隔离并恢复。AUD033 的阈值、窗口、事件派发和恢复语义必须先定产品合同，本批不实施，继续 `confirmed`。
-- 2026-08-06 最终治理计划：任务 `.trellis/tasks/08-06-plugin-activation-quarantine`。显式 activation event 只接受精确 `onStartup`、`onCommand:*`、`onGatewayHook:*`；空/缺失数组保持 legacy，废弃 ProviderEditor/ProtocolBridge 事件拒绝并把历史安装迁移为有原因的 disabled。host crash、runtime error 或 timeout 在任意 startup/command/hook 的 600 秒窗口累计三次时，以单一事务持久 quarantine；第三次请求仍保持既有 fail-open/fail-closed，随后刷新 gateway snapshot 并释放 host。revalidate 成功只恢复 disabled，不自动启用。
+- 2026-08-06 最终治理计划：任务 `.trellis/tasks/archive/2026-08/08-06-plugin-activation-quarantine`。显式 activation event 只接受精确 `onStartup`、`onCommand:*`、`onGatewayHook:*`；空/缺失数组保持 legacy，废弃 ProviderEditor/ProtocolBridge 事件拒绝并把历史安装迁移为有原因的 disabled。host crash、runtime error 或 timeout 在任意 startup/command/hook 的 600 秒窗口累计三次时，以单一事务持久 quarantine；第三次请求仍保持既有 fail-open/fail-closed，随后刷新 gateway snapshot 并释放 host。revalidate 成功只恢复 disabled，不自动启用。
 - 2026-08-08 净重建候选：PR #94 已在 `codex/aud021-filesystem-recovery-journal@c97ad431` 上只重放 AUD-033 的 7 个插件代码/测试提交，产品候选为 `8bb2bbf8`。旧 AUD-008/AUD-002 携带历史、旧审计快照和旧 generated bindings blob 均未带入；`gateway_bearer_token_*` command、runtime access control 与现有 Gateway bindings 保持在基线中，新增 `plugin_revalidate` Rust registry/export anchor 交由该精确 head 的 Actions 生成 bindings。完整跨重启、并发阈值、fail-open/fail-closed、snapshot 刷新与 bindings 门仍待云端验证；按用户最新决定，本分支处理完成后不单独合并，改并入剩余事项的统一集成 PR，条目保持 `planned`。
+- 2026-08-09 交付证据：最终实现并入统一候选 `40423eda34ae3e448c7347199436bc7f49e27972`；PR [#96](https://github.com/KNaiFen/aio-coding-hub/pull/96) 的 PR CI `31272904696` 与 workflow_dispatch `31272906922` 均通过完整前端、bindings、Rust 回归与 `ci-gate`，并以 `ab76a30746ae9393f2b5c883de4e3ea145e1b964` 合并。旧 PR #94 已关闭并由 #96 取代。
 
 ### AUD-034：插件 storage 与 UI 配置保存对同一 JSON 的并发写入会丢失更新
 
@@ -753,7 +759,7 @@ Rust 运行时状态 / 请求日志
 
 ### AUD-035：`history_limit=0` 的 TUI 状态刷新仍投影完整历史并全量扫描会话文件树
 
-- 状态：`planned`
+- 状态：`resolved`
 - 优先级：`P2`
 - 判断依据：状态栏与 `status --once` 明确请求零条历史，却固定触发 500 条日志和会话目录解析；活跃请求期间 500 ms 轮询会把一次不必要的重 I/O 放大为持续负载，可能超过 observer 的 1.5 秒预算。
 - 文件和行号：基线 TUI 请求与轮询 `src-tauri/crates/aio-tui/src/main.rs:84-94, 97-152, 454-465`；快照投影 `src-tauri/src/app/observer/snapshot.rs:24, 158-167, 264-285, 779-819`；Codex 文件发现 `src-tauri/src/domain/cli_sessions/codex.rs:48-97, 675-687`。
@@ -764,8 +770,9 @@ Rust 运行时状态 / 请求日志
 - 2026-08-05 当前主线复核：`origin/main@62574e22` 中 `history_limit=0` 只约束 `recent_requests` 数量，不能等同于“不需要日志”。同一批最多 500 条日志仍用于 `last_request`、`dominant_provider`、活动请求终态去重，以及 `CliScope::All` 的首选 CLI/Provider 判断；TUI 的默认和可选状态项会直接展示这些字段。直接在零历史请求下跳过日志读取会改变现有协议与状态栏行为，因此旧计划中的“没有 500 条历史读取”不是可保持行为的最小修复验收条件。
 - 当前决定：性能问题仍成立，但本轮不实施。后续应先把“recent 列表上限”与“摘要统计/终态去重所需窗口”拆成明确合同，再选择专用聚合查询、只为实际投影的 active/last/recent 条目解析 folder，或建立可失效 session-folder 索引；需用大 session 树基准验证收益和一致性。本项保持 `confirmed`，不按旧报告建议直接裁剪。
 - 2026-08-06 最新主线复核：`origin/main@4ee5faa8` 仍无条件读取最多 500 条日志，并用其派生 last request、dominant provider、active 去重、`scope=all` 首选 provider 与 folder lookup；TUI 仍以 `snapshot(scope, 0)` 请求。直接把零 history 变成零扫描会改变状态栏/协议语义，且没有现成摘要查询或扫描量回归。AUD035 继续 `confirmed`，先定义摘要窗口与历史列表分离合同，再做专用聚合/索引和大树基准。
-- 2026-08-06 最终治理计划：任务 `.trellis/tasks/08-06-observer-zero-history-query`。保留 last 为当前 scope 最新 terminal inference、dominant 为最近最多十条且平手优先较新、active/all-scope/Claude 可见性以及 recent ready-empty 语义；分别使用受限查询，`history_limit=0` 跳过 500-row recent 投影。folder lookup 只接收实际渲染的 active/last/recent 键，并在 Observer state 使用 `(source, session_id)` 隔离、容量与正/负 TTL 均受限的缓存。
+- 2026-08-06 最终治理计划：任务 `.trellis/tasks/archive/2026-08/08-06-observer-zero-history-query`。保留 last 为当前 scope 最新 terminal inference、dominant 为最近最多十条且平手优先较新、active/all-scope/Claude 可见性以及 recent ready-empty 语义；分别使用受限查询，`history_limit=0` 跳过 500-row recent 投影。folder lookup 只接收实际渲染的 active/last/recent 键，并在 Observer state 使用 `(source, session_id)` 隔离、容量与正/负 TTL 均受限的缓存。
 - 2026-08-07 代码完成、交付待执行：独立候选分支 `codex/aud022-observer-zero-history-query` 的 `1f64f787`、`6b77a6dc` 已实现受限 last/dominant/recent 查询、zero-history ready-empty 投影、Claude 可见性过滤与 source-aware 有界 folder cache。缓存命中不占 miss 扫描预算，`history_limit=0` 不调用 recent 查询；本地仅执行 cloud-only checker/self-test 与 `git diff --check`，完整 Rust 查询/缓存回归、bindings 与合并仍由 Actions 验证，条目保持 `planned`。
+- 2026-08-09 交付证据：最终实现并入统一候选 `40423eda34ae3e448c7347199436bc7f49e27972`；PR [#96](https://github.com/KNaiFen/aio-coding-hub/pull/96) 的 PR CI `31272904696` 与 workflow_dispatch `31272906922` 均通过 Rust 查询/缓存回归、bindings、Provider 百万行 benchmark 与 `ci-gate`，并以 `ab76a30746ae9393f2b5c883de4e3ea145e1b964` 合并。旧 PR #93 已关闭并由 #96 取代。
 
 ### AUD-036：插件详情占位数据可被提交到新选中的插件
 
@@ -1055,7 +1062,7 @@ Rust 运行时状态 / 请求日志
 
 ### AUD-054：云端验证与本地零产物合同未覆盖所有受控入口
 
-- 状态：`planned`
+- 状态：`resolved`
 - 优先级：`P1`
 - 判断依据：当前工程约束只禁止 Cargo、Tauri 和部分 native 工具，却仍把依赖安装、Vite dev、TypeScript/Lint/前端测试和 build 描述为可在本地执行；本批要求将本地验证收窄为零依赖合同检查，避免在旧 worktree 或新候选中产生不可追踪的 Node/Rust 产物。
 - 文件和行号：`AGENTS.md:10-11`；`README.md:193-202,261-265`；`README_EN.md:190-199,247-251`；`package.json:18-47`；`scripts/run-checks.mjs:19-35`；`scripts/check-local-build-entrypoints.mjs:1-38`；`.github/workflows/ci.yml:128-301`；活跃 `.trellis/workflow.md`、agent 模板和 cross-layer spec。
@@ -1063,10 +1070,11 @@ Rust 运行时状态 / 请求日志
 - 实际影响与根因：开发者可能在错误 worktree 运行受控脚本，产生 `node_modules`、Vite cache、`src-tauri/target*` 或 generated drift，随后把本地状态误当作验证证据；根因是“禁止 native”与“允许本地 frontend”之间的规则分裂，且静态 checker 没有覆盖完整脚本图。
 - 最小修复建议：增加零依赖本地入口合同，静态拒绝依赖安装、dev、typecheck、lint、test、build 及其间接调用；README/AGENTS/活跃 Trellis 规范和模板只描述该入口与 Actions workflow_dispatch/dev-build。保留 CI 全量质量门，不把桌面打包设为每个 PR 必需任务。历史任务/归档只作为历史证据不改写。
 - 验证及回归测试：对 package/workspace 脚本图、README 命令块、workflow 触发器和入口脚本做 Node AST/文本合同检查；构造允许的 `node --check`/`git diff --check` 与禁止命令 fixture；确认 `ci.yml` 仍运行完整 frontend/native gates，`dev-build` 仍按需 dispatch。
+- 2026-08-06 交付证据：最终候选 `2334403b22f6c50535f2d8aa8f959d633869b172` 的 PR [#86](https://github.com/KNaiFen/aio-coding-hub/pull/86) CI `31103175487` 与 workflow_dispatch `31103187154` 均通过，随后 squash 合并为 `d32106c3706edc7535ea074d4c352c6b7e701dbf`。合并后重新核验并清理 24 个精确仓库级产物目录，未删除全局 Cargo/pnpm 缓存或其他项目文件。
 
 ### AUD-055：Provider Sync 备份扫描归档会话并保留五代快照
 
-- 状态：`planned`
+- 状态：`resolved`
 - 优先级：`P2`
 - 判断依据：正常 Provider Sync 会扫描和改写活动、归档 sessions，并为 SQLite/global state 建立备份；受管备份按五代保留，空间增长与本次 session-only 恢复目标不匹配。
 - 文件和行号：`src-tauri/src/infra/codex_provider_sync.rs:18,151-201,454-472,571-610,1003-1114,1180-1234` 及其测试模块。
@@ -1074,6 +1082,7 @@ Rust 运行时状态 / 请求日志
 - 实际影响与根因：大体量归档会话被重复读写和复制，失败回滚面扩大；多代 backup 长期占用用户磁盘，且按目录/时间清理若证据不足可能误删非受管内容。根因是同步变更集、备份 manifest 和清理策略没有围绕“活动 sessions + 一代 managed backup”建立明确格式合同。
 - 最小修复建议：引入显式 v2 session-only manifest；只枚举活动 sessions 与必要 config，按 manifest 精确分类 v2 managed、可迁移 v1 managed 和 unmanaged。成功建立 v2 后删除旧 v1 managed，最多保留一代 v2；无/损坏 manifest、marker 不匹配、symlink 或非受管目录一律不删除。保留现有失败快照与回滚语义。
 - 验证及回归测试：云端 Rust 覆盖 archived session 不扫描/不改写、v1→v2 迁移、单代保留、替换与回滚；故意制造缺失/损坏 manifest、symlink 和非受管目录，断言原样保留；任一 config/session 写失败时断言活动文件恢复且归档不变。
+- 2026-08-09 交付证据：session-only v2、v1 managed 迁移、单代保留、回滚与句柄相对 no-follow 清理加固并入统一候选 `40423eda34ae3e448c7347199436bc7f49e27972`。PR [#96](https://github.com/KNaiFen/aio-coding-hub/pull/96) 的 PR CI `31272904696` 与 workflow_dispatch `31272906922` 均通过跨平台 Rust、竞态/预算回归、bindings、依赖审计和 `ci-gate`，并以 `ab76a30746ae9393f2b5c883de4e3ea145e1b964` 合并。旧 PR #87 已关闭并由 #96 取代；双 tombstone、摘要与末次复验缩小但不宣称消除同 UID/同权限恶意并发写者的最终 syscall 竞态。
 
 ### AUD-056：请求日志永久留存与运行日志无容量软上限
 
@@ -1541,22 +1550,22 @@ AUD-014 执行结果：只修改 CLI proxy controls hook、Sidebar 和对应两�
 
 实施前只更新本报告与 Trellis 计划。PR #84 已在 `4800bc87` 合并；现已重新 fetch `origin/main`、核对四个目标文件、所有开放 PR 和同功能实现并建立候选 worktree。兼容漂移先整合并重验，根本冲突则保留候选、提交和 worktree 并登记待决策。
 
-### 6.31 2026-08-06 最终修复与本地零产物批次计划
+### 6.31 2026-08-06 最终修复与本地零产物批次交付
 
-本批最初以已核验的 `origin/main@735cec12` 建立八项计划；当前主线已推进到 `origin/main@99de56bb`，其中 AUD-054、AUD-056、AUD-016、AUD-008 已分别合并。AUD-055、AUD-002、AUD-035、AUD-033 的产品实现已汇集到 `codex/final-hardening-unified`，以 `24cdd753` 为已提交集成点并继续承载 Provider Sync 安全加固与本轮收口文档。剩余四项只创建一个面向 `main` 的统一 PR，作为唯一 Actions、审查和合并表面；不再逐项更新/合并旧 PR，也不再另建纯文档 PR。
+本批最初以已核验的 `origin/main@735cec12` 建立八项计划。AUD-054、AUD-056、AUD-016、AUD-008 分别由 PR #86/#89/#90/#91 合并；AUD-055、AUD-002、AUD-035、AUD-033 的产品实现汇集到 `codex/final-hardening-unified`，由统一 PR #96 的精确 head `40423eda34ae3e448c7347199436bc7f49e27972` 完成唯一一次 Actions、审查与合并。PR #96 以 merge commit `ab76a30746ae9393f2b5c883de4e3ea145e1b964` 进入 `main`，保留原子提交历史；旧 PR #87/#92/#93/#94 均已关闭并指向统一交付。合并后的独立纯文档 PR 只负责把报告、PENDING 和 Trellis 从交付中状态收口为完成，不改产品代码。
 
 | 顺序 | Trellis 任务 / 分支 | 报告项 | 实施边界 | 云端门与交接 |
 | --- | --- | --- | --- | --- |
-| 1 | `.trellis/tasks/08-06-cloud-only-zero-artifact-contract` / `codex/cloud-only-zero-artifact-contract` | `AUD-054` | `resolved`：规则、README、活跃 spec/template、package/workspace scripts 与零依赖合同由 `c5b3c6b9` 建立，自测修正为 `2334403b`。 | PR #86 / merge `d32106c3`；PR run `31103175487` 与 workflow_dispatch `31103187154` 全绿；24 个精确仓库产物目录已清理。 |
-| 2 | `.trellis/tasks/08-06-provider-sync-session-snapshot` / `codex/final-hardening-unified` | `AUD-055` | sessions-only v2 manifest、v1 managed 迁移、单代 backup、回滚，以及句柄相对 no-follow 分类/隔离/删除、有界流式摘要、共享 prune 预算和变更 fail-closed。 | 内容已在统一候选；旧 draft PR #87 由统一 PR 取代。仅统一 PR 精确 head 的跨平台 Rust/竞态/预算回归、bindings、audit 与 `ci-gate` 可作为合并证据。双 tombstone、摘要和末次复验只缩小竞态窗口，不宣称消除同 UID/同权限恶意并发写者的最终 syscall 竞态。 |
-| 3 | `.trellis/tasks/08-06-request-runtime-log-retention` / `codex/aud018-request-runtime-log-retention` | `AUD-056` | `resolved`：PR #89 候选 `73ff1d29` 提供 7 天请求/运行日志、ledger 永久保留、256 MiB 软上限、活动文件保护、freelist 可见和不自动 VACUUM。 | PR #89 合并为 `d7679695`；PR run `31174497952` 与 workflow_dispatch `31186468782` 均在该精确 head 全绿。 |
-| 4 | `.trellis/tasks/08-06-gateway-lan-bearer-token` / `codex/aud019-gateway-lan-bearer-token` | `AUD-016` | `resolved`：最终候选 `948dc5fa` 提供真实 peer 全路由 token、一次性展示/轮换、header 脱敏、WSL manifest v2/同步和 provider 专用路径移除。 | PR #90 的 PR CI `31197560686` 与 workflow_dispatch `31197593860` 全绿；squash 合并为 `c5b2333d`。 |
-| 5 | `.trellis/tasks/08-06-cross-restart-data-reset` / `codex/aud020-cross-restart-data-reset` | `AUD-008` | `resolved`：最终候选 `59bc7b7c` 提供 durable marker/tombstone、专用硬退出、启动前清理、失败 maintenance retry/exit 闸门和前端生命周期卸载。 | PR #91 的 PR CI `31239694948` 与 workflow_dispatch `31239707625` 全绿；squash 合并为 `99de56bb`，并为 AUD-002 提供共享 coordinator。 |
-| 6 | `.trellis/tasks/08-06-filesystem-recovery-journal` / `codex/final-hardening-unified` | `AUD-002` | prepare-first journal、SQLite 权威 replay、Skills 受管 artifact、补偿错误聚合。 | 已并入统一候选；不再更新或单独合并 PR #92。云端故障注入、重启、脱敏、并发门与 bindings 由统一 PR 精确 head 验证。 |
-| 7 | `.trellis/tasks/08-06-observer-zero-history-query` / `codex/final-hardening-unified` | `AUD-035` | 受限 last/dominant/recent 查询、zero-history ready-empty 与 source-aware 有界 folder cache。 | 已并入统一候选；旧独立候选/PR #93 不再作为验证或合并表面，查询/缓存回归与 bindings 由统一 PR 精确 head 验证。 |
-| 8 | `.trellis/tasks/08-06-plugin-activation-quarantine` / `codex/final-hardening-unified` | `AUD-033` | 精确 activation policy、startup/command/hook gate、600 秒三次严重故障 quarantine、revalidate，并排除策略/输出/安装拒绝误计数。 | 已并入统一候选并保留 Gateway token 合同；旧 PR #94 由统一 PR 取代，bindings 与完整回归交由统一精确 head Actions。 |
+| 1 | `.trellis/tasks/archive/2026-08/08-06-cloud-only-zero-artifact-contract` / `codex/cloud-only-zero-artifact-contract` | `AUD-054` | `resolved`：规则、README、活跃 spec/template、package/workspace scripts 与零依赖合同由 `c5b3c6b9` 建立，自测修正为 `2334403b`。 | PR #86 / merge `d32106c3`；PR run `31103175487` 与 workflow_dispatch `31103187154` 全绿；24 个精确仓库产物目录已清理。 |
+| 2 | `.trellis/tasks/archive/2026-08/08-06-provider-sync-session-snapshot` / `codex/final-hardening-unified` | `AUD-055` | `resolved`：sessions-only v2 manifest、v1 managed 迁移、单代 backup、回滚，以及句柄相对 no-follow 分类/隔离/删除、有界流式摘要、共享 prune 预算和变更 fail-closed。 | PR #96 head `40423eda` 的 PR CI `31272904696` 与 workflow_dispatch `31272906922` 全绿；merge `ab76a307`。双 tombstone、摘要和末次复验只缩小竞态窗口，不宣称消除同 UID/同权限恶意并发写者的最终 syscall 竞态。 |
+| 3 | `.trellis/tasks/archive/2026-08/08-06-request-runtime-log-retention` / `codex/aud018-request-runtime-log-retention` | `AUD-056` | `resolved`：PR #89 候选 `73ff1d29` 提供 7 天请求/运行日志、ledger 永久保留、256 MiB 软上限、活动文件保护、freelist 可见和不自动 VACUUM。 | PR #89 合并为 `d7679695`；PR run `31174497952` 与 workflow_dispatch `31186468782` 均在该精确 head 全绿。 |
+| 4 | `.trellis/tasks/archive/2026-08/08-06-gateway-lan-bearer-token` / `codex/aud019-gateway-lan-bearer-token` | `AUD-016` | `resolved`：最终候选 `948dc5fa` 提供真实 peer 全路由 token、一次性展示/轮换、header 脱敏、WSL manifest v2/同步和 provider 专用路径移除。 | PR #90 的 PR CI `31197560686` 与 workflow_dispatch `31197593860` 全绿；squash 合并为 `c5b2333d`。 |
+| 5 | `.trellis/tasks/archive/2026-08/08-06-cross-restart-data-reset` / `codex/aud020-cross-restart-data-reset` | `AUD-008` | `resolved`：最终候选 `59bc7b7c` 提供 durable marker/tombstone、专用硬退出、启动前清理、失败 maintenance retry/exit 闸门和前端生命周期卸载。 | PR #91 的 PR CI `31239694948` 与 workflow_dispatch `31239707625` 全绿；squash 合并为 `99de56bb`，并为 AUD-002 提供共享 coordinator。 |
+| 6 | `.trellis/tasks/archive/2026-08/08-06-filesystem-recovery-journal` / `codex/final-hardening-unified` | `AUD-002` | `resolved`：prepare-first journal、SQLite 权威 replay、Skills 受管 artifact、补偿错误聚合。 | PR #96 head `40423eda` 的故障注入、重启、脱敏、并发门、bindings 与 `ci-gate` 全绿；merge `ab76a307`。 |
+| 7 | `.trellis/tasks/archive/2026-08/08-06-observer-zero-history-query` / `codex/final-hardening-unified` | `AUD-035` | `resolved`：受限 last/dominant/recent 查询、zero-history ready-empty 与 source-aware 有界 folder cache。 | PR #96 head `40423eda` 的查询/缓存回归、bindings、百万行 benchmark 与 `ci-gate` 全绿；merge `ab76a307`。 |
+| 8 | `.trellis/tasks/archive/2026-08/08-06-plugin-activation-quarantine` / `codex/final-hardening-unified` | `AUD-033` | `resolved`：精确 activation policy、startup/command/hook gate、600 秒三次严重故障 quarantine、revalidate，并排除策略/输出/安装拒绝误计数。 | PR #96 head `40423eda` 的并发阈值、跨重启、恢复、legacy、snapshot、bindings 与 `ci-gate` 全绿；merge `ab76a307`。 |
 
-本地不运行 `pnpm`、Cargo、Tauri、安装器、dev server、类型检查、Lint、测试、构建或任何间接产物命令；不删除全局 `~/.cargo`、pnpm store 或其他项目文件。统一 PR 创建/合并前重新 fetch `origin/main`，检查功能、接口、实现和效果重叠；兼容漂移先重放并重验，根本冲突保留候选并登记待决策。保留现有 `workflow_dispatch` 全量 CI 与按需 `dev-build`，不把桌面打包升级为每个 PR 必需任务。统一 PR 创建且精确 head 的 Actions 已启动后，按 #94、#93、#92、#87 顺序关闭旧 PR，并在每个关闭评论中链接统一 PR；旧 PR 的 CI 不作为统一候选证据。
+本地未运行 `pnpm`、Cargo、Tauri、安装器、dev server、类型检查、Lint、测试、构建或任何间接产物命令；未删除全局 `~/.cargo`、pnpm store 或其他项目文件。统一 PR 创建与合并前均重新 fetch `origin/main` 并核对功能、接口、实现和效果重叠；未出现待决策冲突。现有 `workflow_dispatch` 全量 CI 与按需 `dev-build` 保持不变，桌面打包没有升级为每个 PR 必需任务。
 
 ## 7. 未覆盖区域与验证盲点
 
@@ -1572,6 +1581,8 @@ AUD-014 执行结果：只修改 CLI proxy controls hook、Sidebar 和对应两�
 
 | 时间 | 命令/方法 | 结果 | 说明 |
 | --- | --- | --- | --- |
+| 2026-08-09 | 最终治理文档收口、PENDING 迁移、九个 Trellis 父子任务归档与本地零产物复验 | 通过 | 审计索引与 56 个明细均为 `resolved`；`PENDING.md` 无活跃条目且下一个 ID 保持 `AIO-PENDING-024`；`PENDING_COMPLETED.md` 连续保存 001 至 023；八个子任务与父任务均归档到 `.trellis/tasks/archive/2026-08/`，归档脚本的全量 JSONL 校验通过。`node scripts/check-cloud-only-verification.selftest.mjs`、`node scripts/check-cloud-only-verification.mjs`、Node 文档/JSON/链接结构检查与 `git diff --check` 通过；未运行 pnpm、Cargo、Tauri、生成器、类型检查、Lint、测试或构建。 |
+| 2026-08-09 | 剩余四项统一 PR #96 精确 head Actions、合并前主线门与合并结果 | 通过并合并 PR #96 | 候选 `40423eda34ae3e448c7347199436bc7f49e27972` 的 PR CI `31272904696` 与 workflow_dispatch `31272906922` 均通过 frontend、Rust format/bindings、Clippy、Rust tests、依赖审计、Provider 百万行 benchmark 和 `ci-gate`。合并前 base/merge-base 均为 `99de56bb`、无其他开放 PR；merge commit 为 `ab76a30746ae9393f2b5c883de4e3ea145e1b964`，合并后 `origin/main` 与该提交一致。 |
 | 2026-08-08 | 剩余四项统一候选汇集、Provider Sync 安全加固、交付拓扑与本地零产物核验 | 本地允许阶段通过；统一 PR/Actions 待执行 | `codex/final-hardening-unified` 基于 `origin/main@99de56bb`，已汇集 AUD-055、AUD-002、AUD-035、AUD-033；本轮补齐 Provider Sync 的可信句柄相对操作、有界 SHA-256、共享 prune 预算、Windows ChangeTime/末次复验和残余竞态说明，并把报告、PENDING、父/子 Trellis 与后端规范改为单一统一 PR。`node scripts/check-cloud-only-verification.selftest.mjs`、`node scripts/check-cloud-only-verification.mjs`、相关 Node 源码/5 个 task JSON 解析及 `git diff --check` 通过；未运行 Cargo、pnpm、Tauri、生成器、类型检查、Lint、测试或构建。 |
 | 2026-08-08 | Provider Sync Windows 枚举/ChangeTime/reparse 后续复审与本地复验 | 本地允许阶段通过；统一 PR/Actions 待执行 | Windows 每次目录快照首批改用 `FileIdBothDirectoryRestartInfo`，新增同句柄二次快照并明确断言新增文件可见；ChangeTime 测试改为只改变只读属性且要求 Windows CI 不静默跳过 reparse-point 建立。复审未发现 Critical/P1/P2；再次运行 cloud-only checker/self-test、Node 解析与 `git diff --check` 均通过，未运行 Cargo、pnpm、Tauri、生成器、类型检查、Lint、测试或构建。 |
 | 2026-08-08 | AUD-002 重放 `origin/main@99de56bb`、range-diff 与本地零产物核验 | 本地允许阶段通过；PR #92 待更新 | 13 个 recovery 提交已重放为产品候选 `699f0c0b`；12 个产品/测试提交内容等价，唯一差异为审计文档整合。`node scripts/check-cloud-only-verification.selftest.mjs`、`node scripts/check-cloud-only-verification.mjs` 与 `git diff --check origin/main...HEAD` 通过；工作树干净，未运行 Cargo、pnpm、Tauri、生成器、类型检查、Lint、测试或构建。 |

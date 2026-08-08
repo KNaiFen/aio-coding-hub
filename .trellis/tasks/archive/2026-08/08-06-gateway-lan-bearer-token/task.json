@@ -3,7 +3,7 @@
   "name": "gateway-lan-bearer-token",
   "title": "AUD-016 非回环网关访问边界",
   "description": "为全部非回环 Gateway 路由增加基于真实 TCP peer 的一次性 Bearer Token 边界，并移除 provider 专用信任路径。",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": "cross-layer",
   "scope": "gateway-security",
   "package": "aio-coding-hub",
@@ -11,16 +11,21 @@
   "creator": "KNaiFen",
   "assignee": "KNaiFen",
   "createdAt": "2026-08-06",
-  "completedAt": null,
+  "completedAt": "2026-08-09",
   "branch": "codex/aud019-gateway-lan-bearer-token",
   "base_branch": "main",
   "worktree_path": "/private/tmp/aio-aud019-gateway-token",
-  "commit": "51224cf2",
+  "commit": "c5b2333d82086989e9b3b1fb3467c5fbded54dbc",
   "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/90",
   "subtasks": [],
   "children": [],
   "parent": "08-06-final-hardening-zero-artifact",
   "relatedFiles": [],
-  "notes": "本批第 4 项；候选已在 AUD-056 合并后的 main 重放为 51224cf2，并纳入精确云端格式补丁和 CI 诊断修复。PR #90 的精确 head 全量 CI、生成绑定核验和合并仍待执行。WSL 非回环连接同样带 token，一次性明文在生成或轮换时直接同步。",
-  "meta": {}
+  "notes": "本批第 4 项；最终候选 948dc5fa 通过精确 PR CI 与 workflow_dispatch 后由 PR #90 合并。WSL 非回环连接同样带 token，一次性明文在生成或轮换时直接同步。",
+  "meta": {
+    "implementation_head": "948dc5fa0824fe2dc59cccd65c3523c39e513f32",
+    "merge_commit": "c5b2333d82086989e9b3b1fb3467c5fbded54dbc",
+    "pr_ci_run": "31197560686",
+    "workflow_dispatch_run": "31197593860"
+  }
 }
