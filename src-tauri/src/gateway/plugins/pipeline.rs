@@ -1467,8 +1467,7 @@ impl GatewayPluginPipeline {
         match result {
             Ok(result) if result.quarantined => {
                 let plugin_id = plugin.summary.plugin_id.clone();
-                self.remove_plugin_from_snapshot(&plugin_id);
-                self.executor.dispose_plugin(&plugin_id);
+                self.remove_plugin_runtime(&plugin_id);
                 tracing::warn!(
                     plugin_id,
                     hook_name = hook_name.as_str(),
@@ -1486,7 +1485,7 @@ impl GatewayPluginPipeline {
         }
     }
 
-    fn remove_plugin_from_snapshot(&self, plugin_id: &str) {
+    pub(crate) fn remove_plugin_runtime(&self, plugin_id: &str) {
         let _refresh_guard = self
             .snapshot_refresh_lock
             .lock()
@@ -1509,6 +1508,7 @@ impl GatewayPluginPipeline {
             self.replace_plugins_locked(&mut snapshot, remaining.into_values().collect())
         };
         self.retain_active_circuits(&active_circuit_keys);
+        self.executor.dispose_plugin(plugin_id);
     }
 
     fn replace_plugins_locked(
@@ -2461,11 +2461,26 @@ mod tests {
     #[derive(Default)]
     struct PruneRecordingExecutor {
         last_retain_ids: Mutex<Vec<String>>,
+        disposed_ids: Mutex<Vec<String>>,
+        request_calls: Mutex<HashMap<String, usize>>,
     }
 
     impl PruneRecordingExecutor {
         fn last_retain_ids(&self) -> Vec<String> {
             self.last_retain_ids.lock().unwrap().clone()
+        }
+
+        fn disposed_ids(&self) -> Vec<String> {
+            self.disposed_ids.lock().unwrap().clone()
+        }
+
+        fn request_call_count(&self, plugin_id: &str) -> usize {
+            self.request_calls
+                .lock()
+                .unwrap()
+                .get(plugin_id)
+                .copied()
+                .unwrap_or_default()
         }
     }
 
@@ -2477,12 +2492,22 @@ mod tests {
                 .collect();
         }
 
+        fn dispose_plugin(&self, plugin_id: &str) {
+            self.disposed_ids.lock().unwrap().push(plugin_id.to_string());
+        }
+
         fn execute_request_hook(
             &self,
-            _plugin: &PluginDetail,
+            plugin: &PluginDetail,
             _context: GatewayVisibleHookContext,
             _hook_timeout: Duration,
         ) -> GatewayHookFuture {
+            *self
+                .request_calls
+                .lock()
+                .unwrap()
+                .entry(plugin.summary.plugin_id.clone())
+                .or_default() += 1;
             Box::pin(async { Ok(GatewayHookResult::continue_unchanged()) })
         }
 
@@ -3498,7 +3523,7 @@ mod tests {
         let (removal_done_tx, removal_done_rx) = mpsc::channel();
         let removal_pipeline = Arc::clone(&pipeline);
         let removal = std::thread::spawn(move || {
-            removal_pipeline.remove_plugin_from_snapshot("plugin.stale-refresh");
+            removal_pipeline.remove_plugin_runtime("plugin.stale-refresh");
             removal_done_tx.send(()).expect("signal quarantine removal");
         });
         let removal_finished_before_refresh = removal_done_rx
@@ -3518,6 +3543,64 @@ mod tests {
             pipeline.plugins_for_hook_count_for_tests(GatewayPluginHookName::RequestAfterBodyRead),
             0
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn failed_refresh_keeps_removed_plugin_disposed_and_out_of_the_snapshot() {
+        let executor = Arc::new(PruneRecordingExecutor::default());
+        let pipeline = GatewayPluginPipeline::for_tests_shared(
+            vec![
+                plugin("plugin.quarantined", 10, vec!["request.body.read"]),
+                plugin("plugin.healthy", 20, vec!["request.body.read"]),
+            ],
+            executor.clone(),
+            GatewayPluginPipelineConfig::default(),
+        );
+        pipeline.force_open_circuit_for_tests(
+            "plugin.quarantined",
+            GatewayPluginHookName::RequestAfterBodyRead,
+        );
+        pipeline.force_open_circuit_for_tests(
+            "plugin.healthy",
+            GatewayPluginHookName::RequestAfterBodyRead,
+        );
+
+        pipeline.remove_plugin_runtime("plugin.quarantined");
+        let refresh_error = pipeline
+            .refresh_plugins_with(|| Err("forced plugin reload failure".into()))
+            .expect_err("full refresh should fail");
+
+        assert!(refresh_error.to_string().contains("forced plugin reload failure"));
+        assert_eq!(executor.disposed_ids(), vec!["plugin.quarantined"]);
+        assert_eq!(executor.last_retain_ids(), vec!["plugin.healthy"]);
+        assert_eq!(
+            pipeline.circuit_snapshot(
+                "plugin.quarantined",
+                GatewayPluginHookName::RequestAfterBodyRead,
+            ),
+            GatewayPluginCircuitSnapshot::default()
+        );
+        assert!(
+            pipeline
+                .circuit_snapshot(
+                    "plugin.healthy",
+                    GatewayPluginHookName::RequestAfterBodyRead,
+                )
+                .open,
+            "unrelated plugin circuit state must be retained"
+        );
+        assert_eq!(
+            pipeline.plugins_for_hook_count_for_tests(GatewayPluginHookName::RequestAfterBodyRead),
+            1,
+            "failed full refresh must keep only the unrelated plugin snapshot"
+        );
+
+        pipeline
+            .run_request_hook(request_input())
+            .await
+            .expect("remaining pipeline should run");
+        assert_eq!(executor.request_call_count("plugin.quarantined"), 0);
+        assert_eq!(executor.request_call_count("plugin.healthy"), 0);
     }
 
     #[tokio::test(flavor = "current_thread")]

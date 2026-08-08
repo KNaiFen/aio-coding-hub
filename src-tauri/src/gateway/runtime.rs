@@ -337,6 +337,10 @@ impl GatewayRuntime {
         self.plugin_pipeline.refresh_plugins_with(load_plugins)
     }
 
+    pub(crate) fn remove_plugin_from_pipeline(&self, plugin_id: &str) {
+        self.plugin_pipeline.remove_plugin_runtime(plugin_id);
+    }
+
     pub(super) fn into_handles(self) -> GatewayRuntimeHandles {
         self.active_requests
             .finish_all(ActiveRequestFinishReason::GatewayStopped);

@@ -6,7 +6,7 @@ use crate::app::plugins::extension_host_registry::ExtensionHostRuntimeState;
 use crate::app_state::{ensure_db_ready, DbInitState};
 use crate::domain::plugins::{
     PluginAuditLog, PluginDetail, PluginExtensionExecutionReport, PluginHookExecutionReport,
-    PluginInstallPreview, PluginInstallSource, PluginReplayFixture, PluginUpdateDiff,
+    PluginInstallPreview, PluginInstallSource, PluginReplayFixture, PluginStatus, PluginUpdateDiff,
 };
 use crate::infra::plugins::market::PluginMarketListing;
 use crate::{blocking, plugins};
@@ -220,9 +220,14 @@ pub(crate) async fn plugin_execute_command(
     let registry = registry_state
         .registry(app.clone(), db_state.inner())
         .await?;
-    let result =
-        plugin_service::execute_plugin_command(&db, registry.as_ref(), &input.command, input.args)
-            .await;
+    let result = plugin_service::execute_plugin_command_with_quarantine(
+        &db,
+        registry.as_ref(),
+        &input.command,
+        input.args,
+        |plugin_id| crate::app::gateway_control::app_remove_gateway_plugin(&app, plugin_id),
+    )
+    .await;
     if result.is_err() {
         crate::app::gateway_control::app_refresh_gateway_plugins(&app, &db);
     }
@@ -653,6 +658,12 @@ fn refresh_running_gateway_plugins(
     db: &crate::db::Db,
     detail: PluginDetail,
 ) -> crate::shared::error::AppResult<PluginDetail> {
+    if detail.summary.status != PluginStatus::Enabled {
+        crate::app::gateway_control::app_remove_gateway_plugin(
+            app,
+            &detail.summary.plugin_id,
+        );
+    }
     crate::app::gateway_control::app_refresh_gateway_plugins(app, db);
     Ok(detail)
 }

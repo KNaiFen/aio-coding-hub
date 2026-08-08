@@ -73,8 +73,17 @@ async fn run(app_handle: tauri::AppHandle) {
         Ok(registry) => match crate::app::plugin_service::activate_startup_plugins(&db, &registry)
             .await
         {
-            Ok(true) => crate::app::gateway_control::app_refresh_gateway_plugins(&app_handle, &db),
-            Ok(false) => {}
+            Ok(quarantined_plugin_ids) => {
+                for plugin_id in &quarantined_plugin_ids {
+                    crate::app::gateway_control::app_remove_gateway_plugin(
+                        &app_handle,
+                        plugin_id,
+                    );
+                }
+                if !quarantined_plugin_ids.is_empty() {
+                    crate::app::gateway_control::app_refresh_gateway_plugins(&app_handle, &db);
+                }
+            }
             Err(error) => tracing::warn!(
                 error = %error,
                 "failed to enumerate plugins for startup activation"

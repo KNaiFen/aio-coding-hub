@@ -144,6 +144,15 @@ pub(crate) fn app_refresh_gateway_plugins<R: tauri::Runtime>(
     });
 }
 
+pub(crate) fn app_remove_gateway_plugin<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    plugin_id: &str,
+) {
+    super::gateway_state::with_app_running_gateway(app, |running| {
+        gateway::control_service::GatewayControlService::remove_plugin(running, plugin_id);
+    });
+}
+
 pub(crate) fn try_app_gateway_update_circuit_config<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     failure_threshold: u32,

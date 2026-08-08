@@ -99,12 +99,26 @@ pub(crate) fn active_plugin_contributions(
     ActiveContributionSnapshot::from_plugin_details(&active_details)
 }
 
-pub(crate) async fn execute_plugin_command(
+#[cfg(test)]
+async fn execute_plugin_command(
     db: &crate::db::Db,
     registry: &ExtensionHostInstanceRegistry,
     command: &str,
     args: serde_json::Value,
 ) -> AppResult<serde_json::Value> {
+    execute_plugin_command_with_quarantine(db, registry, command, args, |_| {}).await
+}
+
+pub(crate) async fn execute_plugin_command_with_quarantine<F>(
+    db: &crate::db::Db,
+    registry: &ExtensionHostInstanceRegistry,
+    command: &str,
+    args: serde_json::Value,
+    on_quarantined: F,
+) -> AppResult<serde_json::Value>
+where
+    F: FnOnce(&str),
+{
     let command = normalize_plugin_command(command)?;
     let detail = find_unique_enabled_command_owner(db, &command)?.ok_or_else(|| {
         AppError::new(
@@ -186,6 +200,7 @@ pub(crate) async fn execute_plugin_command(
                 }
             };
             if quarantined {
+                on_quarantined(&plugin_id);
                 registry.dispose_plugin(&plugin_id).await;
             }
             if let Err(report_error) = record_command_execution_report(
@@ -2203,8 +2218,8 @@ pub(crate) fn revalidate_quarantined_plugin(
 pub(crate) async fn activate_startup_plugins(
     db: &crate::db::Db,
     registry: &ExtensionHostInstanceRegistry,
-) -> AppResult<bool> {
-    let mut gateway_refresh_required = false;
+) -> AppResult<Vec<String>> {
+    let mut quarantined_plugin_ids = Vec::new();
     for summary in list_plugins(db)? {
         if summary.status != PluginStatus::Enabled {
             continue;
@@ -2241,7 +2256,7 @@ pub(crate) async fn activate_startup_plugins(
                 };
                 if quarantined {
                     registry.dispose_plugin(&plugin_id).await;
-                    gateway_refresh_required = true;
+                    quarantined_plugin_ids.push(plugin_id.clone());
                 }
                 tracing::warn!(
                     plugin_id,
@@ -2251,7 +2266,7 @@ pub(crate) async fn activate_startup_plugins(
             }
         }
     }
-    Ok(gateway_refresh_required)
+    Ok(quarantined_plugin_ids)
 }
 
 fn record_severe_runtime_failure(
@@ -3418,7 +3433,7 @@ mod tests {
     use crate::gateway::plugins::pipeline::{GatewayPluginPipeline, GatewayPluginPipelineConfig};
     use std::io::Write;
     use std::path::{Path, PathBuf};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     fn manifest() -> PluginManifest {
         serde_json::from_value(serde_json::json!({
@@ -3585,6 +3600,107 @@ mod tests {
             .expect("enable extension");
     }
 
+    fn install_enabled_throwing_extension_with_command(
+        db: &crate::db::Db,
+        root: &Path,
+        plugin_id: &str,
+        command: &str,
+    ) {
+        std::fs::create_dir_all(root.join("dist")).expect("create dist");
+        let manifest = extension_manifest(plugin_id, command);
+        std::fs::write(
+            root.join("plugin.json"),
+            serde_json::to_vec_pretty(&manifest).expect("manifest json"),
+        )
+        .expect("write manifest");
+        std::fs::write(
+            root.join("dist/extension.js"),
+            format!(
+                r#"
+                module.exports.activate = function(api) {{
+                  api.commands.registerCommand("{command}", function() {{
+                    throw new Error("forced command failure");
+                  }});
+                }};
+                "#
+            ),
+        )
+        .expect("write extension");
+
+        install_plugin_manifest(
+            db,
+            manifest,
+            PluginInstallSource::Local,
+            Some(root.to_string_lossy().to_string()),
+            env!("CARGO_PKG_VERSION"),
+        )
+        .expect("install extension");
+        repository::update_plugin_status(db, plugin_id, PluginStatus::Enabled, None)
+            .expect("enable extension");
+    }
+
+    fn install_enabled_throwing_startup_extension(
+        db: &crate::db::Db,
+        root: &Path,
+        plugin_id: &str,
+    ) {
+        std::fs::create_dir_all(root.join("dist")).expect("create dist");
+        let manifest: PluginManifest = serde_json::from_value(serde_json::json!({
+            "id": plugin_id,
+            "name": "Acme Startup Failure",
+            "version": "1.0.0",
+            "apiVersion": "1.0.0",
+            "runtime": { "kind": "extensionHost", "language": "typescript" },
+            "main": "dist/extension.js",
+            "activationEvents": ["onStartup"],
+            "capabilities": [],
+            "hostCompatibility": {
+                "app": ">=0.56.0 <1.0.0",
+                "pluginApi": "^1.0.0",
+                "platforms": ["macos", "windows", "linux"]
+            }
+        }))
+        .expect("startup manifest");
+        std::fs::write(
+            root.join("plugin.json"),
+            serde_json::to_vec_pretty(&manifest).expect("manifest json"),
+        )
+        .expect("write manifest");
+        std::fs::write(
+            root.join("dist/extension.js"),
+            "module.exports.activate = function() { throw new Error('forced startup failure'); };",
+        )
+        .expect("write extension");
+
+        install_plugin_manifest(
+            db,
+            manifest,
+            PluginInstallSource::Local,
+            Some(root.to_string_lossy().to_string()),
+            env!("CARGO_PKG_VERSION"),
+        )
+        .expect("install startup extension");
+        repository::update_plugin_status(db, plugin_id, PluginStatus::Enabled, None)
+            .expect("enable startup extension");
+    }
+
+    fn seed_two_severe_runtime_failures(db: &crate::db::Db, plugin_id: &str, hook_name: &str) {
+        for index in 0..2 {
+            let result = repository::record_severe_runtime_failure_and_maybe_quarantine(
+                db,
+                repository::RecordPluginRuntimeFailureInput {
+                    plugin_id: plugin_id.to_string(),
+                    hook_name: Some(hook_name.to_string()),
+                    failure_kind: "runtime_error".to_string(),
+                    message: format!("seeded runtime failure {index}"),
+                    trace_id: None,
+                },
+            )
+            .expect("seed severe failure");
+            assert!(!result.quarantined, "first two failures must not quarantine");
+        }
+    }
+
     #[tokio::test]
     async fn plugin_command_execution_records_extension_report() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -3677,6 +3793,76 @@ mod tests {
         assert_eq!(reports.len(), 2);
         assert_eq!(reports[0].input_budget["coldStart"], false);
         assert_eq!(reports[1].input_budget["coldStart"], true);
+    }
+
+    #[tokio::test]
+    async fn third_command_failure_quarantines_before_notifying_gateway_removal() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = crate::db::init_for_tests(&dir.path().join("plugins.db")).expect("db");
+        let plugin_id = "acme.command-failure";
+        let command = "acme.command-failure.run";
+        install_enabled_throwing_extension_with_command(
+            &db,
+            &dir.path().join(plugin_id),
+            plugin_id,
+            command,
+        );
+        seed_two_severe_runtime_failures(&db, plugin_id, command);
+        let registry = ExtensionHostInstanceRegistry::new(db.clone());
+        let removed = Arc::new(Mutex::new(Vec::new()));
+        let removed_for_callback = Arc::clone(&removed);
+
+        let error = execute_plugin_command_with_quarantine(
+            &db,
+            &registry,
+            command,
+            serde_json::json!({ "traceId": "trace-third-command-failure" }),
+            move |quarantined_plugin_id| {
+                removed_for_callback
+                    .lock()
+                    .unwrap()
+                    .push(quarantined_plugin_id.to_string());
+            },
+        )
+        .await
+        .expect_err("third severe command failure should be returned");
+
+        assert!(severe_runtime_failure_kind(error.code()).is_some());
+        assert_eq!(removed.lock().unwrap().clone(), vec![plugin_id.to_string()]);
+        assert_eq!(
+            repository::get_plugin(&db, plugin_id)
+                .expect("quarantined plugin")
+                .summary
+                .status,
+            PluginStatus::Quarantined
+        );
+    }
+
+    #[tokio::test]
+    async fn third_startup_failure_returns_the_quarantined_plugin_for_gateway_removal() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = crate::db::init_for_tests(&dir.path().join("plugins.db")).expect("db");
+        let plugin_id = "acme.startup-failure";
+        install_enabled_throwing_startup_extension(
+            &db,
+            &dir.path().join(plugin_id),
+            plugin_id,
+        );
+        seed_two_severe_runtime_failures(&db, plugin_id, "onStartup");
+        let registry = ExtensionHostInstanceRegistry::new(db.clone());
+
+        let quarantined = activate_startup_plugins(&db, &registry)
+            .await
+            .expect("startup activation should continue after plugin failure");
+
+        assert_eq!(quarantined, vec![plugin_id]);
+        assert_eq!(
+            repository::get_plugin(&db, plugin_id)
+                .expect("quarantined plugin")
+                .summary
+                .status,
+            PluginStatus::Quarantined
+        );
     }
 
     #[tokio::test]

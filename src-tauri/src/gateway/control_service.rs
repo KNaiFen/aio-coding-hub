@@ -232,6 +232,12 @@ impl GatewayControlService {
         }
     }
 
+    pub(crate) fn remove_plugin(running: Option<&GatewayRuntime>, plugin_id: &str) {
+        if let Some(runtime) = running {
+            runtime.remove_plugin_from_pipeline(plugin_id);
+        }
+    }
+
     pub(crate) fn circuit_reset_provider(
         running: Option<&GatewayRuntime>,
         db: &db::Db,
