@@ -1732,12 +1732,7 @@ pub(crate) fn install_plugin_from_local_package_with_policy(
                 install_audit_event_type(policy.install_source),
                 "medium",
                 install_audit_message(policy.install_source),
-                package_provenance_audit_details(
-                    &policy,
-                    &extracted,
-                    &cache_package_path,
-                    trust,
-                ),
+                package_provenance_audit_details(&policy, &extracted, &cache_package_path, trust),
             )?;
             Ok(detail)
         })?;
@@ -2192,7 +2187,10 @@ pub(crate) fn revalidate_quarantined_plugin(
     }
 
     let next = repository::revalidate_quarantined_plugin_to_disabled(db, plugin_id)?;
-    tracing::info!(plugin_id, "quarantined plugin revalidated to disabled state");
+    tracing::info!(
+        plugin_id,
+        "quarantined plugin revalidated to disabled state"
+    );
     detail_with_config_defaults_for_db(db, next)
 }
 
@@ -2335,14 +2333,19 @@ fn validate_revalidation_installation(detail: &PluginDetail) -> AppResult<PathBu
             "installed plugin manifest is not a safe regular file",
         ));
     }
-    let installed_manifest = std::fs::read(&manifest_path)
-        .map_err(|err| AppError::new("PLUGIN_REVALIDATE_INSTALLATION_INVALID", format!("failed to read installed plugin manifest: {err}")))?;
-    let installed_manifest: PluginManifest = serde_json::from_slice(&installed_manifest).map_err(|_| {
+    let installed_manifest = std::fs::read(&manifest_path).map_err(|err| {
         AppError::new(
-            "PLUGIN_REVALIDATE_MANIFEST_INVALID",
-            "installed plugin manifest could not be decoded",
+            "PLUGIN_REVALIDATE_INSTALLATION_INVALID",
+            format!("failed to read installed plugin manifest: {err}"),
         )
     })?;
+    let installed_manifest: PluginManifest =
+        serde_json::from_slice(&installed_manifest).map_err(|_| {
+            AppError::new(
+                "PLUGIN_REVALIDATE_MANIFEST_INVALID",
+                "installed plugin manifest could not be decoded",
+            )
+        })?;
     if installed_manifest != detail.manifest {
         return Err(AppError::new(
             "PLUGIN_REVALIDATE_MANIFEST_MISMATCH",
@@ -2552,7 +2555,10 @@ fn validate_revalidation_cached_package(
     let canonical_package = std::fs::canonicalize(&evidence.cached_package)
         .map_err(|_| revalidation_source_integrity_invalid())?;
     if canonical_package.parent() != Some(canonical_cache_dir.as_path())
-        || canonical_package.extension().and_then(|value| value.to_str()) != Some("aio-plugin")
+        || canonical_package
+            .extension()
+            .and_then(|value| value.to_str())
+            != Some("aio-plugin")
     {
         return Err(revalidation_source_integrity_invalid());
     }
@@ -2596,8 +2602,8 @@ fn collect_revalidation_tree_entries_from_dir(
             .strip_prefix(root)
             .map_err(|_| revalidation_source_integrity_invalid())?
             .to_path_buf();
-        let metadata =
-            std::fs::symlink_metadata(&path).map_err(|_| revalidation_source_integrity_invalid())?;
+        let metadata = std::fs::symlink_metadata(&path)
+            .map_err(|_| revalidation_source_integrity_invalid())?;
         if metadata.file_type().is_symlink() {
             return Err(revalidation_source_integrity_invalid());
         }
@@ -2630,7 +2636,8 @@ fn collect_revalidation_tree_entries_from_dir(
 }
 
 fn revalidation_file_checksum(path: &Path, expected_bytes: u64) -> AppResult<String> {
-    let mut file = std::fs::File::open(path).map_err(|_| revalidation_source_integrity_invalid())?;
+    let mut file =
+        std::fs::File::open(path).map_err(|_| revalidation_source_integrity_invalid())?;
     let mut digest = Sha256::new();
     let mut buffer = [0_u8; 8192];
     let mut read_bytes = 0_u64;
@@ -2765,10 +2772,7 @@ fn package_update_audit_details(
 ) -> serde_json::Value {
     let mut details = package_provenance_details(policy, extracted, cache_package_path, trust);
     if let serde_json::Value::Object(object) = &mut details {
-        object.insert(
-            "fromVersion".to_string(),
-            serde_json::json!(from_version),
-        );
+        object.insert("fromVersion".to_string(), serde_json::json!(from_version));
         object.insert(
             "toVersion".to_string(),
             serde_json::Value::String(extracted.manifest.version.clone()),
@@ -3969,7 +3973,10 @@ mod tests {
         assert_eq!(err.code(), "PLUGIN_INVALID_STATUS");
         let detail = get_plugin_detail(&db, "community.prompt-helper").unwrap();
         assert_eq!(detail.summary.status, PluginStatus::Quarantined);
-        assert_eq!(detail.summary.last_error.as_deref(), Some("runtime quarantine"));
+        assert_eq!(
+            detail.summary.last_error.as_deref(),
+            Some("runtime quarantine")
+        );
     }
 
     #[test]
@@ -6274,8 +6281,7 @@ INSERT INTO plugins (
             &v2_package,
             local_package_manifest("github.revalidate", "1.1.0"),
         );
-        let source_url =
-            "https://github.com/acme/release/releases/download/v1/plugin.aio-plugin";
+        let source_url = "https://github.com/acme/release/releases/download/v1/plugin.aio-plugin";
         install_plugin_from_remote_package_bytes(
             &db,
             std::fs::read(&v1_package).unwrap(),
@@ -6362,8 +6368,7 @@ INSERT INTO plugins (
             &package_path,
             local_package_manifest("github.integrity", "1.0.0"),
         );
-        let source_url =
-            "https://github.com/acme/release/releases/download/v1/plugin.aio-plugin";
+        let source_url = "https://github.com/acme/release/releases/download/v1/plugin.aio-plugin";
         let installed = install_plugin_from_remote_package_bytes(
             &db,
             std::fs::read(&package_path).unwrap(),

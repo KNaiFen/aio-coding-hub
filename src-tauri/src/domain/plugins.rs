@@ -140,7 +140,9 @@ pub fn activation_policy(
             continue;
         }
         if let Some(command) = event.strip_prefix("onCommand:") {
-            if command.is_empty() || command.trim() != command || !declared_commands.contains(command)
+            if command.is_empty()
+                || command.trim() != command
+                || !declared_commands.contains(command)
             {
                 return Err(invalid_activation_event(event));
             }
@@ -1512,7 +1514,10 @@ mod tests {
             .remove("activationEvents");
         let missing: PluginManifest = serde_json::from_value(missing).unwrap();
         validate_manifest(&missing, "0.62.0").unwrap();
-        assert!(matches!(activation_policy(&missing), Ok(PluginActivationPolicy::Legacy)));
+        assert!(matches!(
+            activation_policy(&missing),
+            Ok(PluginActivationPolicy::Legacy)
+        ));
         assert!(manifest_allows_command(&missing, "legacy.command"));
         assert!(manifest_allows_gateway_hook(
             &missing,
@@ -1524,19 +1529,22 @@ mod tests {
         empty["activationEvents"] = serde_json::json!([]);
         let empty: PluginManifest = serde_json::from_value(empty).unwrap();
         validate_manifest(&empty, "0.62.0").unwrap();
-        assert!(matches!(activation_policy(&empty), Ok(PluginActivationPolicy::Legacy)));
+        assert!(matches!(
+            activation_policy(&empty),
+            Ok(PluginActivationPolicy::Legacy)
+        ));
     }
 
     #[test]
     fn manifest_platform_compatibility_is_enforced_when_declared() {
         let mut supported = valid_extension_host_manifest();
-        supported["hostCompatibility"]["platforms"] = serde_json::json!([current_plugin_platform()]);
+        supported["hostCompatibility"]["platforms"] =
+            serde_json::json!([current_plugin_platform()]);
         let supported: PluginManifest = serde_json::from_value(supported).unwrap();
         validate_manifest(&supported, "0.62.0").unwrap();
 
         let mut unsupported = valid_extension_host_manifest();
-        unsupported["hostCompatibility"]["platforms"] =
-            serde_json::json!(["unsupported-platform"]);
+        unsupported["hostCompatibility"]["platforms"] = serde_json::json!(["unsupported-platform"]);
         assert_manifest_validation_error(unsupported, "PLUGIN_INCOMPATIBLE_PLATFORM");
     }
 

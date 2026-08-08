@@ -1022,7 +1022,9 @@ WHERE plugin_id = ?4
                     plugin_id
                 ],
             )
-            .map_err(|e| db_err!("failed to disable plugin with deprecated activation events: {e}"))?;
+            .map_err(|e| {
+                db_err!("failed to disable plugin with deprecated activation events: {e}")
+            })?;
         if changed > 0 {
             append_audit_log_with_tx(
                 tx,
@@ -1031,8 +1033,9 @@ WHERE plugin_id = ?4
                     trace_id: None,
                     event_type: "plugin.activation_events.deprecated".to_string(),
                     risk_level: "medium".to_string(),
-                    message: "Plugin disabled because its activation events are no longer supported"
-                        .to_string(),
+                    message:
+                        "Plugin disabled because its activation events are no longer supported"
+                            .to_string(),
                     details: serde_json::json!({
                         "reason": PLUGIN_DEPRECATED_ACTIVATION_EVENTS_REASON,
                     }),
@@ -1079,7 +1082,11 @@ SET status = ?1,
 WHERE plugin_id = ?3
   AND status = 'quarantined'
 "#,
-                params![PluginStatus::Disabled.as_str(), now_unix_seconds(), plugin_id],
+                params![
+                    PluginStatus::Disabled.as_str(),
+                    now_unix_seconds(),
+                    plugin_id
+                ],
             )
             .map_err(|e| db_err!("failed to revalidate quarantined plugin: {e}"))?;
         if changed == 0 {
@@ -1851,7 +1858,10 @@ INSERT INTO plugin_runtime_failures(
             .unwrap();
             assert!(!result.quarantined);
             assert_eq!(
-                get_plugin(&db, "community.prompt-helper").unwrap().summary.status,
+                get_plugin(&db, "community.prompt-helper")
+                    .unwrap()
+                    .summary
+                    .status,
                 PluginStatus::Enabled
             );
         }
@@ -1905,11 +1915,9 @@ INSERT INTO plugin_runtime_failures(
                 .status,
             PluginStatus::Quarantined
         );
-        let revalidated = revalidate_quarantined_plugin_to_disabled(
-            &reopened,
-            "community.prompt-helper",
-        )
-        .unwrap();
+        let revalidated =
+            revalidate_quarantined_plugin_to_disabled(&reopened, "community.prompt-helper")
+                .unwrap();
         assert_eq!(revalidated.summary.status, PluginStatus::Disabled);
     }
 
