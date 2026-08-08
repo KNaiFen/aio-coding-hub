@@ -144,8 +144,12 @@ WHERE id = ?3
         )
         .expect("read recovered content hash");
     assert!(
-        installed_content_hash.is_some_and(|hash| hash.len() == 64),
-        "recovered content hash should be bound in SQLite"
+        installed_content_hash.as_deref().is_some_and(|hash| {
+            hash.strip_prefix("sha256:").is_some_and(|digest| {
+                digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+            })
+        }),
+        "recovered content hash should be bound in SQLite, got {installed_content_hash:?}"
     );
 }
 
