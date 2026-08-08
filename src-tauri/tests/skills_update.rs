@@ -260,8 +260,7 @@ VALUES (?1, ?2, 1, 1)
         .expect_err("update should fail when sync fails")
         .to_string();
     assert!(
-        err.contains("RECOVERY_REPLAY_FAILED")
-            && err.contains("SKILL_TARGET_EXISTS_UNMANAGED"),
+        err.contains("RECOVERY_REPLAY_FAILED") && err.contains("SKILL_TARGET_EXISTS_UNMANAGED"),
         "unexpected error: {err}"
     );
 
