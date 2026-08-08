@@ -1,8 +1,7 @@
 use crate::app_paths;
 use crate::mcp_sync;
-use crate::shared::fs::{
-    read_file_with_max_len, read_optional_file_with_max_len, write_file_atomic,
-};
+use crate::shared::error::AppError;
+use crate::shared::fs::{read_optional_file_with_max_len, write_file_atomic};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -30,13 +29,20 @@ fn stash_file_path<R: tauri::Runtime>(
     bucket: &str,
 ) -> crate::shared::error::AppResult<PathBuf> {
     let dir = stash_root(app, cli_key)?.join(bucket);
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("failed to create {}: {e}", dir.display()))?;
     let ext = match cli_key {
         "codex" | "grok" => "toml",
         _ => "json",
     };
     Ok(dir.join(format!("mcpServers.{ext}")))
+}
+
+fn ensure_stash_parent(path: &Path) -> crate::shared::error::AppResult<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| invalid_stash("MCP local stash path has no parent"))?;
+    std::fs::create_dir_all(parent).map_err(|error| -> AppError {
+        format!("failed to create {}: {error}", parent.display()).into()
+    })
 }
 
 fn json_root_from_bytes(bytes: Option<Vec<u8>>) -> Value {
@@ -99,14 +105,34 @@ fn json_write_stash(
     write_file_atomic(path, &bytes)
 }
 
-fn json_read_stash(path: &Path) -> serde_json::Map<String, Value> {
-    let Ok(bytes) = read_file_with_max_len(path, MCP_LOCAL_STASH_MAX_BYTES) else {
-        return serde_json::Map::new();
+fn invalid_stash(message: &str) -> AppError {
+    AppError::new("RECOVERY_ARTIFACT_INVALID", message)
+}
+
+fn read_stash_bytes(path: &Path) -> crate::shared::error::AppResult<Option<Vec<u8>>> {
+    read_optional_file_with_max_len(path, MCP_LOCAL_STASH_MAX_BYTES).map_err(|_| {
+        invalid_stash("MCP local stash is unreadable or exceeds the supported size")
+    })
+}
+
+fn json_read_stash(
+    path: &Path,
+) -> crate::shared::error::AppResult<serde_json::Map<String, Value>> {
+    let Some(bytes) = read_stash_bytes(path)? else {
+        return Ok(serde_json::Map::new());
     };
-    let Ok(value) = serde_json::from_slice::<Value>(&bytes) else {
-        return serde_json::Map::new();
-    };
-    value.as_object().cloned().unwrap_or_default()
+    let value = serde_json::from_slice::<Value>(&bytes)
+        .map_err(|_| invalid_stash("MCP local JSON stash is invalid"))?;
+    let servers = value
+        .as_object()
+        .cloned()
+        .ok_or_else(|| invalid_stash("MCP local JSON stash must be an object"))?;
+    if servers.values().any(|server| !server.is_object()) {
+        return Err(invalid_stash(
+            "MCP local JSON stash entries must be objects",
+        ));
+    }
+    Ok(servers)
 }
 
 fn parse_codex_mcp_key_from_header(line: &str) -> Option<String> {
@@ -185,14 +211,40 @@ fn codex_write_stash(path: &Path, lines: &[String]) -> crate::shared::error::App
     write_file_atomic(path, out.as_bytes())
 }
 
-fn codex_read_stash(path: &Path) -> Vec<String> {
-    let Ok(bytes) = read_file_with_max_len(path, MCP_LOCAL_STASH_MAX_BYTES) else {
-        return Vec::new();
+fn codex_read_stash(path: &Path) -> crate::shared::error::AppResult<Vec<String>> {
+    let Some(bytes) = read_stash_bytes(path)? else {
+        return Ok(Vec::new());
     };
-    let Ok(content) = String::from_utf8(bytes) else {
-        return Vec::new();
-    };
-    content.lines().map(|l| l.to_string()).collect()
+    let content = String::from_utf8(bytes)
+        .map_err(|_| invalid_stash("MCP local Codex stash is not valid UTF-8"))?;
+    let document = content
+        .parse::<toml_edit::DocumentMut>()
+        .map_err(|_| invalid_stash("MCP local Codex stash is invalid TOML"))?;
+    if document.iter().any(|(key, item)| {
+        key != "mcp_servers"
+            || item.as_table_like().is_none()
+            || item
+                .as_table_like()
+                .is_some_and(|servers| {
+                    servers
+                        .iter()
+                        .any(|(_, server)| server.as_table_like().is_none())
+                })
+    }) {
+        return Err(invalid_stash(
+            "MCP local Codex stash contains unsupported entries",
+        ));
+    }
+    Ok(content.lines().map(|line| line.to_string()).collect())
+}
+
+fn grok_read_stash(path: &Path) -> crate::shared::error::AppResult<Option<Vec<u8>>> {
+    let bytes = read_stash_bytes(path)?;
+    if let Some(bytes) = bytes.as_deref() {
+        mcp_sync::validate_grok_local_stash(bytes)
+            .map_err(|_| invalid_stash("MCP local Grok stash is invalid"))?;
+    }
+    Ok(bytes)
 }
 
 fn ensure_stash_bytes_len(bytes: &[u8]) -> crate::shared::error::AppResult<()> {
@@ -215,6 +267,7 @@ pub(crate) fn capture_local_mcp_servers_for_workspace_switch<R: tauri::Runtime>(
 
     let from_bucket = stash_bucket_name(from_workspace_id);
     let from_path = stash_file_path(app, cli_key, &from_bucket)?;
+    ensure_stash_parent(&from_path)?;
 
     match cli_key {
         "grok" => {
@@ -246,6 +299,28 @@ pub(crate) fn capture_local_mcp_servers_for_workspace_switch<R: tauri::Runtime>(
     Ok(())
 }
 
+pub(crate) fn validate_local_mcp_stash_for_workspace_switch<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    cli_key: &str,
+    to_workspace_id: i64,
+) -> crate::shared::error::AppResult<()> {
+    crate::shared::cli_key::validate_cli_key(cli_key)?;
+
+    let to_path = stash_file_path(app, cli_key, &to_workspace_id.to_string())?;
+    match cli_key {
+        "grok" => {
+            grok_read_stash(&to_path)?;
+        }
+        "codex" => {
+            codex_read_stash(&to_path)?;
+        }
+        _ => {
+            json_read_stash(&to_path)?;
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn restore_local_mcp_servers_for_workspace_switch<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     cli_key: &str,
@@ -257,8 +332,7 @@ pub(crate) fn restore_local_mcp_servers_for_workspace_switch<R: tauri::Runtime>(
     let to_path = stash_file_path(app, cli_key, &to_workspace_id.to_string())?;
     match cli_key {
         "grok" => {
-            let target_stash =
-                read_optional_file_with_max_len(&to_path, MCP_LOCAL_STASH_MAX_BYTES)?;
+            let target_stash = grok_read_stash(&to_path)?;
             mcp_sync::restore_grok_local_servers_for_workspace(
                 app,
                 managed_server_keys,
@@ -272,7 +346,7 @@ pub(crate) fn restore_local_mcp_servers_for_workspace_switch<R: tauri::Runtime>(
                 .map(|bytes| String::from_utf8_lossy(bytes).to_string())
                 .unwrap_or_default();
             let (mut kept, _) = codex_split_local_blocks(&input, managed_server_keys);
-            let local_to = codex_read_stash(&to_path);
+            let local_to = codex_read_stash(&to_path)?;
             if !local_to.is_empty() {
                 if !kept.is_empty() {
                     kept.push(String::new());
@@ -286,7 +360,7 @@ pub(crate) fn restore_local_mcp_servers_for_workspace_switch<R: tauri::Runtime>(
         _ => {
             let current_bytes = mcp_sync::read_target_bytes(app, cli_key)?;
             let mut root = json_root_from_bytes(current_bytes);
-            let local_to = json_read_stash(&to_path);
+            let local_to = json_read_stash(&to_path)?;
             let servers_obj = json_mcp_servers_obj_mut(&mut root);
             json_remove_local_servers(servers_obj, managed_server_keys);
             for (key, value) in local_to {
@@ -327,21 +401,86 @@ mod tests {
     use super::*;
 
     #[test]
-    fn json_read_stash_returns_empty_for_oversized_file() {
+    fn json_read_stash_rejects_oversized_or_invalid_files() {
         let temp = tempfile::tempdir().expect("tempdir");
         let path = temp.path().join("mcpServers.json");
         std::fs::write(&path, vec![b'x'; MCP_LOCAL_STASH_MAX_BYTES + 1]).expect("write stash");
 
-        assert!(json_read_stash(&path).is_empty());
+        let oversized = json_read_stash(&path).unwrap_err().to_string();
+        assert!(oversized.contains("RECOVERY_ARTIFACT_INVALID"));
+
+        std::fs::write(&path, b"[]").expect("write invalid stash shape");
+        let invalid = json_read_stash(&path).unwrap_err().to_string();
+        assert!(invalid.contains("RECOVERY_ARTIFACT_INVALID"));
+
+        std::fs::write(&path, br#"{"invalid":true}"#).expect("write invalid server entry");
+        let invalid_entry = json_read_stash(&path).unwrap_err().to_string();
+        assert!(invalid_entry.contains("RECOVERY_ARTIFACT_INVALID"));
     }
 
     #[test]
-    fn codex_read_stash_returns_empty_for_oversized_file() {
+    fn codex_read_stash_rejects_oversized_or_invalid_files() {
         let temp = tempfile::tempdir().expect("tempdir");
         let path = temp.path().join("mcpServers.toml");
         std::fs::write(&path, vec![b'x'; MCP_LOCAL_STASH_MAX_BYTES + 1]).expect("write stash");
 
-        assert!(codex_read_stash(&path).is_empty());
+        let oversized = codex_read_stash(&path).unwrap_err().to_string();
+        assert!(oversized.contains("RECOVERY_ARTIFACT_INVALID"));
+
+        std::fs::write(&path, b"[mcp_servers.invalid").expect("write invalid TOML");
+        let invalid = codex_read_stash(&path).unwrap_err().to_string();
+        assert!(invalid.contains("RECOVERY_ARTIFACT_INVALID"));
+
+        std::fs::write(&path, b"unrelated = true\n").expect("write unsupported TOML");
+        let unsupported = codex_read_stash(&path).unwrap_err().to_string();
+        assert!(unsupported.contains("RECOVERY_ARTIFACT_INVALID"));
+    }
+
+    #[test]
+    fn grok_read_stash_uses_the_same_recovery_artifact_error_contract() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("mcpServers.toml");
+        std::fs::write(&path, b"[mcp_servers\ninvalid = true\n").expect("write invalid TOML");
+
+        let invalid = grok_read_stash(&path).unwrap_err().to_string();
+        assert!(invalid.contains("RECOVERY_ARTIFACT_INVALID"));
+
+        std::fs::write(&path, vec![b'x'; MCP_LOCAL_STASH_MAX_BYTES + 1])
+            .expect("write oversized stash");
+        let oversized = grok_read_stash(&path).unwrap_err().to_string();
+        assert!(oversized.contains("RECOVERY_ARTIFACT_INVALID"));
+    }
+
+    #[test]
+    fn missing_stashes_remain_valid_empty_workspace_state() {
+        let temp = tempfile::tempdir().expect("tempdir");
+
+        assert!(
+            json_read_stash(&temp.path().join("missing.json"))
+                .expect("missing JSON stash")
+                .is_empty()
+        );
+        assert!(
+            codex_read_stash(&temp.path().join("missing.toml"))
+                .expect("missing Codex stash")
+                .is_empty()
+        );
+        assert!(
+            grok_read_stash(&temp.path().join("missing-grok.toml"))
+                .expect("missing Grok stash")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn non_file_stash_is_a_recovery_artifact_error() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("mcpServers.json");
+        std::fs::create_dir(&path).expect("create invalid stash directory");
+
+        let error = json_read_stash(&path).unwrap_err().to_string();
+
+        assert!(error.contains("RECOVERY_ARTIFACT_INVALID"));
     }
 
     #[test]

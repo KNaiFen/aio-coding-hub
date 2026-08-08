@@ -13,6 +13,7 @@ pub use import::{import_servers, import_servers_from_workspace_cli, parse_json};
 pub(crate) use local_swap::{
     capture_local_mcp_servers_for_workspace_switch, restore_local_mcp_servers_for_workspace_switch,
     swap_local_mcp_servers_for_workspace_switch,
+    validate_local_mcp_stash_for_workspace_switch,
 };
 pub(crate) use sync::{list_enabled_for_cli, sync_cli_for_workspace, sync_one_cli};
 pub use types::{McpImportReport, McpImportServer, McpParseResult, McpServerSummary};

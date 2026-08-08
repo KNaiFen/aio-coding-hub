@@ -241,6 +241,7 @@ const PHASE_CONTEXT: &str = "workspace.context";
 const PHASE_ACTIVE: &str = "workspace.active";
 const PHASE_PROMPT: &str = "workspace.prompt";
 const PHASE_MCP_CAPTURE: &str = "workspace.mcp_capture";
+const PHASE_MCP_PREFLIGHT: &str = "workspace.mcp_preflight";
 const PHASE_MCP_MANAGED: &str = "workspace.mcp_managed";
 const PHASE_MCP_RESTORE: &str = "workspace.mcp_restore";
 const PHASE_CLAUDE_CAPTURE: &str = "workspace.claude_capture";
@@ -255,6 +256,7 @@ const WORKSPACE_PHASES: &[&str] = &[
     PHASE_ACTIVE,
     PHASE_PROMPT,
     PHASE_MCP_CAPTURE,
+    PHASE_MCP_PREFLIGHT,
     PHASE_MCP_MANAGED,
     PHASE_MCP_RESTORE,
     PHASE_CLAUDE_CAPTURE,
@@ -387,7 +389,19 @@ fn execute_workspace_projection<R: tauri::Runtime>(
                 context.from_workspace_id,
             )
         })?;
+        run_phase(operation, conn, &mut completed, PHASE_MCP_PREFLIGHT, || {
+            mcp::validate_local_mcp_stash_for_workspace_switch(
+                app,
+                &cli_key,
+                context.to_workspace_id,
+            )
+        })?;
         run_phase(operation, conn, &mut completed, PHASE_MCP_MANAGED, || {
+            mcp::validate_local_mcp_stash_for_workspace_switch(
+                app,
+                &cli_key,
+                context.to_workspace_id,
+            )?;
             mcp::sync_cli_for_workspace(app, conn, context.to_workspace_id)
         })?;
         run_phase(operation, conn, &mut completed, PHASE_MCP_RESTORE, || {
@@ -399,7 +413,12 @@ fn execute_workspace_projection<R: tauri::Runtime>(
             )
         })?;
     } else {
-        for phase in [PHASE_MCP_CAPTURE, PHASE_MCP_MANAGED, PHASE_MCP_RESTORE] {
+        for phase in [
+            PHASE_MCP_CAPTURE,
+            PHASE_MCP_PREFLIGHT,
+            PHASE_MCP_MANAGED,
+            PHASE_MCP_RESTORE,
+        ] {
             run_phase(operation, conn, &mut completed, phase, || Ok(()))?;
         }
     }
@@ -739,6 +758,18 @@ INSERT INTO skills(
             std::fs::write(self.grok_home.join("AGENTS.md"), content).expect("write prompt");
         }
 
+        fn write_target_mcp_stash(&self, workspace_id: i64, bytes: &[u8]) {
+            let path = crate::app_paths::app_data_dir(&self.handle())
+                .expect("resolve app data")
+                .join("mcp-local")
+                .join("grok")
+                .join(workspace_id.to_string())
+                .join("mcpServers.toml");
+            std::fs::create_dir_all(path.parent().expect("stash parent"))
+                .expect("create target stash parent");
+            std::fs::write(path, bytes).expect("write target MCP stash");
+        }
+
         fn assert_active(&self, workspace_id: i64) {
             let conn = self.db.open_connection().expect("open db");
             assert_eq!(
@@ -918,6 +949,52 @@ command = "local"
         );
         assert!(!crate::infra::recovery_journal::has_pending(&test.db).expect("resolved journal"));
         let _ = default_id;
+    }
+
+    #[test]
+    fn invalid_target_mcp_stash_fails_before_managed_projection_writes() {
+        let test = GrokWorkspaceTestApp::new();
+        let target_id = test.target_workspace_id();
+        test.set_prompt(target_id, "target instructions");
+        test.add_mcp(target_id);
+        test.write_config(INITIAL_CONFIG.as_bytes());
+        test.write_prompt("original instructions");
+        test.write_target_mcp_stash(target_id, b"unrelated = true\n");
+
+        let error = apply(&test.handle(), &test.db, target_id)
+            .expect_err("invalid target stash must block workspace projection");
+
+        assert_eq!(error.code(), "RECOVERY_ARTIFACT_INVALID");
+        assert_eq!(
+            std::fs::read(test.grok_home.join("config.toml")).expect("read unchanged config"),
+            INITIAL_CONFIG.as_bytes(),
+            "managed MCP sync must not run before target stash validation"
+        );
+        assert!(mcp_sync::read_manifest_bytes(&test.handle(), "grok")
+            .expect("read MCP manifest")
+            .is_none());
+        assert!(crate::infra::recovery_journal::has_pending(&test.db).expect("pending journal"));
+        test.assert_pending_workspace_journal(PHASE_MCP_CAPTURE);
+
+        test.write_target_mcp_stash(
+            target_id,
+            b"[mcp_servers.target_local]\ncommand = \"target-local\"\n",
+        );
+        crate::infra::recovery_journal::replay_pending(&test.handle(), &test.db)
+            .expect("replay repaired target stash");
+        let config = std::fs::read_to_string(test.grok_home.join("config.toml"))
+            .expect("read repaired config")
+            .parse::<toml_edit::DocumentMut>()
+            .expect("valid repaired TOML");
+        assert_eq!(
+            config["mcp_servers"]["managed"]["command"].as_str(),
+            Some("npx")
+        );
+        assert_eq!(
+            config["mcp_servers"]["target_local"]["command"].as_str(),
+            Some("target-local")
+        );
+        assert!(!crate::infra::recovery_journal::has_pending(&test.db).expect("resolved journal"));
     }
 
     #[test]

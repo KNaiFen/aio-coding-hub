@@ -18,6 +18,7 @@ mod paths;
 mod sync;
 mod types;
 
+pub(crate) use grok_toml::validate_grok_local_stash;
 pub(crate) use types::McpServerForSync;
 
 pub use fs::{read_target_bytes, restore_target_bytes};

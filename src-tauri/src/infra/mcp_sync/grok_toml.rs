@@ -206,6 +206,11 @@ fn parse_stash(bytes: &[u8]) -> Result<DocumentMut, String> {
         .map_err(|error| format!("MCP_LOCAL_STASH_INVALID_TOML: {error}"))
 }
 
+pub(crate) fn validate_grok_local_stash(bytes: &[u8]) -> Result<(), String> {
+    let mut document = DocumentMut::new();
+    swap_grok_local_servers(&mut document, &HashSet::new(), Some(bytes)).map(|_| ())
+}
+
 pub(super) fn swap_grok_local_servers(
     document: &mut DocumentMut,
     managed_keys: &HashSet<String>,
@@ -242,10 +247,24 @@ pub(super) fn swap_grok_local_servers(
 
     if let Some(bytes) = target_stash.filter(|bytes| !bytes.is_empty()) {
         let target = parse_stash(bytes)?;
+        if target.iter().any(|(key, _)| key != "mcp_servers") {
+            return Err(
+                "MCP_LOCAL_STASH_INVALID_SCHEMA: unsupported top-level stash entry".to_string(),
+            );
+        }
         if let Some(target_root_item) = target.get("mcp_servers") {
             let target_root = target_root_item.as_table_like().ok_or_else(|| {
                 "MCP_LOCAL_STASH_INVALID_SCHEMA: mcp_servers must be a table".to_string()
             })?;
+            if target_root
+                .iter()
+                .any(|(_, server)| server.as_table_like().is_none())
+            {
+                return Err(
+                    "MCP_LOCAL_STASH_INVALID_SCHEMA: MCP server entries must be tables"
+                        .to_string(),
+                );
+            }
             let target_items: Vec<(String, Item)> = target_root
                 .iter()
                 .filter(|(key, _)| !managed_keys.contains(*key))
@@ -529,5 +548,13 @@ headers = { Authorization = "Bearer target" }
         assert!(current_stash.contains("[mcp_servers.current_local]"));
         assert!(current_stash.contains("custom = \"keep in stash\""));
         assert!(!current_stash.contains("mcp_servers.managed"));
+    }
+
+    #[test]
+    fn grok_local_mcp_stash_rejects_unrelated_root_entries() {
+        let error = validate_grok_local_stash(b"unrelated = true\n")
+            .expect_err("unrelated root entries must not become an empty stash");
+
+        assert!(error.contains("MCP_LOCAL_STASH_INVALID_SCHEMA"));
     }
 }
