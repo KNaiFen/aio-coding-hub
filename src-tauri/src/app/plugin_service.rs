@@ -2177,6 +2177,12 @@ pub(crate) fn revalidate_quarantined_plugin(
             "plugins quarantined by market revocation cannot be revalidated",
         ));
     }
+    if detail.install_source == PluginInstallSource::Market {
+        return Err(AppError::new(
+            "PLUGIN_REVALIDATE_MARKET_STATUS_UNAVAILABLE",
+            "current signed market revocation status is unavailable for revalidation",
+        ));
+    }
 
     validate_manifest_for_source(&detail.manifest, detail.install_source, host_version)?;
     ensure_runtime_enabled(&detail.manifest)?;
@@ -2278,10 +2284,7 @@ pub(crate) fn severe_runtime_failure_kind(error_code: &str) -> Option<&'static s
         | "PLUGIN_EXTENSION_CALL_TIMEOUT"
         | "PLUGIN_EXTENSION_START_TIMEOUT" => Some("timeout"),
         "PLUGIN_EXTENSION_HOST_PROCESS_CRASHED" => Some("host_crash"),
-        "PLUGIN_EXTENSION_HOST_GATEWAY_FAILED"
-        | "PLUGIN_EXTENSION_HOST_INVALID_OUTPUT"
-        | "PLUGIN_EXTENSION_HOST_DECODE_FAILED"
-        | "PLUGIN_EXTENSION_HOST_JS_ERROR" => Some("runtime_error"),
+        "PLUGIN_EXTENSION_HOST_JS_ERROR" => Some("runtime_error"),
         _ => None,
     }
 }
@@ -6220,6 +6223,84 @@ INSERT INTO plugins (
                 .status,
             PluginStatus::Quarantined
         );
+    }
+
+    #[test]
+    fn runtime_quarantined_market_plugin_requires_current_signed_market_status() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::init_for_tests(&dir.path().join("plugins.db")).unwrap();
+        let package_path = dir.path().join("market-runtime-revalidate.aio-plugin");
+        let cache_dir = dir.path().join("plugins/cache");
+        let installed_dir = dir.path().join("plugins/installed");
+        write_local_package(
+            &package_path,
+            local_package_manifest("market.runtime-revalidate", "1.0.0"),
+        );
+        install_plugin_from_local_package(
+            &db,
+            &package_path,
+            &cache_dir,
+            &installed_dir,
+            env!("CARGO_PKG_VERSION"),
+        )
+        .unwrap();
+        db.open_connection()
+            .unwrap()
+            .execute(
+                "UPDATE plugins SET install_source = 'market' WHERE plugin_id = ?1",
+                rusqlite::params!["market.runtime-revalidate"],
+            )
+            .unwrap();
+        repository::update_plugin_status(
+            &db,
+            "market.runtime-revalidate",
+            PluginStatus::Quarantined,
+            Some("runtime quarantine"),
+        )
+        .unwrap();
+
+        let err = revalidate_quarantined_plugin(
+            &db,
+            "market.runtime-revalidate",
+            env!("CARGO_PKG_VERSION"),
+            &cache_dir,
+        )
+        .unwrap_err();
+
+        assert_eq!(err.code(), "PLUGIN_REVALIDATE_MARKET_STATUS_UNAVAILABLE");
+        assert_eq!(
+            repository::get_plugin(&db, "market.runtime-revalidate")
+                .unwrap()
+                .summary
+                .status,
+            PluginStatus::Quarantined
+        );
+    }
+
+    #[test]
+    fn severe_runtime_failure_kind_counts_only_explicit_runtime_failures() {
+        for (code, expected) in [
+            ("PLUGIN_HOOK_TIMEOUT", "timeout"),
+            ("PLUGIN_EXTENSION_HOST_TIMEOUT", "timeout"),
+            ("PLUGIN_EXTENSION_CALL_TIMEOUT", "timeout"),
+            ("PLUGIN_EXTENSION_START_TIMEOUT", "timeout"),
+            ("PLUGIN_EXTENSION_HOST_PROCESS_CRASHED", "host_crash"),
+            ("PLUGIN_EXTENSION_HOST_JS_ERROR", "runtime_error"),
+        ] {
+            assert_eq!(severe_runtime_failure_kind(code), Some(expected));
+        }
+
+        for code in [
+            "PLUGIN_EXTENSION_HOST_GATEWAY_FAILED",
+            "PLUGIN_EXTENSION_HOST_INVALID_OUTPUT",
+            "PLUGIN_EXTENSION_HOST_DECODE_FAILED",
+            "PLUGIN_EXTENSION_HOST_ROOT_UNAVAILABLE",
+            "PLUGIN_PERMISSION_DENIED",
+            "PLUGIN_RESERVED_HEADER",
+            "PLUGIN_INVALID_HEADER",
+        ] {
+            assert_eq!(severe_runtime_failure_kind(code), None, "{code}");
+        }
     }
 
     #[test]

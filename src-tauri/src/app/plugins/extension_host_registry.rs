@@ -1157,7 +1157,7 @@ fn extension_host_gateway_error(err: AppError) -> GatewayPluginError {
             )
         }
         _ => GatewayPluginError::new(
-            "PLUGIN_EXTENSION_HOST_GATEWAY_FAILED",
+            err.code(),
             format!("extension host gateway hook failed: {err}"),
         ),
     }
@@ -1366,6 +1366,42 @@ mod tests {
     use std::sync::{Arc, Mutex as StdMutex};
     use std::time::{Duration, Instant};
     use tokio::sync::Notify;
+
+    #[test]
+    fn gateway_error_conversion_preserves_non_runtime_error_codes() {
+        assert_eq!(
+            extension_host_gateway_error(AppError::new(
+                "PLUGIN_EXTENSION_HOST_ROOT_UNAVAILABLE",
+                "missing root",
+            ))
+            .code(),
+            "PLUGIN_EXTENSION_HOST_ROOT_UNAVAILABLE"
+        );
+        assert_eq!(
+            extension_host_gateway_error(AppError::new(
+                "PLUGIN_EXTENSION_HOST_PROCESS_CRASHED",
+                "crashed",
+            ))
+            .code(),
+            "PLUGIN_EXTENSION_HOST_PROCESS_CRASHED"
+        );
+        assert_eq!(
+            extension_host_gateway_error(AppError::new(
+                "PLUGIN_EXTENSION_HOST_FORBIDDEN",
+                "forbidden",
+            ))
+            .code(),
+            "PLUGIN_PERMISSION_DENIED"
+        );
+        assert_eq!(
+            extension_host_gateway_error(AppError::new(
+                "PLUGIN_EXTENSION_CALL_TIMEOUT",
+                "timeout",
+            ))
+            .code(),
+            "PLUGIN_EXTENSION_HOST_TIMEOUT"
+        );
+    }
 
     struct FakeExtensionHostFactory {
         state: Arc<StdMutex<FakeFactoryState>>,

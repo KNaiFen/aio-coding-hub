@@ -732,6 +732,7 @@ Rust 运行时状态 / 请求日志
 - 验证及回归测试：覆盖 onStartup exactly-once、未声明 event 不执行、连续 timeout/crash 跨重启仍 Quarantined、手动恢复后成功执行。
 - 2026-08-06 最新主线复核：`origin/main@4ee5faa8` 的 `activationEvents` 仍只有 manifest 校验，没有 dispatcher；运行时 circuit 只在内存中短暂 cooldown，重启后清零，`Quarantined` 仅用于显式市场撤销且没有 revalidate/recover 转换。公开文档仍承诺 repeated failure 可隔离并恢复。AUD033 的阈值、窗口、事件派发和恢复语义必须先定产品合同，本批不实施，继续 `confirmed`。
 - 2026-08-06 最终治理计划：任务 `.trellis/tasks/08-06-plugin-activation-quarantine`。显式 activation event 只接受精确 `onStartup`、`onCommand:*`、`onGatewayHook:*`；空/缺失数组保持 legacy，废弃 ProviderEditor/ProtocolBridge 事件拒绝并把历史安装迁移为有原因的 disabled。host crash、runtime error 或 timeout 在任意 startup/command/hook 的 600 秒窗口累计三次时，以单一事务持久 quarantine；第三次请求仍保持既有 fail-open/fail-closed，随后刷新 gateway snapshot 并释放 host。revalidate 成功只恢复 disabled，不自动启用。
+- 2026-08-08 净重建候选：PR #94 已在 `codex/aud021-filesystem-recovery-journal@c97ad431` 上只重放 AUD-033 的 7 个插件代码/测试提交，产品候选为 `8bb2bbf8`。旧 AUD-008/AUD-002 携带历史、旧审计快照和旧 generated bindings blob 均未带入；`gateway_bearer_token_*` command、runtime access control 与现有 Gateway bindings 保持在基线中，新增 `plugin_revalidate` Rust registry/export anchor 交由该精确 head 的 Actions 生成 bindings。完整跨重启、并发阈值、fail-open/fail-closed、snapshot 刷新与 bindings 门仍待云端验证；按用户最新决定，本分支处理完成后不单独合并，改并入剩余事项的统一集成 PR，条目保持 `planned`。
 
 ### AUD-034：插件 storage 与 UI 配置保存对同一 JSON 的并发写入会丢失更新
 
@@ -1552,7 +1553,7 @@ AUD-014 执行结果：只修改 CLI proxy controls hook、Sidebar 和对应两�
 | 5 | `.trellis/tasks/08-06-cross-restart-data-reset` / `codex/aud020-cross-restart-data-reset` | `AUD-008` | `resolved`：最终候选 `59bc7b7c` 提供 durable marker/tombstone、专用硬退出、启动前清理、失败 maintenance retry/exit 闸门和前端生命周期卸载。 | PR #91 的 PR CI `31239694948` 与 workflow_dispatch `31239707625` 全绿；squash 合并为 `99de56bb`，并为 AUD-002 提供共享 coordinator。 |
 | 6 | `.trellis/tasks/08-06-filesystem-recovery-journal` / `codex/aud021-filesystem-recovery-journal` | `AUD-002` | 产品候选 `699f0c0b`：prepare-first journal、SQLite 权威 replay、Skills 受管 artifact、补偿错误聚合。 | 已直接重放到 `origin/main@99de56bb`；待更新 PR #92 的远端 head/base，并对新的精确 head 运行云端故障注入/重启/脱敏/并发门与 bindings 核验。 |
 | 7 | `.trellis/tasks/08-06-observer-zero-history-query` / `codex/observer-zero-history-query` | `AUD-035` | last/dominant/recent 受限查询和 source-aware 有界 folder cache，保持摘要语义。 | 云端查询 spy/缓存/协议回归；下一候选补 AUD-002 证据。 |
-| 8 | `.trellis/tasks/08-06-plugin-activation-quarantine` / `codex/plugin-activation-quarantine` | `AUD-033` | 精确 activation policy、startup/command/hook gate、600 秒三次严重故障 quarantine、revalidate。 | 云端跨重启/并发/fail-open-close/snapshot 门；合并后只开纯文档收口 PR。 |
+| 8 | `.trellis/tasks/08-06-plugin-activation-quarantine` / `codex/aud023-plugin-activation-quarantine` | `AUD-033` | 产品候选 `8bb2bbf8`：精确 activation policy、startup/command/hook gate、600 秒三次严重故障 quarantine、revalidate。 | 已净重建到 AUD-002 候选 `c97ad431`，保留 Gateway token 合同并把 bindings 交给精确 head Actions；处理完成后并入统一集成 PR，不单独合并。 |
 
 本地不运行 `pnpm`、Cargo、Tauri、安装器、dev server、类型检查、Lint、测试、构建或任何间接产物命令；不删除全局 `~/.cargo`、pnpm store 或其他项目文件。每次 PR 创建/合并前重新 fetch `origin/main`，检查功能、接口、实现和效果重叠；兼容漂移先重放并重验，根本冲突保留候选并登记待决策。保留现有 `workflow_dispatch` 全量 CI 与按需 `dev-build`，不把桌面打包升级为每个 PR 必需任务。
 
