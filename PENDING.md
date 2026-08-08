@@ -38,7 +38,7 @@
 
 - **状态**：`planned`
 - **日期**：2026-08-06
-- **待执行交付**：代码已在独立候选分支 `codex/aud019-gateway-lan-bearer-token` 重放为 `51224cf2`，包含精确云端格式补丁和 CI 诊断修复；本地 cloud-only checker/self-test 与 `git diff --check` 通过，未运行 Cargo、pnpm、Tauri、类型检查、Lint、测试或构建。PR、精确 head 全量 CI、生成绑定核验、主线门和合并统一后置；在完成云端验证与合并前保持 `planned`。
+- **待执行交付**：代码最终候选为 `948dc5fa`；PR #90 的 PR CI `31197560686` 与 workflow_dispatch 全量 CI `31197593860` 均在该精确 head 全绿，随后 squash 合并为 `c5b2333d`。产品交付已经完成；按本批约定，条目在最终纯文档收口 PR 迁入 `PENDING_COMPLETED.md` 前暂留 `planned`。
 - **观察问题**：现有 LAN/custom 非回环 Gateway 缺少统一路由鉴权，provider/forwarded header 和 provider 专用路由扩大了可伪造信任面。
 - **锁定决策**：保留 LAN；真实 TCP peer 非回环时所有路由含 health 必须使用应用生成 Bearer Token；loopback 兼容。Token 只展示一次、仅持久化摘要；删除 provider 专用路由、forced-provider 数据流和 Claude Terminal 入口。
 - **拟议方向**：在最外层 Axum middleware 基于 `ConnectInfo<SocketAddr>` 鉴权并剥离敏感/转发身份头，支持旧 LAN 迁移、未确认重启轮换、主动轮换和 WSL 明文即时同步。
@@ -49,7 +49,7 @@
 
 - **状态**：`planned`
 - **日期**：2026-08-06
-- **待执行交付**：代码候选已在独立分支 `codex/aud020-cross-restart-data-reset` 重放为 `c4c069e2`；本地仅通过零依赖 cloud-only checker/self-test 与 `git diff --check`，未运行 Cargo、pnpm、Tauri、生成器、类型检查、Lint、测试或构建。PR、精确 head 全量 CI、跨平台故障注入与主线门统一后置；在云端验证和合并前保持 `planned`。
+- **待执行交付**：代码最终候选为 `59bc7b7c`；PR #91 的 PR CI `31239694948` 与 workflow_dispatch 全量 CI `31239707625` 均在该精确 head 全绿，随后 squash 合并为 `99de56bb`。产品交付已经完成；按本批约定，条目在最终纯文档收口 PR 迁入 `PENDING_COMPLETED.md` 前暂留 `planned`。
 - **观察问题**：数据重置在当前进程逐文件删除，而退出清理可能再次初始化数据库；文件占用或部分失败会让应用带着不完整清理继续运行。
 - **锁定决策**：reset IPC 只持久写 marker 后走专用退出；下次启动在 DB、observer、gateway 和后台任务前删除；失败保留 marker 并进入 retry/exit 维护态。
 - **拟议方向**：建立应用级 maintenance coordinator、幂等 marker 生命周期和专用退出路径，并 gate 原生/前端启动任务。
@@ -60,7 +60,7 @@
 
 - **状态**：`planned`
 - **日期**：2026-08-06
-- **待执行交付**：代码已在依赖 `codex/aud020-cross-restart-data-reset` 的候选分支 `codex/aud021-filesystem-recovery-journal` 重放为 `0e8464c0`；本地 cloud-only checker/self-test 与 `git diff --check` 通过，未运行 Cargo、pnpm、Tauri、生成器、类型检查、Lint、测试或构建。该 PR 在 AUD-020 合并后仍须重放到主线；精确 head 全量 CI、生成绑定核验、主线门和合并前保持 `planned`。
+- **待执行交付**：代码产品候选已重放为 `699f0c0b`，直接基于 `origin/main@99de56bb`；该主线已包含 PR #90 / AUD-016 的 `c5b2333d` 与 PR #91 / AUD-008 的 `99de56bb`。本地 cloud-only checker/self-test 与 `git diff --check` 通过，未运行 Cargo、pnpm、Tauri、生成器、类型检查、Lint、测试或构建。下一步把 PR #92 更新到该重放结果并改为 `main` base，再对新的精确远端 head 运行 PR CI、workflow_dispatch 全量 CI、生成绑定核验与主线门；合并前保持 `planned`。
 - **观察问题**：Prompt、MCP、Skills 和 workspace switch 在 SQLite 与外部文件之间双写，多处补偿吞错；进程中断或 commit/恢复失败可留下跨重启漂移。
 - **锁定决策**：已提交 SQLite 状态为权威；任何外部副作用前 durable journal；启动前阻断自动对账并复用 AUD-008 维护态；补偿失败必须可见且错误摘要脱敏。
 - **拟议方向**：统一 prepare-first 操作协议。Skills 的不可由 metadata 重建内容使用 journal 专属、带 ownership/hash 的临时 staging/backup，resolved 后回收。
