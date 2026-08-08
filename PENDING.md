@@ -60,6 +60,7 @@
 
 - **状态**：`planned`
 - **日期**：2026-08-06
+- **待执行交付**：代码已在依赖 `codex/aud020-cross-restart-data-reset` 的候选分支 `codex/aud021-filesystem-recovery-journal` 提交为 `eed41abb`、`23718b01`；本地 cloud-only checker/self-test 与 `git diff --check` 通过，未运行 Cargo、pnpm、Tauri、生成器、类型检查、Lint、测试或构建。该 PR 在 AUD-020 合并后重放到主线；精确 head 全量 CI、生成绑定核验、主线门和合并前保持 `planned`。
 - **观察问题**：Prompt、MCP、Skills 和 workspace switch 在 SQLite 与外部文件之间双写，多处补偿吞错；进程中断或 commit/恢复失败可留下跨重启漂移。
 - **锁定决策**：已提交 SQLite 状态为权威；任何外部副作用前 durable journal；启动前阻断自动对账并复用 AUD-008 维护态；补偿失败必须可见且错误摘要脱敏。
 - **拟议方向**：统一 prepare-first 操作协议。Skills 的不可由 metadata 重建内容使用 journal 专属、带 ownership/hash 的临时 staging/backup，resolved 后回收。
