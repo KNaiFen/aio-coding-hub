@@ -313,7 +313,7 @@ impl GatewayPluginPipeline {
                         duration_ms: 0,
                         status: "circuitOpen",
                         failure_kind: Some("circuit_open"),
-                        error_code: Some("PLUGIN_HOOK_CIRCUIT_OPEN"),
+                        error_code: Some("PLUGIN_HOOK_CIRCUIT_OPEN".to_string()),
                         mutation_summary: serde_json::json!({ "changed": false }),
                         replayable: false,
                         replay_export_reason: Some("hook skipped because plugin circuit is open"),
@@ -361,15 +361,15 @@ impl GatewayPluginPipeline {
             let result = match future.await {
                 Ok(result) => result,
                 Err(err) => {
-                    let error_code = err.code_for_logging();
+                    let error_code = err.code_for_logging().to_string();
                     self.record_failure(&plugin.summary.plugin_id, hook_name, &plugin_snapshot);
                     self.record_severe_runtime_failure(
                         plugin,
                         hook_name,
-                        error_code,
+                        error_code.as_str(),
                         input.trace_id.as_str(),
                     );
-                    if is_hook_timeout_error(error_code) {
+                    if is_hook_timeout_error(error_code.as_str()) {
                         audit_events.push(timeout_event(plugin, input.hook_name));
                     } else {
                         audit_events.push(audit_event(
@@ -379,8 +379,8 @@ impl GatewayPluginPipeline {
                             "high",
                             "Plugin hook failed",
                             serde_json::json!({
-                                "errorCode": error_code,
-                                "failureKind": failure_kind_for_error_code(error_code),
+                                "errorCode": error_code.as_str(),
+                                "failureKind": failure_kind_for_error_code(error_code.as_str()),
                             }),
                         ));
                     }
@@ -398,7 +398,7 @@ impl GatewayPluginPipeline {
                             } else {
                                 "failedOpen"
                             },
-                            failure_kind: Some(if is_hook_timeout_error(error_code) {
+                            failure_kind: Some(if is_hook_timeout_error(error_code.as_str()) {
                                 "timeout"
                             } else {
                                 "hook_error"
@@ -428,7 +428,7 @@ impl GatewayPluginPipeline {
                 &truncation,
             ) {
                 self.record_failure(&plugin.summary.plugin_id, hook_name, &plugin_snapshot);
-                let error_code = err.code_for_logging();
+                let error_code = err.code_for_logging().to_string();
                 audit_events.push(audit_event(
                     plugin,
                     input.hook_name,
@@ -436,8 +436,8 @@ impl GatewayPluginPipeline {
                     "high",
                     "Plugin hook returned unauthorized mutations",
                     serde_json::json!({
-                        "errorCode": error_code,
-                        "failureKind": failure_kind_for_error_code(error_code),
+                        "errorCode": error_code.as_str(),
+                        "failureKind": failure_kind_for_error_code(error_code.as_str()),
                     }),
                 ));
                 let fail_closed =
@@ -449,8 +449,8 @@ impl GatewayPluginPipeline {
                     HookReportOutcome {
                         started_at_ms,
                         duration_ms: duration_ms_i64(started),
-                        status: budget_or_policy_status(error_code),
-                        failure_kind: Some(failure_kind_for_error_code(error_code)),
+                        status: budget_or_policy_status(error_code.as_str()),
+                        failure_kind: Some(failure_kind_for_error_code(error_code.as_str())),
                         error_code: Some(error_code),
                         mutation_summary: mutation_summary(&result),
                         replayable: true,
@@ -469,7 +469,7 @@ impl GatewayPluginPipeline {
 
             if let Err(err) = apply_header_patch(&mut headers, &result.headers) {
                 self.record_failure(&plugin.summary.plugin_id, hook_name, &plugin_snapshot);
-                let error_code = err.code_for_logging();
+                let error_code = err.code_for_logging().to_string();
                 audit_events.push(audit_event(
                     plugin,
                     input.hook_name,
@@ -477,8 +477,8 @@ impl GatewayPluginPipeline {
                     "high",
                     "Plugin hook returned rejected header mutations",
                     serde_json::json!({
-                        "errorCode": error_code,
-                        "failureKind": failure_kind_for_error_code(error_code),
+                        "errorCode": error_code.as_str(),
+                        "failureKind": failure_kind_for_error_code(error_code.as_str()),
                     }),
                 ));
                 execution_reports.push(self.hook_execution_report(
@@ -489,7 +489,7 @@ impl GatewayPluginPipeline {
                         started_at_ms,
                         duration_ms: duration_ms_i64(started),
                         status: "policyRejected",
-                        failure_kind: Some(failure_kind_for_error_code(error_code)),
+                        failure_kind: Some(failure_kind_for_error_code(error_code.as_str())),
                         error_code: Some(error_code),
                         mutation_summary: mutation_summary(&result),
                         replayable: true,
@@ -616,7 +616,7 @@ impl GatewayPluginPipeline {
                         duration_ms: 0,
                         status: "circuitOpen",
                         failure_kind: Some("circuit_open"),
-                        error_code: Some("PLUGIN_HOOK_CIRCUIT_OPEN"),
+                        error_code: Some("PLUGIN_HOOK_CIRCUIT_OPEN".to_string()),
                         mutation_summary: serde_json::json!({ "changed": false }),
                         replayable: false,
                         replay_export_reason: Some("hook skipped because plugin circuit is open"),
@@ -665,15 +665,15 @@ impl GatewayPluginPipeline {
             {
                 Ok(result) => result,
                 Err(err) => {
-                    let error_code = err.code_for_logging();
+                    let error_code = err.code_for_logging().to_string();
                     self.record_failure(&plugin.summary.plugin_id, hook_name, &plugin_snapshot);
                     self.record_severe_runtime_failure(
                         plugin,
                         hook_name,
-                        error_code,
+                        error_code.as_str(),
                         input.trace_id.as_str(),
                     );
-                    if is_hook_timeout_error(error_code) {
+                    if is_hook_timeout_error(error_code.as_str()) {
                         audit_events.push(timeout_event(plugin, input.hook_name));
                     } else {
                         audit_events.push(failed_event(
@@ -696,7 +696,7 @@ impl GatewayPluginPipeline {
                             } else {
                                 "failedOpen"
                             },
-                            failure_kind: Some(if is_hook_timeout_error(error_code) {
+                            failure_kind: Some(if is_hook_timeout_error(error_code.as_str()) {
                                 "timeout"
                             } else {
                                 "hook_error"
@@ -742,7 +742,7 @@ impl GatewayPluginPipeline {
                         duration_ms: duration_ms_i64(started),
                         status: budget_or_policy_status(err.code_for_logging()),
                         failure_kind: Some(failure_kind_for_error_code(err.code_for_logging())),
-                        error_code: Some(err.code_for_logging()),
+                        error_code: Some(err.code_for_logging().to_string()),
                         mutation_summary: mutation_summary(&result),
                         replayable: true,
                         replay_export_reason: None,
@@ -774,7 +774,7 @@ impl GatewayPluginPipeline {
                         duration_ms: duration_ms_i64(started),
                         status: "policyRejected",
                         failure_kind: Some(failure_kind_for_error_code(err.code_for_logging())),
-                        error_code: Some(err.code_for_logging()),
+                        error_code: Some(err.code_for_logging().to_string()),
                         mutation_summary: mutation_summary(&result),
                         replayable: true,
                         replay_export_reason: None,
@@ -892,7 +892,7 @@ impl GatewayPluginPipeline {
                         duration_ms: 0,
                         status: "circuitOpen",
                         failure_kind: Some("circuit_open"),
-                        error_code: Some("PLUGIN_HOOK_CIRCUIT_OPEN"),
+                        error_code: Some("PLUGIN_HOOK_CIRCUIT_OPEN".to_string()),
                         mutation_summary: serde_json::json!({ "changed": false }),
                         replayable: false,
                         replay_export_reason: Some("hook skipped because plugin circuit is open"),
@@ -940,15 +940,15 @@ impl GatewayPluginPipeline {
             {
                 Ok(result) => result,
                 Err(err) => {
-                    let error_code = err.code_for_logging();
+                    let error_code = err.code_for_logging().to_string();
                     self.record_failure(&plugin.summary.plugin_id, hook_name, &plugin_snapshot);
                     self.record_severe_runtime_failure(
                         plugin,
                         hook_name,
-                        error_code,
+                        error_code.as_str(),
                         input.trace_id.as_str(),
                     );
-                    if is_hook_timeout_error(error_code) {
+                    if is_hook_timeout_error(error_code.as_str()) {
                         audit_events.push(timeout_event(plugin, hook_name));
                     } else {
                         audit_events.push(failed_event(plugin, hook_name, err.code_for_logging()));
@@ -967,7 +967,7 @@ impl GatewayPluginPipeline {
                             } else {
                                 "failedOpen"
                             },
-                            failure_kind: Some(if is_hook_timeout_error(error_code) {
+                            failure_kind: Some(if is_hook_timeout_error(error_code.as_str()) {
                                 "timeout"
                             } else {
                                 "hook_error"
@@ -1008,7 +1008,7 @@ impl GatewayPluginPipeline {
                         duration_ms: duration_ms_i64(started),
                         status: budget_or_policy_status(err.code_for_logging()),
                         failure_kind: Some(failure_kind_for_error_code(err.code_for_logging())),
-                        error_code: Some(err.code_for_logging()),
+                        error_code: Some(err.code_for_logging().to_string()),
                         mutation_summary: mutation_summary(&result),
                         replayable: true,
                         replay_export_reason: None,
@@ -1122,7 +1122,7 @@ impl GatewayPluginPipeline {
                         duration_ms: 0,
                         status: "circuitOpen",
                         failure_kind: Some("circuit_open"),
-                        error_code: Some("PLUGIN_HOOK_CIRCUIT_OPEN"),
+                        error_code: Some("PLUGIN_HOOK_CIRCUIT_OPEN".to_string()),
                         mutation_summary: serde_json::json!({ "changed": false }),
                         replayable: false,
                         replay_export_reason: Some("hook skipped because plugin circuit is open"),
@@ -1170,15 +1170,15 @@ impl GatewayPluginPipeline {
             {
                 Ok(result) => result,
                 Err(err) => {
-                    let error_code = err.code_for_logging();
+                    let error_code = err.code_for_logging().to_string();
                     self.record_failure(&plugin.summary.plugin_id, hook_name, &plugin_snapshot);
                     self.record_severe_runtime_failure(
                         plugin,
                         hook_name,
-                        error_code,
+                        error_code.as_str(),
                         input.trace_id.as_str(),
                     );
-                    if is_hook_timeout_error(error_code) {
+                    if is_hook_timeout_error(error_code.as_str()) {
                         audit_events.push(timeout_event(plugin, hook_name));
                     } else {
                         audit_events.push(failed_event(plugin, hook_name, err.code_for_logging()));
@@ -1197,7 +1197,7 @@ impl GatewayPluginPipeline {
                             } else {
                                 "failedOpen"
                             },
-                            failure_kind: Some(if is_hook_timeout_error(error_code) {
+                            failure_kind: Some(if is_hook_timeout_error(error_code.as_str()) {
                                 "timeout"
                             } else {
                                 "hook_error"
@@ -1238,7 +1238,7 @@ impl GatewayPluginPipeline {
                         duration_ms: duration_ms_i64(started),
                         status: budget_or_policy_status(err.code_for_logging()),
                         failure_kind: Some(failure_kind_for_error_code(err.code_for_logging())),
-                        error_code: Some(err.code_for_logging()),
+                        error_code: Some(err.code_for_logging().to_string()),
                         mutation_summary: mutation_summary(&result),
                         replayable: true,
                         replay_export_reason: None,
@@ -1578,7 +1578,7 @@ impl GatewayPluginPipeline {
         }
         let field = truncation.truncated_direct_field()?;
         let err = truncated_context_execution_error(field);
-        let error_code = err.code_for_logging();
+        let error_code = err.code_for_logging().to_string();
         audit_events.push(audit_event(
             plugin,
             hook_name,
@@ -1586,7 +1586,7 @@ impl GatewayPluginPipeline {
             "high",
             "Plugin hook context exceeded the safe budget",
             serde_json::json!({
-                "errorCode": error_code,
+                "errorCode": error_code.as_str(),
                 "failureKind": "context_budget",
                 "field": field,
                 "executorInvoked": false,
@@ -1599,8 +1599,8 @@ impl GatewayPluginPipeline {
             HookReportOutcome {
                 started_at_ms: now_unix_millis(),
                 duration_ms: 0,
-                status: budget_or_policy_status(error_code),
-                failure_kind: Some(failure_kind_for_error_code(error_code)),
+                status: budget_or_policy_status(error_code.as_str()),
+                failure_kind: Some(failure_kind_for_error_code(error_code.as_str())),
                 error_code: Some(error_code),
                 mutation_summary: serde_json::json!({ "changed": false }),
                 replayable: false,
@@ -1626,7 +1626,7 @@ impl GatewayPluginPipeline {
             started_at_ms: outcome.started_at_ms,
             duration_ms: outcome.duration_ms,
             failure_kind: outcome.failure_kind.map(str::to_string),
-            error_code: outcome.error_code.map(str::to_string),
+            error_code: outcome.error_code,
             failure_policy: Some(failure_policy(plugin, hook_name).as_str().to_string()),
             circuit_state: Some(
                 self.circuit_state_for_report(&plugin.summary.plugin_id, hook_name),
@@ -1661,7 +1661,7 @@ struct HookReportOutcome {
     duration_ms: i64,
     status: &'static str,
     failure_kind: Option<&'static str>,
-    error_code: Option<&'static str>,
+    error_code: Option<String>,
     mutation_summary: serde_json::Value,
     replayable: bool,
     replay_export_reason: Option<&'static str>,
