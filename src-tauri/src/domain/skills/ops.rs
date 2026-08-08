@@ -61,8 +61,7 @@ fn local_source_dir_for_ssot_recovery<R: tauri::Runtime>(
     validate_cli_key(source_cli_key)?;
     validate_relative_subdir(&skill.source_subdir)?;
 
-    let local_source_dir =
-        cli_skills_root(app, source_cli_key)?.join(skill.source_subdir.trim());
+    let local_source_dir = cli_skills_root(app, source_cli_key)?.join(skill.source_subdir.trim());
     if !local_source_dir.is_dir() || !has_skill_md(&local_source_dir) {
         return Err(format!("SKILL_SSOT_MISSING: {}", skill.skill_key).into());
     }

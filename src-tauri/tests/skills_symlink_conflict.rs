@@ -179,8 +179,11 @@ WHERE id = ?4
 
     let local_skill_dir = fix.cli_skills_root.join(&fix.skill_key);
     std::fs::create_dir_all(&local_skill_dir).expect("create local skill dir");
-    std::fs::write(local_skill_dir.join("SKILL.md"), "name: Changed Local Skill\n")
-        .expect("write changed local skill");
+    std::fs::write(
+        local_skill_dir.join("SKILL.md"),
+        "name: Changed Local Skill\n",
+    )
+    .expect("write changed local skill");
 
     let error = aio_coding_hub_lib::test_support::skill_set_enabled_json(
         &handle,
