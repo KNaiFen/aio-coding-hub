@@ -1543,20 +1543,20 @@ AUD-014 执行结果：只修改 CLI proxy controls hook、Sidebar 和对应两�
 
 ### 6.31 2026-08-06 最终修复与本地零产物批次计划
 
-本批以已核验的 `origin/main@735cec12` 为唯一候选基线。`PENDING.md` 已新增 `AIO-PENDING-016` 至 `AIO-PENDING-023`，八项均为 `planned`；父任务为 `.trellis/tasks/08-06-final-hardening-zero-artifact`，每项使用独立短分支和独立 PR。首个 AUD-054 PR 同时纳入本报告、PENDING 和本轮 Trellis 任务；第八项合并后另建一个纯文档 PR，记录全部 PR、提交和 CI 证据，再把条目迁入 `PENDING_COMPLETED.md`。
+本批最初以已核验的 `origin/main@735cec12` 建立八项计划；当前主线已推进到 `origin/main@99de56bb`，其中 AUD-054、AUD-056、AUD-016、AUD-008 已分别合并。AUD-055、AUD-002、AUD-035、AUD-033 的产品实现已汇集到 `codex/final-hardening-unified`，以 `24cdd753` 为已提交集成点并继续承载 Provider Sync 安全加固与本轮收口文档。剩余四项只创建一个面向 `main` 的统一 PR，作为唯一 Actions、审查和合并表面；不再逐项更新/合并旧 PR，也不再另建纯文档 PR。
 
 | 顺序 | Trellis 任务 / 分支 | 报告项 | 实施边界 | 云端门与交接 |
 | --- | --- | --- | --- | --- |
 | 1 | `.trellis/tasks/08-06-cloud-only-zero-artifact-contract` / `codex/cloud-only-zero-artifact-contract` | `AUD-054` | `resolved`：规则、README、活跃 spec/template、package/workspace scripts 与零依赖合同由 `c5b3c6b9` 建立，自测修正为 `2334403b`。 | PR #86 / merge `d32106c3`；PR run `31103175487` 与 workflow_dispatch `31103187154` 全绿；24 个精确仓库产物目录已清理。 |
-| 2 | `.trellis/tasks/08-06-provider-sync-session-snapshot` / `codex/provider-sync-session-only-backup` | `AUD-055` | sessions-only v2 manifest、v1 managed 迁移、单代 backup、回滚和非受管保护。 | PR #87 依用户决策延期到剩余顺序任务收口后合并；届时重跑精确 Actions。 |
+| 2 | `.trellis/tasks/08-06-provider-sync-session-snapshot` / `codex/final-hardening-unified` | `AUD-055` | sessions-only v2 manifest、v1 managed 迁移、单代 backup、回滚，以及句柄相对 no-follow 分类/隔离/删除、有界流式摘要、共享 prune 预算和变更 fail-closed。 | 内容已在统一候选；旧 draft PR #87 由统一 PR 取代。仅统一 PR 精确 head 的跨平台 Rust/竞态/预算回归、bindings、audit 与 `ci-gate` 可作为合并证据。双 tombstone、摘要和末次复验只缩小竞态窗口，不宣称消除同 UID/同权限恶意并发写者的最终 syscall 竞态。 |
 | 3 | `.trellis/tasks/08-06-request-runtime-log-retention` / `codex/aud018-request-runtime-log-retention` | `AUD-056` | `resolved`：PR #89 候选 `73ff1d29` 提供 7 天请求/运行日志、ledger 永久保留、256 MiB 软上限、活动文件保护、freelist 可见和不自动 VACUUM。 | PR #89 合并为 `d7679695`；PR run `31174497952` 与 workflow_dispatch `31186468782` 均在该精确 head 全绿。 |
 | 4 | `.trellis/tasks/08-06-gateway-lan-bearer-token` / `codex/aud019-gateway-lan-bearer-token` | `AUD-016` | `resolved`：最终候选 `948dc5fa` 提供真实 peer 全路由 token、一次性展示/轮换、header 脱敏、WSL manifest v2/同步和 provider 专用路径移除。 | PR #90 的 PR CI `31197560686` 与 workflow_dispatch `31197593860` 全绿；squash 合并为 `c5b2333d`。 |
 | 5 | `.trellis/tasks/08-06-cross-restart-data-reset` / `codex/aud020-cross-restart-data-reset` | `AUD-008` | `resolved`：最终候选 `59bc7b7c` 提供 durable marker/tombstone、专用硬退出、启动前清理、失败 maintenance retry/exit 闸门和前端生命周期卸载。 | PR #91 的 PR CI `31239694948` 与 workflow_dispatch `31239707625` 全绿；squash 合并为 `99de56bb`，并为 AUD-002 提供共享 coordinator。 |
-| 6 | `.trellis/tasks/08-06-filesystem-recovery-journal` / `codex/aud021-filesystem-recovery-journal` | `AUD-002` | 产品候选 `699f0c0b`：prepare-first journal、SQLite 权威 replay、Skills 受管 artifact、补偿错误聚合。 | 已直接重放到 `origin/main@99de56bb`；待更新 PR #92 的远端 head/base，并对新的精确 head 运行云端故障注入/重启/脱敏/并发门与 bindings 核验。 |
-| 7 | `.trellis/tasks/08-06-observer-zero-history-query` / `codex/aud022-observer-zero-history-query` | `AUD-035` | 产品候选 `be295bdb`：受限 last/dominant/recent 查询、zero-history ready-empty 与 source-aware 有界 folder cache。 | 已并入统一集成分支；待统一精确 head 运行查询/缓存回归与 bindings 门。 |
-| 8 | `.trellis/tasks/08-06-plugin-activation-quarantine` / `codex/aud023-plugin-activation-quarantine` | `AUD-033` | 产品候选 `d0daf065`：精确 activation policy、startup/command/hook gate、600 秒三次严重故障 quarantine、revalidate，并排除策略/输出/安装拒绝误计数。 | 已并入统一集成分支，保留 Gateway token 合同；bindings 与完整回归交由统一精确 head Actions。 |
+| 6 | `.trellis/tasks/08-06-filesystem-recovery-journal` / `codex/final-hardening-unified` | `AUD-002` | prepare-first journal、SQLite 权威 replay、Skills 受管 artifact、补偿错误聚合。 | 已并入统一候选；不再更新或单独合并 PR #92。云端故障注入、重启、脱敏、并发门与 bindings 由统一 PR 精确 head 验证。 |
+| 7 | `.trellis/tasks/08-06-observer-zero-history-query` / `codex/final-hardening-unified` | `AUD-035` | 受限 last/dominant/recent 查询、zero-history ready-empty 与 source-aware 有界 folder cache。 | 已并入统一候选；旧独立候选/PR #93 不再作为验证或合并表面，查询/缓存回归与 bindings 由统一 PR 精确 head 验证。 |
+| 8 | `.trellis/tasks/08-06-plugin-activation-quarantine` / `codex/final-hardening-unified` | `AUD-033` | 精确 activation policy、startup/command/hook gate、600 秒三次严重故障 quarantine、revalidate，并排除策略/输出/安装拒绝误计数。 | 已并入统一候选并保留 Gateway token 合同；旧 PR #94 由统一 PR 取代，bindings 与完整回归交由统一精确 head Actions。 |
 
-本地不运行 `pnpm`、Cargo、Tauri、安装器、dev server、类型检查、Lint、测试、构建或任何间接产物命令；不删除全局 `~/.cargo`、pnpm store 或其他项目文件。每次 PR 创建/合并前重新 fetch `origin/main`，检查功能、接口、实现和效果重叠；兼容漂移先重放并重验，根本冲突保留候选并登记待决策。保留现有 `workflow_dispatch` 全量 CI 与按需 `dev-build`，不把桌面打包升级为每个 PR 必需任务。
+本地不运行 `pnpm`、Cargo、Tauri、安装器、dev server、类型检查、Lint、测试、构建或任何间接产物命令；不删除全局 `~/.cargo`、pnpm store 或其他项目文件。统一 PR 创建/合并前重新 fetch `origin/main`，检查功能、接口、实现和效果重叠；兼容漂移先重放并重验，根本冲突保留候选并登记待决策。保留现有 `workflow_dispatch` 全量 CI 与按需 `dev-build`，不把桌面打包升级为每个 PR 必需任务。统一 PR 创建且精确 head 的 Actions 已启动后，按 #94、#93、#92、#87 顺序关闭旧 PR，并在每个关闭评论中链接统一 PR；旧 PR 的 CI 不作为统一候选证据。
 
 ## 7. 未覆盖区域与验证盲点
 
@@ -1572,6 +1572,8 @@ AUD-014 执行结果：只修改 CLI proxy controls hook、Sidebar 和对应两�
 
 | 时间 | 命令/方法 | 结果 | 说明 |
 | --- | --- | --- | --- |
+| 2026-08-08 | 剩余四项统一候选汇集、Provider Sync 安全加固、交付拓扑与本地零产物核验 | 本地允许阶段通过；统一 PR/Actions 待执行 | `codex/final-hardening-unified` 基于 `origin/main@99de56bb`，已汇集 AUD-055、AUD-002、AUD-035、AUD-033；本轮补齐 Provider Sync 的可信句柄相对操作、有界 SHA-256、共享 prune 预算、Windows ChangeTime/末次复验和残余竞态说明，并把报告、PENDING、父/子 Trellis 与后端规范改为单一统一 PR。`node scripts/check-cloud-only-verification.selftest.mjs`、`node scripts/check-cloud-only-verification.mjs`、相关 Node 源码/5 个 task JSON 解析及 `git diff --check` 通过；未运行 Cargo、pnpm、Tauri、生成器、类型检查、Lint、测试或构建。 |
+| 2026-08-08 | Provider Sync Windows 枚举/ChangeTime/reparse 后续复审与本地复验 | 本地允许阶段通过；统一 PR/Actions 待执行 | Windows 每次目录快照首批改用 `FileIdBothDirectoryRestartInfo`，新增同句柄二次快照并明确断言新增文件可见；ChangeTime 测试改为只改变只读属性且要求 Windows CI 不静默跳过 reparse-point 建立。复审未发现 Critical/P1/P2；再次运行 cloud-only checker/self-test、Node 解析与 `git diff --check` 均通过，未运行 Cargo、pnpm、Tauri、生成器、类型检查、Lint、测试或构建。 |
 | 2026-08-08 | AUD-002 重放 `origin/main@99de56bb`、range-diff 与本地零产物核验 | 本地允许阶段通过；PR #92 待更新 | 13 个 recovery 提交已重放为产品候选 `699f0c0b`；12 个产品/测试提交内容等价，唯一差异为审计文档整合。`node scripts/check-cloud-only-verification.selftest.mjs`、`node scripts/check-cloud-only-verification.mjs` 与 `git diff --check origin/main...HEAD` 通过；工作树干净，未运行 Cargo、pnpm、Tauri、生成器、类型检查、Lint、测试或构建。 |
 | 2026-08-08 | AUD-008 PR #91 精确 head CI、合并前主线门与合并后树验证 | 通过并合并 PR #91 | 候选 `59bc7b7c` 的 PR CI `31239694948` 与 workflow_dispatch 全量 CI `31239707625` 全绿，包含 Rust tests、Provider 百万行 benchmark、依赖审计与 `ci-gate`；squash 合并为 `99de56bb`，合并后主线树与候选一致。 |
 | 2026-08-08 | AUD-016 PR #90 精确 head CI、合并前主线门与合并结果 | 通过并合并 PR #90 | 候选 `948dc5fa` 的 PR CI `31197560686` 与 workflow_dispatch 全量 CI `31197593860` 全绿；squash 合并为 `c5b2333d`。 |

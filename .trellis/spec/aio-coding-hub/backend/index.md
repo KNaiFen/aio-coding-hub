@@ -82,6 +82,25 @@ When changing recovery-journal-backed filesystem projection:
 2. Keep a fresh pool borrow only at orchestration boundaries where no active
    connection is held.
 
+When changing Provider Sync managed-backup pruning:
+
+1. Classify, isolate, enumerate, validate, and delete from already-opened
+   trusted root/child handles with no-follow semantics; a path, directory name,
+   timestamp, or file presence is never ownership proof.
+2. Share one bounded prune budget across root enumeration, manifest parsing,
+   snapshot validation, content hashing, and deletion revalidation. Exhaustion,
+   identity/content change, unsupported platform behavior, or malformed input
+   must fail closed and preserve the candidate or isolated data.
+3. Bind ordinary files with a bounded streaming content digest in addition to
+   identity/metadata, and keep detailed warnings bounded with a suppressed-count
+   summary.
+4. Treat double tombstones, handle-relative operations, content digests, Windows
+   ChangeTime, and final revalidation as race-window reduction only. POSIX and
+   Windows do not provide a portable "delete exactly this previously verified
+   identity" guarantee against a malicious concurrent writer with the same UID
+   or equivalent permissions. Do not document or test these measures as fully
+   eliminating that final syscall boundary.
+
 ## Quality Check
 
 - Unit-test the attempt-budget calculation at its boundary values.
@@ -100,3 +119,7 @@ When changing recovery-journal-backed filesystem projection:
   circuit state, or attempt evidence, including a failure followed by success.
 - Exercise recovery projection in the one-connection test pool so journal
   bookkeeping cannot silently depend on spare pool capacity.
+- Exercise Provider Sync root/child replacement, symlink/reparse rejection,
+  equal-length in-place rewrites, shared-budget exhaustion, warning caps, and
+  the Unix/Windows final-delete boundary in GitHub Actions. Observable changes
+  must preserve data and report a bounded warning.

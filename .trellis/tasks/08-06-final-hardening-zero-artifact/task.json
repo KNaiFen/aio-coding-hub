@@ -2,8 +2,8 @@
   "id": "final-hardening-zero-artifact",
   "name": "final-hardening-zero-artifact",
   "title": "最终修复与本地零产物",
-  "description": "按固定顺序交付八项审计修复，并以本地零产物、GitHub Actions 全量验证和最终文档收口完成治理闭环。",
-  "status": "planning",
+  "description": "交付八项审计修复：AUD-054、AUD-056、AUD-016、AUD-008 已进入主线，剩余 AUD-055、AUD-002、AUD-035、AUD-033 由单一统一 PR 通过 GitHub Actions 全量验证并完成治理收口。",
+  "status": "in_progress",
   "dev_type": "cross-layer",
   "scope": "release-governance",
   "package": "aio-coding-hub",
@@ -12,7 +12,7 @@
   "assignee": "KNaiFen",
   "createdAt": "2026-08-06",
   "completedAt": null,
-  "branch": "codex/final-hardening-zero-artifact",
+  "branch": "codex/final-hardening-unified",
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,
@@ -30,6 +30,6 @@
   ],
   "parent": null,
   "relatedFiles": [],
-  "notes": "固定顺序：AUD-054、055、056、016、008、002、035、033；八项实现合并后另开纯文档 PR 收口。",
+  "notes": "AUD-054、AUD-056、AUD-016、AUD-008 已在 main；AUD-055、AUD-002、AUD-035、AUD-033 汇集到 codex/final-hardening-unified，由一个 PR 验证和合并，收口文档随同该 PR 交付，不再创建纯文档 PR。",
   "meta": {}
 }
