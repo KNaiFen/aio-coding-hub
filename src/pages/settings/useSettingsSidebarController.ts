@@ -4,7 +4,7 @@ import type { UpdateMeta } from "../../hooks/useUpdateMeta";
 import { AIO_RELEASES_URL } from "../../constants/urls";
 import { runBackgroundTask } from "../../services/backgroundTasks";
 import type { ConfigImportResult } from "../../services/app/configMigrate";
-import { appDataDirGet, appDataReset, appExit, dbCompact } from "../../services/app/dataManagement";
+import { appDataDirGet, appDataReset, dbCompact } from "../../services/app/dataManagement";
 import type { ClearRequestLogsResult } from "../../services/app/dataManagement";
 import { openDesktopSinglePath, saveDesktopFilePath } from "../../services/desktop/dialog";
 import { openDesktopPath, openDesktopUrl } from "../../services/desktop/opener";
@@ -249,10 +249,6 @@ export function useSettingsSidebarController(input: SettingsSidebarControllerInp
       await clearAppDataResetCaches();
       presentResetAllSuccess();
       setResetAllDialogOpen(false);
-
-      window.setTimeout(() => {
-        appExit().catch(() => {});
-      }, 1000);
     } catch (error) {
       presentSettingsSidebarFailure({
         logTitle: "清理全部信息失败",

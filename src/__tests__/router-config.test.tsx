@@ -19,7 +19,18 @@ vi.mock("react-router-dom", async () => {
 });
 
 vi.mock("../app/useAppBootstrap", () => ({
-  useAppBootstrap: vi.fn(),
+  useAppBootstrap: vi.fn(() => ({
+    synchronized: true,
+    status: {
+      running: false,
+      maintenanceMode: false,
+      currentStage: "ready",
+      failedStage: null,
+      errorMessage: null,
+      canRetry: false,
+    },
+  })),
+  AppRuntimeServices: () => null,
 }));
 
 vi.mock("../app/AppRoutes", () => ({
