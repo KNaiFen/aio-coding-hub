@@ -458,6 +458,7 @@ mod tests {
             "plugin_update_remote",
             "plugin_install_official",
             "plugin_quarantine_revoked",
+            "plugin_revalidate",
             "plugin_enable",
             "plugin_disable",
             "plugin_uninstall",
