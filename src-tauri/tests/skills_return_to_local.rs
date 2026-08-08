@@ -121,5 +121,8 @@ fn return_to_local_rejects_symlink_entries_inside_ssot_dir_without_mutating_stat
             |row| row.get(0),
         )
         .expect("count skill rows after rejection");
-    assert_eq!(remaining, 1, "the rejected return must preserve the skill row");
+    assert_eq!(
+        remaining, 1,
+        "the rejected return must preserve the skill row"
+    );
 }
