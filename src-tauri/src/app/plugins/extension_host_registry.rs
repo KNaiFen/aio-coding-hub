@@ -1394,10 +1394,9 @@ mod tests {
             "PLUGIN_PERMISSION_DENIED"
         );
         assert_eq!(
-            extension_host_gateway_error(AppError::new(
-                "PLUGIN_EXTENSION_CALL_TIMEOUT",
-                "timeout",
-            ))
+            extension_host_gateway_error(
+                AppError::new("PLUGIN_EXTENSION_CALL_TIMEOUT", "timeout",)
+            )
             .code(),
             "PLUGIN_EXTENSION_HOST_TIMEOUT"
         );

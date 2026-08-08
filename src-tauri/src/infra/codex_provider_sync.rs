@@ -812,9 +812,9 @@ fn prune_managed_backups_with_budget(
         )
         .into());
     }
-    let current_name = current_backup
-        .file_name()
-        .ok_or_else(|| "SEC_INVALID_INPUT: invalid current provider sync backup name".to_string())?;
+    let current_name = current_backup.file_name().ok_or_else(|| {
+        "SEC_INVALID_INPUT: invalid current provider sync backup name".to_string()
+    })?;
     let mut warnings = Vec::new();
     let mut suppressed_warnings = 0usize;
     let names = match provider_sync_backup_root_directory_names(&root_handle, budget) {
@@ -890,19 +890,9 @@ fn prune_managed_backups_with_budget(
             }
         };
         if let Some(warning) =
-            remove_managed_backup_candidate_with_root(
-                &root,
-                &root_handle,
-                &path,
-                version,
-                budget,
-            )?
+            remove_managed_backup_candidate_with_root(&root, &root_handle, &path, version, budget)?
         {
-            push_provider_sync_prune_warning(
-                &mut warnings,
-                &mut suppressed_warnings,
-                warning,
-            );
+            push_provider_sync_prune_warning(&mut warnings, &mut suppressed_warnings, warning);
         }
     }
     if suppressed_warnings > 0 {
@@ -1030,52 +1020,44 @@ fn remove_managed_backup_candidate_with_root(
     let Some(original_name) = path.file_name() else {
         return Err("SEC_INVALID_INPUT: invalid managed backup candidate name".into());
     };
-    let delete_handle = match open_provider_sync_backup_child_no_follow(
-        root_handle,
-        original_name,
-        true,
-    ) {
-        Ok(handle) => handle,
-        Err(err) => {
-            return Ok(Some(provider_sync_backup_preserved_warning(
-                path,
-                &format!("failed to bind candidate directory: {err}"),
-            )));
-        }
-    };
+    let delete_handle =
+        match open_provider_sync_backup_child_no_follow(root_handle, original_name, true) {
+            Ok(handle) => handle,
+            Err(err) => {
+                return Ok(Some(provider_sync_backup_preserved_warning(
+                    path,
+                    &format!("failed to bind candidate directory: {err}"),
+                )));
+            }
+        };
     let candidate_identity = provider_sync_file_identity_from_handle(&delete_handle)?;
-    let validation_handle = match open_provider_sync_backup_child_no_follow(
-        root_handle,
-        original_name,
-        true,
-    ) {
-        Ok(handle) => handle,
-        Err(err) => {
-            return Ok(Some(provider_sync_backup_preserved_warning(
-                path,
-                &format!("failed to reopen candidate directory: {err}"),
-            )));
-        }
-    };
+    let validation_handle =
+        match open_provider_sync_backup_child_no_follow(root_handle, original_name, true) {
+            Ok(handle) => handle,
+            Err(err) => {
+                return Ok(Some(provider_sync_backup_preserved_warning(
+                    path,
+                    &format!("failed to reopen candidate directory: {err}"),
+                )));
+            }
+        };
     if provider_sync_file_identity_from_handle(&validation_handle)? != candidate_identity {
         return Ok(Some(provider_sync_backup_preserved_warning(
             path,
             "candidate identity changed before validation",
         )));
     }
-    let expected_snapshot = match validated_provider_sync_backup_snapshot(
-        &validation_handle,
-        expected_version,
-        budget,
-    ) {
-        Ok(snapshot) => snapshot,
-        Err(err) => {
-            return Ok(Some(provider_sync_backup_preserved_warning(
-                path,
-                &format!("ownership or tree validation changed before isolation: {err}"),
-            )));
-        }
-    };
+    let expected_snapshot =
+        match validated_provider_sync_backup_snapshot(&validation_handle, expected_version, budget)
+        {
+            Ok(snapshot) => snapshot,
+            Err(err) => {
+                return Ok(Some(provider_sync_backup_preserved_warning(
+                    path,
+                    &format!("ownership or tree validation changed before isolation: {err}"),
+                )));
+            }
+        };
     drop(validation_handle);
 
     #[cfg(test)]
@@ -1093,19 +1075,16 @@ fn remove_managed_backup_candidate_with_root(
         )));
     }
 
-    let quarantine_name = match isolate_provider_sync_backup_candidate(
-        root_handle,
-        &delete_handle,
-        original_name,
-    ) {
-        Ok(name) => name,
-        Err(err) => {
-            return Ok(Some(provider_sync_backup_preserved_warning(
-                path,
-                &format!("failed to isolate candidate: {err}"),
-            )));
-        }
-    };
+    let quarantine_name =
+        match isolate_provider_sync_backup_candidate(root_handle, &delete_handle, original_name) {
+            Ok(name) => name,
+            Err(err) => {
+                return Ok(Some(provider_sync_backup_preserved_warning(
+                    path,
+                    &format!("failed to isolate candidate: {err}"),
+                )));
+            }
+        };
     let quarantine = root.join(&quarantine_name);
     if let Err(err) = validate_isolated_provider_sync_backup(
         root_handle,
@@ -1235,8 +1214,7 @@ impl ProviderSyncPruneBudget {
     fn reserve_file_hash(&mut self, size: u64) -> AppResult<()> {
         if size > self.max_file_bytes {
             return Err(
-                "SEC_INVALID_INPUT: provider sync backup file is too large to verify safely"
-                    .into(),
+                "SEC_INVALID_INPUT: provider sync backup file is too large to verify safely".into(),
             );
         }
         self.hashed_bytes = self.hashed_bytes.checked_add(size).ok_or_else(|| {
@@ -1244,8 +1222,7 @@ impl ProviderSyncPruneBudget {
         })?;
         if self.hashed_bytes > self.max_hashed_bytes {
             return Err(
-                "SEC_INVALID_INPUT: provider sync backup tree is too large to verify safely"
-                    .into(),
+                "SEC_INVALID_INPUT: provider sync backup tree is too large to verify safely".into(),
             );
         }
         Ok(())
@@ -1489,9 +1466,7 @@ fn open_provider_sync_backup_dir_no_follow(path: &Path) -> AppResult<std::fs::Fi
             )
         })?;
     let attributes = windows_provider_sync_backup_handle_attributes(&file)?;
-    if attributes
-        & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
-        != 0
+    if attributes & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT != 0
         || attributes & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_DIRECTORY == 0
     {
         return Err(format!(
@@ -1514,8 +1489,8 @@ fn provider_sync_backup_root_directory_names(
         .map_err(|err| format!("failed to enumerate provider sync backup root: {err}"))?;
     let mut names = Vec::new();
     for entry in entries {
-        let entry = entry
-            .map_err(|err| format!("failed to enumerate provider sync backup root: {err}"))?;
+        let entry =
+            entry.map_err(|err| format!("failed to enumerate provider sync backup root: {err}"))?;
         let raw_name = entry.file_name();
         if raw_name.to_bytes() == b"." || raw_name.to_bytes() == b".." {
             continue;
@@ -1568,8 +1543,7 @@ fn provider_sync_backup_dir_has_regular_manifest(
         let stat = rustix::fs::statat(dir, name, rustix::fs::AtFlags::SYMLINK_NOFOLLOW)
             .map_err(|err| format!("failed to inspect provider sync backup manifest: {err}"))?;
         return Ok(
-            rustix::fs::FileType::from_raw_mode(stat.st_mode)
-                == rustix::fs::FileType::RegularFile,
+            rustix::fs::FileType::from_raw_mode(stat.st_mode) == rustix::fs::FileType::RegularFile
         );
     }
     Ok(false)
@@ -1587,9 +1561,7 @@ fn provider_sync_backup_dir_has_regular_manifest(
         .collect::<Vec<_>>();
     Ok(windows_provider_sync_backup_entries(dir, budget)?
         .into_iter()
-        .any(|entry| {
-            entry.name == manifest_name && !entry.is_directory && !entry.is_reparse
-        }))
+        .any(|entry| entry.name == manifest_name && !entry.is_directory && !entry.is_reparse))
 }
 
 #[cfg(unix)]
@@ -1661,7 +1633,9 @@ fn open_windows_provider_sync_backup_child_no_follow(
         .len()
         .checked_mul(std::mem::size_of::<u16>())
         .and_then(|value| u16::try_from(value).ok())
-        .ok_or_else(|| "SEC_INVALID_INPUT: provider sync backup entry name is too long".to_string())?;
+        .ok_or_else(|| {
+            "SEC_INVALID_INPUT: provider sync backup entry name is too long".to_string()
+        })?;
     let unicode = UNICODE_STRING {
         Length: byte_len,
         MaximumLength: byte_len,
@@ -1715,9 +1689,7 @@ fn open_windows_provider_sync_backup_child_no_follow(
     }
     let file = unsafe { std::fs::File::from_raw_handle(handle as _) };
     let attributes = windows_provider_sync_backup_handle_attributes(&file)?;
-    if attributes
-        & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
-        != 0
+    if attributes & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT != 0
         || (attributes & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_DIRECTORY != 0)
             != is_directory
     {
@@ -1773,10 +1745,8 @@ fn provider_sync_file_metadata_fingerprint_from_handle(
             file: metadata.ino(),
         },
         size: metadata.size(),
-        modified: i128::from(metadata.mtime()) * 1_000_000_000
-            + i128::from(metadata.mtime_nsec()),
-        changed: i128::from(metadata.ctime()) * 1_000_000_000
-            + i128::from(metadata.ctime_nsec()),
+        modified: i128::from(metadata.mtime()) * 1_000_000_000 + i128::from(metadata.mtime_nsec()),
+        changed: i128::from(metadata.ctime()) * 1_000_000_000 + i128::from(metadata.ctime_nsec()),
         links: metadata.nlink(),
         content_sha256: None,
     })
@@ -1943,7 +1913,9 @@ fn capture_provider_sync_backup_tree_unix(
             let child = open_provider_sync_backup_child_no_follow(dir, &name, true)?;
             let fingerprint = provider_sync_file_fingerprint_from_handle(&child, true, budget)?;
             if fingerprint.identity != stat_identity {
-                return Err("SEC_INVALID_INPUT: provider sync backup directory identity changed".into());
+                return Err(
+                    "SEC_INVALID_INPUT: provider sync backup directory identity changed".into(),
+                );
             }
             (
                 fingerprint,
@@ -1958,7 +1930,9 @@ fn capture_provider_sync_backup_tree_unix(
             }
             (fingerprint, ProviderSyncBackupEntryKind::File, Vec::new())
         } else {
-            return Err("SEC_INVALID_INPUT: provider sync backup contains a link or special entry".into());
+            return Err(
+                "SEC_INVALID_INPUT: provider sync backup contains a link or special entry".into(),
+            );
         };
         snapshot.push(ProviderSyncBackupEntrySnapshot {
             name,
@@ -2042,9 +2016,8 @@ fn windows_provider_sync_backup_entries(
     use std::os::windows::io::AsRawHandle as _;
     use windows_sys::Win32::Foundation::{GetLastError, ERROR_NO_MORE_FILES};
     use windows_sys::Win32::Storage::FileSystem::{
-        FileIdBothDirectoryInfo, FileIdBothDirectoryRestartInfo,
-        GetFileInformationByHandleEx, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
-        FILE_ID_BOTH_DIR_INFO,
+        FileIdBothDirectoryInfo, FileIdBothDirectoryRestartInfo, GetFileInformationByHandleEx,
+        FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ID_BOTH_DIR_INFO,
     };
 
     let mut entries = Vec::new();
@@ -2087,7 +2060,10 @@ fn windows_provider_sync_backup_entries(
                     "SEC_INVALID_INPUT: provider sync backup entry header overflow".to_string()
                 })?;
             if offset % alignment != 0 || fixed_end > buffer_bytes {
-                return Err("SEC_INVALID_INPUT: invalid provider sync backup directory entry alignment".into());
+                return Err(
+                    "SEC_INVALID_INPUT: invalid provider sync backup directory entry alignment"
+                        .into(),
+                );
             }
             let info = unsafe {
                 &*buffer
@@ -2098,11 +2074,13 @@ fn windows_provider_sync_backup_entries(
             };
             let name_bytes = info.FileNameLength as usize;
             if name_bytes % std::mem::size_of::<u16>() != 0 {
-                return Err("SEC_INVALID_INPUT: invalid provider sync backup entry name length".into());
+                return Err(
+                    "SEC_INVALID_INPUT: invalid provider sync backup entry name length".into(),
+                );
             }
-            let minimum_record = header
-                .checked_add(name_bytes)
-                .ok_or_else(|| "SEC_INVALID_INPUT: provider sync backup entry length overflow".to_string())?;
+            let minimum_record = header.checked_add(name_bytes).ok_or_else(|| {
+                "SEC_INVALID_INPUT: provider sync backup entry length overflow".to_string()
+            })?;
             let record_len = if info.NextEntryOffset == 0 {
                 minimum_record
             } else {
@@ -2115,7 +2093,9 @@ fn windows_provider_sync_backup_entries(
                 || info.NextEntryOffset != 0 && record_len % alignment != 0
                 || record_end > buffer_bytes
             {
-                return Err("SEC_INVALID_INPUT: invalid provider sync backup directory entry bounds".into());
+                return Err(
+                    "SEC_INVALID_INPUT: invalid provider sync backup directory entry bounds".into(),
+                );
             }
             let name_len = name_bytes / std::mem::size_of::<u16>();
             let name = unsafe { std::slice::from_raw_parts(info.FileName.as_ptr(), name_len) };
@@ -2131,9 +2111,9 @@ fn windows_provider_sync_backup_entries(
             if info.NextEntryOffset == 0 {
                 break;
             }
-            offset = offset
-                .checked_add(record_len)
-                .ok_or_else(|| "SEC_INVALID_INPUT: provider sync backup entry offset overflow".to_string())?;
+            offset = offset.checked_add(record_len).ok_or_else(|| {
+                "SEC_INVALID_INPUT: provider sync backup entry offset overflow".to_string()
+            })?;
         }
     }
     Ok(entries)
@@ -2260,11 +2240,8 @@ fn remove_provider_sync_backup_snapshot_entries_at(
         run_before_unix_provider_sync_backup_entry_isolation_test_hook();
 
         let isolated_name = isolate_unix_provider_sync_backup_entry(dir, &entry.name)?;
-        let isolated = open_provider_sync_backup_child_no_follow(
-            dir,
-            &isolated_name,
-            is_directory,
-        )?;
+        let isolated =
+            open_provider_sync_backup_child_no_follow(dir, &isolated_name, is_directory)?;
         if provider_sync_file_fingerprint_from_handle(&isolated, is_directory, budget)?
             != entry.fingerprint
         {
@@ -2275,22 +2252,14 @@ fn remove_provider_sync_backup_snapshot_entries_at(
             .into());
         }
         if is_directory {
-            remove_provider_sync_backup_snapshot_entries_at(
-                &isolated,
-                &entry.children,
-                budget,
-            )?;
+            remove_provider_sync_backup_snapshot_entries_at(&isolated, &entry.children, budget)?;
         }
 
         let final_name = isolate_unix_provider_sync_backup_entry(dir, &isolated_name)?;
-        let final_handle = open_provider_sync_backup_child_no_follow(
-            dir,
-            &final_name,
-            is_directory,
-        )?;
+        let final_handle =
+            open_provider_sync_backup_child_no_follow(dir, &final_name, is_directory)?;
         if is_directory {
-            if provider_sync_file_identity_from_handle(&final_handle)?
-                != entry.fingerprint.identity
+            if provider_sync_file_identity_from_handle(&final_handle)? != entry.fingerprint.identity
             {
                 return Err(format!(
                     "SEC_INVALID_INPUT: provider sync backup directory identity changed at final tombstone {}",
@@ -2334,7 +2303,10 @@ fn remove_provider_sync_backup_snapshot_entries_at(
         )
         .map_err(|err| format!("failed to remove provider sync backup entry: {err}"))?;
     }
-    if !capture_provider_sync_backup_tree(dir, budget)?.entries.is_empty() {
+    if !capture_provider_sync_backup_tree(dir, budget)?
+        .entries
+        .is_empty()
+    {
         return Err("SEC_INVALID_INPUT: provider sync backup gained entries during removal".into());
     }
     Ok(())
@@ -2374,22 +2346,17 @@ fn remove_windows_provider_sync_backup_snapshot_entries(
 ) -> AppResult<()> {
     for entry in entries {
         let is_directory = entry.kind == ProviderSyncBackupEntryKind::Directory;
-        let child = open_windows_provider_sync_backup_child_no_follow(
-            dir,
-            &entry.name,
-            is_directory,
-        )?;
+        let child =
+            open_windows_provider_sync_backup_child_no_follow(dir, &entry.name, is_directory)?;
         if provider_sync_file_fingerprint_from_handle(&child, is_directory, budget)?
             != entry.fingerprint
         {
-            return Err("SEC_INVALID_INPUT: provider sync backup entry changed during removal".into());
+            return Err(
+                "SEC_INVALID_INPUT: provider sync backup entry changed during removal".into(),
+            );
         }
         if is_directory {
-            remove_windows_provider_sync_backup_snapshot_entries(
-                &child,
-                &entry.children,
-                budget,
-            )?;
+            remove_windows_provider_sync_backup_snapshot_entries(&child, &entry.children, budget)?;
         }
 
         #[cfg(test)]
@@ -2415,13 +2382,17 @@ fn remove_windows_provider_sync_backup_snapshot_entries(
             != entry.fingerprint
         {
             return Err(
-                "SEC_INVALID_INPUT: provider sync backup file changed before handle deletion".into(),
+                "SEC_INVALID_INPUT: provider sync backup file changed before handle deletion"
+                    .into(),
             );
         }
         delete_windows_provider_sync_backup_handle(&child)?;
         drop(child);
     }
-    if !capture_provider_sync_backup_tree(dir, budget)?.entries.is_empty() {
+    if !capture_provider_sync_backup_tree(dir, budget)?
+        .entries
+        .is_empty()
+    {
         return Err("SEC_INVALID_INPUT: provider sync backup gained entries during removal".into());
     }
     Ok(())
@@ -2523,8 +2494,8 @@ pub(super) fn set_before_provider_sync_backup_isolation_test_hook(
 
 #[cfg(test)]
 fn run_before_provider_sync_backup_isolation_test_hook() {
-    let hook = BEFORE_PROVIDER_SYNC_BACKUP_ISOLATION_TEST_HOOK
-        .with(|current| current.borrow_mut().take());
+    let hook =
+        BEFORE_PROVIDER_SYNC_BACKUP_ISOLATION_TEST_HOOK.with(|current| current.borrow_mut().take());
     if let Some(hook) = hook {
         hook();
     }
@@ -2545,8 +2516,8 @@ pub(super) fn set_after_provider_sync_backup_root_open_test_hook(
 
 #[cfg(test)]
 fn run_after_provider_sync_backup_root_open_test_hook() {
-    let hook = AFTER_PROVIDER_SYNC_BACKUP_ROOT_OPEN_TEST_HOOK
-        .with(|current| current.borrow_mut().take());
+    let hook =
+        AFTER_PROVIDER_SYNC_BACKUP_ROOT_OPEN_TEST_HOOK.with(|current| current.borrow_mut().take());
     if let Some(hook) = hook {
         hook();
     }
@@ -2638,8 +2609,8 @@ pub(super) fn set_after_provider_sync_backup_validation_test_hook(
 
 #[cfg(test)]
 fn run_after_provider_sync_backup_validation_test_hook(quarantine: &Path) {
-    let hook = AFTER_PROVIDER_SYNC_BACKUP_VALIDATION_TEST_HOOK
-        .with(|current| current.borrow_mut().take());
+    let hook =
+        AFTER_PROVIDER_SYNC_BACKUP_VALIDATION_TEST_HOOK.with(|current| current.borrow_mut().take());
     if let Some(hook) = hook {
         hook(quarantine);
     }

@@ -65,10 +65,7 @@ fn backup_prune_limits_accept_exact_boundaries_and_reject_overflow() {
     exact_entries
         .record_entry()
         .expect("maximum supported entry count should be accepted");
-    assert_eq!(
-        exact_entries.entries_seen,
-        PROVIDER_SYNC_PRUNE_MAX_ENTRIES
-    );
+    assert_eq!(exact_entries.entries_seen, PROVIDER_SYNC_PRUNE_MAX_ENTRIES);
     assert!(
         exact_entries.record_entry().is_err(),
         "entry count above the limit must fail closed"
@@ -88,12 +85,14 @@ fn backup_tree_capture_enforces_real_depth_entry_and_hash_budgets() {
 
     let depth_root = temp.path().join("depth-root");
     std::fs::create_dir_all(depth_root.join("one/two")).expect("create depth tree");
-    let depth_handle = open_provider_sync_backup_dir_no_follow(&depth_root).expect("open depth tree");
+    let depth_handle =
+        open_provider_sync_backup_dir_no_follow(&depth_root).expect("open depth tree");
     let mut exact_depth = ProviderSyncPruneBudget::with_limits(2, 8, 1024, 4096);
     capture_provider_sync_backup_tree(&depth_handle, &mut exact_depth)
         .expect("exact recursive depth should be accepted");
     drop(depth_handle);
-    let depth_handle = open_provider_sync_backup_dir_no_follow(&depth_root).expect("reopen depth tree");
+    let depth_handle =
+        open_provider_sync_backup_dir_no_follow(&depth_root).expect("reopen depth tree");
     let mut overflow_depth = ProviderSyncPruneBudget::with_limits(1, 8, 1024, 4096);
     assert!(
         capture_provider_sync_backup_tree(&depth_handle, &mut overflow_depth).is_err(),
@@ -105,12 +104,14 @@ fn backup_tree_capture_enforces_real_depth_entry_and_hash_budgets() {
     for name in ["one", "two", "three"] {
         std::fs::write(entry_root.join(name), b"x").expect("write entry");
     }
-    let entry_handle = open_provider_sync_backup_dir_no_follow(&entry_root).expect("open entry tree");
+    let entry_handle =
+        open_provider_sync_backup_dir_no_follow(&entry_root).expect("open entry tree");
     let mut exact_entries = ProviderSyncPruneBudget::with_limits(1, 3, 1024, 4096);
     capture_provider_sync_backup_tree(&entry_handle, &mut exact_entries)
         .expect("exact entry count should be accepted");
     drop(entry_handle);
-    let entry_handle = open_provider_sync_backup_dir_no_follow(&entry_root).expect("reopen entry tree");
+    let entry_handle =
+        open_provider_sync_backup_dir_no_follow(&entry_root).expect("reopen entry tree");
     let mut overflow_entries = ProviderSyncPruneBudget::with_limits(1, 2, 1024, 4096);
     assert!(
         capture_provider_sync_backup_tree(&entry_handle, &mut overflow_entries).is_err(),
@@ -126,14 +127,16 @@ fn backup_tree_capture_enforces_real_depth_entry_and_hash_budgets() {
     capture_provider_sync_backup_tree(&hash_handle, &mut exact_hash)
         .expect("exact file and aggregate hash bytes should be accepted");
     drop(hash_handle);
-    let hash_handle = open_provider_sync_backup_dir_no_follow(&hash_root).expect("reopen hash tree");
+    let hash_handle =
+        open_provider_sync_backup_dir_no_follow(&hash_root).expect("reopen hash tree");
     let mut oversized_file = ProviderSyncPruneBudget::with_limits(1, 2, 3, 8);
     assert!(
         capture_provider_sync_backup_tree(&hash_handle, &mut oversized_file).is_err(),
         "a file above the configured hash size must fail closed"
     );
     drop(hash_handle);
-    let hash_handle = open_provider_sync_backup_dir_no_follow(&hash_root).expect("reopen hash tree");
+    let hash_handle =
+        open_provider_sync_backup_dir_no_follow(&hash_root).expect("reopen hash tree");
     let mut oversized_tree = ProviderSyncPruneBudget::with_limits(1, 2, 4, 7);
     assert!(
         capture_provider_sync_backup_tree(&hash_handle, &mut oversized_tree).is_err(),
@@ -201,12 +204,9 @@ fn regular_file_fingerprint_binds_equal_length_contents() {
     let payload = root.join("payload");
     std::fs::write(&payload, b"before").expect("write original payload");
     let root_handle = open_provider_sync_backup_dir_no_follow(&root).expect("open root");
-    let original = open_provider_sync_backup_child_no_follow(
-        &root_handle,
-        OsStr::new("payload"),
-        false,
-    )
-    .expect("open original payload");
+    let original =
+        open_provider_sync_backup_child_no_follow(&root_handle, OsStr::new("payload"), false)
+            .expect("open original payload");
     let mut original_budget = ProviderSyncPruneBudget::with_limits(1, 1, 1024, 4096);
     let original_fingerprint =
         provider_sync_file_fingerprint_from_handle(&original, false, &mut original_budget)
@@ -214,12 +214,9 @@ fn regular_file_fingerprint_binds_equal_length_contents() {
     drop(original);
 
     std::fs::write(&payload, b"after!").expect("rewrite payload at the same length");
-    let changed = open_provider_sync_backup_child_no_follow(
-        &root_handle,
-        OsStr::new("payload"),
-        false,
-    )
-    .expect("open changed payload");
+    let changed =
+        open_provider_sync_backup_child_no_follow(&root_handle, OsStr::new("payload"), false)
+            .expect("open changed payload");
     let mut changed_budget = ProviderSyncPruneBudget::with_limits(1, 1, 1024, 4096);
     let changed_fingerprint =
         provider_sync_file_fingerprint_from_handle(&changed, false, &mut changed_budget)
@@ -228,8 +225,7 @@ fn regular_file_fingerprint_binds_equal_length_contents() {
     assert_eq!(original_fingerprint.identity, changed_fingerprint.identity);
     assert_eq!(original_fingerprint.size, changed_fingerprint.size);
     assert_ne!(
-        original_fingerprint.content_sha256,
-        changed_fingerprint.content_sha256,
+        original_fingerprint.content_sha256, changed_fingerprint.content_sha256,
         "equal-length in-place rewrites must change the content fingerprint"
     );
 }
@@ -243,12 +239,9 @@ fn windows_backup_fingerprint_uses_change_time_for_metadata_changes() {
     let payload = root.join("payload");
     std::fs::write(&payload, b"before").expect("write original payload");
     let root_handle = open_provider_sync_backup_dir_no_follow(&root).expect("open root");
-    let original = open_provider_sync_backup_child_no_follow(
-        &root_handle,
-        OsStr::new("payload"),
-        false,
-    )
-    .expect("open original payload");
+    let original =
+        open_provider_sync_backup_child_no_follow(&root_handle, OsStr::new("payload"), false)
+            .expect("open original payload");
     let original_metadata = provider_sync_file_metadata_fingerprint_from_handle(&original)
         .expect("read original change time");
     drop(original);
@@ -259,12 +252,9 @@ fn windows_backup_fingerprint_uses_change_time_for_metadata_changes() {
     permissions.set_readonly(true);
     std::fs::set_permissions(&payload, permissions.clone())
         .expect("set readonly payload attribute");
-    let changed = open_provider_sync_backup_child_no_follow(
-        &root_handle,
-        OsStr::new("payload"),
-        false,
-    )
-    .expect("open changed payload");
+    let changed =
+        open_provider_sync_backup_child_no_follow(&root_handle, OsStr::new("payload"), false)
+            .expect("open changed payload");
     let changed_metadata = provider_sync_file_metadata_fingerprint_from_handle(&changed)
         .expect("read changed change time");
 
@@ -297,7 +287,11 @@ fn windows_backup_directory_enumeration_restarts_for_each_snapshot() {
     let mut first_budget = ProviderSyncPruneBudget::with_limits(4, 8, 1024, 4096);
     let first = capture_provider_sync_backup_tree(&root_handle, &mut first_budget)
         .expect("capture first snapshot");
-    assert_eq!(first.entries.len(), 1, "first snapshot should see one entry");
+    assert_eq!(
+        first.entries.len(),
+        1,
+        "first snapshot should see one entry"
+    );
 
     std::fs::write(root.join("second.txt"), b"2").expect("write second entry");
     let mut second_budget = ProviderSyncPruneBudget::with_limits(4, 8, 1024, 4096);
@@ -562,14 +556,12 @@ fn backup_pruning_classifies_from_the_open_root_after_path_replacement() {
     set_after_provider_sync_backup_root_open_test_hook(Box::new(move || {
         std::fs::rename(&root_for_hook, &moved_root_for_hook).expect("move trusted root");
         let replacement_legacy = root_for_hook.join("legacy-v1");
-        write_managed_manifest(
-            &replacement_legacy,
-            1,
-            "3",
-            PROVIDER_SYNC_MANAGED_BY,
-        );
-        std::fs::write(replacement_legacy.join("user-notes.txt"), b"keep replacement")
-            .expect("write replacement root data");
+        write_managed_manifest(&replacement_legacy, 1, "3", PROVIDER_SYNC_MANAGED_BY);
+        std::fs::write(
+            replacement_legacy.join("user-notes.txt"),
+            b"keep replacement",
+        )
+        .expect("write replacement root data");
     }));
 
     let warning = prune_managed_backups(home, &current_v2).expect("prune bound root");
@@ -715,8 +707,7 @@ fn backup_removal_preserves_replacements_after_quarantine_validation() {
     let moved_quarantine_for_hook = moved_quarantine.clone();
     let candidate_for_hook = candidate.clone();
     set_after_provider_sync_backup_validation_test_hook(Box::new(move |quarantine| {
-        std::fs::rename(quarantine, &moved_quarantine_for_hook)
-            .expect("move isolated backup");
+        std::fs::rename(quarantine, &moved_quarantine_for_hook).expect("move isolated backup");
         std::fs::create_dir_all(quarantine).expect("create quarantine replacement");
         std::fs::write(quarantine.join("replacement-sentinel"), b"keep quarantine")
             .expect("write quarantine sentinel");
@@ -838,8 +829,7 @@ fn backup_removal_preserves_entry_replaced_at_unix_delete_boundary() {
         let manifest = quarantine.join(PROVIDER_SYNC_MANAGED_BACKUP_MANIFEST);
         std::fs::rename(&manifest, quarantine.join("displaced-manifest.json"))
             .expect("displace validated manifest");
-        std::fs::write(&manifest, b"keep replacement")
-            .expect("write replacement manifest entry");
+        std::fs::write(&manifest, b"keep replacement").expect("write replacement manifest entry");
     }));
 
     let warning = remove_managed_backup_candidate(&root, &candidate, expected)
@@ -902,8 +892,7 @@ fn backup_removal_preserves_root_replaced_at_unix_final_delete_boundary() {
         .find(|path| path.join("replacement-sentinel").exists())
         .expect("replacement root tombstone must remain");
     assert_eq!(
-        std::fs::read(replacement.join("replacement-sentinel"))
-            .expect("read replacement sentinel"),
+        std::fs::read(replacement.join("replacement-sentinel")).expect("read replacement sentinel"),
         b"keep replacement".to_vec()
     );
     assert!(

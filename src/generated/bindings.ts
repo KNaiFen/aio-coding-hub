@@ -3160,7 +3160,7 @@ export type FailoverAttempt = {
   provider_name: string;
   base_url: string;
   outcome: string;
-  upstream_sent: boolean;
+  upstream_sent?: boolean;
   status: number | null;
   provider_index: number | null;
   retry_index: number | null;
@@ -3184,16 +3184,6 @@ export type FailoverAttempt = {
   stream_internal_error?: StreamInternalErrorEvidence | null;
   requested_upstream_model: string | null;
 };
-export type StreamInternalErrorEvidence = {
-  event_type: string;
-  error_type: string | null;
-  error_code: string | null;
-  message: string | null;
-  classification: string;
-  matched_keyword: string | null;
-  disposition: string;
-  truncated: boolean;
-};
 export type FrontendErrorReportInput = {
   source: string;
   message: string;
@@ -3214,10 +3204,6 @@ export type GatewayActiveSessionSummary = {
   total_output_tokens: number | null;
   total_cost_usd: number | null;
   total_duration_ms: number | null;
-};
-export type GatewayBearerTokenReveal = {
-  token: string;
-  wsl_sync_error: string | null;
 };
 export type GatewayAttemptEvent = {
   trace_id: string;
@@ -3244,6 +3230,7 @@ export type GatewayAttemptEvent = {
   circuit_failure_threshold: number | null;
   claude_model_mapping: ClaudeModelMapping | null;
 };
+export type GatewayBearerTokenReveal = { token: string; wsl_sync_error: string | null };
 export type GatewayCircuitEvent = {
   trace_id: string;
   cli_key: string;
@@ -3309,6 +3296,8 @@ export type GatewayRequestEvent = {
   visible_ttfb_ms: number | null;
   upstream_stream_duration_ms: number | null;
   upstream_stream_timing_version: number;
+  final_upstream_attempt_duration_ms: number | null;
+  final_upstream_attempt_timing_version: number;
   attempts: FailoverAttempt[];
   input_tokens: number | null;
   output_tokens: number | null;
@@ -3636,6 +3625,12 @@ export type ModelPricesSyncReport = {
   updated: number;
   skipped: number;
   total: number;
+};
+export type ModelRoutingPolicy = { enabled: boolean; rules: ModelRoutingRule[] };
+export type ModelRoutingRule = {
+  source_model: string;
+  target_model: string | null;
+  reasoning_effort: string | null;
 };
 export type NoticeLevel = "info" | "success" | "warning" | "error";
 export type NoticeSendInput = { level: NoticeLevel; title: string | null; body: string };
@@ -4061,6 +4056,13 @@ export type ProviderAccountUsageStatus =
   | "auth_failed"
   | "query_failed";
 export type ProviderAuthMode = "api_key" | "oauth";
+export type ProviderAvailabilityBucket = {
+  start_at_ms: number;
+  end_at_ms: number;
+  success_count: number;
+  failure_count: number;
+  state: ProviderAvailabilityState;
+};
 export type ProviderAvailabilityResult = {
   ok: boolean;
   provider_id: number;
@@ -4072,13 +4074,6 @@ export type ProviderAvailabilityResult = {
   response_preview: string | null;
 };
 export type ProviderAvailabilityState = "healthy" | "unhealthy" | "no_data";
-export type ProviderAvailabilityBucket = {
-  start_at_ms: number;
-  end_at_ms: number;
-  success_count: number;
-  failure_count: number;
-  state: ProviderAvailabilityState;
-};
 export type ProviderAvailabilityTimeline = {
   provider_id: number;
   hours: number;
@@ -4354,6 +4349,8 @@ export type RequestLogDetail = {
   visible_ttfb_ms: number | null;
   upstream_stream_duration_ms: number | null;
   upstream_stream_timing_version: number;
+  final_upstream_attempt_duration_ms: number | null;
+  final_upstream_attempt_timing_version: number;
   attempts_json: string;
   input_tokens: number | null;
   output_tokens: number | null;
@@ -4378,25 +4375,16 @@ export type RequestLogDetail = {
   activity_details_json: string | null;
   created_at: number;
 };
-export type RequestLogPage = { items: RequestLogSummary[]; nextCursor: string | null };
 export type RequestLogErrorScope = "all" | "all_errors" | "stream_internal_error";
+export type RequestLogPage = { items: RequestLogSummary[]; nextCursor: string | null };
 export type RequestLogPageFilters = {
   cliKey: string | null;
   status: RequestLogStatusFilter | null;
   errorCodeContains: string | null;
   methodPathContains: string | null;
-  errorScope: RequestLogErrorScope;
+  errorScope?: RequestLogErrorScope;
   createdAtMsFrom: number | null;
   createdAtMsTo: number | null;
-};
-export type RequestLogSnapshotPage = {
-  items: RequestLogSummary[];
-  snapshotId: string;
-  totalCount: number;
-  totalPages: number;
-  page: number;
-  pageSize: number;
-  expiresAtMs: number;
 };
 export type RequestLogRouteHop = {
   provider_id: number;
@@ -4411,6 +4399,15 @@ export type RequestLogRouteHop = {
   error_code?: string | null;
   decision?: string | null;
   reason?: string | null;
+};
+export type RequestLogSnapshotPage = {
+  items: RequestLogSummary[];
+  snapshotId: string;
+  totalCount: number;
+  totalPages: number;
+  page: number;
+  pageSize: number;
+  expiresAtMs: number;
 };
 export type RequestLogStatusFilter = { op: RequestLogStatusFilterOp; value: number };
 export type RequestLogStatusFilterOp = "eq" | "neq" | "gte" | "lte";
@@ -4432,6 +4429,8 @@ export type RequestLogSummary = {
   visible_ttfb_ms: number | null;
   upstream_stream_duration_ms: number | null;
   upstream_stream_timing_version: number;
+  final_upstream_attempt_duration_ms: number | null;
+  final_upstream_attempt_timing_version: number;
   attempt_count: number;
   has_failover: boolean;
   start_provider_id: number;
@@ -4508,6 +4507,7 @@ export type SettingsUpdate = {
   failoverMaxProvidersToTry: number;
   upstreamRetryPolicy: UpstreamRetryPolicy | null;
   modelRoutingPolicy: ModelRoutingPolicy | null;
+  upstreamErrorResponseRules: UpstreamErrorResponseRule[] | null;
   circuitBreakerFailureThreshold: number | null;
   circuitBreakerOpenDurationMinutes: number | null;
   updateReleasesUrl: string | null;
@@ -4571,6 +4571,7 @@ export type SettingsView = {
   failover_max_providers_to_try: number;
   upstream_retry_policy: UpstreamRetryPolicy;
   model_routing_policy: ModelRoutingPolicy;
+  upstream_error_response_rules: UpstreamErrorResponseRule[];
   circuit_breaker_failure_threshold: number;
   circuit_breaker_open_duration_minutes: number;
   enable_circuit_breaker_notice: boolean;
@@ -4644,11 +4645,23 @@ export type SortModeProviderRow = {
   session_reuse_priority: number;
 };
 export type SortModeSummary = { id: number; name: string; created_at: number; updated_at: number };
+export type StreamInternalErrorEvidence = {
+  event_type: string;
+  error_type: string | null;
+  error_code: string | null;
+  message: string | null;
+  classification: string;
+  matched_keyword: string | null;
+  disposition: string;
+  truncated: boolean;
+};
 export type TargetCliKey = "claude" | "codex" | "gemini";
 export type TrayProviderMiniProvider = {
   providerId: number;
   providerName: string;
   unavailableReasons: TrayProviderMiniUnavailableReason[];
+  successCount: number;
+  failureCount: number;
   availability: ProviderAvailabilityState[];
 };
 export type TrayProviderMiniSelectionSource = "active_request" | "recent_request" | "enabled_cli";
@@ -4666,7 +4679,7 @@ export type TrayProviderMiniUnavailableReason =
   | "circuit_open"
   | "cooldown"
   | "spend_limit"
-  | "oauth_limit";
+  | "o_auth_limit";
 export type UiContribution = {
   id: string;
   title?: string | null;
@@ -4674,18 +4687,33 @@ export type UiContribution = {
   schema: HostRenderedSchema;
   when?: string | null;
 };
+export type UpstreamErrorMessageBehavior =
+  | { mode: "passthrough" }
+  | { mode: "override"; message: string };
+export type UpstreamErrorResponseMatchMode = "any" | "all";
+export type UpstreamErrorResponseRule = {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  priority: number;
+  status_codes: number[];
+  keywords: string[];
+  match_mode: UpstreamErrorResponseMatchMode;
+  cli_keys: string[];
+  provider_ids: number[];
+  status_behavior: UpstreamErrorStatusBehavior;
+  message_behavior: UpstreamErrorMessageBehavior;
+};
+export type UpstreamErrorStatusBehavior =
+  | { mode: "passthrough" }
+  | { mode: "override"; status_code: number };
 export type UpstreamHttpRetryRule = {
   enabled: boolean;
   status_code: number;
   body_contains: string[];
   description: string;
 };
-export type ModelRoutingRule = {
-  source_model: string;
-  target_model: string | null;
-  reasoning_effort: string | null;
-};
-export type ModelRoutingPolicy = { enabled: boolean; rules: ModelRoutingRule[] };
 export type UpstreamRetryPolicy = {
   enabled: boolean;
   http_rules: UpstreamHttpRetryRule[];
