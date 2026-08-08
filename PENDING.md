@@ -82,6 +82,7 @@
 
 - **状态**：`planned`
 - **日期**：2026-08-06
+- **待执行交付**：PR #94 已在 `codex/aud021-filesystem-recovery-journal@c97ad431` 上净重建，产品候选为 `8bb2bbf8`；只重放 AUD-033 的 7 个插件代码/测试提交，未带入旧 AUD-008/AUD-002 历史或旧 generated bindings blob，并保留 Gateway Bearer Token 合同。精确 head 的 Actions 漂移、bindings 和完整回归仍待执行；按用户最新决定，该分支处理完成后不单独合并，改并入剩余事项的统一集成 PR，在统一合并前保持 `planned`。
 - **观察问题**：`activationEvents` 当前基本不参与 command/gateway 调度，重复 runtime failure 只触发进程内 circuit breaker，重启后清零且没有校验恢复路径。
 - **锁定决策**：仅支持 `onStartup`、`onCommand:*`、`onGatewayHook:*`，空数组保持 legacy；显式拒绝两种废弃事件；10 分钟内 3 次严重故障持久 quarantine；revalidate 成功只到 disabled。
 - **拟议方向**：引入精确 ActivationPolicy gate，统一 startup/command/gateway 严重故障分类和原子阈值事务，隔离后刷新 gateway snapshot/host，增加 quarantined-only revalidate。

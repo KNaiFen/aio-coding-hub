@@ -222,7 +222,7 @@ Validation 会拒绝：
 | `quarantined` | `disabled` | 用户确认并在校验后恢复。 |
 | any active state | `uninstalled` | 用户卸载插件。 |
 
-Upgrade failure 会恢复 previous version、config snapshot、capabilities 和 enabled state。Signature failure 会让插件进入 `quarantined`。同一插件的 host crash、JavaScript/runtime error 与 timeout 在 600 秒内累计第三次会进入 `quarantined`；context/output budget、capability/permission 和 header policy 拒绝不计数。第三次请求保留其原本 fail-open/fail-closed 结果，后续请求不再执行插件。重新校验会重新验证 manifest、安装和来源边界，成功后仅转为 `disabled`，不会自动启用；市场撤销隔离不能恢复。
+Upgrade failure 会恢复 previous version、config snapshot、capabilities 和 enabled state。Signature failure 会让插件进入 `quarantined`。同一插件的 host crash、JavaScript/runtime error 与 timeout 在 600 秒内累计第三次会进入 `quarantined`；context/output budget、capability/permission、输出合同、header policy 和安装状态拒绝不计数。第三次请求保留其原本 fail-open/fail-closed 结果，后续请求不再执行插件。重新校验会重新验证 manifest、安装和来源边界，成功后仅转为 `disabled`，不会自动启用；市场撤销隔离不能恢复。Market 来源的运行时隔离只有在宿主能复核当前签名市场状态时才允许恢复；当前状态不可用时保持 `quarantined` 并失败关闭。
 
 ## 11. Manifest 示例：社区 Prompt Helper
 
