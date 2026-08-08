@@ -70,7 +70,9 @@ async fn run(app_handle: tauri::AppHandle) {
         .registry(app_handle.clone(), db_state.inner())
         .await
     {
-        Ok(registry) => match crate::app::plugin_service::activate_startup_plugins(&db, &registry).await {
+        Ok(registry) => match crate::app::plugin_service::activate_startup_plugins(&db, &registry)
+            .await
+        {
             Ok(true) => crate::app::gateway_control::app_refresh_gateway_plugins(&app_handle, &db),
             Ok(false) => {}
             Err(error) => tracing::warn!(

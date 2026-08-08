@@ -217,7 +217,9 @@ pub(crate) async fn plugin_execute_command(
     input: PluginExecuteCommandInput,
 ) -> Result<serde_json::Value, String> {
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
-    let registry = registry_state.registry(app.clone(), db_state.inner()).await?;
+    let registry = registry_state
+        .registry(app.clone(), db_state.inner())
+        .await?;
     let result =
         plugin_service::execute_plugin_command(&db, registry.as_ref(), &input.command, input.args)
             .await;
@@ -576,11 +578,8 @@ pub(crate) async fn plugin_quarantine_revoked(
 ) -> Result<PluginDetail, String> {
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
     let detail = blocking::run("plugin_quarantine_revoked", move || {
-        plugin_service::quarantine_revoked_plugin(
-            &db,
-            &input.plugin_id,
-        )
-        .and_then(|detail| refresh_running_gateway_plugins(&app, &db, detail))
+        plugin_service::quarantine_revoked_plugin(&db, &input.plugin_id)
+            .and_then(|detail| refresh_running_gateway_plugins(&app, &db, detail))
     })
     .await
     .map_err(String::from)?;

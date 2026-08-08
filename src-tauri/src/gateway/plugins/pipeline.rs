@@ -726,7 +726,11 @@ impl GatewayPluginPipeline {
                 &truncation,
             ) {
                 self.record_failure(&plugin.summary.plugin_id, hook_name, &plugin_snapshot);
-                audit_events.push(failed_event(plugin, input.hook_name, err.code_for_logging()));
+                audit_events.push(failed_event(
+                    plugin,
+                    input.hook_name,
+                    err.code_for_logging(),
+                ));
                 let fail_closed =
                     failure_policy(plugin, input.hook_name) == FailurePolicy::FailClosed;
                 execution_reports.push(self.hook_execution_report(
@@ -756,7 +760,11 @@ impl GatewayPluginPipeline {
 
             if let Err(err) = apply_header_patch(&mut headers, &result.headers) {
                 self.record_failure(&plugin.summary.plugin_id, hook_name, &plugin_snapshot);
-                audit_events.push(failed_event(plugin, input.hook_name, err.code_for_logging()));
+                audit_events.push(failed_event(
+                    plugin,
+                    input.hook_name,
+                    err.code_for_logging(),
+                ));
                 execution_reports.push(self.hook_execution_report(
                     plugin,
                     input.hook_name,
@@ -1438,7 +1446,8 @@ impl GatewayPluginPipeline {
         error_code: &str,
         trace_id: &str,
     ) {
-        let Some(failure_kind) = crate::app::plugin_service::severe_runtime_failure_kind(error_code)
+        let Some(failure_kind) =
+            crate::app::plugin_service::severe_runtime_failure_kind(error_code)
         else {
             return;
         };
@@ -3462,7 +3471,9 @@ mod tests {
         let refresh = std::thread::spawn(move || {
             refresh_pipeline
                 .refresh_plugins_with(|| {
-                    refresh_loaded_tx.send(()).expect("signal stale refresh load");
+                    refresh_loaded_tx
+                        .send(())
+                        .expect("signal stale refresh load");
                     allow_refresh_rx.recv().expect("allow stale refresh commit");
                     Ok(vec![stale_plugin])
                 })
