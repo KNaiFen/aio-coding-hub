@@ -61,6 +61,9 @@ pub fn export_typescript_bindings(output_path: &str) -> Result<(), String> {
 #[test]
 #[ignore = "run manually: cargo test export_bindings -- --ignored"]
 fn export_bindings() {
-    export_typescript_bindings("../src/generated/bindings.ts")
-        .expect("failed to export specta TypeScript bindings");
+    export_typescript_bindings(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../src/generated/bindings.ts"
+    ))
+    .expect("failed to export specta TypeScript bindings");
 }

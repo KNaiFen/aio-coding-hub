@@ -327,8 +327,18 @@ impl GatewayRuntime {
             });
     }
 
-    pub(crate) fn refresh_plugin_pipeline(&self, plugins: Vec<crate::plugins::PluginDetail>) {
-        self.plugin_pipeline.replace_plugins(plugins);
+    pub(crate) fn refresh_plugin_pipeline<F>(
+        &self,
+        load_plugins: F,
+    ) -> crate::shared::error::AppResult<usize>
+    where
+        F: FnOnce() -> crate::shared::error::AppResult<Vec<crate::plugins::PluginDetail>>,
+    {
+        self.plugin_pipeline.refresh_plugins_with(load_plugins)
+    }
+
+    pub(crate) fn remove_plugin_from_pipeline(&self, plugin_id: &str) {
+        self.plugin_pipeline.remove_plugin_runtime(plugin_id);
     }
 
     pub(super) fn into_handles(self) -> GatewayRuntimeHandles {

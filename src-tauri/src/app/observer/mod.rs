@@ -18,7 +18,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 use tauri::Manager;
 use tokio::sync::{oneshot, Mutex, OwnedSemaphorePermit, Semaphore};
@@ -29,6 +29,10 @@ const OBSERVER_PROBE_TIMEOUT: Duration = Duration::from_millis(OBSERVER_PROVIDER
 const ACTIVE_CACHE_TTL: Duration = Duration::from_millis(400);
 const IDLE_CACHE_TTL: Duration = Duration::from_millis(1500);
 const OBSERVER_SNAPSHOT_CACHE_MAX_ENTRIES: usize = 64;
+pub(super) const OBSERVER_FOLDER_CACHE_MAX_ENTRIES: usize = 512;
+pub(super) const OBSERVER_FOLDER_LOOKUP_MAX_MISSES: usize = 256;
+pub(super) const OBSERVER_FOLDER_CACHE_HIT_TTL: Duration = Duration::from_secs(30);
+pub(super) const OBSERVER_FOLDER_CACHE_MISS_TTL: Duration = Duration::from_secs(5);
 const DB_QUERY_PERMIT_TIMEOUT: Duration = Duration::from_millis(1600);
 const DB_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 const STOP_TIMEOUT: Duration = Duration::from_secs(1);
@@ -60,6 +64,81 @@ struct CachedSnapshot {
     snapshot: ObserverSnapshotV1,
 }
 
+pub(super) type FolderCacheKey = (crate::cli_sessions::CliSessionsSource, String);
+
+#[derive(Default)]
+pub(super) struct FolderLookupCache {
+    entries: HashMap<FolderCacheKey, FolderCacheEntry>,
+}
+
+struct FolderCacheEntry {
+    folder_name: Option<String>,
+    expires_at: Instant,
+    last_used_at: Instant,
+}
+
+impl FolderLookupCache {
+    pub(super) fn lookup(
+        &mut self,
+        keys: &[FolderCacheKey],
+        now: Instant,
+    ) -> (HashMap<FolderCacheKey, String>, Vec<FolderCacheKey>) {
+        self.prune_expired(now);
+        let mut folders = HashMap::new();
+        let mut misses = Vec::new();
+        for key in keys {
+            match self.entries.get_mut(key) {
+                Some(entry) => {
+                    entry.last_used_at = now;
+                    if let Some(folder_name) = entry.folder_name.as_ref() {
+                        folders.insert(key.clone(), folder_name.clone());
+                    }
+                }
+                None => misses.push(key.clone()),
+            }
+        }
+        (folders, misses)
+    }
+
+    pub(super) fn record(
+        &mut self,
+        key: FolderCacheKey,
+        folder_name: Option<String>,
+        now: Instant,
+    ) {
+        self.prune_expired(now);
+        if !self.entries.contains_key(&key)
+            && self.entries.len() >= OBSERVER_FOLDER_CACHE_MAX_ENTRIES
+        {
+            if let Some(oldest_key) = self
+                .entries
+                .iter()
+                .min_by_key(|(_, entry)| entry.last_used_at)
+                .map(|(key, _)| key.clone())
+            {
+                self.entries.remove(&oldest_key);
+            }
+        }
+        let ttl = if folder_name.is_some() {
+            OBSERVER_FOLDER_CACHE_HIT_TTL
+        } else {
+            OBSERVER_FOLDER_CACHE_MISS_TTL
+        };
+        self.entries.insert(
+            key,
+            FolderCacheEntry {
+                folder_name,
+                expires_at: now.checked_add(ttl).unwrap_or(now),
+                last_used_at: now,
+            },
+        );
+    }
+
+    fn prune_expired(&mut self, now: Instant) {
+        self.entries.retain(|_, entry| entry.expires_at > now);
+    }
+}
+
 #[derive(Clone)]
 struct ObserverHttpState {
     app: tauri::AppHandle,
@@ -69,6 +148,7 @@ struct ObserverHttpState {
     probe_limiter: Arc<Semaphore>,
     db_query_limiter: Arc<Semaphore>,
     cache: Arc<Mutex<HashMap<CacheKey, CachedSnapshot>>>,
+    folder_cache: Arc<StdMutex<FolderLookupCache>>,
 }
 
 #[derive(Default)]
@@ -139,6 +219,7 @@ async fn start(app: tauri::AppHandle) -> crate::shared::error::AppResult<()> {
         probe_limiter: Arc::new(Semaphore::new(OBSERVER_MAX_CONCURRENT_PROBES)),
         db_query_limiter: Arc::new(Semaphore::new(1)),
         cache: Arc::new(Mutex::new(HashMap::new())),
+        folder_cache: Arc::new(StdMutex::new(FolderLookupCache::default())),
     };
     let router = Router::new()
         .route("/api/observer/v1/health", get(health))
@@ -308,6 +389,7 @@ async fn snapshot_handler(
         &state.app,
         db.as_ref(),
         db_query_permit,
+        state.folder_cache.clone(),
         scope,
         usize::from(history_limit),
         query.include_providers,
@@ -760,6 +842,99 @@ mod tests {
             replacement_time,
         )
         .is_some());
+    }
+
+    #[test]
+    fn folder_cache_is_source_aware_and_refreshes_negative_entries() {
+        let now = Instant::now();
+        let codex = (
+            crate::cli_sessions::CliSessionsSource::Codex,
+            "shared".to_string(),
+        );
+        let claude = (
+            crate::cli_sessions::CliSessionsSource::Claude,
+            "shared".to_string(),
+        );
+        let mut cache = FolderLookupCache::default();
+        cache.record(codex.clone(), Some("codex-folder".to_string()), now);
+        cache.record(claude.clone(), None, now);
+
+        let (folders, misses) = cache.lookup(&[codex.clone(), claude.clone()], now);
+        assert_eq!(
+            folders.get(&codex).map(String::as_str),
+            Some("codex-folder")
+        );
+        assert!(!folders.contains_key(&claude));
+        assert!(
+            misses.is_empty(),
+            "negative entries suppress repeated scans"
+        );
+
+        let after_negative_ttl = now
+            .checked_add(OBSERVER_FOLDER_CACHE_MISS_TTL)
+            .expect("negative expiry");
+        let (folders, misses) = cache.lookup(&[codex.clone(), claude.clone()], after_negative_ttl);
+        assert!(folders.contains_key(&codex));
+        assert_eq!(misses, vec![claude.clone()]);
+
+        cache.record(
+            claude.clone(),
+            Some("claude-folder".to_string()),
+            after_negative_ttl,
+        );
+        let (folders, misses) = cache.lookup(std::slice::from_ref(&claude), after_negative_ttl);
+        assert_eq!(
+            folders.get(&claude).map(String::as_str),
+            Some("claude-folder")
+        );
+        assert!(misses.is_empty());
+
+        let after_positive_ttl = after_negative_ttl
+            .checked_add(OBSERVER_FOLDER_CACHE_HIT_TTL)
+            .expect("positive expiry");
+        let (folders, misses) = cache.lookup(&[codex.clone(), claude.clone()], after_positive_ttl);
+        assert!(folders.is_empty());
+        assert_eq!(misses, vec![codex, claude]);
+    }
+
+    #[test]
+    fn folder_cache_caps_entries_with_lru_eviction() {
+        let start = Instant::now();
+        let mut cache = FolderLookupCache::default();
+        for index in 0..OBSERVER_FOLDER_CACHE_MAX_ENTRIES {
+            cache.record(
+                (
+                    crate::cli_sessions::CliSessionsSource::Codex,
+                    format!("session-{index}"),
+                ),
+                Some(format!("folder-{index}")),
+                start
+                    .checked_add(Duration::from_millis(index as u64))
+                    .expect("cache time"),
+            );
+        }
+        let first = (
+            crate::cli_sessions::CliSessionsSource::Codex,
+            "session-0".to_string(),
+        );
+        let second = (
+            crate::cli_sessions::CliSessionsSource::Codex,
+            "session-1".to_string(),
+        );
+        let refreshed_at = start.checked_add(Duration::from_secs(1)).unwrap();
+        let _ = cache.lookup(std::slice::from_ref(&first), refreshed_at);
+        cache.record(
+            (
+                crate::cli_sessions::CliSessionsSource::Claude,
+                "new-session".to_string(),
+            ),
+            Some("new-folder".to_string()),
+            refreshed_at.checked_add(Duration::from_millis(1)).unwrap(),
+        );
+
+        assert_eq!(cache.entries.len(), OBSERVER_FOLDER_CACHE_MAX_ENTRIES);
+        assert!(cache.entries.contains_key(&first));
+        assert!(!cache.entries.contains_key(&second));
     }
 
     #[tokio::test]

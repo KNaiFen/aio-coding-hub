@@ -1,14 +1,13 @@
 //! Usage: MCP server persistence (SQLite) and sync integration hooks.
 
 use crate::db;
+use crate::infra::recovery_journal::RecoveryOperation;
 use crate::shared::error::db_err;
 use crate::shared::time::now_unix_seconds;
 use crate::workspaces;
 use rusqlite::{params, Connection, ErrorCode, OptionalExtension};
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::backups::{CliBackupSnapshots, SingleCliBackup};
-use super::sync::{sync_all_cli, sync_one_cli};
 use super::types::{McpImportServer, McpServerSummary};
 use super::validate::{suggest_key, validate_cli_key, validate_server_key, validate_transport};
 use crate::shared::text::normalize_name;
@@ -362,7 +361,7 @@ pub fn list_for_workspace(
 
 #[allow(clippy::too_many_arguments)]
 pub fn upsert(
-    app: &tauri::AppHandle,
+    _app: &tauri::AppHandle,
     db: &db::Db,
     server_id: Option<i64>,
     server_key: &str,
@@ -376,6 +375,7 @@ pub fn upsert(
     url: Option<&str>,
     header_preserve_keys: Vec<String>,
     header_replace: BTreeMap<String, String>,
+    operation: &RecoveryOperation,
 ) -> crate::shared::error::AppResult<McpServerSummary> {
     let name = normalize_required_text(name, "name", MCP_NAME_MAX_LEN)?;
 
@@ -456,7 +456,6 @@ pub fn upsert(
     };
 
     let normalized_name = normalize_name(name);
-    let snapshots = CliBackupSnapshots::capture_all(app)?;
     let args_json = args_to_json(&args)?;
     let env_json = map_to_json(&env, "env")?;
     let headers_json = map_to_json(&headers, "headers")?;
@@ -544,25 +543,19 @@ WHERE id = ?11
         }
     };
 
-    if let Err(err) = sync_all_cli(app, &tx) {
-        snapshots.restore_all(app);
-        return Err(err);
-    }
+    tx.commit().map_err(|e| db_err!("failed to commit: {e}"))?;
 
-    if let Err(err) = tx.commit() {
-        snapshots.restore_all(app);
-        return Err(db_err!("failed to commit: {err}"));
-    }
-
+    operation.mark_authoritative_committed();
     get_by_id(&conn, id)
 }
 
 pub fn set_enabled(
-    app: &tauri::AppHandle,
+    _app: &tauri::AppHandle,
     db: &db::Db,
     workspace_id: i64,
     server_id: i64,
     enabled: bool,
+    operation: &RecoveryOperation,
 ) -> crate::shared::error::AppResult<McpServerSummary> {
     let mut conn = db.open_connection()?;
     let now = now_unix_seconds();
@@ -572,14 +565,6 @@ pub fn set_enabled(
 
     let cli_key = workspaces::get_cli_key_by_id(&tx, workspace_id)?;
     validate_cli_key(&cli_key)?;
-    let should_sync = workspaces::is_active_workspace(&tx, workspace_id)?;
-
-    let backup = if should_sync {
-        Some(SingleCliBackup::capture(app, &cli_key)?)
-    } else {
-        None
-    };
-
     if enabled {
         tx.execute(
             r#"
@@ -599,36 +584,22 @@ ON CONFLICT(workspace_id, server_id) DO UPDATE SET
         .map_err(|e| db_err!("failed to disable mcp server: {e}"))?;
     }
 
-    if should_sync {
-        if let Err(err) = sync_one_cli(app, &tx, &cli_key) {
-            if let Some(backup) = backup {
-                backup.restore(app, &cli_key);
-            }
-            return Err(err);
-        }
-    }
+    tx.commit().map_err(|e| db_err!("failed to commit: {e}"))?;
 
-    if let Err(err) = tx.commit() {
-        if let Some(backup) = backup {
-            backup.restore(app, &cli_key);
-        }
-        return Err(db_err!("failed to commit: {err}"));
-    }
-
+    operation.mark_authoritative_committed();
     get_by_id_for_workspace(&conn, workspace_id, server_id)
 }
 
 pub fn delete(
-    app: &tauri::AppHandle,
+    _app: &tauri::AppHandle,
     db: &db::Db,
     server_id: i64,
+    operation: &RecoveryOperation,
 ) -> crate::shared::error::AppResult<()> {
     let mut conn = db.open_connection()?;
     let tx = conn
         .transaction()
         .map_err(|e| db_err!("failed to start transaction: {e}"))?;
-
-    let snapshots = CliBackupSnapshots::capture_all(app)?;
 
     let changed = tx
         .execute("DELETE FROM mcp_servers WHERE id = ?1", params![server_id])
@@ -637,16 +608,8 @@ pub fn delete(
         return Err("DB_NOT_FOUND: mcp server not found".to_string().into());
     }
 
-    if let Err(err) = sync_all_cli(app, &tx) {
-        snapshots.restore_all(app);
-        return Err(err);
-    }
-
-    if let Err(err) = tx.commit() {
-        snapshots.restore_all(app);
-        return Err(db_err!("failed to commit: {err}"));
-    }
-
+    tx.commit().map_err(|e| db_err!("failed to commit: {e}"))?;
+    operation.mark_authoritative_committed();
     Ok(())
 }
 

@@ -1,6 +1,7 @@
 //! Usage: Async startup task pipeline extracted from bootstrap setup.
 
 use super::app_state::{ensure_db_ready, DbInitState};
+use super::plugins::extension_host_registry::ExtensionHostRuntimeState;
 use super::startup_state::{
     fail_startup_run, finish_startup_run, set_startup_stage, try_begin_startup_run, AppStartupStage,
 };
@@ -14,7 +15,6 @@ pub(crate) fn spawn(app_handle: tauri::AppHandle) -> bool {
     if !try_begin_startup_run(&app_handle) {
         return false;
     }
-
     tauri::async_runtime::spawn(async move {
         run(app_handle).await;
     });
@@ -30,6 +30,16 @@ async fn run(app_handle: tauri::AppHandle) {
         Some(db) => db,
         None => return,
     };
+
+    let app_for_replay = app_handle.clone();
+    let db_for_replay = db.clone();
+    if !replay_recovery_journal_stage(&app_handle, move || {
+        crate::infra::recovery_journal::replay_pending(&app_for_replay, &db_for_replay)
+    })
+    .await
+    {
+        return;
+    }
 
     match crate::request_logs::reconcile_unresolved_pending(
         &db,
@@ -53,6 +63,33 @@ async fn run(app_handle: tauri::AppHandle) {
             );
             return;
         }
+    }
+
+    let extension_host_state = app_handle.state::<ExtensionHostRuntimeState>();
+    match extension_host_state
+        .registry(app_handle.clone(), db_state.inner())
+        .await
+    {
+        Ok(registry) => match crate::app::plugin_service::activate_startup_plugins(&db, &registry)
+            .await
+        {
+            Ok(quarantined_plugin_ids) => {
+                for plugin_id in &quarantined_plugin_ids {
+                    crate::app::gateway_control::app_remove_gateway_plugin(&app_handle, plugin_id);
+                }
+                if !quarantined_plugin_ids.is_empty() {
+                    crate::app::gateway_control::app_refresh_gateway_plugins(&app_handle, &db);
+                }
+            }
+            Err(error) => tracing::warn!(
+                error = %error,
+                "failed to enumerate plugins for startup activation"
+            ),
+        },
+        Err(error) => tracing::warn!(
+            error = %error,
+            "extension host registry was unavailable for startup activation"
+        ),
     }
 
     crate::request_logs::spawn_retention_task(app_handle.clone(), db.clone());
@@ -90,6 +127,30 @@ async fn run(app_handle: tauri::AppHandle) {
     finish_startup_run(&app_handle);
 }
 
+async fn replay_recovery_journal_stage<R, F>(app_handle: &tauri::AppHandle<R>, replay: F) -> bool
+where
+    R: tauri::Runtime,
+    F: FnOnce() -> crate::shared::error::AppResult<usize> + Send + 'static,
+{
+    crate::app::maintenance::begin_recovery_replay(app_handle);
+    match crate::blocking::run("recovery_journal_startup", replay).await {
+        Ok(count) => {
+            if count > 0 {
+                tracing::info!(
+                    reconciled_count = count,
+                    "startup reconciled pending external-effect recovery journals"
+                );
+            }
+            crate::app::maintenance::finish_recovery_replay_for_startup(app_handle);
+            true
+        }
+        Err(error) => {
+            crate::app::maintenance::fail_recovery_replay(app_handle, error);
+            false
+        }
+    }
+}
+
 async fn initialize_db_stage<R, F, Fut>(
     app_handle: &tauri::AppHandle<R>,
     initialize: F,
@@ -119,7 +180,8 @@ where
 mod tests {
     use super::*;
     use crate::app::app_state::ensure_db_ready_with;
-    use crate::app::startup_state::{startup_status_snapshot, StartupState};
+    use crate::app::maintenance::MaintenanceState;
+    use crate::app::startup_state::{startup_status_snapshot, AppStartupStage, StartupState};
     use crate::shared::error::AppError;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -167,5 +229,50 @@ mod tests {
         assert_eq!(resumed.current_stage, AppStartupStage::ReadingSettings);
         assert_eq!(resumed.failed_stage, None);
         assert!(!resumed.can_retry);
+    }
+
+    #[tokio::test]
+    async fn recovery_replay_resumes_startup_only_after_success() {
+        let app = tauri::test::mock_app();
+        assert!(app.manage(MaintenanceState::default()));
+        assert!(app.manage(StartupState::default()));
+        let app_handle = app.handle().clone();
+
+        assert!(try_begin_startup_run(&app_handle));
+        assert!(replay_recovery_journal_stage(&app_handle, || Ok::<_, AppError>(1)).await);
+
+        assert!(!app_handle
+            .state::<MaintenanceState>()
+            .blocks_normal_operation());
+        let status = startup_status_snapshot(&app_handle);
+        assert!(status.running);
+        assert!(!status.maintenance_mode);
+        assert_eq!(status.current_stage, AppStartupStage::InitializingDb);
+    }
+
+    #[tokio::test]
+    async fn recovery_replay_failure_keeps_maintenance_gate_closed() {
+        let app = tauri::test::mock_app();
+        assert!(app.manage(MaintenanceState::default()));
+        assert!(app.manage(StartupState::default()));
+        let app_handle = app.handle().clone();
+
+        assert!(try_begin_startup_run(&app_handle));
+        assert!(
+            !replay_recovery_journal_stage(&app_handle, || {
+                Err::<usize, _>(AppError::new("RECOVERY_REPLAY_FAILED", "test failure"))
+            })
+            .await
+        );
+
+        assert!(app_handle
+            .state::<MaintenanceState>()
+            .blocks_normal_operation());
+        let status = startup_status_snapshot(&app_handle);
+        assert!(!status.running);
+        assert!(status.maintenance_mode);
+        assert_eq!(status.current_stage, AppStartupStage::Failed);
+        assert_eq!(status.failed_stage, Some(AppStartupStage::InitializingDb));
+        assert!(status.can_retry);
     }
 }

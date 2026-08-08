@@ -8,16 +8,16 @@ use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct GatewayPluginError {
-    code: &'static str,
+    code: String,
     message: String,
     audit_events: Vec<GatewayPluginAuditEvent>,
     execution_reports: Vec<GatewayPluginHookExecutionReport>,
 }
 
 impl GatewayPluginError {
-    pub(crate) fn new(code: &'static str, message: impl Into<String>) -> Self {
+    pub(crate) fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
-            code,
+            code: code.into(),
             message: message.into(),
             audit_events: Vec::new(),
             execution_reports: Vec::new(),
@@ -25,12 +25,12 @@ impl GatewayPluginError {
     }
 
     #[cfg(test)]
-    pub(crate) fn code(&self) -> &'static str {
+    pub(crate) fn code(&self) -> &str {
         self.code_for_logging()
     }
 
-    pub(crate) fn code_for_logging(&self) -> &'static str {
-        self.code
+    pub(crate) fn code_for_logging(&self) -> &str {
+        &self.code
     }
 
     pub(crate) fn with_audit_events(

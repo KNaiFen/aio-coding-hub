@@ -38,6 +38,7 @@ import {
   usePluginPreviewRemoteUpdateMutation,
   usePluginPreviewUpdateFromFileMutation,
   usePluginQuery,
+  usePluginRevalidateMutation,
   usePluginRollbackMutation,
   usePluginSaveConfigMutation,
   usePluginUninstallMutation,
@@ -348,6 +349,7 @@ function PluginDetailPanel({
   onSaveConfig,
   onUpdate,
   onRollback,
+  onRevalidate,
   savingConfig,
   busy,
 }: {
@@ -356,6 +358,7 @@ function PluginDetailPanel({
   onSaveConfig: (config: JsonValue) => void;
   onUpdate: () => void;
   onRollback: (version: string) => void;
+  onRevalidate: () => void;
   savingConfig: boolean;
   busy: boolean;
 }) {
@@ -407,6 +410,7 @@ function PluginDetailPanel({
         rollbackVersion={rollbackVersion}
         busy={busy}
         onRollback={onRollback}
+        onRevalidate={onRevalidate}
       />
 
       <Section title="这个插件会做什么">
@@ -493,6 +497,7 @@ export function PluginsPage() {
   const updateMutation = usePluginUpdateFromFileMutation();
   const updateRemoteMutation = usePluginUpdateRemoteMutation();
   const rollbackMutation = usePluginRollbackMutation();
+  const revalidateMutation = usePluginRevalidateMutation();
   const enableMutation = usePluginEnableMutation();
   const disableMutation = usePluginDisableMutation();
   const uninstallMutation = usePluginUninstallMutation();
@@ -520,6 +525,7 @@ export function PluginsPage() {
     updateMutation.isPending ||
     updateRemoteMutation.isPending ||
     rollbackMutation.isPending ||
+    revalidateMutation.isPending ||
     enableMutation.isPending ||
     disableMutation.isPending ||
     uninstallMutation.isPending ||
@@ -707,6 +713,12 @@ export function PluginsPage() {
                       pluginId: selectedDetail.summary.plugin_id,
                       version,
                     })
+                  );
+                }}
+                onRevalidate={() => {
+                  if (!selectedDetail) return;
+                  void runPluginAction("重新校验隔离插件", () =>
+                    revalidateMutation.mutateAsync(selectedDetail.summary.plugin_id)
                   );
                 }}
                 onSaveConfig={(config) => {

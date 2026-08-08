@@ -55,6 +55,20 @@ impl MaintenanceState {
         self.phase() == MAINTENANCE_FAILED && !self.reset_exit_requested.load(Ordering::Acquire)
     }
 
+    fn try_begin_retry(&self) -> bool {
+        if self.reset_exit_requested.load(Ordering::Acquire) {
+            return false;
+        }
+        self.phase
+            .compare_exchange(
+                MAINTENANCE_FAILED,
+                MAINTENANCE_RUNNING,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+    }
+
     fn allows_invoke(&self, command: &str) -> bool {
         if !self.blocks_normal_operation() {
             return true;
@@ -294,6 +308,10 @@ fn maintenance_failure_message(error: &AppError) -> String {
     format!("数据重置未完成（{}），只能重试或退出", error.code())
 }
 
+fn recovery_failure_message(error: &AppError) -> String {
+    format!("外部配置对账未完成（{}），只能重试或退出", error.code())
+}
+
 fn begin_maintenance<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(state) = app.try_state::<MaintenanceState>() {
         state.set_phase(MAINTENANCE_RUNNING);
@@ -314,6 +332,42 @@ fn finish_maintenance<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         state.set_phase(MAINTENANCE_CLEAN);
     }
     crate::app::startup_state::finish_maintenance_run(app);
+}
+
+fn finish_maintenance_for_startup<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(state) = app.try_state::<MaintenanceState>() {
+        state.reset_exit_requested.store(false, Ordering::Release);
+        state.set_phase(MAINTENANCE_CLEAN);
+    }
+    crate::app::startup_state::resume_startup_after_maintenance_run(app);
+}
+
+pub(crate) fn begin_recovery_replay<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    begin_maintenance(app);
+}
+
+pub(crate) fn finish_recovery_replay<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    finish_maintenance(app);
+}
+
+pub(crate) fn finish_recovery_replay_for_startup<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    finish_maintenance_for_startup(app);
+}
+
+pub(crate) fn fail_recovery_replay<R: tauri::Runtime>(app: &tauri::AppHandle<R>, error: AppError) {
+    if let Some(state) = app.try_state::<MaintenanceState>() {
+        state.set_phase(MAINTENANCE_FAILED);
+    }
+    if app
+        .try_state::<crate::app::startup_state::StartupState>()
+        .is_some()
+    {
+        crate::app::startup_state::fail_maintenance_run_at_stage(
+            app,
+            crate::app::startup_state::AppStartupStage::InitializingDb,
+            recovery_failure_message(&error),
+        );
+    }
 }
 
 /// Consume a pending reset synchronously.  This is called from Tauri setup,
@@ -367,23 +421,78 @@ pub(crate) fn run_before_startup<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -
     }
 }
 
-pub(crate) async fn retry_pending_reset<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> bool {
-    if !app
-        .try_state::<MaintenanceState>()
-        .is_some_and(|state| state.can_retry())
-    {
+pub(crate) async fn retry_pending_maintenance<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> bool {
+    let retry_started = {
+        let Some(state) = app.try_state::<MaintenanceState>() else {
+            return false;
+        };
+        state.try_begin_retry()
+    };
+    if !retry_started {
         return false;
     }
+    crate::app::startup_state::begin_maintenance_run(&app);
+
+    let marker_state =
+        crate::app_paths::app_data_dir(&app).and_then(|data_dir| reset_marker_state(&data_dir));
+    match marker_state {
+        Ok(ResetMarkerState::Pending | ResetMarkerState::Completed) => {
+            let app_for_work = app.clone();
+            match crate::blocking::run("maintenance_reset_retry", move || {
+                Ok::<_, AppError>(run_before_startup(&app_for_work))
+            })
+            .await
+            {
+                Ok(result) => result,
+                Err(error) => {
+                    fail_maintenance(&app, error);
+                    false
+                }
+            }
+        }
+        Err(error) => {
+            fail_maintenance(&app, error);
+            false
+        }
+        Ok(ResetMarkerState::None) => retry_recovery_journal(app).await,
+    }
+}
+
+async fn retry_recovery_journal<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> bool {
+    let db = {
+        let state = app.state::<crate::app::app_state::DbInitState>();
+        let db = state.0.lock().await.clone();
+        db
+    };
+    let db = match db {
+        Some(db) => db,
+        None => {
+            let state = app.state::<crate::app::app_state::DbInitState>();
+            match crate::app::app_state::ensure_db_ready_for_recovery(app.clone(), state.inner())
+                .await
+            {
+                Ok(db) => db,
+                Err(error) => {
+                    fail_recovery_replay(&app, error);
+                    return false;
+                }
+            }
+        }
+    };
 
     let app_for_work = app.clone();
-    match crate::blocking::run("maintenance_reset_retry", move || {
-        Ok::<_, AppError>(run_before_startup(&app_for_work))
+    let db_for_work = db.clone();
+    match crate::blocking::run("recovery_journal_retry", move || {
+        crate::infra::recovery_journal::replay_pending(&app_for_work, &db_for_work)
     })
     .await
     {
-        Ok(result) => result,
+        Ok(_) => {
+            finish_recovery_replay(&app);
+            true
+        }
         Err(error) => {
-            fail_maintenance(&app, error);
+            fail_recovery_replay(&app, error);
             false
         }
     }
@@ -428,6 +537,11 @@ pub(crate) fn start_normal_runtime_once(app: &tauri::AppHandle) -> bool {
         return true;
     };
     state.try_mark_runtime_started()
+}
+
+pub(crate) fn normal_runtime_started<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
+    app.try_state::<MaintenanceState>()
+        .is_some_and(|state| state.runtime_started.load(Ordering::Acquire))
 }
 
 #[cfg(test)]
@@ -488,5 +602,15 @@ mod tests {
         state.request_reset_exit();
         assert!(!state.allows_invoke("app_startup_retry"));
         assert!(state.should_skip_exit_cleanup());
+    }
+
+    #[test]
+    fn maintenance_retry_claim_is_single_flight() {
+        let state = MaintenanceState::default();
+        state.set_phase(MAINTENANCE_FAILED);
+
+        assert!(state.try_begin_retry());
+        assert!(!state.try_begin_retry());
+        assert_eq!(state.phase(), MAINTENANCE_RUNNING);
     }
 }

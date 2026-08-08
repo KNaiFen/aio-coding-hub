@@ -9,7 +9,7 @@ use super::extension_host_worker::{
 use super::privacy_redaction_service::PrivacyRedactionService;
 use crate::db;
 use crate::infra::plugins::{repository, runtime_reports};
-use crate::plugins::PluginManifest;
+use crate::plugins::{manifest_allows_command, manifest_allows_gateway_hook, PluginManifest};
 use crate::shared::error::{AppError, AppResult};
 use rand::RngCore;
 use serde_json::{json, Value};
@@ -208,6 +208,12 @@ impl ExtensionHostInstance {
 
     #[allow(dead_code)]
     pub(crate) async fn execute_command(&mut self, command: &str, args: Value) -> AppResult<Value> {
+        if !manifest_allows_command(&self.manifest, command) {
+            return Err(AppError::new(
+                "PLUGIN_ACTIVATION_EVENT_NOT_DECLARED",
+                format!("extension host did not declare activation for command {command}"),
+            ));
+        }
         if !self
             .manifest
             .capabilities
@@ -237,6 +243,12 @@ impl ExtensionHostInstance {
         hook: &str,
         context: Value,
     ) -> AppResult<Value> {
+        if !manifest_allows_gateway_hook(&self.manifest, hook) {
+            return Err(AppError::new(
+                "PLUGIN_ACTIVATION_EVENT_NOT_DECLARED",
+                format!("extension host did not declare activation for gateway hook {hook}"),
+            ));
+        }
         if !self
             .manifest
             .capabilities

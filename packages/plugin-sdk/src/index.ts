@@ -58,8 +58,6 @@ export type PluginHostCompatibility = {
 export type ActivationEvent =
   | "onStartup"
   | `onCommand:${string}`
-  | `onProviderEditor:${string}`
-  | `onProtocolBridge:${string}`
   | `onGatewayHook:${string}`;
 
 export type UiContributionSlot =
@@ -453,11 +451,11 @@ export function validateManifest(manifest: PluginManifest): ValidationResult {
   if (manifest.runtime.language !== "typescript") {
     return invalid("PLUGIN_INVALID_RUNTIME", "extensionHost language must be typescript");
   }
-  const activationError = validateActivationEvents(manifest.activationEvents);
-  if (activationError) return activationError;
   const contributes = manifest.contributes ?? {};
   const contributionError = validateContributes(contributes, manifest.id);
   if (contributionError) return contributionError;
+  const activationError = validateActivationEvents(manifest.activationEvents, contributes);
+  if (activationError) return activationError;
   const capabilities = manifest.capabilities ?? [];
   const capabilityError = validateCapabilities(capabilities);
   if (!capabilityError.ok) return capabilityError;
@@ -466,29 +464,70 @@ export function validateManifest(manifest: PluginManifest): ValidationResult {
   return { ok: true };
 }
 
-function validateActivationEvents(activationEvents: unknown): ValidationResult | null {
+function validateActivationEvents(
+  activationEvents: unknown,
+  contributes: PluginContributes
+): ValidationResult | null {
   if (activationEvents == null) return null;
   if (!Array.isArray(activationEvents)) {
     return invalid("PLUGIN_INVALID_ACTIVATION_EVENT", "activationEvents must be an array");
   }
 
+  if (activationEvents.length === 0) return null;
+
+  const declaredCommands = new Set(contributes.commands?.map(({ command }) => command) ?? []);
+  const declaredGatewayHooks = new Set<string>(
+    contributes.gatewayHooks?.map(({ name }) => name) ?? []
+  );
+  const activatedCommands = new Set<string>();
+  const activatedGatewayHooks = new Set<string>();
+  const seenEvents = new Set<string>();
+
   for (const event of activationEvents) {
-    if (event === "onStartup") continue;
     if (typeof event !== "string") {
       return invalid("PLUGIN_INVALID_ACTIVATION_EVENT", "activation event must be a string");
     }
-
-    const hasKnownPrefix = [
-      "onCommand:",
-      "onProviderEditor:",
-      "onProtocolBridge:",
-      "onGatewayHook:",
-    ].some((prefix) => event.startsWith(prefix) && event.slice(prefix.length).trim() !== "");
-    if (!hasKnownPrefix) {
+    if (seenEvents.has(event)) {
       return invalid("PLUGIN_INVALID_ACTIVATION_EVENT", `invalid activation event: ${event}`);
     }
+    seenEvents.add(event);
+    if (event === "onStartup") continue;
+
+    if (event.startsWith("onCommand:")) {
+      const command = event.slice("onCommand:".length);
+      if (command === "" || command.trim() !== command || !declaredCommands.has(command)) {
+        return invalid("PLUGIN_INVALID_ACTIVATION_EVENT", `invalid activation event: ${event}`);
+      }
+      activatedCommands.add(command);
+      continue;
+    }
+
+    if (event.startsWith("onGatewayHook:")) {
+      const hook = event.slice("onGatewayHook:".length);
+      if (hook === "" || hook.trim() !== hook || !declaredGatewayHooks.has(hook)) {
+        return invalid("PLUGIN_INVALID_ACTIVATION_EVENT", `invalid activation event: ${event}`);
+      }
+      activatedGatewayHooks.add(hook);
+      continue;
+    }
+
+    return invalid("PLUGIN_INVALID_ACTIVATION_EVENT", `invalid activation event: ${event}`);
+  }
+
+  if (
+    !sameStringSet(activatedCommands, declaredCommands) ||
+    !sameStringSet(activatedGatewayHooks, declaredGatewayHooks)
+  ) {
+    return invalid(
+      "PLUGIN_INVALID_ACTIVATION_EVENT",
+      "explicit activationEvents must exactly match command and gateway hook contributions"
+    );
   }
   return null;
+}
+
+function sameStringSet(left: Set<string>, right: Set<string>) {
+  return left.size === right.size && [...left].every((value) => right.has(value));
 }
 
 function validateContributes(

@@ -1,5 +1,6 @@
 //! Build bounded, secret-free observer snapshots from existing read models.
 
+use super::{FolderCacheKey, FolderLookupCache, OBSERVER_FOLDER_LOOKUP_MAX_MISSES};
 use crate::gateway::active_requests::ActiveRequestSnapshotItem;
 use crate::gateway::observation::is_model_inference_request;
 use crate::{
@@ -13,16 +14,18 @@ use aio_observer_protocol::{
     ObserverProviderAvailabilityTimeline, ObserverProviderCollection, ObserverProviderOAuthQuota,
     ObserverProviderSpendWindow, ObserverProviderStatus, ObserverRequest, ObserverRequestState,
     ObserverRequestUsage, ObserverRouteHop, ObserverSection, ObserverSnapshotV1,
-    ObserverTodayUsage, OBSERVER_PROTOCOL_VERSION,
+    ObserverTodayUsage, OBSERVER_HISTORY_LIMIT_MAX, OBSERVER_PROTOCOL_VERSION,
 };
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-use std::time::Duration;
+use std::sync::{Arc, Mutex as StdMutex};
+use std::time::{Duration, Instant};
 use tauri::Manager;
 use tokio::sync::OwnedSemaphorePermit;
 
-const HISTORY_SCAN_LIMIT: usize = 500;
 const ACTIVE_REQUEST_LIMIT: usize = 200;
+const DOMINANT_PROVIDER_SAMPLE_LIMIT: usize = 10;
+const SESSION_ID_MAX_CHARS: usize = 256;
 const ROUTE_HOP_LIMIT: usize = 20;
 const PROVIDER_STATUS_LIMIT: usize = 512;
 const DB_SNAPSHOT_TIMEOUT: Duration = Duration::from_millis(1500);
@@ -54,8 +57,10 @@ struct ProviderObservation {
 }
 
 struct DbProjection {
-    logs_available: bool,
-    rows: Vec<request_logs::RequestLogSummary>,
+    inference_available: bool,
+    inference_rows: Vec<request_logs::RequestLogSummary>,
+    recent_available: bool,
+    recent_rows: Vec<request_logs::RequestLogSummary>,
     terminal_trace_ids: HashSet<String>,
     folders: HashMap<FolderKey, String>,
     provider_available: bool,
@@ -69,11 +74,21 @@ struct DbProjection {
     provider_details_truncated: bool,
 }
 
+struct DbProjectionRequest {
+    scope: CliScope,
+    active: Vec<ActiveRequestSnapshotItem>,
+    history_limit: usize,
+    now_unix: i64,
+    include_providers: bool,
+}
+
 impl DbProjection {
-    fn unavailable(provider_details_requested: bool) -> Self {
+    fn unavailable(provider_details_requested: bool, history_limit: usize) -> Self {
         Self {
-            logs_available: false,
-            rows: Vec::new(),
+            inference_available: false,
+            inference_rows: Vec::new(),
+            recent_available: history_limit == 0,
+            recent_rows: Vec::new(),
             terminal_trace_ids: HashSet::new(),
             folders: HashMap::new(),
             provider_available: false,
@@ -93,10 +108,12 @@ pub(super) async fn build_snapshot(
     app: &tauri::AppHandle,
     db: Option<&crate::db::Db>,
     db_query_permit: Option<OwnedSemaphorePermit>,
+    folder_cache: Arc<StdMutex<FolderLookupCache>>,
     scope: CliScope,
     history_limit: usize,
     include_providers: bool,
 ) -> ObserverSnapshotV1 {
+    let history_limit = history_limit.min(usize::from(OBSERVER_HISTORY_LIMIT_MAX));
     let generated_at_ms = crate::shared::time::now_unix_millis();
     let gateway_status = gateway_runtime_access::app_gateway_status(app);
     let raw_active = gateway_runtime_access::app_gateway_active_requests_snapshot(app);
@@ -105,15 +122,19 @@ pub(super) async fn build_snapshot(
         app,
         db,
         db_query_permit,
-        scope,
-        &raw_active,
-        generated_at_ms / 1000,
-        include_providers,
+        folder_cache,
+        DbProjectionRequest {
+            scope,
+            active: raw_active.clone(),
+            history_limit,
+            now_unix: generated_at_ms / 1000,
+            include_providers,
+        },
     )
     .await
-    .unwrap_or_else(|| DbProjection::unavailable(include_providers));
+    .unwrap_or_else(|| DbProjection::unavailable(include_providers, history_limit));
     let active = raw_active
-        .into_iter()
+        .iter()
         .filter(|item| !db_projection.terminal_trace_ids.contains(&item.trace_id))
         .collect::<Vec<_>>();
     let active_inference_count = active
@@ -127,19 +148,9 @@ pub(super) async fn build_snapshot(
         .map(|item| project_active(item, &db_projection.folders, generated_at_ms))
         .collect::<Vec<_>>();
 
-    let filtered_rows = db_projection
-        .rows
-        .iter()
-        .filter(|row| scope.matches(&row.cli_key))
-        .collect::<Vec<_>>();
-    let terminal_inference = filtered_rows
-        .iter()
-        .copied()
-        .filter(|row| is_terminal(row))
-        .filter(|row| is_model_inference_request(&row.cli_key, &row.method, &row.path))
-        .collect::<Vec<_>>();
+    let terminal_inference = db_projection.inference_rows.iter().collect::<Vec<_>>();
 
-    let last_request = if db_projection.logs_available {
+    let last_request = if db_projection.inference_available {
         terminal_inference
             .first()
             .map(|row| project_terminal(row, &db_projection.folders))
@@ -148,20 +159,18 @@ pub(super) async fn build_snapshot(
     } else {
         ObserverSection::unavailable()
     };
-    let dominant_provider = if db_projection.logs_available {
+    let dominant_provider = if db_projection.inference_available {
         dominant_provider(&terminal_inference)
             .map(ObserverSection::ready)
             .unwrap_or_else(ObserverSection::empty)
     } else {
         ObserverSection::unavailable()
     };
-    let recent_requests = if db_projection.logs_available {
+    let recent_requests = if db_projection.recent_available {
         ObserverSection::ready(
-            filtered_rows
-                .into_iter()
-                .filter(|row| is_terminal(row))
-                .filter(|row| !active.iter().any(|item| item.trace_id == row.trace_id))
-                .take(history_limit)
+            db_projection
+                .recent_rows
+                .iter()
                 .map(|row| project_terminal(row, &db_projection.folders))
                 .collect(),
         )
@@ -233,15 +242,12 @@ async fn load_db_projection(
     app: &tauri::AppHandle,
     db: Option<&crate::db::Db>,
     db_query_permit: Option<OwnedSemaphorePermit>,
-    scope: CliScope,
-    active: &[ActiveRequestSnapshotItem],
-    now_unix: i64,
-    include_providers: bool,
+    folder_cache: Arc<StdMutex<FolderLookupCache>>,
+    request: DbProjectionRequest,
 ) -> Option<DbProjection> {
     let db = db?.clone();
     let db_query_permit = db_query_permit?;
     let app = app.clone();
-    let active = active.to_vec();
     tokio::time::timeout(
         DB_SNAPSHOT_TIMEOUT,
         blocking::run("observer_snapshot", move || {
@@ -249,10 +255,8 @@ async fn load_db_projection(
             Ok::<_, crate::shared::error::AppError>(build_db_projection(
                 &app,
                 &db,
-                scope,
-                &active,
-                now_unix,
-                include_providers,
+                &folder_cache,
+                &request,
             ))
         }),
     )
@@ -264,29 +268,42 @@ async fn load_db_projection(
 fn build_db_projection(
     app: &tauri::AppHandle,
     db: &crate::db::Db,
-    scope: CliScope,
-    active: &[ActiveRequestSnapshotItem],
-    now_unix: i64,
-    include_providers: bool,
+    folder_cache: &Arc<StdMutex<FolderLookupCache>>,
+    request: &DbProjectionRequest,
 ) -> DbProjection {
-    let rows_result = if scope == CliScope::All {
-        request_logs::list_recent_all(db, HISTORY_SCAN_LIMIT)
-    } else {
-        request_logs::list_recent(db, scope.as_str(), HISTORY_SCAN_LIMIT)
-    };
-    let logs_available = rows_result.is_ok();
-    let rows = rows_result.unwrap_or_default();
-    let terminal_trace_ids = rows
-        .iter()
-        .filter(|row| is_terminal(row))
-        .map(|row| row.trace_id.clone())
-        .collect::<HashSet<_>>();
-    let folders = resolve_folders(app, active, &rows);
+    let active_trace_ids = observer_active_trace_ids(&request.active);
+    let terminal_trace_ids =
+        request_logs::observer_persisted_trace_ids(db, &active_trace_ids).unwrap_or_default();
+    let active_trace_ids = active_trace_ids
+        .into_iter()
+        .filter(|trace_id| !terminal_trace_ids.contains(trace_id))
+        .collect::<Vec<_>>();
+    let cli_key = (request.scope != CliScope::All).then(|| request.scope.as_str());
+    let inference_result = request_logs::list_observer_terminal_inferences(
+        db,
+        cli_key,
+        DOMINANT_PROVIDER_SAMPLE_LIMIT,
+    );
+    let inference_available = inference_result.is_ok();
+    let inference_rows = inference_result.unwrap_or_default();
+    let recent_result = load_observer_recent_rows(request.history_limit, |limit| {
+        request_logs::list_observer_recent_terminal(db, cli_key, limit, &active_trace_ids)
+    });
+    let recent_available = recent_result.is_ok();
+    let recent_rows = recent_result.unwrap_or_default();
+    let rendered_active = rendered_active(&request.active, &terminal_trace_ids, request.scope);
+    let folders = resolve_folders(
+        app,
+        folder_cache,
+        &rendered_active,
+        inference_rows.first(),
+        &recent_rows,
+    );
 
-    let provider_cli_key = preferred_cli_key(scope, &rows);
+    let provider_cli_key = preferred_cli_key(request.scope, inference_rows.first());
     let provider_result = provider_cli_key
         .as_deref()
-        .map(|cli_key| load_provider_candidates(db, cli_key, now_unix));
+        .map(|cli_key| load_provider_candidates(db, cli_key, request.now_unix));
     let provider_available = provider_result.as_ref().is_none_or(|result| result.is_ok());
     let (provider_candidates, limited_provider_ids) =
         provider_result.and_then(Result::ok).unwrap_or_default();
@@ -295,11 +312,11 @@ fn build_db_projection(
     let availability_hours = crate::settings::read(app)
         .map(|settings| settings.provider_availability_hours)
         .unwrap_or(crate::settings::DEFAULT_PROVIDER_AVAILABILITY_HOURS);
-    let provider_details_result = include_providers.then(|| {
+    let provider_details_result = request.include_providers.then(|| {
         load_provider_observations(
             db,
-            (scope != CliScope::All).then(|| scope.as_str()),
-            now_unix,
+            (request.scope != CliScope::All).then(|| request.scope.as_str()),
+            request.now_unix,
             availability_hours,
         )
     });
@@ -310,8 +327,10 @@ fn build_db_projection(
         .and_then(Result::ok)
         .unwrap_or_default();
     DbProjection {
-        logs_available,
-        rows,
+        inference_available,
+        inference_rows,
+        recent_available,
+        recent_rows,
         terminal_trace_ids,
         folders,
         provider_available,
@@ -319,7 +338,7 @@ fn build_db_projection(
         provider_candidates,
         limited_provider_ids,
         today,
-        provider_details_requested: include_providers,
+        provider_details_requested: request.include_providers,
         provider_details_available,
         provider_details,
         provider_details_truncated,
@@ -561,15 +580,14 @@ fn push_spend_window(
     });
 }
 
-fn preferred_cli_key(scope: CliScope, rows: &[request_logs::RequestLogSummary]) -> Option<String> {
+fn preferred_cli_key(
+    scope: CliScope,
+    last_inference: Option<&request_logs::RequestLogSummary>,
+) -> Option<String> {
     if scope != CliScope::All {
         return Some(scope.as_str().to_string());
     }
-    rows.iter()
-        .find(|row| {
-            is_terminal(row) && is_model_inference_request(&row.cli_key, &row.method, &row.path)
-        })
-        .map(|row| row.cli_key.clone())
+    last_inference.map(|row| row.cli_key.clone())
 }
 
 fn today_usage(db: &crate::db::Db) -> Option<ObserverTodayUsage> {
@@ -783,45 +801,130 @@ fn first_eligible_provider<'a>(
     })
 }
 
-fn resolve_folders(
-    app: &tauri::AppHandle,
-    active: &[ActiveRequestSnapshotItem],
-    rows: &[request_logs::RequestLogSummary],
-) -> HashMap<FolderKey, String> {
-    let mut items = Vec::new();
-    let mut seen = HashSet::new();
-    for (cli_key, session_id) in active
+fn recent_query_limit(history_limit: usize) -> Option<usize> {
+    (history_limit > 0).then_some(history_limit)
+}
+
+fn load_observer_recent_rows<F>(
+    history_limit: usize,
+    load: F,
+) -> crate::shared::error::AppResult<Vec<request_logs::RequestLogSummary>>
+where
+    F: FnOnce(usize) -> crate::shared::error::AppResult<Vec<request_logs::RequestLogSummary>>,
+{
+    match recent_query_limit(history_limit) {
+        Some(limit) => load(limit),
+        None => Ok(Vec::new()),
+    }
+}
+
+fn observer_active_trace_ids(active: &[ActiveRequestSnapshotItem]) -> Vec<String> {
+    active.iter().map(|item| item.trace_id.clone()).collect()
+}
+
+fn rendered_active<'a>(
+    active: &'a [ActiveRequestSnapshotItem],
+    terminal_trace_ids: &HashSet<String>,
+    scope: CliScope,
+) -> Vec<&'a ActiveRequestSnapshotItem> {
+    active
         .iter()
-        .filter_map(|item| item.session_id.as_ref().map(|id| (&item.cli_key, id)))
-        .chain(
-            rows.iter()
-                .filter_map(|row| row.session_id.as_ref().map(|id| (&row.cli_key, id))),
-        )
-        .take(HISTORY_SCAN_LIMIT + 100)
-    {
+        .filter(|item| !terminal_trace_ids.contains(&item.trace_id))
+        .filter(|item| scope.matches(&item.cli_key))
+        .take(ACTIVE_REQUEST_LIMIT)
+        .collect()
+}
+
+fn folder_lookup_keys<'a>(
+    items: impl Iterator<Item = (&'a str, Option<&'a str>)>,
+) -> Vec<FolderCacheKey> {
+    let mut keys = Vec::new();
+    let mut seen = HashSet::new();
+    for (cli_key, session_id) in items {
         let Ok(source) = cli_key.parse::<cli_sessions::CliSessionsSource>() else {
             continue;
         };
-        let session_id = session_id.trim();
-        if session_id.is_empty() || session_id.chars().count() > 256 {
+        let Some(session_id) = session_id.map(str::trim) else {
+            continue;
+        };
+        if session_id.is_empty() || session_id.chars().count() > SESSION_ID_MAX_CHARS {
             continue;
         }
-        let key = (source.as_str().to_string(), session_id.to_string());
-        if seen.insert(key) {
-            items.push(cli_sessions::CliSessionsFolderLookupKey {
-                source,
-                session_id: session_id.to_string(),
-            });
+        let key = (source, session_id.to_string());
+        if seen.insert(key.clone()) {
+            keys.push(key);
         }
     }
-    cli_sessions::folder_lookup_by_ids(app, &items, None)
-        .unwrap_or_default()
+    keys
+}
+
+fn resolve_folders(
+    app: &tauri::AppHandle,
+    folder_cache: &Arc<StdMutex<FolderLookupCache>>,
+    active: &[&ActiveRequestSnapshotItem],
+    last_inference: Option<&request_logs::RequestLogSummary>,
+    recent: &[request_logs::RequestLogSummary],
+) -> HashMap<FolderKey, String> {
+    let keys = folder_lookup_keys(
+        active
+            .iter()
+            .map(|item| (item.cli_key.as_str(), item.session_id.as_deref()))
+            .chain(
+                last_inference
+                    .into_iter()
+                    .chain(recent.iter())
+                    .map(|row| (row.cli_key.as_str(), row.session_id.as_deref())),
+            ),
+    );
+    let lookup_started_at = Instant::now();
+    let (mut folders, misses) = {
+        let mut cache = folder_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        cache.lookup(&keys, lookup_started_at)
+    };
+    let misses = misses
         .into_iter()
-        .map(|entry| {
-            (
-                (entry.source, entry.session_id),
-                bounded_text(&entry.folder_name, 256),
+        .take(OBSERVER_FOLDER_LOOKUP_MAX_MISSES)
+        .collect::<Vec<_>>();
+    if !misses.is_empty() {
+        let items = misses
+            .iter()
+            .map(
+                |(source, session_id)| cli_sessions::CliSessionsFolderLookupKey {
+                    source: *source,
+                    session_id: session_id.clone(),
+                },
             )
+            .collect::<Vec<_>>();
+        let requested = misses.iter().cloned().collect::<HashSet<_>>();
+        let scanned = cli_sessions::folder_lookup_by_ids(app, &items, None).unwrap_or_default();
+        let mut found = HashMap::new();
+        for entry in scanned {
+            let Ok(source) = entry.source.parse::<cli_sessions::CliSessionsSource>() else {
+                continue;
+            };
+            let key = (source, entry.session_id.trim().to_string());
+            if requested.contains(&key) {
+                found.insert(key, bounded_text(&entry.folder_name, 256));
+            }
+        }
+        let recorded_at = Instant::now();
+        let mut cache = folder_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        for key in misses {
+            let folder_name = found.get(&key).cloned();
+            cache.record(key.clone(), folder_name.clone(), recorded_at);
+            if let Some(folder_name) = folder_name {
+                folders.insert(key, folder_name);
+            }
+        }
+    }
+    folders
+        .into_iter()
+        .map(|((source, session_id), folder_name)| {
+            ((source.as_str().to_string(), session_id), folder_name)
         })
         .collect()
 }
@@ -1021,7 +1124,11 @@ fn effective_terminal_route_counts(route: &[request_logs::RequestLogRouteHop]) -
 fn dominant_provider(
     rows: &[&request_logs::RequestLogSummary],
 ) -> Option<ObserverDominantProvider> {
-    let sample = rows.iter().copied().take(10).collect::<Vec<_>>();
+    let sample = rows
+        .iter()
+        .copied()
+        .take(DOMINANT_PROVIDER_SAMPLE_LIMIT)
+        .collect::<Vec<_>>();
     let mut counts = HashMap::<String, u8>::new();
     for row in &sample {
         let Some(name) = terminal_provider_name(row) else {
@@ -1045,10 +1152,6 @@ fn dominant_provider(
 
 fn terminal_provider_name(row: &request_logs::RequestLogSummary) -> Option<&str> {
     non_empty(&row.final_provider_name).or_else(|| non_empty(&row.start_provider_name))
-}
-
-fn is_terminal(row: &request_logs::RequestLogSummary) -> bool {
-    row.status.is_some() || row.error_code.is_some() || row.is_interrupted
 }
 
 fn folder_name(
@@ -1240,6 +1343,26 @@ fn bounded_text(value: &str, max_chars: usize) -> String {
 mod tests {
     use super::*;
 
+    fn active_snapshot(
+        trace_id: String,
+        cli_key: &str,
+        created_at_ms: i64,
+    ) -> ActiveRequestSnapshotItem {
+        ActiveRequestSnapshotItem {
+            trace_id,
+            cli_key: cli_key.to_string(),
+            method: "POST".to_string(),
+            path: "/v1/responses".to_string(),
+            query: None,
+            session_id: None,
+            requested_model: None,
+            special_settings_json: None,
+            created_at_ms,
+            last_activity_ms: created_at_ms,
+            current_attempt: None,
+        }
+    }
+
     fn insert_observer_provider(db: &crate::db::Db, name: &str, total_limit: Option<f64>) -> i64 {
         crate::providers::upsert(
             db,
@@ -1398,6 +1521,87 @@ mod tests {
         let result = dominant_provider(&[&newest, &middle, &oldest, &fourth]).expect("dominant");
         assert_eq!(result.provider_name, "A");
         assert_eq!(result.count, 2);
+    }
+
+    #[test]
+    fn zero_history_has_no_recent_query_but_keeps_an_available_empty_projection() {
+        assert_eq!(recent_query_limit(0), None);
+        assert_eq!(recent_query_limit(50), Some(50));
+
+        let projection = DbProjection::unavailable(false, 0);
+        assert!(projection.recent_available);
+        assert!(projection.recent_rows.is_empty());
+        assert!(!projection.inference_available);
+
+        let called = std::cell::Cell::new(false);
+        let rows = load_observer_recent_rows(0, |_| {
+            called.set(true);
+            Ok(Vec::new())
+        })
+        .expect("zero history should not query recent rows");
+        assert!(rows.is_empty());
+        assert!(!called.get(), "zero history must skip the recent query");
+    }
+
+    #[test]
+    fn active_trace_collection_never_silently_truncates_global_concurrency() {
+        let mut active = (0..250)
+            .map(|index| active_snapshot(format!("claude-{index}"), "claude", index))
+            .collect::<Vec<_>>();
+        active.extend(
+            (0..250).map(|index| active_snapshot(format!("codex-{index}"), "codex", index + 1_000)),
+        );
+
+        let trace_ids = observer_active_trace_ids(&active);
+
+        assert_eq!(trace_ids.len(), 500);
+        assert!(trace_ids.iter().any(|trace_id| trace_id == "codex-0"));
+        assert!(trace_ids.iter().any(|trace_id| trace_id == "codex-249"));
+        assert!(trace_ids.iter().any(|trace_id| trace_id == "claude-0"));
+        assert!(trace_ids.iter().any(|trace_id| trace_id == "claude-249"));
+    }
+
+    #[test]
+    fn folder_keys_are_source_aware_bounded_and_ignore_invalid_sessions() {
+        let long_session = "x".repeat(SESSION_ID_MAX_CHARS + 1);
+        let pairs = vec![
+            ("codex", Some("same-session")),
+            ("claude", Some("same-session")),
+            ("codex", Some(" same-session ")),
+            ("grok", Some("ignored-source")),
+            ("codex", Some(long_session.as_str())),
+            ("codex", None),
+        ];
+        let keys = folder_lookup_keys(pairs.into_iter());
+        assert_eq!(keys.len(), 2);
+        assert!(keys.contains(&(
+            cli_sessions::CliSessionsSource::Codex,
+            "same-session".to_string()
+        )));
+        assert!(keys.contains(&(
+            cli_sessions::CliSessionsSource::Claude,
+            "same-session".to_string()
+        )));
+
+        let many = (0..OBSERVER_FOLDER_LOOKUP_MAX_MISSES + 5)
+            .map(|index| ("codex", Some(format!("session-{index}"))))
+            .collect::<Vec<_>>();
+        let all_keys = folder_lookup_keys(
+            many.iter()
+                .map(|(source, session)| (*source, session.as_deref())),
+        );
+        assert_eq!(all_keys.len(), OBSERVER_FOLDER_LOOKUP_MAX_MISSES + 5);
+
+        let now = Instant::now();
+        let mut cache = FolderLookupCache::default();
+        for key in all_keys.iter().take(OBSERVER_FOLDER_LOOKUP_MAX_MISSES) {
+            cache.record(key.clone(), Some("cached".to_string()), now);
+        }
+        let (_, misses) = cache.lookup(&all_keys, now);
+        assert_eq!(
+            misses,
+            all_keys[OBSERVER_FOLDER_LOOKUP_MAX_MISSES..].to_vec()
+        );
     }
 
     #[test]

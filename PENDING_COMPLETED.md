@@ -413,6 +413,20 @@
 - 2026-08-03：`AIO-PENDING-013` 因无法稳定复现且用户决定自行观察而放弃。
 - 2026-08-03：`AIO-PENDING-012`、`AIO-PENDING-014` 已完成并随 `aio-coding-hub-v0.60.45` 发布，证据见“本批次完成证据”。
 - 2026-08-03：`AIO-PENDING-015` 已完成并随 `aio-coding-hub-v0.60.46` 发布，证据见“本批次完成证据”。
+- 2026-08-06：`AIO-PENDING-016` 已完成并合并，仓库级本地产物已按核验清单清理。
+- 2026-08-08：`AIO-PENDING-019`、`AIO-PENDING-020` 已完成并合并，精确候选与全量 Actions 证据如下。
+
+### AIO-PENDING-016 - 云端验证与本地零产物合同
+
+- **状态**：`done`
+- **日期**：2026-08-06
+- **完成日期**：2026-08-06
+- **观察问题**：仓库文档、package/workspace 脚本和 Trellis 模板仍保留会安装依赖或产生 Node/Rust/Tauri 本地产物的入口，与云端构建策略冲突。
+- **锁定决策**：本地禁止依赖安装、dev、类型检查、Lint、测试、构建、Cargo 与 Tauri；只允许零依赖 Node 源码合同/解析检查和 `git diff --check`。跨平台桌面打包不升级为每个 PR 的必需任务。
+- **拟议方向**：更新活跃规则与 README，限制受控脚本为 GitHub Actions 使用，演进零依赖合同检查并加强 CI 静态质量门；历史任务和归档不改写。
+- **验收标准**：本地入口检查能拒绝仓库受控的依赖/构建命令；`ci.yml` 全量 workflow_dispatch 的 rustfmt、bindings、Clippy、Rust tests、前端质量门和 audit 均通过；合并后只清理重新核验过的仓库级产物。
+- **Trellis**：[`08-06-cloud-only-zero-artifact-contract`](./.trellis/tasks/08-06-cloud-only-zero-artifact-contract/)
+- **交付证据**：PR [#86](https://github.com/KNaiFen/aio-coding-hub/pull/86) 的候选提交为 `c5b3c6b9`、零产物自测修正为 `2334403b`；PR CI `31103175487` 与 workflow_dispatch 全量 CI `31103187154` 均通过，squash 合并为 `d32106c3706edc7535ea074d4c352c6b7e701dbf`。合并后重新核验并清理 24 个精确仓库级产物目录，未删除全局 Cargo/pnpm 缓存或其他项目文件。
 
 ### AIO-PENDING-018 - 请求日志与运行日志留存
 
@@ -425,3 +439,27 @@
 - **验收标准**：旧配置持久迁移、所有写入拒绝 0；上月用量/Token/成本/趋势/排行保持；活动日志不被删除；清理后显示可回收字节，只有手动压缩归还空间。
 - **Trellis**：[`08-06-request-runtime-log-retention`](./.trellis/tasks/08-06-request-runtime-log-retention/)
 - **交付证据**：PR [#89](https://github.com/KNaiFen/aio-coding-hub/pull/89) 的精确候选提交为 `73ff1d2942199ab36ecc24286fb9c29691719510`，PR CI `31174497952` 与 workflow_dispatch 全量 CI `31186468782` 均通过；已合并到 `main`，合并提交为 `d7679695acbe4f67ebcdc517405cb123cfc58318`。
+
+### AIO-PENDING-019 - 非回环 Gateway Bearer Token
+
+- **状态**：`done`
+- **日期**：2026-08-06
+- **完成日期**：2026-08-08
+- **观察问题**：现有 LAN/custom 非回环 Gateway 缺少统一路由鉴权，provider/forwarded header 和 provider 专用路由扩大了可伪造信任面。
+- **锁定决策**：保留 LAN；真实 TCP peer 非回环时所有路由含 health 必须使用应用生成 Bearer Token；loopback 兼容。Token 只展示一次、仅持久化摘要；删除 provider 专用路由、forced-provider 数据流和 Claude Terminal 入口。
+- **拟议方向**：在最外层 Axum middleware 基于 `ConnectInfo<SocketAddr>` 鉴权并剥离敏感/转发身份头，支持旧 LAN 迁移、未确认重启轮换、主动轮换和 WSL 明文即时同步。
+- **验收标准**：非回环无/错 token 在任何副作用前返回 401，正确 token 可用且认证/伪造头不外传；旧 token 立即失效；一次性明文不进入持久化、cache、日志或错误；WSL 同步成功或明确失败。
+- **Trellis**：[`08-06-gateway-lan-bearer-token`](./.trellis/tasks/08-06-gateway-lan-bearer-token/)
+- **交付证据**：最终候选为 `948dc5fa`；PR [#90](https://github.com/KNaiFen/aio-coding-hub/pull/90) 的 PR CI `31197560686` 与 workflow_dispatch 全量 CI `31197593860` 均在该精确 head 全绿，随后合并为 `c5b2333d82086989e9b3b1fb3467c5fbded54dbc`。
+
+### AIO-PENDING-020 - 跨重启数据重置
+
+- **状态**：`done`
+- **日期**：2026-08-06
+- **完成日期**：2026-08-08
+- **观察问题**：数据重置在当前进程逐文件删除，而退出清理可能再次初始化数据库；文件占用或部分失败会让应用带着不完整清理继续运行。
+- **锁定决策**：reset IPC 只持久写 marker 后走专用退出；下次启动在 DB、observer、gateway 和后台任务前删除；失败保留 marker 并进入 retry/exit 维护态。
+- **拟议方向**：建立应用级 maintenance coordinator、幂等 marker 生命周期和专用退出路径，并 gate 原生/前端启动任务。
+- **验收标准**：marker durable；失败不清 marker、不启动普通服务；重试完整目标集合；成功清 marker 后首次正常启动；云端覆盖跨平台文件占用与 UI 文案。
+- **Trellis**：[`08-06-cross-restart-data-reset`](./.trellis/tasks/08-06-cross-restart-data-reset/)
+- **交付证据**：最终候选为 `59bc7b7c`；PR [#91](https://github.com/KNaiFen/aio-coding-hub/pull/91) 的 PR CI `31239694948` 与 workflow_dispatch 全量 CI `31239707625` 均在该精确 head 全绿，随后 squash 合并为 `99de56bb9c4d718bb0d2297239f8c88325be2c26`。合并后主线树与候选一致，并为 AUD-002 提供共享 maintenance coordinator。

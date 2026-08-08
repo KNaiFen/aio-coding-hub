@@ -34,6 +34,19 @@ pub(super) fn apply_ensure_patches(conn: &mut Connection) -> crate::shared::erro
     ensure_provider_model_routing_policy(conn)?;
     ensure_skills_update_columns(conn)?;
     ensure_plugin_tables(conn)?;
+    ensure_recovery_journal(conn)?;
+    Ok(())
+}
+
+fn ensure_recovery_journal(conn: &mut Connection) -> crate::shared::error::AppResult<()> {
+    let tx = conn
+        .transaction()
+        .map_err(|error| format!("failed to start recovery journal ensure transaction: {error}"))?;
+    super::v49_to_v50::create_recovery_journal_schema(&tx)?;
+    super::v50_to_v51::create_recovery_claim_schema(&tx)?;
+    tx.commit().map_err(|error| {
+        format!("failed to commit recovery journal ensure transaction: {error}")
+    })?;
     Ok(())
 }
 

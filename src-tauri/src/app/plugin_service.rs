@@ -1,7 +1,8 @@
 use crate::app::plugins::contribution_registry::ActiveContributionSnapshot;
 use crate::app::plugins::extension_host_registry::ExtensionHostInstanceRegistry;
 use crate::domain::plugins::{
-    manifest_effective_permissions, permission_risk, validate_manifest,
+    manifest_allows_command, manifest_allows_startup, manifest_effective_permissions,
+    manifest_has_deprecated_activation_events, permission_risk, validate_manifest,
     validate_manifest_for_official_plugin, PluginCommandImpact, PluginCompatibilitySummary,
     PluginContributionChange, PluginContributionImpact, PluginContributionImpactItem, PluginDetail,
     PluginHookLifecycleSummary, PluginInstallPreview, PluginInstallSource, PluginLifecycleChange,
@@ -17,9 +18,11 @@ use crate::infra::plugins::{package, repository, signing};
 use crate::shared::error::{AppError, AppResult};
 use crate::shared::time::now_unix_millis;
 use rusqlite::OptionalExtension;
+use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
 use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::io::Read;
+use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{Mutex, MutexGuard};
 
@@ -31,6 +34,7 @@ static PLUGIN_PACKAGE_MUTATION_LOCK: Mutex<()> = Mutex::new(());
 static PLUGIN_WORK_PATH_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn list_plugins(db: &crate::db::Db) -> AppResult<Vec<crate::plugins::PluginSummary>> {
+    migrate_deprecated_activation_event_plugins(db)?;
     let mut out = Vec::new();
     for summary in repository::list_plugins(db)? {
         out.push(normalize_unsupported_legacy_plugin_summary_for_list(
@@ -41,9 +45,38 @@ pub(crate) fn list_plugins(db: &crate::db::Db) -> AppResult<Vec<crate::plugins::
 }
 
 pub(crate) fn get_plugin_detail(db: &crate::db::Db, plugin_id: &str) -> AppResult<PluginDetail> {
+    migrate_deprecated_activation_event_plugins(db)?;
     Ok(normalize_unsupported_legacy_plugin_detail(
         detail_with_config_defaults_for_db(db, repository::get_plugin(db, plugin_id)?)?,
     ))
+}
+
+fn migrate_deprecated_activation_event_plugins(db: &crate::db::Db) -> AppResult<()> {
+    // Read directly from the repository so list/get callers cannot recurse back
+    // into this migration. The manifest bytes remain untouched: only the
+    // persisted lifecycle projection carries the migration reason.
+    for summary in repository::list_plugins(db)? {
+        if matches!(
+            summary.status,
+            PluginStatus::Quarantined | PluginStatus::Uninstalled
+        ) {
+            continue;
+        }
+        let detail = repository::get_plugin(db, &summary.plugin_id)?;
+        if manifest_has_deprecated_activation_events(&detail.manifest) {
+            let migrated = repository::disable_plugin_for_deprecated_activation_events(
+                db,
+                &summary.plugin_id,
+            )?;
+            if migrated {
+                tracing::warn!(
+                    plugin_id = %summary.plugin_id,
+                    "disabled installed plugin with deprecated activation events"
+                );
+            }
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn active_plugin_contributions(
@@ -66,12 +99,26 @@ pub(crate) fn active_plugin_contributions(
     ActiveContributionSnapshot::from_plugin_details(&active_details)
 }
 
-pub(crate) async fn execute_plugin_command(
+#[cfg(test)]
+async fn execute_plugin_command(
     db: &crate::db::Db,
     registry: &ExtensionHostInstanceRegistry,
     command: &str,
     args: serde_json::Value,
 ) -> AppResult<serde_json::Value> {
+    execute_plugin_command_with_quarantine(db, registry, command, args, |_| {}).await
+}
+
+pub(crate) async fn execute_plugin_command_with_quarantine<F>(
+    db: &crate::db::Db,
+    registry: &ExtensionHostInstanceRegistry,
+    command: &str,
+    args: serde_json::Value,
+    on_quarantined: F,
+) -> AppResult<serde_json::Value>
+where
+    F: FnOnce(&str),
+{
     let command = normalize_plugin_command(command)?;
     let detail = find_unique_enabled_command_owner(db, &command)?.ok_or_else(|| {
         AppError::new(
@@ -84,6 +131,15 @@ pub(crate) async fn execute_plugin_command(
             "PLUGIN_COMMAND_PLUGIN_DISABLED",
             format!(
                 "plugin {} is not enabled for command {command}",
+                detail.summary.plugin_id
+            ),
+        ));
+    }
+    if !manifest_allows_command(&detail.manifest, &command) {
+        return Err(AppError::new(
+            "PLUGIN_ACTIVATION_EVENT_NOT_DECLARED",
+            format!(
+                "plugin {} did not declare activation for command {command}",
                 detail.summary.plugin_id
             ),
         ));
@@ -125,6 +181,28 @@ pub(crate) async fn execute_plugin_command(
             Ok(output.value)
         }
         Err(error) => {
+            let quarantined = match record_severe_runtime_failure(
+                db,
+                &plugin_id,
+                Some(&command),
+                error.code(),
+                trace_id.clone(),
+            ) {
+                Ok(quarantined) => quarantined,
+                Err(record_error) => {
+                    tracing::warn!(
+                        plugin_id,
+                        command,
+                        error = %record_error,
+                        "failed to persist plugin command runtime failure"
+                    );
+                    false
+                }
+            };
+            if quarantined {
+                on_quarantined(&plugin_id);
+                registry.dispose_plugin(&plugin_id).await;
+            }
             if let Err(report_error) = record_command_execution_report(
                 db,
                 &plugin_id,
@@ -546,6 +624,21 @@ pub(crate) struct RemotePackageInstallPolicy {
 #[derive(Debug, Clone, Copy)]
 struct PackageTrust {
     signature_verified: bool,
+}
+
+#[derive(Debug, Clone)]
+struct RemotePackageRevalidationEvidence {
+    package_checksum: String,
+    cached_package: PathBuf,
+    package_signature: Option<String>,
+    package_public_key: Option<String>,
+    signature_verified: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RevalidationTreeEntry {
+    Directory,
+    File { bytes: u64, checksum: String },
 }
 
 fn lifecycle_notice(
@@ -1654,19 +1747,7 @@ pub(crate) fn install_plugin_from_local_package_with_policy(
                 install_audit_event_type(policy.install_source),
                 "medium",
                 install_audit_message(policy.install_source),
-                install_audit_details(
-                    policy.install_source,
-                    policy.remote_source_url.as_deref(),
-                    policy.market_source_url.as_deref(),
-                    serde_json::json!({
-                    "source": "local",
-                    "packageChecksum": extracted.checksum,
-                    "cachedPackage": cache_package_path.to_string_lossy(),
-                    "unsigned": !trust.signature_verified,
-                    "signatureVerified": trust.signature_verified,
-                    "developerMode": policy.developer_mode,
-                    }),
-                ),
+                package_provenance_audit_details(&policy, &extracted, &cache_package_path, trust),
             )?;
             Ok(detail)
         })?;
@@ -1959,12 +2040,19 @@ pub(crate) fn update_plugin_from_local_package(
         .join(crate::app_paths::plugin_id_path_segment(
             &extracted.manifest.version,
         )?);
+    let cache_package_path = unique_cache_package_path(cache_dir, &plugin_id, &version);
     let _mutation_guard = plugin_package_mutation_guard();
     let mut installed_dir_promoted = false;
 
     let result = (|| -> AppResult<PluginDetail> {
         ensure_plugin_version_is_new(db, &plugin_id, &version)?;
         let current = repository::get_plugin(db, &plugin_id)?;
+        std::fs::write(&cache_package_path, &extracted.package_bytes).map_err(|e| {
+            format!(
+                "failed to write validated plugin package to {}: {e}",
+                cache_package_path.display()
+            )
+        })?;
         promote_new_dir(&extracted.root_dir, &installed_dir)?;
         installed_dir_promoted = true;
         let (granted, pending) = reconcile_permissions_for_manifest(&current, &extracted.manifest);
@@ -1990,14 +2078,14 @@ pub(crate) fn update_plugin_from_local_package(
                 "plugin.updated",
                 "high",
                 "Plugin updated from local package",
-                serde_json::json!({
-                    "fromVersion": current.summary.current_version,
-                    "toVersion": extracted.manifest.version,
-                    "pendingPermissions": pending,
-                    "unsigned": !trust.signature_verified,
-                    "signatureVerified": trust.signature_verified,
-                    "developerMode": policy.developer_mode,
-                }),
+                package_update_audit_details(
+                    &policy,
+                    &extracted,
+                    &cache_package_path,
+                    trust,
+                    current.summary.current_version.as_deref(),
+                    &pending,
+                ),
             )?;
             Ok(detail)
         })?;
@@ -2013,6 +2101,9 @@ pub(crate) fn update_plugin_from_local_package(
     let _ = std::fs::remove_dir(&staging_root);
     if result.is_err() && installed_dir_promoted {
         let _ = std::fs::remove_dir_all(&installed_dir);
+    }
+    if result.is_err() {
+        let _ = std::fs::remove_file(&cache_package_path);
     }
     result
 }
@@ -2073,20 +2164,531 @@ pub(crate) fn rollback_plugin_to_version(
 pub(crate) fn quarantine_revoked_plugin(
     db: &crate::db::Db,
     plugin_id: &str,
-    reason: &str,
 ) -> AppResult<PluginDetail> {
-    let detail =
-        repository::update_plugin_status(db, plugin_id, PluginStatus::Quarantined, Some(reason))?;
-    append_audit(
+    let detail = repository::quarantine_plugin_for_market_revocation(db, plugin_id)?;
+    tracing::warn!(plugin_id, "plugin quarantined by market revocation");
+    Ok(detail)
+}
+
+pub(crate) fn revalidate_quarantined_plugin(
+    db: &crate::db::Db,
+    plugin_id: &str,
+    host_version: &str,
+    cache_dir: &Path,
+) -> AppResult<PluginDetail> {
+    // Hold the package mutation lock across evidence validation and the final
+    // state transition so an update or rollback cannot replace the reviewed tree.
+    let _mutation_guard = plugin_package_mutation_guard();
+    let detail = detail_with_config_defaults_for_db(db, repository::get_plugin(db, plugin_id)?)?;
+    if detail.summary.status != PluginStatus::Quarantined {
+        return Err(AppError::new(
+            "PLUGIN_REVALIDATE_STATUS_INVALID",
+            "only quarantined plugins can be revalidated",
+        ));
+    }
+    if quarantined_by_market_revocation(&detail) {
+        return Err(AppError::new(
+            "PLUGIN_REVALIDATE_MARKET_REVOKED",
+            "plugins quarantined by market revocation cannot be revalidated",
+        ));
+    }
+    if detail.install_source == PluginInstallSource::Market {
+        return Err(AppError::new(
+            "PLUGIN_REVALIDATE_MARKET_STATUS_UNAVAILABLE",
+            "current signed market revocation status is unavailable for revalidation",
+        ));
+    }
+
+    validate_manifest_for_source(&detail.manifest, detail.install_source, host_version)?;
+    ensure_runtime_enabled(&detail.manifest)?;
+    validate_config_against_schema(detail.manifest.config_schema.as_ref(), &detail.config)?;
+    let installed_root = validate_revalidation_installation(&detail)?;
+    if let Some(evidence) = validate_revalidation_source_evidence(db, &detail)? {
+        validate_remote_revalidation_integrity(&detail, &installed_root, cache_dir, &evidence)?;
+    }
+
+    let next = repository::revalidate_quarantined_plugin_to_disabled(db, plugin_id)?;
+    tracing::info!(
+        plugin_id,
+        "quarantined plugin revalidated to disabled state"
+    );
+    detail_with_config_defaults_for_db(db, next)
+}
+
+pub(crate) async fn activate_startup_plugins(
+    db: &crate::db::Db,
+    registry: &ExtensionHostInstanceRegistry,
+) -> AppResult<Vec<String>> {
+    let mut quarantined_plugin_ids = Vec::new();
+    for summary in list_plugins(db)? {
+        if summary.status != PluginStatus::Enabled {
+            continue;
+        }
+        let detail = detail_with_config_defaults_for_db(
+            db,
+            repository::get_plugin(db, &summary.plugin_id)?,
+        )?;
+        if !manifest_allows_startup(&detail.manifest) {
+            continue;
+        }
+
+        let plugin_id = detail.summary.plugin_id.clone();
+        match registry.activate_startup_plugin(detail).await {
+            Ok(true) => tracing::info!(plugin_id, "activated plugin on application startup"),
+            Ok(false) => {}
+            Err(error) => {
+                let quarantined = match record_severe_runtime_failure(
+                    db,
+                    &plugin_id,
+                    Some("onStartup"),
+                    error.code(),
+                    None,
+                ) {
+                    Ok(quarantined) => quarantined,
+                    Err(record_error) => {
+                        tracing::warn!(
+                            plugin_id,
+                            error = %record_error,
+                            "failed to persist startup plugin runtime failure"
+                        );
+                        false
+                    }
+                };
+                if quarantined {
+                    registry.dispose_plugin(&plugin_id).await;
+                    quarantined_plugin_ids.push(plugin_id.clone());
+                }
+                tracing::warn!(
+                    plugin_id,
+                    error_code = error.code(),
+                    "plugin startup activation failed"
+                );
+            }
+        }
+    }
+    Ok(quarantined_plugin_ids)
+}
+
+fn record_severe_runtime_failure(
+    db: &crate::db::Db,
+    plugin_id: &str,
+    hook_name: Option<&str>,
+    error_code: &str,
+    trace_id: Option<String>,
+) -> AppResult<bool> {
+    let Some(failure_kind) = severe_runtime_failure_kind(error_code) else {
+        return Ok(false);
+    };
+    let result = repository::record_severe_runtime_failure_and_maybe_quarantine(
         db,
-        Some(plugin_id.to_string()),
-        "plugin.quarantined",
-        "critical",
-        "Plugin quarantined",
-        serde_json::json!({ "reason": reason, "source": "market_revoked" }),
+        repository::RecordPluginRuntimeFailureInput {
+            plugin_id: plugin_id.to_string(),
+            hook_name: hook_name.map(str::to_string),
+            failure_kind: failure_kind.to_string(),
+            message: format!("Severe plugin runtime failure: {failure_kind}"),
+            trace_id,
+        },
     )?;
-    tracing::warn!(plugin_id, reason, "plugin quarantined by market revocation");
-    repository::get_plugin(db, plugin_id).or(Ok(detail))
+    Ok(result.quarantined)
+}
+
+pub(crate) fn severe_runtime_failure_kind(error_code: &str) -> Option<&'static str> {
+    match error_code {
+        "PLUGIN_HOOK_TIMEOUT"
+        | "PLUGIN_EXTENSION_HOST_TIMEOUT"
+        | "PLUGIN_EXTENSION_CALL_TIMEOUT"
+        | "PLUGIN_EXTENSION_START_TIMEOUT" => Some("timeout"),
+        "PLUGIN_EXTENSION_HOST_PROCESS_CRASHED" => Some("host_crash"),
+        "PLUGIN_EXTENSION_HOST_JS_ERROR" => Some("runtime_error"),
+        _ => None,
+    }
+}
+
+fn quarantined_by_market_revocation(detail: &PluginDetail) -> bool {
+    detail.summary.last_error.as_deref() == Some(repository::PLUGIN_MARKET_REVOKED_REASON)
+}
+
+fn validate_revalidation_installation(detail: &PluginDetail) -> AppResult<PathBuf> {
+    let installed_dir = detail.installed_dir.as_deref().ok_or_else(|| {
+        AppError::new(
+            "PLUGIN_REVALIDATE_INSTALLATION_INVALID",
+            "quarantined plugin has no installed directory",
+        )
+    })?;
+    let root = Path::new(installed_dir);
+    let root_metadata = std::fs::symlink_metadata(root).map_err(|err| {
+        AppError::new(
+            "PLUGIN_REVALIDATE_INSTALLATION_INVALID",
+            format!("failed to inspect plugin installation: {err}"),
+        )
+    })?;
+    if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+        return Err(AppError::new(
+            "PLUGIN_REVALIDATE_INSTALLATION_INVALID",
+            "plugin installation root must be a real directory",
+        ));
+    }
+    let canonical_root = std::fs::canonicalize(root).map_err(|err| {
+        AppError::new(
+            "PLUGIN_REVALIDATE_INSTALLATION_INVALID",
+            format!("failed to canonicalize plugin installation: {err}"),
+        )
+    })?;
+
+    let manifest_path = root.join("plugin.json");
+    let manifest_metadata = std::fs::symlink_metadata(&manifest_path).map_err(|err| {
+        AppError::new(
+            "PLUGIN_REVALIDATE_INSTALLATION_INVALID",
+            format!("failed to inspect installed plugin manifest: {err}"),
+        )
+    })?;
+    if manifest_metadata.file_type().is_symlink()
+        || !manifest_metadata.is_file()
+        || manifest_metadata.len() > 1024 * 1024
+    {
+        return Err(AppError::new(
+            "PLUGIN_REVALIDATE_INSTALLATION_INVALID",
+            "installed plugin manifest is not a safe regular file",
+        ));
+    }
+    let installed_manifest = std::fs::read(&manifest_path).map_err(|err| {
+        AppError::new(
+            "PLUGIN_REVALIDATE_INSTALLATION_INVALID",
+            format!("failed to read installed plugin manifest: {err}"),
+        )
+    })?;
+    let installed_manifest: PluginManifest =
+        serde_json::from_slice(&installed_manifest).map_err(|_| {
+            AppError::new(
+                "PLUGIN_REVALIDATE_MANIFEST_INVALID",
+                "installed plugin manifest could not be decoded",
+            )
+        })?;
+    if installed_manifest != detail.manifest {
+        return Err(AppError::new(
+            "PLUGIN_REVALIDATE_MANIFEST_MISMATCH",
+            "installed plugin manifest does not match persisted plugin metadata",
+        ));
+    }
+
+    let main = detail.manifest.main.as_deref().ok_or_else(|| {
+        AppError::new(
+            "PLUGIN_REVALIDATE_INSTALLATION_INVALID",
+            "extension host manifest is missing main",
+        )
+    })?;
+    let main_path = Path::new(main);
+    if main_path.is_absolute()
+        || main_path
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return Err(AppError::new(
+            "PLUGIN_REVALIDATE_INSTALLATION_INVALID",
+            "extension host main must be a relative file path",
+        ));
+    }
+    let main_path = root.join(main_path);
+    let main_metadata = std::fs::symlink_metadata(&main_path).map_err(|err| {
+        AppError::new(
+            "PLUGIN_REVALIDATE_INSTALLATION_INVALID",
+            format!("failed to inspect extension host main: {err}"),
+        )
+    })?;
+    if main_metadata.file_type().is_symlink() || !main_metadata.is_file() {
+        return Err(AppError::new(
+            "PLUGIN_REVALIDATE_INSTALLATION_INVALID",
+            "extension host main must be a safe regular file",
+        ));
+    }
+    let canonical_main = std::fs::canonicalize(&main_path).map_err(|err| {
+        AppError::new(
+            "PLUGIN_REVALIDATE_INSTALLATION_INVALID",
+            format!("failed to canonicalize extension host main: {err}"),
+        )
+    })?;
+    if !canonical_main.starts_with(&canonical_root) {
+        return Err(AppError::new(
+            "PLUGIN_REVALIDATE_INSTALLATION_INVALID",
+            "extension host main escaped its installation directory",
+        ));
+    }
+    Ok(canonical_root)
+}
+
+fn validate_revalidation_source_evidence(
+    db: &crate::db::Db,
+    detail: &PluginDetail,
+) -> AppResult<Option<RemotePackageRevalidationEvidence>> {
+    if !matches!(
+        detail.install_source,
+        PluginInstallSource::Market | PluginInstallSource::GithubRelease
+    ) {
+        return Ok(None);
+    }
+    let expected_source = detail.install_source.as_str();
+    let evidence = repository::list_audit_logs(db, Some(&detail.summary.plugin_id), 500)?
+        .iter()
+        .find_map(|audit| {
+            if !matches!(
+                audit.event_type.as_str(),
+                "plugin.remote.installed" | "plugin.updated"
+            ) || audit
+                .details
+                .get("source")
+                .and_then(serde_json::Value::as_str)
+                != Some(expected_source)
+                || audit
+                    .details
+                    .get("packageVersion")
+                    .and_then(serde_json::Value::as_str)
+                    != Some(detail.manifest.version.as_str())
+            {
+                return None;
+            }
+
+            let package_checksum = audit
+                .details
+                .get("packageChecksum")
+                .and_then(serde_json::Value::as_str)?
+                .trim();
+            let cached_package = audit
+                .details
+                .get("cachedPackage")
+                .and_then(serde_json::Value::as_str)?
+                .trim();
+            if package_checksum.is_empty() || cached_package.is_empty() {
+                return None;
+            }
+            let signature_verified = audit
+                .details
+                .get("signatureVerified")
+                .and_then(serde_json::Value::as_bool)?;
+            let package_signature = audit
+                .details
+                .get("packageSignature")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
+            let package_public_key = audit
+                .details
+                .get("packagePublicKey")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
+            if signature_verified {
+                if package_signature.is_none() || package_public_key.is_none() {
+                    return None;
+                }
+            } else if audit.details.get("packageSignature").is_some()
+                || audit.details.get("packagePublicKey").is_some()
+            {
+                return None;
+            }
+
+            Some(RemotePackageRevalidationEvidence {
+                package_checksum: package_checksum.to_string(),
+                cached_package: PathBuf::from(cached_package),
+                package_signature,
+                package_public_key,
+                signature_verified,
+            })
+        });
+    evidence
+        .map(Some)
+        .ok_or_else(revalidation_source_evidence_missing)
+}
+
+fn validate_remote_revalidation_integrity(
+    detail: &PluginDetail,
+    installed_root: &Path,
+    cache_dir: &Path,
+    evidence: &RemotePackageRevalidationEvidence,
+) -> AppResult<()> {
+    let cached_package = validate_revalidation_cached_package(cache_dir, evidence)?;
+    let staging_root = cache_dir.join("staging");
+    let staging_dir = unique_staging_dir(&staging_root, "revalidate");
+    let extracted = match package::extract_plugin_package_for_inspection(
+        &cached_package,
+        &staging_dir,
+        package::PluginPackageLimits::default(),
+    ) {
+        Ok(extracted) => extracted,
+        Err(_) => {
+            cleanup_staging_dir(&staging_root, &staging_dir);
+            return Err(revalidation_source_integrity_invalid());
+        }
+    };
+    let result = (|| -> AppResult<()> {
+        signing::verify_checksum(&extracted.package_bytes, &evidence.package_checksum)
+            .map_err(|_| revalidation_source_integrity_invalid())?;
+        if evidence.signature_verified {
+            let signature = evidence
+                .package_signature
+                .as_deref()
+                .ok_or_else(revalidation_source_evidence_missing)?;
+            let public_key = evidence
+                .package_public_key
+                .as_deref()
+                .ok_or_else(revalidation_source_evidence_missing)?;
+            signing::verify_ed25519_signature(&extracted.package_bytes, signature, public_key)
+                .map_err(|_| revalidation_source_integrity_invalid())?;
+        }
+        if extracted.manifest != detail.manifest {
+            return Err(revalidation_source_integrity_invalid());
+        }
+
+        let archived_tree = collect_revalidation_tree_entries(&extracted.root_dir)?;
+        let installed_tree = collect_revalidation_tree_entries(installed_root)?;
+        if archived_tree != installed_tree {
+            return Err(revalidation_source_integrity_invalid());
+        }
+        Ok(())
+    })();
+    cleanup_staging_dir(&staging_root, &staging_dir);
+    result
+}
+
+fn validate_revalidation_cached_package(
+    cache_dir: &Path,
+    evidence: &RemotePackageRevalidationEvidence,
+) -> AppResult<PathBuf> {
+    let cache_metadata =
+        std::fs::symlink_metadata(cache_dir).map_err(|_| revalidation_source_evidence_missing())?;
+    if cache_metadata.file_type().is_symlink() || !cache_metadata.is_dir() {
+        return Err(revalidation_source_integrity_invalid());
+    }
+    let canonical_cache_dir =
+        std::fs::canonicalize(cache_dir).map_err(|_| revalidation_source_evidence_missing())?;
+    if !evidence.cached_package.is_absolute() {
+        return Err(revalidation_source_integrity_invalid());
+    }
+    let metadata = std::fs::symlink_metadata(&evidence.cached_package)
+        .map_err(|_| revalidation_source_evidence_missing())?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(revalidation_source_integrity_invalid());
+    }
+    let canonical_package = std::fs::canonicalize(&evidence.cached_package)
+        .map_err(|_| revalidation_source_integrity_invalid())?;
+    if canonical_package.parent() != Some(canonical_cache_dir.as_path())
+        || canonical_package
+            .extension()
+            .and_then(|value| value.to_str())
+            != Some("aio-plugin")
+    {
+        return Err(revalidation_source_integrity_invalid());
+    }
+    Ok(canonical_package)
+}
+
+fn collect_revalidation_tree_entries(
+    root: &Path,
+) -> AppResult<BTreeMap<PathBuf, RevalidationTreeEntry>> {
+    let limits = package::PluginPackageLimits::default();
+    let mut entries = BTreeMap::new();
+    let mut total_bytes = 0_u64;
+    collect_revalidation_tree_entries_from_dir(
+        root,
+        root,
+        &limits,
+        &mut entries,
+        &mut total_bytes,
+    )?;
+    Ok(entries)
+}
+
+fn collect_revalidation_tree_entries_from_dir(
+    root: &Path,
+    directory: &Path,
+    limits: &package::PluginPackageLimits,
+    entries: &mut BTreeMap<PathBuf, RevalidationTreeEntry>,
+    total_bytes: &mut u64,
+) -> AppResult<()> {
+    let metadata = std::fs::symlink_metadata(directory)
+        .map_err(|_| revalidation_source_integrity_invalid())?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(revalidation_source_integrity_invalid());
+    }
+    let children =
+        std::fs::read_dir(directory).map_err(|_| revalidation_source_integrity_invalid())?;
+    for child in children {
+        let child = child.map_err(|_| revalidation_source_integrity_invalid())?;
+        let path = child.path();
+        let relative = path
+            .strip_prefix(root)
+            .map_err(|_| revalidation_source_integrity_invalid())?
+            .to_path_buf();
+        let metadata = std::fs::symlink_metadata(&path)
+            .map_err(|_| revalidation_source_integrity_invalid())?;
+        if metadata.file_type().is_symlink() {
+            return Err(revalidation_source_integrity_invalid());
+        }
+        if entries.len() >= limits.max_entries {
+            return Err(revalidation_source_integrity_invalid());
+        }
+        if metadata.is_dir() {
+            entries.insert(relative, RevalidationTreeEntry::Directory);
+            collect_revalidation_tree_entries_from_dir(root, &path, limits, entries, total_bytes)?;
+            continue;
+        }
+        if !metadata.is_file() {
+            return Err(revalidation_source_integrity_invalid());
+        }
+        *total_bytes = total_bytes
+            .checked_add(metadata.len())
+            .ok_or_else(revalidation_source_integrity_invalid)?;
+        if *total_bytes > limits.max_extracted_bytes {
+            return Err(revalidation_source_integrity_invalid());
+        }
+        entries.insert(
+            relative,
+            RevalidationTreeEntry::File {
+                bytes: metadata.len(),
+                checksum: revalidation_file_checksum(&path, metadata.len())?,
+            },
+        );
+    }
+    Ok(())
+}
+
+fn revalidation_file_checksum(path: &Path, expected_bytes: u64) -> AppResult<String> {
+    let mut file =
+        std::fs::File::open(path).map_err(|_| revalidation_source_integrity_invalid())?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 8192];
+    let mut read_bytes = 0_u64;
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|_| revalidation_source_integrity_invalid())?;
+        if read == 0 {
+            break;
+        }
+        read_bytes = read_bytes
+            .checked_add(read as u64)
+            .ok_or_else(revalidation_source_integrity_invalid)?;
+        digest.update(&buffer[..read]);
+    }
+    if read_bytes != expected_bytes {
+        return Err(revalidation_source_integrity_invalid());
+    }
+    Ok(format!("sha256:{:x}", digest.finalize()))
+}
+
+fn revalidation_source_evidence_missing() -> AppError {
+    AppError::new(
+        "PLUGIN_REVALIDATE_SOURCE_EVIDENCE_MISSING",
+        "plugin source or signature evidence is unavailable for revalidation",
+    )
+}
+
+fn revalidation_source_integrity_invalid() -> AppError {
+    AppError::new(
+        "PLUGIN_REVALIDATE_SOURCE_INTEGRITY_INVALID",
+        "plugin source evidence does not match the installed package",
+    )
 }
 
 fn enforce_unsigned_install_policy(
@@ -2162,6 +2764,81 @@ fn install_audit_message(source: PluginInstallSource) -> &'static str {
         }
         _ => "Local plugin package installed",
     }
+}
+
+fn package_provenance_audit_details(
+    policy: &LocalPackageInstallPolicy,
+    extracted: &package::ExtractedPluginPackage,
+    cache_package_path: &Path,
+    trust: PackageTrust,
+) -> serde_json::Value {
+    install_audit_details(
+        policy.install_source,
+        policy.remote_source_url.as_deref(),
+        policy.market_source_url.as_deref(),
+        package_provenance_details(policy, extracted, cache_package_path, trust),
+    )
+}
+
+fn package_update_audit_details(
+    policy: &LocalPackageInstallPolicy,
+    extracted: &package::ExtractedPluginPackage,
+    cache_package_path: &Path,
+    trust: PackageTrust,
+    from_version: Option<&str>,
+    pending_permissions: &[String],
+) -> serde_json::Value {
+    let mut details = package_provenance_details(policy, extracted, cache_package_path, trust);
+    if let serde_json::Value::Object(object) = &mut details {
+        object.insert("fromVersion".to_string(), serde_json::json!(from_version));
+        object.insert(
+            "toVersion".to_string(),
+            serde_json::Value::String(extracted.manifest.version.clone()),
+        );
+        object.insert(
+            "pendingPermissions".to_string(),
+            serde_json::json!(pending_permissions),
+        );
+    }
+    install_audit_details(
+        policy.install_source,
+        policy.remote_source_url.as_deref(),
+        policy.market_source_url.as_deref(),
+        details,
+    )
+}
+
+fn package_provenance_details(
+    policy: &LocalPackageInstallPolicy,
+    extracted: &package::ExtractedPluginPackage,
+    cache_package_path: &Path,
+    trust: PackageTrust,
+) -> serde_json::Value {
+    let mut details = serde_json::json!({
+        "packageVersion": extracted.manifest.version.clone(),
+        "packageChecksum": extracted.checksum.clone(),
+        "cachedPackage": cache_package_path.to_string_lossy(),
+        "unsigned": !trust.signature_verified,
+        "signatureVerified": trust.signature_verified,
+        "developerMode": policy.developer_mode,
+    });
+    if trust.signature_verified {
+        if let serde_json::Value::Object(object) = &mut details {
+            if let Some(signature) = policy.signature.as_deref() {
+                object.insert(
+                    "packageSignature".to_string(),
+                    serde_json::Value::String(signature.to_string()),
+                );
+            }
+            if let Some(public_key) = policy.public_key.as_deref() {
+                object.insert(
+                    "packagePublicKey".to_string(),
+                    serde_json::Value::String(public_key.to_string()),
+                );
+            }
+        }
+    }
+    details
 }
 
 fn install_audit_details(
@@ -2261,6 +2938,15 @@ pub(crate) fn enable_plugin(
 }
 
 pub(crate) fn disable_plugin(db: &crate::db::Db, plugin_id: &str) -> AppResult<PluginDetail> {
+    let current = repository::get_plugin(db, plugin_id)?;
+    if current.summary.status == PluginStatus::Quarantined {
+        return Err(AppError::new(
+            "PLUGIN_INVALID_STATUS",
+            format!(
+                "plugin {plugin_id} is quarantined and must be revalidated before it can change state"
+            ),
+        ));
+    }
     let next = repository::update_plugin_status(db, plugin_id, PluginStatus::Disabled, None)?;
     append_audit(
         db,
@@ -2747,7 +3433,7 @@ mod tests {
     use crate::gateway::plugins::pipeline::{GatewayPluginPipeline, GatewayPluginPipelineConfig};
     use std::io::Write;
     use std::path::{Path, PathBuf};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     fn manifest() -> PluginManifest {
         serde_json::from_value(serde_json::json!({
@@ -2914,6 +3600,110 @@ mod tests {
             .expect("enable extension");
     }
 
+    fn install_enabled_throwing_extension_with_command(
+        db: &crate::db::Db,
+        root: &Path,
+        plugin_id: &str,
+        command: &str,
+    ) {
+        std::fs::create_dir_all(root.join("dist")).expect("create dist");
+        let manifest = extension_manifest(plugin_id, command);
+        std::fs::write(
+            root.join("plugin.json"),
+            serde_json::to_vec_pretty(&manifest).expect("manifest json"),
+        )
+        .expect("write manifest");
+        std::fs::write(
+            root.join("dist/extension.js"),
+            format!(
+                r#"
+                module.exports.activate = function(api) {{
+                  api.commands.registerCommand("{command}", function() {{
+                    throw new Error("forced command failure");
+                  }});
+                }};
+                "#
+            ),
+        )
+        .expect("write extension");
+
+        install_plugin_manifest(
+            db,
+            manifest,
+            PluginInstallSource::Local,
+            Some(root.to_string_lossy().to_string()),
+            env!("CARGO_PKG_VERSION"),
+        )
+        .expect("install extension");
+        repository::update_plugin_status(db, plugin_id, PluginStatus::Enabled, None)
+            .expect("enable extension");
+    }
+
+    fn install_enabled_throwing_startup_extension(
+        db: &crate::db::Db,
+        root: &Path,
+        plugin_id: &str,
+    ) {
+        std::fs::create_dir_all(root.join("dist")).expect("create dist");
+        let manifest: PluginManifest = serde_json::from_value(serde_json::json!({
+            "id": plugin_id,
+            "name": "Acme Startup Failure",
+            "version": "1.0.0",
+            "apiVersion": "1.0.0",
+            "runtime": { "kind": "extensionHost", "language": "typescript" },
+            "main": "dist/extension.js",
+            "activationEvents": ["onStartup"],
+            "capabilities": [],
+            "hostCompatibility": {
+                "app": ">=0.56.0 <1.0.0",
+                "pluginApi": "^1.0.0",
+                "platforms": ["macos", "windows", "linux"]
+            }
+        }))
+        .expect("startup manifest");
+        std::fs::write(
+            root.join("plugin.json"),
+            serde_json::to_vec_pretty(&manifest).expect("manifest json"),
+        )
+        .expect("write manifest");
+        std::fs::write(
+            root.join("dist/extension.js"),
+            "module.exports.activate = function() { throw new Error('forced startup failure'); };",
+        )
+        .expect("write extension");
+
+        install_plugin_manifest(
+            db,
+            manifest,
+            PluginInstallSource::Local,
+            Some(root.to_string_lossy().to_string()),
+            env!("CARGO_PKG_VERSION"),
+        )
+        .expect("install startup extension");
+        repository::update_plugin_status(db, plugin_id, PluginStatus::Enabled, None)
+            .expect("enable startup extension");
+    }
+
+    fn seed_two_severe_runtime_failures(db: &crate::db::Db, plugin_id: &str, hook_name: &str) {
+        for index in 0..2 {
+            let result = repository::record_severe_runtime_failure_and_maybe_quarantine(
+                db,
+                repository::RecordPluginRuntimeFailureInput {
+                    plugin_id: plugin_id.to_string(),
+                    hook_name: Some(hook_name.to_string()),
+                    failure_kind: "runtime_error".to_string(),
+                    message: format!("seeded runtime failure {index}"),
+                    trace_id: None,
+                },
+            )
+            .expect("seed severe failure");
+            assert!(
+                !result.quarantined,
+                "first two failures must not quarantine"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn plugin_command_execution_records_extension_report() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -3006,6 +3796,72 @@ mod tests {
         assert_eq!(reports.len(), 2);
         assert_eq!(reports[0].input_budget["coldStart"], false);
         assert_eq!(reports[1].input_budget["coldStart"], true);
+    }
+
+    #[tokio::test]
+    async fn third_command_failure_quarantines_before_notifying_gateway_removal() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = crate::db::init_for_tests(&dir.path().join("plugins.db")).expect("db");
+        let plugin_id = "acme.command-failure";
+        let command = "acme.command-failure.run";
+        install_enabled_throwing_extension_with_command(
+            &db,
+            &dir.path().join(plugin_id),
+            plugin_id,
+            command,
+        );
+        seed_two_severe_runtime_failures(&db, plugin_id, command);
+        let registry = ExtensionHostInstanceRegistry::new(db.clone());
+        let removed = Arc::new(Mutex::new(Vec::new()));
+        let removed_for_callback = Arc::clone(&removed);
+
+        let error = execute_plugin_command_with_quarantine(
+            &db,
+            &registry,
+            command,
+            serde_json::json!({ "traceId": "trace-third-command-failure" }),
+            move |quarantined_plugin_id| {
+                removed_for_callback
+                    .lock()
+                    .unwrap()
+                    .push(quarantined_plugin_id.to_string());
+            },
+        )
+        .await
+        .expect_err("third severe command failure should be returned");
+
+        assert!(severe_runtime_failure_kind(error.code()).is_some());
+        assert_eq!(removed.lock().unwrap().clone(), vec![plugin_id.to_string()]);
+        assert_eq!(
+            repository::get_plugin(&db, plugin_id)
+                .expect("quarantined plugin")
+                .summary
+                .status,
+            PluginStatus::Quarantined
+        );
+    }
+
+    #[tokio::test]
+    async fn third_startup_failure_returns_the_quarantined_plugin_for_gateway_removal() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = crate::db::init_for_tests(&dir.path().join("plugins.db")).expect("db");
+        let plugin_id = "acme.startup-failure";
+        install_enabled_throwing_startup_extension(&db, &dir.path().join(plugin_id), plugin_id);
+        seed_two_severe_runtime_failures(&db, plugin_id, "onStartup");
+        let registry = ExtensionHostInstanceRegistry::new(db.clone());
+
+        let quarantined = activate_startup_plugins(&db, &registry)
+            .await
+            .expect("startup activation should continue after plugin failure");
+
+        assert_eq!(quarantined, vec![plugin_id]);
+        assert_eq!(
+            repository::get_plugin(&db, plugin_id)
+                .expect("quarantined plugin")
+                .summary
+                .status,
+            PluginStatus::Quarantined
+        );
     }
 
     #[tokio::test]
@@ -3269,7 +4125,7 @@ mod tests {
             serde_json::json!({"mode": "append_instruction"}),
         )
         .unwrap();
-        quarantine_revoked_plugin(&db, "community.prompt-helper", "revoked").unwrap();
+        quarantine_revoked_plugin(&db, "community.prompt-helper").unwrap();
 
         let err =
             enable_plugin(&db, "community.prompt-helper", env!("CARGO_PKG_VERSION")).unwrap_err();
@@ -3277,6 +4133,38 @@ mod tests {
         assert!(err.to_string().starts_with("PLUGIN_INVALID_STATUS:"));
         let detail = get_plugin_detail(&db, "community.prompt-helper").unwrap();
         assert_eq!(detail.summary.status, PluginStatus::Quarantined);
+    }
+
+    #[test]
+    fn disable_plugin_rejects_quarantined_until_revalidation() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::init_for_tests(&dir.path().join("plugins.db")).unwrap();
+
+        install_plugin_manifest(
+            &db,
+            manifest(),
+            PluginInstallSource::Local,
+            None,
+            env!("CARGO_PKG_VERSION"),
+        )
+        .unwrap();
+        repository::update_plugin_status(
+            &db,
+            "community.prompt-helper",
+            PluginStatus::Quarantined,
+            Some("runtime quarantine"),
+        )
+        .unwrap();
+
+        let err = disable_plugin(&db, "community.prompt-helper").unwrap_err();
+
+        assert_eq!(err.code(), "PLUGIN_INVALID_STATUS");
+        let detail = get_plugin_detail(&db, "community.prompt-helper").unwrap();
+        assert_eq!(detail.summary.status, PluginStatus::Quarantined);
+        assert_eq!(
+            detail.summary.last_error.as_deref(),
+            Some("runtime quarantine")
+        );
     }
 
     #[test]
@@ -4075,6 +4963,9 @@ INSERT INTO plugins (
             .expect("official manifest contributes")
             .gateway_hooks
             .retain(|hook| hook.name != "gateway.request.beforeSend");
+        legacy
+            .activation_events
+            .retain(|event| event != "onGatewayHook:gateway.request.beforeSend");
         repository::update_plugin_manifest(
             &db,
             legacy,
@@ -4121,6 +5012,9 @@ INSERT INTO plugins (
             .expect("official manifest contributes")
             .gateway_hooks
             .retain(|hook| hook.name != "gateway.request.beforeSend");
+        legacy
+            .activation_events
+            .retain(|event| event != "onGatewayHook:gateway.request.beforeSend");
         repository::update_plugin_manifest(
             &db,
             legacy,
@@ -4203,6 +5097,17 @@ INSERT INTO plugins (
         version: &str,
         contributes: serde_json::Value,
     ) -> serde_json::Value {
+        let mut activation_events = vec!["onStartup".to_string()];
+        activation_events.extend(
+            contributes
+                .get("commands")
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|command| command.get("command"))
+                .filter_map(serde_json::Value::as_str)
+                .map(|command| format!("onCommand:{command}")),
+        );
         serde_json::json!({
             "id": plugin_id,
             "name": "Extension Package Plugin",
@@ -4210,7 +5115,7 @@ INSERT INTO plugins (
             "apiVersion": "1.0.0",
             "main": "dist/extension.js",
             "runtime": { "kind": "extensionHost", "language": "typescript" },
-            "activationEvents": ["onStartup"],
+            "activationEvents": activation_events,
             "contributes": contributes,
             "capabilities": ["provider.extensionValues", "commands.execute"],
             "hostCompatibility": {
@@ -5493,9 +6398,7 @@ INSERT INTO plugins (
         )
         .unwrap();
 
-        let detail =
-            quarantine_revoked_plugin(&db, "community.revoked", "Plugin revoked by market index")
-                .unwrap();
+        let detail = quarantine_revoked_plugin(&db, "community.revoked").unwrap();
 
         assert_eq!(detail.summary.status, PluginStatus::Quarantined);
         assert_eq!(
@@ -5506,6 +6409,327 @@ INSERT INTO plugins (
             .audit_logs
             .iter()
             .any(|log| log.event_type == "plugin.quarantined"));
+
+        let err = revalidate_quarantined_plugin(
+            &db,
+            "community.revoked",
+            env!("CARGO_PKG_VERSION"),
+            &dir.path().join("plugins/cache"),
+        )
+        .unwrap_err();
+        assert_eq!(err.code(), "PLUGIN_REVALIDATE_MARKET_REVOKED");
+        assert_eq!(
+            repository::get_plugin(&db, "community.revoked")
+                .unwrap()
+                .summary
+                .status,
+            PluginStatus::Quarantined
+        );
+    }
+
+    #[test]
+    fn runtime_quarantined_market_plugin_requires_current_signed_market_status() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::init_for_tests(&dir.path().join("plugins.db")).unwrap();
+        let package_path = dir.path().join("market-runtime-revalidate.aio-plugin");
+        let cache_dir = dir.path().join("plugins/cache");
+        let installed_dir = dir.path().join("plugins/installed");
+        write_local_package(
+            &package_path,
+            local_package_manifest("market.runtime-revalidate", "1.0.0"),
+        );
+        install_plugin_from_local_package(
+            &db,
+            &package_path,
+            &cache_dir,
+            &installed_dir,
+            env!("CARGO_PKG_VERSION"),
+        )
+        .unwrap();
+        db.open_connection()
+            .unwrap()
+            .execute(
+                "UPDATE plugins SET install_source = 'market' WHERE plugin_id = ?1",
+                rusqlite::params!["market.runtime-revalidate"],
+            )
+            .unwrap();
+        repository::update_plugin_status(
+            &db,
+            "market.runtime-revalidate",
+            PluginStatus::Quarantined,
+            Some("runtime quarantine"),
+        )
+        .unwrap();
+
+        let err = revalidate_quarantined_plugin(
+            &db,
+            "market.runtime-revalidate",
+            env!("CARGO_PKG_VERSION"),
+            &cache_dir,
+        )
+        .unwrap_err();
+
+        assert_eq!(err.code(), "PLUGIN_REVALIDATE_MARKET_STATUS_UNAVAILABLE");
+        assert_eq!(
+            repository::get_plugin(&db, "market.runtime-revalidate")
+                .unwrap()
+                .summary
+                .status,
+            PluginStatus::Quarantined
+        );
+    }
+
+    #[test]
+    fn severe_runtime_failure_kind_counts_only_explicit_runtime_failures() {
+        for (code, expected) in [
+            ("PLUGIN_HOOK_TIMEOUT", "timeout"),
+            ("PLUGIN_EXTENSION_HOST_TIMEOUT", "timeout"),
+            ("PLUGIN_EXTENSION_CALL_TIMEOUT", "timeout"),
+            ("PLUGIN_EXTENSION_START_TIMEOUT", "timeout"),
+            ("PLUGIN_EXTENSION_HOST_PROCESS_CRASHED", "host_crash"),
+            ("PLUGIN_EXTENSION_HOST_JS_ERROR", "runtime_error"),
+        ] {
+            assert_eq!(severe_runtime_failure_kind(code), Some(expected));
+        }
+
+        for code in [
+            "PLUGIN_EXTENSION_HOST_GATEWAY_FAILED",
+            "PLUGIN_EXTENSION_HOST_INVALID_OUTPUT",
+            "PLUGIN_EXTENSION_HOST_DECODE_FAILED",
+            "PLUGIN_EXTENSION_HOST_ROOT_UNAVAILABLE",
+            "PLUGIN_PERMISSION_DENIED",
+            "PLUGIN_RESERVED_HEADER",
+            "PLUGIN_INVALID_HEADER",
+        ] {
+            assert_eq!(severe_runtime_failure_kind(code), None, "{code}");
+        }
+    }
+
+    #[test]
+    fn runtime_quarantine_revalidation_restores_local_plugin_only_to_disabled() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::init_for_tests(&dir.path().join("plugins.db")).unwrap();
+        let package_path = dir.path().join("runtime-revalidate.aio-plugin");
+        let cache_dir = dir.path().join("plugins/cache");
+        let installed_dir = dir.path().join("plugins/installed");
+        write_local_package(
+            &package_path,
+            local_package_manifest("local.runtime-revalidate", "1.0.0"),
+        );
+        install_plugin_from_local_package(
+            &db,
+            &package_path,
+            &cache_dir,
+            &installed_dir,
+            env!("CARGO_PKG_VERSION"),
+        )
+        .unwrap();
+        repository::update_plugin_status(
+            &db,
+            "local.runtime-revalidate",
+            PluginStatus::Quarantined,
+            Some("runtime quarantine"),
+        )
+        .unwrap();
+
+        let restored = revalidate_quarantined_plugin(
+            &db,
+            "local.runtime-revalidate",
+            env!("CARGO_PKG_VERSION"),
+            &cache_dir,
+        )
+        .unwrap();
+
+        assert_eq!(restored.summary.status, PluginStatus::Disabled);
+        assert_eq!(restored.summary.last_error, None);
+        assert!(restored
+            .audit_logs
+            .iter()
+            .any(|log| log.event_type == "plugin.revalidated"));
+    }
+
+    #[test]
+    fn remote_plugin_update_records_provenance_and_revalidates_to_disabled() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::init_for_tests(&dir.path().join("plugins.db")).unwrap();
+        let cache_dir = dir.path().join("plugins/cache");
+        let installed_dir = dir.path().join("plugins/installed");
+        let v1_package = dir.path().join("remote-revalidate-v1.aio-plugin");
+        let v2_package = dir.path().join("remote-revalidate-v2.aio-plugin");
+        write_local_package(
+            &v1_package,
+            local_package_manifest("github.revalidate", "1.0.0"),
+        );
+        write_local_package(
+            &v2_package,
+            local_package_manifest("github.revalidate", "1.1.0"),
+        );
+        let source_url = "https://github.com/acme/release/releases/download/v1/plugin.aio-plugin";
+        install_plugin_from_remote_package_bytes(
+            &db,
+            std::fs::read(&v1_package).unwrap(),
+            source_url,
+            &cache_dir,
+            &installed_dir,
+            env!("CARGO_PKG_VERSION"),
+            RemotePackageInstallPolicy {
+                install_source: PluginInstallSource::GithubRelease,
+                expected_plugin_id: "github.revalidate".to_string(),
+                expected_checksum: package_checksum(&v1_package),
+                signature: None,
+                public_key: None,
+                market_source_url: None,
+            },
+        )
+        .unwrap();
+        update_plugin_from_remote_package_bytes(
+            &db,
+            std::fs::read(&v2_package).unwrap(),
+            source_url,
+            &cache_dir,
+            &installed_dir,
+            env!("CARGO_PKG_VERSION"),
+            RemotePackageInstallPolicy {
+                install_source: PluginInstallSource::GithubRelease,
+                expected_plugin_id: "github.revalidate".to_string(),
+                expected_checksum: package_checksum(&v2_package),
+                signature: None,
+                public_key: None,
+                market_source_url: None,
+            },
+        )
+        .unwrap();
+        let updated = repository::get_plugin(&db, "github.revalidate").unwrap();
+        let update_audit = updated
+            .audit_logs
+            .iter()
+            .find(|log| log.event_type == "plugin.updated")
+            .unwrap();
+        let cached_package = PathBuf::from(
+            update_audit.details["cachedPackage"]
+                .as_str()
+                .expect("remote update cache path"),
+        );
+        assert_eq!(update_audit.details["source"], "github_release");
+        assert_eq!(update_audit.details["packageVersion"], "1.1.0");
+        assert_eq!(
+            update_audit.details["packageChecksum"],
+            package_checksum(&v2_package)
+        );
+        assert!(cached_package.is_file());
+
+        repository::update_plugin_status(
+            &db,
+            "github.revalidate",
+            PluginStatus::Quarantined,
+            Some("runtime quarantine"),
+        )
+        .unwrap();
+        let restored = revalidate_quarantined_plugin(
+            &db,
+            "github.revalidate",
+            env!("CARGO_PKG_VERSION"),
+            &cache_dir,
+        )
+        .unwrap();
+
+        assert_eq!(restored.summary.status, PluginStatus::Disabled);
+        assert_eq!(restored.summary.current_version.as_deref(), Some("1.1.0"));
+        assert!(restored
+            .audit_logs
+            .iter()
+            .any(|log| log.event_type == "plugin.revalidated"));
+    }
+
+    #[test]
+    fn remote_plugin_revalidation_fails_closed_for_missing_evidence_or_tampered_tree() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::init_for_tests(&dir.path().join("plugins.db")).unwrap();
+        let cache_dir = dir.path().join("plugins/cache");
+        let installed_dir = dir.path().join("plugins/installed");
+        let package_path = dir.path().join("remote-integrity.aio-plugin");
+        write_local_package(
+            &package_path,
+            local_package_manifest("github.integrity", "1.0.0"),
+        );
+        let source_url = "https://github.com/acme/release/releases/download/v1/plugin.aio-plugin";
+        let installed = install_plugin_from_remote_package_bytes(
+            &db,
+            std::fs::read(&package_path).unwrap(),
+            source_url,
+            &cache_dir,
+            &installed_dir,
+            env!("CARGO_PKG_VERSION"),
+            RemotePackageInstallPolicy {
+                install_source: PluginInstallSource::GithubRelease,
+                expected_plugin_id: "github.integrity".to_string(),
+                expected_checksum: package_checksum(&package_path),
+                signature: None,
+                public_key: None,
+                market_source_url: None,
+            },
+        )
+        .unwrap();
+        let install_audit = installed
+            .audit_logs
+            .iter()
+            .find(|log| log.event_type == "plugin.remote.installed")
+            .unwrap();
+        let cached_package = PathBuf::from(
+            install_audit.details["cachedPackage"]
+                .as_str()
+                .expect("remote install cache path"),
+        );
+        repository::update_plugin_status(
+            &db,
+            "github.integrity",
+            PluginStatus::Quarantined,
+            Some("runtime quarantine"),
+        )
+        .unwrap();
+        std::fs::remove_file(&cached_package).unwrap();
+
+        let missing = revalidate_quarantined_plugin(
+            &db,
+            "github.integrity",
+            env!("CARGO_PKG_VERSION"),
+            &cache_dir,
+        )
+        .unwrap_err();
+        assert_eq!(missing.code(), "PLUGIN_REVALIDATE_SOURCE_EVIDENCE_MISSING");
+        assert_eq!(
+            repository::get_plugin(&db, "github.integrity")
+                .unwrap()
+                .summary
+                .status,
+            PluginStatus::Quarantined
+        );
+
+        std::fs::write(&cached_package, std::fs::read(&package_path).unwrap()).unwrap();
+        let main = installed_dir
+            .join("github.integrity")
+            .join("1.0.0")
+            .join("dist/extension.js");
+        std::fs::write(main, b"export default { tampered: true };").unwrap();
+
+        let tampered = revalidate_quarantined_plugin(
+            &db,
+            "github.integrity",
+            env!("CARGO_PKG_VERSION"),
+            &cache_dir,
+        )
+        .unwrap_err();
+        assert_eq!(
+            tampered.code(),
+            "PLUGIN_REVALIDATE_SOURCE_INTEGRITY_INVALID"
+        );
+        assert_eq!(
+            repository::get_plugin(&db, "github.integrity")
+                .unwrap()
+                .summary
+                .status,
+            PluginStatus::Quarantined
+        );
     }
 
     #[test]

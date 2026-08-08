@@ -151,6 +151,30 @@ fn symlink_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
     std::os::unix::fs::symlink(src, dst)
 }
 
+fn write_managed_backup_manifest(dir: &Path, version: u8, created_at: &str) {
+    fs::create_dir_all(dir).expect("create managed backup dir");
+    let mut manifest = json!({
+        "version": version,
+        "trigger": "fixture",
+        "target_provider": "OpenAI",
+        "created_at": created_at,
+        "managed_by": "Codex provider sync",
+        "config_path": null,
+        "session_files": [],
+    });
+    if version == 1 {
+        manifest["sqlite_files"] = json!([]);
+        manifest["global_state_path"] = Value::Null;
+    } else if version == 2 {
+        manifest["scope"] = json!("active_sessions");
+    }
+    fs::write(
+        dir.join("provider-sync.json"),
+        serde_json::to_vec(&manifest).expect("serialize managed manifest"),
+    )
+    .expect("write managed manifest");
+}
+
 #[test]
 fn codex_config_raw_save_does_not_run_provider_sync() {
     let app = support::TestApp::new();
@@ -246,7 +270,7 @@ fn codex_config_set_non_provider_patch_does_not_require_codex_to_be_closed() {
 }
 
 #[test]
-fn codex_provider_sync_from_config_bytes_updates_rollout_sqlite_global_state_and_backup() {
+fn codex_provider_sync_updates_only_active_sessions_and_writes_v2_backup() {
     let app = support::TestApp::new();
     let handle = app.handle();
     let home = codex_home(&handle);
@@ -254,8 +278,21 @@ fn codex_provider_sync_from_config_bytes_updates_rollout_sqlite_global_state_and
 
     write_codex_config(&handle, AIO_CONFIG);
 
-    let rollout_path = home.join("sessions/2026/rollout-provider-sync.jsonl");
-    write_rollout(&rollout_path, "aio", "thread-1");
+    let active_rollout = home.join("sessions/2026/rollout-provider-sync.jsonl");
+    write_rollout(&active_rollout, "aio", "thread-1");
+    let archived_rollout = home.join("archived_sessions/2025/rollout-archived.jsonl");
+    write_rollout(&archived_rollout, "aio", "thread-archived");
+    let archived_bytes = fs::read(&archived_rollout).expect("snapshot archived rollout");
+    let invalid_archived_rollout = home.join("archived_sessions/2024/rollout-invalid-utf8.jsonl");
+    fs::create_dir_all(
+        invalid_archived_rollout
+            .parent()
+            .expect("invalid archived parent"),
+    )
+    .expect("create invalid archived parent");
+    fs::write(&invalid_archived_rollout, b"\xFF\xFE\xFD").expect("write invalid archived rollout");
+    let invalid_archived_bytes =
+        fs::read(&invalid_archived_rollout).expect("snapshot invalid archived rollout");
 
     let sqlite_path = home.join("sqlite/codex-dev.db");
     create_threads_db(
@@ -266,10 +303,16 @@ fn codex_provider_sync_from_config_bytes_updates_rollout_sqlite_global_state_and
             ("thread-3", Some("OpenAI"), Some(1)),
         ],
     );
+    let original_threads = read_threads_db(&sqlite_path);
     write_sqlite_sidecars(&sqlite_path);
+    let original_wal =
+        fs::read(format!("{}-wal", sqlite_path.to_string_lossy())).expect("snapshot sqlite wal");
+    let original_shm =
+        fs::read(format!("{}-shm", sqlite_path.to_string_lossy())).expect("snapshot sqlite shm");
 
     let global_state_path = home.join(".codex-global-state.json");
     write_global_state(&global_state_path, "aio");
+    let original_global_state = fs::read(&global_state_path).expect("snapshot global state");
 
     let result = aio_coding_hub_lib::test_support::codex_provider_sync_from_config_bytes_json(
         &handle,
@@ -283,11 +326,11 @@ fn codex_provider_sync_from_config_bytes_updates_rollout_sqlite_global_state_and
     assert_eq!(support::json_str(&result, "trigger"), "config_save");
     assert_eq!(
         support::json_u64(&result, "sqlite_provider_rows_updated"),
-        2
+        0
     );
     assert_eq!(
         support::json_u64(&result, "sqlite_user_event_rows_updated"),
-        2
+        0
     );
     assert_eq!(support::json_u64(&result, "sqlite_cwd_rows_updated"), 0);
 
@@ -308,16 +351,10 @@ fn codex_provider_sync_from_config_bytes_updates_rollout_sqlite_global_state_and
         .get("updated_workspace_roots")
         .and_then(Value::as_array)
         .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|item| item.as_str().map(ToString::to_string))
-        .collect::<Vec<_>>();
-    assert_eq!(
-        updated_workspace_roots,
-        vec![
-            "C:/workspace/demo".to_string(),
-            "D:/workspace/alt".to_string()
-        ]
+        .unwrap_or_default();
+    assert!(
+        updated_workspace_roots.is_empty(),
+        "{updated_workspace_roots:?}"
     );
 
     let config_text = read_codex_config(&handle);
@@ -326,34 +363,31 @@ fn codex_provider_sync_from_config_bytes_updates_rollout_sqlite_global_state_and
         "{config_text}"
     );
     assert_eq!(
-        rollout_session_meta_providers(&rollout_path),
+        rollout_session_meta_providers(&active_rollout),
         vec!["OpenAI".to_string()]
     );
-
-    let threads = read_threads_db(&sqlite_path);
     assert_eq!(
-        threads,
-        vec![
-            ("thread-1".to_string(), Some("OpenAI".to_string()), Some(1)),
-            ("thread-2".to_string(), Some("OpenAI".to_string()), Some(1)),
-            ("thread-3".to_string(), Some("OpenAI".to_string()), Some(1)),
-        ]
-    );
-
-    let global_state = read_json(&global_state_path);
-    assert_eq!(global_state["model_provider"], "OpenAI");
-    assert_eq!(
-        global_state["electron-saved-workspace-roots"],
-        json!(["C:/workspace/demo", "D:/workspace/alt"])
+        fs::read(&archived_rollout).expect("read archived rollout after sync"),
+        archived_bytes,
+        "archived sessions must not be rewritten"
     );
     assert_eq!(
-        global_state["open-in-target-preferences"],
-        json!({"perPath": {"C:/workspace/demo": "terminal"}})
+        fs::read(&invalid_archived_rollout).expect("read invalid archived rollout after sync"),
+        invalid_archived_bytes,
+        "archived sessions must not even be parsed"
     );
     assert_eq!(
-        global_state["discard_me"],
-        json!({"should": "disappear"}),
-        "unknown global state keys should be preserved: {global_state}"
+        fs::read(format!("{}-wal", sqlite_path.to_string_lossy())).expect("read sqlite wal"),
+        original_wal
+    );
+    assert_eq!(
+        fs::read(format!("{}-shm", sqlite_path.to_string_lossy())).expect("read sqlite shm"),
+        original_shm
+    );
+    assert_eq!(read_threads_db(&sqlite_path), original_threads);
+    assert_eq!(
+        fs::read(&global_state_path).expect("read global state after sync"),
+        original_global_state
     );
 
     let backup_dir = PathBuf::from(support::json_str(&result, "backup_dir"));
@@ -366,27 +400,29 @@ fn codex_provider_sync_from_config_bytes_updates_rollout_sqlite_global_state_and
     assert!(backup_dir
         .join("sessions/2026/rollout-provider-sync.jsonl")
         .exists());
-    assert!(backup_dir.join("sqlite/codex-dev.db").exists());
-    assert!(backup_dir.join("sqlite/codex-dev.db-wal").exists());
-    assert!(backup_dir.join("sqlite/codex-dev.db-shm").exists());
-    assert!(backup_dir.join(".codex-global-state.json").exists());
+    assert!(!backup_dir.join("archived_sessions").exists());
+    assert!(!backup_dir.join("sqlite").exists());
+    assert!(!backup_dir.join(".codex-global-state.json").exists());
 
     let manifest = read_json(&backup_dir.join("provider-sync.json"));
     assert_eq!(manifest["trigger"], "config_save");
     assert_eq!(manifest["target_provider"], "OpenAI");
     assert_eq!(manifest["managed_by"], "Codex provider sync");
-    assert_eq!(manifest["version"], 1);
+    assert_eq!(manifest["version"], 2);
+    assert_eq!(manifest["scope"], "active_sessions");
     assert_eq!(
-        manifest["sqlite_files"]
+        manifest["session_files"]
             .as_array()
             .map(|items| items.len())
             .unwrap_or_default(),
-        3
+        1
     );
+    assert!(manifest.get("sqlite_files").is_none(), "{manifest}");
+    assert!(manifest.get("global_state_path").is_none(), "{manifest}");
 }
 
 #[test]
-fn codex_provider_sync_current_uses_same_rules_and_then_reports_up_to_date() {
+fn codex_provider_sync_current_ignores_archived_sqlite_and_global_state() {
     let app = support::TestApp::new();
     let handle = app.handle();
     let home = codex_home(&handle);
@@ -396,6 +432,7 @@ fn codex_provider_sync_current_uses_same_rules_and_then_reports_up_to_date() {
 
     let rollout_path = home.join("archived_sessions/2026/rollout-manual.jsonl");
     write_rollout(&rollout_path, "aio", "thread-9");
+    let original_rollout = fs::read(&rollout_path).expect("snapshot archived rollout");
 
     let sqlite_path = home.join("state_5.sqlite");
     create_threads_db(
@@ -405,64 +442,134 @@ fn codex_provider_sync_current_uses_same_rules_and_then_reports_up_to_date() {
             ("thread-10", None, Some(0)),
         ],
     );
+    let original_threads = read_threads_db(&sqlite_path);
 
     let global_state_path = home.join(".codex-global-state.json");
     write_global_state(&global_state_path, "aio");
+    let original_global_state = fs::read(&global_state_path).expect("snapshot global state");
 
-    let first = aio_coding_hub_lib::test_support::codex_provider_sync_current_json(&handle)
+    let result = aio_coding_hub_lib::test_support::codex_provider_sync_current_json(&handle)
         .expect("manual sync current");
 
-    assert_eq!(support::json_str(&first, "status"), "synced");
-    assert_eq!(support::json_str(&first, "target_provider"), "OpenAI");
-    assert_eq!(support::json_u64(&first, "sqlite_provider_rows_updated"), 2);
-    assert_eq!(
-        support::json_u64(&first, "sqlite_user_event_rows_updated"),
-        2
-    );
-    assert_eq!(
-        rollout_session_meta_providers(&rollout_path),
-        vec!["OpenAI".to_string()]
-    );
-    assert_eq!(
-        read_threads_db(&sqlite_path),
-        vec![
-            ("thread-10".to_string(), Some("OpenAI".to_string()), Some(1)),
-            ("thread-9".to_string(), Some("OpenAI".to_string()), Some(1)),
-        ]
-    );
-    let global_state_after_first = read_json(&global_state_path);
-    assert_eq!(global_state_after_first["model_provider"], "OpenAI");
+    assert_eq!(support::json_str(&result, "status"), "up_to_date");
+    assert_eq!(support::json_str(&result, "target_provider"), "OpenAI");
     assert!(
-        global_state_after_first.get("discard_me").is_some(),
-        "unknown global state keys should be preserved: {global_state_after_first}"
-    );
-
-    let second = aio_coding_hub_lib::test_support::codex_provider_sync_current_json(&handle)
-        .expect("second manual sync");
-
-    assert_eq!(support::json_str(&second, "status"), "up_to_date");
-    assert_eq!(support::json_str(&second, "target_provider"), "OpenAI");
-    assert!(
-        second.get("backup_dir").is_some_and(Value::is_null),
-        "{second}"
+        result.get("backup_dir").is_some_and(Value::is_null),
+        "{result}"
     );
     assert_eq!(
-        support::json_u64(&second, "sqlite_provider_rows_updated"),
+        support::json_u64(&result, "sqlite_provider_rows_updated"),
         0
     );
     assert_eq!(
-        support::json_u64(&second, "sqlite_user_event_rows_updated"),
+        support::json_u64(&result, "sqlite_user_event_rows_updated"),
         0
     );
     assert_eq!(
-        second
+        result
             .get("changed_session_files")
             .and_then(Value::as_array)
             .map(|items| items.len())
             .unwrap_or_default(),
         0
     );
-    assert_eq!(read_json(&global_state_path)["model_provider"], "OpenAI");
+    assert_eq!(
+        fs::read(&rollout_path).expect("read archived rollout"),
+        original_rollout
+    );
+    assert_eq!(read_threads_db(&sqlite_path), original_threads);
+    assert_eq!(
+        fs::read(&global_state_path).expect("read global state"),
+        original_global_state
+    );
+    assert!(!home.join("backups_state/provider-sync").exists());
+}
+
+#[test]
+fn codex_provider_sync_migrates_v1_and_replaces_previous_v2_backup() {
+    let app = support::TestApp::new();
+    let handle = app.handle();
+    let home = codex_home(&handle);
+    fs::create_dir_all(&home).expect("create codex home");
+
+    write_codex_config(&handle, OPENAI_CONFIG);
+    let rollout_path = home.join("sessions/rollout-backup-migration.jsonl");
+    write_rollout(&rollout_path, "aio", "thread-backup-migration");
+
+    let backup_root = home.join("backups_state/provider-sync");
+    let legacy_v1 = backup_root.join("legacy-v1");
+    write_managed_backup_manifest(&legacy_v1, 1, "1");
+    let previous_v2 = backup_root.join("previous-v2");
+    write_managed_backup_manifest(&previous_v2, 2, "2");
+    let no_manifest = backup_root.join("no-manifest");
+    fs::create_dir_all(&no_manifest).expect("create unmanaged backup");
+    let corrupt_manifest = backup_root.join("corrupt-manifest");
+    fs::create_dir_all(&corrupt_manifest).expect("create corrupt backup");
+    fs::write(corrupt_manifest.join("provider-sync.json"), b"{bad-json")
+        .expect("write corrupt manifest");
+    let wrong_marker = backup_root.join("wrong-marker");
+    fs::create_dir_all(&wrong_marker).expect("create wrong marker backup");
+    fs::write(
+        wrong_marker.join("provider-sync.json"),
+        serde_json::to_vec(&json!({
+            "version": 1,
+            "trigger": "fixture",
+            "target_provider": "OpenAI",
+            "created_at": "3",
+            "managed_by": "not provider sync",
+            "config_path": null,
+            "session_files": [],
+            "sqlite_files": [],
+            "global_state_path": null
+        }))
+        .expect("serialize wrong marker manifest"),
+    )
+    .expect("write wrong marker manifest");
+
+    let result = aio_coding_hub_lib::test_support::codex_provider_sync_current_json(&handle)
+        .expect("sync with managed backup migration");
+
+    let current = PathBuf::from(support::json_str(&result, "backup_dir"));
+    assert!(current.is_dir(), "current v2 backup must exist");
+    assert!(
+        !current.join("config.toml").exists(),
+        "unchanged config must not be backed up"
+    );
+    let current_manifest = read_json(&current.join("provider-sync.json"));
+    assert!(
+        current_manifest
+            .get("config_path")
+            .is_some_and(Value::is_null),
+        "unchanged config must be recorded as null: {current_manifest}"
+    );
+    assert!(!legacy_v1.exists(), "v1 managed backup should be removed");
+    assert!(
+        !previous_v2.exists(),
+        "previous v2 managed backup should be removed"
+    );
+    assert!(no_manifest.exists(), "unmanaged backup must be preserved");
+    assert!(
+        corrupt_manifest.exists(),
+        "corrupt manifest must be preserved"
+    );
+    assert!(wrong_marker.exists(), "marker mismatch must be preserved");
+
+    let managed_v2 = fs::read_dir(&backup_root)
+        .expect("read backup root")
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            let manifest = entry.path().join("provider-sync.json");
+            let Some(value) = fs::read(&manifest)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            else {
+                return false;
+            };
+            value["managed_by"] == "Codex provider sync" && value["version"] == 2
+        })
+        .map(|entry| entry.path())
+        .collect::<Vec<_>>();
+    assert_eq!(managed_v2, vec![current]);
 }
 
 #[test]
@@ -668,96 +775,4 @@ fn codex_provider_sync_rejects_symlinked_backup_root() {
         rollout_session_meta_providers(&rollout_path),
         vec!["aio".to_string()]
     );
-}
-
-#[test]
-fn codex_provider_sync_from_config_bytes_rolls_back_when_sqlite_write_fails() {
-    let app = support::TestApp::new();
-    let handle = app.handle();
-    let home = codex_home(&handle);
-    fs::create_dir_all(&home).expect("create codex home");
-
-    write_codex_config(&handle, AIO_CONFIG);
-
-    let rollout_path = home.join("sessions/rollout-rollback.jsonl");
-    write_rollout(&rollout_path, "aio", "thread-rollback");
-    let original_rollout = fs::read_to_string(&rollout_path).expect("read original rollout");
-
-    let global_state_path = home.join(".codex-global-state.json");
-    write_global_state(&global_state_path, "aio");
-    let original_global_state =
-        fs::read_to_string(&global_state_path).expect("read original state");
-
-    let sqlite_path = home.join("state_5.sqlite");
-    create_threads_db(&sqlite_path, &[("thread-rollback", Some("aio"), Some(0))]);
-    let conn = Connection::open(&sqlite_path).expect("open sqlite for trigger");
-    conn.execute(
-        "CREATE TRIGGER fail_provider_sync_update BEFORE UPDATE ON threads BEGIN SELECT RAISE(ABORT, 'boom'); END",
-        [],
-    )
-    .expect("create failing trigger");
-    drop(conn);
-
-    let err = aio_coding_hub_lib::test_support::codex_provider_sync_from_config_bytes_json(
-        &handle,
-        "config_save",
-        OPENAI_CONFIG.as_bytes().to_vec(),
-    )
-    .expect_err("sqlite failure should bubble up");
-    let err_text = err.to_string();
-    assert!(
-        err_text.contains("failed to update sqlite provider rows"),
-        "unexpected error: {err_text}"
-    );
-
-    assert_eq!(read_codex_config(&handle), AIO_CONFIG);
-    assert_eq!(
-        fs::read_to_string(&rollout_path).expect("read restored rollout"),
-        original_rollout
-    );
-    assert_eq!(
-        fs::read_to_string(&global_state_path).expect("read restored state"),
-        original_global_state
-    );
-}
-
-#[test]
-fn codex_provider_sync_rolls_back_first_sqlite_when_later_sqlite_fails() {
-    let app = support::TestApp::new();
-    let handle = app.handle();
-    let home = codex_home(&handle);
-    fs::create_dir_all(home.join("sqlite")).expect("create sqlite dir");
-
-    write_codex_config(&handle, AIO_CONFIG);
-
-    let first_db = home.join("sqlite/codex-dev.db");
-    create_threads_db(&first_db, &[("thread-first", Some("aio"), Some(0))]);
-    let first_before = read_threads_db(&first_db);
-
-    let second_db = home.join("sqlite/z-failing.db");
-    create_threads_db(&second_db, &[("thread-second", Some("aio"), Some(0))]);
-    let conn = Connection::open(&second_db).expect("open failing sqlite");
-    conn.execute(
-        "CREATE TRIGGER fail_provider_sync_update BEFORE UPDATE ON threads BEGIN SELECT RAISE(ABORT, 'boom'); END",
-        [],
-    )
-    .expect("create failing trigger");
-    drop(conn);
-    let second_before = read_threads_db(&second_db);
-
-    let err = aio_coding_hub_lib::test_support::codex_provider_sync_from_config_bytes_json(
-        &handle,
-        "config_save",
-        OPENAI_CONFIG.as_bytes().to_vec(),
-    )
-    .expect_err("later sqlite failure should bubble up");
-    let err_text = err.to_string();
-    assert!(
-        err_text.contains("failed to update sqlite provider rows"),
-        "unexpected error: {err_text}"
-    );
-
-    assert_eq!(read_threads_db(&first_db), first_before);
-    assert_eq!(read_threads_db(&second_db), second_before);
-    assert_eq!(read_codex_config(&handle), AIO_CONFIG);
 }

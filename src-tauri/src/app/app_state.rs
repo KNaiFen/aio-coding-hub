@@ -41,6 +41,19 @@ pub(crate) async fn ensure_db_ready<R: tauri::Runtime>(
     .await
 }
 
+/// Startup recovery owns the maintenance gate, so it needs a narrowly scoped
+/// DB initialization path that cannot be reached by normal IPC commands.
+pub(crate) async fn ensure_db_ready_for_recovery<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: &DbInitState,
+) -> AppResult<db::Db> {
+    ensure_db_ready_with(state, || {
+        let app = app.clone();
+        async move { blocking::run("db_init_for_recovery", move || db::init(&app)).await }
+    })
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

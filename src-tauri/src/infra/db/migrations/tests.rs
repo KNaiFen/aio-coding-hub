@@ -3710,3 +3710,61 @@ SELECT EXISTS(
         "a recreated ledger must not inherit a stale complete marker"
     );
 }
+
+#[test]
+fn recovery_journal_migrates_v49_and_v50_with_idempotent_claim_schema() {
+    let mut conn = Connection::open_in_memory().expect("open recovery migration db");
+    conn.pragma_update(None, "user_version", 49_i64)
+        .expect("set v49 fixture");
+
+    v49_to_v50::migrate_v49_to_v50(&mut conn).expect("migrate v49->v50");
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("read v50 version");
+    assert_eq!(version, 50);
+    assert!(test_has_table(&conn, "external_effect_recovery_journal"));
+
+    v50_to_v51::migrate_v50_to_v51(&mut conn).expect("migrate v50->v51");
+    v50_to_v51::create_recovery_claim_schema(&conn).expect("repeat recovery ensure");
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("read v51 version");
+    assert_eq!(version, 51);
+    for column in [
+        "lease_owner",
+        "lease_expires_at",
+        "claim_epoch",
+        "replay_context",
+    ] {
+        assert!(test_has_column(
+            &conn,
+            "external_effect_recovery_journal",
+            column
+        ));
+    }
+    assert!(test_has_table(
+        &conn,
+        "external_effect_recovery_coordinator"
+    ));
+    let workspace_index: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_external_effect_recovery_workspace_apply_cli')",
+            [],
+            |row| row.get(0),
+        )
+        .expect("inspect workspace recovery index");
+    assert!(workspace_index);
+}
+
+#[test]
+fn fresh_schema_contains_recovery_journal_and_coordinator() {
+    let mut conn = Connection::open_in_memory().expect("open fresh migration db");
+    apply_migrations(&mut conn).expect("create fresh schema");
+
+    assert!(test_has_table(&conn, "external_effect_recovery_journal"));
+    assert!(test_has_table(
+        &conn,
+        "external_effect_recovery_coordinator"
+    ));
+    apply_migrations(&mut conn).expect("repeat current schema ensure");
+}
