@@ -1168,6 +1168,18 @@ struct ProviderSyncFileFingerprint {
     content_sha256: Option<[u8; 32]>,
 }
 
+#[cfg(unix)]
+impl ProviderSyncFileFingerprint {
+    fn matches_after_unix_rename(&self, observed: &Self) -> bool {
+        // renameat updates ctime for the same inode; every other bound property must remain stable.
+        self.identity == observed.identity
+            && self.size == observed.size
+            && self.modified == observed.modified
+            && self.links == observed.links
+            && self.content_sha256 == observed.content_sha256
+    }
+}
+
 #[derive(Debug)]
 struct ProviderSyncPruneBudget {
     max_depth: usize,
@@ -2240,8 +2252,11 @@ fn remove_provider_sync_backup_snapshot_entries_at(
         let isolated_name = isolate_unix_provider_sync_backup_entry(dir, &entry.name)?;
         let isolated =
             open_provider_sync_backup_child_no_follow(dir, &isolated_name, is_directory)?;
-        if provider_sync_file_fingerprint_from_handle(&isolated, is_directory, budget)?
-            != entry.fingerprint
+        let isolated_fingerprint =
+            provider_sync_file_fingerprint_from_handle(&isolated, is_directory, budget)?;
+        if !entry
+            .fingerprint
+            .matches_after_unix_rename(&isolated_fingerprint)
         {
             return Err(format!(
                 "SEC_INVALID_INPUT: provider sync backup entry identity changed at tombstone {}",
@@ -2275,14 +2290,19 @@ fn remove_provider_sync_backup_snapshot_entries_at(
                 )
                 .into());
             }
-        } else if provider_sync_file_fingerprint_from_handle(&final_handle, false, budget)?
-            != entry.fingerprint
-        {
-            return Err(format!(
-                "SEC_INVALID_INPUT: provider sync backup file changed at final tombstone {}",
-                final_name.to_string_lossy()
-            )
-            .into());
+        } else {
+            let final_fingerprint =
+                provider_sync_file_fingerprint_from_handle(&final_handle, false, budget)?;
+            if !entry
+                .fingerprint
+                .matches_after_unix_rename(&final_fingerprint)
+            {
+                return Err(format!(
+                    "SEC_INVALID_INPUT: provider sync backup file changed at final tombstone {}",
+                    final_name.to_string_lossy()
+                )
+                .into());
+            }
         }
         ensure_provider_sync_backup_name_identity(
             dir,
