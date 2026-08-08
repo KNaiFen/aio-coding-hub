@@ -33,7 +33,7 @@ pub use queries::{
     get_by_id, get_by_trace_id, list_after_id, list_after_id_all, list_observer_recent_terminal,
     list_observer_terminal_inferences, list_recent, list_recent_all, observer_persisted_trace_ids,
     page_all_excluding_traces, snapshot_membership_excluding_traces, summaries_by_ids,
-    terminal_trace_ids,
+    terminal_trace_ids, OBSERVER_TRACE_ID_QUERY_LIMIT,
 };
 
 const WRITE_BUFFER_CAPACITY: usize = 512;

@@ -13,6 +13,8 @@ use super::types::{
     RequestLogRouteHop, RequestLogStatusFilter, RequestLogStatusFilterOp, RequestLogSummary,
 };
 
+pub const OBSERVER_TRACE_ID_QUERY_LIMIT: usize = 400;
+
 const CLAUDE_VISIBLE_LOG_PATH: &str = "/v1/messages";
 const CLAUDE_VISIBLE_LOG_CONDITION: &str = "(cli_key != 'claude' OR path = '/v1/messages')";
 const OBSERVER_MODEL_INFERENCE_CONDITION: &str = r#"
@@ -909,7 +911,20 @@ pub fn list_observer_recent_terminal(
     limit: usize,
     excluded_trace_ids: &[String],
 ) -> crate::shared::error::AppResult<Vec<RequestLogSummary>> {
+    ensure_observer_trace_id_query_limit(excluded_trace_ids)?;
     list_observer_rows(db, cli_key, limit, excluded_trace_ids, false)
+}
+
+fn ensure_observer_trace_id_query_limit(
+    trace_ids: &[String],
+) -> crate::shared::error::AppResult<()> {
+    if trace_ids.len() > OBSERVER_TRACE_ID_QUERY_LIMIT {
+        return Err(format!(
+            "SEC_INVALID_INPUT: observer trace-id query exceeds {OBSERVER_TRACE_ID_QUERY_LIMIT} entries"
+        )
+        .into());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1208,6 +1223,7 @@ pub fn observer_persisted_trace_ids(
 ) -> crate::shared::error::AppResult<HashSet<String>> {
     const SQLITE_PARAM_CHUNK: usize = 900;
 
+    ensure_observer_trace_id_query_limit(trace_ids)?;
     let mut persisted = HashSet::new();
     if trace_ids.is_empty() {
         return Ok(persisted);
@@ -1248,7 +1264,7 @@ mod tests {
         list_recent_all, load_source_provider_info_map, observer_persisted_trace_ids, page_all,
         page_all_excluding_traces, parse_attempts, route_from_attempts,
         snapshot_membership_excluding_traces, start_provider_from_attempts, summaries_by_ids,
-        terminal_trace_ids,
+        terminal_trace_ids, OBSERVER_TRACE_ID_QUERY_LIMIT,
     };
     use crate::db;
     use crate::request_logs::{
@@ -2077,6 +2093,39 @@ INSERT INTO providers (id, name, source_provider_id, bridge_type) VALUES (12, 'C
         assert!(persisted.contains("visible-claude"));
         assert!(persisted.contains("interrupted-codex"));
         assert!(!persisted.contains("hidden-claude"));
+    }
+
+    #[test]
+    fn observer_trace_queries_reject_unbounded_exclusion_sets() {
+        let dir = tempdir().unwrap();
+        let db = db::init_for_tests(&dir.path().join("observer-trace-limit.db")).unwrap();
+        let bounded_trace_ids = (0..OBSERVER_TRACE_ID_QUERY_LIMIT)
+            .map(|index| format!("bounded-trace-{index}"))
+            .collect::<Vec<_>>();
+        assert!(
+            observer_persisted_trace_ids(&db, &bounded_trace_ids)
+                .expect("exact trace-id limit should be accepted")
+                .is_empty()
+        );
+        assert!(
+            list_observer_recent_terminal(&db, None, 1, &bounded_trace_ids)
+                .expect("exact exclusion limit should be accepted")
+                .is_empty()
+        );
+
+        let trace_ids = (0..=OBSERVER_TRACE_ID_QUERY_LIMIT)
+            .map(|index| format!("trace-{index}"))
+            .collect::<Vec<_>>();
+
+        let persisted_error = observer_persisted_trace_ids(&db, &trace_ids)
+            .expect_err("persisted trace query must be bounded")
+            .to_string();
+        assert!(persisted_error.contains("observer trace-id query exceeds"));
+
+        let recent_error = list_observer_recent_terminal(&db, None, 1, &trace_ids)
+            .expect_err("recent exclusion query must be bounded")
+            .to_string();
+        assert!(recent_error.contains("observer trace-id query exceeds"));
     }
 
     #[test]

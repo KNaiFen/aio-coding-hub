@@ -888,6 +888,13 @@ mod tests {
             Some("claude-folder")
         );
         assert!(misses.is_empty());
+
+        let after_positive_ttl = after_negative_ttl
+            .checked_add(OBSERVER_FOLDER_CACHE_HIT_TTL)
+            .expect("positive expiry");
+        let (folders, misses) = cache.lookup(&[codex.clone(), claude.clone()], after_positive_ttl);
+        assert!(folders.is_empty());
+        assert_eq!(misses, vec![codex, claude]);
     }
 
     #[test]

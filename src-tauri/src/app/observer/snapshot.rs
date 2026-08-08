@@ -271,18 +271,12 @@ fn build_db_projection(
     folder_cache: &Arc<StdMutex<FolderLookupCache>>,
     request: &DbProjectionRequest,
 ) -> DbProjection {
-    let active_trace_ids = request
-        .active
-        .iter()
-        .map(|item| item.trace_id.clone())
-        .collect::<Vec<_>>();
+    let active_trace_ids = observer_active_trace_ids(&request.active);
     let terminal_trace_ids =
         request_logs::observer_persisted_trace_ids(db, &active_trace_ids).unwrap_or_default();
-    let active_trace_ids = request
-        .active
-        .iter()
-        .filter(|item| !terminal_trace_ids.contains(&item.trace_id))
-        .map(|item| item.trace_id.clone())
+    let active_trace_ids = active_trace_ids
+        .into_iter()
+        .filter(|trace_id| !terminal_trace_ids.contains(trace_id))
         .collect::<Vec<_>>();
     let cli_key = (request.scope != CliScope::All).then(|| request.scope.as_str());
     let inference_result = request_logs::list_observer_terminal_inferences(
@@ -292,12 +286,9 @@ fn build_db_projection(
     );
     let inference_available = inference_result.is_ok();
     let inference_rows = inference_result.unwrap_or_default();
-    let recent_result = match recent_query_limit(request.history_limit) {
-        Some(limit) => {
-            request_logs::list_observer_recent_terminal(db, cli_key, limit, &active_trace_ids)
-        }
-        None => Ok(Vec::new()),
-    };
+    let recent_result = load_observer_recent_rows(request.history_limit, |limit| {
+        request_logs::list_observer_recent_terminal(db, cli_key, limit, &active_trace_ids)
+    });
     let recent_available = recent_result.is_ok();
     let recent_rows = recent_result.unwrap_or_default();
     let rendered_active = rendered_active(&request.active, &terminal_trace_ids, request.scope);
@@ -812,6 +803,23 @@ fn first_eligible_provider<'a>(
 
 fn recent_query_limit(history_limit: usize) -> Option<usize> {
     (history_limit > 0).then_some(history_limit)
+}
+
+fn load_observer_recent_rows<F>(
+    history_limit: usize,
+    load: F,
+) -> crate::shared::error::AppResult<Vec<request_logs::RequestLogSummary>>
+where
+    F: FnOnce(usize) -> crate::shared::error::AppResult<Vec<request_logs::RequestLogSummary>>,
+{
+    match recent_query_limit(history_limit) {
+        Some(limit) => load(limit),
+        None => Ok(Vec::new()),
+    }
+}
+
+fn observer_active_trace_ids(active: &[ActiveRequestSnapshotItem]) -> Vec<String> {
+    active.iter().map(|item| item.trace_id.clone()).collect()
 }
 
 fn rendered_active<'a>(
@@ -1335,6 +1343,26 @@ fn bounded_text(value: &str, max_chars: usize) -> String {
 mod tests {
     use super::*;
 
+    fn active_snapshot(
+        trace_id: String,
+        cli_key: &str,
+        created_at_ms: i64,
+    ) -> ActiveRequestSnapshotItem {
+        ActiveRequestSnapshotItem {
+            trace_id,
+            cli_key: cli_key.to_string(),
+            method: "POST".to_string(),
+            path: "/v1/responses".to_string(),
+            query: None,
+            session_id: None,
+            requested_model: None,
+            special_settings_json: None,
+            created_at_ms,
+            last_activity_ms: created_at_ms,
+            current_attempt: None,
+        }
+    }
+
     fn insert_observer_provider(db: &crate::db::Db, name: &str, total_limit: Option<f64>) -> i64 {
         crate::providers::upsert(
             db,
@@ -1504,6 +1532,34 @@ mod tests {
         assert!(projection.recent_available);
         assert!(projection.recent_rows.is_empty());
         assert!(!projection.inference_available);
+
+        let called = std::cell::Cell::new(false);
+        let rows = load_observer_recent_rows(0, |_| {
+            called.set(true);
+            Ok(Vec::new())
+        })
+        .expect("zero history should not query recent rows");
+        assert!(rows.is_empty());
+        assert!(!called.get(), "zero history must skip the recent query");
+    }
+
+    #[test]
+    fn active_trace_collection_never_silently_truncates_global_concurrency() {
+        let mut active = (0..250)
+            .map(|index| active_snapshot(format!("claude-{index}"), "claude", index))
+            .collect::<Vec<_>>();
+        active.extend(
+            (0..250)
+                .map(|index| active_snapshot(format!("codex-{index}"), "codex", index + 1_000)),
+        );
+
+        let trace_ids = observer_active_trace_ids(&active);
+
+        assert_eq!(trace_ids.len(), 500);
+        assert!(trace_ids.iter().any(|trace_id| trace_id == "codex-0"));
+        assert!(trace_ids.iter().any(|trace_id| trace_id == "codex-249"));
+        assert!(trace_ids.iter().any(|trace_id| trace_id == "claude-0"));
+        assert!(trace_ids.iter().any(|trace_id| trace_id == "claude-249"));
     }
 
     #[test]
