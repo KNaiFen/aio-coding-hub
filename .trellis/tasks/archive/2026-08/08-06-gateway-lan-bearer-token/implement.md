@@ -7,4 +7,4 @@
 - [x] 删除 provider route、forced-provider 数据流与 Claude Terminal 全栈入口。
 - [x] 覆盖 loopback、LAN/custom、严格 Bearer、轮换、旧路径 404、header 脱敏及 WSL manifest v2 无凭据持久化。
 - [x] 本地执行 cloud-only contract/self-test 与 `git diff --check`；bindings/native/frontend 由 Actions 验证。
-- [ ] 合并后在 AUD-008 候选记录证据。
+- [x] 合并后在 AUD-008 候选记录证据。

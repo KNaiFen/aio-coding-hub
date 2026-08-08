@@ -7,6 +7,6 @@
 - [x] 将 workspace switch 纳入父 operation 和可重放阶段。
 - [x] 在 DB 初始化后接入阻断 replay，复用 AUD-008 maintenance retry/exit gate。
 - [x] gate 普通写 IPC 与前端后台启动，防止 replay 期间交错修改。
-- [ ] 由统一 PR 精确 head 的云端 Actions 覆盖跨实例 replay、并发、artifact 越界/symlink/hash、错误脱敏、schema 与 bindings。
+- [x] 由统一 PR 精确 head 的云端 Actions 覆盖跨实例 replay、并发、artifact 越界/symlink/hash、错误脱敏、schema 与 bindings。
 - [x] 本地只运行零依赖源码合同、解析与 `git diff --check`。
-- [ ] 在统一 PR 内记录精确 head、CI 与替代旧 PR #92 的证据，并与 AUD-055、AUD-035、AUD-033 一起合并。
+- [x] 在统一 PR 内记录精确 head、CI 与替代旧 PR #92 的证据，并与 AUD-055、AUD-035、AUD-033 一起合并。

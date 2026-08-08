@@ -8,6 +8,6 @@
 - [x] 源码侧同步 `DbDiskUsage.reclaimable_bytes` 精确 binding 字段，未运行本地生成器；待 Actions 核验无额外漂移。
 - [x] 本地运行 cloud-only checker/self-test 与 diff；完整测试交 Actions。
 - [x] 代码提交 `28d65b2d`、`c86799ce`。
-- [ ] 平台可用后建立/重建 PR，对精确 head 运行 frontend、Rust format/bindings、Clippy、Rust tests 与 audit。
-- [ ] 执行最终主线门并合并；在此之前保持 `in_progress/planned`。
-- [ ] 合并后在 AUD-016 候选中记录证据。
+- [x] 平台可用后建立/重建 PR，对精确 head 运行 frontend、Rust format/bindings、Clippy、Rust tests 与 audit。
+- [x] 执行最终主线门并合并；在此之前保持 `in_progress/planned`。
+- [x] 合并后在 AUD-016 候选中记录证据。
