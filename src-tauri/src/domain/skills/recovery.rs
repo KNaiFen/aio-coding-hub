@@ -42,6 +42,11 @@ pub(super) enum SkillRecoveryContext {
         skill_id: i64,
         skill_key: String,
     },
+    SetEnabled {
+        workspace_id: i64,
+        skill_id: i64,
+        skill_key: String,
+    },
     Uninstall {
         skill_id: i64,
         skill_key: String,
@@ -70,6 +75,7 @@ impl SkillRecoveryContext {
             Self::Install { .. } => "skill.install",
             Self::ImportLocal { .. } => "skill.import_local",
             Self::Update { .. } => "skill.update",
+            Self::SetEnabled { .. } => "skill.set_enabled",
             Self::Uninstall { .. } => "skill.uninstall",
             Self::ReturnToLocal { .. } => "skill.return_to_local",
             Self::InstallToLocal { .. } => "skill.install_to_local",
@@ -105,6 +111,11 @@ impl SkillRecoveryContext {
                 workspace_id,
                 skill_id,
                 ..
+            }
+            | Self::SetEnabled {
+                workspace_id,
+                skill_id,
+                ..
             } => entry.workspace_id == Some(*workspace_id) && entry.entity_id == Some(*skill_id),
             Self::Uninstall { skill_id, .. } => {
                 entry.workspace_id.is_none() && entry.entity_id == Some(*skill_id)
@@ -137,6 +148,7 @@ impl SkillRecoveryContext {
         match self {
             Self::Install { skill_key, .. }
             | Self::Update { skill_key, .. }
+            | Self::SetEnabled { skill_key, .. }
             | Self::Uninstall { skill_key, .. }
             | Self::ReturnToLocal { skill_key, .. } => validate(skill_key),
             Self::ImportLocal {
@@ -903,6 +915,40 @@ fn replay_update<R: tauri::Runtime>(
     ))
 }
 
+fn replay_set_enabled<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    conn: &rusqlite::Connection,
+    context: &SkillRecoveryContext,
+    artifact: &LoadedArtifact,
+) -> AppResult<()> {
+    let SkillRecoveryContext::SetEnabled {
+        workspace_id,
+        skill_id,
+        skill_key,
+    } = context
+    else {
+        return Err(AppError::new(
+            "RECOVERY_ARTIFACT_INVALID",
+            "Skill 启用恢复上下文不匹配",
+        ));
+    };
+    let desired_hash = role_hash(artifact, "desired")?;
+    let Some(installed_hash) =
+        installed_hash_for_replay(app, conn, Some(*skill_id), skill_key, &[desired_hash])?
+    else {
+        return sync_all_skills(app, conn);
+    };
+    if installed_hash != desired_hash {
+        return Err(AppError::new(
+            "RECOVERY_ARTIFACT_INVALID",
+            "Skill 启用内容与 SQLite 不一致",
+        ));
+    }
+    project_ssot_from_role(app, skill_key, artifact, "desired", None)?;
+    let _ = workspace_id;
+    sync_all_skills(app, conn)
+}
+
 fn replay_uninstall<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     conn: &rusqlite::Connection,
@@ -1080,6 +1126,9 @@ pub(crate) fn replay_recovery_operation<R: tauri::Runtime>(
             replay_import_local(app, &conn, &context, &artifact)
         }
         SkillRecoveryContext::Update { .. } => replay_update(app, &conn, &context, &artifact),
+        SkillRecoveryContext::SetEnabled { .. } => {
+            replay_set_enabled(app, &conn, &context, &artifact)
+        }
         SkillRecoveryContext::Uninstall { .. } => replay_uninstall(app, &conn, &context, &artifact),
         SkillRecoveryContext::ReturnToLocal { .. } => {
             replay_return_to_local(app, &conn, &context, &artifact)
@@ -1355,6 +1404,11 @@ INSERT INTO skills(
                 workspace_id: 1,
                 cli_key: "codex".to_string(),
                 dir_name: "nested\\name".to_string(),
+            },
+            SkillRecoveryContext::SetEnabled {
+                workspace_id: 1,
+                skill_id: 42,
+                skill_key: "../escape".to_string(),
             },
         ] {
             let error = context

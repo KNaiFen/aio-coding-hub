@@ -19,7 +19,7 @@ use crate::shared::time::now_unix_seconds;
 use crate::workspaces;
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 fn is_external_local_skill_dir(path: &Path) -> crate::shared::error::AppResult<bool> {
     if !exists_or_is_link(path) || is_managed_dir(path) {
@@ -40,6 +40,35 @@ fn is_aio_managed_skill_target(
         || is_managed_link_to_ssot(path, ssot_root))
 }
 
+fn local_source_cli_key(source_git_url: &str) -> Option<&str> {
+    source_git_url
+        .strip_prefix("local://")
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn local_source_dir_for_ssot_recovery<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    skill: &InstalledSkillSummary,
+    ssot_dir: &Path,
+) -> crate::shared::error::AppResult<PathBuf> {
+    if exists_or_is_link(ssot_dir) {
+        return Err(format!("SKILL_SSOT_MISSING: {}", skill.skill_key).into());
+    }
+    let Some(source_cli_key) = local_source_cli_key(&skill.source_git_url) else {
+        return Err(format!("SKILL_SSOT_MISSING: {}", skill.skill_key).into());
+    };
+    validate_cli_key(source_cli_key)?;
+    validate_relative_subdir(&skill.source_subdir)?;
+
+    let local_source_dir =
+        cli_skills_root(app, source_cli_key)?.join(skill.source_subdir.trim());
+    if !local_source_dir.is_dir() || !has_skill_md(&local_source_dir) {
+        return Err(format!("SKILL_SSOT_MISSING: {}", skill.skill_key).into());
+    }
+    Ok(local_source_dir)
+}
+
 fn ensure_ssot_dir_exists<R: tauri::Runtime>(
     _app: &tauri::AppHandle<R>,
     skill: &InstalledSkillSummary,
@@ -57,6 +86,14 @@ pub(super) fn ensure_installed_content_hash(
     ssot_dir: &Path,
 ) -> crate::shared::error::AppResult<String> {
     let actual = skill_dir_content_hash(ssot_dir)?;
+    ensure_installed_content_hash_matches(conn, skill_id, &actual)
+}
+
+fn ensure_installed_content_hash_matches(
+    conn: &Connection,
+    skill_id: i64,
+    actual: &str,
+) -> crate::shared::error::AppResult<String> {
     let stored: Option<Option<String>> = conn
         .query_row(
             "SELECT installed_content_hash FROM skills WHERE id = ?1",
@@ -68,7 +105,7 @@ pub(super) fn ensure_installed_content_hash(
     match stored {
         None => Err("DB_NOT_FOUND: skill not found".to_string().into()),
         Some(Some(stored)) if stored != actual => Err(
-            "RECOVERY_ARTIFACT_INVALID: installed skill content hash does not match SSOT"
+            "RECOVERY_ARTIFACT_INVALID: installed skill content hash does not match trusted content"
                 .to_string()
                 .into(),
         ),
@@ -85,7 +122,7 @@ pub(super) fn ensure_installed_content_hash(
                     .to_string()
                     .into());
             }
-            Ok(actual)
+            Ok(actual.to_string())
         }
     }
 }
@@ -327,17 +364,51 @@ pub fn set_enabled<R: tauri::Runtime>(
         .map_err(|e| db_err!("failed to query workspace_skill_enabled: {e}"))?
         .is_some();
 
-    if was_enabled == enabled {
-        return get_skill_by_id_for_workspace(&conn, workspace_id, skill_id);
-    }
-
     let ssot_root = ssot_skills_root(app)?;
     let ssot_dir = ssot_root.join(&current.skill_key);
-    ensure_ssot_dir_exists(app, &current, &ssot_dir)?;
+    let staged_hash = if exists_or_is_link(&ssot_dir)
+        && !is_symlink_or_junction(&ssot_dir)
+        && ssot_dir.is_dir()
+    {
+        None
+    } else if enabled && !exists_or_is_link(&ssot_dir) {
+        let local_source_dir = local_source_dir_for_ssot_recovery(app, &current, &ssot_dir)?;
+        let context = SkillRecoveryContext::SetEnabled {
+            workspace_id,
+            skill_id,
+            skill_key: current.skill_key.clone(),
+        };
+        let artifact = stage_artifact(
+            app,
+            &conn,
+            operation,
+            &context,
+            &[("desired", local_source_dir.as_path())],
+            None,
+        )?;
+        Some(artifact.role_hash("desired")?.to_string())
+    } else {
+        ensure_ssot_dir_exists(app, &current, &ssot_dir)?;
+        None
+    };
+
+    if was_enabled == enabled && staged_hash.is_none() {
+        return get_skill_by_id_for_workspace(&conn, workspace_id, skill_id);
+    }
 
     let tx = conn
         .transaction()
         .map_err(|e| db_err!("failed to start transaction: {e}"))?;
+
+    if let Some(staged_hash) = staged_hash.as_deref() {
+        ensure_installed_content_hash_matches(&tx, skill_id, staged_hash)?;
+    }
+
+    if was_enabled == enabled {
+        tx.commit().map_err(|e| db_err!("failed to commit: {e}"))?;
+        operation.mark_authoritative_committed();
+        return get_skill_by_id_for_workspace(&conn, workspace_id, skill_id);
+    }
 
     if enabled {
         tx.execute(
@@ -374,20 +445,22 @@ pub fn uninstall<R: tauri::Runtime>(
     let skill = get_skill_by_id(&conn, skill_id)?;
     let ssot_root = ssot_skills_root(app)?;
     let ssot_dir = ssot_root.join(&skill.skill_key);
-    ensure_ssot_dir_exists(app, &skill, &ssot_dir)?;
-    ensure_installed_content_hash(&conn, skill_id, &ssot_dir)?;
-    let context = SkillRecoveryContext::Uninstall {
-        skill_id,
-        skill_key: skill.skill_key.clone(),
-    };
-    let _artifact = stage_artifact(
-        app,
-        &conn,
-        operation,
-        &context,
-        &[("previous", ssot_dir.as_path())],
-        None,
-    )?;
+    if exists_or_is_link(&ssot_dir) {
+        ensure_ssot_dir_exists(app, &skill, &ssot_dir)?;
+        ensure_installed_content_hash(&conn, skill_id, &ssot_dir)?;
+        let context = SkillRecoveryContext::Uninstall {
+            skill_id,
+            skill_key: skill.skill_key.clone(),
+        };
+        let _artifact = stage_artifact(
+            app,
+            &conn,
+            operation,
+            &context,
+            &[("previous", ssot_dir.as_path())],
+            None,
+        )?;
+    }
 
     delete_skill_row(&conn, skill_id)?;
     operation.mark_authoritative_committed();

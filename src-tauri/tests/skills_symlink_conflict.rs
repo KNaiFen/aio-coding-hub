@@ -114,7 +114,7 @@ WHERE id = ?3
 
     let local_skill_dir = fix.cli_skills_root.join(&fix.skill_key);
     std::fs::create_dir_all(&local_skill_dir).expect("create local skill dir");
-    std::fs::write(local_skill_dir.join("SKILL.md"), "name: Context7 Local\n")
+    std::fs::write(local_skill_dir.join("SKILL.md"), "name: Context7\n")
         .expect("write local skill md");
 
     let enabled = aio_coding_hub_lib::test_support::skill_set_enabled_json(
@@ -135,6 +135,72 @@ WHERE id = ?3
         local_skill_dir.exists(),
         "local skill dir should stay untouched after enable"
     );
+    let installed_content_hash: Option<String> = fix
+        .conn
+        .query_row(
+            "SELECT installed_content_hash FROM skills WHERE id = ?1",
+            [fix.skill_id],
+            |row| row.get(0),
+        )
+        .expect("read recovered content hash");
+    assert!(
+        installed_content_hash.is_some_and(|hash| hash.len() == 64),
+        "recovered content hash should be bound in SQLite"
+    );
+}
+
+#[test]
+fn skills_enable_rejects_local_source_hash_mismatch() {
+    let app = support::TestApp::new();
+    let handle = app.handle();
+
+    aio_coding_hub_lib::test_support::init_db(&handle).expect("init db");
+    let fix = SkillTestFixture::new(&app, &handle, "codex", "Codex Reject SSOT Drift");
+
+    std::fs::remove_dir_all(&fix.ssot_skill_dir).expect("remove ssot dir to simulate drift");
+    fix.conn
+        .execute(
+            r#"
+UPDATE skills
+SET source_git_url = ?1,
+    source_branch = 'local',
+    source_subdir = ?2,
+    installed_content_hash = ?3
+WHERE id = ?4
+"#,
+            params![
+                "local://codex",
+                &fix.skill_key,
+                "0".repeat(64),
+                fix.skill_id
+            ],
+        )
+        .expect("set authoritative content hash");
+
+    let local_skill_dir = fix.cli_skills_root.join(&fix.skill_key);
+    std::fs::create_dir_all(&local_skill_dir).expect("create local skill dir");
+    std::fs::write(local_skill_dir.join("SKILL.md"), "name: Changed Local Skill\n")
+        .expect("write changed local skill");
+
+    let error = aio_coding_hub_lib::test_support::skill_set_enabled_json(
+        &handle,
+        fix.workspace_id,
+        fix.skill_id,
+        true,
+    )
+    .expect_err("mismatched local content must not restore SSOT");
+    assert_eq!(error.code(), "RECOVERY_ARTIFACT_INVALID");
+    assert!(!fix.ssot_skill_dir.exists(), "SSOT should remain absent");
+
+    let enabled_count: i64 = fix
+        .conn
+        .query_row(
+            "SELECT COUNT(1) FROM workspace_skill_enabled WHERE workspace_id = ?1 AND skill_id = ?2",
+            params![fix.workspace_id, fix.skill_id],
+            |row| row.get(0),
+        )
+        .expect("count enabled rows");
+    assert_eq!(enabled_count, 0, "mismatched skill must remain disabled");
 }
 
 #[test]

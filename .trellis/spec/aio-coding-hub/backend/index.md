@@ -81,6 +81,15 @@ When changing recovery-journal-backed filesystem projection:
    first is held.
 2. Keep a fresh pool borrow only at orchestration boundaries where no active
    connection is held.
+3. When a `local://` Skill source must restore a missing SSOT, first copy it
+   into a journal-owned `desired` artifact, then bind that artifact hash to
+   `installed_content_hash` in the same authoritative SQLite commit. Replay
+   only from the validated artifact; an existing unsafe SSOT entry or a hash
+   mismatch must fail closed.
+4. Skill uninstall may omit a `previous` artifact only when the SSOT directory
+   entry is genuinely absent. Symlinks, junctions, files, and other unsafe
+   entries remain errors; the committed row deletion then drives managed-link
+   cleanup through the ordinary authoritative projection.
 
 When changing Provider Sync managed-backup pruning:
 
@@ -119,6 +128,9 @@ When changing Provider Sync managed-backup pruning:
   circuit state, or attempt evidence, including a failure followed by success.
 - Exercise recovery projection in the one-connection test pool so journal
   bookkeeping cannot silently depend on spare pool capacity.
+- Exercise missing-SSOT recovery from a local Skill source, persisted-hash
+  mismatch rejection, and uninstall cleanup of broken managed links in GitHub
+  Actions.
 - Exercise Provider Sync root/child replacement, symlink/reparse rejection,
   equal-length in-place rewrites, shared-budget exhaustion, warning caps, and
   the Unix/Windows final-delete boundary in GitHub Actions. Observable changes

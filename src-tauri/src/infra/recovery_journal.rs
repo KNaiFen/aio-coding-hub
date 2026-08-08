@@ -392,6 +392,11 @@ fn validate_replay_context_for_kind(kind: &str, context: &str) -> AppResult<()> 
             &["operation", "workspace_id", "skill_id", "skill_key"],
             &["operation", "workspace_id", "skill_id", "skill_key"],
         ),
+        "skill.set_enabled" => (
+            "set_enabled",
+            &["operation", "workspace_id", "skill_id", "skill_key"],
+            &["operation", "workspace_id", "skill_id", "skill_key"],
+        ),
         "skill.uninstall" => (
             "uninstall",
             &["operation", "skill_id", "skill_key"],
