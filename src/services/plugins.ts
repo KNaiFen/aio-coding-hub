@@ -266,6 +266,17 @@ export async function pluginQuarantineRevoked(pluginId: string) {
   });
 }
 
+export async function pluginRevalidate(pluginId: string) {
+  const normalizedPluginId = normalizePluginId(pluginId);
+
+  return invokeGeneratedIpc<PluginDetail>({
+    title: "重新校验隔离插件失败",
+    cmd: "plugin_revalidate",
+    args: { pluginId: normalizedPluginId },
+    invoke: async () => commands.pluginRevalidate({ pluginId: normalizedPluginId }),
+  });
+}
+
 export async function pluginEnable(pluginId: string) {
   const normalizedPluginId = normalizePluginId(pluginId);
 

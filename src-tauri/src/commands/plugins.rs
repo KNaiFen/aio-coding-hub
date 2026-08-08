@@ -6,7 +6,7 @@ use crate::app::plugins::extension_host_registry::ExtensionHostRuntimeState;
 use crate::app_state::{ensure_db_ready, DbInitState};
 use crate::domain::plugins::{
     PluginAuditLog, PluginDetail, PluginExtensionExecutionReport, PluginHookExecutionReport,
-    PluginInstallPreview, PluginInstallSource, PluginReplayFixture, PluginUpdateDiff,
+    PluginInstallPreview, PluginInstallSource, PluginReplayFixture, PluginStatus, PluginUpdateDiff,
 };
 use crate::infra::plugins::market::PluginMarketListing;
 use crate::{blocking, plugins};
@@ -217,10 +217,21 @@ pub(crate) async fn plugin_execute_command(
     input: PluginExecuteCommandInput,
 ) -> Result<serde_json::Value, String> {
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
-    let registry = registry_state.registry(app, db_state.inner()).await?;
-    plugin_service::execute_plugin_command(&db, registry.as_ref(), &input.command, input.args)
-        .await
-        .map_err(Into::into)
+    let registry = registry_state
+        .registry(app.clone(), db_state.inner())
+        .await?;
+    let result = plugin_service::execute_plugin_command_with_quarantine(
+        &db,
+        registry.as_ref(),
+        &input.command,
+        input.args,
+        |plugin_id| crate::app::gateway_control::app_remove_gateway_plugin(&app, plugin_id),
+    )
+    .await;
+    if result.is_err() {
+        crate::app::gateway_control::app_refresh_gateway_plugins(&app, &db);
+    }
+    result.map_err(Into::into)
 }
 
 #[tauri::command]
@@ -572,10 +583,30 @@ pub(crate) async fn plugin_quarantine_revoked(
 ) -> Result<PluginDetail, String> {
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
     let detail = blocking::run("plugin_quarantine_revoked", move || {
-        plugin_service::quarantine_revoked_plugin(
+        plugin_service::quarantine_revoked_plugin(&db, &input.plugin_id)
+            .and_then(|detail| refresh_running_gateway_plugins(&app, &db, detail))
+    })
+    .await
+    .map_err(String::from)?;
+    dispose_plugin_extension_host_after_lifecycle_change(&registry_state, &detail).await;
+    Ok(detail)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn plugin_revalidate(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    registry_state: tauri::State<'_, ExtensionHostRuntimeState>,
+    input: PluginGetInput,
+) -> Result<PluginDetail, String> {
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
+    let detail = blocking::run("plugin_revalidate", move || {
+        plugin_service::revalidate_quarantined_plugin(
             &db,
             &input.plugin_id,
-            "Plugin revoked by market index",
+            env!("CARGO_PKG_VERSION"),
+            &crate::app_paths::plugins_cache_dir(&app)?,
         )
         .and_then(|detail| refresh_running_gateway_plugins(&app, &db, detail))
     })
@@ -627,6 +658,9 @@ fn refresh_running_gateway_plugins(
     db: &crate::db::Db,
     detail: PluginDetail,
 ) -> crate::shared::error::AppResult<PluginDetail> {
+    if detail.summary.status != PluginStatus::Enabled {
+        crate::app::gateway_control::app_remove_gateway_plugin(app, &detail.summary.plugin_id);
+    }
     crate::app::gateway_control::app_refresh_gateway_plugins(app, db);
     Ok(detail)
 }

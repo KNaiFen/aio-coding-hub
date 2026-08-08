@@ -24,6 +24,7 @@ pub(crate) mod model_prices_sync;
 pub(crate) mod plugins;
 pub(crate) mod prompt_sync;
 pub(crate) mod provider_circuit_breakers;
+pub(crate) mod recovery_journal;
 pub(crate) mod request_attempt_logs;
 pub(crate) mod request_logs;
 pub(crate) mod settings;

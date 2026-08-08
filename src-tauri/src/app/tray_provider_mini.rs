@@ -28,6 +28,8 @@ pub(crate) enum TrayProviderMiniUnavailableReason {
     CircuitOpen,
     Cooldown,
     SpendLimit,
+    #[serde(rename = "oauth_limit")]
+    #[specta(rename = "oauth_limit")]
     OAuthLimit,
 }
 

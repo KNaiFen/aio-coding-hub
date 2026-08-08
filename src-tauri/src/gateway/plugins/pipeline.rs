@@ -12,14 +12,17 @@ use super::permissions::{
 };
 use super::registry::HookRegistry;
 use crate::app::plugins::access_policy::effective_hook_permissions;
-use crate::domain::plugins::{PluginDetail, PluginHook, PluginStatus};
+use crate::domain::plugins::{
+    manifest_allows_gateway_hook, PluginDetail, PluginHook, PluginStatus,
+};
+use crate::infra::plugins::repository::{self, RecordPluginRuntimeFailureInput};
 use crate::shared::time::now_unix_millis;
 use axum::body::Bytes;
 use axum::http::{HeaderMap, HeaderName, HeaderValue};
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
 use std::time::{Duration, Instant};
 
 pub(crate) type GatewayHookFuture =
@@ -27,6 +30,8 @@ pub(crate) type GatewayHookFuture =
 
 pub(crate) trait GatewayPluginExecutor: Send + Sync {
     fn retain_runtime_caches_for_plugins(&self, _plugins: &[PluginDetail]) {}
+
+    fn dispose_plugin(&self, _plugin_id: &str) {}
 
     /// Execute the hook within the invocation budget selected by the pipeline.
     ///
@@ -215,9 +220,11 @@ struct GatewayPluginSnapshot {
 
 pub(crate) struct GatewayPluginPipeline {
     plugins: RwLock<Arc<GatewayPluginSnapshot>>,
+    snapshot_refresh_lock: Mutex<()>,
     executor: Arc<dyn GatewayPluginExecutor>,
     config: GatewayPluginPipelineConfig,
     circuits: Mutex<HashMap<(String, GatewayPluginHookName), GatewayPluginCircuitSnapshot>>,
+    db: Option<crate::db::Db>,
 }
 
 impl GatewayPluginPipeline {
@@ -225,9 +232,11 @@ impl GatewayPluginPipeline {
     pub(crate) fn empty_shared() -> Arc<Self> {
         Arc::new(Self {
             plugins: RwLock::new(Arc::new(GatewayPluginSnapshot::default())),
+            snapshot_refresh_lock: Mutex::new(()),
             executor: Arc::new(NoopGatewayPluginExecutor),
             config: GatewayPluginPipelineConfig::default(),
             circuits: Mutex::new(HashMap::new()),
+            db: None,
         })
     }
 
@@ -240,9 +249,11 @@ impl GatewayPluginPipeline {
         executor.retain_runtime_caches_for_plugins(&plugins);
         Self {
             plugins: RwLock::new(Arc::new(build_plugin_snapshot(plugins))),
+            snapshot_refresh_lock: Mutex::new(()),
             executor,
             config,
             circuits: Mutex::new(HashMap::new()),
+            db: None,
         }
     }
 
@@ -250,13 +261,16 @@ impl GatewayPluginPipeline {
         plugins: Vec<PluginDetail>,
         executor: Arc<dyn GatewayPluginExecutor>,
         config: GatewayPluginPipelineConfig,
+        db: crate::db::Db,
     ) -> Self {
         executor.retain_runtime_caches_for_plugins(&plugins);
         Self {
             plugins: RwLock::new(Arc::new(build_plugin_snapshot(plugins))),
+            snapshot_refresh_lock: Mutex::new(()),
             executor,
             config,
             circuits: Mutex::new(HashMap::new()),
+            db: Some(db),
         }
     }
 
@@ -299,7 +313,7 @@ impl GatewayPluginPipeline {
                         duration_ms: 0,
                         status: "circuitOpen",
                         failure_kind: Some("circuit_open"),
-                        error_code: Some("PLUGIN_HOOK_CIRCUIT_OPEN"),
+                        error_code: Some("PLUGIN_HOOK_CIRCUIT_OPEN".to_string()),
                         mutation_summary: serde_json::json!({ "changed": false }),
                         replayable: false,
                         replay_export_reason: Some("hook skipped because plugin circuit is open"),
@@ -347,9 +361,15 @@ impl GatewayPluginPipeline {
             let result = match future.await {
                 Ok(result) => result,
                 Err(err) => {
+                    let error_code = err.code_for_logging().to_string();
                     self.record_failure(&plugin.summary.plugin_id, hook_name, &plugin_snapshot);
-                    let error_code = err.code_for_logging();
-                    if is_hook_timeout_error(error_code) {
+                    self.record_severe_runtime_failure(
+                        plugin,
+                        hook_name,
+                        error_code.as_str(),
+                        input.trace_id.as_str(),
+                    );
+                    if is_hook_timeout_error(error_code.as_str()) {
                         audit_events.push(timeout_event(plugin, input.hook_name));
                     } else {
                         audit_events.push(audit_event(
@@ -358,7 +378,10 @@ impl GatewayPluginPipeline {
                             "plugin.hook.failed",
                             "high",
                             "Plugin hook failed",
-                            serde_json::json!({ "error": err.to_string() }),
+                            serde_json::json!({
+                                "errorCode": error_code.as_str(),
+                                "failureKind": failure_kind_for_error_code(error_code.as_str()),
+                            }),
                         ));
                     }
                     let fail_closed =
@@ -375,7 +398,7 @@ impl GatewayPluginPipeline {
                             } else {
                                 "failedOpen"
                             },
-                            failure_kind: Some(if is_hook_timeout_error(error_code) {
+                            failure_kind: Some(if is_hook_timeout_error(error_code.as_str()) {
                                 "timeout"
                             } else {
                                 "hook_error"
@@ -405,13 +428,17 @@ impl GatewayPluginPipeline {
                 &truncation,
             ) {
                 self.record_failure(&plugin.summary.plugin_id, hook_name, &plugin_snapshot);
+                let error_code = err.code_for_logging().to_string();
                 audit_events.push(audit_event(
                     plugin,
                     input.hook_name,
                     "plugin.hook.failed",
                     "high",
                     "Plugin hook returned unauthorized mutations",
-                    serde_json::json!({ "error": err.to_string() }),
+                    serde_json::json!({
+                        "errorCode": error_code.as_str(),
+                        "failureKind": failure_kind_for_error_code(error_code.as_str()),
+                    }),
                 ));
                 let fail_closed =
                     failure_policy(plugin, input.hook_name) == FailurePolicy::FailClosed;
@@ -422,9 +449,9 @@ impl GatewayPluginPipeline {
                     HookReportOutcome {
                         started_at_ms,
                         duration_ms: duration_ms_i64(started),
-                        status: budget_or_policy_status(err.code_for_logging()),
-                        failure_kind: Some(failure_kind_for_error_code(err.code_for_logging())),
-                        error_code: Some(err.code_for_logging()),
+                        status: budget_or_policy_status(error_code.as_str()),
+                        failure_kind: Some(failure_kind_for_error_code(error_code.as_str())),
+                        error_code: Some(error_code),
                         mutation_summary: mutation_summary(&result),
                         replayable: true,
                         replay_export_reason: None,
@@ -442,13 +469,17 @@ impl GatewayPluginPipeline {
 
             if let Err(err) = apply_header_patch(&mut headers, &result.headers) {
                 self.record_failure(&plugin.summary.plugin_id, hook_name, &plugin_snapshot);
+                let error_code = err.code_for_logging().to_string();
                 audit_events.push(audit_event(
                     plugin,
                     input.hook_name,
                     "plugin.hook.failed",
                     "high",
                     "Plugin hook returned rejected header mutations",
-                    serde_json::json!({ "error": err.to_string() }),
+                    serde_json::json!({
+                        "errorCode": error_code.as_str(),
+                        "failureKind": failure_kind_for_error_code(error_code.as_str()),
+                    }),
                 ));
                 execution_reports.push(self.hook_execution_report(
                     plugin,
@@ -458,8 +489,8 @@ impl GatewayPluginPipeline {
                         started_at_ms,
                         duration_ms: duration_ms_i64(started),
                         status: "policyRejected",
-                        failure_kind: Some(failure_kind_for_error_code(err.code_for_logging())),
-                        error_code: Some(err.code_for_logging()),
+                        failure_kind: Some(failure_kind_for_error_code(error_code.as_str())),
+                        error_code: Some(error_code),
                         mutation_summary: mutation_summary(&result),
                         replayable: true,
                         replay_export_reason: None,
@@ -585,7 +616,7 @@ impl GatewayPluginPipeline {
                         duration_ms: 0,
                         status: "circuitOpen",
                         failure_kind: Some("circuit_open"),
-                        error_code: Some("PLUGIN_HOOK_CIRCUIT_OPEN"),
+                        error_code: Some("PLUGIN_HOOK_CIRCUIT_OPEN".to_string()),
                         mutation_summary: serde_json::json!({ "changed": false }),
                         replayable: false,
                         replay_export_reason: Some("hook skipped because plugin circuit is open"),
@@ -634,12 +665,22 @@ impl GatewayPluginPipeline {
             {
                 Ok(result) => result,
                 Err(err) => {
+                    let error_code = err.code_for_logging().to_string();
                     self.record_failure(&plugin.summary.plugin_id, hook_name, &plugin_snapshot);
-                    let error_code = err.code_for_logging();
-                    if is_hook_timeout_error(error_code) {
+                    self.record_severe_runtime_failure(
+                        plugin,
+                        hook_name,
+                        error_code.as_str(),
+                        input.trace_id.as_str(),
+                    );
+                    if is_hook_timeout_error(error_code.as_str()) {
                         audit_events.push(timeout_event(plugin, input.hook_name));
                     } else {
-                        audit_events.push(failed_event(plugin, input.hook_name, &err.to_string()));
+                        audit_events.push(failed_event(
+                            plugin,
+                            input.hook_name,
+                            err.code_for_logging(),
+                        ));
                     }
                     let fail_closed =
                         failure_policy(plugin, input.hook_name) == FailurePolicy::FailClosed;
@@ -655,7 +696,7 @@ impl GatewayPluginPipeline {
                             } else {
                                 "failedOpen"
                             },
-                            failure_kind: Some(if is_hook_timeout_error(error_code) {
+                            failure_kind: Some(if is_hook_timeout_error(error_code.as_str()) {
                                 "timeout"
                             } else {
                                 "hook_error"
@@ -685,7 +726,11 @@ impl GatewayPluginPipeline {
                 &truncation,
             ) {
                 self.record_failure(&plugin.summary.plugin_id, hook_name, &plugin_snapshot);
-                audit_events.push(failed_event(plugin, input.hook_name, &err.to_string()));
+                audit_events.push(failed_event(
+                    plugin,
+                    input.hook_name,
+                    err.code_for_logging(),
+                ));
                 let fail_closed =
                     failure_policy(plugin, input.hook_name) == FailurePolicy::FailClosed;
                 execution_reports.push(self.hook_execution_report(
@@ -697,7 +742,7 @@ impl GatewayPluginPipeline {
                         duration_ms: duration_ms_i64(started),
                         status: budget_or_policy_status(err.code_for_logging()),
                         failure_kind: Some(failure_kind_for_error_code(err.code_for_logging())),
-                        error_code: Some(err.code_for_logging()),
+                        error_code: Some(err.code_for_logging().to_string()),
                         mutation_summary: mutation_summary(&result),
                         replayable: true,
                         replay_export_reason: None,
@@ -715,7 +760,11 @@ impl GatewayPluginPipeline {
 
             if let Err(err) = apply_header_patch(&mut headers, &result.headers) {
                 self.record_failure(&plugin.summary.plugin_id, hook_name, &plugin_snapshot);
-                audit_events.push(failed_event(plugin, input.hook_name, &err.to_string()));
+                audit_events.push(failed_event(
+                    plugin,
+                    input.hook_name,
+                    err.code_for_logging(),
+                ));
                 execution_reports.push(self.hook_execution_report(
                     plugin,
                     input.hook_name,
@@ -725,7 +774,7 @@ impl GatewayPluginPipeline {
                         duration_ms: duration_ms_i64(started),
                         status: "policyRejected",
                         failure_kind: Some(failure_kind_for_error_code(err.code_for_logging())),
-                        error_code: Some(err.code_for_logging()),
+                        error_code: Some(err.code_for_logging().to_string()),
                         mutation_summary: mutation_summary(&result),
                         replayable: true,
                         replay_export_reason: None,
@@ -843,7 +892,7 @@ impl GatewayPluginPipeline {
                         duration_ms: 0,
                         status: "circuitOpen",
                         failure_kind: Some("circuit_open"),
-                        error_code: Some("PLUGIN_HOOK_CIRCUIT_OPEN"),
+                        error_code: Some("PLUGIN_HOOK_CIRCUIT_OPEN".to_string()),
                         mutation_summary: serde_json::json!({ "changed": false }),
                         replayable: false,
                         replay_export_reason: Some("hook skipped because plugin circuit is open"),
@@ -891,12 +940,18 @@ impl GatewayPluginPipeline {
             {
                 Ok(result) => result,
                 Err(err) => {
+                    let error_code = err.code_for_logging().to_string();
                     self.record_failure(&plugin.summary.plugin_id, hook_name, &plugin_snapshot);
-                    let error_code = err.code_for_logging();
-                    if is_hook_timeout_error(error_code) {
+                    self.record_severe_runtime_failure(
+                        plugin,
+                        hook_name,
+                        error_code.as_str(),
+                        input.trace_id.as_str(),
+                    );
+                    if is_hook_timeout_error(error_code.as_str()) {
                         audit_events.push(timeout_event(plugin, hook_name));
                     } else {
-                        audit_events.push(failed_event(plugin, hook_name, &err.to_string()));
+                        audit_events.push(failed_event(plugin, hook_name, err.code_for_logging()));
                     }
                     let fail_closed =
                         failure_policy(plugin, hook_name) == FailurePolicy::FailClosed;
@@ -912,7 +967,7 @@ impl GatewayPluginPipeline {
                             } else {
                                 "failedOpen"
                             },
-                            failure_kind: Some(if is_hook_timeout_error(error_code) {
+                            failure_kind: Some(if is_hook_timeout_error(error_code.as_str()) {
                                 "timeout"
                             } else {
                                 "hook_error"
@@ -942,7 +997,7 @@ impl GatewayPluginPipeline {
                 &truncation,
             ) {
                 self.record_failure(&plugin.summary.plugin_id, hook_name, &plugin_snapshot);
-                audit_events.push(failed_event(plugin, hook_name, &err.to_string()));
+                audit_events.push(failed_event(plugin, hook_name, err.code_for_logging()));
                 let fail_closed = failure_policy(plugin, hook_name) == FailurePolicy::FailClosed;
                 execution_reports.push(self.hook_execution_report(
                     plugin,
@@ -953,7 +1008,7 @@ impl GatewayPluginPipeline {
                         duration_ms: duration_ms_i64(started),
                         status: budget_or_policy_status(err.code_for_logging()),
                         failure_kind: Some(failure_kind_for_error_code(err.code_for_logging())),
-                        error_code: Some(err.code_for_logging()),
+                        error_code: Some(err.code_for_logging().to_string()),
                         mutation_summary: mutation_summary(&result),
                         replayable: true,
                         replay_export_reason: None,
@@ -1067,7 +1122,7 @@ impl GatewayPluginPipeline {
                         duration_ms: 0,
                         status: "circuitOpen",
                         failure_kind: Some("circuit_open"),
-                        error_code: Some("PLUGIN_HOOK_CIRCUIT_OPEN"),
+                        error_code: Some("PLUGIN_HOOK_CIRCUIT_OPEN".to_string()),
                         mutation_summary: serde_json::json!({ "changed": false }),
                         replayable: false,
                         replay_export_reason: Some("hook skipped because plugin circuit is open"),
@@ -1115,12 +1170,18 @@ impl GatewayPluginPipeline {
             {
                 Ok(result) => result,
                 Err(err) => {
+                    let error_code = err.code_for_logging().to_string();
                     self.record_failure(&plugin.summary.plugin_id, hook_name, &plugin_snapshot);
-                    let error_code = err.code_for_logging();
-                    if is_hook_timeout_error(error_code) {
+                    self.record_severe_runtime_failure(
+                        plugin,
+                        hook_name,
+                        error_code.as_str(),
+                        input.trace_id.as_str(),
+                    );
+                    if is_hook_timeout_error(error_code.as_str()) {
                         audit_events.push(timeout_event(plugin, hook_name));
                     } else {
-                        audit_events.push(failed_event(plugin, hook_name, &err.to_string()));
+                        audit_events.push(failed_event(plugin, hook_name, err.code_for_logging()));
                     }
                     let fail_closed =
                         failure_policy(plugin, hook_name) == FailurePolicy::FailClosed;
@@ -1136,7 +1197,7 @@ impl GatewayPluginPipeline {
                             } else {
                                 "failedOpen"
                             },
-                            failure_kind: Some(if is_hook_timeout_error(error_code) {
+                            failure_kind: Some(if is_hook_timeout_error(error_code.as_str()) {
                                 "timeout"
                             } else {
                                 "hook_error"
@@ -1166,7 +1227,7 @@ impl GatewayPluginPipeline {
                 &truncation,
             ) {
                 self.record_failure(&plugin.summary.plugin_id, hook_name, &plugin_snapshot);
-                audit_events.push(failed_event(plugin, hook_name, &err.to_string()));
+                audit_events.push(failed_event(plugin, hook_name, err.code_for_logging()));
                 let fail_closed = failure_policy(plugin, hook_name) == FailurePolicy::FailClosed;
                 execution_reports.push(self.hook_execution_report(
                     plugin,
@@ -1177,7 +1238,7 @@ impl GatewayPluginPipeline {
                         duration_ms: duration_ms_i64(started),
                         status: budget_or_policy_status(err.code_for_logging()),
                         failure_kind: Some(failure_kind_for_error_code(err.code_for_logging())),
-                        error_code: Some(err.code_for_logging()),
+                        error_code: Some(err.code_for_logging().to_string()),
                         mutation_summary: mutation_summary(&result),
                         replayable: true,
                         replay_export_reason: None,
@@ -1241,26 +1302,35 @@ impl GatewayPluginPipeline {
             .unwrap_or_default()
     }
 
-    pub(crate) fn replace_plugins(&self, plugins: Vec<PluginDetail>) {
-        self.executor.retain_runtime_caches_for_plugins(&plugins);
-        let snapshot = Arc::new(build_plugin_snapshot(plugins));
-        let active_circuit_keys = snapshot
-            .by_hook
-            .iter()
-            .flat_map(|(hook_name, plugins)| {
-                plugins
-                    .iter()
-                    .map(move |plugin| (plugin.summary.plugin_id.clone(), *hook_name))
-            })
-            .collect::<std::collections::HashSet<(String, GatewayPluginHookName)>>();
-        *self
-            .plugins
-            .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = snapshot;
-        self.circuits
+    /// Loads enabled plugins while holding the same lock used by quarantine
+    /// removal, so a stale database read cannot restore a just-quarantined
+    /// plugin after its snapshot entry has been removed.
+    pub(crate) fn refresh_plugins_with<F>(
+        &self,
+        load_plugins: F,
+    ) -> crate::shared::error::AppResult<usize>
+    where
+        F: FnOnce() -> crate::shared::error::AppResult<Vec<PluginDetail>>,
+    {
+        let _refresh_guard = self
+            .snapshot_refresh_lock
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .retain(|circuit_key, _| active_circuit_keys.contains(circuit_key));
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let plugins = load_plugins()?;
+        let plugin_count = plugins.len();
+        self.replace_plugins_while_refresh_locked(plugins);
+        Ok(plugin_count)
+    }
+
+    fn replace_plugins_while_refresh_locked(&self, plugins: Vec<PluginDetail>) {
+        let active_circuit_keys = {
+            let mut snapshot = self
+                .plugins
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            self.replace_plugins_locked(&mut snapshot, plugins)
+        };
+        self.retain_active_circuits(&active_circuit_keys);
     }
 
     fn plugins_for_hook(
@@ -1369,6 +1439,108 @@ impl GatewayPluginPipeline {
         }
     }
 
+    fn record_severe_runtime_failure(
+        &self,
+        plugin: &PluginDetail,
+        hook_name: GatewayPluginHookName,
+        error_code: &str,
+        trace_id: &str,
+    ) {
+        let Some(failure_kind) =
+            crate::app::plugin_service::severe_runtime_failure_kind(error_code)
+        else {
+            return;
+        };
+        let Some(db) = self.db.as_ref() else {
+            return;
+        };
+        let result = repository::record_severe_runtime_failure_and_maybe_quarantine(
+            db,
+            RecordPluginRuntimeFailureInput {
+                plugin_id: plugin.summary.plugin_id.clone(),
+                hook_name: Some(hook_name.as_str().to_string()),
+                failure_kind: failure_kind.to_string(),
+                message: format!("Severe plugin runtime failure: {failure_kind}"),
+                trace_id: Some(trace_id.to_string()),
+            },
+        );
+        match result {
+            Ok(result) if result.quarantined => {
+                let plugin_id = plugin.summary.plugin_id.clone();
+                self.remove_plugin_runtime(&plugin_id);
+                tracing::warn!(
+                    plugin_id,
+                    hook_name = hook_name.as_str(),
+                    failure_kind,
+                    "plugin quarantined after repeated severe gateway failures"
+                );
+            }
+            Ok(_) => {}
+            Err(error) => tracing::warn!(
+                plugin_id = %plugin.summary.plugin_id,
+                hook_name = hook_name.as_str(),
+                error = %error,
+                "failed to persist severe gateway plugin runtime failure"
+            ),
+        }
+    }
+
+    pub(crate) fn remove_plugin_runtime(&self, plugin_id: &str) {
+        let _refresh_guard = self
+            .snapshot_refresh_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let active_circuit_keys = {
+            let mut snapshot = self
+                .plugins
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut remaining = HashMap::<String, PluginDetail>::new();
+            for plugins in snapshot.by_hook.values() {
+                for plugin in plugins.iter() {
+                    if plugin.summary.plugin_id != plugin_id {
+                        remaining
+                            .entry(plugin.summary.plugin_id.clone())
+                            .or_insert_with(|| plugin.clone());
+                    }
+                }
+            }
+            self.replace_plugins_locked(&mut snapshot, remaining.into_values().collect())
+        };
+        self.retain_active_circuits(&active_circuit_keys);
+        self.executor.dispose_plugin(plugin_id);
+    }
+
+    fn replace_plugins_locked(
+        &self,
+        current_snapshot: &mut RwLockWriteGuard<'_, Arc<GatewayPluginSnapshot>>,
+        plugins: Vec<PluginDetail>,
+    ) -> std::collections::HashSet<(String, GatewayPluginHookName)> {
+        self.executor.retain_runtime_caches_for_plugins(&plugins);
+        let snapshot = Arc::new(build_plugin_snapshot(plugins));
+        let active_circuit_keys = snapshot
+            .by_hook
+            .iter()
+            .flat_map(|(hook_name, plugins)| {
+                plugins
+                    .iter()
+                    .map(move |plugin| (plugin.summary.plugin_id.clone(), *hook_name))
+            })
+            .collect::<std::collections::HashSet<(String, GatewayPluginHookName)>>();
+        **current_snapshot = snapshot;
+        active_circuit_keys
+    }
+
+    fn retain_active_circuits(
+        &self,
+        active_circuit_keys: &std::collections::HashSet<(String, GatewayPluginHookName)>,
+    ) {
+        self.circuits
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .retain(|circuit_key, _| active_circuit_keys.contains(circuit_key));
+    }
+
     fn record_success(
         &self,
         plugin_id: &str,
@@ -1406,7 +1578,7 @@ impl GatewayPluginPipeline {
         }
         let field = truncation.truncated_direct_field()?;
         let err = truncated_context_execution_error(field);
-        let error_code = err.code_for_logging();
+        let error_code = err.code_for_logging().to_string();
         audit_events.push(audit_event(
             plugin,
             hook_name,
@@ -1414,7 +1586,7 @@ impl GatewayPluginPipeline {
             "high",
             "Plugin hook context exceeded the safe budget",
             serde_json::json!({
-                "error": err.to_string(),
+                "errorCode": error_code.as_str(),
                 "failureKind": "context_budget",
                 "field": field,
                 "executorInvoked": false,
@@ -1427,8 +1599,8 @@ impl GatewayPluginPipeline {
             HookReportOutcome {
                 started_at_ms: now_unix_millis(),
                 duration_ms: 0,
-                status: budget_or_policy_status(error_code),
-                failure_kind: Some(failure_kind_for_error_code(error_code)),
+                status: budget_or_policy_status(error_code.as_str()),
+                failure_kind: Some(failure_kind_for_error_code(error_code.as_str())),
                 error_code: Some(error_code),
                 mutation_summary: serde_json::json!({ "changed": false }),
                 replayable: false,
@@ -1454,7 +1626,7 @@ impl GatewayPluginPipeline {
             started_at_ms: outcome.started_at_ms,
             duration_ms: outcome.duration_ms,
             failure_kind: outcome.failure_kind.map(str::to_string),
-            error_code: outcome.error_code.map(str::to_string),
+            error_code: outcome.error_code,
             failure_policy: Some(failure_policy(plugin, hook_name).as_str().to_string()),
             circuit_state: Some(
                 self.circuit_state_for_report(&plugin.summary.plugin_id, hook_name),
@@ -1489,7 +1661,7 @@ struct HookReportOutcome {
     duration_ms: i64,
     status: &'static str,
     failure_kind: Option<&'static str>,
-    error_code: Option<&'static str>,
+    error_code: Option<String>,
     mutation_summary: serde_json::Value,
     replayable: bool,
     replay_export_reason: Option<&'static str>,
@@ -1655,6 +1827,10 @@ fn budget_or_policy_status(error_code: &str) -> &'static str {
 }
 
 fn failure_kind_for_error_code(error_code: &str) -> &'static str {
+    if let Some(failure_kind) = crate::app::plugin_service::severe_runtime_failure_kind(error_code)
+    {
+        return failure_kind;
+    }
     match error_code {
         "PLUGIN_OUTPUT_TOO_LARGE" => "output_budget",
         "PLUGIN_CONTEXT_TRUNCATED" => "context_budget",
@@ -1725,6 +1901,9 @@ fn build_plugin_snapshot(plugins: Vec<PluginDetail>) -> GatewayPluginSnapshot {
             continue;
         }
         for hook in active_plugin_hooks(plugin) {
+            if !manifest_allows_gateway_hook(&plugin.manifest, &hook.name) {
+                continue;
+            }
             let Some(hook_name) = hook_name_from_str(&hook.name) else {
                 continue;
             };
@@ -1814,7 +1993,7 @@ fn completed_event(
 fn failed_event(
     plugin: &PluginDetail,
     hook_name: GatewayPluginHookName,
-    error: &str,
+    error_code: &str,
 ) -> GatewayPluginAuditEvent {
     audit_event(
         plugin,
@@ -1822,7 +2001,10 @@ fn failed_event(
         "plugin.hook.failed",
         "high",
         "Plugin hook failed",
-        serde_json::json!({ "error": error }),
+        serde_json::json!({
+            "errorCode": error_code,
+            "failureKind": failure_kind_for_error_code(error_code),
+        }),
     )
 }
 
@@ -2132,7 +2314,7 @@ mod tests {
     use axum::body::Bytes;
     use axum::http::{HeaderMap, Method};
     use std::collections::BTreeMap;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{mpsc, Arc, Mutex};
     use std::time::Duration;
     use tokio::sync::Notify;
 
@@ -2279,11 +2461,26 @@ mod tests {
     #[derive(Default)]
     struct PruneRecordingExecutor {
         last_retain_ids: Mutex<Vec<String>>,
+        disposed_ids: Mutex<Vec<String>>,
+        request_calls: Mutex<HashMap<String, usize>>,
     }
 
     impl PruneRecordingExecutor {
         fn last_retain_ids(&self) -> Vec<String> {
             self.last_retain_ids.lock().unwrap().clone()
+        }
+
+        fn disposed_ids(&self) -> Vec<String> {
+            self.disposed_ids.lock().unwrap().clone()
+        }
+
+        fn request_call_count(&self, plugin_id: &str) -> usize {
+            self.request_calls
+                .lock()
+                .unwrap()
+                .get(plugin_id)
+                .copied()
+                .unwrap_or_default()
         }
     }
 
@@ -2295,12 +2492,25 @@ mod tests {
                 .collect();
         }
 
+        fn dispose_plugin(&self, plugin_id: &str) {
+            self.disposed_ids
+                .lock()
+                .unwrap()
+                .push(plugin_id.to_string());
+        }
+
         fn execute_request_hook(
             &self,
-            _plugin: &PluginDetail,
+            plugin: &PluginDetail,
             _context: GatewayVisibleHookContext,
             _hook_timeout: Duration,
         ) -> GatewayHookFuture {
+            *self
+                .request_calls
+                .lock()
+                .unwrap()
+                .entry(plugin.summary.plugin_id.clone())
+                .or_default() += 1;
             Box::pin(async { Ok(GatewayHookResult::continue_unchanged()) })
         }
 
@@ -2353,7 +2563,9 @@ mod tests {
             GatewayPluginPipelineConfig::default(),
         );
 
-        pipeline.replace_plugins(vec![plugin("acme.b", 1, vec!["request.body.read"])]);
+        pipeline
+            .refresh_plugins_with(|| Ok(vec![plugin("acme.b", 1, vec!["request.body.read"])]))
+            .expect("test refresh should succeed");
 
         assert_eq!(executor.last_retain_ids(), vec!["acme.b"]);
     }
@@ -2663,9 +2875,15 @@ mod tests {
                 && event.event_type == "plugin.hook.failed"
                 && event
                     .details
-                    .get("error")
+                    .get("errorCode")
                     .and_then(serde_json::Value::as_str)
-                    .is_some_and(|error| error.contains("PLUGIN_OUTPUT_TOO_LARGE"))
+                    == Some("PLUGIN_OUTPUT_TOO_LARGE")
+        }));
+        assert!(first.execution_reports.iter().any(|report| {
+            report.plugin_id == "plugin.large"
+                && report.status == "budgetRejected"
+                && report.failure_kind.as_deref() == Some("output_budget")
+                && report.error_code.as_deref() == Some("PLUGIN_OUTPUT_TOO_LARGE")
         }));
         assert!(first.audit_events.iter().all(|event| {
             !(event.plugin_id == "plugin.large" && event.event_type == "plugin.hook.completed")
@@ -2729,9 +2947,15 @@ mod tests {
                 && event.event_type == "plugin.hook.failed"
                 && event
                     .details
-                    .get("error")
+                    .get("errorCode")
                     .and_then(serde_json::Value::as_str)
-                    .is_some_and(|error| error.contains("PLUGIN_CONTEXT_TRUNCATED"))
+                    == Some("PLUGIN_CONTEXT_TRUNCATED")
+        }));
+        assert!(output.execution_reports.iter().any(|report| {
+            report.plugin_id == "plugin.truncated"
+                && report.status == "budgetRejected"
+                && report.failure_kind.as_deref() == Some("context_budget")
+                && report.error_code.as_deref() == Some("PLUGIN_CONTEXT_TRUNCATED")
         }));
         assert!(
             pipeline
@@ -3203,6 +3427,245 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn third_severe_gateway_failure_quarantines_after_preserving_the_fail_open_result() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = crate::db::init_for_tests(&dir.path().join("plugins.db")).expect("db");
+        let detail = plugin(
+            "plugin.runtime-quarantine",
+            10,
+            vec!["request.body.read", "request.body.write"],
+        );
+        crate::infra::plugins::repository::insert_plugin(
+            &db,
+            crate::infra::plugins::repository::InsertPluginInput {
+                manifest: detail.manifest.clone(),
+                install_source: PluginInstallSource::Local,
+                status: PluginStatus::Enabled,
+                installed_dir: None,
+            },
+        )
+        .expect("install plugin state");
+        let executor = InMemoryGatewayPluginExecutor::new().with_request_async_handler(
+            "plugin.runtime-quarantine",
+            |_ctx| async {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                GatewayHookResult::continue_unchanged()
+            },
+        );
+        let observed_timeouts = executor.observed_timeouts();
+        let pipeline = GatewayPluginPipeline::for_runtime(
+            vec![detail],
+            Arc::new(executor),
+            GatewayPluginPipelineConfig {
+                hook_timeout: Duration::from_millis(1),
+                circuit_failure_threshold: 10,
+                circuit_cooldown: Duration::from_secs(60),
+                ..GatewayPluginPipelineConfig::default()
+            },
+            db.clone(),
+        );
+
+        for _ in 0..3 {
+            let output = pipeline
+                .run_request_hook(request_input())
+                .await
+                .expect("fail-open timeout must preserve the current request");
+            assert_eq!(output.body.as_ref(), b"hello");
+        }
+
+        assert_eq!(
+            crate::infra::plugins::repository::get_plugin(&db, "plugin.runtime-quarantine")
+                .expect("plugin detail")
+                .summary
+                .status,
+            PluginStatus::Quarantined
+        );
+        assert_eq!(
+            pipeline.plugins_for_hook_count_for_tests(GatewayPluginHookName::RequestAfterBodyRead),
+            0
+        );
+
+        let after_quarantine = pipeline
+            .run_request_hook(request_input())
+            .await
+            .expect("quarantined plugin must no longer run");
+        assert_eq!(after_quarantine.body.as_ref(), b"hello");
+        assert_eq!(observed_timeouts.lock().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn stale_refresh_cannot_restore_a_plugin_after_quarantine_removal() {
+        let stale_plugin = plugin(
+            "plugin.stale-refresh",
+            10,
+            vec!["request.body.read", "request.body.write"],
+        );
+        let pipeline = GatewayPluginPipeline::for_tests_shared(
+            vec![stale_plugin.clone()],
+            Arc::new(InMemoryGatewayPluginExecutor::new()),
+            GatewayPluginPipelineConfig::default(),
+        );
+        let (refresh_loaded_tx, refresh_loaded_rx) = mpsc::channel();
+        let (allow_refresh_tx, allow_refresh_rx) = mpsc::channel();
+        let refresh_pipeline = Arc::clone(&pipeline);
+        let refresh = std::thread::spawn(move || {
+            refresh_pipeline
+                .refresh_plugins_with(|| {
+                    refresh_loaded_tx
+                        .send(())
+                        .expect("signal stale refresh load");
+                    allow_refresh_rx.recv().expect("allow stale refresh commit");
+                    Ok(vec![stale_plugin])
+                })
+                .expect("refresh stale plugin snapshot");
+        });
+        refresh_loaded_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("stale refresh should hold the refresh lock");
+
+        let (removal_done_tx, removal_done_rx) = mpsc::channel();
+        let removal_pipeline = Arc::clone(&pipeline);
+        let removal = std::thread::spawn(move || {
+            removal_pipeline.remove_plugin_runtime("plugin.stale-refresh");
+            removal_done_tx.send(()).expect("signal quarantine removal");
+        });
+        let removal_finished_before_refresh = removal_done_rx
+            .recv_timeout(Duration::from_millis(100))
+            .is_ok();
+
+        allow_refresh_tx
+            .send(())
+            .expect("release stale refresh commit");
+        refresh.join().expect("stale refresh thread");
+        removal.join().expect("quarantine removal thread");
+        assert!(
+            !removal_finished_before_refresh,
+            "quarantine removal must wait for an in-progress refresh"
+        );
+        assert_eq!(
+            pipeline.plugins_for_hook_count_for_tests(GatewayPluginHookName::RequestAfterBodyRead),
+            0
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn failed_refresh_keeps_removed_plugin_disposed_and_out_of_the_snapshot() {
+        let executor = Arc::new(PruneRecordingExecutor::default());
+        let pipeline = GatewayPluginPipeline::for_tests_shared(
+            vec![
+                plugin("plugin.quarantined", 10, vec!["request.body.read"]),
+                plugin("plugin.healthy", 20, vec!["request.body.read"]),
+            ],
+            executor.clone(),
+            GatewayPluginPipelineConfig::default(),
+        );
+        pipeline.force_open_circuit_for_tests(
+            "plugin.quarantined",
+            GatewayPluginHookName::RequestAfterBodyRead,
+        );
+        pipeline.force_open_circuit_for_tests(
+            "plugin.healthy",
+            GatewayPluginHookName::RequestAfterBodyRead,
+        );
+
+        pipeline.remove_plugin_runtime("plugin.quarantined");
+        let refresh_error = pipeline
+            .refresh_plugins_with(|| Err("forced plugin reload failure".into()))
+            .expect_err("full refresh should fail");
+
+        assert!(refresh_error
+            .to_string()
+            .contains("forced plugin reload failure"));
+        assert_eq!(executor.disposed_ids(), vec!["plugin.quarantined"]);
+        assert_eq!(executor.last_retain_ids(), vec!["plugin.healthy"]);
+        assert_eq!(
+            pipeline.circuit_snapshot(
+                "plugin.quarantined",
+                GatewayPluginHookName::RequestAfterBodyRead,
+            ),
+            GatewayPluginCircuitSnapshot::default()
+        );
+        assert!(
+            pipeline
+                .circuit_snapshot(
+                    "plugin.healthy",
+                    GatewayPluginHookName::RequestAfterBodyRead,
+                )
+                .open,
+            "unrelated plugin circuit state must be retained"
+        );
+        assert_eq!(
+            pipeline.plugins_for_hook_count_for_tests(GatewayPluginHookName::RequestAfterBodyRead),
+            1,
+            "failed full refresh must keep only the unrelated plugin snapshot"
+        );
+
+        pipeline
+            .run_request_hook(request_input())
+            .await
+            .expect("remaining pipeline should run");
+        assert_eq!(executor.request_call_count("plugin.quarantined"), 0);
+        assert_eq!(executor.request_call_count("plugin.healthy"), 0);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn third_severe_gateway_failure_keeps_the_fail_closed_error_before_removal() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = crate::db::init_for_tests(&dir.path().join("plugins.db")).expect("db");
+        let mut detail = plugin("plugin.runtime-fail-closed", 10, vec!["request.body.read"]);
+        gateway_hook_mut(&mut detail).failure_policy = Some("fail-closed".to_string());
+        crate::infra::plugins::repository::insert_plugin(
+            &db,
+            crate::infra::plugins::repository::InsertPluginInput {
+                manifest: detail.manifest.clone(),
+                install_source: PluginInstallSource::Local,
+                status: PluginStatus::Enabled,
+                installed_dir: None,
+            },
+        )
+        .expect("install plugin state");
+        let executor = InMemoryGatewayPluginExecutor::new().with_request_async_handler(
+            "plugin.runtime-fail-closed",
+            |_ctx| async {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                GatewayHookResult::continue_unchanged()
+            },
+        );
+        let pipeline = GatewayPluginPipeline::for_runtime(
+            vec![detail],
+            Arc::new(executor),
+            GatewayPluginPipelineConfig {
+                hook_timeout: Duration::from_millis(1),
+                circuit_failure_threshold: 10,
+                circuit_cooldown: Duration::from_secs(60),
+                ..GatewayPluginPipelineConfig::default()
+            },
+            db.clone(),
+        );
+
+        for _ in 0..3 {
+            let err = pipeline
+                .run_request_hook(request_input())
+                .await
+                .expect_err("fail-closed timeout must still fail the current request");
+            assert_eq!(err.code(), "PLUGIN_HOOK_TIMEOUT");
+        }
+
+        assert_eq!(
+            crate::infra::plugins::repository::get_plugin(&db, "plugin.runtime-fail-closed")
+                .expect("plugin detail")
+                .summary
+                .status,
+            PluginStatus::Quarantined
+        );
+        assert_eq!(
+            pipeline.plugins_for_hook_count_for_tests(GatewayPluginHookName::RequestAfterBodyRead),
+            0
+        );
+        assert!(pipeline.run_request_hook(request_input()).await.is_ok());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn gateway_plugin_pipeline_returns_fail_closed_audit_events_on_error() {
         let executor = InMemoryGatewayPluginExecutor::new().with_request_async_handler(
             "plugin.slow",
@@ -3379,11 +3842,15 @@ mod tests {
             .expect("pipeline should execute initial plugin");
         assert_eq!(before.body.as_ref(), b"old");
 
-        pipeline.replace_plugins(vec![plugin(
-            "plugin.new",
-            10,
-            vec!["request.body.read", "request.body.write"],
-        )]);
+        pipeline
+            .refresh_plugins_with(|| {
+                Ok(vec![plugin(
+                    "plugin.new",
+                    10,
+                    vec!["request.body.read", "request.body.write"],
+                )])
+            })
+            .expect("test refresh should succeed");
 
         let after = pipeline
             .run_request_hook(request_input())
@@ -3412,7 +3879,9 @@ mod tests {
 
         let mut replacement = plugin("plugin.hook-refresh", 10, vec!["log.redact"]);
         gateway_hook_mut(&mut replacement).name = "log.beforePersist".to_string();
-        pipeline.replace_plugins(vec![replacement]);
+        pipeline
+            .refresh_plugins_with(|| Ok(vec![replacement]))
+            .expect("test refresh should succeed");
 
         assert!(
             !pipeline
@@ -3463,18 +3932,24 @@ mod tests {
         started.notified().await;
         let mut log_only = plugin("plugin.hook-refresh", 10, vec!["log.redact"]);
         gateway_hook_mut(&mut log_only).name = "log.beforePersist".to_string();
-        pipeline.replace_plugins(vec![log_only]);
+        pipeline
+            .refresh_plugins_with(|| Ok(vec![log_only]))
+            .expect("test refresh should succeed");
         release.notify_one();
         in_flight
             .await
             .expect("in-flight hook task")
             .expect("old fail-open hook result");
 
-        pipeline.replace_plugins(vec![plugin(
-            "plugin.hook-refresh",
-            10,
-            vec!["request.body.read"],
-        )]);
+        pipeline
+            .refresh_plugins_with(|| {
+                Ok(vec![plugin(
+                    "plugin.hook-refresh",
+                    10,
+                    vec!["request.body.read"],
+                )])
+            })
+            .expect("test refresh should succeed");
         assert_eq!(
             pipeline.circuit_snapshot(
                 "plugin.hook-refresh",
@@ -3496,7 +3971,9 @@ mod tests {
             1
         );
 
-        pipeline.replace_plugins(vec![plugin("plugin.b", 20, vec!["request.body.read"])]);
+        pipeline
+            .refresh_plugins_with(|| Ok(vec![plugin("plugin.b", 20, vec!["request.body.read"])]))
+            .expect("test refresh should succeed");
 
         assert_eq!(
             pipeline.plugins_for_hook_count_for_tests(GatewayPluginHookName::RequestAfterBodyRead),

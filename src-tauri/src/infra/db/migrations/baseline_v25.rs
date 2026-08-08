@@ -430,6 +430,8 @@ INSERT OR IGNORE INTO usage_ledger_backfill_state(
     )
     .map_err(|e| format!("failed to initialize fresh usage ledger state: {e}"))?;
     super::v42_to_v43::recreate_usage_events_view(&tx)?;
+    super::v49_to_v50::create_recovery_journal_schema(&tx)?;
+    super::v50_to_v51::create_recovery_claim_schema(&tx)?;
 
     for (git_url, branch) in [
         ("https://github.com/anthropics/skills", "auto"),

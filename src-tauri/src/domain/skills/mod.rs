@@ -10,6 +10,7 @@ mod local_swap;
 mod npx_lock;
 mod ops;
 mod paths;
+mod recovery;
 mod repo_cache;
 mod repos;
 mod skill_md;
@@ -20,17 +21,24 @@ mod util;
 
 pub use discover::{discover_available, discover_repo_available};
 pub use installed::installed_list_for_workspace;
-pub use local::{delete_local, import_local, import_local_batch, install_to_local, local_list};
-pub(crate) use local_swap::swap_local_skills_for_workspace_switch;
+pub use local::{delete_local, import_local, install_to_local, local_list};
+pub(crate) use local_swap::{
+    capture_staged_local_skills_for_workspace_switch,
+    cleanup_workspace_switch_local_skills_artifact,
+    restore_staged_local_skills_for_workspace_switch, stage_local_skills_for_workspace_switch,
+    swap_local_skills_for_workspace_switch,
+};
 pub(crate) use ops::sync_one_cli;
 pub use ops::{install, return_to_local, set_enabled, sync_cli_for_workspace, uninstall};
 pub use paths::paths_get;
+pub(crate) use recovery::{cleanup_recovery_operation, replay_recovery_operation};
 pub use repos::{repo_delete, repo_upsert, repos_list};
 pub use types::{
-    AvailableSkillSummary, InstalledSkillSummary, LocalSkillSummary, SkillImportLocalBatchReport,
-    SkillRepoSummary, SkillUpdateInfo, SkillsPaths,
+    AvailableSkillSummary, InstalledSkillSummary, LocalSkillSummary, SkillImportIssue,
+    SkillImportLocalBatchReport, SkillRepoSummary, SkillUpdateInfo, SkillsPaths,
 };
 pub use update::{check_updates_for_workspace, update_skill};
+pub(crate) use util::validate_dir_name as validate_recovery_path_component;
 
 #[cfg(test)]
 mod tests;

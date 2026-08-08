@@ -19,8 +19,8 @@ export function AppMaintenanceScreen({ status }: { status: AppStartupStatus }) {
     try {
       await retryAppStartupStatusSnapshot();
     } catch (error) {
-      const message = "重试数据清理失败：请查看 Console 日志";
-      logToConsole("error", "重试数据清理失败", { error: String(error) });
+      const message = "重试维护操作失败：请查看 Console 日志";
+      logToConsole("error", "重试维护操作失败", { error: String(error) });
       setRetryError(message);
       toast.error(message);
     } finally {
@@ -43,7 +43,7 @@ export function AppMaintenanceScreen({ status }: { status: AppStartupStatus }) {
       <section className="w-full max-w-xl border-y border-amber-300 py-8 dark:border-amber-700">
         <div className="flex items-center gap-3 text-amber-700 dark:text-amber-300">
           <ShieldAlert aria-hidden="true" className="size-6 shrink-0" />
-          <h1 className="text-lg font-semibold">数据重置尚未完成</h1>
+          <h1 className="text-lg font-semibold">数据维护尚未完成</h1>
         </div>
         <p className="mt-3 break-words text-sm leading-6 text-secondary-foreground">
           {status.errorMessage ?? "维护操作需要重新执行。"}

@@ -185,7 +185,7 @@ describe("App bootstrap", () => {
 
     await renderApp();
 
-    expect(await screen.findByText("数据重置尚未完成")).toBeInTheDocument();
+    expect(await screen.findByText("数据维护尚未完成")).toBeInTheDocument();
     expect(screen.queryByTestId("app-routes")).not.toBeInTheDocument();
     expect(listenAppHeartbeat).toHaveBeenCalledTimes(1);
     expect(listenAndSyncAppStartupStatusSnapshot).toHaveBeenCalledTimes(1);
@@ -205,8 +205,8 @@ describe("App bootstrap", () => {
     await renderApp();
     fireEvent.click(await screen.findByRole("button", { name: "重试" }));
 
-    expect(await screen.findByText("重试数据清理失败：请查看 Console 日志")).toBeInTheDocument();
-    expect(logToConsole).toHaveBeenCalledWith("error", "重试数据清理失败", {
+    expect(await screen.findByText("重试维护操作失败：请查看 Console 日志")).toBeInTheDocument();
+    expect(logToConsole).toHaveBeenCalledWith("error", "重试维护操作失败", {
       error: "Error: retry boom",
     });
     expect(screen.getByRole("button", { name: "重试" })).toBeEnabled();
@@ -233,7 +233,7 @@ describe("App bootstrap", () => {
     vi.mocked(useAppStartupStatus).mockReturnValue(MAINTENANCE_STATUS);
     app.rerenderApp();
 
-    expect(await screen.findByText("数据重置尚未完成")).toBeInTheDocument();
+    expect(await screen.findByText("数据维护尚未完成")).toBeInTheDocument();
     await vi.waitFor(() => {
       expect(unlistenGateway).toHaveBeenCalledTimes(1);
       expect(unlistenNotice).toHaveBeenCalledTimes(1);

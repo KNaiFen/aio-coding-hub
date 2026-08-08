@@ -73,7 +73,7 @@ fn return_to_local_moves_skill_out_of_managed_registry_and_keeps_local_dir() {
 }
 
 #[test]
-fn return_to_local_resolves_symlink_entries_inside_ssot_dir() {
+fn return_to_local_rejects_symlink_entries_inside_ssot_dir_without_mutating_state() {
     let app = support::TestApp::new();
     let handle = app.handle();
 
@@ -87,36 +87,44 @@ fn return_to_local_resolves_symlink_entries_inside_ssot_dir() {
         return;
     }
 
-    let ok = aio_coding_hub_lib::test_support::skill_return_to_local(
+    let error = aio_coding_hub_lib::test_support::skill_return_to_local(
         &handle,
         fix.workspace_id,
         fix.skill_id,
     )
-    .expect("return to local should succeed with symlink");
-
-    assert!(ok, "skill return_to_local should succeed");
+    .expect_err("return to local must reject a linked SSOT entry");
+    assert_eq!(error.code(), "SKILL_HASH_BLOCKED_SYMLINK");
+    assert!(
+        !error
+            .to_string()
+            .contains(&*external_file.to_string_lossy()),
+        "the recovery error must not disclose the external link target"
+    );
 
     let local_dir = fix.cli_skills_root.join(&fix.skill_key);
     assert!(
-        local_dir.exists(),
-        "local skill dir should exist after returning"
+        !local_dir.exists(),
+        "a rejected return must not create a local skill directory"
     );
-
-    let copied_file = local_dir.join("linked.txt");
-    assert!(
-        copied_file.exists(),
-        "symlink target content should be copied"
-    );
-    let content = std::fs::read_to_string(&copied_file).expect("read copied file");
     assert_eq!(
-        content, "external\n",
-        "copied file should contain the symlink target content"
+        std::fs::read_to_string(&external_file).expect("read external sentinel"),
+        "external\n",
+        "the external link target must remain untouched"
     );
-
-    // The copied file should be a regular file, not a symlink
-    let meta = std::fs::symlink_metadata(&copied_file).expect("read metadata");
     assert!(
-        !meta.file_type().is_symlink(),
-        "copied file should be a regular file, not a symlink"
+        fix.ssot_skill_dir.join("linked.txt").is_symlink(),
+        "the rejected SSOT entry must remain intact"
+    );
+    let remaining: i64 = fix
+        .conn
+        .query_row(
+            "SELECT COUNT(1) FROM skills WHERE id = ?1",
+            params![fix.skill_id],
+            |row| row.get(0),
+        )
+        .expect("count skill rows after rejection");
+    assert_eq!(
+        remaining, 1,
+        "the rejected return must preserve the skill row"
     );
 }

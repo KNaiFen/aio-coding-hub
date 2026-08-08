@@ -99,17 +99,21 @@ fn begin_maintenance(status: &mut AppStartupStatus) {
     status.can_retry = false;
 }
 
-fn set_maintenance_failed(status: &mut AppStartupStatus, message: String) {
+fn set_maintenance_failed(status: &mut AppStartupStatus, stage: AppStartupStage, message: String) {
     status.running = false;
     status.maintenance_mode = true;
     status.current_stage = AppStartupStage::Failed;
-    status.failed_stage = Some(AppStartupStage::ResettingData);
+    status.failed_stage = Some(stage);
     status.error_message = Some(message);
     status.can_retry = true;
 }
 
 fn finish_maintenance(status: &mut AppStartupStatus) {
     *status = AppStartupStatus::default();
+}
+
+fn resume_startup_after_maintenance(status: &mut AppStartupStatus) {
+    set_stage(status, AppStartupStage::InitializingDb);
 }
 
 fn emit_snapshot<R: tauri::Runtime>(app: &tauri::AppHandle<R>, snapshot: &AppStartupStatus) {
@@ -184,14 +188,28 @@ pub(crate) fn fail_maintenance_run<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     message: impl Into<String>,
 ) -> AppStartupStatus {
+    fail_maintenance_run_at_stage(app, AppStartupStage::ResettingData, message)
+}
+
+pub(crate) fn fail_maintenance_run_at_stage<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    stage: AppStartupStage,
+    message: impl Into<String>,
+) -> AppStartupStatus {
     let message = message.into();
-    update_status(app, |status| set_maintenance_failed(status, message))
+    update_status(app, |status| set_maintenance_failed(status, stage, message))
 }
 
 pub(crate) fn finish_maintenance_run<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> AppStartupStatus {
     update_status(app, finish_maintenance)
+}
+
+pub(crate) fn resume_startup_after_maintenance_run<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> AppStartupStatus {
+    update_status(app, resume_startup_after_maintenance)
 }
 
 #[cfg(test)]
@@ -227,6 +245,19 @@ mod tests {
 
         assert!(!begin_run(&mut status));
         assert!(status.running);
+    }
+
+    #[test]
+    fn recovery_completion_resumes_existing_startup_run() {
+        let mut status = AppStartupStatus::default();
+        begin_maintenance(&mut status);
+
+        resume_startup_after_maintenance(&mut status);
+
+        assert!(status.running);
+        assert!(!status.maintenance_mode);
+        assert_eq!(status.current_stage, AppStartupStage::InitializingDb);
+        assert!(!status.can_retry);
     }
 
     #[test]
@@ -280,7 +311,11 @@ mod tests {
         assert!(status.maintenance_mode);
         assert_eq!(status.current_stage, AppStartupStage::ResettingData);
 
-        set_maintenance_failed(&mut status, "retry reset".to_string());
+        set_maintenance_failed(
+            &mut status,
+            AppStartupStage::ResettingData,
+            "retry reset".to_string(),
+        );
         assert!(!status.running);
         assert!(status.maintenance_mode);
         assert_eq!(status.current_stage, AppStartupStage::Failed);
@@ -289,5 +324,21 @@ mod tests {
 
         finish_maintenance(&mut status);
         assert_eq!(status, AppStartupStatus::default());
+    }
+
+    #[test]
+    fn recovery_failure_preserves_database_stage_in_maintenance() {
+        let mut status = AppStartupStatus::default();
+
+        set_maintenance_failed(
+            &mut status,
+            AppStartupStage::InitializingDb,
+            "retry recovery".to_string(),
+        );
+
+        assert!(status.maintenance_mode);
+        assert_eq!(status.current_stage, AppStartupStage::Failed);
+        assert_eq!(status.failed_stage, Some(AppStartupStage::InitializingDb));
+        assert!(status.can_retry);
     }
 }

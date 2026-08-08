@@ -9,6 +9,7 @@ fn mcp_import_from_workspace_cli_flows_are_stable() {
     mcp_import_from_workspace_cli_preserves_sse_transport();
     mcp_import_from_workspace_cli_preserves_server_key_casing();
     mcp_import_from_workspace_cli_codex_does_not_create_suffix_key();
+    mcp_import_from_workspace_cli_precommit_failure_preserves_target_bytes();
 }
 
 fn mcp_import_from_workspace_cli_reads_claude_json_and_imports() {
@@ -273,4 +274,38 @@ args = ["-y", "--prefer-online", "fast-context-mcp"]
     let synced_text = String::from_utf8(synced).expect("utf8 codex target");
     assert!(synced_text.contains("[mcp_servers.mcp-server]"));
     assert!(!synced_text.contains("[mcp_servers.mcp-server-2]"));
+}
+
+fn mcp_import_from_workspace_cli_precommit_failure_preserves_target_bytes() {
+    let app = support::TestApp::new();
+    let handle = app.handle();
+    let original = b"{\"mcpServers\": [".to_vec();
+    aio_coding_hub_lib::test_support::mcp_restore_target_bytes(
+        &handle,
+        "claude",
+        Some(original.clone()),
+    )
+    .expect("write invalid claude target");
+    let workspace_id =
+        aio_coding_hub_lib::test_support::workspace_active_id_by_cli(&handle, "claude")
+            .expect("claude active workspace");
+
+    let error =
+        aio_coding_hub_lib::test_support::mcp_import_from_workspace_cli_json(&handle, workspace_id)
+            .expect_err("invalid target must fail before the SQLite commit");
+
+    assert_eq!(error.code(), "SEC_INVALID_INPUT");
+    assert_eq!(
+        aio_coding_hub_lib::test_support::mcp_read_target_bytes(&handle, "claude")
+            .expect("read claude target"),
+        Some(original)
+    );
+    assert_eq!(
+        aio_coding_hub_lib::test_support::recovery_journal_statuses_for_kind(
+            &handle,
+            "mcp.import_from_cli",
+        )
+        .expect("read journal statuses"),
+        vec!["resolved"]
+    );
 }

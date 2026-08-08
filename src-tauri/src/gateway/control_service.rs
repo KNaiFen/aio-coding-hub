@@ -219,10 +219,8 @@ impl GatewayControlService {
         let Some(runtime) = running else {
             return;
         };
-        match plugin_service::enabled_plugins_for_gateway(db) {
-            Ok(plugins) => {
-                let plugin_count = plugins.len();
-                runtime.refresh_plugin_pipeline(plugins);
+        match runtime.refresh_plugin_pipeline(|| plugin_service::enabled_plugins_for_gateway(db)) {
+            Ok(plugin_count) => {
                 tracing::info!(plugin_count, "refreshed gateway plugin pipeline");
             }
             Err(err) => {
@@ -231,6 +229,12 @@ impl GatewayControlService {
                     "failed to refresh gateway plugin pipeline; keeping previous snapshot"
                 );
             }
+        }
+    }
+
+    pub(crate) fn remove_plugin(running: Option<&GatewayRuntime>, plugin_id: &str) {
+        if let Some(runtime) = running {
+            runtime.remove_plugin_from_pipeline(plugin_id);
         }
     }
 
@@ -288,6 +292,7 @@ fn load_gateway_plugin_pipeline(
                     plugins,
                     Arc::new(RuntimeGatewayPluginExecutor::with_db(db.clone())),
                     super::plugins::pipeline::GatewayPluginPipelineConfig::default(),
+                    db.clone(),
                 ),
             )
         }
@@ -317,6 +322,7 @@ fn empty_runtime_gateway_plugin_pipeline(
             Vec::new(),
             Arc::new(RuntimeGatewayPluginExecutor::with_db(db.clone())),
             super::plugins::pipeline::GatewayPluginPipelineConfig::default(),
+            db.clone(),
         ),
     )
 }
@@ -432,7 +438,9 @@ mod tests {
             crate::db::init_for_tests(&temp.path().join("gateway-fallback.db")).expect("init db");
         let pipeline = fallback_gateway_plugin_pipeline_for_tests(&db);
 
-        pipeline.replace_plugins(vec![extension_host_plugin_without_root()]);
+        pipeline
+            .refresh_plugins_with(|| Ok(vec![extension_host_plugin_without_root()]))
+            .expect("test refresh should succeed");
 
         let err = pipeline
             .run_request_hook(GatewayRequestHookInput {
@@ -449,7 +457,7 @@ mod tests {
             .await
             .expect_err("fallback pipeline should keep runtime executor after refresh");
 
-        assert_eq!(err.code(), "PLUGIN_EXTENSION_HOST_GATEWAY_FAILED");
+        assert_eq!(err.code(), "PLUGIN_EXTENSION_HOST_ROOT_UNAVAILABLE");
         assert!(err
             .to_string()
             .contains("PLUGIN_EXTENSION_HOST_ROOT_UNAVAILABLE"));

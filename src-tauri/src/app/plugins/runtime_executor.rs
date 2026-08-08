@@ -154,6 +154,10 @@ impl GatewayPluginExecutor for RuntimeGatewayPluginExecutor {
         self.retain_runtime_caches_for_plugins(plugins);
     }
 
+    fn dispose_plugin(&self, plugin_id: &str) {
+        self.lifecycle.dispose_plugin(plugin_id);
+    }
+
     fn execute_request_hook(
         &self,
         plugin: &PluginDetail,
