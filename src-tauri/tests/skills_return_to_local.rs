@@ -95,7 +95,7 @@ fn return_to_local_rejects_symlink_entries_inside_ssot_dir_without_mutating_stat
     .expect_err("return to local must reject a linked SSOT entry");
     assert_eq!(error.code(), "SKILL_HASH_BLOCKED_SYMLINK");
     assert!(
-        !error.to_string().contains(&external_file.to_string_lossy()),
+        !error.to_string().contains(&*external_file.to_string_lossy()),
         "the recovery error must not disclose the external link target"
     );
 
