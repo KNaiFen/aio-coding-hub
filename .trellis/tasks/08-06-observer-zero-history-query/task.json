@@ -15,12 +15,12 @@
   "branch": "codex/aud022-observer-zero-history-query",
   "base_branch": "main",
   "worktree_path": "/private/tmp/aio-aud022-observer",
-  "commit": "dc9a4418",
+  "commit": "be295bdb",
   "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/93",
   "subtasks": [],
   "children": [],
   "parent": "08-06-final-hardening-zero-artifact",
   "relatedFiles": [],
-  "notes": "本批第 7 项；候选已在 AUD-056 合并后的 main 重放为 dc9a4418，保持 last、dominant、active、all-scope 与 recent ready-empty 语义。PR #93 的精确 head 全量 CI、bindings 核验和顺序合并仍待执行。",
+  "notes": "本批第 7 项；产品候选已在 origin/main@99de56bb 上重放为 be295bdb，保持 last、dominant、active、all-scope 与 recent ready-empty 语义。本地 cloud-only checker/self-test 与 git diff --check 通过；前序 PR #92 的全量 run 31245416972 因 generated-file drift 失败并已形成精确补丁，不阻塞本项。PR #93 的精确 head 全量 CI、bindings 核验和顺序合并仍待执行。",
   "meta": {}
 }
