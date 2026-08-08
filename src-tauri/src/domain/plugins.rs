@@ -1675,10 +1675,8 @@ mod tests {
                 "failurePolicy": "fail-open"
             }]
         });
-        raw["activationEvents"] = serde_json::json!([
-            "onStartup",
-            "onGatewayHook:gateway.request.afterBodyRead"
-        ]);
+        raw["activationEvents"] =
+            serde_json::json!(["onStartup", "onGatewayHook:gateway.request.afterBodyRead"]);
 
         assert_manifest_validation_error(raw, "PLUGIN_MISSING_CAPABILITY");
     }
