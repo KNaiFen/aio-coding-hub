@@ -451,7 +451,7 @@ mod tests {
             .await
             .expect_err("fallback pipeline should keep runtime executor after refresh");
 
-        assert_eq!(err.code(), "PLUGIN_EXTENSION_HOST_GATEWAY_FAILED");
+        assert_eq!(err.code(), "PLUGIN_EXTENSION_HOST_ROOT_UNAVAILABLE");
         assert!(err
             .to_string()
             .contains("PLUGIN_EXTENSION_HOST_ROOT_UNAVAILABLE"));

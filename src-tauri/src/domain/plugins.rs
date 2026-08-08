@@ -1659,6 +1659,8 @@ mod tests {
                 "title": "Refresh"
             }]
         });
+        raw["activationEvents"] =
+            serde_json::json!(["onStartup", "onCommand:acme.extension.refresh"]);
 
         assert_manifest_validation_error(raw, "PLUGIN_MISSING_CAPABILITY");
     }
@@ -1673,6 +1675,10 @@ mod tests {
                 "failurePolicy": "fail-open"
             }]
         });
+        raw["activationEvents"] = serde_json::json!([
+            "onStartup",
+            "onGatewayHook:gateway.request.afterBodyRead"
+        ]);
 
         assert_manifest_validation_error(raw, "PLUGIN_MISSING_CAPABILITY");
     }
@@ -1834,7 +1840,7 @@ mod tests {
             "apiVersion": "1.0.0",
             "main": "dist/extension.js",
             "runtime": { "kind": "extensionHost", "language": "typescript" },
-            "activationEvents": ["onStartup", "onProviderEditor:openrouter"],
+            "activationEvents": ["onStartup", "onCommand:acme.openrouter.refreshModels"],
             "contributes": {
                 "providers": [{
                     "providerType": "openrouter",

@@ -4778,6 +4778,9 @@ INSERT INTO plugins (
             .expect("official manifest contributes")
             .gateway_hooks
             .retain(|hook| hook.name != "gateway.request.beforeSend");
+        legacy
+            .activation_events
+            .retain(|event| event != "onGatewayHook:gateway.request.beforeSend");
         repository::update_plugin_manifest(
             &db,
             legacy,
@@ -4824,6 +4827,9 @@ INSERT INTO plugins (
             .expect("official manifest contributes")
             .gateway_hooks
             .retain(|hook| hook.name != "gateway.request.beforeSend");
+        legacy
+            .activation_events
+            .retain(|event| event != "onGatewayHook:gateway.request.beforeSend");
         repository::update_plugin_manifest(
             &db,
             legacy,
@@ -4906,6 +4912,17 @@ INSERT INTO plugins (
         version: &str,
         contributes: serde_json::Value,
     ) -> serde_json::Value {
+        let mut activation_events = vec!["onStartup".to_string()];
+        activation_events.extend(
+            contributes
+                .get("commands")
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|command| command.get("command"))
+                .filter_map(serde_json::Value::as_str)
+                .map(|command| format!("onCommand:{command}")),
+        );
         serde_json::json!({
             "id": plugin_id,
             "name": "Extension Package Plugin",
@@ -4913,7 +4930,7 @@ INSERT INTO plugins (
             "apiVersion": "1.0.0",
             "main": "dist/extension.js",
             "runtime": { "kind": "extensionHost", "language": "typescript" },
-            "activationEvents": ["onStartup"],
+            "activationEvents": activation_events,
             "contributes": contributes,
             "capabilities": ["provider.extensionValues", "commands.execute"],
             "hostCompatibility": {
@@ -6380,7 +6397,7 @@ INSERT INTO plugins (
             },
         )
         .unwrap();
-        let updated = update_plugin_from_remote_package_bytes(
+        update_plugin_from_remote_package_bytes(
             &db,
             std::fs::read(&v2_package).unwrap(),
             source_url,
@@ -6397,6 +6414,7 @@ INSERT INTO plugins (
             },
         )
         .unwrap();
+        let updated = repository::get_plugin(&db, "github.revalidate").unwrap();
         let update_audit = updated
             .audit_logs
             .iter()

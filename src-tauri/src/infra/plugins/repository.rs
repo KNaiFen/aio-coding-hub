@@ -1784,6 +1784,7 @@ INSERT INTO plugin_runtime_failures(
             ],
         )
         .unwrap();
+        drop(conn);
 
         let list = list_plugins(&db).unwrap();
         assert_eq!(list.len(), 1);
@@ -1843,6 +1844,7 @@ INSERT INTO plugin_runtime_failures(
             ],
         )
         .unwrap();
+        drop(conn);
 
         for index in 1..=2 {
             let result = record_severe_runtime_failure_and_maybe_quarantine(
@@ -1905,8 +1907,6 @@ INSERT INTO plugin_runtime_failures(
         )
         .unwrap();
         assert!(!after_quarantine.quarantined);
-
-        drop(conn);
         let reopened = crate::db::init_for_tests(&db_path).unwrap();
         assert_eq!(
             get_plugin(&reopened, "community.prompt-helper")

@@ -3762,6 +3762,10 @@ INSERT INTO codex_managed_profiles(
                 .gateway_hooks
                 .retain(|hook| hook.name != "gateway.request.afterBodyRead");
         }
+        plugin
+            .manifest
+            .activation_events
+            .retain(|event| event != "onGatewayHook:gateway.request.afterBodyRead");
         persist_plugin_detail(&db, &plugin);
 
         let (upstream_base_url, captured_rx, upstream_task) =

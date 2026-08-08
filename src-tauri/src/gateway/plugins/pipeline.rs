@@ -2847,9 +2847,15 @@ mod tests {
                 && event.event_type == "plugin.hook.failed"
                 && event
                     .details
-                    .get("error")
+                    .get("errorCode")
                     .and_then(serde_json::Value::as_str)
-                    .is_some_and(|error| error.contains("PLUGIN_OUTPUT_TOO_LARGE"))
+                    == Some("PLUGIN_OUTPUT_TOO_LARGE")
+        }));
+        assert!(first.execution_reports.iter().any(|report| {
+            report.plugin_id == "plugin.large"
+                && report.status == "budgetRejected"
+                && report.failure_kind.as_deref() == Some("output_budget")
+                && report.error_code.as_deref() == Some("PLUGIN_OUTPUT_TOO_LARGE")
         }));
         assert!(first.audit_events.iter().all(|event| {
             !(event.plugin_id == "plugin.large" && event.event_type == "plugin.hook.completed")
@@ -2913,9 +2919,15 @@ mod tests {
                 && event.event_type == "plugin.hook.failed"
                 && event
                     .details
-                    .get("error")
+                    .get("errorCode")
                     .and_then(serde_json::Value::as_str)
-                    .is_some_and(|error| error.contains("PLUGIN_CONTEXT_TRUNCATED"))
+                    == Some("PLUGIN_CONTEXT_TRUNCATED")
+        }));
+        assert!(output.execution_reports.iter().any(|report| {
+            report.plugin_id == "plugin.truncated"
+                && report.status == "budgetRejected"
+                && report.failure_kind.as_deref() == Some("context_budget")
+                && report.error_code.as_deref() == Some("PLUGIN_CONTEXT_TRUNCATED")
         }));
         assert!(
             pipeline
