@@ -1553,8 +1553,6 @@ fn provider_sync_backup_dir_has_regular_manifest(
     dir: &std::fs::File,
     budget: &mut ProviderSyncPruneBudget,
 ) -> AppResult<bool> {
-    use std::os::unix::ffi::OsStrExt as _;
-
     let entries = rustix::fs::Dir::read_from(dir)
         .map_err(|err| format!("failed to enumerate provider sync backup candidate: {err}"))?;
     for entry in entries {
