@@ -21,6 +21,7 @@
 - 发布准备 PR #28 已合并，精确发布提交为 `c1dca6b25b58c0307f54183d1319b7bb1316aca2`；PR CI `30812790883` 与精确主分支候选 CI `30814365441` 均成功，后者生成并组装 Windows/macOS 桌面及四个平台 TUI 候选。
 - 正式版本为 [`aio-coding-hub-v0.60.46`](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.46)，发布工作流 `30818164026` 已成功。标签触发运行 `30818031580` 仅因已知的注解标签 checkout `would clobber existing tag` 冲突失败，随后从 `main` 手动 dispatch 同一标签并复用精确候选；12 个 Release 资产已上传，`SHA256SUMS.txt` 中 11 个有效载荷逐项通过校验，发布后的校验和与 `latest.json` 和候选产物逐字节一致。
 - `AIO-PENDING-016`、`018`、`019`、`020` 已分别由 PR #86/#89/#90/#91 合并；`AIO-PENDING-017`、`021`、`022`、`023` 已由统一 PR #96 合并。#96 的精确 head `40423eda34ae3e448c7347199436bc7f49e27972` 在 PR CI `31272904696` 与 workflow_dispatch `31272906922` 中均通过完整 frontend、Rust format/bindings、Clippy、Rust tests、依赖审计、Provider 百万行 benchmark 和 `ci-gate`，并以 `ab76a30746ae9393f2b5c883de4e3ea145e1b964` 合并到 `main`。
+- `AIO-PENDING-024` 至 `028` 已由统一功能 PR #98 合并，merge commit 为 `66b9716690d3026b9d1b8d3d8765ead46d17e291`；精确 head `9d4123ff230d5c3ef8bedbfcd1b3d95206fd3611` 的 PR CI `31311729903` 与 workflow_dispatch 全量 CI `31309798396` 均通过。版本 PR #99 合并为 `4cc63a3190dfa0d8351294e428b968c9df82fb7b`，精确主线候选 CI `31315530596` 完成 Windows/macOS 签名桌面候选、四平台 TUI 候选、统一聚合与 `ci-gate`；正式版本 [`aio-coding-hub-v0.60.50`](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.50) 的发布工作流 `31317631120` 成功，12 个 Release 资产全部上传。
 
 ## 条目
 
@@ -517,3 +518,63 @@
 - **验收标准**：不匹配事件不启动 host；legacy 兼容；第三次 crash/runtime/timeout 跨重启隔离且保留当前 fail-open/fail-closed；policy rejection 不计数；恢复不自动启用，历史废弃事件迁移原因可见。
 - **Trellis**：[`08-06-plugin-activation-quarantine`](./.trellis/tasks/archive/2026-08/08-06-plugin-activation-quarantine/)
 - **交付证据**：统一候选 head `40423eda34ae3e448c7347199436bc7f49e27972` 的 PR [#96](https://github.com/KNaiFen/aio-coding-hub/pull/96) CI `31272904696` 与 workflow_dispatch `31272906922` 均通过并发阈值、跨重启、恢复、legacy、gateway snapshot、bindings 和 `ci-gate`；merge commit 为 `ab76a30746ae9393f2b5c883de4e3ea145e1b964`。
+
+### AIO-PENDING-024：首页用量 Y 轴大数格式与宽度
+
+- **状态**：`done`
+- **日期**：2026-08-09
+- **完成日期**：2026-08-09
+- **观察问题**：日用量超过 `1000M` 时，固定 45px 的 Y 轴会裁切第四位数字。
+- **锁定决策**：`>=1000M` 使用 `B`，并根据实际最长刻度动态计算轴宽；不改用量聚合语义。
+- **拟议方向**：扩展共享 token 格式器，由显式 tick 列表计算预留宽度。
+- **验收标准**：`1.0B` 及更长标签不裁切；百万、千和普通数值保持现有形式。
+- **Trellis**：[`08-09-home-usage-axis-format`](./.trellis/tasks/archive/2026-08/08-09-home-usage-axis-format/)
+- **交付证据**：统一功能 PR [#98](https://github.com/KNaiFen/aio-coding-hub/pull/98) 在精确 head `9d4123ff230d5c3ef8bedbfcd1b3d95206fd3611` 通过 CI `31311729903` 与 workflow_dispatch `31309798396`，并以 `66b9716690d3026b9d1b8d3d8765ead46d17e291` 合入 `main`；共享格式器和动态图轴宽回归随正式版本 `aio-coding-hub-v0.60.50` 发布。
+
+### AIO-PENDING-025：供应商余额左对齐
+
+- **状态**：`done`
+- **日期**：2026-08-09
+- **完成日期**：2026-08-09
+- **观察问题**：配置余额查询后，前置刷新图标导致余额文字比上方信息右移。
+- **锁定决策**：文字从父容器起点开始，刷新图标改为尾随图标；保留整行刷新和无障碍名称。
+- **拟议方向**：只调整 `ProviderAccountUsageInline` 按钮内容顺序和布局约束。
+- **验收标准**：成功、刷新、错误和长文本状态均与上方内容左对齐。
+- **Trellis**：[`08-09-provider-balance-left-align`](./.trellis/tasks/archive/2026-08/08-09-provider-balance-left-align/)
+- **交付证据**：统一功能 PR [#98](https://github.com/KNaiFen/aio-coding-hub/pull/98) 的布局实现和前端回归在 CI `31311729903` 与 workflow_dispatch `31309798396` 中通过，并以 `66b9716690d3026b9d1b8d3d8765ead46d17e291` 合入 `main`；结果随 `aio-coding-hub-v0.60.50` 发布。
+
+### AIO-PENDING-026：供应商状态条三色与当前格规则
+
+- **状态**：`done`
+- **日期**：2026-08-09
+- **完成日期**：2026-08-09
+- **观察问题**：历史格只有红绿两色且阈值为 75%，当前格无法表达“最后观测结果 + 格内成功率”。
+- **锁定决策**：过去格 `<50%` 红、`50%..90%` 黄、`>=90%` 绿；当前格最后观测失败为红，最后成功且格内 `<90%` 为黄，`>=90%` 为绿。
+- **拟议方向**：新增 `degraded` 状态，由后端按精确时间和最后观测判定，前端只渲染语义色。
+- **验收标准**：50% 为黄、90% 为绿；只有包含当前时刻的格使用特殊规则；同毫秒冲突时失败优先。
+- **Trellis**：[`08-09-provider-availability-thresholds`](./.trellis/tasks/archive/2026-08/08-09-provider-availability-thresholds/)
+- **交付证据**：统一功能 PR [#98](https://github.com/KNaiFen/aio-coding-hub/pull/98) 覆盖领域阈值、当前格末次观测、同毫秒失败优先与前端三色映射；精确 head 全量 Actions 通过后以 `66b9716690d3026b9d1b8d3d8765ead46d17e291` 合入 `main`，并随 `aio-coding-hub-v0.60.50` 发布。
+
+### AIO-PENDING-027：请求日志与全局 TPS 对齐 sub2api
+
+- **状态**：`done`
+- **日期**：2026-08-09
+- **完成日期**：2026-08-09
+- **观察问题**：客户端断开后成功 drain 的新请求仍会丢失可信最终 attempt 计时；聚合统计使用 token/总时长加权比率。
+- **锁定决策**：单条 TPS 为 `output_tokens * 1000 / final_success_attempt_duration_ms`，包含 TTFB；全局为合格单请求 TPS 的算术平均。
+- **拟议方向**：分离输出流和最终 attempt 计时污染，聚合层保存 TPS sum/count，日 rollup 重建。
+- **验收标准**：新的可信 drain 完成请求显示速度；旧 `timing_version=0`、失败或缺 usage 继续显示 `—`；所有统计表面返回相同算术平均。
+- **Trellis**：[`08-09-request-log-sub2api-tps`](./.trellis/tasks/archive/2026-08/08-09-request-log-sub2api-tps/)
+- **交付证据**：统一功能 PR [#98](https://github.com/KNaiFen/aio-coding-hub/pull/98) 对齐 sub2api 的单请求速率与算术平均，补齐可信 drain 和旧数据排除回归；精确 head 的 PR CI `31311729903` 与 workflow_dispatch `31309798396` 全绿，merge commit 为 `66b9716690d3026b9d1b8d3d8765ead46d17e291`，并随 `aio-coding-hub-v0.60.50` 发布。
+
+### AIO-PENDING-028：供应商定时可用性测试
+
+- **状态**：`done`
+- **日期**：2026-08-09
+- **完成日期**：2026-08-09
+- **观察问题**：供应商只能手动测试，且现有测试结果不进入可用性状态条。
+- **锁定决策**：每供应商在编辑器配置开关和 `1..=1440` 分钟间隔，默认关闭/10 分钟；页面关闭后后台仍运行。
+- **拟议方向**：复用现有完整 probe，以本地日 00:00 为周期锚点，边界后 5 秒加 0–3 秒稳定错峰，全局并发上限 4。
+- **验收标准**：关闭时零额外请求；启动、唤醒、刚开启不补当前/历史周期；真实请求、桌面、Observer/TUI 和定时测试结果等权进入状态条；Base URL Ping 除外。
+- **Trellis**：[`08-09-provider-scheduled-availability-probe`](./.trellis/tasks/archive/2026-08/08-09-provider-scheduled-availability-probe/)
+- **交付证据**：统一功能 PR [#98](https://github.com/KNaiFen/aio-coding-hub/pull/98) 交付 schema 52、Provider 配置贯通、有界全量调度、Provider 级单飞、过期目标丢弃、手动/定时观测统一投影与 Observer/TUI 快照；精确 head 全量 Actions 通过并以 `66b9716690d3026b9d1b8d3d8765ead46d17e291` 合并，正式版本为 `aio-coding-hub-v0.60.50`。

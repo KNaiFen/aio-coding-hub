@@ -24,6 +24,13 @@
 
 - [x] 显式暂存本批路径，对照 allowlist 排除既有未跟踪文件。
 - [x] 创建 `feat: 统一用量速率与供应商可用性监测` 功能提交并推送；后续云端反馈使用独立有界修复提交。
-- [ ] 对精确分支触发 `ci.yml workflow_dispatch`，核对 `head_sha` 并等待 `ci-gate`。
-- [ ] CI 漂移只应用绑定当前 SHA 的有界补丁；功能失败修复后重跑完整 CI。
-- [ ] CI 绿色后创建一个指向 `main` 的 PR，不自动合并。
+- [x] 对精确分支触发 `ci.yml workflow_dispatch`，核对 `head_sha` 并等待 `ci-gate`。
+- [x] CI 漂移只应用绑定当前 SHA 的有界补丁；功能失败修复后重跑完整 CI。
+- [x] CI 绿色后创建一个指向 `main` 的 PR；经用户明确授权后合并。
+
+## Delivery Evidence
+
+- 功能 PR #98：head `9d4123ff230d5c3ef8bedbfcd1b3d95206fd3611`，PR CI `31311729903`、workflow_dispatch `31309798396`，merge commit `66b9716690d3026b9d1b8d3d8765ead46d17e291`。
+- 版本 PR #99：版本提交 `589d4fa4844167956714c37b958162e9aab58e9e`，PR CI `31314550647`，merge commit `4cc63a3190dfa0d8351294e428b968c9df82fb7b`。
+- 主线候选 CI `31315530596`：Windows/macOS 签名桌面候选、四平台 TUI、统一候选聚合和 `ci-gate` 全部成功。
+- 正式版本 `aio-coding-hub-v0.60.50`：tag peeled 到 `4cc63a3190dfa0d8351294e428b968c9df82fb7b`，release workflow `31317631120` 成功，12 个资产全部上传。

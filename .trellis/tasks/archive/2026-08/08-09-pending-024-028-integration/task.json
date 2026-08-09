@@ -3,7 +3,7 @@
   "name": "pending-024-028-integration",
   "title": "首页统计与供应商健康统一改造",
   "description": "统一交付首页图表、供应商布局与可用性、sub2api TPS 口径及定时主动探测，全部代码完成后再统一验证。",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": null,
   "scope": "@aio-coding-hub",
   "package": "aio-coding-hub",
@@ -11,12 +11,12 @@
   "creator": "KNaiFen",
   "assignee": "KNaiFen",
   "createdAt": "2026-08-09",
-  "completedAt": null,
+  "completedAt": "2026-08-09",
   "branch": "codex/feature-merge",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": null,
-  "pr_url": null,
+  "commit": "66b9716690d3026b9d1b8d3d8765ead46d17e291",
+  "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/98",
   "subtasks": [],
   "children": [
     "08-09-home-usage-axis-format",
@@ -27,6 +27,6 @@
   ],
   "parent": null,
   "relatedFiles": [],
-  "notes": "",
+  "notes": "PR #98 与精确 head CI 已通过并合入 main；版本 PR #99、主线候选 CI 31315530596 与 v0.60.50 发布工作流 31317631120 均成功，12 个 Release 资产已上传。",
   "meta": {}
 }
