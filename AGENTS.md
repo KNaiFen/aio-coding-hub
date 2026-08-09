@@ -13,6 +13,7 @@
 
 ## Multi-worktree Delivery
 
+- The canonical independent-session workflow and Markdown templates live in `docs/operations/multi-worktree-delivery.md`. Use `execution.md` as the main-authored entry point, `delivery.md` as the execution-session handoff, and `findings.md` only when main requests changes.
 - The coordinator checkout is `main`; implementation happens in a sibling task worktree and never directly in the coordinator checkout.
 - An independent execution session may commit and push its assigned task branch, create or update its PR, and fix failures until the latest PR commit has passed the required CI and relevant compile jobs. It must not push `main`, merge a PR, enable auto-merge, or remove a worktree.
 - Implementation is complete only when the latest PR commit is green in the required cloud checks and the task worktree contains a Markdown handoff with the PR link, changed files and code locations, deviations from the plan, verification results, and open issues.
