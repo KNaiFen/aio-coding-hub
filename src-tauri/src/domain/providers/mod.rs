@@ -19,6 +19,7 @@ pub(crate) use types::{
     ProviderObserverRow, ProviderRouteRow, ProviderTransportContext,
     CODEX_TO_ANTHROPIC_MESSAGES_BRIDGE_TYPE, CODEX_TO_OPENAI_CHAT_BRIDGE_TYPE,
     CODEX_TO_OPENAI_RESPONSES_BRIDGE_TYPE, CX2CC_BRIDGE_TYPE,
+    DEFAULT_AVAILABILITY_PROBE_INTERVAL_MINUTES,
 };
 
 pub use queries::{
