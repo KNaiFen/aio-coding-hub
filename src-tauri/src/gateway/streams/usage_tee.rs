@@ -523,8 +523,8 @@ where
             Poll::Ready(None) => {
                 // The relay owns finalization while draining after a downstream
                 // disconnect so it can persist complete client-abort evidence.
-                if !defer_finalization
-                    && !(self.defer_terminal_error && self.tracker.terminal_error_seen())
+                if !(defer_finalization
+                    || self.defer_terminal_error && self.tracker.terminal_error_seen())
                 {
                     self.finalize(self.ctx.error_code);
                 }
