@@ -1,4 +1,4 @@
 {"file":".trellis/spec/aio-coding-hub/backend/index.md","reason":"Gateway Rust 实现、安全和错误处理规范"}
 {"file":".trellis/spec/aio-coding-hub/cross-layer/gateway-failover-route-contract.md","reason":"Gateway 路由与 Provider 选择合同"}
 {"file":".trellis/spec/aio-coding-hub/cross-layer/settings-ownership-rollback-contract.md","reason":"Token settings/runtime 原子收敛"}
-{"file":"CODEBASE_HEALTH_AUDIT.md","reason":"AUD-016 风险与用户锁定决策"}
+{"file":"docs/history/audits/codebase-health-audit-2026-08-09.md","reason":"AUD-016 风险与用户锁定决策"}

@@ -13,14 +13,14 @@
   "createdAt": "2026-08-03",
   "completedAt": null,
   "branch": "codex/upstream-claude-oauth",
-  "base_branch": "codex/feature-merge",
+  "base_branch": "main",
   "worktree_path": null,
   "commit": null,
   "pr_url": null,
   "subtasks": [],
   "children": [],
-  "parent": "08-03-upstream-selective-integration",
+  "parent": null,
   "relatedFiles": [],
-  "notes": "",
+  "notes": "独立候选：原父任务的其他交付已进入 main 并归档。本任务仍需使用真实隔离账号完成登录、exchange、refresh 与 401 refresh 验证，未验证前不得合并。",
   "meta": {}
 }

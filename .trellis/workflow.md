@@ -683,28 +683,27 @@ your per-turn prompt text
 
 Constraints:
 - STATUS charset: `[A-Za-z0-9_-]+` (underscores and hyphens allowed, e.g. `in-review`, `blocked-by-team`)
-- A lifecycle hook must write `task.json.status` to your custom value, otherwise the tag is never read
-- Lifecycle hooks live in `task.json.hooks.after_*` and bind to one of `after_create / after_start / after_finish / after_archive`
+- A lifecycle hook or task command must write `task.json.status` to your custom value, otherwise the tag is never read.
+- Lifecycle hooks are configured under `hooks` in `.trellis/config.yaml` and bind to one of `after_create / after_start / after_finish / after_archive`.
 
 ### Adding a lifecycle hook
 
-Add a `hooks` field to your `task.json`:
+Add hooks to `.trellis/config.yaml`:
 
-```json
-{
-  "hooks": {
-    "after_finish": [
-      "your-script-or-command-here"
-    ]
-  }
-}
+```yaml
+hooks:
+  after_finish:
+    - your-script-or-command-here
 ```
 
 Supported events: `after_create / after_start / after_finish / after_archive`. Note that `after_finish` ≠ a status change (it only clears the active-task pointer); use `after_archive` for "task is done" notifications.
 
 ### Full contract
 
-For the workflow state machine's runtime contract, the locations of all status writers, pseudo-statuses (`no_task` / `stale_<source_type>`), the hook reachability matrix, and other deep details, see:
+The checked-in lifecycle implementation and archive contract are:
 
-- `.trellis/spec/cli/backend/workflow-state-contract.md` — runtime contract + writer table + test invariants
-- `.trellis/scripts/inject-workflow-state.py` — actual parser (reads workflow.md only, no embedded text)
+- `.trellis/scripts/task.py` — task command entry point and start/finish status writers.
+- `.trellis/scripts/common/task_store.py` — create/archive state changes and archive hooks.
+- `.trellis/scripts/common/task_utils.py` — lifecycle hook execution.
+- `.trellis/scripts/common/config.py` — `.trellis/config.yaml` hook loading.
+- `.trellis/spec/aio-coding-hub/cross-layer/trellis-task-context-archive-contract.md` — archive path rewrite and full-manifest validation contract.

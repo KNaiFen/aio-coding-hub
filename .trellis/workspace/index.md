@@ -27,7 +27,8 @@ workspace/
 
 | Developer | Last Active | Sessions | Active File |
 |-----------|-------------|----------|-------------|
-| (none yet) | - | - | - |
+| KNaiFen | 2026-08-03 | 1 | [`KNaiFen/journal-1.md`](./KNaiFen/journal-1.md) |
+| FingerCaster | 2026-07-20 | 17 | [`FingerCaster/journal-1.md`](./FingerCaster/journal-1.md) |
 
 ---
 
@@ -122,4 +123,4 @@ Use this template when recording sessions:
 
 ---
 
-**Language**: All documentation must be written in **English**.
+**Language**: Preserve the language appropriate to each document and its audience. Session records may be Chinese or English; they remain historical evidence rather than current product specifications.

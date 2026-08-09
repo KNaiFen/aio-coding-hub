@@ -1,4 +1,0 @@
-{"file": ".trellis/spec/aio-coding-hub/cross-layer/request-log-usage-ledger-pagination-contract.md", "reason": "验证 retention 前后聚合一致"}
-{"file": ".trellis/spec/aio-coding-hub/cross-layer/index.md", "reason": "验证生成绑定和跨层兼容"}
-{"file": ".trellis/tasks/08-03-provider-metric-trends-ledger/research/daily-rollup-contract.md", "reason": "验证混合源等价、回退和不删除事实数据"}
-{"file": ".trellis/tasks/08-03-provider-metric-trends-ledger/research/main-drift-differential-review.md", "reason": "验证 PR 前主线漂移、业务语义冲突和修补结论"}
