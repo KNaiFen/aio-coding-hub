@@ -1760,6 +1760,8 @@ mod tests {
             claude_models: None,
             model_mapping: None,
             availability_test_model: None,
+            availability_probe_enabled: false,
+            availability_probe_interval_minutes: 10,
             limit_5h_usd: None,
             limit_daily_usd: None,
             daily_reset_mode: Some(DailyResetMode::Fixed),
@@ -2632,6 +2634,8 @@ mod tests {
             exact: BTreeMap::from([("gpt-source".to_string(), "gpt-synthetic-target".to_string())]),
         });
         input.availability_test_model = Some("gpt-synthetic-test".to_string());
+        input.availability_probe_enabled = true;
+        input.availability_probe_interval_minutes = 37;
         input.limit_5h_usd = Some(5.5);
         input.limit_daily_usd = Some(12.5);
         input.daily_reset_time = Some("03:04:05".to_string());
@@ -2691,6 +2695,8 @@ mod tests {
         assert!(!serialized.contains("SYNTHETIC_ACCOUNT_SECRET"));
         assert!(!serialized.contains("SYNTHETIC_EXTENSION_SECRET"));
         assert!(!serialized.contains("newApiUserId"));
+        assert!(!serialized.contains("availability_probe_enabled"));
+        assert!(!serialized.contains("availability_probe_interval_minutes"));
         for excluded in [
             "created_at",
             "updated_at",
@@ -2739,6 +2745,8 @@ mod tests {
             imported.availability_test_model.as_deref(),
             Some("gpt-synthetic-test")
         );
+        assert!(!imported.availability_probe_enabled);
+        assert_eq!(imported.availability_probe_interval_minutes, 10);
         assert_eq!(imported.limit_5h_usd, Some(5.5));
         assert_eq!(imported.limit_daily_usd, Some(12.5));
         assert_eq!(imported.daily_reset_time, "03:04:05");

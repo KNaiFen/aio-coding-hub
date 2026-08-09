@@ -3,6 +3,7 @@
 use crate::app_state::{ensure_db_ready, DbInitState};
 use crate::domain::provider_availability;
 use crate::{blocking, settings};
+use tauri::Manager;
 
 #[tauri::command]
 #[specta::specta]
@@ -12,7 +13,13 @@ pub(crate) async fn provider_test_availability(
     provider_id: i64,
 ) -> Result<provider_availability::ProviderAvailabilityResult, String> {
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
-    provider_availability::test_provider_availability(&app, db, provider_id)
+    let Some(runtime) = app.try_state::<
+        crate::app::provider_availability_probe_runtime::ProviderAvailabilityProbeRuntimeState,
+    >() else {
+        return Err("SYSTEM_ERROR: provider availability runtime is unavailable".to_string());
+    };
+    runtime
+        .probe_manual(app.clone(), db, provider_id)
         .await
         .map_err(Into::into)
 }

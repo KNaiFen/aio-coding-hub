@@ -65,6 +65,8 @@ export type EffectDeps = {
   setClaudeModels: (v: ClaudeModels) => void;
   setModelMapping: (v: ModelMapping) => void;
   setTestModel: (v: string) => void;
+  setAvailabilityProbeEnabled: (v: boolean) => void;
+  setAvailabilityProbeIntervalMinutes: (v: string) => void;
   setTags: React.Dispatch<React.SetStateAction<string[]>>;
   setTagInput: (v: string) => void;
   setStreamIdleTimeoutSeconds: (v: string) => void;
@@ -119,6 +121,8 @@ export function useProviderEditorEffects(d: EffectDeps) {
     setClaudeModels,
     setModelMapping,
     setTestModel,
+    setAvailabilityProbeEnabled,
+    setAvailabilityProbeIntervalMinutes,
     setTags,
     setTagInput,
     setStreamIdleTimeoutSeconds,
@@ -173,6 +177,10 @@ export function useProviderEditorEffects(d: EffectDeps) {
       );
       setModelMapping(createInitialValues?.model_mapping ?? { default_model: null, exact: {} });
       setTestModel(createInitialValues?.availability_test_model ?? "");
+      setAvailabilityProbeEnabled(createInitialValues?.availability_probe_enabled ?? false);
+      setAvailabilityProbeIntervalMinutes(
+        String(createInitialValues?.availability_probe_interval_minutes ?? 10)
+      );
       setTags(createInitialValues?.tags ?? []);
       setTagInput("");
       setStreamIdleTimeoutSeconds(valueOrEmpty(createInitialValues?.stream_idle_timeout_seconds));
@@ -227,6 +235,8 @@ export function useProviderEditorEffects(d: EffectDeps) {
     );
     setModelMapping(snapshot.model_mapping ?? { default_model: null, exact: {} });
     setTestModel(snapshot.availability_test_model ?? "");
+    setAvailabilityProbeEnabled(snapshot.availability_probe_enabled);
+    setAvailabilityProbeIntervalMinutes(String(snapshot.availability_probe_interval_minutes));
     setTags(snapshot.tags ?? []);
     setTagInput("");
     setStreamIdleTimeoutSeconds(valueOrEmpty(snapshot.stream_idle_timeout_seconds));
@@ -281,6 +291,8 @@ export function useProviderEditorEffects(d: EffectDeps) {
     setClaudeModels,
     setModelMapping,
     setTestModel,
+    setAvailabilityProbeEnabled,
+    setAvailabilityProbeIntervalMinutes,
     setCx2ccSourceValue,
     setOauthLoading,
     setOauthStatus,

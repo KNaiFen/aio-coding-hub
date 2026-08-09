@@ -108,6 +108,33 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
           <ApiKeySection form={f} />
         )}
 
+        <FormField label="定时可用性测试" group>
+          <div className="flex flex-wrap items-center gap-3">
+            <Switch
+              checked={f.availabilityProbeEnabled}
+              onCheckedChange={f.setAvailabilityProbeEnabled}
+              disabled={f.saving}
+              aria-label="启用定时可用性测试"
+            />
+            <div className="flex min-w-0 items-center gap-2">
+              <Input
+                aria-label="定时可用性测试间隔"
+                type="number"
+                min="1"
+                max="1440"
+                step="1"
+                value={f.availabilityProbeIntervalMinutes}
+                onChange={(event) =>
+                  f.setAvailabilityProbeIntervalMinutes(event.currentTarget.value)
+                }
+                disabled={f.saving || !f.availabilityProbeEnabled}
+                className="w-28"
+              />
+              <span className="text-sm text-muted-foreground">分钟</span>
+            </div>
+          </div>
+        </FormField>
+
         <FormField
           label="流式空闲超时覆盖（秒）"
           hint="留空或 0 表示沿用全局设置；仅对当前 Provider 的流式请求生效。"

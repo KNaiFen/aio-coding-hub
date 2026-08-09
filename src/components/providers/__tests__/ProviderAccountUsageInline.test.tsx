@@ -46,6 +46,8 @@ function makeProvider(id: number): ProviderSummary {
     source_provider_id: null,
     bridge_type: null,
     availability_test_model: null,
+    availability_probe_enabled: false,
+    availability_probe_interval_minutes: 10,
     api_key_configured: true,
     extension_values: [
       {
@@ -145,6 +147,8 @@ describe("ProviderAccountUsageInline", () => {
       name: "刷新账户用量，账户: 可用 · 余额 2.00 USD，已用 2.00/3.00 USD",
     });
     const initialMarkup = [firstButton.innerHTML, secondButton.innerHTML];
+    expect(firstButton.firstElementChild?.tagName).toBe("SPAN");
+    expect(firstButton.lastElementChild?.tagName).toBe("svg");
 
     for (let cycle = 0; cycle < 3; cycle += 1) {
       await act(async () => {

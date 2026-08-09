@@ -24,8 +24,9 @@ remote administration API.
 - The sole active operation is authenticated `POST`
   `/api/observer/v1/providers/<provider_id>/test-availability`. It is bounded by
   a separate concurrency limit and timeout, returns a bounded fixed-shape result
-  with credential-stripped URL and preview fields, and never writes availability
-  history, routing, limits, or circuit state.
+  with credential-stripped URL and preview fields, and records the same bounded
+  availability observation as the desktop and scheduled full-probe entry
+  points. It never changes routing, limits, or circuit state.
 - Responses are `no-store` and `nosniff`. Invalid input, authentication, busy,
   and internal failures use fixed structured messages without body, URL,
   credentials, or decoder details.
@@ -97,8 +98,18 @@ remote administration API.
   provider eligible or preferred. Provider projection failures make only that
   optional section unavailable and never enter routing or health accounting.
 - Each provider may include a 12-bucket, 3/6/12-hour availability timeline
-  derived only from terminal real-upstream attempts. Manual tests, local
-  failures, skipped attempts, and aborted requests never contribute facts.
+  derived from terminal real-upstream attempts and completed full Provider
+  probes. Desktop manual, Observer/TUI manual, and scheduled probes write equal
+  success/failure facts after a bounded probe returns `Ok`; a bounded
+  `ok=false` result is a failure fact. Base URL Ping, internal probe errors,
+  local preflight failures without a probe result, skipped attempts, and
+  aborted requests never contribute facts.
+- Provider configuration and credential writers acquire a per-Provider probe
+  mutation gate, advance the generation, and hold the gate through their
+  durable write. New manual, Observer/TUI, and scheduled probes wait for that
+  boundary before reading configuration. An older flight either records before
+  the mutation begins or becomes stale; no probe may start in the invalidation
+  to commit window and later publish an observation for the wrong generation.
 
 ## TUI behavior
 

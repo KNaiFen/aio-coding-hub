@@ -20,6 +20,8 @@ function makeContext(
     claudeModels: {},
     modelMapping: { default_model: null, exact: {} },
     testModel: "",
+    availabilityProbeEnabled: false,
+    availabilityProbeIntervalMinutes: "10",
     streamIdleTimeoutSeconds: "",
     upstreamRetryPolicyOverrideEnabled: false,
     upstreamRetryPolicyDraft: DEFAULT_UPSTREAM_RETRY_POLICY,
@@ -117,6 +119,58 @@ describe("pages/providers/providerEditorSubmitModel", () => {
     if (!result.ok) return;
 
     expect(result.value.payload.availabilityTestModel).toBe("gpt-5.4");
+  });
+
+  it.each([
+    ["1", 1],
+    ["1440", 1440],
+  ])("passes availability probe settings at the %s minute boundary", (raw, expected) => {
+    const result = buildProviderEditorUpsertInput(
+      makeContext({
+        availabilityProbeEnabled: true,
+        availabilityProbeIntervalMinutes: raw,
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.payload.availabilityProbeEnabled).toBe(true);
+    expect(result.value.payload.availabilityProbeIntervalMinutes).toBe(expected);
+  });
+
+  it.each(["", "0", "1.5", "1441"]) (
+    "rejects an invalid availability probe interval of %s",
+    (availabilityProbeIntervalMinutes) => {
+      const result = buildProviderEditorUpsertInput(
+        makeContext({
+          availabilityProbeEnabled: true,
+          availabilityProbeIntervalMinutes,
+        })
+      );
+
+      expect(result).toEqual({
+        ok: false,
+        error: {
+          kind: "message",
+          message: "定时可用性测试间隔必须为 1-1440 分钟",
+        },
+      });
+    }
+  );
+
+  it("uses the default interval when scheduled probing is disabled", () => {
+    const result = buildProviderEditorUpsertInput(
+      makeContext({
+        availabilityProbeEnabled: false,
+        availabilityProbeIntervalMinutes: "invalid-hidden-value",
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.payload.availabilityProbeEnabled).toBe(false);
+    expect(result.value.payload.availabilityProbeIntervalMinutes).toBe(10);
   });
 
   it("normalizes a provider model-routing override and clears it when inheritance is selected", () => {

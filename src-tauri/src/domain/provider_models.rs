@@ -1290,6 +1290,9 @@ pub async fn refresh(
     db: &db::Db,
     provider_id: i64,
     expected_provider_uuid: &str,
+    probe_runtime: Option<
+        crate::app::provider_availability_probe_runtime::ProviderAvailabilityProbeRuntimeState,
+    >,
 ) -> AppResult<ProviderModelCatalog> {
     let expected_provider_uuid = validate_expected_provider_uuid(expected_provider_uuid)?;
     let lock = refresh_lock(expected_provider_uuid);
@@ -1315,11 +1318,12 @@ pub async fn refresh(
     };
     let effective_credential = match tokio::time::timeout_at(
         deadline,
-        crate::providers::resolve_effective_transport_credential(
+        crate::providers::resolve_effective_transport_credential_with_probe_runtime(
             db,
             &discovery_client,
             "codex",
             &initial_context.transport,
+            probe_runtime,
         ),
     )
     .await
@@ -1773,7 +1777,7 @@ INSERT INTO providers(
         )
         .expect("seed expired OAuth credential");
 
-        let catalog = refresh(&test_app.db, provider_id, &provider_uuid)
+        let catalog = refresh(&test_app.db, provider_id, &provider_uuid, None)
             .await
             .expect("redirect rejection is a catalog refresh failure");
         redirect_server.await.expect("token endpoint task");
@@ -2560,10 +2564,9 @@ INSERT INTO providers(
 
         let refresh_db = test_app.db.clone();
         let refresh_expected_uuid = initial_uuid.clone();
-        let refresh_task =
-            tokio::spawn(
-                async move { refresh(&refresh_db, provider_id, &refresh_expected_uuid).await },
-            );
+        let refresh_task = tokio::spawn(async move {
+            refresh(&refresh_db, provider_id, &refresh_expected_uuid, None).await
+        });
         tokio::time::timeout(Duration::from_secs(2), async {
             while Arc::strong_count(&refresh_mutex) <= initial_strong_count {
                 tokio::task::yield_now().await;

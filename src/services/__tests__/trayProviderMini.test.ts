@@ -47,7 +47,19 @@ describe("trayProviderMini service", () => {
   });
 
   it("accepts the bounded snapshot contract and preserves eighteen cells", () => {
-    expect(normalizeTrayProviderMiniSnapshot(snapshot)).toEqual(snapshot);
+    const withDegraded = {
+      ...snapshot,
+      providers: [
+        {
+          ...snapshot.providers[0],
+          availability: [
+            "degraded",
+            ...snapshot.providers[0]!.availability.slice(1),
+          ],
+        },
+      ],
+    } satisfies TrayProviderMiniSnapshot;
+    expect(normalizeTrayProviderMiniSnapshot(withDegraded)).toEqual(withDegraded);
   });
 
   it("fails closed on malformed providers and repairs malformed bucket counts", () => {

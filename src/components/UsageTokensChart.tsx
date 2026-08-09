@@ -12,7 +12,12 @@ import type { UsageHourlyRow } from "../services/usage/usage";
 import { useTheme } from "../hooks/useTheme";
 import { cn } from "../utils/cn";
 import { buildRecentDayKeys } from "../utils/dateKeys";
-import { formatTokensMillions, computeNiceYAxis, toDateLabel } from "../utils/chartHelpers";
+import {
+  computeNiceYAxis,
+  computeYAxisWidth,
+  formatTokensMillions,
+  toDateLabel,
+} from "../utils/chartHelpers";
 import {
   getAxisStyle,
   getGridLineStyle,
@@ -106,6 +111,8 @@ export function UsageTokensChart({
     return ticks;
   }, [yAxisConfig]);
 
+  const yAxisWidth = useMemo(() => computeYAxisWidth(tickValues), [tickValues]);
+
   const xAxisTicks = useMemo(() => {
     return buildUsageTokensXAxisTicks(chartData.map((d) => d.label));
   }, [chartData]);
@@ -141,7 +148,7 @@ export function UsageTokensChart({
               tickLine={false}
               tick={{ ...axisStyle }}
               tickFormatter={formatTokensMillions}
-              width={45}
+              width={yAxisWidth}
             />
             <Tooltip
               content={<CustomTooltip />}

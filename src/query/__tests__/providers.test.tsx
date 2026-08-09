@@ -136,6 +136,8 @@ function makeProvider(
     source_provider_id: partial.source_provider_id ?? null,
     bridge_type: partial.bridge_type ?? null,
     availability_test_model: partial.availability_test_model ?? null,
+    availability_probe_enabled: partial.availability_probe_enabled ?? false,
+    availability_probe_interval_minutes: partial.availability_probe_interval_minutes ?? 10,
     stream_idle_timeout_seconds: partial.stream_idle_timeout_seconds ?? null,
     upstream_retry_policy_override: partial.upstream_retry_policy_override ?? null,
     model_routing_policy_override: partial.model_routing_policy_override ?? null,

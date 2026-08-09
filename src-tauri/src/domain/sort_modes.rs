@@ -699,6 +699,8 @@ mod tests {
                 priority: Some(100),
                 claude_models: None,
                 availability_test_model: None,
+                availability_probe_enabled: false,
+                availability_probe_interval_minutes: 10,
                 limit_5h_usd: None,
                 limit_daily_usd: None,
                 daily_reset_mode: Some(crate::providers::DailyResetMode::Fixed),

@@ -39,6 +39,7 @@ pub struct ProviderAvailabilityResult {
 #[serde(rename_all = "snake_case")]
 pub enum ProviderAvailabilityState {
     Healthy,
+    Degraded,
     Unhealthy,
     NoData,
 }
@@ -867,14 +868,53 @@ ON CONFLICT(trace_id, provider_id) DO UPDATE SET
     }
 }
 
+/// Persists one completed manual or scheduled probe as a normal availability
+/// fact. The runtime owns generation checks; this function owns the durable,
+/// provider-backed projection boundary and deliberately has no error/detail
+/// parameters to keep probe diagnostics out of the status timeline.
+pub(crate) fn record_probe_observation(
+    db: &db::Db,
+    trace_id: &str,
+    provider_id: i64,
+    observed_at_ms: i64,
+    success: bool,
+) -> AppResult<()> {
+    if provider_id <= 0 || trace_id.trim().is_empty() {
+        return Err("SEC_INVALID_INPUT: invalid provider availability observation".into());
+    }
+    let conn = db.open_connection()?;
+    conn.execute(
+        r#"
+INSERT INTO provider_availability_observations(
+  trace_id, cli_key, provider_id, observed_at_ms, success
+)
+SELECT ?1, p.cli_key, p.id, ?3, ?4
+FROM providers p
+WHERE p.id = ?2
+ON CONFLICT(trace_id, provider_id) DO NOTHING
+"#,
+        params![
+            trace_id,
+            provider_id,
+            observed_at_ms.max(0),
+            i64::from(success),
+        ],
+    )
+    .map_err(|error| db_err!("failed to write provider probe availability fact: {error}"))?;
+    Ok(())
+}
+
 fn bucket_state(success_count: u32, failure_count: u32) -> ProviderAvailabilityState {
-    let total = success_count.saturating_add(failure_count);
+    let success_count = u64::from(success_count);
+    let total = success_count.saturating_add(u64::from(failure_count));
     if total == 0 {
         ProviderAvailabilityState::NoData
-    } else if success_count.saturating_mul(4) >= total.saturating_mul(3) {
-        ProviderAvailabilityState::Healthy
-    } else {
+    } else if success_count.saturating_mul(100) < total.saturating_mul(50) {
         ProviderAvailabilityState::Unhealthy
+    } else if success_count.saturating_mul(100) < total.saturating_mul(90) {
+        ProviderAvailabilityState::Degraded
+    } else {
+        ProviderAvailabilityState::Healthy
     }
 }
 
@@ -961,7 +1001,7 @@ FROM provider_availability_observations
 WHERE observed_at_ms >= ?
   AND observed_at_ms < ?
   AND provider_id IN ({placeholders})
-ORDER BY observed_at_ms ASC, rowid ASC
+ORDER BY observed_at_ms ASC, success DESC, rowid ASC
 "#
     );
     let mut values = Vec::<rusqlite::types::Value>::with_capacity(provider_ids.len() + 2);
@@ -1015,7 +1055,10 @@ ORDER BY observed_at_ms ASC, rowid ASC
         }
         if let Some(current) = timeline.buckets.last_mut() {
             current.state = match current_last_success[position] {
-                Some(true) => ProviderAvailabilityState::Healthy,
+                Some(true) if current.state == ProviderAvailabilityState::Healthy => {
+                    ProviderAvailabilityState::Healthy
+                }
+                Some(true) => ProviderAvailabilityState::Degraded,
                 Some(false) => ProviderAvailabilityState::Unhealthy,
                 None => ProviderAvailabilityState::NoData,
             };
@@ -1150,10 +1193,82 @@ mod tests {
     }
 
     #[test]
-    fn availability_state_uses_seventy_five_percent_boundary() {
+    fn probe_observations_are_idempotent_provider_backed_and_secret_free() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let db = crate::db::init_for_tests(&temp.path().join("probe-observations.sqlite3"))
+            .expect("init db");
+        let provider =
+            upsert(&db, default_provider_params("probe-provider")).expect("insert provider");
+
+        record_probe_observation(&db, "availability-probe:success", provider.id, 1_000, true)
+            .expect("record successful probe");
+        record_probe_observation(&db, "availability-probe:failure", provider.id, 2_000, false)
+            .expect("record failed probe");
+        record_probe_observation(&db, "availability-probe:success", provider.id, 9_999, false)
+            .expect("duplicate probe remains idempotent");
+
+        let conn = db.open_connection().expect("open db");
+        let success = conn
+            .query_row(
+                "SELECT cli_key, observed_at_ms, success FROM provider_availability_observations WHERE trace_id = ?1 AND provider_id = ?2",
+                params!["availability-probe:success", provider.id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?)),
+            )
+            .expect("read successful probe");
+        let failure: i64 = conn
+            .query_row(
+                "SELECT success FROM provider_availability_observations WHERE trace_id = ?1 AND provider_id = ?2",
+                params!["availability-probe:failure", provider.id],
+                |row| row.get(0),
+            )
+            .expect("read failed probe");
+        assert_eq!(success, ("codex".to_string(), 1_000, 1));
+        assert_eq!(failure, 0);
+
+        let mut columns_statement = conn
+            .prepare("SELECT name FROM pragma_table_info('provider_availability_observations') ORDER BY cid")
+            .expect("prepare observation schema");
+        let columns = columns_statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .expect("read observation schema")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect observation schema");
+        assert_eq!(
+            columns,
+            vec![
+                "trace_id",
+                "cli_key",
+                "provider_id",
+                "observed_at_ms",
+                "success",
+            ],
+            "availability facts may not carry probe URLs, credentials, response bodies, or errors"
+        );
+        drop(columns_statement);
+        drop(conn);
+
+        crate::providers::delete(&db, provider.id, false).expect("delete provider");
+        record_probe_observation(&db, "availability-probe:deleted", provider.id, 3_000, true)
+            .expect("deleted provider is ignored");
+        let deleted_rows: i64 = db
+            .open_connection()
+            .expect("open db")
+            .query_row(
+                "SELECT COUNT(1) FROM provider_availability_observations WHERE trace_id = 'availability-probe:deleted'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count deleted provider observations");
+        assert_eq!(deleted_rows, 0);
+    }
+
+    #[test]
+    fn availability_state_uses_fifty_and_ninety_percent_boundaries() {
         assert_eq!(bucket_state(0, 0), ProviderAvailabilityState::NoData);
-        assert_eq!(bucket_state(3, 1), ProviderAvailabilityState::Healthy);
-        assert_eq!(bucket_state(2, 1), ProviderAvailabilityState::Unhealthy);
+        assert_eq!(bucket_state(49, 51), ProviderAvailabilityState::Unhealthy);
+        assert_eq!(bucket_state(1, 1), ProviderAvailabilityState::Degraded);
+        assert_eq!(bucket_state(89, 11), ProviderAvailabilityState::Degraded);
+        assert_eq!(bucket_state(9, 1), ProviderAvailabilityState::Healthy);
     }
 
     fn default_provider_params(name: &str) -> ProviderUpsertParams {
@@ -1170,6 +1285,8 @@ mod tests {
             priority: Some(100),
             claude_models: None,
             availability_test_model: None,
+            availability_probe_enabled: false,
+            availability_probe_interval_minutes: 10,
             limit_5h_usd: None,
             limit_daily_usd: None,
             daily_reset_mode: Some(DailyResetMode::Fixed),
@@ -1264,7 +1381,7 @@ mod tests {
             desktop_current_bucket_start
         );
         assert_eq!((current.success_count, current.failure_count), (4, 1));
-        assert_eq!(current.state, ProviderAvailabilityState::Healthy);
+        assert_eq!(current.state, ProviderAvailabilityState::Degraded);
         assert_eq!(
             desktop_timeline.buckets.last().map(|bucket| (
                 bucket.success_count,
@@ -1279,7 +1396,7 @@ mod tests {
                 bucket.failure_count,
                 bucket.state
             )),
-            Some((4, 1, ProviderAvailabilityState::Healthy))
+            Some((4, 1, ProviderAvailabilityState::Degraded))
         );
         assert_eq!(
             desktop_timeline
@@ -1287,7 +1404,7 @@ mod tests {
                 .iter()
                 .find(|bucket| bucket.start_at_ms == current_bucket_start)
                 .map(|bucket| (bucket.success_count, bucket.failure_count, bucket.state)),
-            Some((3, 1, ProviderAvailabilityState::Healthy))
+            Some((3, 1, ProviderAvailabilityState::Degraded))
         );
 
         let rolled_now_ms = 10 * 60 * 60 * 1_000 + 31 * 60 * 1_000;
@@ -1307,7 +1424,7 @@ mod tests {
                 .expect("previous current period becomes historical");
             assert_eq!(
                 rolled_historical.state,
-                ProviderAvailabilityState::Healthy,
+                ProviderAvailabilityState::Degraded,
                 "historical state must use the success ratio for {bucket_count} buckets"
             );
             let rolled_current = rolled_timeline.buckets.last().expect("new current bucket");
@@ -1333,7 +1450,7 @@ mod tests {
     }
 
     #[test]
-    fn current_status_cell_uses_last_success_even_when_failures_are_the_majority() {
+    fn current_status_cell_uses_degraded_when_last_observation_succeeds_below_ninety_percent() {
         let temp = tempfile::tempdir().expect("tempdir");
         let db_path = temp
             .path()
@@ -1365,14 +1482,14 @@ mod tests {
                 .expect("provider timeline");
             assert_eq!(
                 timeline.buckets.last().expect("current status cell").state,
-                ProviderAvailabilityState::Healthy,
-                "the last successful request must win for {bucket_count} buckets"
+                ProviderAvailabilityState::Degraded,
+                "the last successful observation must produce degraded below 90% for {bucket_count} buckets"
             );
         }
     }
 
     #[test]
-    fn current_status_cell_uses_rowid_to_break_equal_timestamp_ties() {
+    fn current_status_cell_prefers_failure_for_equal_timestamp_ties() {
         let temp = tempfile::tempdir().expect("tempdir");
         let db_path = temp.path().join("provider-availability-rowid.sqlite3");
         let db = crate::db::init_for_tests(&db_path).expect("init db");
@@ -1416,13 +1533,13 @@ mod tests {
             };
             assert_eq!(
                 state_for(success_last.id),
-                ProviderAvailabilityState::Healthy,
-                "the later rowid must win for {bucket_count} buckets"
+                ProviderAvailabilityState::Unhealthy,
+                "failure must win equal timestamps for {bucket_count} buckets"
             );
             assert_eq!(
                 state_for(failure_last.id),
                 ProviderAvailabilityState::Unhealthy,
-                "the later rowid must win for {bucket_count} buckets"
+                "failure must win equal timestamps for {bucket_count} buckets"
             );
         }
     }
@@ -1904,7 +2021,7 @@ mod tests {
             r#"{"error":{"message":"model not found"}}"#,
         )
         .await;
-        std::env::set_var(
+        let _oauth_base_url_override = crate::test_support::ScopedTestEnvVar::set(
             "AIO_CODING_HUB_TEST_CODEX_OAUTH_BASE_URL",
             source_base_url.clone(),
         );
@@ -1953,6 +2070,5 @@ mod tests {
         assert!(request
             .to_ascii_lowercase()
             .contains("authorization: bearer oauth-access-token"));
-        std::env::remove_var("AIO_CODING_HUB_TEST_CODEX_OAUTH_BASE_URL");
     }
 }

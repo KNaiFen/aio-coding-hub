@@ -8,7 +8,13 @@ import { cn } from "../../utils/cn";
 
 const DESKTOP_BUCKET_COUNT = 36;
 const AVAILABILITY_HOURS = new Set([3, 6, 12]);
-const AVAILABILITY_STATES = new Set<ProviderAvailabilityState>(["healthy", "unhealthy", "no_data"]);
+type ProviderAvailabilityRenderState = ProviderAvailabilityState | "degraded";
+const AVAILABILITY_STATES = new Set<ProviderAvailabilityRenderState>([
+  "healthy",
+  "degraded",
+  "unhealthy",
+  "no_data",
+]);
 const TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
   month: "2-digit",
   day: "2-digit",
@@ -33,7 +39,7 @@ function validBucket(bucket: ProviderAvailabilityBucket) {
     bucket.end_at_ms > bucket.start_at_ms &&
     validCount(bucket.success_count) &&
     validCount(bucket.failure_count) &&
-    AVAILABILITY_STATES.has(bucket.state)
+    AVAILABILITY_STATES.has(bucket.state as ProviderAvailabilityRenderState)
   );
 }
 
@@ -59,10 +65,12 @@ export function normalizeProviderAvailabilityTimeline(
   return timeline;
 }
 
-function stateLabel(state: ProviderAvailabilityState) {
+function stateLabel(state: ProviderAvailabilityRenderState) {
   switch (state) {
     case "healthy":
       return "高可用";
+    case "degraded":
+      return "可用性降级";
     case "unhealthy":
       return "低可用";
     default:
@@ -70,10 +78,12 @@ function stateLabel(state: ProviderAvailabilityState) {
   }
 }
 
-function stateClassName(state: ProviderAvailabilityState) {
+function stateClassName(state: ProviderAvailabilityRenderState) {
   switch (state) {
     case "healthy":
       return "bg-success ring-1 ring-emerald-700/15 dark:ring-emerald-200/15";
+    case "degraded":
+      return "bg-warning ring-1 ring-amber-700/15 dark:ring-amber-200/15";
     case "unhealthy":
       return "bg-danger ring-1 ring-rose-800/15 dark:ring-rose-100/15";
     default:

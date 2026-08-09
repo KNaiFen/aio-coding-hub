@@ -157,6 +157,7 @@ pub struct ObserverProviderAccountUsage {
 #[serde(rename_all = "snake_case")]
 pub enum ObserverProviderAvailabilityState {
     Healthy,
+    Degraded,
     Unhealthy,
     NoData,
 }

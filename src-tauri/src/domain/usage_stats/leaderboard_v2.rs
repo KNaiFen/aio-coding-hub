@@ -154,8 +154,8 @@ SELECT
       final_upstream_attempt_timing_version = 1 AND
       final_upstream_attempt_duration_ms IS NOT NULL AND
       final_upstream_attempt_duration_ms > 0
-    ) THEN final_upstream_attempt_duration_ms ELSE 0 END
-  ) AS success_generation_ms_sum,
+    ) THEN output_tokens * 1000.0 / final_upstream_attempt_duration_ms ELSE 0.0 END
+  ) AS success_output_tokens_per_second_sum,
   SUM(
     CASE WHEN (
       status >= 200 AND status < 300 AND error_present = 0 AND
@@ -163,8 +163,8 @@ SELECT
       final_upstream_attempt_timing_version = 1 AND
       final_upstream_attempt_duration_ms IS NOT NULL AND
       final_upstream_attempt_duration_ms > 0
-    ) THEN output_tokens ELSE 0 END
-  ) AS success_output_tokens_for_rate_sum
+    ) THEN 1 ELSE 0 END
+  ) AS success_output_rate_count
 FROM usage_events
 WHERE excluded_from_stats = 0
 {where_clause}
@@ -202,11 +202,11 @@ GROUP BY cli_key
                         success_ttfb_ms_count: row
                             .get::<_, Option<i64>>("success_ttfb_ms_count")?
                             .unwrap_or(0),
-                        success_generation_ms_sum: row
-                            .get::<_, Option<i64>>("success_generation_ms_sum")?
-                            .unwrap_or(0),
-                        success_output_tokens_for_rate_sum: row
-                            .get::<_, Option<i64>>("success_output_tokens_for_rate_sum")?
+                        success_output_tokens_per_second_sum: row
+                            .get::<_, Option<f64>>("success_output_tokens_per_second_sum")?
+                            .unwrap_or(0.0),
+                        success_output_rate_count: row
+                            .get::<_, Option<i64>>("success_output_rate_count")?
                             .unwrap_or(0),
                         total_tokens: aggregated_total_tokens(row)?,
                         input_tokens: row.get::<_, Option<i64>>("input_tokens")?.unwrap_or(0),
@@ -291,8 +291,8 @@ SELECT
       final_upstream_attempt_timing_version = 1 AND
       final_upstream_attempt_duration_ms IS NOT NULL AND
       final_upstream_attempt_duration_ms > 0
-    ) THEN final_upstream_attempt_duration_ms ELSE 0 END
-  ) AS success_generation_ms_sum,
+    ) THEN output_tokens * 1000.0 / final_upstream_attempt_duration_ms ELSE 0.0 END
+  ) AS success_output_tokens_per_second_sum,
   SUM(
     CASE WHEN (
       status >= 200 AND status < 300 AND error_present = 0 AND
@@ -300,8 +300,8 @@ SELECT
       final_upstream_attempt_timing_version = 1 AND
       final_upstream_attempt_duration_ms IS NOT NULL AND
       final_upstream_attempt_duration_ms > 0
-    ) THEN output_tokens ELSE 0 END
-  ) AS success_output_tokens_for_rate_sum
+    ) THEN 1 ELSE 0 END
+  ) AS success_output_rate_count
 FROM usage_events
 WHERE excluded_from_stats = 0
 {where_clause}
@@ -339,11 +339,11 @@ GROUP BY COALESCE(NULLIF(requested_model, ''), 'Unknown')
                         success_ttfb_ms_count: row
                             .get::<_, Option<i64>>("success_ttfb_ms_count")?
                             .unwrap_or(0),
-                        success_generation_ms_sum: row
-                            .get::<_, Option<i64>>("success_generation_ms_sum")?
-                            .unwrap_or(0),
-                        success_output_tokens_for_rate_sum: row
-                            .get::<_, Option<i64>>("success_output_tokens_for_rate_sum")?
+                        success_output_tokens_per_second_sum: row
+                            .get::<_, Option<f64>>("success_output_tokens_per_second_sum")?
+                            .unwrap_or(0.0),
+                        success_output_rate_count: row
+                            .get::<_, Option<i64>>("success_output_rate_count")?
                             .unwrap_or(0),
                         total_tokens: aggregated_total_tokens(row)?,
                         input_tokens: row.get::<_, Option<i64>>("input_tokens")?.unwrap_or(0),
@@ -430,8 +430,8 @@ SELECT
       final_upstream_attempt_timing_version = 1 AND
       final_upstream_attempt_duration_ms IS NOT NULL AND
       final_upstream_attempt_duration_ms > 0
-    ) THEN final_upstream_attempt_duration_ms ELSE 0 END
-  ) AS success_generation_ms_sum,
+    ) THEN output_tokens * 1000.0 / final_upstream_attempt_duration_ms ELSE 0.0 END
+  ) AS success_output_tokens_per_second_sum,
   SUM(
     CASE WHEN (
       status >= 200 AND status < 300 AND error_present = 0 AND
@@ -439,8 +439,8 @@ SELECT
       final_upstream_attempt_timing_version = 1 AND
       final_upstream_attempt_duration_ms IS NOT NULL AND
       final_upstream_attempt_duration_ms > 0
-    ) THEN output_tokens ELSE 0 END
-  ) AS success_output_tokens_for_rate_sum
+    ) THEN 1 ELSE 0 END
+  ) AS success_output_rate_count
 FROM usage_events
 WHERE excluded_from_stats = 0
 {where_clause}
@@ -479,11 +479,11 @@ GROUP BY key
                         success_ttfb_ms_count: row
                             .get::<_, Option<i64>>("success_ttfb_ms_count")?
                             .unwrap_or(0),
-                        success_generation_ms_sum: row
-                            .get::<_, Option<i64>>("success_generation_ms_sum")?
-                            .unwrap_or(0),
-                        success_output_tokens_for_rate_sum: row
-                            .get::<_, Option<i64>>("success_output_tokens_for_rate_sum")?
+                        success_output_tokens_per_second_sum: row
+                            .get::<_, Option<f64>>("success_output_tokens_per_second_sum")?
+                            .unwrap_or(0.0),
+                        success_output_rate_count: row
+                            .get::<_, Option<i64>>("success_output_rate_count")?
                             .unwrap_or(0),
                         total_tokens: aggregated_total_tokens(row)?,
                         input_tokens: row.get::<_, Option<i64>>("input_tokens")?.unwrap_or(0),
@@ -573,8 +573,8 @@ SELECT
       r.final_upstream_attempt_timing_version = 1 AND
       r.final_upstream_attempt_duration_ms IS NOT NULL AND
       r.final_upstream_attempt_duration_ms > 0
-    ) THEN r.final_upstream_attempt_duration_ms ELSE 0 END
-  ) AS success_generation_ms_sum,
+    ) THEN r.output_tokens * 1000.0 / r.final_upstream_attempt_duration_ms ELSE 0.0 END
+  ) AS success_output_tokens_per_second_sum,
   SUM(
     CASE WHEN (
       r.status >= 200 AND r.status < 300 AND r.error_present = 0 AND
@@ -582,8 +582,8 @@ SELECT
       r.final_upstream_attempt_timing_version = 1 AND
       r.final_upstream_attempt_duration_ms IS NOT NULL AND
       r.final_upstream_attempt_duration_ms > 0
-    ) THEN r.output_tokens ELSE 0 END
-  ) AS success_output_tokens_for_rate_sum
+    ) THEN 1 ELSE 0 END
+  ) AS success_output_rate_count
 FROM usage_events r
 WHERE r.excluded_from_stats = 0
 AND r.final_provider_id IS NOT NULL
@@ -627,11 +627,11 @@ GROUP BY r.cli_key, r.final_provider_id
                         success_ttfb_ms_count: row
                             .get::<_, Option<i64>>("success_ttfb_ms_count")?
                             .unwrap_or(0),
-                        success_generation_ms_sum: row
-                            .get::<_, Option<i64>>("success_generation_ms_sum")?
-                            .unwrap_or(0),
-                        success_output_tokens_for_rate_sum: row
-                            .get::<_, Option<i64>>("success_output_tokens_for_rate_sum")?
+                        success_output_tokens_per_second_sum: row
+                            .get::<_, Option<f64>>("success_output_tokens_per_second_sum")?
+                            .unwrap_or(0.0),
+                        success_output_rate_count: row
+                            .get::<_, Option<i64>>("success_output_rate_count")?
                             .unwrap_or(0),
                         total_tokens: aggregated_total_tokens(row)?,
                         input_tokens: row.get::<_, Option<i64>>("input_tokens")?.unwrap_or(0),

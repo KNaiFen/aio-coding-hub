@@ -5,7 +5,10 @@ use std::path::PathBuf;
 #[cfg(test)]
 use crate::shared::mutex_ext::MutexExt;
 #[cfg(test)]
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::{
+    ffi::OsString,
+    sync::{Mutex, MutexGuard, OnceLock},
+};
 
 pub fn clear_settings_cache() {
     crate::settings::clear_cache();
@@ -25,6 +28,44 @@ pub fn test_env_lock() -> MutexGuard<'static, ()> {
     TEST_ENV_LOCK
         .get_or_init(|| Mutex::new(()))
         .lock_or_recover()
+}
+
+#[cfg(test)]
+#[must_use = "keep the guard alive for the full environment override scope"]
+pub(crate) struct ScopedTestEnvVar {
+    key: &'static str,
+    previous: Option<OsString>,
+}
+
+#[cfg(test)]
+impl ScopedTestEnvVar {
+    pub(crate) fn set(key: &'static str, value: impl Into<OsString>) -> Self {
+        let guard = Self {
+            key,
+            previous: std::env::var_os(key),
+        };
+        std::env::set_var(key, value.into());
+        guard
+    }
+
+    pub(crate) fn remove(key: &'static str) -> Self {
+        let guard = Self {
+            key,
+            previous: std::env::var_os(key),
+        };
+        std::env::remove_var(key);
+        guard
+    }
+}
+
+#[cfg(test)]
+impl Drop for ScopedTestEnvVar {
+    fn drop(&mut self) {
+        match self.previous.take() {
+            Some(value) => std::env::set_var(self.key, value),
+            None => std::env::remove_var(self.key),
+        }
+    }
 }
 
 fn serialize_json(
@@ -435,6 +476,8 @@ pub fn provider_upsert_bridge_json<R: tauri::Runtime>(
             priority,
             claude_models,
             availability_test_model: None,
+            availability_probe_enabled: false,
+            availability_probe_interval_minutes: 10,
             limit_5h_usd,
             limit_daily_usd,
             daily_reset_mode: parse_daily_reset_mode(daily_reset_mode)?,

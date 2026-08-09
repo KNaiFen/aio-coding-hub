@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   computeNiceYAxis,
+  computeYAxisWidth,
   escapeHtml,
   formatTokensMillions,
   pickTopSlices,
@@ -8,12 +9,19 @@ import {
 } from "../chartHelpers";
 
 describe("utils/chartHelpers", () => {
-  it("formats token units across zero/K/M branches", () => {
+  it("formats token units across zero/K/M/B branches", () => {
     expect(formatTokensMillions(0)).toBe("0");
     expect(formatTokensMillions(Number.NaN)).toBe("0");
     expect(formatTokensMillions(999)).toBe("999");
     expect(formatTokensMillions(1_000)).toBe("1.0K");
     expect(formatTokensMillions(2_000_000)).toBe("2.0M");
+    expect(formatTokensMillions(1_000_000_000)).toBe("1.0B");
+    expect(formatTokensMillions(12_500_000_000)).toBe("12.5B");
+  });
+
+  it("sizes the Y axis from the longest formatted tick", () => {
+    expect(computeYAxisWidth([0, 1_000_000_000])).toBe(45);
+    expect(computeYAxisWidth([0, 12_345_000_000_000])).toBe(68);
   });
 
   it("computes fallback axis for non-positive max values", () => {

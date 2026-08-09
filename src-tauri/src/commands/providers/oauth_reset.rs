@@ -268,7 +268,7 @@ pub(crate) async fn provider_oauth_reset_codex_quota(
 ) -> Result<ProviderOAuthResetCodexQuotaResult, String> {
     require_codex_reset_confirm(provider_id, confirm)?;
 
-    let db = ensure_db_ready(app, db_state.inner()).await?;
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
     let mut details = blocking::run("provider_oauth_reset_codex_quota_load", {
         let db = db.clone();
         move || crate::providers::get_oauth_details(&db, provider_id)
@@ -292,7 +292,8 @@ pub(crate) async fn provider_oauth_reset_codex_quota(
         )
     {
         details =
-            super::oauth::refresh_oauth_details_for_limits(&db, &client, &details, adapter).await?;
+            super::oauth::refresh_oauth_details_for_limits(&app, &db, &client, &details, adapter)
+                .await?;
     }
 
     let access_token = super::oauth::effective_oauth_access_token(&details, adapter)?;

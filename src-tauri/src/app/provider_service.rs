@@ -1,3 +1,6 @@
+use crate::app::provider_availability_probe_runtime::{
+    ProviderAvailabilityProbeMutationGuard, ProviderAvailabilityProbeRuntimeState,
+};
 use crate::app_state::{ensure_db_ready, DbInitState};
 use crate::gateway_control::{
     app_gateway_clear_cli_route_runtime_state, app_gateway_clear_cli_session_bindings,
@@ -22,6 +25,10 @@ pub(crate) struct ProviderUpsertInput {
     pub claude_models: Option<providers::ClaudeModels>,
     pub model_mapping: Option<providers::ModelMapping>,
     pub availability_test_model: Option<String>,
+    #[serde(default)]
+    pub availability_probe_enabled: Option<bool>,
+    #[serde(default)]
+    pub availability_probe_interval_minutes: Option<u32>,
     #[serde(rename = "limit5hUsd", alias = "limit5HUsd")]
     #[specta(rename = "limit5hUsd")]
     pub limit_5h_usd: Option<f64>,
@@ -46,6 +53,14 @@ pub(crate) struct ProviderUpsertInput {
     pub model_routing_policy_override: Option<crate::settings::ModelRoutingPolicy>,
     #[serde(default)]
     pub model_routing_policy_override_specified: bool,
+}
+
+pub(crate) async fn begin_provider_availability_probe_mutation<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    provider_id: i64,
+) -> Option<ProviderAvailabilityProbeMutationGuard> {
+    let runtime = ProviderAvailabilityProbeRuntimeState::from_app(app)?;
+    runtime.begin_mutation(provider_id).await
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -231,6 +246,8 @@ pub(crate) async fn provider_upsert(
         claude_models,
         model_mapping,
         availability_test_model,
+        availability_probe_enabled,
+        availability_probe_interval_minutes,
         limit_5h_usd,
         limit_daily_usd,
         daily_reset_mode,
@@ -252,10 +269,15 @@ pub(crate) async fn provider_upsert(
     } = input;
 
     let is_create = provider_id.is_none();
+    let probe_mutation_guard = match provider_id {
+        Some(provider_id) => begin_provider_availability_probe_mutation(&app, provider_id).await,
+        None => None,
+    };
     let name_for_log = name.clone();
     let cli_key_for_log = cli_key.clone();
     let submitted_api_key = api_key.clone();
     let result = blocking::run("provider_upsert", move || {
+        let _probe_mutation_guard = probe_mutation_guard;
         let previous = match provider_id {
             Some(id) => {
                 let conn = db.open_connection()?;
@@ -267,6 +289,20 @@ pub(crate) async fn provider_upsert(
             Some(id) => Some(providers::get_api_key_plaintext(&db, id)?),
             None => None,
         };
+        let availability_probe_enabled = availability_probe_enabled
+            .or_else(|| {
+                previous
+                    .as_ref()
+                    .map(|provider| provider.availability_probe_enabled)
+            })
+            .unwrap_or(false);
+        let availability_probe_interval_minutes = availability_probe_interval_minutes
+            .or_else(|| {
+                previous
+                    .as_ref()
+                    .map(|provider| provider.availability_probe_interval_minutes)
+            })
+            .unwrap_or(providers::DEFAULT_AVAILABILITY_PROBE_INTERVAL_MINUTES);
 
         let saved = providers::upsert(
             &db,
@@ -284,6 +320,8 @@ pub(crate) async fn provider_upsert(
                 claude_models,
                 model_mapping,
                 availability_test_model,
+                availability_probe_enabled,
+                availability_probe_interval_minutes,
                 limit_5h_usd,
                 limit_daily_usd,
                 daily_reset_mode,
@@ -402,6 +440,8 @@ pub(crate) async fn provider_duplicate(
                 claude_models: Some(source.claude_models.clone()),
                 model_mapping: Some(source.model_mapping.clone()),
                 availability_test_model: source.availability_test_model.clone(),
+                availability_probe_enabled: source.availability_probe_enabled,
+                availability_probe_interval_minutes: source.availability_probe_interval_minutes,
                 limit_5h_usd: source.limit_5h_usd,
                 limit_daily_usd: source.limit_daily_usd,
                 daily_reset_mode: Some(source.daily_reset_mode),
@@ -458,7 +498,9 @@ pub(crate) async fn provider_set_enabled(
     enabled: bool,
 ) -> Result<providers::ProviderSummary, String> {
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
+    let probe_mutation_guard = begin_provider_availability_probe_mutation(&app, provider_id).await;
     let result = blocking::run("provider_set_enabled", move || {
+        let _probe_mutation_guard = probe_mutation_guard;
         providers::set_enabled(&db, provider_id, enabled)
     })
     .await
@@ -486,9 +528,11 @@ pub(crate) async fn provider_delete(
     clear_usage_stats: bool,
 ) -> Result<bool, String> {
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
+    let probe_mutation_guard = begin_provider_availability_probe_mutation(&app, provider_id).await;
     let result = blocking::run(
         "provider_delete",
         move || -> crate::shared::error::AppResult<(bool, String)> {
+            let _probe_mutation_guard = probe_mutation_guard;
             let cli_key = providers::cli_key_by_id(&db, provider_id)?.ok_or_else(|| {
                 crate::shared::error::AppError::from("DB_NOT_FOUND: provider not found")
             })?;
@@ -661,6 +705,8 @@ mod tests {
             "costMultiplier": 1.0,
             "priority": 10,
             "claudeModels": null,
+            "availabilityProbeEnabled": true,
+            "availabilityProbeIntervalMinutes": 30,
             "limit5hUsd": 5.0,
             "limitDailyUsd": 10.0,
             "dailyResetMode": "fixed",
@@ -676,6 +722,8 @@ mod tests {
 
         assert_eq!(input.base_url_mode, providers::ProviderBaseUrlMode::Order);
         assert_eq!(input.auth_mode, Some(providers::ProviderAuthMode::ApiKey));
+        assert_eq!(input.availability_probe_enabled, Some(true));
+        assert_eq!(input.availability_probe_interval_minutes, Some(30));
         assert_eq!(input.limit_5h_usd, Some(5.0));
         assert_eq!(
             input.daily_reset_mode,
@@ -705,6 +753,8 @@ mod tests {
         .expect("deserialize provider input legacy alias");
 
         assert_eq!(input.base_url_mode, providers::ProviderBaseUrlMode::Ping);
+        assert_eq!(input.availability_probe_enabled, None);
+        assert_eq!(input.availability_probe_interval_minutes, None);
         assert_eq!(input.limit_5h_usd, Some(7.0));
         assert_eq!(
             input.daily_reset_mode,
@@ -724,6 +774,8 @@ mod tests {
             claude_models: Default::default(),
             model_mapping: Default::default(),
             availability_test_model: None,
+            availability_probe_enabled: false,
+            availability_probe_interval_minutes: 10,
             enabled: true,
             priority: 1,
             cost_multiplier: 1.0,
@@ -816,6 +868,8 @@ mod tests {
             claude_models: Default::default(),
             model_mapping: Default::default(),
             availability_test_model: None,
+            availability_probe_enabled: false,
+            availability_probe_interval_minutes: 10,
             enabled: true,
             priority: 1,
             cost_multiplier: 1.0,

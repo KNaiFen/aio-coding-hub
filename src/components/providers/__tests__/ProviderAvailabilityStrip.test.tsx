@@ -12,9 +12,10 @@ import {
 
 const START_AT_MS = Date.UTC(2026, 7, 2, 8, 0, 0);
 const BUCKET_DURATION_MS = 10 * 60_000;
+type RuntimeAvailabilityState = ProviderAvailabilityState | "degraded";
 
 function makeTimeline(
-  states: ProviderAvailabilityState[] = ["healthy", "unhealthy", "no_data"]
+  states: RuntimeAvailabilityState[] = ["healthy", "degraded", "unhealthy", "no_data"]
 ): ProviderAvailabilityTimeline {
   return {
     provider_id: 7,
@@ -28,9 +29,9 @@ function makeTimeline(
       return {
         start_at_ms: START_AT_MS + index * BUCKET_DURATION_MS,
         end_at_ms: START_AT_MS + (index + 1) * BUCKET_DURATION_MS,
-        success_count: state === "healthy" ? 3 : 0,
+        success_count: state === "healthy" ? 3 : state === "degraded" ? 1 : 0,
         failure_count: state === "unhealthy" ? 2 : 0,
-        state,
+        state: state as ProviderAvailabilityState,
       };
     }),
   };
@@ -48,8 +49,10 @@ describe("components/providers/ProviderAvailabilityStrip", () => {
     expect(cells).toHaveLength(36);
     expect(cells[0]).toHaveClass("bg-success");
     expect(cells[0].className).toContain("dark:ring");
-    expect(cells[1]).toHaveClass("bg-danger");
-    expect(cells[2]).toHaveClass("bg-surface-muted");
+    expect(cells[1]).toHaveClass("bg-warning");
+    expect(cells[1]).toHaveAttribute("aria-label", expect.stringContaining("可用性降级"));
+    expect(cells[2]).toHaveClass("bg-danger");
+    expect(cells[3]).toHaveClass("bg-surface-muted");
 
     await user.hover(cells[0]);
     const tooltip = await screen.findByRole("tooltip");

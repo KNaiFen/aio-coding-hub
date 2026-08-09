@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS providers (
   source_provider_id INTEGER DEFAULT NULL REFERENCES providers(id) ON DELETE SET NULL,
   bridge_type TEXT DEFAULT NULL,
   availability_test_model TEXT DEFAULT NULL,
+  availability_probe_enabled INTEGER NOT NULL DEFAULT 0 CHECK(availability_probe_enabled IN (0, 1)),
+  availability_probe_interval_minutes INTEGER NOT NULL DEFAULT 10 CHECK(availability_probe_interval_minutes BETWEEN 1 AND 1440),
   UNIQUE(cli_key, name)
 );
 
@@ -430,6 +432,7 @@ INSERT OR IGNORE INTO usage_ledger_backfill_state(
     )
     .map_err(|e| format!("failed to initialize fresh usage ledger state: {e}"))?;
     super::v42_to_v43::recreate_usage_events_view(&tx)?;
+    super::v46_to_v47::create_provider_daily_rollup_schema(&tx)?;
     super::v49_to_v50::create_recovery_journal_schema(&tx)?;
     super::v50_to_v51::create_recovery_claim_schema(&tx)?;
 

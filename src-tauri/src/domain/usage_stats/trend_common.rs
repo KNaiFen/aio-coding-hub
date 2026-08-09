@@ -662,8 +662,7 @@ SELECT
   SUM(CASE WHEN {success} THEN r.duration_ms ELSE 0 END) AS success_duration_ms_sum,
   SUM(CASE WHEN {success} AND {valid_ttfb} THEN r.ttfb_ms ELSE 0 END) AS success_ttfb_ms_sum,
   SUM(CASE WHEN {success} AND {valid_ttfb} THEN 1 ELSE 0 END) AS success_ttfb_ms_count,
-  SUM(CASE WHEN {success} AND {valid_output_rate} THEN r.final_upstream_attempt_duration_ms ELSE 0 END) AS success_generation_ms_sum,
-  SUM(CASE WHEN {success} AND {valid_output_rate} THEN r.output_tokens ELSE 0 END) AS success_output_tokens_for_rate_sum,
+  SUM(CASE WHEN {success} AND {valid_output_rate} THEN r.output_tokens * 1000.0 / r.final_upstream_attempt_duration_ms ELSE 0.0 END) AS success_output_tokens_per_second_sum,
   SUM(CASE WHEN {success} AND {valid_output_rate} THEN 1 ELSE 0 END) AS success_output_rate_count,
   SUM(CASE WHEN {success} THEN {cache_denom_expr} ELSE 0 END) AS cache_denom_tokens,
   SUM(CASE WHEN {success} THEN COALESCE(r.cache_read_input_tokens, 0) ELSE 0 END) AS cache_read_input_tokens
@@ -701,8 +700,7 @@ SELECT
   SUM(r.success_duration_ms_sum) AS success_duration_ms_sum,
   SUM(r.success_ttfb_ms_sum) AS success_ttfb_ms_sum,
   SUM(r.success_ttfb_ms_count) AS success_ttfb_ms_count,
-  SUM(r.success_generation_ms_sum) AS success_generation_ms_sum,
-  SUM(r.success_output_tokens_for_rate_sum) AS success_output_tokens_for_rate_sum,
+  SUM(r.success_output_tokens_per_second_sum) AS success_output_tokens_per_second_sum,
   SUM(r.success_output_rate_count) AS success_output_rate_count,
   SUM(r.cache_denom_tokens) AS cache_denom_tokens,
   SUM(r.cache_read_input_tokens) AS cache_read_input_tokens
@@ -749,8 +747,7 @@ trend_source AS MATERIALIZED (
     SUM(success_duration_ms_sum) AS success_duration_ms_sum,
     SUM(success_ttfb_ms_sum) AS success_ttfb_ms_sum,
     SUM(success_ttfb_ms_count) AS success_ttfb_ms_count,
-    SUM(success_generation_ms_sum) AS success_generation_ms_sum,
-    SUM(success_output_tokens_for_rate_sum) AS success_output_tokens_for_rate_sum,
+    SUM(success_output_tokens_per_second_sum) AS success_output_tokens_per_second_sum,
     SUM(success_output_rate_count) AS success_output_rate_count,
     SUM(cache_denom_tokens) AS cache_denom_tokens,
     SUM(cache_read_input_tokens) AS cache_read_input_tokens

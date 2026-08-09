@@ -34,12 +34,19 @@ function weightedAverage(
   return totalValue / totalWeight;
 }
 
+type PreviewUsageLeaderboardRow = UsageLeaderboardRow & {
+  preview_output_rate: {
+    sum: number;
+    count: number;
+  };
+};
+
 type PreviewLeaderboardRowInput = Omit<
-  UsageLeaderboardRow,
+  PreviewUsageLeaderboardRow,
   "first_request_created_at_ms" | "last_request_created_at_ms"
 >;
 
-function withoutRequestBounds(row: PreviewLeaderboardRowInput): UsageLeaderboardRow {
+function withoutRequestBounds(row: PreviewLeaderboardRowInput): PreviewUsageLeaderboardRow {
   return {
     ...row,
     first_request_created_at_ms: null,
@@ -57,7 +64,7 @@ function withPreviewDayBounds(
   firstHour: number,
   lastHour: number,
   lastMinute: number
-): UsageLeaderboardRow {
+): PreviewUsageLeaderboardRow {
   return {
     ...row,
     first_request_created_at_ms: localDayTimeMs(row.key, firstHour, 0),
@@ -82,6 +89,7 @@ const PREVIEW_TOKEN_PROVIDER_BASE_ROWS: PreviewLeaderboardRowInput[] = [
     avg_duration_ms: 980,
     avg_ttfb_ms: 240,
     avg_output_tokens_per_second: 96.5,
+    preview_output_rate: { sum: 96.5 * 15, count: 15 },
     cost_usd: 1.38,
   },
   {
@@ -100,6 +108,7 @@ const PREVIEW_TOKEN_PROVIDER_BASE_ROWS: PreviewLeaderboardRowInput[] = [
     avg_duration_ms: 1_120,
     avg_ttfb_ms: 310,
     avg_output_tokens_per_second: 84.2,
+    preview_output_rate: { sum: 84.2 * 12, count: 12 },
     cost_usd: 1.16,
   },
   {
@@ -118,11 +127,12 @@ const PREVIEW_TOKEN_PROVIDER_BASE_ROWS: PreviewLeaderboardRowInput[] = [
     avg_duration_ms: 860,
     avg_ttfb_ms: 220,
     avg_output_tokens_per_second: 105.7,
+    preview_output_rate: { sum: 105.7 * 9, count: 9 },
     cost_usd: 0.82,
   },
 ];
 
-export const PREVIEW_TOKEN_PROVIDER_ROWS: UsageLeaderboardRow[] =
+export const PREVIEW_TOKEN_PROVIDER_ROWS: PreviewUsageLeaderboardRow[] =
   PREVIEW_TOKEN_PROVIDER_BASE_ROWS.map(withoutRequestBounds);
 
 const PREVIEW_TOKEN_MODEL_BASE_ROWS: PreviewLeaderboardRowInput[] = [
@@ -142,6 +152,7 @@ const PREVIEW_TOKEN_MODEL_BASE_ROWS: PreviewLeaderboardRowInput[] = [
     avg_duration_ms: 930,
     avg_ttfb_ms: 230,
     avg_output_tokens_per_second: 98.4,
+    preview_output_rate: { sum: 98.4 * 11, count: 11 },
     cost_usd: 1.12,
   },
   {
@@ -160,6 +171,7 @@ const PREVIEW_TOKEN_MODEL_BASE_ROWS: PreviewLeaderboardRowInput[] = [
     avg_duration_ms: 1_180,
     avg_ttfb_ms: 320,
     avg_output_tokens_per_second: 82.1,
+    preview_output_rate: { sum: 82.1 * 9, count: 9 },
     cost_usd: 0.86,
   },
   {
@@ -178,6 +190,7 @@ const PREVIEW_TOKEN_MODEL_BASE_ROWS: PreviewLeaderboardRowInput[] = [
     avg_duration_ms: 900,
     avg_ttfb_ms: 220,
     avg_output_tokens_per_second: 97.8,
+    preview_output_rate: { sum: 97.8 * 6, count: 6 },
     cost_usd: 0.48,
   },
   {
@@ -196,6 +209,7 @@ const PREVIEW_TOKEN_MODEL_BASE_ROWS: PreviewLeaderboardRowInput[] = [
     avg_duration_ms: 1_090,
     avg_ttfb_ms: 270,
     avg_output_tokens_per_second: 87.9,
+    preview_output_rate: { sum: 87.9 * 4, count: 4 },
     cost_usd: 0.33,
   },
   {
@@ -214,6 +228,7 @@ const PREVIEW_TOKEN_MODEL_BASE_ROWS: PreviewLeaderboardRowInput[] = [
     avg_duration_ms: 910,
     avg_ttfb_ms: 230,
     avg_output_tokens_per_second: 92.7,
+    preview_output_rate: { sum: 92.7 * 3, count: 3 },
     cost_usd: 0.31,
   },
   {
@@ -232,11 +247,12 @@ const PREVIEW_TOKEN_MODEL_BASE_ROWS: PreviewLeaderboardRowInput[] = [
     avg_duration_ms: 780,
     avg_ttfb_ms: 190,
     avg_output_tokens_per_second: 118.6,
+    preview_output_rate: { sum: 118.6 * 4, count: 4 },
     cost_usd: 0.26,
   },
 ];
 
-export const PREVIEW_TOKEN_MODEL_ROWS: UsageLeaderboardRow[] =
+export const PREVIEW_TOKEN_MODEL_ROWS: PreviewUsageLeaderboardRow[] =
   PREVIEW_TOKEN_MODEL_BASE_ROWS.map(withoutRequestBounds);
 
 const PREVIEW_TODAY_KEY = previewDayKey(0);
@@ -260,6 +276,7 @@ const PREVIEW_TOKEN_DAY_BASE_ROWS: PreviewLeaderboardRowInput[] = [
     avg_duration_ms: 960,
     avg_ttfb_ms: 230,
     avg_output_tokens_per_second: 101.2,
+    preview_output_rate: { sum: 101.2 * 17, count: 17 },
     cost_usd: 1.48,
   },
   {
@@ -278,6 +295,7 @@ const PREVIEW_TOKEN_DAY_BASE_ROWS: PreviewLeaderboardRowInput[] = [
     avg_duration_ms: 1_080,
     avg_ttfb_ms: 290,
     avg_output_tokens_per_second: 88.4,
+    preview_output_rate: { sum: 88.4 * 12, count: 12 },
     cost_usd: 1.1,
   },
   {
@@ -296,11 +314,12 @@ const PREVIEW_TOKEN_DAY_BASE_ROWS: PreviewLeaderboardRowInput[] = [
     avg_duration_ms: 900,
     avg_ttfb_ms: 220,
     avg_output_tokens_per_second: 104.8,
+    preview_output_rate: { sum: 104.8 * 8, count: 8 },
     cost_usd: 0.78,
   },
 ];
 
-export const PREVIEW_TOKEN_DAY_ROWS: UsageLeaderboardRow[] = PREVIEW_TOKEN_DAY_BASE_ROWS.map(
+export const PREVIEW_TOKEN_DAY_ROWS: PreviewUsageLeaderboardRow[] = PREVIEW_TOKEN_DAY_BASE_ROWS.map(
   (row, index) => withPreviewDayBounds(row, 8 + index, 23 - index, 34)
 );
 
@@ -344,14 +363,20 @@ const PREVIEW_DAY_HOUR_WEIGHTS: readonly number[] = [
 ];
 
 export function scalePreviewTokenRows(
-  rows: UsageLeaderboardRow[],
+  rows: PreviewUsageLeaderboardRow[],
   factor: number
-): UsageLeaderboardRow[] {
+): PreviewUsageLeaderboardRow[] {
   const scale = (value: number) => Math.max(0, Math.round(value * factor));
   return rows.map((row) => {
     const requestsTotal = scale(row.requests_total);
     const requestsFailed = Math.min(requestsTotal, scale(row.requests_failed));
     const requestsSuccess = Math.max(0, requestsTotal - requestsFailed);
+    const outputRateCount = Math.min(requestsSuccess, scale(row.preview_output_rate.count));
+    const outputRateAverage =
+      row.preview_output_rate.count > 0
+        ? row.preview_output_rate.sum / row.preview_output_rate.count
+        : null;
+    const scaledOutputRateAverage = outputRateCount > 0 ? outputRateAverage : null;
 
     return {
       ...row,
@@ -366,6 +391,11 @@ export function scalePreviewTokenRows(
       cache_read_input_tokens: scale(row.cache_read_input_tokens),
       total_duration_ms: scale(row.total_duration_ms),
       cost_usd: row.cost_usd == null ? null : row.cost_usd * factor,
+      avg_output_tokens_per_second: scaledOutputRateAverage,
+      preview_output_rate: {
+        sum: scaledOutputRateAverage == null ? 0 : scaledOutputRateAverage * outputRateCount,
+        count: outputRateCount,
+      },
     };
   });
 }
@@ -444,7 +474,7 @@ export function buildPreviewTokenDayDetail(
   };
 }
 
-export function buildPreviewTokenSummary(rows: UsageLeaderboardRow[]): UsageSummary {
+export function buildPreviewTokenSummary(rows: PreviewUsageLeaderboardRow[]): UsageSummary {
   const requestsTotal = rows.reduce((sum, row) => sum + row.requests_total, 0);
   const requestsSuccess = rows.reduce((sum, row) => sum + row.requests_success, 0);
   const requestsFailed = rows.reduce((sum, row) => sum + row.requests_failed, 0);
@@ -455,6 +485,16 @@ export function buildPreviewTokenSummary(rows: UsageLeaderboardRow[]): UsageSumm
   const totalDurationMs = rows.reduce((sum, row) => sum + row.total_duration_ms, 0);
   const cacheCreationTokens = rows.reduce((sum, row) => sum + row.cache_creation_input_tokens, 0);
   const cacheReadTokens = rows.reduce((sum, row) => sum + row.cache_read_input_tokens, 0);
+  const outputRateAggregate = rows.reduce(
+    (aggregate, row) => {
+      const { sum, count } = row.preview_output_rate;
+      if (!Number.isFinite(sum) || !Number.isFinite(count) || count <= 0) return aggregate;
+      aggregate.sum += sum;
+      aggregate.count += count;
+      return aggregate;
+    },
+    { sum: 0, count: 0 }
+  );
 
   return {
     requests_total: requestsTotal,
@@ -477,11 +517,8 @@ export function buildPreviewTokenSummary(rows: UsageLeaderboardRow[]): UsageSumm
       (row) => row.avg_ttfb_ms,
       (row) => row.requests_total
     ),
-    avg_output_tokens_per_second: weightedAverage(
-      rows,
-      (row) => row.avg_output_tokens_per_second,
-      (row) => row.output_tokens
-    ),
+    avg_output_tokens_per_second:
+      outputRateAggregate.count > 0 ? outputRateAggregate.sum / outputRateAggregate.count : null,
     input_tokens: inputTokens,
     output_tokens: outputTokens,
     io_total_tokens: ioTotalTokens,

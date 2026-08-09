@@ -1,5 +1,7 @@
 //! Usage: OAuth credential resolution helpers for `failover_loop`.
 
+use crate::app::provider_availability_probe_runtime::ProviderAvailabilityProbeRuntimeState;
+
 pub(super) fn resolve_oauth_adapter_for_provider(
     cli_key: &str,
     provider_id: i64,
@@ -24,7 +26,15 @@ pub(super) async fn resolve_effective_credential<R: tauri::Runtime>(
     provider: &crate::providers::ProviderForGateway,
 ) -> crate::shared::error::AppResult<String> {
     let client = state.client();
-    crate::providers::resolve_effective_credential(&state.db, &client, cli_key, provider).await
+    let probe_runtime = ProviderAvailabilityProbeRuntimeState::from_app(&state.app);
+    crate::providers::resolve_effective_transport_credential_with_probe_runtime(
+        &state.db,
+        &client,
+        cli_key,
+        &provider.transport_context(),
+        probe_runtime,
+    )
+    .await
 }
 
 /// After a 401 response, attempt to refresh OAuth token and return the new credential.
@@ -97,6 +107,12 @@ pub(super) async fn refresh_oauth_credential_after_401<R: tauri::Runtime>(
             .into());
     }
 
+    let _probe_mutation_guard =
+        crate::app::provider_service::begin_provider_availability_probe_mutation(
+            &state.app,
+            provider.id,
+        )
+        .await;
     match crate::providers::update_oauth_tokens_if_last_refreshed_matches(
         &state.db,
         provider.id,

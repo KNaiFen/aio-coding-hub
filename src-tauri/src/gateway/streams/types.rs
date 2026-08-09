@@ -67,7 +67,8 @@ struct UpstreamOutputTimingState {
     first_output_ms: Option<u128>,
     last_output_ms: Option<u128>,
     final_attempt_duration_ms: Option<u128>,
-    contaminated: bool,
+    output_contaminated: bool,
+    final_attempt_contaminated: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -127,15 +128,32 @@ impl UpstreamOutputTiming {
         );
     }
 
-    pub(in crate::gateway) fn invalidate(&self) {
+    pub(in crate::gateway) fn invalidate_output(&self) {
         let mut state = self
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        state.contaminated = true;
+        state.output_contaminated = true;
+    }
+
+    pub(in crate::gateway) fn invalidate_final_attempt(&self) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.output_contaminated = true;
+        state.final_attempt_contaminated = true;
+    }
+
+    pub(in crate::gateway) fn observe_protocol_completion_at(&self, elapsed_ms: u128) {
+        self.observe_final_attempt_end_at(elapsed_ms);
     }
 
     pub(in crate::gateway) fn observe_clean_eof_at(&self, elapsed_ms: u128) {
+        self.observe_final_attempt_end_at(elapsed_ms);
+    }
+
+    fn observe_final_attempt_end_at(&self, elapsed_ms: u128) {
         if elapsed_ms == 0 {
             return;
         }
@@ -143,7 +161,9 @@ impl UpstreamOutputTiming {
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        state.final_attempt_duration_ms = Some(elapsed_ms);
+        if state.final_attempt_duration_ms.is_none() {
+            state.final_attempt_duration_ms = Some(elapsed_ms);
+        }
     }
 
     pub(in crate::gateway) fn final_attempt_duration_ms(&self) -> Option<u128> {
@@ -151,7 +171,7 @@ impl UpstreamOutputTiming {
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if state.contaminated {
+        if state.final_attempt_contaminated {
             return None;
         }
         state
@@ -164,7 +184,7 @@ impl UpstreamOutputTiming {
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if state.contaminated {
+        if state.output_contaminated {
             return None;
         }
         state.last_output_ms.zip(state.first_output_ms).and_then(
@@ -249,10 +269,19 @@ mod tests {
     }
 
     #[test]
-    fn upstream_output_timing_is_unknown_after_backpressure_contamination() {
+    fn downstream_contamination_preserves_a_frozen_final_attempt() {
         let timing = UpstreamOutputTiming::from_buffered_prefix(Some(120), Some(420));
-        timing.observe_clean_eof_at(900);
-        timing.invalidate();
+        timing.observe_protocol_completion_at(900);
+        timing.invalidate_output();
+        assert_eq!(timing.duration_ms(), None);
+        assert_eq!(timing.final_attempt_duration_ms(), Some(900));
+    }
+
+    #[test]
+    fn upstream_failure_invalidates_output_and_final_attempt_timing() {
+        let timing = UpstreamOutputTiming::from_buffered_prefix(Some(120), Some(420));
+        timing.observe_protocol_completion_at(900);
+        timing.invalidate_final_attempt();
         assert_eq!(timing.duration_ms(), None);
         assert_eq!(timing.final_attempt_duration_ms(), None);
     }
@@ -265,5 +294,13 @@ mod tests {
         timing.observe_clean_eof_at(900);
         assert_eq!(timing.first_byte_ms(), Some(120));
         assert_eq!(timing.final_attempt_duration_ms(), Some(900));
+    }
+
+    #[test]
+    fn first_protocol_completion_freezes_the_final_attempt_before_eof() {
+        let timing = UpstreamOutputTiming::default();
+        timing.observe_protocol_completion_at(700);
+        timing.observe_clean_eof_at(900);
+        assert_eq!(timing.final_attempt_duration_ms(), Some(700));
     }
 }

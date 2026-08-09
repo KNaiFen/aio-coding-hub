@@ -27,8 +27,10 @@ pub(crate) async fn provider_models_refresh(
     provider_id: i64,
     provider_uuid: String,
 ) -> Result<crate::provider_models::ProviderModelCatalog, String> {
+    let probe_runtime =
+        crate::app::provider_availability_probe_runtime::ProviderAvailabilityProbeRuntimeState::from_app(&app);
     let db = ensure_db_ready(app, db_state.inner()).await?;
-    crate::provider_models::refresh(&db, provider_id, &provider_uuid)
+    crate::provider_models::refresh(&db, provider_id, &provider_uuid, probe_runtime)
         .await
         .map_err(Into::into)
 }

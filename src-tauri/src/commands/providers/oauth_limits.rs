@@ -24,7 +24,7 @@ pub(crate) async fn provider_oauth_fetch_limits(
     db_state: tauri::State<'_, DbInitState>,
     provider_id: i64,
 ) -> Result<ProviderOAuthLimitsResult, String> {
-    let db = ensure_db_ready(app, db_state.inner()).await?;
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
     let mut details = blocking::run("provider_oauth_fetch_limits_load", {
         let db = db.clone();
         move || crate::providers::get_oauth_details(&db, provider_id)
@@ -44,7 +44,7 @@ pub(crate) async fn provider_oauth_fetch_limits(
             details.oauth_refresh_lead_s,
         )
     {
-        match refresh_oauth_details_for_limits(&db, &client, &details, adapter).await {
+        match refresh_oauth_details_for_limits(&app, &db, &client, &details, adapter).await {
             Ok(refreshed) => details = refreshed,
             Err(err) => {
                 let now_unix = crate::shared::time::now_unix_seconds();
@@ -74,7 +74,7 @@ pub(crate) async fn provider_oauth_fetch_limits(
                 && oauth_details_can_refresh(&details)
             {
                 let refreshed =
-                    refresh_oauth_details_for_limits(&db, &client, &details, adapter).await?;
+                    refresh_oauth_details_for_limits(&app, &db, &client, &details, adapter).await?;
                 let refreshed_token = effective_oauth_access_token(&refreshed, adapter)?;
                 fetch_limits_result_for_details(&client, &refreshed, adapter, &refreshed_token)
                     .await

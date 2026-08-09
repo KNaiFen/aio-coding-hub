@@ -769,6 +769,7 @@ pub struct SseUsageTracker {
     last_model: Option<String>,
     last_reasoning_effort: Option<String>,
     completion_seen: bool,
+    protocol_completion_seen: bool,
     terminal_error_seen: bool,
     fake_200_detected: bool,
     meaningful_output_seen: bool,
@@ -819,8 +820,14 @@ fn is_completion_event_name(event: &[u8]) -> bool {
 
 fn is_terminal_error_event_name(event: &[u8]) -> bool {
     let event = trim_ascii(event);
-    eq_ignore_ascii_case_bytes(event, b"error")
-        || eq_ignore_ascii_case_bytes(event, b"response.error")
+    [
+        b"error".as_slice(),
+        b"response.error".as_slice(),
+        b"response.failed".as_slice(),
+        b"response.incomplete".as_slice(),
+    ]
+    .iter()
+    .any(|candidate| eq_ignore_ascii_case_bytes(event, candidate))
 }
 
 fn is_completion_event_type(event_type: &str) -> bool {
@@ -835,12 +842,15 @@ fn is_completion_event_type(event_type: &str) -> bool {
             | "message.completed"
             | "message_stop"
             | "message.stop"
-    ) || normalized.ends_with(".completed")
+    )
 }
 
 fn is_terminal_error_event_type(event_type: &str) -> bool {
     let normalized = normalize_ascii_lower(event_type);
-    matches!(normalized.as_str(), "error" | "response.error") || normalized.ends_with(".error")
+    matches!(
+        normalized.as_str(),
+        "error" | "response.error" | "response.failed" | "response.incomplete"
+    ) || normalized.ends_with(".error")
 }
 
 fn is_completion_status(status: &str) -> bool {
@@ -1075,6 +1085,7 @@ impl SseUsageTracker {
             last_model: None,
             last_reasoning_effort: None,
             completion_seen: false,
+            protocol_completion_seen: false,
             terminal_error_seen: false,
             fake_200_detected: false,
             meaningful_output_seen: false,
@@ -1088,6 +1099,13 @@ impl SseUsageTracker {
 
     pub fn completion_seen(&self) -> bool {
         self.completion_seen
+    }
+
+    /// Exact stream-level completion evidence suitable for freezing an upstream
+    /// attempt. Broader finish/status heuristics remain useful for response
+    /// classification but must drain to a clean EOF before they own timing.
+    pub fn protocol_completion_seen(&self) -> bool {
+        self.protocol_completion_seen
     }
 
     pub fn terminal_error_seen(&self) -> bool {
@@ -1229,6 +1247,7 @@ impl SseUsageTracker {
             }
             if rest == b"[DONE]" {
                 self.completion_seen = true;
+                self.protocol_completion_seen = true;
                 return;
             }
 
@@ -1312,6 +1331,7 @@ impl SseUsageTracker {
 
         if is_completion_event_name(event) {
             self.completion_seen = true;
+            self.protocol_completion_seen = true;
         }
         if is_terminal_error_event_name(event) {
             self.terminal_error_seen = true;
@@ -1328,6 +1348,7 @@ impl SseUsageTracker {
         if let Some(event_type) = data.get("type").and_then(|v| v.as_str()) {
             if is_completion_event_type(event_type) {
                 self.completion_seen = true;
+                self.protocol_completion_seen = true;
             }
             if is_terminal_error_event_type(event_type) {
                 self.terminal_error_seen = true;

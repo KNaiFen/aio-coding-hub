@@ -16,12 +16,14 @@ import {
 
 const availabilityStyle: Record<TrayProviderMiniAvailabilityState, string> = {
   healthy: "bg-emerald-500 dark:bg-emerald-400",
+  degraded: "bg-amber-500 dark:bg-amber-400",
   unhealthy: "bg-rose-500 dark:bg-rose-400",
   no_data: "bg-muted-foreground/20 dark:bg-muted-foreground/30",
 };
 
 const availabilityLabel: Record<TrayProviderMiniAvailabilityState, string> = {
   healthy: "正常",
+  degraded: "降级",
   unhealthy: "异常",
   no_data: "无数据",
 };

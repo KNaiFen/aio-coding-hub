@@ -106,6 +106,8 @@ function makeProvider(partial: Partial<ProviderSummary> = {}): ProviderSummary {
     source_provider_id: null,
     bridge_type: null,
     availability_test_model: null,
+    availability_probe_enabled: partial.availability_probe_enabled ?? false,
+    availability_probe_interval_minutes: partial.availability_probe_interval_minutes ?? 10,
     api_key_configured: partial.api_key_configured ?? false,
     ...partial,
     newapi_account_user_id: partial.newapi_account_user_id ?? null,
@@ -157,6 +159,8 @@ function makeInitialValues(
     claude_models: { main_model: "claude-copy" },
     model_mapping: { default_model: null, exact: {} },
     availability_test_model: "",
+    availability_probe_enabled: false,
+    availability_probe_interval_minutes: 10,
     enabled: true,
     cost_multiplier: 1.5,
     limit_5h_usd: 5,
@@ -524,6 +528,82 @@ describe("pages/providers/ProviderEditorDialog", () => {
           availabilityTestModel: "gpt-5.4",
         })
       )
+    );
+  });
+
+  it("defaults scheduled availability probes off and saves enabled settings", async () => {
+    vi.mocked(providerUpsert).mockResolvedValue(
+      makeProvider({
+        availability_probe_enabled: true,
+        availability_probe_interval_minutes: 30,
+      })
+    );
+
+    render(
+      <ProviderEditorDialog
+        mode="create"
+        open={true}
+        cliKey="claude"
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    const enabled = dialog.getByRole("switch", { name: "启用定时可用性测试" });
+    const interval = dialog.getByRole("spinbutton", { name: "定时可用性测试间隔" });
+    expect(enabled).toHaveAttribute("aria-checked", "false");
+    expect(interval).toBeDisabled();
+    expect(interval).toHaveValue(10);
+
+    fireEvent.change(dialog.getByPlaceholderText("default"), {
+      target: { value: "Probe Provider" },
+    });
+    fireEvent.change(dialog.getByPlaceholderText("sk-…"), { target: { value: "sk-test" } });
+    fireEvent.change(dialog.getByPlaceholderText(/中转 endpoint/), {
+      target: { value: "https://example.com/v1" },
+    });
+    fireEvent.click(enabled);
+    fireEvent.change(interval, { target: { value: "30" } });
+    fireEvent.click(dialog.getByRole("button", { name: "保存" }));
+
+    await waitFor(() =>
+      expect(vi.mocked(providerUpsert)).toHaveBeenCalledWith(
+        expect.objectContaining({
+          availabilityProbeEnabled: true,
+          availabilityProbeIntervalMinutes: 30,
+        })
+      )
+    );
+  });
+
+  it("restores scheduled probe settings and rejects an out-of-range interval", async () => {
+    render(
+      <ProviderEditorDialog
+        mode="edit"
+        open={true}
+        provider={makeProvider({
+          api_key_configured: true,
+          availability_probe_enabled: true,
+          availability_probe_interval_minutes: 60,
+        })}
+        onSaved={vi.fn()}
+        onOpenChange={vi.fn()}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    const enabled = dialog.getByRole("switch", { name: "启用定时可用性测试" });
+    const interval = dialog.getByRole("spinbutton", { name: "定时可用性测试间隔" });
+    expect(enabled).toHaveAttribute("aria-checked", "true");
+    expect(interval).toHaveValue(60);
+
+    fireEvent.change(interval, { target: { value: "1441" } });
+    fireEvent.click(dialog.getByRole("button", { name: "保存" }));
+
+    expect(vi.mocked(providerUpsert)).not.toHaveBeenCalled();
+    expect(vi.mocked(toast)).toHaveBeenCalledWith(
+      "定时可用性测试间隔必须为 1-1440 分钟"
     );
   });
 

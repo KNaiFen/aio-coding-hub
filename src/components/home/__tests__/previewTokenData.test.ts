@@ -1,6 +1,4 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import type { UsageLeaderboardRow } from "../../../services/usage/usage";
-
 async function loadModule() {
   vi.resetModules();
   return await import("../previewTokenData");
@@ -32,7 +30,7 @@ describe("components/home/previewTokenData", () => {
     expect(mod.previewFolderSelectionFactor(["missing-folder"])).toBe(0);
 
     const baseRow = mod.PREVIEW_TOKEN_PROVIDER_ROWS[0];
-    const nullCostRow = { ...baseRow, cost_usd: null } as UsageLeaderboardRow;
+    const nullCostRow = { ...baseRow, cost_usd: null };
 
     const scaledZero = mod.scalePreviewTokenRows([nullCostRow], 0)[0];
     expect(scaledZero.requests_total).toBe(0);
@@ -41,6 +39,8 @@ describe("components/home/previewTokenData", () => {
     expect(scaledZero.total_tokens).toBe(0);
     expect(scaledZero.total_duration_ms).toBe(0);
     expect(scaledZero.cost_usd).toBeNull();
+    expect(scaledZero.avg_output_tokens_per_second).toBeNull();
+    expect(scaledZero.preview_output_rate).toEqual({ sum: 0, count: 0 });
 
     const scaledUp = mod.scalePreviewTokenRows([baseRow], 1.5)[0];
     expect(scaledUp.requests_total).toBe(27);
@@ -49,6 +49,8 @@ describe("components/home/previewTokenData", () => {
     expect(scaledUp.total_tokens).toBe(73_800);
     expect(scaledUp.total_duration_ms).toBe(26_460);
     expect(scaledUp.cost_usd).toBeCloseTo(2.07);
+    expect(scaledUp.avg_output_tokens_per_second).toBe(96.5);
+    expect(scaledUp.preview_output_rate).toEqual({ sum: 96.5 * 23, count: 23 });
   });
 
   it("builds summary and day detail preview rows", async () => {
@@ -61,7 +63,7 @@ describe("components/home/previewTokenData", () => {
     expect(emptySummary.avg_ttfb_ms).toBeNull();
     expect(emptySummary.avg_output_tokens_per_second).toBeNull();
 
-    const weightedRows: UsageLeaderboardRow[] = [
+    const aggregateRows = [
       {
         ...mod.PREVIEW_TOKEN_PROVIDER_ROWS[0],
         requests_total: 1,
@@ -76,7 +78,8 @@ describe("components/home/previewTokenData", () => {
         total_duration_ms: 100,
         avg_duration_ms: null,
         avg_ttfb_ms: 100,
-        avg_output_tokens_per_second: 50,
+        avg_output_tokens_per_second: 375,
+        preview_output_rate: { sum: 375, count: 1 },
         cost_usd: null,
       },
       {
@@ -93,12 +96,31 @@ describe("components/home/previewTokenData", () => {
         total_duration_ms: 200,
         avg_duration_ms: 200,
         avg_ttfb_ms: null,
-        avg_output_tokens_per_second: null,
+        avg_output_tokens_per_second: 500,
+        preview_output_rate: { sum: 1_000, count: 2 },
         cost_usd: 2,
+      },
+      {
+        ...mod.PREVIEW_TOKEN_PROVIDER_ROWS[2],
+        requests_total: 0,
+        requests_success: 0,
+        requests_failed: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+        io_total_tokens: 0,
+        total_tokens: 0,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+        total_duration_ms: 0,
+        avg_duration_ms: null,
+        avg_ttfb_ms: null,
+        avg_output_tokens_per_second: null,
+        preview_output_rate: { sum: 0, count: 0 },
+        cost_usd: null,
       },
     ];
 
-    const summary = mod.buildPreviewTokenSummary(weightedRows);
+    const summary = mod.buildPreviewTokenSummary(aggregateRows);
     expect(summary.requests_total).toBe(3);
     expect(summary.requests_with_usage).toBe(3);
     expect(summary.requests_success).toBe(3);
@@ -107,7 +129,7 @@ describe("components/home/previewTokenData", () => {
     expect(summary.total_duration_ms).toBe(300);
     expect(summary.avg_duration_ms).toBeCloseTo(133.333, 2);
     expect(summary.avg_ttfb_ms).toBeCloseTo(33.333, 2);
-    expect(summary.avg_output_tokens_per_second).toBeCloseTo(16.667, 2);
+    expect(summary.avg_output_tokens_per_second).toBeCloseTo(458.333, 2);
     expect(summary.cache_creation_5m_input_tokens).toBe(8);
     expect(summary.cache_creation_1h_input_tokens).toBe(4);
 

@@ -3757,6 +3757,117 @@ fn recovery_journal_migrates_v49_and_v50_with_idempotent_claim_schema() {
 }
 
 #[test]
+fn migrate_v51_to_v52_adds_probe_and_tps_columns_and_invalidates_old_rollups() {
+    let mut conn = Connection::open_in_memory().expect("open v51 migration db");
+    v42_to_v43::create_usage_ledger_schema(&conn).expect("create usage ledger fixture");
+    conn.execute_batch(
+        r#"
+CREATE TABLE providers (id INTEGER PRIMARY KEY);
+
+CREATE TABLE usage_provider_daily_rollup_days (
+  local_day TEXT PRIMARY KEY,
+  day_start_ts INTEGER NOT NULL,
+  day_end_ts INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  source_row_count INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE usage_provider_daily_rollups (
+  local_day TEXT NOT NULL,
+  cli_key TEXT NOT NULL,
+  final_provider_id INTEGER NOT NULL,
+  provider_name_all_snapshot TEXT,
+  provider_name_success_snapshot TEXT,
+  created_at_min INTEGER NOT NULL,
+  created_at_max INTEGER NOT NULL,
+  requests_total INTEGER NOT NULL,
+  requests_success INTEGER NOT NULL,
+  success_duration_ms_sum INTEGER NOT NULL,
+  success_ttfb_ms_sum INTEGER NOT NULL,
+  success_ttfb_ms_count INTEGER NOT NULL,
+  success_generation_ms_sum INTEGER NOT NULL,
+  success_output_tokens_for_rate_sum INTEGER NOT NULL,
+  success_output_rate_count INTEGER NOT NULL,
+  cache_denom_tokens INTEGER NOT NULL,
+  cache_read_input_tokens INTEGER NOT NULL,
+  PRIMARY KEY(local_day, cli_key, final_provider_id)
+);
+
+CREATE TABLE usage_provider_daily_rollup_backfill_state (
+  id INTEGER PRIMARY KEY,
+  next_local_day TEXT,
+  updated_at INTEGER NOT NULL
+);
+
+INSERT INTO usage_provider_daily_rollup_days(
+  local_day, day_start_ts, day_end_ts, status, source_row_count, updated_at
+) VALUES ('2026-08-01', 100, 200, 'complete', 2, 1);
+
+INSERT INTO usage_provider_daily_rollups(
+  local_day, cli_key, final_provider_id,
+  provider_name_all_snapshot, provider_name_success_snapshot,
+  created_at_min, created_at_max, requests_total, requests_success,
+  success_duration_ms_sum, success_ttfb_ms_sum, success_ttfb_ms_count,
+  success_generation_ms_sum, success_output_tokens_for_rate_sum,
+  success_output_rate_count, cache_denom_tokens, cache_read_input_tokens
+) VALUES (
+  '2026-08-01', 'codex', 7, 'Old', 'Old',
+  110, 120, 2, 2, 1000, 100, 2, 1000, 400, 2, 500, 100
+);
+
+INSERT INTO usage_provider_daily_rollup_backfill_state(id, next_local_day, updated_at)
+VALUES (1, '2026-08-02', 1);
+
+PRAGMA user_version = 51;
+"#,
+    )
+    .expect("create v51 projection fixture");
+
+    v51_to_v52::migrate_v51_to_v52(&mut conn).expect("migrate v51->v52");
+
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("read v52 version");
+    assert_eq!(version, 52);
+    for column in [
+        "availability_probe_enabled",
+        "availability_probe_interval_minutes",
+    ] {
+        assert!(test_has_column(&conn, "providers", column));
+    }
+    assert!(test_has_column(
+        &conn,
+        "usage_provider_daily_rollups",
+        "success_output_tokens_per_second_sum"
+    ));
+    let projection_rows: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM usage_provider_daily_rollups",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count reset rollups");
+    assert_eq!(projection_rows, 0);
+    let day_state: (String, i64) = conn
+        .query_row(
+            "SELECT status, source_row_count FROM usage_provider_daily_rollup_days WHERE local_day = '2026-08-01'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("read invalidated rollup day");
+    assert_eq!(day_state, ("dirty".to_string(), 0));
+    let cursor: Option<String> = conn
+        .query_row(
+            "SELECT next_local_day FROM usage_provider_daily_rollup_backfill_state WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read reset projection cursor");
+    assert_eq!(cursor, None);
+}
+
+#[test]
 fn fresh_schema_contains_recovery_journal_and_coordinator() {
     let mut conn = Connection::open_in_memory().expect("open fresh migration db");
     apply_migrations(&mut conn).expect("create fresh schema");
@@ -3765,6 +3876,21 @@ fn fresh_schema_contains_recovery_journal_and_coordinator() {
     assert!(test_has_table(
         &conn,
         "external_effect_recovery_coordinator"
+    ));
+    assert!(test_has_column(
+        &conn,
+        "providers",
+        "availability_probe_enabled"
+    ));
+    assert!(test_has_column(
+        &conn,
+        "providers",
+        "availability_probe_interval_minutes"
+    ));
+    assert!(test_has_column(
+        &conn,
+        "usage_provider_daily_rollups",
+        "success_output_tokens_per_second_sum"
     ));
     apply_migrations(&mut conn).expect("repeat current schema ensure");
 }

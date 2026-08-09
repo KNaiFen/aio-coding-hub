@@ -134,6 +134,11 @@ fn decode_provider_row(
         availability_test_model: normalize_model_slot(
             row.get::<_, Option<String>>("availability_test_model")?,
         ),
+        availability_probe_enabled: row.get::<_, i64>("availability_probe_enabled")? != 0,
+        availability_probe_interval_minutes: row
+            .get::<_, i64>("availability_probe_interval_minutes")?
+            .try_into()
+            .unwrap_or(DEFAULT_AVAILABILITY_PROBE_INTERVAL_MINUTES),
         limit_5h_usd: row.get("limit_5h_usd")?,
         limit_daily_usd: row.get("limit_daily_usd")?,
         daily_reset_mode: DailyResetMode::parse(&daily_reset_mode_raw)
@@ -174,6 +179,8 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<ProviderSummary, rusqlite::
         claude_models: decoded.claude_models,
         model_mapping: decoded.model_mapping,
         availability_test_model: decoded.availability_test_model,
+        availability_probe_enabled: decoded.availability_probe_enabled,
+        availability_probe_interval_minutes: decoded.availability_probe_interval_minutes,
         enabled: row.get::<_, i64>("enabled")? != 0,
         priority: row.get("priority")?,
         cost_multiplier: row.get("cost_multiplier")?,
@@ -436,6 +443,8 @@ SELECT
   claude_models_json,
   model_mapping_json,
   availability_test_model,
+  availability_probe_enabled,
+  availability_probe_interval_minutes,
   tags_json,
   note,
   enabled,
@@ -730,6 +739,8 @@ SELECT
   claude_models_json,
   model_mapping_json,
   availability_test_model,
+  availability_probe_enabled,
+  availability_probe_interval_minutes,
   tags_json,
   note,
   enabled,
@@ -844,6 +855,8 @@ SELECT
   p.claude_models_json,
   p.model_mapping_json,
   p.availability_test_model,
+  p.availability_probe_enabled,
+  p.availability_probe_interval_minutes,
   p.limit_5h_usd,
   p.limit_daily_usd,
   p.daily_reset_mode,
@@ -904,6 +917,8 @@ SELECT
   p.claude_models_json,
   p.model_mapping_json,
   p.availability_test_model,
+  p.availability_probe_enabled,
+  p.availability_probe_interval_minutes,
   p.limit_5h_usd,
   p.limit_daily_usd,
   p.daily_reset_mode,
@@ -1243,6 +1258,8 @@ SELECT
   claude_models_json,
   model_mapping_json,
   availability_test_model,
+  availability_probe_enabled,
+  availability_probe_interval_minutes,
   limit_5h_usd,
   limit_daily_usd,
   daily_reset_mode,
@@ -1316,6 +1333,8 @@ SELECT
   claude_models_json,
   model_mapping_json,
   availability_test_model,
+  availability_probe_enabled,
+  availability_probe_interval_minutes,
   limit_5h_usd,
   limit_daily_usd,
   daily_reset_mode,
@@ -1353,20 +1372,42 @@ WHERE id = ?1
 /// Resolve the effective API credential for a provider.
 /// For `api_key` mode, returns the plaintext key.
 /// For `oauth` mode, checks token freshness and refreshes inline if needed.
-pub(crate) async fn resolve_effective_credential(
-    db: &db::Db,
-    client: &reqwest::Client,
-    cli_key: &str,
-    provider: &ProviderForGateway,
-) -> crate::shared::error::AppResult<String> {
-    resolve_effective_transport_credential(db, client, cli_key, &provider.transport_context()).await
-}
-
 pub(crate) async fn resolve_effective_transport_credential(
     db: &db::Db,
     client: &reqwest::Client,
     cli_key: &str,
     transport: &ProviderTransportContext,
+) -> crate::shared::error::AppResult<String> {
+    resolve_effective_transport_credential_inner(db, client, cli_key, transport, None).await
+}
+
+pub(crate) async fn resolve_effective_transport_credential_with_probe_runtime(
+    db: &db::Db,
+    client: &reqwest::Client,
+    cli_key: &str,
+    transport: &ProviderTransportContext,
+    probe_runtime: Option<
+        crate::app::provider_availability_probe_runtime::ProviderAvailabilityProbeRuntimeState,
+    >,
+) -> crate::shared::error::AppResult<String> {
+    resolve_effective_transport_credential_inner(
+        db,
+        client,
+        cli_key,
+        transport,
+        probe_runtime.as_ref(),
+    )
+    .await
+}
+
+async fn resolve_effective_transport_credential_inner(
+    db: &db::Db,
+    client: &reqwest::Client,
+    cli_key: &str,
+    transport: &ProviderTransportContext,
+    probe_runtime: Option<
+        &crate::app::provider_availability_probe_runtime::ProviderAvailabilityProbeRuntimeState,
+    >,
 ) -> crate::shared::error::AppResult<String> {
     if transport.auth_mode != "oauth" {
         let api_key = transport.api_key_plaintext.trim();
@@ -1423,6 +1464,12 @@ pub(crate) async fn resolve_effective_transport_credential(
                     Ok(refreshed) => {
                         let new_token = refreshed.access_token.trim().to_string();
                         if !new_token.is_empty() {
+                            let _probe_mutation_guard = match probe_runtime {
+                                Some(runtime) => {
+                                    runtime.begin_mutation(transport.provider_id).await
+                                }
+                                None => None,
+                            };
                             match update_oauth_tokens_if_last_refreshed_matches(
                                 db,
                                 transport.provider_id,
@@ -1520,6 +1567,8 @@ pub fn upsert(
         claude_models,
         model_mapping,
         availability_test_model,
+        availability_probe_enabled,
+        availability_probe_interval_minutes,
         limit_5h_usd,
         limit_daily_usd,
         daily_reset_mode,
@@ -1552,6 +1601,15 @@ pub fn upsert(
 
     let requested_auth_mode = auth_mode.unwrap_or(ProviderAuthMode::ApiKey);
     let is_oauth = requested_auth_mode == ProviderAuthMode::Oauth;
+
+    if !(MIN_AVAILABILITY_PROBE_INTERVAL_MINUTES..=MAX_AVAILABILITY_PROBE_INTERVAL_MINUTES)
+        .contains(&availability_probe_interval_minutes)
+    {
+        return Err(format!(
+            "SEC_INVALID_INPUT: availability_probe_interval_minutes must be within [{MIN_AVAILABILITY_PROBE_INTERVAL_MINUTES}, {MAX_AVAILABILITY_PROBE_INTERVAL_MINUTES}]"
+        )
+        .into());
+    }
 
     if cli_key == "grok" && claude_models.as_ref().is_some_and(ClaudeModels::has_any) {
         return Err(
@@ -1811,9 +1869,11 @@ INSERT INTO providers(
   stream_idle_timeout_seconds,
   upstream_retry_policy_json,
   model_routing_policy_json,
+  availability_probe_enabled,
+  availability_probe_interval_minutes,
   created_at,
   updated_at
-) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, '{}', ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31)
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, '{}', ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33)
 "#,
                 params![
                     provider_uuid,
@@ -1845,6 +1905,8 @@ INSERT INTO providers(
                     stream_idle_timeout_seconds,
                     upstream_retry_policy_override_json,
                     model_routing_policy_override_json,
+                    enabled_to_int(availability_probe_enabled),
+                    i64::from(availability_probe_interval_minutes),
                     now,
                     now
                 ],
@@ -2095,8 +2157,10 @@ SET
   stream_idle_timeout_seconds = ?24,
   upstream_retry_policy_json = ?25,
   model_routing_policy_json = ?26,
-  updated_at = ?27
-WHERE id = ?28
+  availability_probe_enabled = ?27,
+  availability_probe_interval_minutes = ?28,
+  updated_at = ?29
+WHERE id = ?30
 "#,
                 params![
                     name,
@@ -2125,6 +2189,8 @@ WHERE id = ?28
                     next_stream_idle_timeout_seconds,
                     next_upstream_retry_policy_override_json,
                     next_model_routing_policy_override_json,
+                    enabled_to_int(availability_probe_enabled),
+                    i64::from(availability_probe_interval_minutes),
                     now,
                     id
                 ],

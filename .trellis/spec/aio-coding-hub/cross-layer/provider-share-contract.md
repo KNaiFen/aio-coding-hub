@@ -162,6 +162,19 @@ v1 export path. The default filename is
 `aio-coding-hub-provider-<cli>-<sanitized-name>.json`, uses a cross-platform
 240-byte budget, and contains no timestamp.
 
+`availability_probe_enabled` and `availability_probe_interval_minutes` are
+local operational scheduling state, not portable Provider configuration. They
+are intentionally absent from every single-Provider share version. Export does
+not serialize either field, and import always creates them as disabled with the
+10-minute default regardless of the sender's local setting. Local Provider
+duplication is not share/import and preserves both fields.
+
+Provider upsert keeps these local fields backward compatible with older
+callers. When either field is absent, an update preserves that field's stored
+value while a create uses the disabled/10-minute default. Explicit `false` and
+explicit interval values remain authoritative. Upsert input bindings therefore
+keep both fields optional, while Provider summary output remains concrete.
+
 #### Secret And Native-I/O Boundary
 
 The full envelope and credentials stay in Rust memory. Export commands write
@@ -269,7 +282,8 @@ extension values.
 
 - Good: a complete API-key provider with compatible extensions exports to the
   same bytes through copy/save, previews without secrets, and imports as a
-  disabled provider with all fields and extension values preserved.
+  disabled provider with portable fields and extension values preserved while
+  local scheduled probing resets to disabled/10 minutes.
 - Good: importing an existing name selects the deterministic next copy name,
   rechecks that name in the transaction, and leaves the original provider and
   every route/template untouched.
@@ -290,7 +304,8 @@ extension values.
 - Domain tests: strict schema negatives, UTF-8 and 8 MiB boundaries,
   deterministic reserialization, cross-platform filename byte bounds, all
   configuration/credential/extension round-trips, referenced-provider refusal,
-  standalone `cx2cc`, collision naming, disabled/no-route import, and rollback.
+  standalone `cx2cc`, collision naming, disabled/no-route import, scheduled
+  probe exclusion with disabled/10-minute import defaults, and rollback.
 - Plugin tests: missing/unavailable owner, exact version mismatch, manifest
   ID/version mismatch, missing capability/namespace/target CLI, built-in owner
   recreation, and a compatibility change between preview and confirm. Assert

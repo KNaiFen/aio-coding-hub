@@ -1135,6 +1135,7 @@ fn provider_availability_detail_lines(
     lines.extend(availability.buckets.iter().take(12).map(|bucket| {
         let state = match bucket.state {
             aio_observer_protocol::ObserverProviderAvailabilityState::Healthy => "可用",
+            aio_observer_protocol::ObserverProviderAvailabilityState::Degraded => "降级",
             aio_observer_protocol::ObserverProviderAvailabilityState::Unhealthy => "不可用",
             aio_observer_protocol::ObserverProviderAvailabilityState::NoData => "无数据",
         };
@@ -1486,6 +1487,9 @@ fn provider_availability_line(
             aio_observer_protocol::ObserverProviderAvailabilityState::Healthy => {
                 ProviderTone::Success
             }
+            aio_observer_protocol::ObserverProviderAvailabilityState::Degraded => {
+                ProviderTone::Warning
+            }
             aio_observer_protocol::ObserverProviderAvailabilityState::Unhealthy => {
                 ProviderTone::Error
             }
@@ -1818,7 +1822,8 @@ mod tests {
                     failure_count: u32::from(index == 1),
                     state: match index {
                         0 => ObserverProviderAvailabilityState::Healthy,
-                        1 => ObserverProviderAvailabilityState::Unhealthy,
+                        1 => ObserverProviderAvailabilityState::Degraded,
+                        2 => ObserverProviderAvailabilityState::Unhealthy,
                         _ => ObserverProviderAvailabilityState::NoData,
                     },
                 })
@@ -2082,10 +2087,14 @@ mod tests {
         );
         assert_eq!(
             lines.last().expect("availability line").spans[3].style.fg,
-            Some(Color::Red)
+            Some(Color::Yellow)
         );
         assert_eq!(
             lines.last().expect("availability line").spans[4].style.fg,
+            Some(Color::Red)
+        );
+        assert_eq!(
+            lines.last().expect("availability line").spans[5].style.fg,
             Some(Color::DarkGray)
         );
 
