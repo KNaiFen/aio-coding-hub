@@ -35,6 +35,7 @@
 ## 运维与贡献
 
 - [Homebrew 发布指南](./release-homebrew.md)
+- [多 Worktree 任务交付规范](./operations/multi-worktree-delivery.md)
 - [仓库执行规则](../AGENTS.md)
 - [Trellis 工作流](../.trellis/workflow.md)
 - [Trellis 规范目录](../.trellis/spec/)
