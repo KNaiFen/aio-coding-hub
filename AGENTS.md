@@ -11,10 +11,24 @@
 - Local validation is limited to direct dependency-free Node.js source contracts and syntax parsing that do not write files, plus `git diff --check`. The canonical entry is `node scripts/check-cloud-only-verification.mjs`; run its self-test directly with `node scripts/check-cloud-only-verification.selftest.mjs`. Use `node --check <changed-file.mjs>` only for changed Node source. Do not invoke these checks through `pnpm`.
 - GitHub Actions owns dependency installation, frontend lint/typecheck/tests/build, Rust formatting and lock synchronization, generated bindings, Clippy, Rust tests, audit, signing, and desktop packaging. Apply only a bounded CI drift patch when Actions reports generated-file drift. Use the full `ci` workflow_dispatch for validation and the `dev-build` workflow only when a desktop integration artifact is actually needed.
 
+## Planning Mode
+
+- In Plan mode, actively refine the request, investigate the current behavior and relevant code, locate the actual problem, and turn the discussion into explicit objectives, scope, constraints, locked decisions, and acceptance criteria before proposing implementation.
+- Resolve discoverable technical facts from the repository and available evidence instead of asking the user to supply them. When uncertainty concerns user intent, desired product behavior, priority, tradeoffs, or what should count as success, ask the user directly and do not guess or silently choose on the user's behalf.
+- Keep confirmed facts, assumptions, open questions, and user decisions distinguishable. Do not start implementation while a material requirement question remains unresolved; present concrete options and consequences when that helps the user decide.
+
+## Task Routing And Markdown Records
+
+- Not every task needs a worktree. Main may implement a small, bounded, low-risk task directly in the `main/` checkout when no independent execution session or parallel isolation is needed. Protected remote `main` still requires a short-lived PR branch; direct main work does not authorize bypassing branch protection.
+- Use a sibling worktree when work is delegated to an independent execution session, runs in parallel, spans a long session, has broad or high-risk scope, or needs isolated state. Main decides the route before implementation and may migrate a growing task from direct work to a worktree.
+- Once the user and main have confirmed a change plan and implementation is authorized, persist the agreed plan in Markdown before editing. Before the task ends, record the actual result in Markdown whether it completed, partially completed, failed, was blocked, or was abandoned. Chat history alone is not a durable task record.
+- Simple direct-main tasks use one entry in `docs/history/change-records/YYYY-MM.md` with “Confirmed Plan” and “Implementation Result” sections. Delegated or complex tasks use the Trellis task artifacts and the independent-session delivery documents.
+- The canonical rules and templates live in `docs/operations/task-documentation-records.md`. Keep records useful and evidence-based; do not add custom JSON gates or fabricate fields merely to satisfy a template.
+
 ## Multi-worktree Delivery
 
 - The canonical independent-session workflow and Markdown templates live in `docs/operations/multi-worktree-delivery.md`. Use `execution.md` as the main-authored entry point, `delivery.md` as the execution-session handoff, and `findings.md` only when main requests changes.
-- The coordinator checkout is `main`; implementation happens in a sibling task worktree and never directly in the coordinator checkout.
+- For delegated worktree tasks, the coordinator checkout is `main` and implementation happens in a sibling task worktree rather than directly in the coordinator checkout.
 - An independent execution session may commit and push its assigned task branch, create or update its PR, and fix failures until the latest PR commit has passed the required CI and relevant compile jobs. It must not push `main`, merge a PR, enable auto-merge, or remove a worktree.
 - Implementation is complete only when the latest PR commit is green in the required cloud checks and the task worktree contains a Markdown handoff with the PR link, changed files and code locations, deviations from the plan, verification results, and open issues.
 - After handoff, the execution session pauses. Main reviews the latest PR diff against the task artifacts and current contracts; main may perform the review itself or ask a read-only sub-agent to report findings.
@@ -34,7 +48,7 @@
 - Recording an item is not authorization to implement it. When the user asks only to record or discuss an issue, update `PENDING.md` and do not change product code for that item.
 - Before producing any formal implementation plan, and before starting changes after an explicit instruction such as "start", "implement", or "begin modifying", read `PENDING.md` and include every unresolved `pending` or `planned` entry in the proposed work checklist. Do not silently omit an entry; surface conflicts, dependencies, or scope risks and ask before deferring it again.
 - Give each new entry a stable sequential ID, and record its status, date, observed problem, locked user decisions, proposed direction, and acceptance criteria. After a `done` entry has merge/release evidence, or a `dropped` entry has an explicit user decision and reason, move the complete entry to `PENDING_COMPLETED.md`; never delete or compress its history.
-- When an entry is selected for implementation, link it to the corresponding Trellis task and change its status to `planned`. Mark it `done` only after the implementation is merged and verified, including the PR, commit, or release evidence. Use `dropped` only with an explicit user decision and record the reason.
+- When an entry is selected for implementation, change its status to `planned` and link it to the durable record for the chosen route: a monthly change-record entry for a simple direct-main task, or the corresponding Trellis task for complex or delegated work. Mark it `done` only after the implementation is merged and verified, including the PR, commit, or release evidence. Use `dropped` only with an explicit user decision and record the reason.
 <!-- TRELLIS:START -->
 # Trellis Instructions
 

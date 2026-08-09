@@ -39,7 +39,7 @@ python ./.trellis/scripts/get_context.py --mode packages   # list packages / lay
 
 ### Task System
 
-Every task has its own directory under `.trellis/tasks/{MM-DD-name}/` holding `task.json`, `prd.md`, optional `design.md`, optional `implement.md`, optional `research/`, and context manifests (`implement.jsonl`, `check.jsonl`) for sub-agent-capable platforms.
+Every Trellis-managed task has its own directory under `.trellis/tasks/{MM-DD-name}/` holding `task.json`, `prd.md`, optional `design.md`, optional `implement.md`, optional `research/`, and context manifests (`implement.jsonl`, `check.jsonl`) for sub-agent-capable platforms. Small tasks that explicitly skip Trellis follow the repository's direct-main Markdown record rules instead.
 
 ```bash
 # Task lifecycle
@@ -292,7 +292,7 @@ When a user request matches one of these intents inside an active task, route fi
 
 - Task creation approval is not implementation approval; implementation waits for `task.py start` after artifact review.
 - PRD-only is valid for lightweight tasks; complex tasks need `design.md` + `implement.md`.
-- Planning must be persisted to task artifacts; checks must run before reporting completion.
+- For Trellis-managed work, planning must be persisted to task artifacts; small tasks that skip Trellis must use the repository's direct-main Markdown record. Checks must run before reporting completion on either route.
 
 ### Loading Step Detail
 

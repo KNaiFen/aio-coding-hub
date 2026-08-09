@@ -4,6 +4,8 @@
 
 它追求的是信息充分和职责清楚，不是增加审批系统。任务文档使用 Markdown；GitHub PR 是代码、提交和 CI 状态的实时事实源，不新增自定义 JSON 门禁。
 
+并非所有任务都需要 worktree。由 main session 自己完成的简单、低风险任务按 [任务方案与实施结果留痕规范](./task-documentation-records.md) 直接在 `main/` 检出施工；独立执行、并行、长流程或高风险任务才使用本规范和同级 worktree。
+
 ## 核心原则
 
 1. **一个详细事实源**：完整任务方案只保存在任务 worktree 的 Trellis 任务目录中。main 的索引只保存任务名、分支、worktree 和 PR 链接。
@@ -23,7 +25,7 @@
 | `delivery.md` | 执行 session | 每次声明可验收前 | 说明实际完成内容、计划偏移、代码位置和验证证据 |
 | `findings.md` | main | 验收不通过时 | 给出可定位、可整改、可复验的问题和修改目标 |
 
-简单任务可以只有 `prd.md` 和 `execution.md`；复杂任务仍使用 `prd.md`、`design.md`、`implement.md` 分离需求、设计和步骤。`execution.md` 只做施工导航和任务边界摘要，不复制整份设计。
+委派给独立执行 session 的轻量任务在开工前可以只由 main 准备 `prd.md` 和 `execution.md`，执行 session 在声明可验收前仍必须补齐 `delivery.md`。复杂任务额外使用 `design.md` 和 `implement.md` 分离技术设计与实施步骤。`execution.md` 只做施工导航和任务边界摘要，不复制整份设计。
 
 模板：
 
