@@ -8,7 +8,7 @@
 
 ## 先读什么
 
-- [插件开发总指南](./developer-guide.md)：唯一主线入口，从创建 Extension Host 插件到本地回放、配置表单、打包和发布。
+- [插件开发总指南](./developer-guide.md)：唯一主线入口，从创建 Extension Host 插件到宿主回放材料、配置表单、打包和发布。
 - [Privacy Filter 示例](./examples/privacy-filter.md)：查看官方 Extension Host 插件如何说明隐私过滤边界。
 - [插件 API 参考](./reference/README.md)：查 `plugin.json`、hooks、capabilities、host-mediated context labels、config schema、SDK 和发布规则。
 
@@ -51,6 +51,7 @@
 - 第三方插件代码不在 Rust 主进程或 Tauri WebView 中执行。
 - Manifest 校验只接受 Extension Host runtime、已激活 hooks、已知 contributions 和 capability 组合；reserved permissions 只作为内部/legacy host-mediated labels 保留。
 - `protocolBridges` 当前是 MVP skeleton，不是可执行协议转换能力。
-- `hostCompatibility.platforms` 当前随 `manifest`、预检和市场元数据展示，但不参与本地安装阻断或市场兼容性筛选。
+- `hostCompatibility.platforms` 是可选但强制执行的平台白名单；声明后，不匹配当前桌面平台的插件不能安装、更新、重验或启用。
+- 插件声明并获准 `diagnostics.read` 后，可通过 `api.diagnostics.getRuntimeReports(limit?)` 读取自身最近运行报告；不能读取其他插件的报告，limit 会收敛到 `1..100`。
 - 当前只有 `official.privacy-filter` 是宿主内置官方隐私过滤插件。社区同类能力应实现为 Extension Host 插件。
 - WASM、process 和第三方 native 运行时只作为 unsupported pre-release legacy runtime 说明出现，不是当前推荐路径。

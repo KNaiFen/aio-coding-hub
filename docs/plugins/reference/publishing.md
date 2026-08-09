@@ -13,9 +13,9 @@
 
 当前实现支持本地/离线包导入、受约束的远程 `.aio-plugin` 下载、checksum/signature verification、更新时的 capability/contribution diff、已撤销插件 quarantine，以及 rollback snapshots。
 
-## 0.62.2 生命周期行为
+## 当前生命周期行为
 
-0.62.2 把安装、更新、回滚和隔离相关信息收口为宿主侧 lifecycle explanation layer。它不改变 `plugin.json` v1 的字段形状，也不新增插件可调用 API。
+当前宿主把安装、更新、回滚和隔离相关信息收口为 lifecycle explanation layer。该层不改变 `plugin.json` v1 的字段形状，也不隐式新增插件可调用 API。
 
 ### 安装预检
 
@@ -55,9 +55,11 @@
 
 ## publish-check
 
-`pnpm --filter create-aio-plugin cli publish-check <plugin-dir>` 会读取插件目录，复用打包/校验路径计算 package metadata，并输出适合放进市场索引的字段，例如 plugin id、version、checksum、signature 状态、runtime、contributions、capabilities、risk labels 和 compatibility summary。
+> 仓库贡献者不得在本地 checkout 运行 package-manager 脚本。下面的 monorepo 命令只记录 GitHub Actions 所有的 CI 合同；外部插件工作区不受本仓库 `AGENTS.md` 约束。
 
-示例模板可以运行 publish-check，例如 `example:prompt-helper`、`example:redactor` 和 `example:response-guard` 生成的目录都应能输出发布 metadata。这个 metadata 只说明包具备发布前检查信息；它不代表示例已经被上传、签名、加入默认 market index，或变成默认可安装市场包。
+GitHub Actions 中的 `pnpm --filter create-aio-plugin cli publish-check <plugin-dir>` 会读取插件目录，复用打包/校验路径计算 package metadata，并输出适合放进市场索引的字段，例如 plugin id、version、checksum、signature 状态、runtime、contributions、capabilities、risk labels 和 compatibility summary。
+
+GitHub Actions 可以对示例模板运行 publish-check；`example:prompt-helper`、`example:redactor` 和 `example:response-guard` 生成的目录都应能输出发布 metadata。这个 metadata 只说明包具备发布前检查信息；它不代表示例已经被上传、签名、加入默认 market index，或变成默认可安装市场包。
 
 `publish-check` 不写 `.aio-plugin` artifact，不替代 `pack`、`sign` 或 `verify`。它的职责是让发布者在提交市场索引前看到宿主安装时会关心的 metadata。真实安装仍由宿主重新下载包、校验 checksum、校验 signature、判断 compatibility、应用 capability/contribution policy，并处理 revoked / incompatible install blocks。
 
@@ -84,7 +86,7 @@ market index URL 只用于定位索引来源。trusted public key 用于校验 r
 
 远程或市场安装必须提供 checksum。宿主会下载 `.aio-plugin` 后重新计算 `sha256`，和索引中的 checksum 对比。提供 signature 和 trusted public key 时，宿主会校验 Ed25519 signature；没有 trusted public key 时，插件仍可能被当作 unsigned package 展示给用户。
 
-revoked / incompatible install blocks 必须在市场 UI 和宿主安装路径同时生效。UI 可以提前禁用安装按钮并解释原因；宿主命令仍要在真实安装时重新检查 revoked、宿主应用版本、`pluginApi` 兼容性、运行时策略和包安全限制。`hostCompatibility.platforms` 当前只作为元数据展示，不参与这些安装阻断。
+revoked / incompatible install blocks 必须在市场 UI 和宿主安装路径同时生效。UI 可以提前禁用安装按钮并解释原因；宿主命令仍要在真实安装时重新检查 revoked、宿主应用版本、`pluginApi`、`hostCompatibility.platforms`、运行时策略和包安全限制。声明 `platforms` 后，当前桌面平台不匹配会阻断安装。
 
 ## Replay Fixtures In Publishing
 

@@ -59,10 +59,15 @@ const requiredDocs = [
       "official.privacy-filter",
       "acme.prompt-helper",
       "quarantined",
+      "PLUGIN_INCOMPATIBLE_PLATFORM",
       "Extension Host public manifest 不支持 top-level `permissions`",
       "High-risk 和 critical labels",
     ],
-    forbiddenPhrases: ['"kind": "wasm"'],
+    forbiddenPhrases: [
+      '"kind": "wasm"',
+      "0.62.x 只支持 Plugin API major",
+      "当前代码实际阻断的是 `hostCompatibility.app` 和 `hostCompatibility.pluginApi`",
+    ],
   },
   {
     path: "docs/plugins/README.md",
@@ -75,7 +80,11 @@ const requiredDocs = [
       "Manifest",
       "Hooks",
       "Permissions",
+      "diagnostics.read",
+      "api.diagnostics.getRuntimeReports",
+      "强制执行的平台白名单",
     ],
+    forbiddenPhrases: ["不参与本地安装阻断或市场兼容性筛选"],
   },
   {
     path: "docs/plugins/developer-guide.md",
@@ -95,8 +104,11 @@ const requiredDocs = [
       "request.normalizedMessages",
       "configSchema",
       "x-aio-ui",
-      "pnpm --filter create-aio-plugin cli validate",
-      "pnpm --filter create-aio-plugin cli pack",
+      "仓库本地 checkout 不得运行任何 `pnpm` 命令",
+      "GitHub Actions 中的 monorepo 工具合同",
+      "GitHub Actions 在仓库 CI 中运行",
+      "create-aio-plugin cli validate",
+      "create-aio-plugin cli pack",
       "PLUGIN_REPLAY_UNSUPPORTED",
       ".aio-plugin",
       "official.privacy-filter",
@@ -106,6 +118,7 @@ const requiredDocs = [
       "example:redactor",
       "example:response-guard",
       "示例是开发模板，不是默认可安装市场包",
+      "安装、更新、重验和启用时的强制白名单",
     ],
     forbiddenPhrases: [
       "WASM 适合需要确定性代码逻辑的插件",
@@ -113,6 +126,8 @@ const requiredDocs = [
       "最小声明式规则插件",
       "pnpm --filter create-aio-plugin cli replay",
       legacyCreateAioPluginExecCommand,
+      "Warnings do not fail the command in 0.62.1",
+      "platforms` 当前只作为元数据展示",
     ],
   },
   {
@@ -144,11 +159,11 @@ const requiredDocs = [
     path: "docs/plugins/developer-guide.md",
     phrases: [
       "create-aio-plugin",
-      "pnpm --filter create-aio-plugin cli",
-      "pnpm --filter create-aio-plugin cli validate",
-      "pnpm --filter create-aio-plugin cli pack",
-      "pnpm --filter create-aio-plugin cli publish-check",
-      "从 Plugins 页面本地安装",
+      "create-aio-plugin cli",
+      "create-aio-plugin cli validate",
+      "create-aio-plugin cli pack",
+      "create-aio-plugin cli publish-check",
+      "Plugins 页面执行本地包导入",
       "Claude 和 Codex request shapes",
       "@aio-coding-hub/plugin-sdk",
       "plugin.json",
@@ -179,6 +194,8 @@ const requiredDocs = [
       "privacy.redact",
       "api.privacy.redactRequestBody",
       "已移除的内置示例",
+      "仓库本地 checkout 不得运行 package-manager 脚本",
+      "GitHub Actions 或仓库外独立插件工作区",
     ],
     forbiddenPhrases: ["native:privacyFilter", "host-owned built-in"],
   },
@@ -207,9 +224,10 @@ const requiredDocs = [
       "unsupported pre-release legacy runtime",
       "信任边界",
       "性能与稳定性建议",
-      "0.62 does not add public provider plugin APIs",
+      "The current host does not expose public provider plugin APIs",
     ],
     caseInsensitivePhrases: ["provider adapter facades remain internal"],
+    forbiddenPhrases: ["## 0.62 Platform Kernel Decision"],
   },
   {
     path: "docs/plugins/reference/manifest.md",
@@ -221,8 +239,12 @@ const requiredDocs = [
       "contributes.gatewayHooks",
       "capabilities",
       "Protocol bridge MVP skeleton",
+      "PLUGIN_INCOMPATIBLE_PLATFORM",
     ],
-    forbiddenPhrases: ['{ "kind": "wasm"'],
+    forbiddenPhrases: [
+      '{ "kind": "wasm"',
+      "platforms` 当前是解析和展示元数据",
+    ],
   },
   {
     path: "docs/plugins/reference/hooks.md",
@@ -278,9 +300,14 @@ const requiredDocs = [
       "plugin_export_replay_fixture",
       "默认市场视图",
       "自定义 market index 属于高级来源",
-      "示例模板可以运行 publish-check",
+      "GitHub Actions 可以对示例模板运行 publish-check",
       "不代表示例已经被上传、签名、加入默认 market index",
+      "hostCompatibility.platforms",
+      "阻断安装",
+      "仓库贡献者不得在本地 checkout 运行 package-manager 脚本",
+      "GitHub Actions 所有的 CI 合同",
     ],
+    forbiddenPhrases: ["## 0.62.2 生命周期行为", "当前只作为元数据展示"],
   },
   {
     path: "docs/plugins/runtime/README.md",
@@ -289,6 +316,13 @@ const requiredDocs = [
       "plugin_hook_execution_reports",
       "host-owned lifecycle",
       "Dispose",
+      "diagnostics.read",
+      "api.diagnostics.getRuntimeReports",
+      "1..100",
+    ],
+    forbiddenPhrases: [
+      "without exposing a new plugin-callable diagnostics API",
+      "0.62.3 treats runtime lifecycle",
     ],
   },
   {
@@ -297,16 +331,92 @@ const requiredDocs = [
       "SemVer",
       "pluginApi",
       "platforms",
-      "Plugin API v1 remains externally compatible in 0.62",
-      "0.62 does not add public provider plugin APIs",
+      "Plugin API v1 remains externally compatible with the current host",
+      "The current host does not expose public provider plugin APIs",
       "Extension Host is the only community runtime",
       "unsupported pre-release legacy runtime",
+      "PLUGIN_INCOMPATIBLE_PLATFORM",
+      "api.diagnostics.getRuntimeReports",
     ],
-    forbiddenPhrases: ['{ "kind": "wasm"'],
+    forbiddenPhrases: [
+      '{ "kind": "wasm"',
+      "0.62",
+      "当前不会因为缺少当前桌面平台而阻断",
+    ],
+  },
+  {
+    path: "docs/plugins/plugin-api-v1-contract.json",
+    phrases: [
+      '"diagnostics.read"',
+      '"api.diagnostics.getRuntimeReports"',
+      '"diagnosticsReadBoundary"',
+      '"defaultLimit": 20',
+      '"limitRange": [1, 100]',
+      "PLUGIN_INCOMPATIBLE_PLATFORM",
+    ],
+    forbiddenPhrases: ["只作为元数据和展示字段"],
   },
 ];
 
 const failures = [];
+
+const requiredSourceContracts = [
+  {
+    path: "src-tauri/src/domain/plugins.rs",
+    checks: [
+      {
+        label: "platform compatibility rejects an undeclared current platform",
+        pattern:
+          /fn validate_host_compatibility[\s\S]*?current_plugin_platform\(\)[\s\S]*?compatibility\.platforms[\s\S]*?PLUGIN_INCOMPATIBLE_PLATFORM/,
+      },
+      {
+        label: "current platform is derived from the host OS",
+        pattern: /fn current_plugin_platform\(\)[\s\S]*?std::env::consts::OS/,
+      },
+    ],
+  },
+  {
+    path: "src-tauri/src/app/plugins/extension_host.rs",
+    checks: [
+      {
+        label: "diagnostics API requires diagnostics.read and scopes reports to the owning plugin",
+        pattern:
+          /fn diagnostics_get_runtime_reports[\s\S]*?require_capability\("diagnostics\.read"\)\?[\s\S]*?host_api_plugin_id\(&params\)\?[\s\S]*?list_extension_execution_reports\([\s\S]*?Some\(plugin_id\)/,
+      },
+      {
+        label: "diagnostics API defaults to 20 and clamps the requested limit to 1..100",
+        pattern: /fn diagnostics_get_runtime_reports[\s\S]*?unwrap_or\(20\)[\s\S]*?\.clamp\(1, 100\)/,
+      },
+      {
+        label: "host API rejects a pluginId that differs from the Extension Host owner",
+        pattern:
+          /fn host_api_plugin_id[\s\S]*?plugin_id != self\.plugin_id[\s\S]*?PLUGIN_EXTENSION_HOST_FORBIDDEN/,
+      },
+    ],
+  },
+  {
+    path: "packages/plugin-sdk/src/index.ts",
+    checks: [
+      {
+        label: "SDK exposes diagnostics only through the optional capability-gated namespace",
+        pattern:
+          /Available only when the plugin declares the `diagnostics\.read` capability[\s\S]*?getRuntimeReports\(limit\?: number\)[\s\S]*?diagnostics\?: DiagnosticsApi/,
+      },
+    ],
+  },
+];
+
+const versionIndependentCurrentDocs = [
+  "docs/plugin-manifest-v1.md",
+  "docs/plugins/README.md",
+  "docs/plugins/developer-guide.md",
+  "docs/plugins/reference/compatibility.md",
+  "docs/plugins/reference/manifest.md",
+  "docs/plugins/reference/publishing.md",
+  "docs/plugins/runtime/README.md",
+  "docs/plugins/architecture/README.md",
+  "docs/plugins/architecture/audit.md",
+];
 
 const localReplayBoundaryFiles = [
   "docs/plugins/README.md",
@@ -401,6 +511,31 @@ for (const doc of requiredDocs) {
     if (text.includes(phrase)) {
       failures.push(`${doc.path}: forbidden phrase "${phrase}"`);
     }
+  }
+}
+
+for (const sourceContract of requiredSourceContracts) {
+  const fullPath = join(repoRoot, sourceContract.path);
+  if (!existsSync(fullPath)) {
+    failures.push(`${sourceContract.path}: missing required source contract`);
+    continue;
+  }
+  const source = readFileSync(fullPath, "utf8");
+  for (const check of sourceContract.checks) {
+    if (!check.pattern.test(source)) {
+      failures.push(`${sourceContract.path}: missing source contract for ${check.label}`);
+    }
+  }
+}
+
+for (const path of versionIndependentCurrentDocs) {
+  const fullPath = join(repoRoot, path);
+  if (!existsSync(fullPath)) {
+    failures.push(`${path}: missing current plugin document`);
+    continue;
+  }
+  if (/\b0\.62(?:\.\d+|\.x)?\b/.test(readFileSync(fullPath, "utf8"))) {
+    failures.push(`${path}: current plugin documentation must not bind Plugin API v1 to 0.62`);
   }
 }
 
