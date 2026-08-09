@@ -213,9 +213,7 @@ ORDER BY {order_by_fields}, b.requests_success DESC, b.cli_key ASC, b.provider_i
             None
         };
         let avg_output_tokens_per_second = if row.success_output_rate_count > 0 {
-            Some(
-                row.success_output_tokens_per_second_sum / row.success_output_rate_count as f64,
-            )
+            Some(row.success_output_tokens_per_second_sum / row.success_output_rate_count as f64)
         } else {
             None
         };

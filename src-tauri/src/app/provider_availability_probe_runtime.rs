@@ -166,10 +166,7 @@ impl ProviderAvailabilityProbeRuntimeState {
         if provider_id <= 0 {
             return None;
         }
-        let guard = self
-            .provider_mutation_gate(provider_id)
-            .lock_owned()
-            .await;
+        let guard = self.provider_mutation_gate(provider_id).lock_owned().await;
         self.invalidate_generation(provider_id).await;
         Some(ProviderAvailabilityProbeMutationGuard { _guard: guard })
     }
@@ -258,10 +255,7 @@ impl ProviderAvailabilityProbeRuntimeState {
         provider_id: i64,
         expected_generation: Option<u64>,
     ) -> ProbeDecision {
-        let _gate = self
-            .provider_mutation_gate(provider_id)
-            .lock_owned()
-            .await;
+        let _gate = self.provider_mutation_gate(provider_id).lock_owned().await;
         let mut inner = self.shared.inner.lock().await;
         if !inner.entries.contains_key(&provider_id) {
             let generation = inner.allocate_generation();
@@ -490,10 +484,11 @@ fn reconcile_schedules_inner(
             interval_minutes: loaded.interval_minutes,
             revision: loaded.revision,
         };
-        let config_changed = inner
-            .entries
-            .get(&loaded.provider_id)
-            .is_none_or(|entry| entry.schedule.is_none_or(|schedule| schedule.config != config));
+        let config_changed = inner.entries.get(&loaded.provider_id).is_none_or(|entry| {
+            entry
+                .schedule
+                .is_none_or(|schedule| schedule.config != config)
+        });
         if config_changed {
             let generation = inner.allocate_generation();
             let entry = inner.entries.entry(loaded.provider_id).or_default();
@@ -673,11 +668,7 @@ CREATE TABLE providers (
         connection
     }
 
-    fn insert_schedule_provider(
-        connection: &rusqlite::Connection,
-        provider_id: i64,
-        active: bool,
-    ) {
+    fn insert_schedule_provider(connection: &rusqlite::Connection, provider_id: i64, active: bool) {
         connection
             .execute(
                 r#"
@@ -691,11 +682,7 @@ INSERT INTO providers(
             .expect("insert schedule test provider");
     }
 
-    fn loaded(
-        provider_id: i64,
-        revision: i64,
-        next_boundary_ms: i64,
-    ) -> LoadedSchedule {
+    fn loaded(provider_id: i64, revision: i64, next_boundary_ms: i64) -> LoadedSchedule {
         LoadedSchedule {
             provider_id,
             active: true,
@@ -708,22 +695,17 @@ INSERT INTO providers(
     #[test]
     fn startup_and_configuration_changes_schedule_only_the_next_boundary() {
         let mut inner = RuntimeInner::default();
-        let targets = reconcile_schedules_inner(
-            &mut inner,
-            vec![loaded(7, 1, 60_000)],
-            55_000,
-            false,
-        );
+        let targets =
+            reconcile_schedules_inner(&mut inner, vec![loaded(7, 1, 60_000)], 55_000, false);
         assert!(targets.is_empty());
 
-        let targets = reconcile_schedules_inner(
-            &mut inner,
-            vec![loaded(7, 2, 120_000)],
-            65_000,
-            false,
-        );
+        let targets =
+            reconcile_schedules_inner(&mut inner, vec![loaded(7, 2, 120_000)], 65_000, false);
         assert!(targets.is_empty());
-        assert_eq!(inner.entries[&7].schedule.unwrap().next_boundary_ms, 120_000);
+        assert_eq!(
+            inner.entries[&7].schedule.unwrap().next_boundary_ms,
+            120_000
+        );
     }
 
     #[test]
@@ -731,12 +713,8 @@ INSERT INTO providers(
         let mut inner = RuntimeInner::default();
         reconcile_schedules_inner(&mut inner, vec![loaded(3, 1, 60_000)], 50_000, false);
         let due_at = scheduled_due_at_ms(3, 60_000);
-        let targets = reconcile_schedules_inner(
-            &mut inner,
-            vec![loaded(3, 1, 120_000)],
-            due_at,
-            false,
-        );
+        let targets =
+            reconcile_schedules_inner(&mut inner, vec![loaded(3, 1, 120_000)], due_at, false);
         assert_eq!(targets.len(), 1);
         assert_eq!(targets[0].boundary_ms, 60_000);
 
@@ -747,7 +725,10 @@ INSERT INTO providers(
             true,
         );
         assert!(targets.is_empty());
-        assert_eq!(inner.entries[&3].schedule.unwrap().next_boundary_ms, 180_000);
+        assert_eq!(
+            inner.entries[&3].schedule.unwrap().next_boundary_ms,
+            180_000
+        );
     }
 
     #[test]
@@ -776,7 +757,10 @@ INSERT INTO providers(
 
     #[test]
     fn scheduled_identity_and_jitter_are_stable_and_bounded() {
-        assert_eq!(scheduled_trace_id(9, 123_000), "availability-probe:9:123000");
+        assert_eq!(
+            scheduled_trace_id(9, 123_000),
+            "availability-probe:9:123000"
+        );
         let jitter = stable_jitter_ms(9);
         assert!((0..=3_000).contains(&jitter));
         assert_eq!(jitter, stable_jitter_ms(9));
@@ -786,7 +770,12 @@ INSERT INTO providers(
     fn scheduled_probe_concurrency_is_capped_at_four() {
         let limiter = Arc::new(Semaphore::new(MAX_CONCURRENT_SCHEDULED_PROBES));
         let permits = (0..MAX_CONCURRENT_SCHEDULED_PROBES)
-            .map(|_| limiter.clone().try_acquire_owned().expect("scheduled permit"))
+            .map(|_| {
+                limiter
+                    .clone()
+                    .try_acquire_owned()
+                    .expect("scheduled permit")
+            })
             .collect::<Vec<_>>();
         assert!(limiter.clone().try_acquire_owned().is_err());
         drop(permits);
@@ -870,7 +859,10 @@ INSERT INTO providers(
             let mut inner = state.shared.inner.lock().await;
             let (_, should_record) = take_finished_flight(&mut inner, 4, generation)
                 .expect("invalidated flight remains available for completion");
-            assert!(!should_record, "an invalidated probe must not write an observation");
+            assert!(
+                !should_record,
+                "an invalidated probe must not write an observation"
+            );
         }
         assert!(matches!(
             state.begin_probe(4, Some(generation)).await,

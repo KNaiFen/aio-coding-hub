@@ -73,10 +73,8 @@ pub(crate) async fn provider_oauth_fetch_limits(
             if should_retry_oauth_limits_after_refresh(&err_str)
                 && oauth_details_can_refresh(&details)
             {
-                let refreshed = refresh_oauth_details_for_limits(
-                    &app, &db, &client, &details, adapter,
-                )
-                .await?;
+                let refreshed =
+                    refresh_oauth_details_for_limits(&app, &db, &client, &details, adapter).await?;
                 let refreshed_token = effective_oauth_access_token(&refreshed, adapter)?;
                 fetch_limits_result_for_details(&client, &refreshed, adapter, &refreshed_token)
                     .await

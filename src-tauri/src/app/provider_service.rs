@@ -270,9 +270,7 @@ pub(crate) async fn provider_upsert(
 
     let is_create = provider_id.is_none();
     let probe_mutation_guard = match provider_id {
-        Some(provider_id) => {
-            begin_provider_availability_probe_mutation(&app, provider_id).await
-        }
+        Some(provider_id) => begin_provider_availability_probe_mutation(&app, provider_id).await,
         None => None,
     };
     let name_for_log = name.clone();
@@ -500,8 +498,7 @@ pub(crate) async fn provider_set_enabled(
     enabled: bool,
 ) -> Result<providers::ProviderSummary, String> {
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
-    let probe_mutation_guard =
-        begin_provider_availability_probe_mutation(&app, provider_id).await;
+    let probe_mutation_guard = begin_provider_availability_probe_mutation(&app, provider_id).await;
     let result = blocking::run("provider_set_enabled", move || {
         let _probe_mutation_guard = probe_mutation_guard;
         providers::set_enabled(&db, provider_id, enabled)
@@ -531,8 +528,7 @@ pub(crate) async fn provider_delete(
     clear_usage_stats: bool,
 ) -> Result<bool, String> {
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
-    let probe_mutation_guard =
-        begin_provider_availability_probe_mutation(&app, provider_id).await;
+    let probe_mutation_guard = begin_provider_availability_probe_mutation(&app, provider_id).await;
     let result = blocking::run(
         "provider_delete",
         move || -> crate::shared::error::AppResult<(bool, String)> {

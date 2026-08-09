@@ -40,9 +40,7 @@ fn add_column_if_missing(
     Ok(true)
 }
 
-pub(super) fn ensure_provider_availability_probe_columns(
-    conn: &Connection,
-) -> Result<(), String> {
+pub(super) fn ensure_provider_availability_probe_columns(conn: &Connection) -> Result<(), String> {
     if !table_exists(conn, "providers")? {
         return Ok(());
     }

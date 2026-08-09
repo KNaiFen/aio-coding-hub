@@ -456,11 +456,7 @@ async fn provider_test_availability_handler(
     };
     let result = match tokio::time::timeout(
         OBSERVER_PROBE_TIMEOUT,
-        runtime.probe_manual(
-            state.app.clone(),
-            db,
-            provider_id,
-        ),
+        runtime.probe_manual(state.app.clone(), db, provider_id),
     )
     .await
     {

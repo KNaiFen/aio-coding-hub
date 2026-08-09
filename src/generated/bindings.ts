@@ -4073,7 +4073,7 @@ export type ProviderAvailabilityResult = {
   error: string | null;
   response_preview: string | null;
 };
-export type ProviderAvailabilityState = "healthy" | "unhealthy" | "no_data";
+export type ProviderAvailabilityState = "healthy" | "degraded" | "unhealthy" | "no_data";
 export type ProviderAvailabilityTimeline = {
   provider_id: number;
   hours: number;
@@ -4255,6 +4255,8 @@ export type ProviderSummary = {
   claude_models: ClaudeModels;
   model_mapping: ModelMapping;
   availability_test_model: string | null;
+  availability_probe_enabled: boolean;
+  availability_probe_interval_minutes: number;
   enabled: boolean;
   priority: number;
   cost_multiplier: number;
@@ -4298,6 +4300,8 @@ export type ProviderUpsertInput = {
   claudeModels: ClaudeModels | null;
   modelMapping: ModelMapping | null;
   availabilityTestModel: string | null;
+  availabilityProbeEnabled?: boolean | null;
+  availabilityProbeIntervalMinutes?: number | null;
   limit5hUsd: number | null;
   limitDailyUsd: number | null;
   dailyResetMode: DailyResetMode | null;

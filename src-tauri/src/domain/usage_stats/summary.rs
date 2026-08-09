@@ -234,9 +234,7 @@ fn summary_from_event_rows(rows: &[UsageEventAgg]) -> UsageSummary {
         None
     };
     let avg_output_tokens_per_second = if agg.success_output_rate_count > 0 {
-        Some(
-            agg.success_output_tokens_per_second_sum / agg.success_output_rate_count as f64,
-        )
+        Some(agg.success_output_tokens_per_second_sum / agg.success_output_rate_count as f64)
     } else {
         None
     };

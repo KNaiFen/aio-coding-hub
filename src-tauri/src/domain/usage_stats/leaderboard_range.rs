@@ -116,10 +116,7 @@ impl ProviderAgg {
             None
         };
         let avg_output_tokens_per_second = if self.success_output_rate_count > 0 {
-            Some(
-                self.success_output_tokens_per_second_sum
-                    / self.success_output_rate_count as f64,
-            )
+            Some(self.success_output_tokens_per_second_sum / self.success_output_rate_count as f64)
         } else {
             None
         };

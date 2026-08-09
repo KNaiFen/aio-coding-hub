@@ -291,10 +291,9 @@ pub(crate) async fn provider_oauth_reset_codex_quota(
             details.oauth_refresh_lead_s,
         )
     {
-        details = super::oauth::refresh_oauth_details_for_limits(
-            &app, &db, &client, &details, adapter,
-        )
-        .await?;
+        details =
+            super::oauth::refresh_oauth_details_for_limits(&app, &db, &client, &details, adapter)
+                .await?;
     }
 
     let access_token = super::oauth::effective_oauth_access_token(&details, adapter)?;

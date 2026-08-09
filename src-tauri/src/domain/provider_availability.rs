@@ -1197,8 +1197,8 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let db = crate::db::init_for_tests(&temp.path().join("probe-observations.sqlite3"))
             .expect("init db");
-        let provider = upsert(&db, default_provider_params("probe-provider"))
-            .expect("insert provider");
+        let provider =
+            upsert(&db, default_provider_params("probe-provider")).expect("insert provider");
 
         record_probe_observation(&db, "availability-probe:success", provider.id, 1_000, true)
             .expect("record successful probe");

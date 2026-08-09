@@ -1284,12 +1284,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        invalidate_for_downstream_backpressure,
-        is_codex_body_buffer_drop_successish, is_codex_client_abort_successish,
-        is_codex_drop_successish, is_codex_responses_path, is_codex_stream_tail_error_successish,
-        is_codex_stream_terminal_error_successish, is_plugin_stream_error_chunk, next_item,
-        spawn_touch_activity, spawn_upstream_output_timing_stream, spawn_usage_sse_relay_body,
-        RelayBodyStream, StreamFinalizeCtx, UpstreamModelObserverStream, UsageSseTeeStream,
+        invalidate_for_downstream_backpressure, is_codex_body_buffer_drop_successish,
+        is_codex_client_abort_successish, is_codex_drop_successish, is_codex_responses_path,
+        is_codex_stream_tail_error_successish, is_codex_stream_terminal_error_successish,
+        is_plugin_stream_error_chunk, next_item, spawn_touch_activity,
+        spawn_upstream_output_timing_stream, spawn_usage_sse_relay_body, RelayBodyStream,
+        StreamFinalizeCtx, UpstreamModelObserverStream, UsageSseTeeStream,
     };
     use crate::gateway::active_requests::{ActiveRequestRegistry, ActiveRequestStart};
     use crate::gateway::proxy::GatewayErrorCode;
@@ -2124,12 +2124,8 @@ mod tests {
             0,
         );
 
-        let body = spawn_usage_sse_relay_body(
-            timed_upstream,
-            ctx,
-            Some(Duration::from_millis(10)),
-            None,
-        );
+        let body =
+            spawn_usage_sse_relay_body(timed_upstream, ctx, Some(Duration::from_millis(10)), None);
 
         upstream_tx
             .send(Ok(Bytes::from_static(
@@ -2199,12 +2195,8 @@ mod tests {
             attempt_started,
             0,
         );
-        let body = spawn_usage_sse_relay_body(
-            timed_upstream,
-            ctx,
-            Some(Duration::from_millis(500)),
-            None,
-        );
+        let body =
+            spawn_usage_sse_relay_body(timed_upstream, ctx, Some(Duration::from_millis(500)), None);
 
         upstream_tx
             .send(Ok(Bytes::from_static(

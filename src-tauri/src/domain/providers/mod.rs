@@ -38,8 +38,7 @@ pub(crate) use queries::{
     model_routing_policy_override_from_json, model_routing_policy_override_to_json,
     replace_extension_values, resolve_effective_transport_credential,
     resolve_effective_transport_credential_with_probe_runtime, set_enabled, set_oauth_last_error,
-    update_oauth_tokens,
-    update_oauth_tokens_if_last_refreshed_matches,
+    update_oauth_tokens, update_oauth_tokens_if_last_refreshed_matches,
 };
 
 pub(crate) use share::{

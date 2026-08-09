@@ -498,11 +498,8 @@ pub(crate) async fn provider_oauth_start_flow(
     // 10. Save to provider
     let app_handle = app.clone();
     let probe_mutation_guard =
-        crate::app::provider_service::begin_provider_availability_probe_mutation(
-            &app,
-            provider_id,
-        )
-        .await;
+        crate::app::provider_service::begin_provider_availability_probe_mutation(&app, provider_id)
+            .await;
     blocking::run("provider_oauth_start_flow_save", move || {
         let _probe_mutation_guard = probe_mutation_guard;
         crate::gateway::oauth::complete_current_flow(&flow_id, || {
@@ -876,11 +873,8 @@ pub(crate) async fn provider_oauth_poll_device_flow(
     let completion_binding = binding.clone();
 
     let probe_mutation_guard =
-        crate::app::provider_service::begin_provider_availability_probe_mutation(
-            &app,
-            provider_id,
-        )
-        .await;
+        crate::app::provider_service::begin_provider_availability_probe_mutation(&app, provider_id)
+            .await;
     blocking::run("provider_oauth_poll_device_flow_save", move || {
         let _probe_mutation_guard = probe_mutation_guard;
         crate::gateway::oauth::complete_current_device_flow(
@@ -1121,11 +1115,8 @@ pub(crate) async fn provider_oauth_refresh(
     let expected_last_refreshed_at = details.oauth_last_refreshed_at;
 
     let probe_mutation_guard =
-        crate::app::provider_service::begin_provider_availability_probe_mutation(
-            &app,
-            provider_id,
-        )
-        .await;
+        crate::app::provider_service::begin_provider_availability_probe_mutation(&app, provider_id)
+            .await;
     let persisted = blocking::run("provider_oauth_refresh_save", move || {
         let _probe_mutation_guard = probe_mutation_guard;
         crate::providers::update_oauth_tokens_if_last_refreshed_matches(
@@ -1167,11 +1158,8 @@ pub(crate) async fn provider_oauth_disconnect(
 ) -> Result<ProviderOAuthDisconnectResult, String> {
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
     let probe_mutation_guard =
-        crate::app::provider_service::begin_provider_availability_probe_mutation(
-            &app,
-            provider_id,
-        )
-        .await;
+        crate::app::provider_service::begin_provider_availability_probe_mutation(&app, provider_id)
+            .await;
     blocking::run("provider_oauth_disconnect", move || {
         let _probe_mutation_guard = probe_mutation_guard;
         crate::providers::clear_oauth(&db, provider_id)?;

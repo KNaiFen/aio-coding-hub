@@ -3799,8 +3799,5 @@ fn folder_keys_filter_summary_leaderboard_and_day_detail() {
     assert_eq!(detail.folders.len(), 1);
     assert_eq!(detail.folders[0].key, "/work/alpha");
     assert_eq!(detail.folders[0].total_tokens, 550);
-    assert_eq!(
-        detail.folders[0].avg_output_tokens_per_second,
-        Some(437.5)
-    );
+    assert_eq!(detail.folders[0].avg_output_tokens_per_second, Some(437.5));
 }
