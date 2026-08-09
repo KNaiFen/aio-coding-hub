@@ -1,7 +1,0 @@
-{"file":".trellis/spec/aio-coding-hub/cross-layer/index.md","reason":"Verify all live quality guidance uses cloud-native validation and keeps frontend checks local-safe."}
-{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Audit exact SHA/run/artifact flow and validation ownership at every workflow boundary."}
-{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Check that target and asset contracts are not duplicated across CI, dev build and Release."}
-{"file":".trellis/tasks/07-31-cloud-only-build-artifact-promotion/prd.md","reason":"Acceptance criteria and explicit no-local-Rust constraint."}
-{"file":".trellis/tasks/07-31-cloud-only-build-artifact-promotion/design.md","reason":"Verify security, failure, recovery and rollback behavior against the approved design."}
-{"file":".trellis/tasks/07-31-cloud-only-build-artifact-promotion/research/local-build-trigger-audit.md","reason":"Re-run the trigger inventory and prove every repository-controlled local native path is removed."}
-{"file":".trellis/tasks/07-31-cloud-only-build-artifact-promotion/research/ci-release-artifact-audit.md","reason":"Compare new workflow behavior with measured duplication and artifact requirements."}

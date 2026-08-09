@@ -67,7 +67,7 @@ Protocol bridge MVP skeleton 只稳定 `protocolBridges` 的 `manifest` 声明�
 
 契约、SDK 和 Rust 校验认识的 UI 插槽名称多于当前前端已挂载位置。当前前端实际挂载 `providers.editor.sections`、`settings.sections` 和 `logs.detail.tabs`。`providers.editor.fields` 会被 SDK/Rust 校验为 provider UI contribution 并要求 `provider.extensionValues`，但当前前端没有对应类型化插槽挂载；`providers.card.badges`、`providers.card.actions` 和其他契约插槽目前只是 `manifest` 已知或仅用于元数据。
 
-`hostCompatibility` 必须包含 `app` 和 `pluginApi`。`platforms` 当前是解析和展示元数据，不参与本地安装阻断或市场兼容性筛选；不要把它写成当前已强制执行的平台白名单。
+`hostCompatibility` 必须包含 `app` 和 `pluginApi`。可选的 `platforms` 是宿主强制校验的平台白名单；声明后，当前桌面平台不匹配会以 `PLUGIN_INCOMPATIBLE_PLATFORM` 阻断安装、更新、重新校验和启用。市场 UI 可以提前筛选，但真实安装始终重新校验。
 
 `configSchema` 可以包含标准 JSON Schema 展示字段和 AIO `x-aio-ui` 元数据。详见 [Config Schema](./config-schema.md)。
 

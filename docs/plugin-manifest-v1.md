@@ -51,7 +51,7 @@ Plugin IDs 使用 `publisher.plugin-name` 格式。
 
 Versions 必须遵循 SemVer。Pre-release versions 可用于本地开发和 unsigned packages；marketplace stable releases 应使用 release versions。
 
-`apiVersion` 独立于 app version。0.62.x 只支持 Plugin API major `1`，所以 manifest 的 `apiVersion` 必须是 `1.x.y`。宿主可以在同一 major API 内添加 backward-compatible fields。Breaking changes 需要新的 major API。
+`apiVersion` 独立于 app version。当前宿主只支持 Plugin API major `1`，所以 manifest 的 `apiVersion` 必须是 `1.x.y`。宿主可以在同一 major API 内添加 backward-compatible fields。Breaking changes 需要新的 major API。
 
 ## 4. Runtime
 
@@ -85,7 +85,7 @@ Extension Host 是唯一 community runtime：
 
 不兼容插件会被标记为 `incompatible`，不会进入 hook pipeline。
 
-当前代码实际阻断的是 `hostCompatibility.app` 和 `hostCompatibility.pluginApi`。`platforms` 会被解析并在预检和元数据中展示，但本地包安装和市场索引兼容版本选择尚未按当前桌面操作系统阻断；发布者不应把它当成当前已强制执行的平台白名单。
+`hostCompatibility.app`、`hostCompatibility.pluginApi` 和可选的 `hostCompatibility.platforms` 都是宿主强制校验条件。声明 `platforms` 后，当前桌面平台必须出现在白名单中；否则安装、更新、重新校验和启用会以 `PLUGIN_INCOMPATIBLE_PLATFORM` 阻断。市场 UI 是否提前筛选只影响展示，真实安装仍由宿主重新校验。
 
 ## 6. Contributions 与 Capabilities
 
@@ -216,13 +216,15 @@ Validation 会拒绝：
 | `disabled` | `update_available` | Market 发现新的兼容版本。 |
 | `update_available` | `enabled` | 更新成功且 capabilities 仍有效。 |
 | `update_available` | `disabled` | 更新成功但新增 capability 需要用户确认。 |
-| `installed` | `incompatible` | 宿主应用版本或 Plugin API 版本不兼容。当前 `platforms` 不触发该状态。 |
+| install/update/revalidate/enable 前的既有状态 | 状态不变 | 宿主应用版本、Plugin API 版本或当前桌面平台不兼容时拒绝操作，并返回对应兼容性错误。 |
 | `enabled` | `quarantined` | 600 秒内第三次 host crash、JavaScript/runtime error 或 timeout，或 signature failure、revoked market status。 |
 | `disabled` | `quarantined` | Signature failure 或 revoked market status。 |
 | `quarantined` | `disabled` | 用户确认并在校验后恢复。 |
 | any active state | `uninstalled` | 用户卸载插件。 |
 
 Upgrade failure 会恢复 previous version、config snapshot、capabilities 和 enabled state。Signature failure 会让插件进入 `quarantined`。同一插件的 host crash、JavaScript/runtime error 与 timeout 在 600 秒内累计第三次会进入 `quarantined`；context/output budget、capability/permission、输出合同、header policy 和安装状态拒绝不计数。第三次请求保留其原本 fail-open/fail-closed 结果，后续请求不再执行插件。重新校验会重新验证 manifest、安装和来源边界，成功后仅转为 `disabled`，不会自动启用；市场撤销隔离不能恢复。Market 来源的运行时隔离只有在宿主能复核当前签名市场状态时才允许恢复；当前状态不可用时保持 `quarantined` 并失败关闭。
+
+`incompatible` 仍是序列化状态值，可用于既有记录和兼容性展示；当前安装、更新、重新校验和启用路径在写入新状态前执行兼容性校验，因此校验失败不会把已安装插件自动迁移到 `incompatible`。
 
 ## 11. Manifest 示例：社区 Prompt Helper
 

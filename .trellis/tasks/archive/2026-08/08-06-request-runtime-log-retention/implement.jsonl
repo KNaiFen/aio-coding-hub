@@ -1,4 +1,4 @@
 {"file":".trellis/spec/aio-coding-hub/backend/index.md","reason":"Rust 设置、日志与数据管理规范"}
 {"file":".trellis/spec/aio-coding-hub/cross-layer/request-log-usage-ledger-pagination-contract.md","reason":"请求明细与 usage ledger 跨层语义"}
 {"file":".trellis/spec/aio-coding-hub/cross-layer/index.md","reason":"前后端与生成绑定一致性"}
-{"file":"CODEBASE_HEALTH_AUDIT.md","reason":"AUD-056 需求与验收"}
+{"file":"docs/history/audits/codebase-health-audit-2026-08-09.md","reason":"AUD-056 需求与验收"}

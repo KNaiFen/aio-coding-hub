@@ -1,0 +1,32 @@
+{
+  "id": "upstream-selective-integration",
+  "name": "upstream-selective-integration",
+  "title": "选择性集成 FingerCaster 上游修复与趋势",
+  "description": "以固定上游 SHA 选择性移植 UPA-002/003/004/005/009，并基于 usage ledger 重做有界 UPA-008；不整支合并上游。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "@aio-coding-hub",
+  "package": "aio-coding-hub",
+  "priority": "P1",
+  "creator": "KNaiFen",
+  "assignee": "KNaiFen",
+  "createdAt": "2026-08-03",
+  "completedAt": "2026-08-10",
+  "branch": "codex/feature-merge",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-03-upstream-chatgpt-account-header",
+    "08-03-upstream-provider-delete-reconcile",
+    "08-03-upstream-oauth-status-cache",
+    "08-03-provider-metric-trends-ledger",
+    "08-03-upstream-about-unknown-metadata"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "实施期间 origin/main 前进到 dc311482c2af00177544c1b526dd173a2b7f20c9，并已完成 Tray/PENDING-015 与 0.60.46 发布。集成分支无冲突重放并保留远端结果，本批目标版本顺延为 0.60.47。UPA-004 因真实 Claude Pro/Max OAuth 门禁未完成而保持候选，不进入本次发布。",
+  "meta": {}
+}

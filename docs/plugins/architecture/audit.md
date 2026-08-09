@@ -97,8 +97,8 @@ Bundled official plugin：
 - Plugin hot-path performance smoke tests 是 release readiness 的一部分。
 - `create-aio-plugin replay` 当前不执行 Extension Host gateway hooks；fixture model 由宿主 `plugin_export_replay_fixture` 和运行报告保持一致。
 
-## 0.62 Platform Kernel Decision
+## Current Platform Kernel Decision
 
-0.62 保持 Plugin API v1 externally compatible，重点是收紧内部平台边界而不是扩张公开 API。Contract metadata 成为 drift checks 的来源；hook 行为通过 internal descriptors 路由；runtime dispatch 从 gateway pipeline orchestration 中拆出；provider-specific behavior 开始迁移到 provider adapter facades 后面。
+当前宿主保持 Plugin API v1 externally compatible，重点是收紧内部平台边界而不是扩张公开 API。Contract metadata 成为 drift checks 的来源；hook 行为通过 internal descriptors 路由；runtime dispatch 从 gateway pipeline orchestration 中拆出；provider-specific behavior 开始迁移到 provider adapter facades 后面。
 
-0.62 does not add public provider plugin APIs. Provider adapter facades remain internal so gateway selection, failover, circuit breaking, limits, OAuth handling, and session binding stay owned by the Rust gateway core.
+The current host does not expose public provider plugin APIs. Provider adapter facades remain internal so gateway selection, failover, circuit breaking, limits, OAuth handling, and session binding stay owned by the Rust gateway core.

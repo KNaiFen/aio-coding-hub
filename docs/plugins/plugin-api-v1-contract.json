@@ -103,7 +103,14 @@
   "hostCompatibilityRuntimeBoundary": {
     "app": "当前参与安装和市场兼容性检查",
     "pluginApi": "当前参与安装和市场兼容性检查",
-    "platforms": "当前代码中只作为元数据和展示字段；不参与市场兼容版本选择或本地安装阻断"
+    "platforms": "可选的强制平台白名单；声明后，当前桌面平台不匹配会以 PLUGIN_INCOMPATIBLE_PLATFORM 阻断安装、更新、重新校验和启用"
+  },
+  "diagnosticsReadBoundary": {
+    "capability": "diagnostics.read",
+    "api": "api.diagnostics.getRuntimeReports",
+    "scope": "仅返回当前插件的最近运行报告",
+    "defaultLimit": 20,
+    "limitRange": [1, 100]
   },
   "storagePluginBoundary": {
     "capability": "storage.plugin",

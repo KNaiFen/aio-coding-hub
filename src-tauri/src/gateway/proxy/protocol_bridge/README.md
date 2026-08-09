@@ -116,6 +116,8 @@ With 3 client protocols and 3 provider protocols:
 
 ## Testing
 
+The following commands describe the CI-owned Rust checks for this module; they are not local contributor commands:
+
 ```bash
 # All protocol_bridge tests (unit + e2e)
 cargo test --lib -- protocol_bridge
@@ -123,3 +125,5 @@ cargo test --lib -- protocol_bridge
 # E2E integration tests only
 cargo test --lib -- protocol_bridge::e2e_tests
 ```
+
+Repository contributors must follow the zero-artifact rule in the root [AGENTS.md](../../../../../AGENTS.md): do not run Cargo, Rust formatting, tests, or builds locally. GitHub Actions owns these checks; local validation is limited to the dependency-free commands explicitly allowed there.

@@ -4,6 +4,8 @@
 
 Extension Host 是唯一 community runtime。社区插件使用 `runtime.kind = "extensionHost"`，`main` 指向打包后的 JavaScript 输出，并通过 `contributes` 和 `capabilities` 声明自己要接入的 host surface。
 
+> **仓库执行边界：** 本页出现的 `pnpm --filter ...` 只记录 GitHub Actions 中的 monorepo 工具合同，仓库本地 checkout 不得运行任何 `pnpm` 命令，也不得生成 `.aio-plugin` 或其他构建产物。外部插件作者只能在独立于本仓库的插件工作区使用等效工具；AIO Coding Hub 仓库贡献者始终遵循根 `AGENTS.md` 的零产物规则。
+
 ## 适合做成插件的能力
 
 插件适合扩展本地网关链路中可被明确 hook 的行为，例如：
@@ -29,24 +31,24 @@ doctor -> validate --strict -> pack -> publish-check -> install/update -> export
 2. 编写最小 `plugin.json`：声明 `main`、`runtime.kind = "extensionHost"`、必要的 `activationEvents`、`contributes`、`capabilities`、`hostCompatibility` 和 `configSchema`。
 3. 在 `dist/extension.js` 中导出 `activate(api)`，并使用 `api.gateway.registerHook`、commands 或其他 Extension Host API 注册行为。
 4. 准备 fixture：至少覆盖 Claude `messages[].content[].text` 和 Codex/OpenAI Responses `input[].content[].text` / `input_text` 形态，作为宿主 trace 复现和发布检查材料。
-5. 使用 `pnpm --filter create-aio-plugin cli doctor` 和 `validate --strict` 做 package health、manifest 与入口文件校验。
-6. 使用 `pnpm --filter create-aio-plugin cli pack` 打包为 `.aio-plugin`。
-7. 发布前运行 `pnpm --filter create-aio-plugin cli publish-check ./acme.redactor` 生成 release metadata。
+5. 由 GitHub Actions 使用 `create-aio-plugin doctor` 和 `validate --strict` 做 package health、manifest 与入口文件校验。
+6. 由 GitHub Actions 使用 `create-aio-plugin pack` 打包为 `.aio-plugin`。
+7. 由 GitHub Actions 在发布前使用 `create-aio-plugin publish-check` 生成 release metadata。
 8. 在 Plugins 页面本地导入或从市场安装，先检查安装预检，再确认 capabilities、数据访问和贡献点影响，启用插件，检查审计日志。
 9. 对真实请求问题，从宿主导出 `plugin_export_replay_fixture`，用导出的 trace、attempts、runtime reports 和本地 body fixture 复现。
 10. 修复 Extension Host 入口后重新打包、安装并复测。
 11. 发布前计算 `sha256`，可信索引分发时补 Ed25519 签名。
 
-## 10 分钟快速开始
+## 工具链合同与示例
 
-直接从完整示例模板 scaffold 一个 Extension Host 插件：
+以下 monorepo 命令是 GitHub Actions 所有的合同示例，不是本地快速开始步骤。CI 可从完整示例模板 scaffold 一个 Extension Host 插件：
 
 ```bash
 pnpm --filter create-aio-plugin test
 pnpm --filter create-aio-plugin cli acme.redactor example:redactor
 ```
 
-也可以选择其他示例模板：
+CI 合同也覆盖其他示例模板：
 
 ```bash
 pnpm --filter create-aio-plugin cli acme.prompt-helper example:prompt-helper
@@ -56,7 +58,7 @@ pnpm --filter create-aio-plugin cli acme.response-guard example:response-guard
 
 示例是开发模板，不是默认可安装市场包。它们用于学习 manifest、`dist/extension.js`、fixtures、`validate --strict`、`pack` 和 `publish-check` 的完整路径；Plugins 页面里的同名精选卡片仍保持示例状态，不会绕过宿主安装校验。
 
-生成目录后，先检查 package health，再校验 `plugin.json` 和 Extension Host 入口：
+生成目录后，CI 先检查 package health，再校验 `plugin.json` 和 Extension Host 入口：
 
 ```bash
 pnpm --filter create-aio-plugin cli doctor ./acme.redactor
@@ -87,7 +89,7 @@ Codex/OpenAI Responses fixture 示例：
 
 如果问题来自真实网关请求，先在 Plugins 页面或 request log 操作里导出 replay fixture。宿主命令名是 `plugin_export_replay_fixture`；它会把 trace id、hook name、plugin id、attempts 和 `plugin_hook_execution_reports` 放进 fixture。当前 request logs 不持久化完整 body，所以导出结果会在 `notes` 里说明缺口，插件作者需要用本地 fixture 补齐要复现的 request/response body。
 
-打包插件并从 Plugins 页面本地安装：
+CI 打包并生成发布 metadata 后，可以把产物交给 Plugins 页面执行本地包导入：
 
 ```bash
 pnpm --filter create-aio-plugin cli pack ./acme.redactor
@@ -104,7 +106,7 @@ Plugins 页面默认展示“精选插件”，面向普通用户提供简洁安
 
 “高级来源”用于插件开发者或自定义源用户。它保留 market index URL、index JSON 和索引签名输入，但默认折叠。高级来源加载出的条目仍然走同一套安装卡片和宿主安装校验。
 
-SDK 检查命令：
+GitHub Actions 中的 SDK 检查入口：
 
 ```bash
 pnpm --filter @aio-coding-hub/plugin-sdk typecheck
@@ -186,7 +188,7 @@ module.exports.activate = function(api) {
 - `main` 指向打包后的 JavaScript 输出。
 - `contributes.gatewayHooks` 决定插件在哪些阶段被调用。
 - `capabilities` 必须包含对应贡献点需要的能力。
-- `hostCompatibility` 决定应用版本和插件 API 版本兼容性；`platforms` 当前只作为元数据展示，不参与安装阻断或市场兼容性筛选。
+- `hostCompatibility` 决定应用版本、插件 API 版本和桌面平台兼容性；声明 `platforms` 后，它是安装、更新、重验和启用时的强制白名单。
 
 ## Capability 依赖
 
@@ -280,9 +282,9 @@ Claude 和 Codex/OpenAI Responses 的请求结构不同。插件应避免只适�
 
 `password` 字段只影响输入控件展示，不代表宿主管理的密钥存储。当前 `storage.plugin` 能力提供的 Extension Host storage API 会把插件状态写入同一份插件配置 JSON 的顶层 `storage` 字段，大小限制为 64 KiB；它不是独立 KV 表。插件配置 schema 不应声明顶层 `storage` 字段。
 
-## 本地校验与宿主回放材料
+## CI 校验与宿主回放材料
 
-常用命令：
+以下命令只由 GitHub Actions 在仓库 CI 中运行；本地 checkout 不得执行：
 
 ```bash
 pnpm --filter create-aio-plugin test
@@ -295,7 +297,7 @@ pnpm --filter create-aio-plugin cli publish-check ./acme.redactor
 
 `doctor` checks package health and reports structured diagnostics with `severity`, `code`, `message`, `path`, and `hint`.
 `validate --strict` keeps Plugin API v1 compatibility but adds package-level checks for Extension Host `main`, artifact paths, target compatibility, hook contributions, capabilities, and package layout.
-Warnings do not fail the command in 0.62.1; any `error` severity diagnostic returns a non-zero exit code.
+Warnings do not fail the current command; any `error` severity diagnostic returns a non-zero exit code.
 
 验收一个插件时，至少确认：
 

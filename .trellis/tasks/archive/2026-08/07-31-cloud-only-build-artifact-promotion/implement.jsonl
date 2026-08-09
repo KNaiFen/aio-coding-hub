@@ -1,0 +1,6 @@
+{"file":".trellis/spec/aio-coding-hub/cross-layer/index.md","reason":"Owns cross-layer generated-binding, CI validation and release quality guidance."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Map source SHA, build output, artifact manifest and Release promotion across workflow boundaries."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Keep support targets, stable asset naming and updater metadata in one existing owner."}
+{"file": ".trellis/tasks/archive/2026-08/07-31-cloud-only-build-artifact-promotion/research/local-build-trigger-audit.md", "reason": "Exact local hook, package script and documentation trigger evidence."}
+{"file": ".trellis/tasks/archive/2026-08/07-31-cloud-only-build-artifact-promotion/research/ci-release-artifact-audit.md", "reason": "Measured CI/Release duplication, retention limits and immutable artifact promotion evidence."}
+{"file": ".trellis/tasks/archive/2026-08/07-31-cloud-only-build-artifact-promotion/design.md", "reason": "Approved boundaries, manifest schema, permissions and fail-closed promotion architecture."}

@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/aio-coding-hub/cross-layer/index.md", "reason": "Apply cross-layer frontend quality checks without running local native tooling."}
+{"file": ".trellis/tasks/archive/2026-08/08-01-home-route-tooltip-density/research/ui-audit.md", "reason": "Verify the implementation resolves both documented screenshot regressions."}

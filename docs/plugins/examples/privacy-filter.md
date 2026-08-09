@@ -61,17 +61,19 @@ Official privacy filter rules are loaded under a separate 1 MiB host byte budget
 
 ## 官方风格示例清单
 
+> **仓库执行边界：** 本清单中的 package command 由 GitHub Actions 验证；仓库本地 checkout 不得运行 package-manager 脚本或生成插件包。外部插件作者只能在仓库外独立插件工作区执行等效工具。
+
 一个 official-style example 必须包含：
 
 - 一个 minimal manifest。
 - 一个 Claude messages fixture。
 - 一个 Codex/OpenAI Responses input fixture。
 - 一个 host replay/export 验证说明。
-- 一个 package command。
+- 一个 CI-owned package command 合同。
 - 精确列出它依赖的 capabilities，以及 host-mediated context/mutation labels。
 - 简短说明哪些行为是 intentionally unsupported。
 - 能被宿主导出的 trace replay fixture 覆盖至少一个正常路径和一个边界路径。
-- 能通过 `pnpm --filter create-aio-plugin cli publish-check` 生成市场发布 metadata。
+- 能由 GitHub Actions 或仓库外独立插件工作区通过 `publish-check` 生成市场发布 metadata。
 
 社区示例应使用 Extension Host。Gateway 行为通过 `contributes.gatewayHooks` 和 `api.gateway.registerHook` 表达；旧运行时只用于迁移说明。
 
@@ -79,7 +81,7 @@ Official privacy filter rules are loaded under a separate 1 MiB host byte budget
 
 `official.privacy-filter` 可以用宿主导出的 replay fixture 验证请求脱敏和日志脱敏边界。当前 request logs 不持久化完整 request/response body，所以导出的 fixture 会携带 trace、attempts、运行报告和 notes；插件作者需要用本地 fixture 补齐需要复现的 body。
 
-发布到市场前，插件包仍应经过 `pack`、`sign` 或 `verify` 以及 `publish-check`。`publish-check` 只生成发布 metadata，不替代宿主安装时的 checksum、signature、兼容性和撤销状态检查。
+发布到市场前，GitHub Actions 或仓库外独立插件工作区中的插件包仍应经过 `pack`、`sign` 或 `verify` 以及 `publish-check`。`publish-check` 只生成发布 metadata，不替代宿主安装时的 checksum、signature、兼容性和撤销状态检查。
 
 ## 已移除的内置示例
 
