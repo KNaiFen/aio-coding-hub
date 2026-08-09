@@ -2087,10 +2087,14 @@ mod tests {
         );
         assert_eq!(
             lines.last().expect("availability line").spans[3].style.fg,
-            Some(Color::Red)
+            Some(Color::Yellow)
         );
         assert_eq!(
             lines.last().expect("availability line").spans[4].style.fg,
+            Some(Color::Red)
+        );
+        assert_eq!(
+            lines.last().expect("availability line").spans[5].style.fg,
             Some(Color::DarkGray)
         );
 
