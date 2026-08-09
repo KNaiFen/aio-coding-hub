@@ -78,6 +78,21 @@ When changing plugin runtime quarantine:
    in-flight calls may finish under their existing deadline, but no later
    snapshot lookup may start the quarantined plugin.
 
+When changing Provider availability probe scheduling:
+
+1. Keep network single-flight ownership Provider-scoped across configuration
+   generations. A new generation waits for the old flight to finish, then
+   rechecks generation before starting; it never joins the stale result or runs
+   a second request concurrently.
+2. Scan eligible Provider configuration in bounded keyset pages. Every eligible
+   ID must eventually be visited, and missing schedules may be removed only
+   after a complete scan epoch, never from a truncated prefix or partial page.
+3. Bound queued scheduled work by the target's due grace. Recheck expiry and
+   generation after obtaining the global concurrency permit; expired targets
+   are skipped instead of replayed as a historical-period probe.
+4. Keep manual probes outside the scheduled concurrency queue while sharing an
+   already-running flight for the same Provider.
+
 When changing upstream error response rules:
 
 1. Read [Upstream error response rule contract](./upstream-error-response-rule-contract.md).
@@ -155,6 +170,9 @@ When changing Provider Sync managed-backup pruning:
 - Exercise command, startup, and gateway quarantine while a full plugin refresh
   fails; the target plugin must remain absent and disposed while unrelated
   plugin snapshot/circuit state survives.
+- Exercise Provider probe pagination beyond one page, partial-scan preservation,
+  full-epoch removal, cross-generation single-flight handoff, stale-result
+  suppression, due-grace expiry, and the global scheduled concurrency bound.
 - Exercise missing-SSOT recovery from a local Skill source, persisted-hash
   mismatch rejection, and uninstall cleanup of broken managed links in GitHub
   Actions.

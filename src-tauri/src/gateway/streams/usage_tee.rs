@@ -498,6 +498,7 @@ where
         &mut self,
         cx: &mut Context<'_>,
         enforce_idle_timeout: bool,
+        defer_finalization: bool,
     ) -> Poll<Option<Result<B, reqwest::Error>>> {
         if self.stop_after_terminal_error {
             return Poll::Ready(None);
@@ -520,10 +521,11 @@ where
                 Poll::Pending
             }
             Poll::Ready(None) => {
-                // When defer_terminal_error is set and the tracker saw a terminal
-                // error, skip finalization here — the relay task will decide the
-                // final error_code with Codex-specific tolerance logic.
-                if !(self.defer_terminal_error && self.tracker.terminal_error_seen()) {
+                // The relay owns finalization while draining after a downstream
+                // disconnect so it can persist complete client-abort evidence.
+                if !defer_finalization
+                    && !(self.defer_terminal_error && self.tracker.terminal_error_seen())
+                {
                     self.finalize(self.ctx.error_code);
                 }
                 Poll::Ready(None)
@@ -589,6 +591,9 @@ where
                 Poll::Ready(Some(Ok(chunk)))
             }
             Poll::Ready(Some(Err(err))) => {
+                if defer_finalization {
+                    return Poll::Ready(Some(Err(err)));
+                }
                 let completion_seen = self.tracker.completion_seen();
                 let codex_successish = is_codex_stream_tail_error_successish(
                     &self.ctx.cli_key,
@@ -732,7 +737,7 @@ where
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.as_mut().get_mut();
-        this.poll_next_inner(cx, true)
+        this.poll_next_inner(cx, true, false)
     }
 }
 
@@ -753,7 +758,7 @@ where
     type Output = Option<Result<B, reqwest::Error>>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.0.poll_next_inner(cx, false)
+        self.0.poll_next_inner(cx, false, true)
     }
 }
 
@@ -831,6 +836,7 @@ where
         let mut client_abort_detected_by: Option<&'static str> = None;
         let mut downstream_closed = false;
         let mut upstream_ended_normally = false;
+        let mut upstream_transport_error_seen = false;
 
         let is_codex_responses = is_codex_responses_path(&tee.ctx.cli_key, &tee.ctx.path);
         let mut drain_deadline: Option<tokio::time::Instant> = None;
@@ -884,6 +890,7 @@ where
                         drained_bytes = drained_bytes.saturating_add(chunk_len);
                     }
                     Ok(Some(Err(_))) => {
+                        upstream_transport_error_seen = true;
                         break;
                     }
                     Ok(None) => {
@@ -1033,6 +1040,7 @@ where
                     "drained_chunks": drained_chunks,
                     "drained_bytes": drained_bytes,
                     "upstream_ended_normally": upstream_ended_normally,
+                    "upstream_transport_error_seen": upstream_transport_error_seen,
                     "completion_seen": completion_seen,
                     "terminal_error_seen": terminal_error_seen,
                     "saw_stream_output": saw_stream_output,
@@ -1042,16 +1050,17 @@ where
 
             // Codex SSE: only a completed/usage-bearing or cleanly ended upstream
             // drain may turn a downstream disconnect into a successful request.
-            let codex_successish = is_codex_client_abort_successish(
-                &tee.ctx.cli_key,
-                &tee.ctx.path,
-                tee.ctx.status,
-                saw_stream_output,
-                completion_seen,
-                usage_seen,
-                terminal_error_seen,
-                upstream_ended_normally,
-            );
+            let codex_successish = !upstream_transport_error_seen
+                && is_codex_client_abort_successish(
+                    &tee.ctx.cli_key,
+                    &tee.ctx.path,
+                    tee.ctx.status,
+                    saw_stream_output,
+                    completion_seen,
+                    usage_seen,
+                    terminal_error_seen,
+                    upstream_ended_normally,
+                );
             if codex_successish {
                 tee.finalize(None);
             } else {
@@ -2237,6 +2246,78 @@ mod tests {
         );
         assert_eq!(log.final_upstream_attempt_duration_ms, None);
         assert_eq!(log.final_upstream_attempt_timing_version, 0);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn codex_disconnect_drain_transport_error_remains_aborted() {
+        let app = tauri::test::mock_app();
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("usage-tee-drain-read-error.sqlite"))
+            .expect("init test db");
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+        let active_requests = Arc::new(ActiveRequestRegistry::default());
+        active_requests.register(active_request_start("trace-usage-tee-drain"));
+        let ctx = test_stream_finalize_ctx(app.handle().clone(), db, log_tx, active_requests);
+        let upstream_timing = ctx.upstream_output_timing.clone();
+        let attempt_started = ctx.attempt_started;
+        let (upstream_tx, upstream_rx) =
+            tokio::sync::mpsc::channel::<Result<Bytes, reqwest::Error>>(4);
+
+        let timed_upstream = spawn_upstream_output_timing_stream(
+            RelayBodyStream::new(upstream_rx),
+            "codex",
+            upstream_timing,
+            attempt_started,
+            0,
+        );
+        let body =
+            spawn_usage_sse_relay_body(timed_upstream, ctx, Some(Duration::from_millis(500)), None);
+
+        upstream_tx
+            .send(Ok(Bytes::from_static(
+                b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n",
+            )))
+            .await
+            .expect("send first output chunk");
+        let mut body_stream = body.into_data_stream();
+        next_item(&mut body_stream)
+            .await
+            .expect("body should yield first output")
+            .expect("first output should be ok");
+        drop(body_stream);
+
+        upstream_tx
+            .send(Ok(Bytes::from_static(
+                b"event: response.completed\n\
+                  data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n",
+            )))
+            .await
+            .expect("send completion");
+        let read_error = reqwest::Client::new()
+            .get("://invalid-url")
+            .build()
+            .expect_err("invalid URL should produce a reqwest error");
+        upstream_tx
+            .send(Err(read_error))
+            .await
+            .expect("send read error");
+        drop(upstream_tx);
+
+        let log = tokio::time::timeout(Duration::from_secs(2), log_rx.recv())
+            .await
+            .expect("request log should be enqueued")
+            .expect("request log channel should stay open");
+        assert_eq!(
+            log.error_code,
+            Some(GatewayErrorCode::StreamAborted.as_str().to_string())
+        );
+        assert_eq!(log.final_upstream_attempt_duration_ms, None);
+        assert_eq!(log.final_upstream_attempt_timing_version, 0);
+        assert!(log
+            .special_settings_json
+            .as_deref()
+            .is_some_and(|value| value.contains("\"type\":\"client_abort\"")
+                && value.contains("\"upstream_transport_error_seen\":true")));
     }
 
     #[tokio::test(flavor = "current_thread")]

@@ -8,6 +8,8 @@
 - [x] 完成流式最终 attempt 计时修复、单条 TPS 和全部统计聚合的算术平均。
 - [x] 完成 schema 52、Provider 配置跨层贯通、probe coordinator、后台 scheduler 和手动/定时观测持久化。
 - [x] 完成 Rust/前端/迁移测试代码、活跃规范更新和 Trellis/PENDING 一致性检查。
+- [x] 修复云端暴露的 Provider 查询漏列、OAuth 测试环境恢复和 Codex drain 提前 finalize。
+- [x] 复核并修复 scheduler 固定前缀截断、跨代际双 flight、过期排队补跑和 stale tombstone。
 - [x] 执行变更清单对照；在全部项目完成前不运行任何测试/构建/格式化。
 
 ## Phase B: Unified Verification
@@ -20,8 +22,8 @@
 
 ## Phase C: Commit, Actions, PR
 
-- [ ] 显式暂存本批路径，对照 allowlist 排除 230 个原有未跟踪文件。
-- [ ] 创建一个 `feat: 统一用量速率与供应商可用性监测` 提交并推送。
+- [x] 显式暂存本批路径，对照 allowlist 排除既有未跟踪文件。
+- [x] 创建 `feat: 统一用量速率与供应商可用性监测` 功能提交并推送；后续云端反馈使用独立有界修复提交。
 - [ ] 对精确分支触发 `ci.yml workflow_dispatch`，核对 `head_sha` 并等待 `ci-gate`。
 - [ ] CI 漂移只应用绑定当前 SHA 的有界补丁；功能失败修复后重跑完整 CI。
 - [ ] CI 绿色后创建一个指向 `main` 的 PR，不自动合并。

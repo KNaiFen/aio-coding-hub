@@ -2021,7 +2021,7 @@ mod tests {
             r#"{"error":{"message":"model not found"}}"#,
         )
         .await;
-        std::env::set_var(
+        let _oauth_base_url_override = crate::test_support::ScopedTestEnvVar::set(
             "AIO_CODING_HUB_TEST_CODEX_OAUTH_BASE_URL",
             source_base_url.clone(),
         );
@@ -2070,6 +2070,5 @@ mod tests {
         assert!(request
             .to_ascii_lowercase()
             .contains("authorization: bearer oauth-access-token"));
-        std::env::remove_var("AIO_CODING_HUB_TEST_CODEX_OAUTH_BASE_URL");
     }
 }

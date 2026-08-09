@@ -27,6 +27,9 @@
 - 启动、唤醒、开启或改间隔从下一边界开始；不跑当前周期或历史周期。
 - 只调度 `provider.enabled && availability_probe_enabled`，全局定时并发为 4；手动入口不被全局排队延迟，但与同 Provider 的进行中 probe 共享结果。
 - 定时 trace ID 绑定 Provider 与边界，手动 trace ID 唯一；配置 generation 变化、禁用或删除后的旧结果丢弃。
+- 调度配置使用有界 keyset 分页轮询全部符合条件的 Provider；只有完整 scan epoch 结束后才清理缺失项，不能永久截断固定 ID 前缀。
+- 单飞边界属于 Provider 而不是 generation；配置变更后等待旧网络 flight 结束，再按最新 generation 重新判定，绝不并行发送新旧配置 probe。
+- due target 只在边界延迟窗口和 grace 内等待全局 permit；过期目标丢弃，不形成历史周期补跑。
 
 ## Failure And Security
 
