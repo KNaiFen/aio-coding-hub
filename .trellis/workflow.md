@@ -151,7 +151,7 @@ Phase 3: Finish  → verify, update spec, commit, and wrap up
 
 ### Request Triage
 
-- Simple conversation or small task: ask only whether this turn should create a Trellis task. If the user says no, skip Trellis for this session.
+- Simple conversation or small task: ask only whether this turn should create a Trellis task. If the user says no, skip Trellis for this session; when implementation is authorized, use the repository's direct-main Markdown record before editing and close the same entry with the actual result before ending.
 - Complex task: ask whether you may create a Trellis task and enter planning. If the user says no, do not do broad inline implementation; explain, clarify scope, or suggest a smaller split.
 - User approval to create a task is not approval to start implementation. Planning still happens first.
 
@@ -160,8 +160,11 @@ Phase 3: Finish  → verify, update spec, commit, and wrap up
 - `prd.md` — requirements, constraints, and acceptance criteria. Do not put technical design or execution checklists here.
 - `design.md` — technical design for complex tasks: boundaries, contracts, data flow, tradeoffs, compatibility, rollout / rollback shape.
 - `implement.md` — execution plan for complex tasks: ordered checklist, validation commands, review gates, and rollback points.
+- `execution.md` — required before a Trellis task is handed to an independent execution session; it is the main-authored worktree entry point and boundary summary.
+- `delivery.md` — required before an independent execution session asks main to accept the work; it records actual implementation, deviations, verification, and risks.
+- `findings.md` — created by main only when acceptance fails; it records actionable findings and re-verification targets.
 - `implement.jsonl` / `check.jsonl` — spec and research manifests for sub-agent context. They do not replace `implement.md`.
-- Lightweight tasks may be PRD-only. Complex tasks must have `prd.md`, `design.md`, and `implement.md` before `task.py start`.
+- Lightweight Trellis tasks implemented by main in the same session may be PRD-only. Every delegated worktree task must also have `execution.md` before its execution session starts and `delivery.md` before acceptance. Complex tasks must have `prd.md`, `design.md`, and `implement.md` before `task.py start`.
 
 ### Parent / Child Task Trees
 
@@ -175,13 +178,13 @@ Create new children with `task.py create "<title>" --slug <name> --parent <paren
 
 [workflow-state:no_task]
 No active task. First classify the current turn and ask for task-creation consent before creating any Trellis task.
-Simple conversation / small task: ask only whether this turn should create a Trellis task. If the user says no, skip Trellis for this session.
+Simple conversation / small task: ask only whether this turn should create a Trellis task. If the user says no, skip Trellis for this session. For authorized implementation, first write the confirmed plan in `docs/history/change-records/YYYY-MM.md`; before ending, add the actual implementation result to the same entry.
 Complex task: ask the user if you can create a Trellis task and enter the planning phase. If the user says no, explain, clarify scope, or suggest a smaller split.
 [/workflow-state:no_task]
 
 ### Phase 1: Plan
 - 1.0 Create task `[required · once]` (only after task-creation consent)
-- 1.1 Requirement exploration `[required · repeatable]` (`prd.md`; complex tasks also need `design.md` + `implement.md`)
+- 1.1 Requirement exploration `[required · repeatable]` (`prd.md`; delegated worktree tasks also need `execution.md`; complex tasks also need `design.md` + `implement.md`)
 - 1.2 Research `[optional · repeatable]`
 - 1.3 Configure context `[required · once]` — Claude Code, Cursor, OpenCode, Codex, Kiro, Gemini, Qoder, CodeBuddy, Copilot, Droid, Pi, Oh My Pi, ZCode, Reasonix (sub-agent-dispatch platforms only; inline platforms skip)
 - 1.4 Activate task `[required · once]` (review gate, then `task.py start`; status → in_progress)
@@ -191,7 +194,7 @@ Complex task: ask the user if you can create a Trellis task and enter the planni
 
 [workflow-state:planning]
 Load `trellis-brainstorm`; stay in planning.
-Lightweight: `prd.md` can be enough. Complex: finish `prd.md`, `design.md`, and `implement.md`; ask for review before `task.py start`.
+Main-session lightweight Trellis task: `prd.md` can be enough. Delegated worktree task: also finish `execution.md` before handoff. Complex: finish `prd.md`, `design.md`, and `implement.md`; ask for review before `task.py start`.
 Multi-deliverable scope: consider a parent task plus independently verifiable child tasks; dependencies must be written in child artifacts, not implied by tree position.
 Sub-agent mode: curate `implement.jsonl` and `check.jsonl` as spec/research manifests before start.
 [/workflow-state:planning]
@@ -204,7 +207,7 @@ Sub-agent mode: curate `implement.jsonl` and `check.jsonl` as spec/research mani
 
 [workflow-state:planning-inline]
 Load `trellis-brainstorm`; stay in planning.
-Lightweight: `prd.md` can be enough. Complex: finish `prd.md`, `design.md`, and `implement.md`; ask for review before `task.py start`.
+Main-session lightweight Trellis task: `prd.md` can be enough. Delegated worktree task: also finish `execution.md` before handoff. Complex: finish `prd.md`, `design.md`, and `implement.md`; ask for review before `task.py start`.
 Multi-deliverable scope: consider a parent task plus independently verifiable child tasks; dependencies must be written in child artifacts, not implied by tree position.
 Inline mode: skip jsonl curation; Phase 2 reads artifacts/specs via `trellis-before-dev`.
 [/workflow-state:planning-inline]
@@ -266,7 +269,7 @@ Code committed. Run `/trellis:finish-work`; if dirty, return to Phase 3.4 first.
 2. Run steps in order inside each Phase; `[required]` steps can't be skipped
 3. Phases can roll back (e.g., Execute reveals a prd defect → return to Plan to fix, then re-enter Execute)
 4. Steps tagged `[once]` are skipped if the output already exists; don't re-run
-5. Artifact presence informs the next step; missing `design.md` / `implement.md` is valid for lightweight tasks and incomplete planning for complex tasks.
+5. Artifact presence informs the next step; missing `design.md` / `implement.md` is valid for lightweight tasks and incomplete planning for complex tasks, while missing `execution.md` blocks delegated worktree handoff.
 
 ### Active Task Routing
 
@@ -291,7 +294,7 @@ When a user request matches one of these intents inside an active task, route fi
 ### Guardrails
 
 - Task creation approval is not implementation approval; implementation waits for `task.py start` after artifact review.
-- PRD-only is valid for lightweight tasks; complex tasks need `design.md` + `implement.md`.
+- PRD-only is valid only for lightweight Trellis tasks implemented by main in the same session. Delegated worktree tasks also need `execution.md` before handoff and `delivery.md` before acceptance; complex tasks need `design.md` + `implement.md`.
 - For Trellis-managed work, planning must be persisted to task artifacts; small tasks that skip Trellis must use the repository's direct-main Markdown record. Checks must run before reporting completion on either route.
 
 ### Loading Step Detail
@@ -441,7 +444,7 @@ After artifact review, flip the task status to `in_progress`:
 python ./.trellis/scripts/task.py start <task-dir>
 ```
 
-For lightweight tasks, `prd.md` can be enough. For complex tasks, `prd.md`, `design.md`, and `implement.md` must exist and be reviewed before start. On sub-agent-dispatch platforms, `implement.jsonl` and `check.jsonl` must both have real curated entries before start. Runtime consumers tolerate missing or seed-only manifests for compatibility, but that tolerance is not a planning-ready state.
+For lightweight Trellis tasks implemented by main in the same session, `prd.md` can be enough. A delegated worktree task must also have a reviewed `execution.md` before its execution session starts. For complex tasks, `prd.md`, `design.md`, and `implement.md` must exist and be reviewed before start. On sub-agent-dispatch platforms, `implement.jsonl` and `check.jsonl` must both have real curated entries before start. Runtime consumers tolerate missing or seed-only manifests for compatibility, but that tolerance is not a planning-ready state.
 
 After this command succeeds, the breadcrumb auto-switches to `[workflow-state:in_progress]`, and the rest of Phase 2 / 3 follows.
 
@@ -454,6 +457,7 @@ If `task.py start` errors with a session-identity message (no context key from h
 | `prd.md` exists | ✅ |
 | User confirms task should enter implementation | ✅ |
 | `task.py start` has been run (status = in_progress) | ✅ |
+| `execution.md` exists and is reviewed (delegated worktree tasks) | ✅ |
 | `research/` has artifacts (complex tasks) | recommended |
 | `design.md` exists (complex tasks) | ✅ |
 | `implement.md` exists (complex tasks) | ✅ |
@@ -653,7 +657,7 @@ This section is for developers who want to modify the Trellis workflow itself. A
 
 Edit the corresponding step's walkthrough body in the Phase 1 / 2 / 3 sections above. Critical invariants:
 - No active task must triage first and ask for task-creation consent before creating a Trellis task.
-- Planning must distinguish lightweight PRD-only tasks from complex tasks that require `prd.md`, `design.md`, and `implement.md` before start.
+- Planning must distinguish main-session lightweight PRD-only tasks, delegated worktree tasks that also require `execution.md`, and complex tasks that require `prd.md`, `design.md`, and `implement.md` before start.
 - Every required execution path must keep the Phase 3.4 commit reminder reachable before `/trellis:finish-work`.
 
 All tag blocks live in the `## Phase Index` section above, immediately after each phase summary:
