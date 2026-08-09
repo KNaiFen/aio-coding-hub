@@ -190,7 +190,8 @@ def _default_prd_content(title: str, description: str | None = None) -> str:
 ## Notes
 
 - Keep `prd.md` focused on requirements, constraints, and acceptance criteria.
-- Lightweight tasks can remain PRD-only.
+- Lightweight tasks implemented by main in the same session can remain PRD-only.
+- Delegated worktree tasks also need `execution.md` before handoff and `delivery.md` before acceptance.
 - For complex tasks, add `design.md` for technical design and `implement.md` for execution planning before `task.py start`.
 """
 
@@ -411,7 +412,8 @@ def cmd_create(args: argparse.Namespace) -> int:
     print("", file=sys.stderr)
     print(colored("Next steps:", Colors.BLUE), file=sys.stderr)
     print("  - Fill prd.md with requirements and acceptance criteria", file=sys.stderr)
-    print("  - Lightweight task: PRD-only is valid", file=sys.stderr)
+    print("  - Lightweight main-session task: PRD-only is valid", file=sys.stderr)
+    print("  - Delegated worktree task: add execution.md before handoff and delivery.md before acceptance", file=sys.stderr)
     print("  - Complex task: add design.md and implement.md before task.py start", file=sys.stderr)
     if seeded_jsonl:
         print(
