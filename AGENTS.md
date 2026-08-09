@@ -11,6 +11,16 @@
 - Local validation is limited to direct dependency-free Node.js source contracts and syntax parsing that do not write files, plus `git diff --check`. The canonical entry is `node scripts/check-cloud-only-verification.mjs`; run its self-test directly with `node scripts/check-cloud-only-verification.selftest.mjs`. Use `node --check <changed-file.mjs>` only for changed Node source. Do not invoke these checks through `pnpm`.
 - GitHub Actions owns dependency installation, frontend lint/typecheck/tests/build, Rust formatting and lock synchronization, generated bindings, Clippy, Rust tests, audit, signing, and desktop packaging. Apply only a bounded CI drift patch when Actions reports generated-file drift. Use the full `ci` workflow_dispatch for validation and the `dev-build` workflow only when a desktop integration artifact is actually needed.
 
+## Multi-worktree Delivery
+
+- The coordinator checkout is `main`; implementation happens in a sibling task worktree and never directly in the coordinator checkout.
+- An independent execution session may commit and push its assigned task branch, create or update its PR, and fix failures until the latest PR commit has passed the required CI and relevant compile jobs. It must not push `main`, merge a PR, enable auto-merge, or remove a worktree.
+- Implementation is complete only when the latest PR commit is green in the required cloud checks and the task worktree contains a Markdown handoff with the PR link, changed files and code locations, deviations from the plan, verification results, and open issues.
+- After handoff, the execution session pauses. Main reviews the latest PR diff against the task artifacts and current contracts; main may perform the review itself or ask a read-only sub-agent to report findings.
+- If acceptance fails, main writes a Markdown `findings.md` in the task worktree. The execution session continues from that document; every new push requires the relevant CI checks to pass again before re-acceptance.
+- Only main merges an accepted PR. After merge, main updates the knowledge base, archives the Trellis task, synchronizes local `main`, and removes the task worktree only after confirming it is clean and no session is using it.
+- Do not add a second custom JSON gate for this workflow. Use the existing Trellis task artifacts where applicable, Markdown handoffs for delivery, and GitHub PR checks for CI evidence.
+
 ## Project Knowledge Base
 
 - `docs/README.md` is the canonical navigation entry for product, architecture, plugin, operations, task, and historical documentation.
