@@ -19,6 +19,10 @@
 - [Request Logs 实时卡片跨 CLI 分栏分析](./engineering-notes/realtime-trace-card-cli-tab-leak-analysis.md)：2026-07-04 的问题定位记录。
 - [Upstream main reconciliation](./engineering-notes/upstream-main-reconciliation-2026-07-05.md)：2026-07-05 的上游同步与发布记录。
 
+## 简单变更记录
+
+- [2026-08 变更记录](./change-records/2026-08.md)：main session 直接实施的简单任务，以及任务留痕规则建立时的收口证据。
+
 ## 维护边界
 
 - 保留当时结论，不用当前事实覆盖历史上下文。
