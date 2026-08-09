@@ -78,6 +78,8 @@ function makeContext(overrides: Partial<SaveActionContext> = {}): SaveActionCont
     claudeModels: {},
     modelMapping: { default_model: null, exact: {} },
     testModel: "",
+    availabilityProbeEnabled: false,
+    availabilityProbeIntervalMinutes: "10",
     streamIdleTimeoutSeconds: "",
     upstreamRetryPolicyOverrideEnabled: false,
     upstreamRetryPolicyDraft: DEFAULT_UPSTREAM_RETRY_POLICY,

@@ -171,10 +171,6 @@ impl ProviderAvailabilityProbeRuntimeState {
         Some(ProviderAvailabilityProbeMutationGuard { _guard: guard })
     }
 
-    pub(crate) async fn invalidate(&self, provider_id: i64) {
-        let _guard = self.begin_mutation(provider_id).await;
-    }
-
     async fn invalidate_generation(&self, provider_id: i64) {
         let mut inner = self.shared.inner.lock().await;
         let generation = inner.allocate_generation();
@@ -854,7 +850,7 @@ INSERT INTO providers(
             state.begin_probe(4, None).await,
             ProbeDecision::Wait(_)
         ));
-        state.invalidate(4).await;
+        drop(state.begin_mutation(4).await);
         {
             let mut inner = state.shared.inner.lock().await;
             let (_, should_record) = take_finished_flight(&mut inner, 4, generation)
@@ -878,7 +874,7 @@ INSERT INTO providers(
     #[tokio::test]
     async fn invalidating_an_idle_provider_does_not_leave_a_runtime_tombstone() {
         let state = ProviderAvailabilityProbeRuntimeState::default();
-        state.invalidate(99).await;
+        drop(state.begin_mutation(99).await);
         let inner = state.shared.inner.lock().await;
         assert!(!inner.entries.contains_key(&99));
     }

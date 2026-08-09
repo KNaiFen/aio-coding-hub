@@ -1244,6 +1244,7 @@ mod tests {
             ],
             "availability facts may not carry probe URLs, credentials, response bodies, or errors"
         );
+        drop(columns_statement);
         drop(conn);
 
         crate::providers::delete(&db, provider.id, false).expect("delete provider");

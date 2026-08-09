@@ -162,6 +162,8 @@ function makeCtx(overrides: Partial<OAuthActionContext> = {}) {
     claudeModels: {},
     modelMapping: { default_model: null, exact: {} },
     testModel: "",
+    availabilityProbeEnabled: false,
+    availabilityProbeIntervalMinutes: "10",
     upstreamRetryPolicyOverrideEnabled: false,
     upstreamRetryPolicyDraft: {
       enabled: true,
