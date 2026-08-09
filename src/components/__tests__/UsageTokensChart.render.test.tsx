@@ -25,6 +25,9 @@ vi.mock("../charts/lazyRecharts", async () => {
       <div
         data-testid="y-axis"
         data-ticks={(props.ticks ?? []).join("|")}
+        data-formatted-ticks={(props.ticks ?? [])
+          .map((tick: number) => props.tickFormatter?.(tick) ?? String(tick))
+          .join("|")}
         data-width={props.width}
       >
         {props.tickFormatter?.(1_500_000)}
@@ -81,7 +84,7 @@ describe("UsageTokensChart rendering", () => {
     expect(screen.getByTestId("area-chart")).toHaveAttribute("data-points", "7");
     expect(screen.getByTestId("x-axis").dataset.ticks).toContain("03/18");
     expect(screen.getByTestId("y-axis").textContent).toContain("1.5M");
-    expect(screen.getByTestId("y-axis")).toHaveAttribute("data-width", "45");
+    expect(screen.getByTestId("y-axis")).toHaveAttribute("data-width", "54");
     expect(screen.getByTestId("area")).toHaveAttribute("data-key", "tokens");
     expect(within(screen.getByTestId("tooltip")).getByText("03/12")).toBeInTheDocument();
     expect(within(screen.getByTestId("tooltip")).getByText("Tokens")).toBeInTheDocument();
@@ -96,13 +99,16 @@ describe("UsageTokensChart rendering", () => {
 
     render(
       <UsageTokensChart
-        rows={[makeHourlyRow({ total_tokens: 12_345_000_000_000 })]}
+        rows={[
+          makeHourlyRow({ day: "2026-03-18", total_tokens: 12_345_000_000_000 }),
+        ]}
         days={1}
       />
     );
 
     const yAxis = screen.getByTestId("y-axis");
     expect(yAxis.dataset.ticks).toContain("12500000000000");
+    expect(yAxis.dataset.formattedTicks).toContain("12500.0B");
     expect(Number(yAxis.dataset.width)).toBeGreaterThan(45);
 
     vi.useRealTimers();
