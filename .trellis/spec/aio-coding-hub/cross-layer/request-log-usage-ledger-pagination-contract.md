@@ -94,14 +94,30 @@ Performance trend formulas are identical to the usage summary formulas:
 
 - average duration is successful duration divided by successful requests;
 - average TTFB includes only successful rows where `ttfb_ms < duration_ms`;
-- output rate is the sum of non-null output tokens divided by the sum of
-  valid `(duration_ms - ttfb_ms)` generation time, not an average of
-  per-request rates.
+- each valid output-rate sample is
+  `output_tokens * 1000.0 / final_upstream_attempt_duration_ms`, using the
+  complete trusted final successful upstream attempt including TTFB;
+- summary, leaderboard, folder, day-detail, trend, and daily-rollup output rate
+  is the arithmetic mean of those per-request samples (`rate_sum / sample_count`),
+  never `SUM(output_tokens) / SUM(duration)` and never a duration with TTFB
+  subtracted.
 
-Errors, statistics-excluded rows, missing output usage, and invalid TTFB never
-enter those metric denominators. Trend ranges use local natural calendar
-boundaries and intentionally ignore the configurable statistics day-start
-offset.
+The final-attempt timestamp freezes at the first trustworthy protocol
+completion event, or at a clean EOF for protocols without such an event. After
+a downstream disconnect, the Codex Responses stream keeps draining until EOF,
+an upstream error, or its bounded deadline even after completion is seen. A
+later terminal failure/incomplete event or transport error invalidates the
+frozen attempt before persistence; a clean completion is not allowed to hide a
+queued terminal error. The disconnect itself invalidates downstream output
+timing, but does not discard a final-attempt timestamp established by a
+trustworthy completion or clean drain.
+
+Errors, statistics-excluded rows, missing or non-positive output usage,
+untrusted timing versions, and missing or non-positive final-attempt duration
+never enter the output-rate denominator. Invalid TTFB remains excluded only
+from the TTFB metric; a valid final-attempt output-rate sample does not require
+TTFB. Trend ranges use local natural calendar boundaries and intentionally
+ignore the configurable statistics day-start offset.
 
 Each performance row exposes the valid sample count for duration, TTFB, and
 output rate separately. Consumers must display the sample count for the active
@@ -161,5 +177,7 @@ Verify migration, resumable backfill, concurrent dual-write, pending
 reconciliation, failure isolation, retention coverage, manual clear, provider
 deletion, cost correction, aggregate equality before/after cutover, bounded
 provider trend formulas/ranking/buckets/rows and detail-retention invariance,
+per-request output-rate arithmetic averaging versus token/duration weighting,
+raw/rollup/hybrid equality after projection rebuild,
 cursor validation, equal-timestamp page boundaries, filter semantics, live
 overlays, and generated binding compatibility.

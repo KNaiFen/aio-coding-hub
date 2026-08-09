@@ -40,7 +40,7 @@ const snapshot: TrayProviderMiniSnapshot = {
       failureCount: 1,
       availability: [
         "healthy",
-        "healthy",
+        "degraded",
         "unhealthy",
         "no_data",
         "healthy",
@@ -111,7 +111,8 @@ describe("TrayProviderMiniApp", () => {
     expect(screen.queryByText("成")).not.toBeInTheDocument();
     expect(screen.queryByText("败")).not.toBeInTheDocument();
     const timelines = screen.getAllByLabelText("供应商可用性");
-    expect(within(timelines[0]!).getAllByTitle(/正常|异常|无数据/)).toHaveLength(18);
+    expect(within(timelines[0]!).getAllByTitle(/正常|降级|异常|无数据/)).toHaveLength(18);
+    expect(within(timelines[0]!).getByTitle("降级")).toHaveClass("bg-amber-500");
     expect(within(timelines[1]!).getAllByTitle("无数据")).toHaveLength(18);
   });
 

@@ -17,6 +17,8 @@ export type ProviderEditorInitialValues = {
   claude_models: ClaudeModels;
   model_mapping: ModelMapping;
   availability_test_model: string;
+  availability_probe_enabled?: boolean;
+  availability_probe_interval_minutes?: number;
   enabled: boolean;
   cost_multiplier: number;
   limit_5h_usd: number | null;
@@ -79,6 +81,8 @@ export function buildDuplicatedProviderInitialValues(
       exact: { ...(provider.model_mapping?.exact ?? {}) },
     },
     availability_test_model: provider.availability_test_model ?? "",
+    availability_probe_enabled: provider.availability_probe_enabled,
+    availability_probe_interval_minutes: provider.availability_probe_interval_minutes,
     enabled: provider.enabled,
     cost_multiplier: provider.cost_multiplier,
     limit_5h_usd: provider.limit_5h_usd,

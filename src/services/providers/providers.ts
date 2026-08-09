@@ -80,9 +80,39 @@ const PROVIDER_AUTH_MODE_VALUES = [
 ] as const satisfies readonly ProviderAuthMode[];
 export const MAX_PROVIDER_ORDER_IDS = 512;
 export const MAX_SESSION_REUSE_PRIORITY = 1000;
+export const DEFAULT_AVAILABILITY_PROBE_INTERVAL_MINUTES = 10;
+export const MIN_AVAILABILITY_PROBE_INTERVAL_MINUTES = 1;
+export const MAX_AVAILABILITY_PROBE_INTERVAL_MINUTES = 1_440;
+
+type ProviderProbeSummaryFields = {
+  availability_probe_enabled: boolean;
+  availability_probe_interval_minutes: number;
+};
+
+type ProviderProbeUpsertFields = {
+  availabilityProbeEnabled?: boolean;
+  availabilityProbeIntervalMinutes?: number;
+};
+
+type ProviderProbeUpsertTransportFields = {
+  availabilityProbeEnabled?: boolean;
+  availabilityProbeIntervalMinutes?: number;
+};
+
+type GeneratedProviderSummaryWithProbe = GeneratedProviderSummary & ProviderProbeSummaryFields;
+type GeneratedProviderUpsertInputWithProbe = Omit<
+  GeneratedProviderUpsertInput,
+  keyof ProviderProbeUpsertFields
+> &
+  ProviderProbeUpsertFields;
+type GeneratedProviderUpsertTransportInputWithProbe = Omit<
+  GeneratedProviderUpsertInput,
+  keyof ProviderProbeUpsertTransportFields
+> &
+  ProviderProbeUpsertTransportFields;
 
 export type ProviderSummary = Override<
-  GeneratedProviderSummary,
+  GeneratedProviderSummaryWithProbe,
   {
     cli_key: CliKey;
     auth_mode: ProviderAuthMode;
@@ -114,6 +144,8 @@ type ProviderUpsertFieldMap = {
   claudeModels: "claudeModels";
   modelMapping: "modelMapping";
   availabilityTestModel: "availabilityTestModel";
+  availabilityProbeEnabled: "availabilityProbeEnabled";
+  availabilityProbeIntervalMinutes: "availabilityProbeIntervalMinutes";
   limit5hUsd: "limit5hUsd";
   limitDailyUsd: "limitDailyUsd";
   dailyResetMode: "dailyResetMode";
@@ -135,9 +167,9 @@ type ProviderUpsertFieldMap = {
 };
 
 type ProviderUpsertAuthority = RemapGeneratedKeys<
-  GeneratedProviderUpsertInput,
+  GeneratedProviderUpsertInputWithProbe,
   ProviderUpsertFieldMap &
-    Record<keyof GeneratedProviderUpsertInput, keyof GeneratedProviderUpsertInput>
+    Record<keyof GeneratedProviderUpsertInputWithProbe, keyof GeneratedProviderUpsertInputWithProbe>
 >;
 
 type ProviderUpsertOptionalKeys =
@@ -152,7 +184,7 @@ export type ProviderUpsertInput = Omit<
 } & Partial<Pick<ProviderUpsertAuthority, ProviderUpsertOptionalKeys>>;
 
 type ProviderUpsertTransportInput = Omit<
-  GeneratedProviderUpsertInput,
+  GeneratedProviderUpsertTransportInputWithProbe,
   | "streamIdleTimeoutSeconds"
   | "upstreamRetryPolicyOverrideSpecified"
   | "modelRoutingPolicyOverrideSpecified"
@@ -182,8 +214,13 @@ export function toProviderSummary(value: GeneratedProviderSummary): ProviderSumm
   if (!isCanonicalUuidV4(value.provider_uuid)) {
     throw new Error("IPC_INVALID_UUID: providers.provider_uuid");
   }
+  const provider = value as GeneratedProviderSummaryWithProbe;
   return {
-    ...value,
+    ...provider,
+    availability_probe_enabled: provider.availability_probe_enabled ?? false,
+    availability_probe_interval_minutes:
+      provider.availability_probe_interval_minutes ??
+      DEFAULT_AVAILABILITY_PROBE_INTERVAL_MINUTES,
     cli_key: toCliKey(value.cli_key, "providers.cli_key"),
     auth_mode: toProviderAuthMode(value.auth_mode, "providers.auth_mode"),
   };
@@ -203,6 +240,21 @@ function toProviderUpsertPayload(input: ProviderUpsertInput): ProviderUpsertTran
       ? null
       : validateProviderId(input.sourceProviderId, "sourceProviderId");
   const cliKey = validateProviderCliKey(input.cliKey);
+  const availabilityProbeEnabled =
+    input.availabilityProbeEnabled ?? (providerId == null ? false : undefined);
+  const availabilityProbeIntervalMinutes =
+    input.availabilityProbeIntervalMinutes ??
+    (providerId == null ? DEFAULT_AVAILABILITY_PROBE_INTERVAL_MINUTES : undefined);
+  if (
+    availabilityProbeIntervalMinutes !== undefined &&
+    (!Number.isSafeInteger(availabilityProbeIntervalMinutes) ||
+      availabilityProbeIntervalMinutes < MIN_AVAILABILITY_PROBE_INTERVAL_MINUTES ||
+      availabilityProbeIntervalMinutes > MAX_AVAILABILITY_PROBE_INTERVAL_MINUTES)
+  ) {
+    throw new Error(
+      `SEC_INVALID_INPUT: availabilityProbeIntervalMinutes must be within [${MIN_AVAILABILITY_PROBE_INTERVAL_MINUTES}, ${MAX_AVAILABILITY_PROBE_INTERVAL_MINUTES}]`
+    );
+  }
 
   const payloadBase = {
     providerId,
@@ -218,6 +270,8 @@ function toProviderUpsertPayload(input: ProviderUpsertInput): ProviderUpsertTran
     claudeModels: input.claudeModels ?? null,
     modelMapping: input.modelMapping ?? null,
     availabilityTestModel: input.availabilityTestModel ?? null,
+    availabilityProbeEnabled,
+    availabilityProbeIntervalMinutes,
     limit5hUsd: input.limit5hUsd ?? null,
     limitDailyUsd: input.limitDailyUsd ?? null,
     dailyResetMode: input.dailyResetMode ?? null,
@@ -233,7 +287,7 @@ function toProviderUpsertPayload(input: ProviderUpsertInput): ProviderUpsertTran
     accountUsageCredentials: input.accountUsageCredentials ?? null,
     upstreamRetryPolicyOverride: null,
     modelRoutingPolicyOverride: null,
-  } satisfies Omit<GeneratedProviderUpsertInput, "streamIdleTimeoutSeconds">;
+  } satisfies Omit<GeneratedProviderUpsertTransportInputWithProbe, "streamIdleTimeoutSeconds">;
 
   const payload: ProviderUpsertTransportInput = { ...payloadBase };
 

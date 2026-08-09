@@ -348,6 +348,8 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
     exact: {},
   });
   const [testModel, setTestModel] = useState("");
+  const [availabilityProbeEnabled, setAvailabilityProbeEnabled] = useState(false);
+  const [availabilityProbeIntervalMinutes, setAvailabilityProbeIntervalMinutes] = useState("10");
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
   const [streamIdleTimeoutSeconds, setStreamIdleTimeoutSeconds] = useState("");
@@ -945,6 +947,8 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
     setClaudeModels,
     setModelMapping,
     setTestModel,
+    setAvailabilityProbeEnabled,
+    setAvailabilityProbeIntervalMinutes,
     setTags,
     setTagInput,
     setStreamIdleTimeoutSeconds,
@@ -990,6 +994,8 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
       claudeModels,
       modelMapping,
       testModel,
+      availabilityProbeEnabled,
+      availabilityProbeIntervalMinutes,
       streamIdleTimeoutSeconds,
       upstreamRetryPolicyOverrideEnabled,
       upstreamRetryPolicyDraft,
@@ -1040,6 +1046,8 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
       claudeModels,
       modelMapping,
       testModel,
+      availabilityProbeEnabled,
+      availabilityProbeIntervalMinutes,
       streamIdleTimeoutSeconds,
       upstreamRetryPolicyOverrideEnabled,
       upstreamRetryPolicyDraft,
@@ -1292,6 +1300,10 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
     setModelMapping,
     testModel,
     setTestModel,
+    availabilityProbeEnabled,
+    setAvailabilityProbeEnabled,
+    availabilityProbeIntervalMinutes,
+    setAvailabilityProbeIntervalMinutes,
     claudeModelCount,
     streamIdleTimeoutSeconds,
     setStreamIdleTimeoutSeconds,

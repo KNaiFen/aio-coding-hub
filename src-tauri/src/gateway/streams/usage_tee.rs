@@ -158,6 +158,14 @@ fn observe_new_output_events(
     }
 }
 
+fn invalidate_for_downstream_backpressure(timing: &UpstreamOutputTiming) {
+    if timing.final_attempt_duration_ms().is_some() {
+        timing.invalidate_output();
+    } else {
+        timing.invalidate_final_attempt();
+    }
+}
+
 pub(in crate::gateway) fn spawn_upstream_output_timing_stream<S>(
     mut upstream: S,
     protocol_key: &str,
@@ -183,6 +191,7 @@ where
             };
             if let Ok(chunk) = &item {
                 let before = tracker.output_delta_event_count();
+                let completion_before = tracker.protocol_completion_seen();
                 tracker.ingest_chunk(chunk.as_ref());
                 observe_new_output_events(
                     &tracker,
@@ -192,29 +201,32 @@ where
                     before,
                 );
                 if tracker.terminal_error_seen() {
-                    timing.invalidate();
+                    timing.invalidate_final_attempt();
+                } else if !completion_before && tracker.protocol_completion_seen() {
+                    timing.observe_protocol_completion_at(attempt_started.elapsed().as_millis());
                 }
             } else {
-                timing.invalidate();
+                timing.invalidate_final_attempt();
             }
 
             match tx.try_send(item) {
                 Ok(()) => {}
                 Err(tokio::sync::mpsc::error::TrySendError::Full(item)) => {
                     // A full queue means later observations would include downstream pacing.
-                    timing.invalidate();
+                    invalidate_for_downstream_backpressure(&timing);
                     if tx.send(item).await.is_err() {
                         break;
                     }
                 }
                 Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                    timing.invalidate();
+                    timing.invalidate_output();
                     break;
                 }
             }
         }
 
         let before = tracker.output_delta_event_count();
+        let completion_before = tracker.protocol_completion_seen();
         let _ = tracker.finalize();
         observe_new_output_events(
             &tracker,
@@ -224,7 +236,9 @@ where
             before,
         );
         if tracker.terminal_error_seen() {
-            timing.invalidate();
+            timing.invalidate_final_attempt();
+        } else if !completion_before && tracker.protocol_completion_seen() {
+            timing.observe_protocol_completion_at(attempt_started.elapsed().as_millis());
         } else if upstream_ended_normally {
             timing.observe_clean_eof_at(attempt_started.elapsed().as_millis());
         }
@@ -256,19 +270,19 @@ where
                     timing.observe_first_byte_at(attempt_started.elapsed().as_millis());
                 }
                 Ok(_) => {}
-                Err(_) => timing.invalidate(),
+                Err(_) => timing.invalidate_final_attempt(),
             }
 
             match tx.try_send(item) {
                 Ok(()) => {}
                 Err(tokio::sync::mpsc::error::TrySendError::Full(item)) => {
-                    timing.invalidate();
+                    timing.invalidate_final_attempt();
                     if tx.send(item).await.is_err() {
                         break;
                     }
                 }
                 Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                    timing.invalidate();
+                    timing.invalidate_output();
                     break;
                 }
             }
@@ -296,15 +310,16 @@ fn is_codex_client_abort_successish(
     saw_stream_output: bool,
     completion_seen: bool,
     usage_seen: bool,
-    _terminal_error_seen: bool,
-    _upstream_ended_normally: bool,
+    terminal_error_seen: bool,
+    upstream_ended_normally: bool,
 ) -> bool {
     is_codex_responses_path(cli_key, path)
         && (200..300).contains(&status)
         && saw_stream_output
-        // For codex, downstream disconnect can race with trailing markers.
-        // Completion/usage is required before treating the request as successful.
-        && (usage_seen || completion_seen)
+        && !terminal_error_seen
+        // A clean upstream EOF is the fallback when no explicit completion marker
+        // exists; otherwise completion or usage must have reached the drain.
+        && (usage_seen || completion_seen || upstream_ended_normally)
 }
 
 fn is_codex_drop_successish(
@@ -680,7 +695,6 @@ where
         let final_upstream_attempt_timing_version = i64::from(
             effective_error_code.is_none()
                 && !stream_error_seen
-                && self.tracker.completion_seen()
                 && final_upstream_attempt_duration_ms.is_some(),
         );
         emit_request_event_and_spawn_request_log(
@@ -764,7 +778,7 @@ where
 {
     fn drop(&mut self) {
         if !self.finalized {
-            self.ctx.upstream_output_timing.invalidate();
+            self.ctx.upstream_output_timing.invalidate_output();
             // Best-effort flush for trailing partial SSE data before deciding abort/success.
             let usage = self.tracker.finalize();
             let usage_seen = usage.is_some();
@@ -848,12 +862,12 @@ where
                 if !is_codex_responses {
                     break;
                 }
-                // Keep draining until completion/deadline/end-of-stream.
+                // A completion frame freezes the attempt timestamp but is not
+                // sufficient to stop draining: a queued terminal error must
+                // still be able to invalidate that timestamp before logging.
+                // Stop only at EOF, an upstream error, or the bounded deadline.
                 // Some Codex backend flows can emit transient error-like markers before
                 // `response.completed` (with usage) arrives.
-                if tee.tracker.completion_seen() {
-                    break;
-                }
                 let Some(deadline) = drain_deadline else {
                     break;
                 };
@@ -889,7 +903,7 @@ where
                 // 这里通过监听 rx 端被 drop 来更早感知断开，避免误记 GW_STREAM_ABORTED。
                 // 如果断开和 idle timeout 同时 ready，断开应优先进入 Codex drain。
                 _ = tx.closed() => {
-                    tee.ctx.upstream_output_timing.invalidate();
+                    tee.ctx.upstream_output_timing.invalidate_output();
                     client_abort_detected_by = Some("rx_closed");
                     downstream_closed = true;
                     if is_codex_responses {
@@ -911,7 +925,9 @@ where
                             match tx.try_send(Ok(chunk)) {
                                 Ok(()) => {}
                                 Err(tokio::sync::mpsc::error::TrySendError::Full(item)) => {
-                                    tee.ctx.upstream_output_timing.invalidate();
+                                    invalidate_for_downstream_backpressure(
+                                        &tee.ctx.upstream_output_timing,
+                                    );
                                     if tx.send(item).await.is_err() {
                                         client_abort_detected_by = Some("send_failed");
                                         downstream_closed = true;
@@ -923,7 +939,7 @@ where
                                     }
                                 }
                                 Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                                    tee.ctx.upstream_output_timing.invalidate();
+                                    tee.ctx.upstream_output_timing.invalidate_output();
                                     client_abort_detected_by = Some("send_failed");
                                     downstream_closed = true;
                                     if is_codex_responses {
@@ -938,7 +954,7 @@ where
                             forwarded_bytes = forwarded_bytes.saturating_add(chunk_len);
                         }
                         Err(err) => {
-                            tee.ctx.upstream_output_timing.invalidate();
+                            tee.ctx.upstream_output_timing.invalidate_final_attempt();
                             // 尽力把流错误透传给客户端
                             let _ = tx.send(Err(err)).await;
                             break;
@@ -1024,9 +1040,8 @@ where
                 }),
             );
 
-            // Codex SSE: 2xx + saw output + no terminal error => treat client disconnect as success.
-            // Do NOT require completion_seen: ChatGPT backend's response.completed may arrive
-            // after the client disconnects and the drain window may not capture it.
+            // Codex SSE: only a completed/usage-bearing or cleanly ended upstream
+            // drain may turn a downstream disconnect into a successful request.
             let codex_successish = is_codex_client_abort_successish(
                 &tee.ctx.cli_key,
                 &tee.ctx.path,
@@ -1243,7 +1258,7 @@ where
 {
     fn drop(&mut self) {
         if !self.finalized {
-            self.ctx.upstream_output_timing.invalidate();
+            self.ctx.upstream_output_timing.invalidate_output();
             let usage_seen = !self.truncated
                 && !self.buffer.is_empty()
                 && usage::parse_usage_from_json_or_sse_bytes(&self.ctx.cli_key, &self.buffer)
@@ -1269,15 +1284,16 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
+        invalidate_for_downstream_backpressure,
         is_codex_body_buffer_drop_successish, is_codex_client_abort_successish,
         is_codex_drop_successish, is_codex_responses_path, is_codex_stream_tail_error_successish,
         is_codex_stream_terminal_error_successish, is_plugin_stream_error_chunk, next_item,
-        spawn_touch_activity, spawn_usage_sse_relay_body, RelayBodyStream, StreamFinalizeCtx,
-        UpstreamModelObserverStream, UsageSseTeeStream,
+        spawn_touch_activity, spawn_upstream_output_timing_stream, spawn_usage_sse_relay_body,
+        RelayBodyStream, StreamFinalizeCtx, UpstreamModelObserverStream, UsageSseTeeStream,
     };
     use crate::gateway::active_requests::{ActiveRequestRegistry, ActiveRequestStart};
     use crate::gateway::proxy::GatewayErrorCode;
-    use crate::gateway::streams::StreamActivityTracker;
+    use crate::gateway::streams::{StreamActivityTracker, UpstreamOutputTiming};
     use crate::{circuit_breaker, db, request_logs, session_manager, usage};
     use axum::body::Bytes;
     use std::collections::HashMap;
@@ -1417,6 +1433,37 @@ mod tests {
             std::str::from_utf8(chunk.as_ref()).expect("utf8"),
             ": aio-plugin-error\nevent: error\ndata: {\"error\":\"plugin_failed\"}\n\n"
         );
+    }
+
+    #[test]
+    fn timing_freeze_requires_exact_protocol_completion_or_clean_eof() {
+        let mut tracker = usage::SseUsageTracker::new("codex");
+        tracker.ingest_chunk(b"data: {\"status\":\"completed\"}\n\n");
+        assert!(tracker.completion_seen());
+        assert!(!tracker.protocol_completion_seen());
+
+        tracker.ingest_chunk(b"data: {\"type\":\"response.item.completed\"}\n\n");
+        assert!(tracker.completion_seen());
+        assert!(!tracker.protocol_completion_seen());
+
+        tracker.ingest_chunk(
+            b"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n",
+        );
+        assert!(tracker.protocol_completion_seen());
+    }
+
+    #[test]
+    fn downstream_backpressure_only_invalidates_an_unfinished_attempt() {
+        let before_completion = UpstreamOutputTiming::default();
+        invalidate_for_downstream_backpressure(&before_completion);
+        before_completion.observe_protocol_completion_at(10);
+        assert_eq!(before_completion.final_attempt_duration_ms(), None);
+
+        let after_completion = UpstreamOutputTiming::from_buffered_prefix(Some(1), Some(5));
+        after_completion.observe_protocol_completion_at(10);
+        invalidate_for_downstream_backpressure(&after_completion);
+        assert_eq!(after_completion.final_attempt_duration_ms(), Some(10));
+        assert_eq!(after_completion.duration_ms(), None);
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -1686,7 +1733,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_client_abort_successish_allows_completion_or_usage_when_upstream_ended() {
+    fn codex_client_abort_successish_accepts_completion_usage_or_clean_eof() {
         assert!(is_codex_client_abort_successish(
             "codex",
             "/v1/responses",
@@ -1694,8 +1741,8 @@ mod tests {
             true,
             true,
             false,
-            true,
-            true
+            false,
+            false
         ));
         assert!(is_codex_client_abort_successish(
             "codex",
@@ -1704,10 +1751,10 @@ mod tests {
             true,
             false,
             true,
-            true,
-            true
+            false,
+            false
         ));
-        assert!(!is_codex_client_abort_successish(
+        assert!(is_codex_client_abort_successish(
             "codex",
             "/v1/responses",
             200,
@@ -1722,7 +1769,7 @@ mod tests {
             "/v1/responses",
             200,
             true,
-            false,
+            true,
             false,
             true,
             true
@@ -1907,6 +1954,153 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn upstream_timing_freezes_at_protocol_completion_before_delayed_eof() {
+        let timing = UpstreamOutputTiming::default();
+        let attempt_started = Instant::now();
+        let (upstream_tx, upstream_rx) =
+            tokio::sync::mpsc::channel::<Result<Bytes, reqwest::Error>>(4);
+        let mut stream = spawn_upstream_output_timing_stream(
+            RelayBodyStream::new(upstream_rx),
+            "codex",
+            timing.clone(),
+            attempt_started,
+            0,
+        );
+
+        tokio::time::sleep(Duration::from_millis(2)).await;
+        upstream_tx
+            .send(Ok(Bytes::from_static(
+                b"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n",
+            )))
+            .await
+            .expect("send completion");
+        next_item(&mut stream)
+            .await
+            .expect("completion chunk")
+            .expect("completion chunk should succeed");
+        let frozen = timing
+            .final_attempt_duration_ms()
+            .expect("completion must freeze timing");
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        drop(upstream_tx);
+        assert!(next_item(&mut stream).await.is_none());
+        assert_eq!(timing.final_attempt_duration_ms(), Some(frozen));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn upstream_timing_uses_clean_eof_without_exact_completion() {
+        let timing = UpstreamOutputTiming::default();
+        let attempt_started = Instant::now();
+        let (upstream_tx, upstream_rx) =
+            tokio::sync::mpsc::channel::<Result<Bytes, reqwest::Error>>(4);
+        let mut stream = spawn_upstream_output_timing_stream(
+            RelayBodyStream::new(upstream_rx),
+            "codex",
+            timing.clone(),
+            attempt_started,
+            0,
+        );
+
+        tokio::time::sleep(Duration::from_millis(2)).await;
+        upstream_tx
+            .send(Ok(Bytes::from_static(
+                b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n",
+            )))
+            .await
+            .expect("send output");
+        drop(upstream_tx);
+        while let Some(item) = next_item(&mut stream).await {
+            item.expect("output chunk should succeed");
+        }
+        assert!(timing.final_attempt_duration_ms().is_some());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn upstream_read_error_invalidates_a_previously_frozen_attempt() {
+        let timing = UpstreamOutputTiming::default();
+        let attempt_started = Instant::now();
+        let (upstream_tx, upstream_rx) =
+            tokio::sync::mpsc::channel::<Result<Bytes, reqwest::Error>>(4);
+        let mut stream = spawn_upstream_output_timing_stream(
+            RelayBodyStream::new(upstream_rx),
+            "codex",
+            timing.clone(),
+            attempt_started,
+            0,
+        );
+
+        tokio::time::sleep(Duration::from_millis(2)).await;
+        upstream_tx
+            .send(Ok(Bytes::from_static(
+                b"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n",
+            )))
+            .await
+            .expect("send completion");
+        next_item(&mut stream)
+            .await
+            .expect("completion chunk")
+            .expect("completion chunk should succeed");
+        assert!(timing.final_attempt_duration_ms().is_some());
+
+        let read_error = reqwest::Client::new()
+            .get("://invalid-url")
+            .build()
+            .expect_err("invalid URL should produce a reqwest error");
+        upstream_tx
+            .send(Err(read_error))
+            .await
+            .expect("send read error");
+        drop(upstream_tx);
+        let mut saw_error = false;
+        while let Some(item) = next_item(&mut stream).await {
+            saw_error |= item.is_err();
+        }
+        assert!(saw_error);
+        assert_eq!(timing.final_attempt_duration_ms(), None);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn upstream_terminal_failure_invalidates_a_previously_frozen_attempt() {
+        let timing = UpstreamOutputTiming::default();
+        let attempt_started = Instant::now();
+        let (upstream_tx, upstream_rx) =
+            tokio::sync::mpsc::channel::<Result<Bytes, reqwest::Error>>(4);
+        let mut stream = spawn_upstream_output_timing_stream(
+            RelayBodyStream::new(upstream_rx),
+            "codex",
+            timing.clone(),
+            attempt_started,
+            0,
+        );
+
+        tokio::time::sleep(Duration::from_millis(2)).await;
+        upstream_tx
+            .send(Ok(Bytes::from_static(
+                b"event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n",
+            )))
+            .await
+            .expect("send completion");
+        next_item(&mut stream)
+            .await
+            .expect("completion chunk")
+            .expect("completion chunk should succeed");
+        assert!(timing.final_attempt_duration_ms().is_some());
+
+        upstream_tx
+            .send(Ok(Bytes::from_static(
+                b"event: response.failed\ndata: {\"type\":\"response.failed\"}\n\n",
+            )))
+            .await
+            .expect("send terminal failure");
+        drop(upstream_tx);
+        while let Some(item) = next_item(&mut stream).await {
+            item.expect("terminal failure chunk should remain transport-valid");
+        }
+        assert_eq!(timing.final_attempt_duration_ms(), None);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn codex_disconnect_drain_ignores_stream_idle_timeout_until_completion() {
         let app = tauri::test::mock_app();
         let app_handle = app.handle().clone();
@@ -1917,11 +2111,21 @@ mod tests {
         let active_requests = Arc::new(ActiveRequestRegistry::default());
         active_requests.register(active_request_start("trace-usage-tee-drain"));
         let ctx = test_stream_finalize_ctx(app_handle, db, log_tx, active_requests.clone());
+        let upstream_timing = ctx.upstream_output_timing.clone();
+        let attempt_started = ctx.attempt_started;
         let (upstream_tx, upstream_rx) =
             tokio::sync::mpsc::channel::<Result<Bytes, reqwest::Error>>(4);
 
-        let body = spawn_usage_sse_relay_body(
+        let timed_upstream = spawn_upstream_output_timing_stream(
             RelayBodyStream::new(upstream_rx),
+            "codex",
+            upstream_timing,
+            attempt_started,
+            0,
+        );
+
+        let body = spawn_usage_sse_relay_body(
+            timed_upstream,
             ctx,
             Some(Duration::from_millis(10)),
             None,
@@ -1944,7 +2148,7 @@ mod tests {
 
         drop(body_stream);
 
-        let completion_tx = upstream_tx.clone();
+        let completion_tx = upstream_tx;
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(50)).await;
             let _ = completion_tx
@@ -1965,10 +2169,82 @@ mod tests {
         assert_eq!(log.input_tokens, Some(1));
         assert_eq!(log.output_tokens, Some(2));
         assert_eq!(log.total_tokens, Some(3));
+        assert!(log.final_upstream_attempt_duration_ms.is_some());
+        assert_eq!(log.final_upstream_attempt_timing_version, 1);
         assert!(log
             .special_settings_json
             .as_deref()
             .is_some_and(|value| value.contains("\"client_abort\"")));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn codex_disconnect_drain_invalidates_completion_followed_by_terminal_failure() {
+        let app = tauri::test::mock_app();
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("usage-tee-drain-failed.sqlite"))
+            .expect("init test db");
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+        let active_requests = Arc::new(ActiveRequestRegistry::default());
+        active_requests.register(active_request_start("trace-usage-tee-drain"));
+        let ctx = test_stream_finalize_ctx(app.handle().clone(), db, log_tx, active_requests);
+        let upstream_timing = ctx.upstream_output_timing.clone();
+        let attempt_started = ctx.attempt_started;
+        let (upstream_tx, upstream_rx) =
+            tokio::sync::mpsc::channel::<Result<Bytes, reqwest::Error>>(4);
+
+        let timed_upstream = spawn_upstream_output_timing_stream(
+            RelayBodyStream::new(upstream_rx),
+            "codex",
+            upstream_timing,
+            attempt_started,
+            0,
+        );
+        let body = spawn_usage_sse_relay_body(
+            timed_upstream,
+            ctx,
+            Some(Duration::from_millis(500)),
+            None,
+        );
+
+        upstream_tx
+            .send(Ok(Bytes::from_static(
+                b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n",
+            )))
+            .await
+            .expect("send first output chunk");
+        let mut body_stream = body.into_data_stream();
+        next_item(&mut body_stream)
+            .await
+            .expect("body should yield first output")
+            .expect("first output should be ok");
+        drop(body_stream);
+
+        upstream_tx
+            .send(Ok(Bytes::from_static(
+                b"event: response.completed\n\
+                  data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n",
+            )))
+            .await
+            .expect("send completion");
+        upstream_tx
+            .send(Ok(Bytes::from_static(
+                b"event: response.failed\n\
+                  data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\"}}\n\n",
+            )))
+            .await
+            .expect("send terminal failure");
+        drop(upstream_tx);
+
+        let log = tokio::time::timeout(Duration::from_secs(2), log_rx.recv())
+            .await
+            .expect("request log should be enqueued")
+            .expect("request log channel should stay open");
+        assert_eq!(
+            log.error_code,
+            Some(GatewayErrorCode::StreamAborted.as_str().to_string())
+        );
+        assert_eq!(log.final_upstream_attempt_duration_ms, None);
+        assert_eq!(log.final_upstream_attempt_timing_version, 0);
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -2041,10 +2317,19 @@ mod tests {
         let active_requests = Arc::new(ActiveRequestRegistry::default());
         active_requests.register(active_request_start("trace-usage-tee-drain"));
         let ctx = test_stream_finalize_ctx(app.handle().clone(), db, log_tx, active_requests);
+        let upstream_timing = ctx.upstream_output_timing.clone();
+        let attempt_started = ctx.attempt_started;
         let (upstream_tx, upstream_rx) =
             tokio::sync::mpsc::channel::<Result<Bytes, reqwest::Error>>(4);
 
-        let body = spawn_usage_sse_relay_body(RelayBodyStream::new(upstream_rx), ctx, None, None);
+        let timed_upstream = spawn_upstream_output_timing_stream(
+            RelayBodyStream::new(upstream_rx),
+            "codex",
+            upstream_timing,
+            attempt_started,
+            0,
+        );
+        let body = spawn_usage_sse_relay_body(timed_upstream, ctx, None, None);
         let mut body_stream = body.into_data_stream();
 
         upstream_tx
@@ -2089,6 +2374,8 @@ mod tests {
             .expect("request log should be enqueued")
             .expect("request log channel should stay open");
         assert_eq!(log.error_code, None);
+        assert!(log.final_upstream_attempt_duration_ms.is_some());
+        assert_eq!(log.final_upstream_attempt_timing_version, 1);
     }
 
     #[tokio::test(flavor = "current_thread")]

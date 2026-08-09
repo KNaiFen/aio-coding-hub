@@ -19,6 +19,9 @@ pub(crate) fn create_builder() -> tauri::Builder<tauri::Wry> {
         .manage(
             crate::app::provider_account_usage_runtime::ProviderAccountUsageRuntimeState::default(),
         )
+        .manage(
+            crate::app::provider_availability_probe_runtime::ProviderAvailabilityProbeRuntimeState::default(),
+        )
         .manage(crate::app::heartbeat_watchdog::HeartbeatWatchdogState::default())
         .manage(crate::app::plugins::extension_host_registry::ExtensionHostRuntimeState::default())
         .plugin(tauri_plugin_opener::init())

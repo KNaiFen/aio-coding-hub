@@ -227,10 +227,6 @@ export function ProviderAccountUsageInline({
         )}
         title={refreshError ?? display.title}
       >
-        <RefreshCw
-          className={cn("mt-0.5 h-3 w-3 shrink-0", iconSpinning && "animate-spin")}
-          aria-hidden="true"
-        />
         <span className="flex min-w-0 max-w-full flex-col gap-1">
           <span className="min-w-0 max-w-full truncate">{visibleText}</span>
           {metrics.length ? (
@@ -246,6 +242,10 @@ export function ProviderAccountUsageInline({
             </span>
           ) : null}
         </span>
+        <RefreshCw
+          className={cn("mt-0.5 h-3 w-3 shrink-0", iconSpinning && "animate-spin")}
+          aria-hidden="true"
+        />
       </button>
     </span>
   );

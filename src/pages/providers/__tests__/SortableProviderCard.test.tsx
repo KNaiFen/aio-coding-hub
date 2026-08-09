@@ -79,6 +79,8 @@ function makeProvider(partial: Partial<ProviderSummary> = {}): ProviderSummary {
     source_provider_id: null,
     bridge_type: null,
     availability_test_model: null,
+    availability_probe_enabled: partial.availability_probe_enabled ?? false,
+    availability_probe_interval_minutes: partial.availability_probe_interval_minutes ?? 10,
     api_key_configured: partial.api_key_configured ?? false,
     ...partial,
     newapi_account_user_id: partial.newapi_account_user_id ?? null,

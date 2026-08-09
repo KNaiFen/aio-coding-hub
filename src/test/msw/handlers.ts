@@ -282,6 +282,14 @@ export const handlers = [
         typeof input.availabilityTestModel === "string"
           ? input.availabilityTestModel || null
           : (existing?.availability_test_model ?? null),
+      availability_probe_enabled:
+        typeof input.availabilityProbeEnabled === "boolean"
+          ? input.availabilityProbeEnabled
+          : (existing?.availability_probe_enabled ?? false),
+      availability_probe_interval_minutes:
+        typeof input.availabilityProbeIntervalMinutes === "number"
+          ? input.availabilityProbeIntervalMinutes
+          : (existing?.availability_probe_interval_minutes ?? 10),
       api_key_configured:
         input.authMode === "oauth"
           ? false

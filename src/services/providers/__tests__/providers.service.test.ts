@@ -107,6 +107,8 @@ function createProviderSummary(overrides: Partial<ProviderSummary> = {}): Provid
     source_provider_id: null,
     bridge_type: null,
     availability_test_model: null,
+    availability_probe_enabled: false,
+    availability_probe_interval_minutes: 10,
     stream_idle_timeout_seconds: null,
     extension_values: [],
     upstream_retry_policy_override: null,
@@ -232,6 +234,8 @@ describe("services/providers/providers", () => {
         baseUrlMode: "order",
         limit5hUsd: null,
         dailyResetMode: "fixed",
+        availabilityProbeEnabled: false,
+        availabilityProbeIntervalMinutes: 10,
         upstreamRetryPolicyOverride: null,
       })
     );
@@ -240,6 +244,54 @@ describe("services/providers/providers", () => {
         upstreamRetryPolicyOverrideSpecified: expect.anything(),
       })
     );
+  });
+
+  it("passes explicit availability probe settings and rejects invalid intervals", async () => {
+    vi.mocked(commands.providerUpsert).mockResolvedValue({
+      status: "ok",
+      data: createProviderSummary({
+        availability_probe_enabled: true,
+        availability_probe_interval_minutes: 30,
+      }),
+    });
+    const baseInput = {
+      providerId: 1,
+      cliKey: "claude" as const,
+      name: "P1",
+      baseUrls: ["https://example.com"],
+      baseUrlMode: "order" as const,
+      apiKey: null,
+      enabled: true,
+      costMultiplier: 1,
+      priority: null,
+      claudeModels: null,
+      modelMapping: null,
+      limit5hUsd: null,
+      limitDailyUsd: null,
+      dailyResetMode: "fixed" as const,
+      dailyResetTime: "00:00:00",
+      limitWeeklyUsd: null,
+      limitMonthlyUsd: null,
+      limitTotalUsd: null,
+    };
+
+    await providerUpsert({
+      ...baseInput,
+      availabilityProbeEnabled: true,
+      availabilityProbeIntervalMinutes: 30,
+    });
+    expect(commands.providerUpsert).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        availabilityProbeEnabled: true,
+        availabilityProbeIntervalMinutes: 30,
+      })
+    );
+
+    for (const interval of [0, 1.5, 1441]) {
+      await expect(
+        providerUpsert({ ...baseInput, availabilityProbeIntervalMinutes: interval })
+      ).rejects.toThrow("SEC_INVALID_INPUT: availabilityProbeIntervalMinutes");
+    }
   });
 
   it("marks retry policy override as specified only when the caller submits it", async () => {

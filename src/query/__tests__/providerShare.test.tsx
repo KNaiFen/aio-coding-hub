@@ -21,6 +21,8 @@ function provider(id: number, cliKey: ProviderSummary["cli_key"], name: string):
     claude_models: {},
     model_mapping: { default_model: null, exact: {} },
     availability_test_model: null,
+    availability_probe_enabled: false,
+    availability_probe_interval_minutes: 10,
     enabled: false,
     priority: 0,
     cost_multiplier: 1,

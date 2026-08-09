@@ -8,6 +8,10 @@
  */
 export function formatTokensMillions(value: number): string {
   if (!Number.isFinite(value) || value === 0) return "0";
+  const billions = value / 1_000_000_000;
+  if (billions >= 1) {
+    return `${billions.toFixed(1)}B`;
+  }
   const millions = value / 1_000_000;
   if (millions >= 1) {
     return `${millions.toFixed(1)}M`;
@@ -16,6 +20,18 @@ export function formatTokensMillions(value: number): string {
     return `${(value / 1000).toFixed(1)}K`;
   }
   return String(Math.round(value));
+}
+
+export function computeYAxisWidth(
+  tickValues: readonly number[],
+  formatter: (value: number) => string = formatTokensMillions,
+  minimumWidth = 45
+): number {
+  const longestLabelLength = tickValues.reduce(
+    (longest, value) => Math.max(longest, formatter(value).length),
+    0
+  );
+  return Math.max(minimumWidth, Math.ceil(longestLabelLength * 7 + 12));
 }
 
 /**

@@ -19,6 +19,11 @@ import {
   CODEX_TO_OPENAI_CHAT_BRIDGE_TYPE,
   CODEX_TO_OPENAI_RESPONSES_BRIDGE_TYPE,
 } from "./providerEditorUtils";
+import {
+  DEFAULT_AVAILABILITY_PROBE_INTERVAL_MINUTES,
+  MAX_AVAILABILITY_PROBE_INTERVAL_MINUTES,
+  MIN_AVAILABILITY_PROBE_INTERVAL_MINUTES,
+} from "../../services/providers/providers";
 
 export function buildProviderEditorUpsertInput(
   ctx: ProviderEditorPayloadContext
@@ -50,6 +55,23 @@ export function buildProviderEditorUpsertInput(
       error: {
         kind: "message",
         message: "流式空闲超时必须为 0-3600 秒",
+      },
+    };
+  }
+
+  const availabilityProbeIntervalMinutes = ctx.availabilityProbeEnabled
+    ? Number(ctx.availabilityProbeIntervalMinutes)
+    : DEFAULT_AVAILABILITY_PROBE_INTERVAL_MINUTES;
+  if (
+    !Number.isSafeInteger(availabilityProbeIntervalMinutes) ||
+    availabilityProbeIntervalMinutes < MIN_AVAILABILITY_PROBE_INTERVAL_MINUTES ||
+    availabilityProbeIntervalMinutes > MAX_AVAILABILITY_PROBE_INTERVAL_MINUTES
+  ) {
+    return {
+      ok: false,
+      error: {
+        kind: "message",
+        message: `定时可用性测试间隔必须为 ${MIN_AVAILABILITY_PROBE_INTERVAL_MINUTES}-${MAX_AVAILABILITY_PROBE_INTERVAL_MINUTES} 分钟`,
       },
     };
   }
@@ -188,6 +210,8 @@ export function buildProviderEditorUpsertInput(
     enabled: parsed.data.enabled,
     costMultiplier: effectiveCostMultiplier,
     availabilityTestModel: ctx.cliKey === "codex" ? ctx.testModel : null,
+    availabilityProbeEnabled: ctx.availabilityProbeEnabled,
+    availabilityProbeIntervalMinutes,
     limit5hUsd: parsed.data.limit_5h_usd,
     limitDailyUsd: parsed.data.limit_daily_usd,
     dailyResetMode: parsed.data.daily_reset_mode,

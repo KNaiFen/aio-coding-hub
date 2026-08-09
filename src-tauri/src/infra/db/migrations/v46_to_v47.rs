@@ -54,6 +54,8 @@ CREATE TABLE IF NOT EXISTS usage_provider_daily_rollups (
   success_generation_ms_sum INTEGER NOT NULL,
   success_output_tokens_for_rate_sum INTEGER NOT NULL,
   success_output_rate_count INTEGER NOT NULL,
+  success_output_tokens_per_second_sum REAL NOT NULL DEFAULT 0
+    CHECK(success_output_tokens_per_second_sum >= 0),
   cache_denom_tokens INTEGER NOT NULL,
   cache_read_input_tokens INTEGER NOT NULL,
   PRIMARY KEY(local_day, cli_key, final_provider_id),

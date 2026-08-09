@@ -6,6 +6,9 @@ use std::collections::{BTreeMap, HashSet};
 
 pub(super) const DEFAULT_PRIORITY: i64 = 100;
 pub(super) const MAX_MODEL_NAME_LEN: usize = 200;
+pub const DEFAULT_AVAILABILITY_PROBE_INTERVAL_MINUTES: u32 = 10;
+pub const MIN_AVAILABILITY_PROBE_INTERVAL_MINUTES: u32 = 1;
+pub const MAX_AVAILABILITY_PROBE_INTERVAL_MINUTES: u32 = 1_440;
 pub(crate) const CX2CC_BRIDGE_TYPE: &str = "cx2cc";
 pub(crate) const CODEX_TO_OPENAI_CHAT_BRIDGE_TYPE: &str = "codex_to_openai_chat";
 pub(crate) const CODEX_TO_OPENAI_RESPONSES_BRIDGE_TYPE: &str = "codex_to_openai_responses";
@@ -97,6 +100,8 @@ pub struct ProviderUpsertParams {
     pub claude_models: Option<ClaudeModels>,
     pub model_mapping: Option<ModelMapping>,
     pub availability_test_model: Option<String>,
+    pub availability_probe_enabled: bool,
+    pub availability_probe_interval_minutes: u32,
     pub limit_5h_usd: Option<f64>,
     pub limit_daily_usd: Option<f64>,
     pub daily_reset_mode: Option<DailyResetMode>,
@@ -297,6 +302,8 @@ pub struct ProviderSummary {
     pub claude_models: ClaudeModels,
     pub model_mapping: ModelMapping,
     pub availability_test_model: Option<String>,
+    pub availability_probe_enabled: bool,
+    pub availability_probe_interval_minutes: u32,
     pub enabled: bool,
     pub priority: i64,
     pub cost_multiplier: f64,
@@ -450,6 +457,8 @@ pub(super) struct DecodedProviderRow {
     pub claude_models: ClaudeModels,
     pub model_mapping: ModelMapping,
     pub availability_test_model: Option<String>,
+    pub availability_probe_enabled: bool,
+    pub availability_probe_interval_minutes: u32,
     pub limit_5h_usd: Option<f64>,
     pub limit_daily_usd: Option<f64>,
     pub daily_reset_mode: DailyResetMode,

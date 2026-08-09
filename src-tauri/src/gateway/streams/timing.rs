@@ -135,7 +135,7 @@ where
 {
     fn drop(&mut self) {
         if !self.finalized {
-            self.ctx.upstream_output_timing.invalidate();
+            self.ctx.upstream_output_timing.invalidate_output();
             self.finalize(Some(GatewayErrorCode::StreamAborted.as_str()));
         }
     }

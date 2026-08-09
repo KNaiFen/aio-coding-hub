@@ -31,8 +31,8 @@ pub(super) struct ProviderAgg {
     pub(super) success_duration_ms_sum: i64,
     pub(super) success_ttfb_ms_sum: i64,
     pub(super) success_ttfb_ms_count: i64,
-    pub(super) success_generation_ms_sum: i64,
-    pub(super) success_output_tokens_for_rate_sum: i64,
+    pub(super) success_output_tokens_per_second_sum: f64,
+    pub(super) success_output_rate_count: i64,
     pub(super) input_tokens: i64,
     pub(super) output_tokens: i64,
     pub(super) total_tokens: i64,
@@ -75,12 +75,10 @@ impl ProviderAgg {
         self.success_ttfb_ms_count = self
             .success_ttfb_ms_count
             .saturating_add(add.success_ttfb_ms_count);
-        self.success_generation_ms_sum = self
-            .success_generation_ms_sum
-            .saturating_add(add.success_generation_ms_sum);
-        self.success_output_tokens_for_rate_sum = self
-            .success_output_tokens_for_rate_sum
-            .saturating_add(add.success_output_tokens_for_rate_sum);
+        self.success_output_tokens_per_second_sum += add.success_output_tokens_per_second_sum;
+        self.success_output_rate_count = self
+            .success_output_rate_count
+            .saturating_add(add.success_output_rate_count);
         self.input_tokens = self.input_tokens.saturating_add(add.input_tokens);
         self.output_tokens = self.output_tokens.saturating_add(add.output_tokens);
         self.total_tokens = self.total_tokens.saturating_add(add.total_tokens);
@@ -117,10 +115,10 @@ impl ProviderAgg {
         } else {
             None
         };
-        let avg_output_tokens_per_second = if self.success_generation_ms_sum > 0 {
+        let avg_output_tokens_per_second = if self.success_output_rate_count > 0 {
             Some(
-                self.success_output_tokens_for_rate_sum as f64
-                    / (self.success_generation_ms_sum as f64 / 1000.0),
+                self.success_output_tokens_per_second_sum
+                    / self.success_output_rate_count as f64,
             )
         } else {
             None
@@ -197,8 +195,8 @@ SELECT
   success_duration_ms_sum,
   success_ttfb_ms_sum,
   success_ttfb_ms_count,
-  success_generation_ms_sum,
-  success_output_tokens_for_rate_sum,
+  success_output_tokens_per_second_sum,
+  success_output_rate_count,
   input_tokens,
   output_tokens,
   input_tokens + output_tokens + cache_read_input_tokens + cache_creation_input_tokens + legacy_total_tokens AS total_tokens,
@@ -233,16 +231,16 @@ FROM (
         output_tokens > 0 AND
         final_upstream_attempt_timing_version = 1 AND
         final_upstream_attempt_duration_ms IS NOT NULL AND final_upstream_attempt_duration_ms > 0
-      ) THEN final_upstream_attempt_duration_ms ELSE 0 END
-    ) AS success_generation_ms_sum,
+      ) THEN output_tokens * 1000.0 / final_upstream_attempt_duration_ms ELSE 0.0 END
+    ) AS success_output_tokens_per_second_sum,
     SUM(
       CASE WHEN (
         status >= 200 AND status < 300 AND error_present = 0 AND
         output_tokens > 0 AND
         final_upstream_attempt_timing_version = 1 AND
         final_upstream_attempt_duration_ms IS NOT NULL AND final_upstream_attempt_duration_ms > 0
-      ) THEN output_tokens ELSE 0 END
-    ) AS success_output_tokens_for_rate_sum,
+      ) THEN 1 ELSE 0 END
+    ) AS success_output_rate_count,
     SUM({effective_input_expr}) AS input_tokens,
     SUM(COALESCE(output_tokens, 0)) AS output_tokens,
     SUM(COALESCE(cache_read_input_tokens, 0)) AS cache_read_input_tokens,
@@ -296,9 +294,9 @@ pub fn leaderboard_provider(
                 let success_duration_ms_sum: i64 = row.get("success_duration_ms_sum")?;
                 let success_ttfb_ms_count: i64 = row.get("success_ttfb_ms_count")?;
                 let success_ttfb_ms_sum: i64 = row.get("success_ttfb_ms_sum")?;
-                let success_generation_ms_sum: i64 = row.get("success_generation_ms_sum")?;
-                let success_output_tokens_for_rate_sum: i64 =
-                    row.get("success_output_tokens_for_rate_sum")?;
+                let success_output_tokens_per_second_sum: f64 =
+                    row.get("success_output_tokens_per_second_sum")?;
+                let success_output_rate_count: i64 = row.get("success_output_rate_count")?;
 
                 Ok(UsageProviderRow {
                     cli_key: row.get("cli_key")?,
@@ -311,9 +309,8 @@ pub fn leaderboard_provider(
                         .then(|| success_duration_ms_sum / requests_success),
                     avg_ttfb_ms: (success_ttfb_ms_count > 0)
                         .then(|| success_ttfb_ms_sum / success_ttfb_ms_count),
-                    avg_output_tokens_per_second: (success_generation_ms_sum > 0).then(|| {
-                        success_output_tokens_for_rate_sum as f64
-                            / (success_generation_ms_sum as f64 / 1000.0)
+                    avg_output_tokens_per_second: (success_output_rate_count > 0).then(|| {
+                        success_output_tokens_per_second_sum / success_output_rate_count as f64
                     }),
                     input_tokens: row.get("input_tokens")?,
                     output_tokens: row.get("output_tokens")?,

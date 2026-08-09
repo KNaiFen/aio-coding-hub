@@ -1,0 +1,32 @@
+{
+  "id": "pending-024-028-integration",
+  "name": "pending-024-028-integration",
+  "title": "首页统计与供应商健康统一改造",
+  "description": "统一交付首页图表、供应商布局与可用性、sub2api TPS 口径及定时主动探测，全部代码完成后再统一验证。",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": "@aio-coding-hub",
+  "package": "aio-coding-hub",
+  "priority": "P2",
+  "creator": "KNaiFen",
+  "assignee": "KNaiFen",
+  "createdAt": "2026-08-09",
+  "completedAt": null,
+  "branch": "codex/feature-merge",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-09-home-usage-axis-format",
+    "08-09-provider-balance-left-align",
+    "08-09-provider-availability-thresholds",
+    "08-09-request-log-sub2api-tps",
+    "08-09-provider-scheduled-availability-probe"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

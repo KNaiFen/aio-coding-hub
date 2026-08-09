@@ -90,24 +90,24 @@ pub(super) fn summary_query(
 	      ttfb_ms < duration_ms
 	    ) THEN 1 ELSE 0 END
 	  ) AS success_ttfb_ms_count,
-	  SUM(
-	    CASE WHEN (
-	      status >= 200 AND status < 300 AND error_present = 0 AND
-	      output_tokens > 0 AND
-      final_upstream_attempt_timing_version = 1 AND
-      final_upstream_attempt_duration_ms IS NOT NULL AND
-      final_upstream_attempt_duration_ms > 0
-	    ) THEN final_upstream_attempt_duration_ms ELSE 0 END
-	  ) AS success_generation_ms_sum,
-	  SUM(
-	    CASE WHEN (
-	      status >= 200 AND status < 300 AND error_present = 0 AND
-	      output_tokens > 0 AND
-      final_upstream_attempt_timing_version = 1 AND
-      final_upstream_attempt_duration_ms IS NOT NULL AND
-      final_upstream_attempt_duration_ms > 0
-	    ) THEN output_tokens ELSE 0 END
-	  ) AS success_output_tokens_for_rate_sum,
+		  SUM(
+		    CASE WHEN (
+		      status >= 200 AND status < 300 AND error_present = 0 AND
+		      output_tokens > 0 AND
+	      final_upstream_attempt_timing_version = 1 AND
+	      final_upstream_attempt_duration_ms IS NOT NULL AND
+	      final_upstream_attempt_duration_ms > 0
+		    ) THEN output_tokens * 1000.0 / final_upstream_attempt_duration_ms ELSE 0.0 END
+		  ) AS success_output_tokens_per_second_sum,
+		  SUM(
+		    CASE WHEN (
+		      status >= 200 AND status < 300 AND error_present = 0 AND
+		      output_tokens > 0 AND
+	      final_upstream_attempt_timing_version = 1 AND
+	      final_upstream_attempt_duration_ms IS NOT NULL AND
+	      final_upstream_attempt_duration_ms > 0
+		    ) THEN 1 ELSE 0 END
+		  ) AS success_output_rate_count,
 	  SUM({effective_input_expr}) AS input_tokens,
 	  SUM(COALESCE(output_tokens, 0)) AS output_tokens,
 		  SUM(COALESCE(cache_read_input_tokens, 0)) AS cache_read_input_tokens,
@@ -132,11 +132,11 @@ pub(super) fn summary_query(
         let success_ttfb_ms_count = row
             .get::<_, Option<i64>>("success_ttfb_ms_count")?
             .unwrap_or(0);
-        let success_generation_ms_sum = row
-            .get::<_, Option<i64>>("success_generation_ms_sum")?
-            .unwrap_or(0);
-        let success_output_tokens_for_rate_sum = row
-            .get::<_, Option<i64>>("success_output_tokens_for_rate_sum")?
+        let success_output_tokens_per_second_sum = row
+            .get::<_, Option<f64>>("success_output_tokens_per_second_sum")?
+            .unwrap_or(0.0);
+        let success_output_rate_count = row
+            .get::<_, Option<i64>>("success_output_rate_count")?
             .unwrap_or(0);
 
         let avg_duration_ms = if requests_success > 0 {
@@ -149,11 +149,8 @@ pub(super) fn summary_query(
         } else {
             None
         };
-        let avg_output_tokens_per_second = if success_generation_ms_sum > 0 {
-            Some(
-                success_output_tokens_for_rate_sum as f64
-                    / (success_generation_ms_sum as f64 / 1000.0),
-            )
+        let avg_output_tokens_per_second = if success_output_rate_count > 0 {
+            Some(success_output_tokens_per_second_sum / success_output_rate_count as f64)
         } else {
             None
         };
@@ -236,10 +233,9 @@ fn summary_from_event_rows(rows: &[UsageEventAgg]) -> UsageSummary {
     } else {
         None
     };
-    let avg_output_tokens_per_second = if agg.success_generation_ms_sum > 0 {
+    let avg_output_tokens_per_second = if agg.success_output_rate_count > 0 {
         Some(
-            agg.success_output_tokens_for_rate_sum as f64
-                / (agg.success_generation_ms_sum as f64 / 1000.0),
+            agg.success_output_tokens_per_second_sum / agg.success_output_rate_count as f64,
         )
     } else {
         None

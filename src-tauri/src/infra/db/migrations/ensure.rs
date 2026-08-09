@@ -30,6 +30,7 @@ pub(super) fn apply_ensure_patches(conn: &mut Connection) -> crate::shared::erro
     ensure_usage_provider_daily_rollups(conn)?;
     ensure_provider_stream_idle_timeout(conn)?;
     ensure_provider_availability_test_model(conn)?;
+    super::v51_to_v52::ensure_provider_availability_probe_columns(conn)?;
     ensure_provider_upstream_retry_policy(conn)?;
     ensure_provider_model_routing_policy(conn)?;
     ensure_skills_update_columns(conn)?;
@@ -1244,21 +1245,14 @@ SELECT
         )
         .map_err(|error| format!("failed to inspect Provider daily rollup schema: {error}"))?;
     super::v46_to_v47::create_provider_daily_rollup_schema(&tx)?;
-    if projection_schema_incomplete {
-        tx.execute("DELETE FROM usage_provider_daily_rollups", [])
-            .map_err(|error| format!("failed to reset Provider daily rollups: {error}"))?;
-        tx.execute("DELETE FROM usage_provider_daily_rollup_days", [])
-            .map_err(|error| format!("failed to reset Provider daily rollup days: {error}"))?;
-        tx.execute(
-            r#"
-UPDATE usage_provider_daily_rollup_backfill_state
-SET next_local_day = NULL,
-    updated_at = CAST(strftime('%s', 'now') AS INTEGER)
-WHERE id = 1
-"#,
-            [],
-        )
-        .map_err(|error| format!("failed to reset Provider daily rollup cursor: {error}"))?;
+    let tps_sum_column_added =
+        super::v51_to_v52::ensure_usage_provider_daily_rollup_tps_sum_column(&tx)?;
+    if projection_schema_incomplete || tps_sum_column_added {
+        super::v51_to_v52::reset_provider_daily_rollup_projection(&tx)?;
+        if projection_schema_incomplete {
+            tx.execute("DELETE FROM usage_provider_daily_rollup_days", [])
+                .map_err(|error| format!("failed to reset Provider daily rollup days: {error}"))?;
+        }
     }
     tx.commit()
         .map_err(|error| format!("failed to commit Provider daily rollup ensure: {error}"))?;

@@ -112,6 +112,8 @@ function makeProvider(partial: Partial<ProviderSummary> = {}): ProviderSummary {
     bridge_type: partial.bridge_type ?? null,
     model_mapping: partial.model_mapping ?? { default_model: null, exact: {} },
     availability_test_model: partial.availability_test_model ?? null,
+    availability_probe_enabled: partial.availability_probe_enabled ?? false,
+    availability_probe_interval_minutes: partial.availability_probe_interval_minutes ?? 10,
     upstream_retry_policy_override: partial.upstream_retry_policy_override ?? null,
     api_key_configured: partial.api_key_configured ?? false,
     stream_idle_timeout_seconds: partial.stream_idle_timeout_seconds ?? null,

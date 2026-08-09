@@ -7,7 +7,11 @@ import { invokeGeneratedIpc } from "./generatedIpc";
 export const TRAY_PROVIDER_MINI_SNAPSHOT_EVENT = "tray-provider-mini:snapshot";
 export const TRAY_PROVIDER_MINI_BUCKET_COUNT = 18;
 
-export type TrayProviderMiniAvailabilityState = "healthy" | "unhealthy" | "no_data";
+export type TrayProviderMiniAvailabilityState =
+  | "healthy"
+  | "degraded"
+  | "unhealthy"
+  | "no_data";
 export type TrayProviderMiniUnavailableReason =
   | "circuit_open"
   | "cooldown"
@@ -37,6 +41,7 @@ export type TrayProviderMiniSnapshot = {
 
 const AVAILABILITY_STATES = new Set<TrayProviderMiniAvailabilityState>([
   "healthy",
+  "degraded",
   "unhealthy",
   "no_data",
 ]);

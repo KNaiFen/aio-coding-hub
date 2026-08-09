@@ -515,6 +515,9 @@ fn observer_availability_timeline(
                     crate::domain::provider_availability::ProviderAvailabilityState::Healthy => {
                         ObserverProviderAvailabilityState::Healthy
                     }
+                    crate::domain::provider_availability::ProviderAvailabilityState::Degraded => {
+                        ObserverProviderAvailabilityState::Degraded
+                    }
                     crate::domain::provider_availability::ProviderAvailabilityState::Unhealthy => {
                         ObserverProviderAvailabilityState::Unhealthy
                     }
@@ -1380,6 +1383,8 @@ mod tests {
                 claude_models: None,
                 model_mapping: None,
                 availability_test_model: None,
+                availability_probe_enabled: false,
+                availability_probe_interval_minutes: 10,
                 limit_5h_usd: None,
                 limit_daily_usd: None,
                 daily_reset_mode: None,

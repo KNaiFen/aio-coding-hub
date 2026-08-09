@@ -86,8 +86,7 @@ bucketed AS (
     s.success_duration_ms_sum,
     s.success_ttfb_ms_sum,
     s.success_ttfb_ms_count,
-    s.success_generation_ms_sum,
-    s.success_output_tokens_for_rate_sum,
+    s.success_output_tokens_per_second_sum,
     s.success_output_rate_count
   FROM trend_source s
   JOIN top_providers tp
@@ -105,8 +104,7 @@ SELECT
   b.success_duration_ms_sum,
   b.success_ttfb_ms_sum,
   b.success_ttfb_ms_count,
-  b.success_generation_ms_sum,
-  b.success_output_tokens_for_rate_sum,
+  b.success_output_tokens_per_second_sum,
   b.success_output_rate_count
 FROM bucketed b
 ORDER BY {order_by_fields}, b.requests_success DESC, b.cli_key ASC, b.provider_id ASC
@@ -125,8 +123,7 @@ ORDER BY {order_by_fields}, b.requests_success DESC, b.cli_key ASC, b.provider_i
         success_duration_ms_sum: i64,
         success_ttfb_ms_sum: i64,
         success_ttfb_ms_count: i64,
-        success_generation_ms_sum: i64,
-        success_output_tokens_for_rate_sum: i64,
+        success_output_tokens_per_second_sum: f64,
         success_output_rate_count: i64,
     }
 
@@ -154,12 +151,9 @@ ORDER BY {order_by_fields}, b.requests_success DESC, b.cli_key ASC, b.provider_i
                     success_ttfb_ms_count: row
                         .get::<_, Option<i64>>("success_ttfb_ms_count")?
                         .unwrap_or(0),
-                    success_generation_ms_sum: row
-                        .get::<_, Option<i64>>("success_generation_ms_sum")?
-                        .unwrap_or(0),
-                    success_output_tokens_for_rate_sum: row
-                        .get::<_, Option<i64>>("success_output_tokens_for_rate_sum")?
-                        .unwrap_or(0),
+                    success_output_tokens_per_second_sum: row
+                        .get::<_, Option<f64>>("success_output_tokens_per_second_sum")?
+                        .unwrap_or(0.0),
                     success_output_rate_count: row
                         .get::<_, Option<i64>>("success_output_rate_count")?
                         .unwrap_or(0),
@@ -218,10 +212,9 @@ ORDER BY {order_by_fields}, b.requests_success DESC, b.cli_key ASC, b.provider_i
         } else {
             None
         };
-        let avg_output_tokens_per_second = if row.success_generation_ms_sum > 0 {
+        let avg_output_tokens_per_second = if row.success_output_rate_count > 0 {
             Some(
-                row.success_output_tokens_for_rate_sum as f64
-                    / (row.success_generation_ms_sum as f64 / 1000.0),
+                row.success_output_tokens_per_second_sum / row.success_output_rate_count as f64,
             )
         } else {
             None

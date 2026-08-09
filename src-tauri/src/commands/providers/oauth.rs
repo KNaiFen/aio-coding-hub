@@ -497,7 +497,14 @@ pub(crate) async fn provider_oauth_start_flow(
 
     // 10. Save to provider
     let app_handle = app.clone();
+    let probe_mutation_guard =
+        crate::app::provider_service::begin_provider_availability_probe_mutation(
+            &app,
+            provider_id,
+        )
+        .await;
     blocking::run("provider_oauth_start_flow_save", move || {
+        let _probe_mutation_guard = probe_mutation_guard;
         crate::gateway::oauth::complete_current_flow(&flow_id, || {
             crate::providers::update_oauth_tokens(
                 &db,
@@ -868,7 +875,14 @@ pub(crate) async fn provider_oauth_poll_device_flow(
     let bound_cli_key = binding.cli_key.clone();
     let completion_binding = binding.clone();
 
+    let probe_mutation_guard =
+        crate::app::provider_service::begin_provider_availability_probe_mutation(
+            &app,
+            provider_id,
+        )
+        .await;
     blocking::run("provider_oauth_poll_device_flow_save", move || {
+        let _probe_mutation_guard = probe_mutation_guard;
         crate::gateway::oauth::complete_current_device_flow(
             &flow_id,
             &completion_binding,
@@ -1050,7 +1064,7 @@ pub(crate) async fn provider_oauth_refresh(
     db_state: tauri::State<'_, DbInitState>,
     provider_id: i64,
 ) -> Result<ProviderOAuthRefreshResult, String> {
-    let db = ensure_db_ready(app, db_state.inner()).await?;
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
 
     let details = blocking::run("provider_oauth_refresh_load", {
         let db = db.clone();
@@ -1106,7 +1120,14 @@ pub(crate) async fn provider_oauth_refresh(
     let expires_at = token_set.expires_at;
     let expected_last_refreshed_at = details.oauth_last_refreshed_at;
 
+    let probe_mutation_guard =
+        crate::app::provider_service::begin_provider_availability_probe_mutation(
+            &app,
+            provider_id,
+        )
+        .await;
     let persisted = blocking::run("provider_oauth_refresh_save", move || {
+        let _probe_mutation_guard = probe_mutation_guard;
         crate::providers::update_oauth_tokens_if_last_refreshed_matches(
             &db,
             provider_id,
@@ -1144,8 +1165,15 @@ pub(crate) async fn provider_oauth_disconnect(
     db_state: tauri::State<'_, DbInitState>,
     provider_id: i64,
 ) -> Result<ProviderOAuthDisconnectResult, String> {
-    let db = ensure_db_ready(app, db_state.inner()).await?;
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
+    let probe_mutation_guard =
+        crate::app::provider_service::begin_provider_availability_probe_mutation(
+            &app,
+            provider_id,
+        )
+        .await;
     blocking::run("provider_oauth_disconnect", move || {
+        let _probe_mutation_guard = probe_mutation_guard;
         crate::providers::clear_oauth(&db, provider_id)?;
         crate::domain::provider_oauth_limits::clear_snapshot(&db, provider_id)?;
         Ok::<(), crate::shared::error::AppError>(())
@@ -1238,7 +1266,8 @@ pub(super) fn effective_oauth_access_token(
     Ok(token)
 }
 
-pub(super) async fn refresh_oauth_details_for_limits(
+pub(super) async fn refresh_oauth_details_for_limits<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     db: &crate::db::Db,
     client: &reqwest::Client,
     details: &crate::providers::ProviderOAuthDetails,
@@ -1298,6 +1327,9 @@ pub(super) async fn refresh_oauth_details_for_limits(
     let expires_at = token_set.expires_at;
     let expected_last_refreshed_at = details.oauth_last_refreshed_at;
 
+    let probe_mutation_guard =
+        crate::app::provider_service::begin_provider_availability_probe_mutation(app, provider_id)
+            .await;
     let persisted = blocking::run("provider_oauth_fetch_limits_refresh_save", {
         let db = db.clone();
         let oauth_provider_type = oauth_provider_type.clone();
@@ -1309,6 +1341,7 @@ pub(super) async fn refresh_oauth_details_for_limits(
         let oauth_email = oauth_email.clone();
         let new_refresh_token = new_refresh_token.clone();
         move || {
+            let _probe_mutation_guard = probe_mutation_guard;
             crate::providers::update_oauth_tokens_if_last_refreshed_matches(
                 &db,
                 provider_id,

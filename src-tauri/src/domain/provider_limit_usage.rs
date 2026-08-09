@@ -550,6 +550,8 @@ mod tests {
                 claude_models: None,
                 model_mapping: None,
                 availability_test_model: None,
+                availability_probe_enabled: false,
+                availability_probe_interval_minutes: 10,
                 limit_5h_usd: Some(10.0),
                 limit_daily_usd: Some(10.0),
                 daily_reset_mode: Some(DailyResetMode::Rolling),

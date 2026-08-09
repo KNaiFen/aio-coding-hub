@@ -445,10 +445,19 @@ async fn provider_test_availability_handler(
             )
         }
     };
+    let Some(runtime) = state.app.try_state::<
+        crate::app::provider_availability_probe_runtime::ProviderAvailabilityProbeRuntimeState,
+    >() else {
+        return api_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "OBS_UNAVAILABLE",
+            "provider probe is unavailable",
+        );
+    };
     let result = match tokio::time::timeout(
         OBSERVER_PROBE_TIMEOUT,
-        crate::domain::provider_availability::test_provider_availability(
-            &state.app,
+        runtime.probe_manual(
+            state.app.clone(),
             db,
             provider_id,
         ),

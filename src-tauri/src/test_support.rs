@@ -435,6 +435,8 @@ pub fn provider_upsert_bridge_json<R: tauri::Runtime>(
             priority,
             claude_models,
             availability_test_model: None,
+            availability_probe_enabled: false,
+            availability_probe_interval_minutes: 10,
             limit_5h_usd,
             limit_daily_usd,
             daily_reset_mode: parse_daily_reset_mode(daily_reset_mode)?,

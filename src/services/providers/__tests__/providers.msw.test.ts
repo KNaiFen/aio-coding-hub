@@ -130,6 +130,54 @@ describe("services/providers via MSW bridge", () => {
     expect(cleared?.stream_idle_timeout_seconds).toBeNull();
   });
 
+  it("persists and preserves scheduled availability probe settings", async () => {
+    const baseInput = {
+      cliKey: "claude" as const,
+      name: "Probe Provider",
+      baseUrls: ["https://api.example.com"],
+      baseUrlMode: "order" as const,
+      authMode: "api_key" as const,
+      apiKey: "sk-test",
+      enabled: true,
+      costMultiplier: 1,
+      priority: 1,
+      claudeModels: null,
+      modelMapping: null,
+      limit5hUsd: null,
+      limitDailyUsd: null,
+      dailyResetMode: "fixed" as const,
+      dailyResetTime: "00:00:00",
+      limitWeeklyUsd: null,
+      limitMonthlyUsd: null,
+      limitTotalUsd: null,
+      tags: [],
+      note: "",
+    };
+
+    const created = await providerUpsert({
+      ...baseInput,
+      availabilityProbeEnabled: true,
+      availabilityProbeIntervalMinutes: 30,
+    });
+    expect(created).toMatchObject({
+      availability_probe_enabled: true,
+      availability_probe_interval_minutes: 30,
+    });
+
+    const preserved = await providerUpsert({
+      ...baseInput,
+      providerId: created.id,
+      name: "Probe Provider Updated",
+      apiKey: undefined,
+      availabilityProbeEnabled: undefined,
+      availabilityProbeIntervalMinutes: undefined,
+    });
+    expect(preserved).toMatchObject({
+      availability_probe_enabled: true,
+      availability_probe_interval_minutes: 30,
+    });
+  });
+
   it("persists, preserves, and clears retry policy overrides through the bridge", async () => {
     const baseInput = {
       cliKey: "claude" as const,

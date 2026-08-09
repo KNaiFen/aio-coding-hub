@@ -46,6 +46,8 @@ function makeSavedProvider(partial: Partial<ProviderSummary> = {}): ProviderSumm
     upstream_retry_policy_override: partial.upstream_retry_policy_override ?? null,
     model_routing_policy_override: partial.model_routing_policy_override ?? null,
     availability_test_model: partial.availability_test_model ?? null,
+    availability_probe_enabled: partial.availability_probe_enabled ?? false,
+    availability_probe_interval_minutes: partial.availability_probe_interval_minutes ?? 10,
     api_key_configured: partial.api_key_configured ?? true,
     newapi_account_user_id: partial.newapi_account_user_id ?? null,
     newapi_account_access_token_configured: partial.newapi_account_access_token_configured ?? false,

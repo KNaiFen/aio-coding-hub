@@ -64,6 +64,8 @@ export type FormActionContext = {
   claudeModels: ClaudeModels;
   modelMapping: ModelMapping;
   testModel: string;
+  availabilityProbeEnabled: boolean;
+  availabilityProbeIntervalMinutes: string;
   streamIdleTimeoutSeconds: string;
   upstreamRetryPolicyOverrideEnabled: boolean;
   upstreamRetryPolicyDraft: UpstreamRetryPolicy;
@@ -93,6 +95,8 @@ export type ProviderEditorPayloadContext = {
   claudeModels: ClaudeModels;
   modelMapping: ModelMapping;
   testModel: string;
+  availabilityProbeEnabled: boolean;
+  availabilityProbeIntervalMinutes: string;
   streamIdleTimeoutSeconds: string;
   upstreamRetryPolicyOverrideEnabled: boolean;
   upstreamRetryPolicyDraft: UpstreamRetryPolicy;

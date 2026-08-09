@@ -220,6 +220,7 @@ INSERT INTO usage_provider_daily_rollups(
   success_generation_ms_sum,
   success_output_tokens_for_rate_sum,
   success_output_rate_count,
+  success_output_tokens_per_second_sum,
   cache_denom_tokens,
   cache_read_input_tokens
 )
@@ -239,6 +240,7 @@ SELECT
   SUM(CASE WHEN {success} AND {valid_output_rate} THEN r.final_upstream_attempt_duration_ms ELSE 0 END),
   SUM(CASE WHEN {success} AND {valid_output_rate} THEN r.output_tokens ELSE 0 END),
   SUM(CASE WHEN {success} AND {valid_output_rate} THEN 1 ELSE 0 END),
+  SUM(CASE WHEN {success} AND {valid_output_rate} THEN r.output_tokens * 1000.0 / r.final_upstream_attempt_duration_ms ELSE 0.0 END),
   SUM(CASE WHEN {success} THEN {cache_denom} ELSE 0 END),
   SUM(CASE WHEN {success} THEN COALESCE(r.cache_read_input_tokens, 0) ELSE 0 END)
 FROM usage_ledger r
@@ -511,7 +513,17 @@ WHERE local_day = ?1
             )
             .expect("read rollup day state");
         assert_eq!(day_state, (start, end, "complete".to_string(), 2));
-        let aggregate: (Option<String>, Option<String>, i64, i64, i64, i64, i64, i64) = conn
+        let aggregate: (
+            Option<String>,
+            Option<String>,
+            i64,
+            i64,
+            i64,
+            i64,
+            i64,
+            f64,
+            i64,
+        ) = conn
             .query_row(
                 r#"
 SELECT
@@ -522,6 +534,7 @@ SELECT
   success_duration_ms_sum,
   success_ttfb_ms_sum,
   success_generation_ms_sum,
+  success_output_tokens_per_second_sum,
   cache_denom_tokens
 FROM usage_provider_daily_rollups
 WHERE local_day = ?1 AND final_provider_id = 41
@@ -537,6 +550,7 @@ WHERE local_day = ?1 AND final_provider_id = 41
                         row.get(5)?,
                         row.get(6)?,
                         row.get(7)?,
+                        row.get(8)?,
                     ))
                 },
             )
@@ -545,7 +559,8 @@ WHERE local_day = ?1 AND final_provider_id = 41
         assert_eq!(aggregate.1.as_deref(), Some("Alpha"));
         assert_eq!((aggregate.2, aggregate.3), (2, 1));
         assert_eq!((aggregate.4, aggregate.5, aggregate.6), (100, 10, 100));
-        assert_eq!(aggregate.7, 125);
+        assert_eq!(aggregate.7, 200.0);
+        assert_eq!(aggregate.8, 125);
 
         conn.execute(
             "UPDATE usage_ledger SET duration_ms = 150 WHERE request_log_id = 1",

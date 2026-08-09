@@ -22,7 +22,11 @@ vi.mock("../charts/lazyRecharts", async () => {
     CartesianGrid: (props: any) => <div data-testid="grid" data-stroke={props.stroke} />,
     XAxis: (props: any) => <div data-testid="x-axis" data-ticks={(props.ticks ?? []).join("|")} />,
     YAxis: (props: any) => (
-      <div data-testid="y-axis" data-ticks={(props.ticks ?? []).join("|")}>
+      <div
+        data-testid="y-axis"
+        data-ticks={(props.ticks ?? []).join("|")}
+        data-width={props.width}
+      >
         {props.tickFormatter?.(1_500_000)}
       </div>
     ),
@@ -77,10 +81,29 @@ describe("UsageTokensChart rendering", () => {
     expect(screen.getByTestId("area-chart")).toHaveAttribute("data-points", "7");
     expect(screen.getByTestId("x-axis").dataset.ticks).toContain("03/18");
     expect(screen.getByTestId("y-axis").textContent).toContain("1.5M");
+    expect(screen.getByTestId("y-axis")).toHaveAttribute("data-width", "45");
     expect(screen.getByTestId("area")).toHaveAttribute("data-key", "tokens");
     expect(within(screen.getByTestId("tooltip")).getByText("03/12")).toBeInTheDocument();
     expect(within(screen.getByTestId("tooltip")).getByText("Tokens")).toBeInTheDocument();
     expect(screen.getByTestId("empty-tooltip")).toBeEmptyDOMElement();
+
+    vi.useRealTimers();
+  });
+
+  it("uses billions and expands the Y axis for long tick labels", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-18T12:00:00Z"));
+
+    render(
+      <UsageTokensChart
+        rows={[makeHourlyRow({ total_tokens: 12_345_000_000_000 })]}
+        days={1}
+      />
+    );
+
+    const yAxis = screen.getByTestId("y-axis");
+    expect(yAxis.dataset.ticks).toContain("12500000000000");
+    expect(Number(yAxis.dataset.width)).toBeGreaterThan(45);
 
     vi.useRealTimers();
   });

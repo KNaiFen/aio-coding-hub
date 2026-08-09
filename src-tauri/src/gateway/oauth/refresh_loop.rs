@@ -22,16 +22,21 @@ enum RefreshLoopStep<T> {
 ///
 /// The loop runs until `shutdown_rx` receives a signal (the gateway stop path
 /// should send it). Returns a `JoinHandle` that can be used to await termination.
-pub(crate) fn spawn(
+pub(crate) fn spawn<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     db: crate::db::Db,
     shutdown_rx: watch::Receiver<bool>,
 ) -> tauri::async_runtime::JoinHandle<()> {
     tauri::async_runtime::spawn(async move {
-        run_loop(db, shutdown_rx).await;
+        run_loop(app, db, shutdown_rx).await;
     })
 }
 
-async fn run_loop(db: crate::db::Db, mut shutdown_rx: watch::Receiver<bool>) {
+async fn run_loop<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    db: crate::db::Db,
+    mut shutdown_rx: watch::Receiver<bool>,
+) {
     let client = match super::build_default_oauth_http_client() {
         Ok(client) => client,
         Err(err) => {
@@ -245,6 +250,12 @@ async fn run_loop(db: crate::db::Db, mut shutdown_rx: watch::Receiver<bool>) {
                         continue;
                     }
 
+                    let probe_mutation_guard =
+                        crate::app::provider_service::begin_provider_availability_probe_mutation(
+                            &app,
+                            provider_id,
+                        )
+                        .await;
                     match await_with_shutdown(
                         &mut shutdown_rx,
                         crate::blocking::run("oauth_refresh_loop_persist", {
@@ -253,6 +264,7 @@ async fn run_loop(db: crate::db::Db, mut shutdown_rx: watch::Receiver<bool>) {
                             let new_id_token = resolved_id_token;
                             let expires_at = token_set.expires_at;
                             move || {
+                                let _probe_mutation_guard = probe_mutation_guard;
                                 providers::update_oauth_tokens_if_last_refreshed_matches(
                                     &db,
                                     provider_id,

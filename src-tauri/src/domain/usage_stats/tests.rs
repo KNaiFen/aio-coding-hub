@@ -1639,6 +1639,7 @@ CREATE TABLE usage_provider_daily_rollups (
   success_generation_ms_sum INTEGER NOT NULL,
   success_output_tokens_for_rate_sum INTEGER NOT NULL,
   success_output_rate_count INTEGER NOT NULL,
+  success_output_tokens_per_second_sum REAL NOT NULL,
   cache_denom_tokens INTEGER NOT NULL,
   cache_read_input_tokens INTEGER NOT NULL,
   PRIMARY KEY(local_day, cli_key, final_provider_id)
@@ -1738,6 +1739,7 @@ INSERT INTO usage_provider_daily_rollups(
   success_generation_ms_sum,
   success_output_tokens_for_rate_sum,
   success_output_rate_count,
+  success_output_tokens_per_second_sum,
   cache_denom_tokens,
   cache_read_input_tokens
 )
@@ -1757,6 +1759,7 @@ SELECT
   SUM(CASE WHEN {success} AND {valid_output_rate} THEN r.final_upstream_attempt_duration_ms ELSE 0 END),
   SUM(CASE WHEN {success} AND {valid_output_rate} THEN r.output_tokens ELSE 0 END),
   SUM(CASE WHEN {success} AND {valid_output_rate} THEN 1 ELSE 0 END),
+  SUM(CASE WHEN {success} AND {valid_output_rate} THEN r.output_tokens * 1000.0 / r.final_upstream_attempt_duration_ms ELSE 0.0 END),
   SUM(CASE WHEN {success} THEN {cache_denom} ELSE 0 END),
   SUM(CASE WHEN {success} THEN COALESCE(r.cache_read_input_tokens, 0) ELSE 0 END)
 FROM usage_events r
@@ -1789,20 +1792,38 @@ fn provider_trends_mix_complete_rollups_with_raw_gaps_without_overlap() {
     let calendar_start = local_day_start_ts(&conn, "2024-01-01");
     for day in 0..=6i64 {
         let created_at = calendar_start + day * 86_400 + 3 * 3600;
+        let (duration_ms, final_attempt_duration_ms, output_tokens) = if day == 1 {
+            (800, Some(800), Some(300))
+        } else {
+            (1000 + day, Some(900 + day), Some(20 + day))
+        };
         insert_usage_log(
             &conn,
             TestUsageLog {
                 provider_name: "Alpha Success",
-                duration_ms: 1000 + day,
+                duration_ms,
                 ttfb_ms: Some(100 + day),
+                final_upstream_attempt_duration_ms: final_attempt_duration_ms,
                 input_tokens: Some(200 + day),
-                output_tokens: Some(20 + day),
+                output_tokens,
                 cache_read_input_tokens: Some(40 + day),
                 created_at,
                 ..base_usage_log(created_at)
             },
         );
     }
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            provider_name: "Alpha Success",
+            duration_ms: 200,
+            ttfb_ms: Some(50),
+            final_upstream_attempt_duration_ms: Some(200),
+            output_tokens: Some(100),
+            created_at: calendar_start + 86_400 + 3 * 3600 + 60,
+            ..base_usage_log(calendar_start + 86_400 + 3 * 3600 + 60)
+        },
+    );
     insert_usage_log(
         &conn,
         TestUsageLog {
@@ -1922,6 +1943,19 @@ fn provider_trends_mix_complete_rollups_with_raw_gaps_without_overlap() {
     assert!(hybrid_cache
         .iter()
         .any(|row| row.key == "codex:123" && row.name == "codex/Alpha Success"));
+    let arithmetic_rate_day = local_day_key(&conn, calendar_start + 86_400);
+    let raw_rate_row = raw_metrics
+        .iter()
+        .find(|row| row.day == arithmetic_rate_day && row.provider_id == 123)
+        .expect("raw arithmetic output-rate day");
+    assert_eq!(raw_rate_row.output_rate_samples, 2);
+    assert_eq!(raw_rate_row.avg_output_tokens_per_second, Some(437.5));
+    let hybrid_rate_row = hybrid_metrics
+        .iter()
+        .find(|row| row.day == arithmetic_rate_day && row.provider_id == 123)
+        .expect("rollup arithmetic output-rate day");
+    assert_eq!(hybrid_rate_row.output_rate_samples, 2);
+    assert_eq!(hybrid_rate_row.avg_output_tokens_per_second, Some(437.5));
 
     let raw_excluded_metrics = provider_metric_trend_v1_with_conn(
         &conn,
@@ -2151,13 +2185,25 @@ fn provider_metric_trend_matches_summary_formulas_and_sample_guards() {
         &conn,
         TestUsageLog {
             provider_name: "Formula Provider",
+            duration_ms: 200,
+            ttfb_ms: Some(50),
+            final_upstream_attempt_duration_ms: Some(200),
+            output_tokens: Some(100),
+            created_at: bucket_ts + 1,
+            ..base_usage_log(bucket_ts + 1)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            provider_name: "Formula Provider",
             duration_ms: 2000,
             ttfb_ms: Some(5000),
             final_upstream_attempt_duration_ms: Some(500),
             final_upstream_attempt_timing_version: 0,
             output_tokens: Some(999),
-            created_at: bucket_ts + 1,
-            ..base_usage_log(bucket_ts + 1)
+            created_at: bucket_ts + 2,
+            ..base_usage_log(bucket_ts + 2)
         },
     );
     insert_usage_log(
@@ -2167,8 +2213,8 @@ fn provider_metric_trend_matches_summary_formulas_and_sample_guards() {
             duration_ms: 1200,
             ttfb_ms: Some(100),
             output_tokens: None,
-            created_at: bucket_ts + 2,
-            ..base_usage_log(bucket_ts + 2)
+            created_at: bucket_ts + 3,
+            ..base_usage_log(bucket_ts + 3)
         },
     );
     insert_usage_log(
@@ -2180,8 +2226,8 @@ fn provider_metric_trend_matches_summary_formulas_and_sample_guards() {
             duration_ms: 90_000,
             ttfb_ms: Some(50),
             output_tokens: Some(90_000),
-            created_at: bucket_ts + 3,
-            ..base_usage_log(bucket_ts + 3)
+            created_at: bucket_ts + 4,
+            ..base_usage_log(bucket_ts + 4)
         },
     );
     insert_usage_log(
@@ -2192,8 +2238,8 @@ fn provider_metric_trend_matches_summary_formulas_and_sample_guards() {
             ttfb_ms: Some(50),
             output_tokens: Some(90_000),
             excluded_from_stats: 1,
-            created_at: bucket_ts + 4,
-            ..base_usage_log(bucket_ts + 4)
+            created_at: bucket_ts + 5,
+            ..base_usage_log(bucket_ts + 5)
         },
     );
 
@@ -2218,24 +2264,37 @@ fn provider_metric_trend_matches_summary_formulas_and_sample_guards() {
         },
     )
     .expect("provider metric trend");
+    let leaderboard = leaderboard_v2_with_conn(
+        &conn,
+        UsageScopeV2::Provider,
+        Some(start_ts),
+        Some(start_ts + 86_400),
+        None,
+        Some(123),
+        Some(50),
+        false,
+    )
+    .expect("provider leaderboard");
 
     assert_eq!(rows.len(), 1);
     let row = &rows[0];
     assert_eq!(row.granularity, UsageTrendGranularityV1::Hour);
-    assert_eq!(row.requests_total, 4);
-    assert_eq!(row.requests_success, 3);
-    assert_eq!(row.duration_samples, 3);
-    assert_eq!(row.ttfb_samples, 2);
-    assert_eq!(row.output_rate_samples, 1);
+    assert_eq!(row.requests_total, 5);
+    assert_eq!(row.requests_success, 4);
+    assert_eq!(row.duration_samples, 4);
+    assert_eq!(row.ttfb_samples, 3);
+    assert_eq!(row.output_rate_samples, 2);
     assert_eq!(row.avg_duration_ms, summary.avg_duration_ms);
     assert_eq!(row.avg_ttfb_ms, summary.avg_ttfb_ms);
     assert_eq!(
         row.avg_output_tokens_per_second,
         summary.avg_output_tokens_per_second
     );
-    assert_eq!(row.avg_duration_ms, Some(1400));
-    assert_eq!(row.avg_ttfb_ms, Some(150));
-    assert_eq!(row.avg_output_tokens_per_second, Some(375.0));
+    assert_eq!(row.avg_duration_ms, Some(1100));
+    assert_eq!(row.avg_ttfb_ms, Some(116));
+    assert_eq!(row.avg_output_tokens_per_second, Some(437.5));
+    assert_eq!(leaderboard.len(), 1);
+    assert_eq!(leaderboard[0].avg_output_tokens_per_second, Some(437.5));
 }
 
 #[test]
@@ -3558,10 +3617,27 @@ fn folder_keys_filter_summary_leaderboard_and_day_detail() {
             provider_id: 123,
             requested_model: "gpt-alpha",
             input_tokens: Some(100),
-            output_tokens: Some(20),
+            output_tokens: Some(300),
+            final_upstream_attempt_duration_ms: Some(800),
             cost_usd_femto: Some(0),
             session_id: Some("codex-alpha-1"),
             created_at: start_ts + 2 * 3600,
+            ..base_usage_log(start_ts)
+        },
+    );
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            cli_key: "codex",
+            provider_id: 123,
+            requested_model: "gpt-alpha",
+            input_tokens: Some(50),
+            output_tokens: Some(100),
+            duration_ms: 200,
+            ttfb_ms: Some(50),
+            final_upstream_attempt_duration_ms: Some(200),
+            session_id: Some("codex-alpha-1"),
+            created_at: start_ts + 2 * 3600 + 60,
             ..base_usage_log(start_ts)
         },
     );
@@ -3615,10 +3691,11 @@ fn folder_keys_filter_summary_leaderboard_and_day_detail() {
 
     let alpha_summary =
         summary_v2_with_conn(&conn, &alpha_params, fixture_folder_lookup).expect("summary");
-    assert_eq!(alpha_summary.requests_total, 1);
+    assert_eq!(alpha_summary.requests_total, 2);
     assert_eq!(alpha_summary.cost_covered_success, 1);
-    assert_eq!(alpha_summary.total_tokens, 120);
-    assert_eq!(alpha_summary.io_total_tokens, 120);
+    assert_eq!(alpha_summary.total_tokens, 550);
+    assert_eq!(alpha_summary.io_total_tokens, 550);
+    assert_eq!(alpha_summary.avg_output_tokens_per_second, Some(437.5));
 
     let alpha_day_rows = leaderboard_v2_folder_filtered_with_conn(
         &conn,
@@ -3638,14 +3715,15 @@ fn folder_keys_filter_summary_leaderboard_and_day_detail() {
     .expect("day leaderboard");
     assert_eq!(alpha_day_rows.len(), 1);
     assert_eq!(alpha_day_rows[0].key, day);
-    assert_eq!(alpha_day_rows[0].total_tokens, 120);
+    assert_eq!(alpha_day_rows[0].total_tokens, 550);
+    assert_eq!(alpha_day_rows[0].avg_output_tokens_per_second, Some(437.5));
     assert_eq!(
         alpha_day_rows[0].first_request_created_at_ms,
         Some((start_ts + 2 * 3600) * 1000)
     );
     assert_eq!(
         alpha_day_rows[0].last_request_created_at_ms,
-        Some((start_ts + 2 * 3600) * 1000)
+        Some((start_ts + 2 * 3600 + 60) * 1000)
     );
 
     let alpha_model_rows = leaderboard_v2_folder_filtered_with_conn(
@@ -3666,6 +3744,10 @@ fn folder_keys_filter_summary_leaderboard_and_day_detail() {
     .expect("model leaderboard");
     assert_eq!(alpha_model_rows.len(), 1);
     assert_eq!(alpha_model_rows[0].key, "gpt-alpha");
+    assert_eq!(
+        alpha_model_rows[0].avg_output_tokens_per_second,
+        Some(437.5)
+    );
     assert_eq!(alpha_model_rows[0].first_request_created_at_ms, None);
     assert_eq!(alpha_model_rows[0].last_request_created_at_ms, None);
 
@@ -3711,10 +3793,14 @@ fn folder_keys_filter_summary_leaderboard_and_day_detail() {
     )
     .expect("day detail");
     assert_eq!(detail.hours.len(), 24);
-    assert_eq!(detail.hours[2].requests_total, 1);
-    assert_eq!(detail.hours[2].total_tokens, 120);
+    assert_eq!(detail.hours[2].requests_total, 2);
+    assert_eq!(detail.hours[2].total_tokens, 550);
     assert_eq!(detail.hours[5].requests_total, 0);
     assert_eq!(detail.folders.len(), 1);
     assert_eq!(detail.folders[0].key, "/work/alpha");
-    assert_eq!(detail.folders[0].total_tokens, 120);
+    assert_eq!(detail.folders[0].total_tokens, 550);
+    assert_eq!(
+        detail.folders[0].avg_output_tokens_per_second,
+        Some(437.5)
+    );
 }
