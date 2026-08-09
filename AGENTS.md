@@ -18,7 +18,7 @@
 - Implementation is complete only when the latest PR commit is green in the required cloud checks and the task worktree contains a Markdown handoff with the PR link, changed files and code locations, deviations from the plan, verification results, and open issues.
 - After handoff, the execution session pauses. Main reviews the latest PR diff against the task artifacts and current contracts; main may perform the review itself or ask a read-only sub-agent to report findings.
 - If acceptance fails, main writes a Markdown `findings.md` in the task worktree. The execution session continues from that document; every new push requires the relevant CI checks to pass again before re-acceptance.
-- Only main merges an accepted PR. After merge, main updates the knowledge base, archives the Trellis task, synchronizes local `main`, and removes the task worktree only after confirming it is clean and no session is using it.
+- Only main merges an accepted PR. Include required knowledge-base updates in the accepted PR whenever possible; if a new current fact is discovered after merge, main opens a small follow-up documentation PR instead of pushing directly to protected `main`. After the documentation is merged, main archives the Trellis task, synchronizes local `main`, and removes the task worktree only after confirming it is clean and no session is using it.
 - Do not add a second custom JSON gate for this workflow. Use the existing Trellis task artifacts where applicable, Markdown handoffs for delivery, and GitHub PR checks for CI evidence.
 
 ## Project Knowledge Base
