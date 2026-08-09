@@ -46,9 +46,8 @@ fn provider_for_base_url_test(
 #[test]
 fn oauth_primary_base_url_uses_adapter_default_even_with_legacy_base_urls() {
     let _env_lock = crate::test_support::test_env_lock();
-    let _oauth_base_url_override = crate::test_support::ScopedTestEnvVar::remove(
-        "AIO_CODING_HUB_TEST_CODEX_OAUTH_BASE_URL",
-    );
+    let _oauth_base_url_override =
+        crate::test_support::ScopedTestEnvVar::remove("AIO_CODING_HUB_TEST_CODEX_OAUTH_BASE_URL");
     let provider = provider_for_base_url_test(
         "oauth",
         vec!["/legacy/relative/path", "https://another.example.com/v1"],

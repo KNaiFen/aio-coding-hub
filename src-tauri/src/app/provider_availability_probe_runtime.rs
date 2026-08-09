@@ -928,8 +928,7 @@ INSERT INTO providers(
         }
         insert_schedule_provider(&connection, 514, true);
 
-        let batch =
-            load_schedules_from_conn(&connection, 55_000, None).expect("load schedules");
+        let batch = load_schedules_from_conn(&connection, 55_000, None).expect("load schedules");
         assert!(batch.next_after_provider_id.is_none());
         assert_eq!(batch.schedules.len(), 1);
         assert_eq!(batch.schedules[0].provider_id, 514);
@@ -942,8 +941,7 @@ INSERT INTO providers(
             insert_schedule_provider(&connection, provider_id, true);
         }
 
-        let first =
-            load_schedules_from_conn(&connection, 55_000, None).expect("load first page");
+        let first = load_schedules_from_conn(&connection, 55_000, None).expect("load first page");
         assert_eq!(first.schedules.len(), SCHEDULED_PROVIDER_PAGE_SIZE);
         assert_eq!(first.schedules.first().map(|row| row.provider_id), Some(1));
         assert_eq!(
@@ -951,12 +949,8 @@ INSERT INTO providers(
             Some(SCHEDULED_PROVIDER_PAGE_SIZE as i64)
         );
 
-        let second = load_schedules_from_conn(
-            &connection,
-            55_000,
-            first.next_after_provider_id,
-        )
-        .expect("load second page");
+        let second = load_schedules_from_conn(&connection, 55_000, first.next_after_provider_id)
+            .expect("load second page");
         assert!(second.next_after_provider_id.is_none());
         assert_eq!(second.schedules.len(), 1);
         assert_eq!(
