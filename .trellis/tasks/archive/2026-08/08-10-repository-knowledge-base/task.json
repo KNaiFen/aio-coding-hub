@@ -3,7 +3,7 @@
   "name": "repository-knowledge-base",
   "title": "整理并建立可持续项目知识库",
   "description": "清点 main 与两个历史 worktree 的文档资产，建立统一知识入口，修正文档漂移，迁移历史资料并归档已交付的 Trellis 任务。",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": "documentation",
   "scope": "repository-knowledge",
   "package": "aio-coding-hub",
@@ -11,11 +11,11 @@
   "creator": "KNaiFen",
   "assignee": "KNaiFen",
   "createdAt": "2026-08-10",
-  "completedAt": null,
+  "completedAt": "2026-08-10",
   "branch": null,
   "base_branch": "main",
   "worktree_path": null,
-  "commit": null,
+  "commit": "aad97e3050434f4613559f49545008022644c38a",
   "pr_url": null,
   "subtasks": [],
   "children": [],
@@ -30,6 +30,6 @@
     ".trellis/workspace/",
     "scripts/check-plugin-system-docs.mjs"
   ],
-  "notes": "main 是唯一写入目标；aio-feature-merge 与 aio-float-fix 仅做只读差异核对。",
+  "notes": "交付提交：0ae02512619a0ca2d4dc7e7992d6b708be67ac7f（知识库）、4872b80918b30c0a2e9409f36ac98cb72c583777（插件文档）、aad97e3050434f4613559f49545008022644c38a（Trellis 归档）。main 是唯一写入目标；aio-feature-merge 与 aio-float-fix 仅做只读差异核对。",
   "meta": {}
 }

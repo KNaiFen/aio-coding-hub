@@ -5,7 +5,6 @@
 ## 当前活动任务
 
 - [`08-03-upstream-claude-oauth`](./08-03-upstream-claude-oauth/)：独立候选，仍需使用真实隔离账号验证完整 OAuth 登录、exchange、refresh 和 401 refresh 流程。
-- [`08-10-repository-knowledge-base`](./08-10-repository-knowledge-base/)：整理文档、修正事实漂移并建立本知识库。
 
 ## 归档
 

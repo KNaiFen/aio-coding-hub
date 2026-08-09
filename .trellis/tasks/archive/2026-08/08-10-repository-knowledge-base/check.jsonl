@@ -1,0 +1,6 @@
+{"file":".trellis/spec/aio-coding-hub/cross-layer/cloud-only-verification-contract.md","reason":"检查验证命令未越过零产物边界"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/trellis-task-context-archive-contract.md","reason":"检查活跃与归档上下文完整性"}
+{"file": ".trellis/tasks/archive/2026-08/08-10-repository-knowledge-base/research/document-inventory-and-branch-diff.md", "reason": "复核跨 worktree 资料未被错误导入"}
+{"file": ".trellis/tasks/archive/2026-08/08-10-repository-knowledge-base/research/current-fact-drift.md", "reason": "复核所有确认的现行文档漂移均已处理"}
+{"file": ".trellis/tasks/archive/2026-08/08-10-repository-knowledge-base/research/release-history.md", "reason": "复核 changelog 与标签历史一致"}
+{"file": ".trellis/tasks/archive/2026-08/08-10-repository-knowledge-base/research/task-archive-map.md", "reason": "复核归档数量、范围和保留任务"}
