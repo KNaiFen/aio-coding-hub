@@ -12,6 +12,8 @@ schemaVersion: 1
 
 # Request Logs processing realtime card tab leak analysis
 
+> **状态：历史问题分析。** 本记录保留 2026-07-04 的定位证据，源码行号和问题状态可能已经变化。判断当前行为时以现行代码和 [项目知识库](../../README.md) 为准。
+
 ## 现象
 
 Request Logs 页面在「处理中」状态会出现卡片串栏：Codex/Claude 的处理中卡片可能出现在另一个 CLI 栏目里，也可能在「全部」或自身栏目里暂时看不到，Claude 栏目里也可能同时混入 Codex 和 Claude 卡片。最终记录展示正常，问题集中在处理中实时卡片，不是普通 row 的最终归属错位。

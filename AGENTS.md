@@ -11,6 +11,12 @@
 - Local validation is limited to direct dependency-free Node.js source contracts and syntax parsing that do not write files, plus `git diff --check`. The canonical entry is `node scripts/check-cloud-only-verification.mjs`; run its self-test directly with `node scripts/check-cloud-only-verification.selftest.mjs`. Use `node --check <changed-file.mjs>` only for changed Node source. Do not invoke these checks through `pnpm`.
 - GitHub Actions owns dependency installation, frontend lint/typecheck/tests/build, Rust formatting and lock synchronization, generated bindings, Clippy, Rust tests, audit, signing, and desktop packaging. Apply only a bounded CI drift patch when Actions reports generated-file drift. Use the full `ci` workflow_dispatch for validation and the `dev-build` workflow only when a desktop integration artifact is actually needed.
 
+## Project Knowledge Base
+
+- `docs/README.md` is the canonical navigation entry for product, architecture, plugin, operations, task, and historical documentation.
+- Treat current code and machine-readable contracts as authoritative over prose. Current specifications outrank task records; task records outrank historical audits and session journals.
+- Move completed or superseded evidence into the indexed history/archive locations instead of leaving parallel current-looking documents at the repository root.
+
 ## Deferred Work List
 
 - `PENDING.md` is the canonical active list for unresolved small issues and improvements that the user asks to accumulate for a later batch. Completed and explicitly dropped history lives in `PENDING_COMPLETED.md` and is not part of the mandatory pre-planning context.

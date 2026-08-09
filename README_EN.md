@@ -89,6 +89,15 @@
 - Repository management, filtering, and sorting
 - Batch management linked to workspaces
 
+### Plugin System
+
+- Official bundled Privacy Filter and community Extension Host plugins
+- Gateway and log hooks, commands, provider extension values, and host-rendered UI contributions
+- Capability-gated APIs, manifest validation, configuration schemas, audit reports, quarantine, and rollback
+- SDK and scaffolder: `@aio-coding-hub/plugin-sdk` and `create-aio-plugin`
+
+Start with the [Plugin Development Guide](docs/plugins/README.md). Community plugins use the Extension Host; WASM, process, and native runtimes are unsupported pre-release legacy paths.
+
 ### CLI Management
 
 - Direct editing of Claude Code settings
@@ -226,6 +235,14 @@ curl http://127.0.0.1:37123/health
 ```
 
 ---
+
+## Project Documentation
+
+- [Project knowledge base](docs/README.md): the canonical map for product, architecture, plugin, operations, task, and historical documentation.
+- [Pending work](PENDING.md) and [completed work](PENDING_COMPLETED.md): deferred items and delivery evidence.
+- [Trellis task index](.trellis/tasks/README.md): plans, research, checks, and archived task context.
+
+Current code and machine-readable contracts take precedence over historical audits, superseded plans, and session journals.
 
 ## Tech Stack
 

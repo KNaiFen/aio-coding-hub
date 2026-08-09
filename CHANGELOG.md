@@ -1,5 +1,113 @@
 # Changelog
 
+## [0.60.50](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.50) (2026-08-09)
+
+### Highlights
+
+* complete the final hardening stack across provider usage and availability, cross-restart data reset, gateway authentication, and dependency security
+
+## [0.60.49](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.49) (2026-08-06)
+
+### Highlights
+
+* tighten request observability correctness and ship coordinated plugin, CI, security, cache, and UI hardening
+
+## [0.60.48](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.48) (2026-08-05)
+
+### Highlights
+
+* integrate codebase health fixes, request observability and provider status, immutable candidate promotion, and release tag-fetch recovery
+
+## [0.60.47](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.47) (2026-08-04)
+
+### Highlights
+
+* deliver selective upstream fixes, provider metric trends, in-stream error retry behavior, and tiered CI validation
+
+## [0.60.46](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.46) (2026-08-03)
+
+### Highlights
+
+* refine the macOS tray hover panel and correct quota-aware provider routing
+
+## [0.60.45](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.45) (2026-08-03)
+
+### Highlights
+
+* deliver and close deferred work items PENDING-012 through PENDING-015
+
+## [0.60.44](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.44) (2026-08-03)
+
+### Highlights
+
+* complete TUI and macOS tray observability improvements
+
+## [0.60.43](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.43) (2026-08-03)
+
+### Highlights
+
+* deliver and close deferred work items PENDING-001 through PENDING-011
+
+## [0.60.42](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.42) (2026-08-02)
+
+### Highlights
+
+* align upstream error-response handling and establish durable pending-work governance
+
+## [0.60.41](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.41) (2026-08-02)
+
+### Highlights
+
+* improve model-route notifications and refine TUI selection and visual behavior
+
+## [0.60.40](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.40) (2026-08-02)
+
+### Highlights
+
+* improve home-route tooltip density and repair release-candidate downloads
+
+## [0.60.39](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.39) (2026-08-01)
+
+### Highlights
+
+* add the Observer TUI, cloud-only artifact workflows, and release-signing migration
+
+## [0.60.38](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.38) (2026-07-31)
+
+### Highlights
+
+* restore home overview visibility and archive the completed delivery tasks
+
+## [0.60.37](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.37) (2026-07-31)
+
+### Highlights
+
+* count only live model-inference requests in concurrency metrics
+
+## [0.60.36](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.36) (2026-07-31)
+
+### Highlights
+
+* add Codex compaction-ledger pagination and close request-encoding compatibility work
+
+## [0.60.35](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.35) (2026-07-30)
+
+### Highlights
+
+* normalize compressed Codex requests and make macOS path tests portable
+
+## [0.60.34](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.34) (2026-07-30)
+
+### Highlights
+
+* validate zstd-compressed Codex requests and expose real-time session concurrency
+
+## [0.60.33](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.33) (2026-07-29)
+
+### Highlights
+
+* add active-session concurrency on Home, surface query failures as unavailable state, and reuse verified `main` candidates in releases
+
 ## [0.60.32](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.32) (2026-07-27)
 
 ### Features

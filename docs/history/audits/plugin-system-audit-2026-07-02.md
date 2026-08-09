@@ -1,5 +1,7 @@
 # Plugin 插件体系架构审计报告（2026-07-02）
 
+> **状态：历史审计。** 结论和命令反映 2026-07-02 的插件实现，后续平台校验、diagnostics、CI 与运行时边界已经变化。当前插件规范见 [插件开发手册](../../plugins/README.md) 和 [Manifest v1](../../plugin-manifest-v1.md)；不要用本报告指导当前实现或本地验证。
+
 ## 1. 审计结论
 
 当前 Plugin 体系已经从早期多 runtime 设想，收敛到 **Extension Host-only 的社区插件模型**。这个方向是正确的：第三方代码不进入 Rust 主进程或 Tauri WebView，而是通过 host-managed Extension Host worker 执行；插件能力通过 `contributes.*` 与 `capabilities` 声明；gateway hook 由宿主裁剪上下文、限制 mutation、记录审计，并使用 timeout/circuit/failure-policy 约束执行。

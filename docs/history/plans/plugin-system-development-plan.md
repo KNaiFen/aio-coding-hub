@@ -1,12 +1,6 @@
 # aio coding hub 社区插件系统开发计划
 
-> Status: Superseded.
->
-> This historical plan is retained for context only. The current public plugin
-> direction is Extension Host-only, documented in `docs/plugin-manifest-v1.md`
-> and `docs/plugins/`. Earlier alternate WASM and arbitrary process runtime
-> plans are unsupported pre-release history and are not the current
-> implementation plan.
+> **状态：已被替代。** 本计划仅保留早期设计上下文，不得作为实施清单。当前公开插件方向是 Extension Host-only，见 [Manifest v1](../../plugin-manifest-v1.md) 与 [插件开发手册](../../plugins/README.md)；早期 WASM、任意进程和 native 运行时方案属于不受支持的预发布历史。
 
 ## 1. 目标与开发边界
 

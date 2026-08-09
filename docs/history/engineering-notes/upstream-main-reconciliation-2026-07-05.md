@@ -12,6 +12,8 @@ schemaVersion: 1
 
 # Upstream main reconciliation 2026-07-05
 
+> **Status: historical engineering record.** This note preserves the 2026-07-05 merge and release evidence. Branches, remotes, release policy, and commands may no longer be current; use `AGENTS.md`, current Git history, and the [project knowledge base](../../README.md) for present-day work.
+
 ## Purpose
 
 Record the exact upstream merge baseline and fork-preservation checks from the 2026-07-05 reconciliation, so the next upstream sync can start from evidence instead of memory.
