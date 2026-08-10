@@ -7,14 +7,14 @@
 - 分支：`chore/github-actions-governance`
 - 基线：`origin/main`
 - 完整 base SHA：`9b05b28d5841584dc6f2a867947afd5d23f76246`
-- 规划提交：待初始规划提交后回填
+- 规划提交：`30a021269f3b6ae2c46f195faa273a1af81f26f9`
 - 实施授权：已确认；2026-08-10，按审查结果实施，Rust 并行化延后独立实验。
 - PR 目标：`main`
 - PR：尚未创建
 - 直接 main 迁移来源：无
 - PENDING 审阅：`AIO-PENDING-029` 明确排除，禁止触碰 `upgrade-tui.command`
 - 当前唯一写者：main session
-- 当前阶段：施工中（规划检查点待提交）
+- 当前阶段：施工中
 
 ## 阅读顺序
 
