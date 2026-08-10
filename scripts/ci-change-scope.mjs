@@ -153,6 +153,13 @@ export function fullCiResult(reason, error = undefined) {
   };
 }
 
+export function manualCiResult() {
+  return {
+    ...fullCiResult("manual-dispatch"),
+    providerTrendBenchmark: false,
+  };
+}
+
 export function shouldRunProviderTrendBenchmark(paths) {
   return paths.some(
     (path) =>
@@ -281,7 +288,7 @@ export function runClassifier(options, runGit = runGitCommand) {
     const policy = loadPolicy(options.policyPath || DEFAULT_POLICY_PATH);
     const changed = collectChangedPaths(options, runGit);
     if (changed.forceFull) {
-      return fullCiResult(changed.reason);
+      return changed.reason === "manual-dispatch" ? manualCiResult() : fullCiResult(changed.reason);
     }
     return classifyPaths(changed.paths, policy);
   } catch (error) {

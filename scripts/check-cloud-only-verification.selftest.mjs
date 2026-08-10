@@ -8,6 +8,12 @@ import { assertGithubActionsEnvironment } from "./require-github-actions.mjs";
 
 const valid = loadCloudOnlyVerificationFixture();
 assert.doesNotThrow(() => assertCloudOnlyVerificationContract(valid));
+assert.doesNotThrow(() =>
+  assertCloudOnlyVerificationContract({
+    ...valid,
+    ciWorkflow: valid.ciWorkflow.replace("    steps:\n", "    steps: # executable steps\n"),
+  })
+);
 assert.throws(() => assertGithubActionsEnvironment({}), /GitHub Actions-only/);
 assert.doesNotThrow(() => assertGithubActionsEnvironment({ GITHUB_ACTIONS: "true" }));
 
@@ -111,6 +117,110 @@ for (const [name, mutate, expected] of [
     },
     /dev-build\.yml must declare only the workflow_dispatch trigger/,
   ],
+  [
+    "manual CI guard condition",
+    (fixture) => {
+      fixture.ciWorkflow = fixture.ciWorkflow.replace(
+        "    if: github.event_name == 'workflow_dispatch'",
+        "    if: true"
+      );
+    },
+    /ci\.yml manual-dispatch-guard if must equal/,
+  ],
+  [
+    "manual CI main boundary",
+    (fixture) => {
+      fixture.ciWorkflow = fixture.ciWorkflow.replace(
+        '[[ "$EVENT_REF" == "refs\/heads\/main" ]]',
+        '[[ -n "$EVENT_REF" ]]'
+      );
+    },
+    /manual-dispatch-guard must retain the approved fail-closed script/,
+  ],
+  [
+    "manual CI gate name",
+    (fixture) => {
+      fixture.ciWorkflow = fixture.ciWorkflow.replace(
+        "    name: ${{ github.event_name == 'workflow_dispatch' && 'manual-ci-gate' || 'ci-gate' }}",
+        "    name: ci-gate"
+      );
+    },
+    /ci\.yml ci-gate name must equal/,
+  ],
+  [
+    "inline PR title dependency",
+    (fixture) => {
+      fixture.ciWorkflow = fixture.ciWorkflow.replace(
+        "      - manual-dispatch-guard\n",
+        "      - manual-dispatch-guard\n      - pr-title\n"
+      );
+    },
+    /must not inline or depend on the independent pr-title check/,
+  ],
+  [
+    "PR title edited trigger",
+    (fixture) => {
+      fixture.prTitleWorkflow = fixture.prTitleWorkflow.replace("edited, ", "");
+    },
+    /pr-title\.yml must trigger for pull_request edited/,
+  ],
+  [
+    "PR title checkout",
+    (fixture) => {
+      fixture.prTitleWorkflow = fixture.prTitleWorkflow.replace(
+        "    steps:\n",
+        "    steps:\n      - uses: actions/checkout@1111111111111111111111111111111111111111\n"
+      );
+    },
+    /pr-title\.yml must not checkout pull request code/,
+  ],
+  [
+    "PR title validation",
+    (fixture) => {
+      fixture.prTitleWorkflow = fixture.prTitleWorkflow.replace(
+        '[[ "$PR_TITLE" =~ $pattern ]]',
+        "true"
+      );
+    },
+    /pr-title\.yml pr-title must retain the approved fail-closed script/,
+  ],
+  [
+    "performance pull request trigger",
+    (fixture) => {
+      fixture.performanceWorkflow = fixture.performanceWorkflow.replace(
+        "  workflow_dispatch:\n",
+        "  pull_request:\n  workflow_dispatch:\n"
+      );
+    },
+    /performance\.yml must declare only the workflow_dispatch trigger/,
+  ],
+  [
+    "performance main guard",
+    (fixture) => {
+      fixture.performanceWorkflow = fixture.performanceWorkflow.replace(
+        '[[ "$EVENT_REF" == "refs\/heads\/main" ]]',
+        '[[ -n "$EVENT_REF" ]]'
+      );
+    },
+    /performance\.yml main-guard must retain the approved fail-closed script/,
+  ],
+  [
+    "performance benchmark",
+    (fixture) => {
+      fixture.performanceWorkflow = fixture.performanceWorkflow.replace(
+        "provider_trend_million_ledger_rows_release_under_one_second",
+        "provider_trend_smoke_test"
+      );
+    },
+    /performance\.yml provider-trend-benchmark must retain the approved fail-closed script/,
+  ],
+  [
+    "performance signing access",
+    (fixture) => {
+      fixture.performanceWorkflow += "\nenvironment: release-signing\n";
+    },
+    /performance\.yml must not receive release signing access/,
+  ],
 ]) {
   expectContractFailure(name, mutate, expected);
 }
@@ -138,9 +248,36 @@ for (const [job, command] of [
     (fixture) => {
       fixture.ciWorkflow = fixture.ciWorkflow.replace(command, "true");
     },
-    new RegExp(`ci\\.yml ${job} must include`)
+    job === "rust" && /^(?:cargo fmt|cargo update|cargo run)/.test(command)
+      ? /ci\.yml rust must retain the approved fail-closed script/
+      : new RegExp(`ci\\.yml ${job} must include`)
   );
 }
+
+expectContractFailure(
+  "frontend echoed command is not executable",
+  (fixture) => {
+    fixture.ciWorkflow = fixture.ciWorkflow.replace("        run: pnpm build", "        run: echo pnpm build");
+  },
+  /ci\.yml frontend must include pnpm build/
+);
+expectContractFailure(
+  "frontend ignored failure is not a quality gate",
+  (fixture) => {
+    fixture.ciWorkflow = fixture.ciWorkflow.replace("        run: pnpm build", "        run: pnpm build || true");
+  },
+  /ci\.yml frontend must include pnpm build/
+);
+expectContractFailure(
+  "Rust conditional no-op is not executable",
+  (fixture) => {
+    fixture.ciWorkflow = fixture.ciWorkflow.replace(
+      "        run: cargo audit",
+      "        run: if false; then cargo audit; fi"
+    );
+  },
+  /ci\.yml rust must include cargo audit/
+);
 
 expectContractFailure(
   "docs cloud-only step",
@@ -243,6 +380,76 @@ expectContractFailure(
     );
   },
   /ci\.yml frontend must include pnpm build/
+);
+expectContractFailure(
+  "frontend required step cannot be skipped",
+  (fixture) => {
+    fixture.ciWorkflow = fixture.ciWorkflow.replace(
+      "      - name: Build frontend\n        run: pnpm build",
+      "      - name: Build frontend\n        if: ${{ false }}\n        run: pnpm build"
+    );
+  },
+  /ci\.yml frontend must include pnpm build/
+);
+expectContractFailure(
+  "frontend required step cannot ignore failures",
+  (fixture) => {
+    fixture.ciWorkflow = fixture.ciWorkflow.replace(
+      "      - name: Build frontend\n        run: pnpm build",
+      "      - name: Build frontend\n        continue-on-error: true\n        run: pnpm build"
+    );
+  },
+  /ci\.yml frontend must include pnpm build/
+);
+expectContractFailure(
+  "aggregate gate must always run",
+  (fixture) => {
+    fixture.ciWorkflow = fixture.ciWorkflow.replace(
+      "  ci-gate:\n    name: ${{ github.event_name == 'workflow_dispatch' && 'manual-ci-gate' || 'ci-gate' }}\n    if: always()",
+      "  ci-gate:\n    name: ${{ github.event_name == 'workflow_dispatch' && 'manual-ci-gate' || 'ci-gate' }}\n    if: false"
+    );
+  },
+  /ci\.yml ci-gate if must equal always\(\)/
+);
+expectContractFailure(
+  "aggregate gate must bind the real Rust result",
+  (fixture) => {
+    fixture.ciWorkflow = fixture.ciWorkflow.replace(
+      "          RUST_RESULT: ${{ needs.rust.result }}",
+      "          RUST_RESULT: success"
+    );
+  },
+  /ci\.yml ci-gate must bind aggregation results directly from needs\.\*/
+);
+expectContractFailure(
+  "aggregate gate script cannot be conditionally disabled",
+  (fixture) => {
+    fixture.ciWorkflow = fixture.ciWorkflow.replace(
+      "          set -euo pipefail\n\n          if [[ \"$EVENT_NAME\" == \"workflow_dispatch\" ]]; then",
+      "          set -euo pipefail\n\n          if false; then\n            :\n          fi\n\n          if [[ \"$EVENT_NAME\" == \"workflow_dispatch\" ]]; then"
+    );
+  },
+  /ci\.yml ci-gate must retain the approved fail-closed aggregation script/
+);
+expectContractFailure(
+  "PR title step cannot be skipped",
+  (fixture) => {
+    fixture.prTitleWorkflow = fixture.prTitleWorkflow.replace(
+      "      - name: Check PR title\n        shell: bash",
+      "      - name: Check PR title\n        if: ${{ false }}\n        shell: bash"
+    );
+  },
+  /pr-title\.yml pr-title must retain the approved fail-closed script/
+);
+expectContractFailure(
+  "performance benchmark step cannot ignore failures",
+  (fixture) => {
+    fixture.performanceWorkflow = fixture.performanceWorkflow.replace(
+      "      - name: Provider trend million-row release benchmark\n        working-directory:",
+      "      - name: Provider trend million-row release benchmark\n        continue-on-error: true\n        working-directory:"
+    );
+  },
+  /performance\.yml provider-trend-benchmark must retain the approved fail-closed script/
 );
 
 console.error("[cloud-only-verification:selftest] all assertions passed");

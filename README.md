@@ -198,7 +198,7 @@ node scripts/check-cloud-only-verification.mjs
 git diff --check
 ```
 
-修改 `.mjs` 文件时还可直接运行 `node --check <changed-file.mjs>`。依赖安装、前端完整质量门、Rust、生成绑定与制品均由 `ci` 的全量 `workflow_dispatch` 执行；需要桌面集成制品时，在 Actions 页面按需运行 `dev-build` 并选择目标。
+修改 `.mjs` 文件时还可直接运行 `node --check <changed-file.mjs>`。普通 PR 与受保护分支推送会自动触发 `ci`，以对应提交的 `ci-gate` 和 `pr-title` 为准；不要为常规验证额外手动运行 `ci`。`workflow_dispatch` 仅用于 `main` 的恢复或候选构建，Provider trend release benchmark 由相关自动 CI 路径或独立 `performance` 工作流执行；需要桌面集成制品时，在 Actions 页面按需运行 `dev-build` 并选择目标。
 
 <!-- SUPPORT_MATRIX_SOURCE_BUILD:START -->
 | 分类 | 云端工作流目标 | 说明 |

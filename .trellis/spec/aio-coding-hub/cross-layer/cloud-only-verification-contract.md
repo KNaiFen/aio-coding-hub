@@ -5,8 +5,9 @@
 This repository keeps local worktrees free of dependency and build artifacts.
 The contract applies to repository rules, README instructions, root/workspace
 package scripts, Tauri build hooks, Trellis workflow/agent guidance, active AIO
-specs, `ci.yml`, and `dev-build.yml`. Historical tasks, archived records, and
-workspace journals remain historical evidence and are not rewritten.
+specs, `ci.yml`, `pr-title.yml`, `performance.yml`, and `dev-build.yml`.
+Historical tasks, archived records, and workspace journals remain historical
+evidence and are not rewritten.
 
 ## 2. Local Allowlist
 
@@ -41,7 +42,10 @@ no third-party package, does not spawn a prohibited tool, and does not write.
 
 ## 4. Required Cloud Gates
 
-`ci.yml` keeps `workflow_dispatch` and fail-closed `ci-gate` semantics.
+`ci.yml` keeps `workflow_dispatch` and fail-closed automatic `ci-gate`
+semantics. Manual runs are main-only and report `manual-ci-gate`, so they cannot
+replace the protected branch check. Routine PR validation uses the automatic
+workflow rather than a second manual run.
 
 - `docs-contract` and `support-contract` run the cloud-only checker directly;
   the support job runs its self-test first.
@@ -53,6 +57,11 @@ no third-party package, does not spawn a prohibited tool, and does not write.
 - Candidate desktop/TUI jobs remain limited to eligible main commits or an
   explicit manual candidate request. They are skipped for PR branches and are
   not required for every PR.
+- `pr-title.yml` checks pull request titles without checkout and reruns on title
+  edits without starting full CI.
+- Relevant automatic Rust paths retain the release benchmark. Manual CI omits
+  it; `performance.yml` provides an explicit main-only benchmark without
+  signing or release permissions.
 - `dev-build.yml` has only the `workflow_dispatch` trigger and produces the
   selected unsigned integration artifact in GitHub Actions.
 
@@ -71,13 +80,17 @@ The checker self-test must fail when:
   entry reappears;
 - README or active Trellis guidance recommends a prohibited local command;
 - Tauri regains a local dev hook;
-- `dev-build.yml` gains a non-manual trigger or candidate desktop/TUI jobs stop
+- `dev-build.yml` or `performance.yml` gains a non-manual trigger, manual CI can
+  run heavy jobs outside `main`, or candidate desktop/TUI jobs stop
   being skipped outside eligible main runs;
 - a protected CI command is moved to a comment or non-`run` field;
 - the support/docs contract stops invoking the checker;
 - frontend install/audit/lint/typecheck/test/build or Rust
   format/bindings/Clippy/tests/audit disappears;
-- `ci-gate` no longer owns the selectable frontend/Rust/support results.
+- the automatic `ci-gate` no longer owns the selectable frontend/Rust/support
+  results, or manual CI can report the same required check name;
+- `pr-title.yml` checks out PR code, misses title edits, or is folded back into
+  full CI.
 
 The positive fixture and repository scan must run without dependencies and
 without writing any file.

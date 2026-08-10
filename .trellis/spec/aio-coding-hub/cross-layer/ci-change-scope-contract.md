@@ -11,7 +11,7 @@ not implicitly grant a cheaper CI route.
 
 | Tier                  | Required jobs                                                 | Intended content                                                         |
 | --------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| Process documentation | `change-scope`, PR title when applicable, `ci-gate`           | Task records, pending lists, agent/process notes                         |
+| Process documentation | `change-scope`, independent `pr-title`, `ci-gate`             | Task records, pending lists, agent/process notes                         |
 | Checked documentation | Process jobs plus `docs-contract`                             | READMEs, product Markdown, Trellis specs/workflow                        |
 | Complete CI           | Existing support, frontend, Rust, and eligible candidate jobs | Code, configuration, contracts, tooling, locks, unknown or mixed changes |
 
@@ -34,7 +34,9 @@ waiting for a check that never reports.
 - Checked documentation and complete CI are independent flags. A mixed change
   can run both the targeted documentation job and the complete suites.
 - Pull requests use their base/head merge base. Pushes use the event's
-  `before` and head objects. Manual and unsupported events require complete CI.
+  `before` and head objects. Main-only manual and unsupported events require
+  complete CI; manual CI omits the release benchmark because it has a dedicated
+  workflow.
 - Parse NUL-delimited `git diff --name-status` records. Renames and copies
   classify both old and new paths; deletions classify the old path.
 - Invalid/all-zero SHAs, missing history, Git errors, malformed policy,
@@ -54,8 +56,9 @@ waiting for a check that never reports.
   selected successes and unselected `skipped` results. A classifier failure,
   missing output, unexpected skip, cancellation, or selected-suite failure must
   fail the gate.
-- `ci-gate` remains named exactly `ci-gate` so the protected branch's strict
-  required-check rule stays stable.
+- The automatic gate remains named exactly `ci-gate` so the protected branch's
+  strict required-check rule stays stable. Manual runs use `manual-ci-gate` and
+  cannot satisfy that rule. PR title validation is a separate required check.
 
 ### 5. Change Rules
 

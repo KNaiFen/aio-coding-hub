@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +13,65 @@ const LOCAL_COMMAND_LINE =
 const LOCAL_QUALITY_INSTRUCTION =
   /^\s*(?:-\s*)?(?:run|regenerate|execute)\b.*\b(?:rust|frontend|bindings?|type-?check|lint|clippy|format(?:ting)?|test(?:s| suite)?|cargo|pnpm)\b/i;
 const README_FENCE = /```(?:bash|sh|shell)?\s*\n([\s\S]*?)```/gi;
+const RUST_CANONICALIZE_RUN = `set -euo pipefail
+cargo fmt --manifest-path src-tauri/Cargo.toml --all
+cargo update --manifest-path src-tauri/Cargo.toml --workspace
+cargo run --manifest-path src-tauri/Cargo.toml --locked --example export-bindings
+pnpm exec prettier --write src/generated/bindings.ts
+if git diff --quiet -- src-tauri src/generated/bindings.ts; then
+  echo "drift=false" >> "$GITHUB_OUTPUT"
+else
+  git diff --binary -- src-tauri src/generated/bindings.ts > cloud-native-fixes.patch
+  echo "drift=true" >> "$GITHUB_OUTPUT"
+fi`;
+const MANUAL_CI_GUARD_RUN = `set -euo pipefail
+[[ "$EVENT_REF" == "refs/heads/main" ]] || {
+  echo "::error::Manual ci runs are restricted to the main branch. PR validation is automatic."
+  exit 1
+}`;
+const PERFORMANCE_GUARD_RUN = `set -euo pipefail
+[[ "$EVENT_REF" == "refs/heads/main" ]] || {
+  echo "::error::Performance runs are restricted to the main branch."
+  exit 1
+}`;
+const PR_TITLE_RUN = `set -euo pipefail
+pattern='^(feat|fix|docs|chore|style|refactor|perf|test|ci|build|revert)(\\([^)]+\\))?: .+'
+[[ "$PR_TITLE" =~ $pattern ]] || {
+  echo "::error::PR title must use Conventional Commits."
+  exit 1
+}`;
+const PERFORMANCE_BENCHMARK_RUN = `set -euo pipefail
+started_at="$(date +%s)"
+cargo test --release --locked --lib \\
+  provider_trend_million_ledger_rows_release_under_one_second -- \\
+  --ignored --test-threads=1
+duration_seconds="$(( $(date +%s) - started_at ))"
+{
+  echo "## Provider trend benchmark"
+  echo "- Commit: \\\`$GITHUB_SHA\\\`"
+  echo "- Rust: 1.90.0"
+  echo "- Duration: \${duration_seconds}s"
+} >> "$GITHUB_STEP_SUMMARY"`;
+const CI_GATE_RESULT_ENV = new Map([
+  ["EVENT_NAME", "${{ github.event_name }}"],
+  ["EVENT_REF", "${{ github.ref }}"],
+  ["MANUAL_GUARD_RESULT", "${{ needs.manual-dispatch-guard.result }}"],
+  ["CHANGE_SCOPE_RESULT", "${{ needs.change-scope.result }}"],
+  ["SCOPE", "${{ needs.change-scope.outputs.scope }}"],
+  ["FULL_CI", "${{ needs.change-scope.outputs.full_ci }}"],
+  ["DOCS_CHECKS", "${{ needs.change-scope.outputs.docs_checks }}"],
+  ["DOCS_RESULT", "${{ needs.docs-contract.result }}"],
+  ["SUPPORT_RESULT", "${{ needs.support-contract.result }}"],
+  ["FRONTEND_RESULT", "${{ needs.frontend.result }}"],
+  ["RUST_RESULT", "${{ needs.rust.result }}"],
+  ["PLAN_RESULT", "${{ needs.candidate-plan.result }}"],
+  ["SHOULD_BUILD", "${{ needs.candidate-plan.outputs.should_build }}"],
+  ["BUILD_RESULT", "${{ needs.build-release-candidate.result }}"],
+  ["TUI_BUILD_RESULT", "${{ needs.build-tui-release-candidate.result }}"],
+  ["ASSEMBLE_RESULT", "${{ needs.assemble-release-candidate.result }}"],
+]);
+// The aggregation script's complete shell control flow is part of the required gate.
+const CI_GATE_RUN_SHA256 = "e05c0c0da1c482e4e96e5d4a5abcd487ad7493b5ff8b8cf32ffd23d59fac2eb6";
 
 function readText(root, relativePath) {
   return readFileSync(join(root, relativePath), "utf8");
@@ -54,6 +114,8 @@ export function loadCloudOnlyVerificationFixture(root = repoRoot) {
     activeSpecs: readMarkdownTree(root, ".trellis/spec/aio-coding-hub"),
     ciWorkflow: readText(root, ".github/workflows/ci.yml"),
     devBuildWorkflow: readText(root, ".github/workflows/dev-build.yml"),
+    performanceWorkflow: readText(root, ".github/workflows/performance.yml"),
+    prTitleWorkflow: readText(root, ".github/workflows/pr-title.yml"),
   };
 }
 
@@ -134,53 +196,141 @@ function stripWorkflowComment(line) {
   return line.replace(/(^|\s)#.*$/, "$1").trimEnd();
 }
 
-function workflowRunBodies(workflow, job) {
+function indentation(line) {
+  return line.length - line.trimStart().length;
+}
+
+function parseWorkflowStep(lines) {
+  const properties = new Map();
+  const mappings = new Map();
+  const propertyIndexes = [];
+  const malformed = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = stripWorkflowComment(lines[index]);
+    if (!line.trim()) continue;
+    const indent = indentation(line);
+    const pattern =
+      index === 0
+        ? /^ {6}-\s+([A-Za-z0-9_-]+):\s*(.*)$/
+        : indent === 8
+          ? /^ {8}([A-Za-z0-9_-]+):\s*(.*)$/
+          : undefined;
+    if (!pattern) continue;
+    const match = pattern.exec(line);
+    if (!match) {
+      malformed.push(line.trim());
+      continue;
+    }
+    properties.set(match[1], match[2].trim());
+    propertyIndexes.push({ index, key: match[1], value: match[2].trim() });
+  }
+
+  for (const property of propertyIndexes) {
+    if (property.value) continue;
+    const mapping = new Map();
+    for (let index = property.index + 1; index < lines.length; index += 1) {
+      const line = stripWorkflowComment(lines[index]);
+      if (!line.trim()) continue;
+      const indent = indentation(line);
+      if (indent <= 8) break;
+      if (indent !== 10) continue;
+      const match = /^ {10}([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
+      if (!match) {
+        malformed.push(line.trim());
+        continue;
+      }
+      mapping.set(match[1], match[2].trim());
+    }
+    mappings.set(property.key, mapping);
+  }
+
+  return { lines, properties, mappings, malformed };
+}
+
+function workflowSteps(workflow, job) {
   const body = workflowJobBody(workflow, job);
   if (!body) return [];
 
   const lines = body.split(/\r?\n/);
-  const runs = [];
-  let inSteps = false;
-  for (let index = 0; index < lines.length; index += 1) {
-    if (/^ {4}steps:\s*$/.test(lines[index])) {
-      inSteps = true;
-      continue;
-    }
-    if (!inSteps) continue;
-    if (/^ {4}\S/.test(lines[index])) {
-      inSteps = false;
-      continue;
-    }
+  const stepsStart = lines.findIndex((line) => /^ {4}steps:\s*(?:#.*)?$/.test(line));
+  if (stepsStart === -1) return [];
 
-    const match = /^(?:( {6})-\s+run:|( {8})run:)\s*(.*)$/.exec(lines[index]);
+  const steps = [];
+  let current = [];
+  for (let index = stepsStart + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    const visible = stripWorkflowComment(line);
+    if (visible.trim() && indentation(line) <= 4) break;
+    if (/^ {6}-\s+/.test(visible)) {
+      if (current.length > 0) steps.push(parseWorkflowStep(current));
+      current = [line];
+    } else if (current.length > 0) {
+      current.push(line);
+    }
+  }
+  if (current.length > 0) steps.push(parseWorkflowStep(current));
+  return steps;
+}
+
+function workflowStepRun(step) {
+  for (let index = 0; index < step.lines.length; index += 1) {
+    const inline = /^ {6}-\s+run:\s*(.*)$/.exec(step.lines[index]);
+    const nested = /^ {8}run:\s*(.*)$/.exec(step.lines[index]);
+    const match = inline ?? nested;
     if (!match) continue;
 
-    const keyIndent = match[1]?.length ?? match[2]?.length ?? 0;
-    const value = stripWorkflowComment(match[3]).trim();
-    if (!/^[>|]/.test(value)) {
-      if (value) runs.push(value);
-      continue;
-    }
+    const value = stripWorkflowComment(match[1]).trim();
+    if (!/^[>|]/.test(value)) return { style: "scalar", value };
 
+    const keyIndent = inline ? 6 : 8;
     const block = [];
     let contentIndent;
-    while (index + 1 < lines.length) {
-      const next = lines[index + 1];
-      if (!next.trim()) {
+    for (let child = index + 1; child < step.lines.length; child += 1) {
+      const line = step.lines[child];
+      if (!stripWorkflowComment(line).trim()) {
         block.push("");
-        index += 1;
         continue;
       }
-
-      const nextIndent = /^\s*/.exec(next)[0].length;
-      if (nextIndent <= keyIndent) break;
-      contentIndent ??= nextIndent;
-      block.push(stripWorkflowComment(next.slice(contentIndent)));
-      index += 1;
+      const childIndent = indentation(line);
+      if (childIndent <= keyIndent) break;
+      contentIndent ??= childIndent;
+      block.push(stripWorkflowComment(line.slice(contentIndent)));
     }
-    runs.push(block.join("\n"));
+    return { style: value[0], value: block.join("\n") };
   }
-  return runs;
+  return undefined;
+}
+
+function workflowRunBodies(workflow, job) {
+  return workflowSteps(workflow, job)
+    .map((step) => workflowStepRun(step)?.value)
+    .filter((run) => run !== undefined);
+}
+
+function runExecutesCommand(run, command) {
+  return run.split(/\r?\n/).some((line) => {
+    const normalized = line.trim().replace(/\\\s*$/, "").trim();
+    return normalized === command;
+  });
+}
+
+function stepRunsUnconditionally(step) {
+  return (
+    step.malformed.length === 0 &&
+    !step.properties.has("if") &&
+    !step.properties.has("continue-on-error")
+  );
+}
+
+function requireStepMapping(step, property, expected, label, failures) {
+  const mapping = step?.mappings.get(property) ?? new Map();
+  if (
+    mapping.size !== expected.size ||
+    [...expected].some(([key, value]) => mapping.get(key) !== value)
+  ) {
+    failures.push(label);
+  }
 }
 
 function workflowJobProperty(workflow, job, property) {
@@ -206,27 +356,89 @@ function workflowJobProperty(workflow, job, property) {
   return "";
 }
 
-function assertWorkflowRunCommands(workflow, job, commands, failures) {
-  const runs = workflowRunBodies(workflow, job);
-  if (runs.length === 0) {
-    failures.push(`ci.yml must define ${job} with a run step`);
+function assertWorkflowRunCommands(workflow, job, commands, failures, label = "ci.yml") {
+  const steps = workflowSteps(workflow, job);
+  if (steps.length === 0) {
+    failures.push(`${label} must define ${job} with a run step`);
     return;
   }
 
   for (const command of commands) {
-    if (!runs.some((run) => run.includes(command))) {
-      failures.push(`ci.yml ${job} must include ${command}`);
+    if (
+      !steps.some((step) => {
+        const run = workflowStepRun(step);
+        return (
+          stepRunsUnconditionally(step) &&
+          run?.style === "scalar" &&
+          run.value === command
+        );
+      })
+    ) {
+      failures.push(`${label} ${job} must include ${command}`);
     }
   }
 }
 
-function assertWorkflowJobPropertyEquals(workflow, job, property, expected, failures) {
+function assertWorkflowRunScript(workflow, job, expected, failures, label = "ci.yml") {
+  const steps = workflowSteps(workflow, job);
+  if (
+    !steps.some((step) => {
+      const run = workflowStepRun(step);
+      return (
+        stepRunsUnconditionally(step) &&
+        run?.style === "|" &&
+        run.value.trimEnd() === expected
+      );
+    })
+  ) {
+    failures.push(`${label} ${job} must retain the approved fail-closed script`);
+  }
+}
+
+function assertWorkflowJobPropertyEquals(
+  workflow,
+  job,
+  property,
+  expected,
+  failures,
+  label = "ci.yml"
+) {
   if (!workflowJobBody(workflow, job)) {
-    failures.push(`ci.yml must define ${job}`);
+    failures.push(`${label} must define ${job}`);
     return;
   }
   if (workflowJobProperty(workflow, job, property) !== expected) {
-    failures.push(`ci.yml ${job} ${property} must equal ${expected}`);
+    failures.push(`${label} ${job} ${property} must equal ${expected}`);
+  }
+}
+
+function assertCiGateClosure(workflow, failures) {
+  assertWorkflowJobPropertyEquals(workflow, "ci-gate", "if", "always()", failures);
+  const matches = workflowSteps(workflow, "ci-gate").filter(
+    (step) => step.properties.get("name") === "Require expected jobs"
+  );
+  const step = matches.length === 1 ? matches[0] : undefined;
+  const run = step ? workflowStepRun(step) : undefined;
+  if (
+    !step ||
+    step.malformed.length > 0 ||
+    step.properties.get("shell") !== "bash" ||
+    !stepRunsUnconditionally(step) ||
+    run?.style !== "|"
+  ) {
+    failures.push("ci.yml ci-gate must retain an unconditional Bash aggregation step");
+    return;
+  }
+  requireStepMapping(
+    step,
+    "env",
+    CI_GATE_RESULT_ENV,
+    "ci.yml ci-gate must bind aggregation results directly from needs.*",
+    failures
+  );
+  const digest = createHash("sha256").update(run.value.trimEnd()).digest("hex");
+  if (digest !== CI_GATE_RUN_SHA256) {
+    failures.push("ci.yml ci-gate must retain the approved fail-closed aggregation script");
   }
 }
 
@@ -295,17 +507,130 @@ function assertCandidatePrBoundary(workflow, failures) {
 }
 
 function assertManualDevBuildWorkflow(workflow, failures) {
+  assertOnlyWorkflowDispatch(workflow, "dev-build.yml", failures);
+}
+
+function workflowTriggers(workflow, label, failures) {
   const onBlock = /^on:\s*\n([\s\S]*?)(?=^(?:permissions|concurrency|env|defaults|jobs):)/m.exec(workflow)?.[1];
   if (!onBlock) {
-    failures.push("dev-build.yml must define an on block");
-    return;
+    failures.push(`${label} must define an on block`);
+    return { onBlock: "", triggers: [] };
   }
 
   const triggers = [...onBlock.matchAll(/^\s{2}([A-Za-z][A-Za-z0-9_-]*):/gm)].map(
     (match) => match[1]
   );
+  return { onBlock, triggers };
+}
+
+function assertOnlyWorkflowDispatch(workflow, label, failures) {
+  const { triggers } = workflowTriggers(workflow, label, failures);
   if (triggers.length !== 1 || triggers[0] !== "workflow_dispatch") {
-    failures.push("dev-build.yml must declare only the workflow_dispatch trigger");
+    failures.push(`${label} must declare only the workflow_dispatch trigger`);
+  }
+}
+
+function assertManualCiBoundary(workflow, failures) {
+  assertWorkflowJobPropertyEquals(
+    workflow,
+    "manual-dispatch-guard",
+    "if",
+    "github.event_name == 'workflow_dispatch'",
+    failures
+  );
+  assertWorkflowJobPropertyEquals(
+    workflow,
+    "change-scope",
+    "needs",
+    "manual-dispatch-guard",
+    failures
+  );
+  assertWorkflowJobPropertyEquals(
+    workflow,
+    "change-scope",
+    "if",
+    "always() && (github.event_name != 'workflow_dispatch' || needs.manual-dispatch-guard.result == 'success')",
+    failures
+  );
+  assertWorkflowJobPropertyEquals(
+    workflow,
+    "ci-gate",
+    "name",
+    "${{ github.event_name == 'workflow_dispatch' && 'manual-ci-gate' || 'ci-gate' }}",
+    failures
+  );
+
+  assertWorkflowRunScript(
+    workflow,
+    "manual-dispatch-guard",
+    MANUAL_CI_GUARD_RUN,
+    failures
+  );
+
+  const gateBody = workflowJobBody(workflow, "ci-gate");
+  const gateRuns = workflowRunBodies(workflow, "ci-gate");
+  if (!gateBody.includes("- manual-dispatch-guard")) {
+    failures.push("ci.yml ci-gate must depend on manual-dispatch-guard");
+  }
+  if (
+    !gateRuns.some((run) => runExecutesCommand(run, '[[ "$MANUAL_GUARD_RESULT" == "success" ]]')) ||
+    !gateRuns.some((run) => runExecutesCommand(run, '[[ "$MANUAL_GUARD_RESULT" == "skipped" ]]'))
+  ) {
+    failures.push("ci.yml ci-gate must validate the manual guard result for every event type");
+  }
+  if (workflowJobBody(workflow, "pr-title") || gateBody.includes("pr-title")) {
+    failures.push("ci.yml must not inline or depend on the independent pr-title check");
+  }
+}
+
+function assertPrTitleWorkflow(workflow, failures) {
+  const { onBlock, triggers } = workflowTriggers(workflow, "pr-title.yml", failures);
+  if (triggers.length !== 1 || triggers[0] !== "pull_request") {
+    failures.push("pr-title.yml must declare only the pull_request trigger");
+  }
+  for (const type of ["edited", "opened", "reopened", "synchronize"]) {
+    if (!onBlock.includes(type)) failures.push(`pr-title.yml must trigger for pull_request ${type}`);
+  }
+  if (/uses:\s+actions\/checkout@/.test(workflow)) {
+    failures.push("pr-title.yml must not checkout pull request code");
+  }
+  assertWorkflowJobPropertyEquals(
+    workflow,
+    "pr-title",
+    "name",
+    "pr-title",
+    failures,
+    "pr-title.yml"
+  );
+  assertWorkflowRunScript(workflow, "pr-title", PR_TITLE_RUN, failures, "pr-title.yml");
+}
+
+function assertPerformanceWorkflow(workflow, failures) {
+  assertOnlyWorkflowDispatch(workflow, "performance.yml", failures);
+  assertWorkflowRunScript(
+    workflow,
+    "main-guard",
+    PERFORMANCE_GUARD_RUN,
+    failures,
+    "performance.yml"
+  );
+  assertWorkflowJobPropertyEquals(
+    workflow,
+    "provider-trend-benchmark",
+    "needs",
+    "main-guard",
+    failures,
+    "performance.yml"
+  );
+  assertWorkflowRunScript(
+    workflow,
+    "provider-trend-benchmark",
+    PERFORMANCE_BENCHMARK_RUN,
+    failures,
+    "performance.yml"
+  );
+  if (/release-signing|TAURI_SIGNING_PRIVATE_KEY/.test(workflow)) {
+    failures.push("performance.yml must not receive release signing access");
   }
 }
 
@@ -325,6 +650,8 @@ export function assertCloudOnlyVerificationContract(fixture) {
     activeSpecs,
     ciWorkflow,
     devBuildWorkflow,
+    performanceWorkflow,
+    prTitleWorkflow,
   } = fixture;
 
   assertActionsOnlyScripts(rootPackage, "root package.json", ROOT_GUARD, failures);
@@ -370,6 +697,12 @@ export function assertCloudOnlyVerificationContract(fixture) {
   if (!/^\s*workflow_dispatch:\s*$/m.test(ciWorkflow)) {
     failures.push("ci.yml must retain workflow_dispatch");
   }
+  requireText(agents, "Do not start an additional manual `ci` run for routine PR validation.", "AGENTS.md", failures);
+  requireText(readme, "不要为常规验证额外手动运行 `ci`", "README.md", failures);
+  requireText(readmeEn, "Do not start an additional manual `ci` run for routine validation.", "README_EN.md", failures);
+  assertManualCiBoundary(ciWorkflow, failures);
+  assertPrTitleWorkflow(prTitleWorkflow, failures);
+  assertPerformanceWorkflow(performanceWorkflow, failures);
   assertWorkflowRunCommands(
     ciWorkflow,
     "docs-contract",
@@ -406,27 +739,15 @@ export function assertCloudOnlyVerificationContract(fixture) {
     ciWorkflow,
     "rust",
     [
-      "cargo fmt --manifest-path src-tauri/Cargo.toml --all",
-      "cargo update --manifest-path src-tauri/Cargo.toml --workspace",
-      "cargo run --manifest-path src-tauri/Cargo.toml --locked --example export-bindings",
       "cargo clippy --workspace --all-targets --locked -- -D warnings",
       "cargo test --workspace --locked -- --test-threads=1",
       "cargo audit",
     ],
     failures
   );
+  assertWorkflowRunScript(ciWorkflow, "rust", RUST_CANONICALIZE_RUN, failures);
+  assertCiGateClosure(ciWorkflow, failures);
   assertCandidatePrBoundary(ciWorkflow, failures);
-  assertWorkflowRunCommands(
-    ciWorkflow,
-    "ci-gate",
-    [
-      '[[ "$PLAN_RESULT" == "skipped" ]]',
-      '[[ "$BUILD_RESULT" == "skipped" ]]',
-      '[[ "$TUI_BUILD_RESULT" == "skipped" ]]',
-      '[[ "$ASSEMBLE_RESULT" == "skipped" ]]',
-    ],
-    failures
-  );
 
   assertManualDevBuildWorkflow(devBuildWorkflow, failures);
   requireText(devBuildWorkflow, "pnpm exec tauri build", "dev-build.yml", failures);

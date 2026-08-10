@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import { assertCiQualityGates } from "./check-ci-quality-gates.mjs";
 
@@ -27,41 +28,31 @@ const stages = {
   ],
   "plugin-hardening": ["cloud-only-verification", "create-aio-plugin-typecheck"],
 };
-const workflow = `
-  support-contract:
-    steps:
-      - run: node scripts/check-cloud-only-verification.selftest.mjs && node scripts/check-cloud-only-verification.mjs
-      - run: node scripts/check-ci-quality-gates.selftest.mjs && node scripts/check-ci-quality-gates.mjs
-      - run: node scripts/check-no-instant-now-sub.selftest.mjs && node scripts/check-no-instant-now-sub.mjs
-  frontend:
-    steps:
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm audit:deps
-      - run: pnpm lint
-      - run: pnpm plugin-sdk:typecheck
-      - run: pnpm create-aio-plugin:typecheck
-      - run: pnpm plugin-sdk:test
-      - run: pnpm --filter create-aio-plugin test
-      - run: pnpm test:e2e
-      - run: pnpm test:unit:coverage
-      - run: pnpm build
-  rust:
-    steps:
-      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all
-      - run: cargo update --manifest-path src-tauri/Cargo.toml --workspace
-      - run: cargo run --manifest-path src-tauri/Cargo.toml --locked --example export-bindings
-      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - run: cargo test --workspace --locked -- --test-threads=1
-      - run: cargo audit
-  ci-gate:
-    needs:
-      - support-contract
-      - frontend
-      - rust
-`;
+const readFixture = (relativePath) =>
+  readFileSync(new URL(`../${relativePath}`, import.meta.url), "utf8");
+const ciWorkflow = readFixture(".github/workflows/ci.yml");
+const prTitleWorkflow = readFixture(".github/workflows/pr-title.yml");
+const performanceWorkflow = readFixture(".github/workflows/performance.yml");
+const codeqlWorkflow = readFixture(".github/workflows/codeql.yml");
+const dependabotConfig = readFixture(".github/dependabot.yml");
 
-const valid = { packageJson, checks, stages, workflow };
+const valid = {
+  codeqlWorkflow,
+  dependabotConfig,
+  packageJson,
+  checks,
+  stages,
+  ciWorkflow,
+  performanceWorkflow,
+  prTitleWorkflow,
+};
 assert.doesNotThrow(() => assertCiQualityGates(valid));
+assert.doesNotThrow(() =>
+  assertCiQualityGates({
+    ...valid,
+    ciWorkflow: ciWorkflow.replace("    steps:\n", "    steps: # executable steps\n"),
+  })
+);
 
 for (const [name, fixture, expected] of [
   [
@@ -89,8 +80,8 @@ for (const [name, fixture, expected] of [
     "support cloud-only step",
     {
       ...valid,
-      workflow: workflow.replace(
-        "      - run: node scripts/check-cloud-only-verification.selftest.mjs && node scripts/check-cloud-only-verification.mjs\n",
+      ciWorkflow: ciWorkflow.replace(
+        "        run: node scripts/check-cloud-only-verification.selftest.mjs && node scripts/check-cloud-only-verification.mjs\n",
         ""
       ),
     },
@@ -98,19 +89,261 @@ for (const [name, fixture, expected] of [
   ],
   [
     "frontend build",
-    { ...valid, workflow: workflow.replace("      - run: pnpm build\n", "") },
+    { ...valid, ciWorkflow: ciWorkflow.replace("        run: pnpm build\n", "") },
+    /ci\.yml frontend must include pnpm build/,
+  ],
+  [
+    "Actions pin policy step",
+    {
+      ...valid,
+      ciWorkflow: ciWorkflow.replace(
+        "        run: node scripts/check-github-actions-pin-policy.selftest.mjs && node scripts/check-github-actions-pin-policy.mjs\n",
+        ""
+      ),
+    },
+    /ci\.yml support-contract must include node scripts\/check-github-actions-pin-policy/,
+  ],
+  [
+    "Actions pin policy comment is not executable",
+    {
+      ...valid,
+      ciWorkflow: ciWorkflow.replace(
+        "        run: node scripts/check-github-actions-pin-policy.selftest.mjs && node scripts/check-github-actions-pin-policy.mjs",
+        "        # run: node scripts/check-github-actions-pin-policy.selftest.mjs && node scripts/check-github-actions-pin-policy.mjs"
+      ),
+    },
+    /ci\.yml support-contract must include node scripts\/check-github-actions-pin-policy/,
+  ],
+  [
+    "frontend env text is not executable",
+    {
+      ...valid,
+      ciWorkflow: ciWorkflow.replace("        run: pnpm build", "        env:\n          run: pnpm build"),
+    },
+    /ci\.yml frontend must include pnpm build/,
+  ],
+  [
+    "frontend echoed command is not executable",
+    {
+      ...valid,
+      ciWorkflow: ciWorkflow.replace("        run: pnpm build", "        run: echo pnpm build"),
+    },
+    /ci\.yml frontend must include pnpm build/,
+  ],
+  [
+    "frontend ignored failure is not a quality gate",
+    {
+      ...valid,
+      ciWorkflow: ciWorkflow.replace("        run: pnpm build", "        run: pnpm build || true"),
+    },
+    /ci\.yml frontend must include pnpm build/,
+  ],
+  [
+    "frontend conditional no-op is not executable",
+    {
+      ...valid,
+      ciWorkflow: ciWorkflow.replace(
+        "        run: pnpm build",
+        "        run: if false; then pnpm build; fi"
+      ),
+    },
+    /ci\.yml frontend must include pnpm build/,
+  ],
+  [
+    "frontend step condition cannot skip a required command",
+    {
+      ...valid,
+      ciWorkflow: ciWorkflow.replace(
+        "      - name: Build frontend\n        run: pnpm build",
+        "      - name: Build frontend\n        if: ${{ false }}\n        run: pnpm build"
+      ),
+    },
+    /ci\.yml frontend must include pnpm build/,
+  ],
+  [
+    "frontend required command cannot ignore failures",
+    {
+      ...valid,
+      ciWorkflow: ciWorkflow.replace(
+        "      - name: Build frontend\n        run: pnpm build",
+        "      - name: Build frontend\n        continue-on-error: true\n        run: pnpm build"
+      ),
+    },
+    /ci\.yml frontend must include pnpm build/,
+  ],
+  [
+    "frontend non-canonical condition cannot hide a required command",
+    {
+      ...valid,
+      ciWorkflow: ciWorkflow.replace(
+        "      - name: Build frontend\n        run: pnpm build",
+        "      - name: Build frontend\n        if : ${{ false }}\n        run: pnpm build"
+      ),
+    },
     /ci\.yml frontend must include pnpm build/,
   ],
   [
     "Rust clippy",
     {
       ...valid,
-      workflow: workflow.replace(
-        "      - run: cargo clippy --workspace --all-targets --locked -- -D warnings\n",
+      ciWorkflow: ciWorkflow.replace(
+        "        run: cargo clippy --workspace --all-targets --locked -- -D warnings\n",
         ""
       ),
     },
     /ci\.yml rust must include cargo clippy/,
+  ],
+  [
+    "manual gate name",
+    {
+      ...valid,
+      ciWorkflow: ciWorkflow.replace(
+        "    name: ${{ github.event_name == 'workflow_dispatch' && 'manual-ci-gate' || 'ci-gate' }}",
+        "    name: ci-gate"
+      ),
+    },
+    /ci\.yml ci-gate must include name:/,
+  ],
+  [
+    "aggregate gate cannot be skipped",
+    {
+      ...valid,
+      ciWorkflow: ciWorkflow.replace(
+        "  ci-gate:\n    name: ${{ github.event_name == 'workflow_dispatch' && 'manual-ci-gate' || 'ci-gate' }}\n    if: always()",
+        "  ci-gate:\n    name: ${{ github.event_name == 'workflow_dispatch' && 'manual-ci-gate' || 'ci-gate' }}\n    if: false"
+      ),
+    },
+    /ci\.yml ci-gate must use if: always\(\)/,
+  ],
+  [
+    "aggregate gate must consume the real full-CI output",
+    {
+      ...valid,
+      ciWorkflow: ciWorkflow.replace(
+        "          FULL_CI: ${{ needs.change-scope.outputs.full_ci }}",
+        "          FULL_CI: 'true'"
+      ),
+    },
+    /ci\.yml ci-gate must bind aggregation results directly from needs\.\*/,
+  ],
+  [
+    "independent PR title",
+    { ...valid, prTitleWorkflow: "" },
+    /pr-title\.yml pr-title must retain the approved fail-closed script/,
+  ],
+  [
+    "PR title validation command",
+    { ...valid, prTitleWorkflow: prTitleWorkflow.replace('[[ "$PR_TITLE" =~ $pattern ]]', "true") },
+    /pr-title\.yml pr-title must retain the approved fail-closed script/,
+  ],
+  [
+    "performance benchmark",
+    { ...valid, performanceWorkflow: "" },
+    /performance\.yml provider-trend-benchmark must retain the approved fail-closed script/,
+  ],
+  [
+    "CodeQL Rust language",
+    {
+      ...valid,
+      codeqlWorkflow: codeqlWorkflow.replace(
+        "          - language: rust\n            build-mode: autobuild\n",
+        ""
+      ),
+    },
+    /codeql\.yml must retain the approved language\/build-mode pairs/,
+  ],
+  [
+    "CodeQL privileged trigger",
+    {
+      ...valid,
+      codeqlWorkflow: codeqlWorkflow.replace("  pull_request:\n", "  pull_request_target:\n"),
+    },
+    /codeql\.yml must declare only push, pull_request/,
+  ],
+  [
+    "CodeQL duplicate quoted permissions cannot override defaults",
+    {
+      ...valid,
+      codeqlWorkflow: codeqlWorkflow.replace(
+        "permissions:\n  contents: read\n  security-events: write",
+        'permissions:\n  contents: read\n  security-events: write\n"permissions":\n  contents: write'
+      ),
+    },
+    /codeql\.yml must use only the approved canonical top-level keys/,
+  ],
+  [
+    "CodeQL job permissions cannot override defaults",
+    {
+      ...valid,
+      codeqlWorkflow: codeqlWorkflow.replace(
+        "    timeout-minutes: 45\n    strategy:",
+        "    timeout-minutes: 45\n    permissions: write-all\n    strategy:"
+      ),
+    },
+    /codeql\.yml analyze must use only the approved canonical job properties/,
+  ],
+  [
+    "CodeQL action comment",
+    {
+      ...valid,
+      codeqlWorkflow: codeqlWorkflow.replace(
+        "        uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6",
+        "        # uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6"
+      ),
+    },
+    /codeql\.yml must retain the Analyze action step/,
+  ],
+  [
+    "CodeQL nested with.uses is not an action step",
+    {
+      ...valid,
+      codeqlWorkflow: codeqlWorkflow.replace(
+        "        uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6\n        with:\n",
+        "        with:\n          uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3\n"
+      ),
+    },
+    /codeql\.yml must retain the Initialize CodeQL action step/,
+  ],
+  [
+    "CodeQL matrix modes cannot be swapped",
+    {
+      ...valid,
+      codeqlWorkflow: codeqlWorkflow.replace(
+        "          - language: javascript-typescript\n            build-mode: none\n          - language: rust\n            build-mode: autobuild",
+        "          - language: javascript-typescript\n            build-mode: autobuild\n          - language: rust\n            build-mode: none"
+      ),
+    },
+    /codeql\.yml must retain the approved language\/build-mode pairs/,
+  ],
+  [
+    "CodeQL initialization cannot be skipped",
+    {
+      ...valid,
+      codeqlWorkflow: codeqlWorkflow.replace(
+        "      - name: Initialize CodeQL\n        uses:",
+        "      - name: Initialize CodeQL\n        if: ${{ false }}\n        uses:"
+      ),
+    },
+    /codeql\.yml Initialize CodeQL must not be conditionally skipped/,
+  ],
+  [
+    "Dependabot Cargo directory",
+    {
+      ...valid,
+      dependabotConfig: dependabotConfig.replace("    directory: /src-tauri", "    directory: /"),
+    },
+    /dependabot\.yml cargo directory must be \/src-tauri/,
+  ],
+  [
+    "Dependabot Actions entry",
+    {
+      ...valid,
+      dependabotConfig: dependabotConfig.replace(
+        "  - package-ecosystem: github-actions\n    directory: /\n    schedule:\n      interval: weekly\n",
+        ""
+      ),
+    },
+    /dependabot\.yml must define exactly one github-actions update entry/,
   ],
 ]) {
   assert.throws(() => assertCiQualityGates(fixture), expected, name);

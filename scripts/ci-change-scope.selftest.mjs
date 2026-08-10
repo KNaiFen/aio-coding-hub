@@ -175,7 +175,9 @@ assert.equal(failedClosed.providerTrendBenchmark, true);
 assert.equal(failedClosed.reason, "classification-error");
 
 const manual = runClassifier({ eventName: "workflow_dispatch", policyPath });
-assert.equal(manual.providerTrendBenchmark, true);
+assert.equal(manual.providerTrendBenchmark, false);
+assert.equal(manual.fullCi, true);
+assert.equal(manual.reason, "manual-dispatch");
 
 assert.throws(
   () =>
