@@ -4,28 +4,29 @@
 Task Management Script.
 
 Usage:
-    python task.py create "<title>" [--slug <name>] [--assignee <dev>] [--priority P0|P1|P2|P3] [--parent <dir>] [--package <pkg>] [--no-start]
-    python task.py add-context <dir> <file> <path> [reason] # Add jsonl entry
-    python task.py validate <dir>              # Validate jsonl files
-    python task.py validate --all              # Validate all active/archive jsonl files
-    python task.py list-context <dir>          # List jsonl entries
-    python task.py start <dir>                 # Set active task
-    python task.py current [--source]          # Show active task
-    python task.py finish                      # Clear active task
-    python task.py set-branch <dir> <branch>   # Set git branch
-    python task.py set-base-branch <dir> <branch>  # Set PR target branch
-    python task.py set-scope <dir> <scope>     # Set scope for PR title
-    python task.py archive <task-dir>          # Archive completed task
-    python task.py list                        # List active tasks
-    python task.py list-archive [month]        # List archived tasks
-    python task.py add-subtask <parent-dir> <child-dir>     # Link child to parent
-    python task.py remove-subtask <parent-dir> <child-dir>  # Unlink child from parent
+    python3 task.py create "<title>" [--slug <name>] [--assignee <dev>] [--priority P0|P1|P2|P3] [--base-branch <branch>] [--parent <dir>] [--package <pkg>] [--no-start]
+    python3 task.py add-context <dir> <file> <path> [reason] # Add jsonl entry
+    python3 task.py validate <dir>              # Validate jsonl files
+    python3 task.py validate --all              # Validate all active/archive jsonl files
+    python3 task.py list-context <dir>          # List jsonl entries
+    python3 task.py start <dir>                 # Set active task
+    python3 task.py current [--source]          # Show active task
+    python3 task.py finish                      # Clear active task
+    python3 task.py set-branch <dir> <branch>   # Set git branch
+    python3 task.py set-base-branch <dir> <branch>  # Set PR target branch
+    python3 task.py set-scope <dir> <scope>     # Set scope for PR title
+    python3 task.py archive [--no-commit] <task-dir>  # Archive completed task
+    python3 task.py list                        # List active tasks
+    python3 task.py list-archive [month]        # List archived tasks
+    python3 task.py add-subtask <parent-dir> <child-dir>     # Link child to parent
+    python3 task.py remove-subtask <parent-dir> <child-dir>  # Unlink child from parent
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from common.log import Colors, colored
 from common.paths import (
@@ -68,6 +69,35 @@ from common.task_context import (
 # Command: start / finish
 # =============================================================================
 
+
+def _read_task_state(task_json_path: Path) -> dict | None:
+    """Load task state or report why start cannot continue."""
+    data = read_json(task_json_path)
+    if not isinstance(data, dict):
+        print(colored(f"Error: task.json is missing or invalid: {task_json_path}", Colors.RED))
+        return None
+    return data
+
+
+def _mark_task_in_progress(task_json_path: Path, *, degraded: bool) -> bool:
+    """Persist planning -> in_progress before a session starts work."""
+    data = _read_task_state(task_json_path)
+    if data is None:
+        return False
+
+    if data.get("status") != "planning":
+        return True
+
+    data["status"] = "in_progress"
+    if not write_json(task_json_path, data):
+        print(colored(f"Error: failed to update task status: {task_json_path}", Colors.RED))
+        return False
+
+    suffix = " (degraded)" if degraded else ""
+    print(colored(f"✓ Status: planning → in_progress{suffix}", Colors.GREEN))
+    return True
+
+
 def cmd_start(args: argparse.Namespace) -> int:
     """Set active task."""
     repo_root = get_repo_root()
@@ -109,27 +139,25 @@ def cmd_start(args: argparse.Namespace) -> int:
             Colors.YELLOW,
         ))
 
-        # Still flip task.json status: planning → in_progress so downstream phases proceed.
-        if task_json_path.is_file():
-            data = read_json(task_json_path)
-            if data and data.get("status") == "planning":
-                data["status"] = "in_progress"
-                if write_json(task_json_path, data):
-                    print(colored("✓ Status: planning → in_progress (degraded)", Colors.GREEN))
-            run_task_hooks("after_start", task_json_path, repo_root)
+        # A degraded session still needs durable task state. Never report success
+        # or run lifecycle hooks when that state cannot be read or written.
+        if not _mark_task_in_progress(task_json_path, degraded=True):
+            return 1
+
+        run_task_hooks("after_start", task_json_path, repo_root)
         return 0
+
+    if _read_task_state(task_json_path) is None:
+        return 1
 
     active = set_active_task(task_dir, repo_root)
     if active:
+        if not _mark_task_in_progress(task_json_path, degraded=False):
+            clear_active_task(repo_root)
+            return 1
+
         print(colored(f"✓ Current task set to: {task_dir}", Colors.GREEN))
         print(f"Source: {active.source}")
-
-        if task_json_path.is_file():
-            data = read_json(task_json_path)
-            if data and data.get("status") == "planning":
-                data["status"] = "in_progress"
-                if write_json(task_json_path, data):
-                    print(colored("✓ Status: planning → in_progress", Colors.GREEN))
 
         print()
         print(colored("The hook will now inject context from this task's jsonl files.", Colors.BLUE))
@@ -305,25 +333,26 @@ def show_usage() -> None:
     print("""Task Management Script
 
 Usage:
-  python task.py create <title>                     Create new task directory
-  python task.py create <title> --package <pkg>     Create task for a specific package
-  python task.py create <title> --parent <dir>      Create task as child of parent
-  python task.py create <title> --no-start          Create without making it active in this session
-  python task.py add-context <dir> <jsonl> <path> [reason]  Add entry to jsonl
-  python task.py validate <dir>                     Validate jsonl files
-  python task.py validate --all                     Validate all active/archive jsonl files
-  python task.py list-context <dir>                 List jsonl entries
-  python task.py start <dir>                        Set active task
-  python task.py current [--source]                 Show active task
-  python task.py finish                             Clear active task
-  python task.py set-branch <dir> <branch>          Set git branch
-  python task.py set-base-branch <dir> <branch>     Set PR target branch
-  python task.py set-scope <dir> <scope>            Set scope for PR title
-  python task.py archive <task-dir>                 Archive completed task
-  python task.py add-subtask <parent> <child>       Link child task to parent
-  python task.py remove-subtask <parent> <child>    Unlink child from parent
-  python task.py list [--mine] [--status <status>]  List tasks
-  python task.py list-archive [YYYY-MM]             List archived tasks
+  python3 task.py create <title>                     Create new task directory
+  python3 task.py create <title> --package <pkg>     Create task for a specific package
+  python3 task.py create <title> --base-branch <branch>  Set the PR target at creation
+  python3 task.py create <title> --parent <dir>      Create task as child of parent
+  python3 task.py create <title> --no-start          Create without making it active in this session
+  python3 task.py add-context <dir> <jsonl> <path> [reason]  Add entry to jsonl
+  python3 task.py validate <dir>                     Validate jsonl files
+  python3 task.py validate --all                     Validate all active/archive jsonl files
+  python3 task.py list-context <dir>                 List jsonl entries
+  python3 task.py start <dir>                        Set active task
+  python3 task.py current [--source]                 Show active task
+  python3 task.py finish                             Clear active task
+  python3 task.py set-branch <dir> <branch>          Set git branch
+  python3 task.py set-base-branch <dir> <branch>     Set PR target branch
+  python3 task.py set-scope <dir> <scope>            Set scope for PR title
+  python3 task.py archive [--no-commit] <task-dir>   Archive completed task
+  python3 task.py add-subtask <parent> <child>       Link child task to parent
+  python3 task.py remove-subtask <parent> <child>    Unlink child from parent
+  python3 task.py list [--mine] [--status <status>]  List tasks
+  python3 task.py list-archive [YYYY-MM]             List archived tasks
 
 Monorepo options:
   --package <pkg>      Package name (validated against config.yaml packages)
@@ -333,20 +362,20 @@ List options:
   --status, -s <s>     Filter by status (planning, in_progress, review, completed)
 
 Examples:
-  python task.py create "Add login feature" --slug add-login
-  python task.py create "Add login feature" --slug add-login --package cli
-  python task.py create "Child task" --slug child --parent .trellis/tasks/01-21-parent
-  python task.py add-context <dir> implement .trellis/spec/cli/backend/auth.md "Auth guidelines"
-  python task.py set-branch <dir> task/add-login
-  python task.py start .trellis/tasks/01-21-add-login
-  python task.py current --source
-  python task.py finish
-  python task.py archive add-login
-  python task.py add-subtask parent-task child-task  # Link existing tasks
-  python task.py remove-subtask parent-task child-task
-  python task.py list                               # List all active tasks
-  python task.py list --mine                        # List my tasks only
-  python task.py list --mine --status in_progress   # List my in-progress tasks
+  python3 task.py create "Add login feature" --slug add-login --base-branch main
+  python3 task.py create "Add login feature" --slug add-login --package cli
+  python3 task.py create "Child task" --slug child --parent .trellis/tasks/01-21-parent
+  python3 task.py add-context <dir> implement .trellis/spec/cli/backend/auth.md "Auth guidelines"
+  python3 task.py set-branch <dir> task/add-login
+  python3 task.py start .trellis/tasks/01-21-add-login
+  python3 task.py current --source
+  python3 task.py finish
+  python3 task.py archive --no-commit add-login
+  python3 task.py add-subtask parent-task child-task  # Link existing tasks
+  python3 task.py remove-subtask parent-task child-task
+  python3 task.py list                               # List all active tasks
+  python3 task.py list --mine                        # List my tasks only
+  python3 task.py list --mine --status in_progress   # List my in-progress tasks
 """)
 
 
@@ -377,7 +406,7 @@ def main() -> int:
         )
         print("See .trellis/workflow.md planning artifact guidance or run:", file=sys.stderr)
         print(
-            "  python ./.trellis/scripts/get_context.py --mode phase --step 1",
+            "  python3 ./.trellis/scripts/get_context.py --mode phase --step 1",
             file=sys.stderr,
         )
         print(
@@ -399,6 +428,7 @@ def main() -> int:
     p_create.add_argument("--assignee", "-a", help="Assignee developer")
     p_create.add_argument("--priority", "-p", default="P2", help="Priority (P0-P3)")
     p_create.add_argument("--description", "-d", help="Task description")
+    p_create.add_argument("--base-branch", help="PR target branch (default: main)")
     p_create.add_argument("--parent", help="Parent task directory (establishes subtask link)")
     p_create.add_argument("--package", help="Package name for monorepo projects")
     p_create.add_argument(
