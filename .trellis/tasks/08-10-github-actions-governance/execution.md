@@ -10,11 +10,11 @@
 - 规划提交：`30a021269f3b6ae2c46f195faa273a1af81f26f9`
 - 实施授权：已确认；2026-08-10，按审查结果实施，Rust 并行化延后独立实验。
 - PR 目标：`main`
-- PR：尚未创建
+- PR：[#108](https://github.com/KNaiFen/aio-coding-hub/pull/108)
 - 直接 main 迁移来源：无
 - PENDING 审阅：`AIO-PENDING-029` 明确排除，禁止触碰 `upgrade-tui.command`
 - 当前唯一写者：main session
-- 当前阶段：施工中
+- 当前阶段：等待验收（交付候选 CI 已通过；交付记录提交后需复验最新 head）
 
 ## 阅读顺序
 
