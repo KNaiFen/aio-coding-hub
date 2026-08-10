@@ -138,7 +138,7 @@ _CODEX_CONFIG_DIR = ".codex"
 _SEED_EXAMPLE = (
     "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. "
     "Put spec/research files only — no code paths. "
-    "Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. "
+    "Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. "
     "Delete this line once real entries are added."
 )
 
@@ -175,6 +175,23 @@ def _default_prd_content(title: str, description: str | None = None) -> str:
     heading = title.strip() or "Untitled task"
     return f"""# {heading}
 
+## Plan Status
+
+- Implementation authorization: pending confirmation
+- Confirmation date and summary: TBD
+- Confirmed coverage: scope / locked decisions / acceptance criteria
+- Planning revision: TBD (record the full planning commit before implementation)
+- Execution route: main-session Trellis / delegated worktree
+- Migrated from direct-main record: none / monthly record path, migration reason, frozen commit, uncommitted-change disposition
+
+## Material Facts, Assumptions, and Open Questions
+
+| Item | Source | Status / closure condition |
+|---|---|---|
+| TBD | user / code / current specification / external evidence | confirmed / must resolve before implementation |
+
+Do not start implementation with a material open question. Record approved scope or decision changes in this file with their affected acceptance criteria and confirmation.
+
 ## Goal
 
 {goal}
@@ -186,6 +203,16 @@ def _default_prd_content(title: str, description: str | None = None) -> str:
 ## Acceptance Criteria
 
 - [ ] TBD
+
+## Scope and Decision Changes
+
+| Date | Old / new decision | Affected acceptance criteria | Decision owner / resume condition |
+|---|---|---|---|
+| TBD |  |  |  |
+
+## PENDING Review
+
+- TBD (record relevant unresolved IDs and their disposition)
 
 ## Notes
 
@@ -293,9 +320,9 @@ def cmd_create(args: argparse.Namespace) -> int:
 
     today = datetime.now().strftime("%Y-%m-%d")
 
-    # Record current branch as base_branch (PR target)
-    _, branch_out, _ = run_git(["branch", "--show-current"], cwd=repo_root)
-    current_branch = branch_out.strip() or "main"
+    # This repository's protected integration target is main. Callers that
+    # intentionally target another branch must say so explicitly.
+    base_branch = (getattr(args, "base_branch", None) or "main").strip() or "main"
 
     description = (args.description or "").strip()
     if not description.strip():
@@ -322,7 +349,7 @@ def cmd_create(args: argparse.Namespace) -> int:
         "createdAt": today,
         "completedAt": None,
         "branch": None,
-        "base_branch": current_branch,
+        "base_branch": base_branch,
         "worktree_path": None,
         "commit": None,
         "pr_url": None,
@@ -412,6 +439,7 @@ def cmd_create(args: argparse.Namespace) -> int:
     print("", file=sys.stderr)
     print(colored("Next steps:", Colors.BLUE), file=sys.stderr)
     print("  - Fill prd.md with requirements and acceptance criteria", file=sys.stderr)
+    print(f"  - PR target branch: {base_branch}", file=sys.stderr)
     print("  - Lightweight main-session task: PRD-only is valid", file=sys.stderr)
     print("  - Delegated worktree task: add execution.md before handoff and delivery.md before acceptance", file=sys.stderr)
     print("  - Complex task: add design.md and implement.md before task.py start", file=sys.stderr)
@@ -777,7 +805,7 @@ def cmd_set_branch(args: argparse.Namespace) -> int:
 
     if not branch:
         print(colored("Error: Missing arguments", Colors.RED))
-        print("Usage: python task.py set-branch <task-dir> <branch-name>")
+        print("Usage: python3 task.py set-branch <task-dir> <branch-name>")
         return 1
 
     task_json = target_dir / FILE_TASK_JSON
@@ -808,8 +836,8 @@ def cmd_set_base_branch(args: argparse.Namespace) -> int:
 
     if not base_branch:
         print(colored("Error: Missing arguments", Colors.RED))
-        print("Usage: python task.py set-base-branch <task-dir> <base-branch>")
-        print("Example: python task.py set-base-branch <dir> develop")
+        print("Usage: python3 task.py set-base-branch <task-dir> <base-branch>")
+        print("Example: python3 task.py set-base-branch <dir> develop")
         print()
         print("This sets the target branch for PR (the branch your feature will merge into).")
         return 1
@@ -843,7 +871,7 @@ def cmd_set_scope(args: argparse.Namespace) -> int:
 
     if not scope:
         print(colored("Error: Missing arguments", Colors.RED))
-        print("Usage: python task.py set-scope <task-dir> <scope>")
+        print("Usage: python3 task.py set-scope <task-dir> <scope>")
         return 1
 
     task_json = target_dir / FILE_TASK_JSON
