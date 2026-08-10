@@ -1,6 +1,6 @@
 //! Database CRUD operations for providers.
 
-use super::model_policy::ProviderModelPolicyV1;
+use super::model_policy::{ProviderModelPolicyStatus, ProviderModelPolicyV1};
 use super::types::*;
 use super::validation::*;
 use crate::db;
@@ -946,6 +946,57 @@ pub(crate) fn list_enabled_for_gateway_in_mode(
         )?),
         None => Ok(list_enabled_for_gateway_default(&conn, cli_key)?),
     }
+}
+
+pub(crate) fn list_ready_model_policies_for_configured_routes(
+    db: &db::Db,
+    cli_key: &str,
+) -> crate::shared::error::AppResult<Vec<ProviderModelPolicyV1>> {
+    validate_cli_key(cli_key)?;
+    let conn = db.open_connection()?;
+    let mut stmt = conn
+        .prepare_cached(
+            r#"
+SELECT p.model_policy_json
+FROM providers p
+WHERE p.cli_key = ?1
+  AND (
+    (
+      p.enabled = 1
+      AND EXISTS (
+        SELECT 1
+        FROM default_route_providers drp
+        WHERE drp.cli_key = p.cli_key
+          AND drp.provider_id = p.id
+      )
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM sort_mode_providers smp
+      WHERE smp.cli_key = p.cli_key
+        AND smp.provider_id = p.id
+        AND smp.enabled = 1
+    )
+  )
+ORDER BY p.id ASC
+"#,
+        )
+        .map_err(|e| db_err!("failed to prepare configured route model policy query: {e}"))?;
+    let rows = stmt
+        .query_map(params![cli_key], |row| row.get::<_, Option<String>>(0))
+        .map_err(|e| db_err!("failed to query configured route model policies: {e}"))?;
+
+    let mut policies = Vec::new();
+    for row in rows {
+        let raw = row.map_err(|e| db_err!("failed to read configured route model policy: {e}"))?;
+        let (policy, status) = ProviderModelPolicyV1::decode(raw.as_deref(), cli_key);
+        if status == ProviderModelPolicyStatus::Ready {
+            if let Some(policy) = policy {
+                policies.push(policy);
+            }
+        }
+    }
+    Ok(policies)
 }
 
 /// Resolve a source provider by ID for CX2CC chaining.

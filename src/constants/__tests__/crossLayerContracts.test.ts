@@ -14,6 +14,7 @@ import { getSettingsState, resetMswState } from "../../test/msw/state";
 import bindingsSource from "../../generated/bindings.ts?raw";
 import heartbeatSource from "../../../src-tauri/src/app/heartbeat_watchdog.rs?raw";
 import noticeSource from "../../../src-tauri/src/app/notice.rs?raw";
+import providerServiceSource from "../../../src-tauri/src/app/provider_service.rs?raw";
 import settingsServiceSource from "../../../src-tauri/src/app/settings_service.rs?raw";
 import startupStateSource from "../../../src-tauri/src/app/startup_state.rs?raw";
 import promptsSource from "../../../src-tauri/src/domain/prompts.rs?raw";
@@ -72,6 +73,9 @@ describe("cross-layer contracts", () => {
       appEventNames.heartbeat
     );
     expect(extractRustStringConst(noticeSource, "NOTICE_EVENT_NAME")).toBe(appEventNames.notice);
+    expect(extractRustStringConst(providerServiceSource, "PROVIDER_CODEX_CATALOG_EVENT_NAME")).toBe(
+      appEventNames.providerCodexCatalog
+    );
     expect(extractRustStringConst(startupStateSource, "APP_STARTUP_STATUS_EVENT_NAME")).toBe(
       appEventNames.startupStatus
     );

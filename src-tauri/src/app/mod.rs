@@ -24,6 +24,7 @@ pub(crate) mod provider_model_discovery;
 pub(crate) mod provider_service;
 pub(crate) mod resident;
 pub(crate) mod settings_service;
+pub(crate) mod sort_mode_service;
 pub(crate) mod startup_gateway;
 pub(crate) mod startup_settings;
 pub(crate) mod startup_state;

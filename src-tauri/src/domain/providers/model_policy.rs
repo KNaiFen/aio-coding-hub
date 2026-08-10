@@ -158,6 +158,12 @@ impl ProviderModelPolicyV1 {
         }
         source_model.to_string()
     }
+
+    pub(crate) fn has_mapping_match(&self, source_model: &str) -> bool {
+        self.mappings
+            .iter()
+            .any(|mapping| match_pattern(&mapping.source, source_model).is_some())
+    }
 }
 
 fn validate_policy_value(field: &str, value: &str) -> Result<(), String> {

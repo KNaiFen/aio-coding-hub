@@ -289,7 +289,8 @@ pub(crate) fn export_typescript_bindings(output_path: &str) -> Result<(), String
         .typ::<crate::gateway::events::GatewayRequestSignalEvent>()
         .typ::<crate::gateway::events::GatewayAttemptEvent>()
         .typ::<crate::gateway::events::GatewayLogEvent>()
-        .typ::<crate::gateway::events::GatewayCircuitEvent>();
+        .typ::<crate::gateway::events::GatewayCircuitEvent>()
+        .typ::<crate::app::provider_service::CodexCatalogEventPayload>();
 
     builder
         .export(

@@ -2588,6 +2588,8 @@ export type CliVersionCheck = {
   updateAvailable: boolean;
   error: string | null;
 };
+export type CodexCatalogEventPayload = { status: CodexCatalogEventStatus };
+export type CodexCatalogEventStatus = "updated" | "failed";
 export type CodexConfigPatch = {
   model: string | null;
   approval_policy: string | null;

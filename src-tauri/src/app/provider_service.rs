@@ -2,6 +2,62 @@ use crate::app_state::{ensure_db_ready, DbInitState};
 use crate::gateway_control::app_gateway_clear_cli_route_runtime_state;
 use crate::{blocking, providers};
 
+pub(crate) const PROVIDER_CODEX_CATALOG_EVENT_NAME: &str = "providers:codex_catalog";
+
+#[derive(Clone, Copy, serde::Serialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum CodexCatalogEventStatus {
+    Updated,
+    Failed,
+}
+
+#[derive(Clone, serde::Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CodexCatalogEventPayload {
+    pub(crate) status: CodexCatalogEventStatus,
+}
+
+pub(crate) async fn refresh_codex_catalog_after_routing_change(
+    app: &tauri::AppHandle,
+    db: crate::db::Db,
+    mapping_sources_changed: bool,
+) {
+    if !mapping_sources_changed {
+        return;
+    }
+
+    let refresh_app = app.clone();
+    let result = blocking::run("refresh_codex_model_catalog", move || {
+        crate::cli_proxy::refresh_codex_model_catalog_if_enabled(&refresh_app, &db)
+    })
+    .await;
+
+    let status = match result {
+        Ok(crate::cli_proxy::CodexCatalogRefreshResult::Updated) => {
+            tracing::info!("Codex model capability catalog refreshed after routing change");
+            Some(CodexCatalogEventStatus::Updated)
+        }
+        Ok(crate::cli_proxy::CodexCatalogRefreshResult::NotActive)
+        | Ok(crate::cli_proxy::CodexCatalogRefreshResult::Unchanged) => None,
+        Err(error) => {
+            tracing::warn!(
+                error_code = "CLI_PROXY_CODEX_CATALOG_FAILED",
+                error = %error,
+                "failed to refresh Codex model capability catalog after routing change"
+            );
+            Some(CodexCatalogEventStatus::Failed)
+        }
+    };
+
+    if let Some(status) = status {
+        crate::app::heartbeat_watchdog::gated_emit(
+            app,
+            PROVIDER_CODEX_CATALOG_EVENT_NAME,
+            CodexCatalogEventPayload { status },
+        );
+    }
+}
+
 #[derive(serde::Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ProviderUpsertInput {
@@ -162,6 +218,7 @@ pub(crate) async fn provider_upsert(
     let cli_key_for_log = cli_key.clone();
     let submitted_api_key = api_key.clone();
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
+    let refresh_db = db.clone();
     let result = blocking::run("provider_upsert", move || {
         let previous = match provider_id {
             Some(id) => {
@@ -170,6 +227,13 @@ pub(crate) async fn provider_upsert(
             }
             None => None,
         };
+        let tracks_codex_mappings = cli_key == "codex"
+            || previous
+                .as_ref()
+                .is_some_and(|provider| provider.cli_key == "codex");
+        let mapping_sources_before = tracks_codex_mappings
+            .then(|| crate::infra::codex_model_catalog::projection::routable_mapping_signature(&db))
+            .transpose()?;
         let previous_api_key = match provider_id {
             Some(id) => Some(providers::get_api_key_plaintext(&db, id)?),
             None => None,
@@ -212,13 +276,19 @@ pub(crate) async fn provider_upsert(
             &saved,
             submitted_api_key.as_deref(),
         );
+        let mapping_sources_changed = if let Some(before) = mapping_sources_before {
+            before
+                != crate::infra::codex_model_catalog::projection::routable_mapping_signature(&db)?
+        } else {
+            false
+        };
 
-        Ok::<_, crate::shared::error::AppError>((saved, decision))
+        Ok::<_, crate::shared::error::AppError>((saved, decision, mapping_sources_changed))
     })
     .await
-    .map_err(Into::into);
+    .map_err(String::from);
 
-    if let Ok((ref provider, decision)) = result {
+    if let Ok((ref provider, decision, _)) = result {
         if is_create {
             tracing::info!(
                 provider_id = provider.id,
@@ -247,7 +317,9 @@ pub(crate) async fn provider_upsert(
         }
     }
 
-    result.map(|(provider, _)| provider)
+    let (provider, _, mapping_sources_changed) = result?;
+    refresh_codex_catalog_after_routing_change(&app, refresh_db, mapping_sources_changed).await;
+    Ok(provider)
 }
 
 pub(crate) async fn provider_duplicate(
@@ -256,6 +328,7 @@ pub(crate) async fn provider_duplicate(
     provider_id: i64,
 ) -> Result<providers::ProviderSummary, String> {
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
+    let refresh_db = db.clone();
     let result = blocking::run("provider_duplicate", move || {
         let source = {
             let conn = db.open_connection()?;
@@ -273,7 +346,11 @@ pub(crate) async fn provider_duplicate(
             None
         };
 
-        providers::duplicate(
+        let mapping_sources_before = (source.cli_key == "codex")
+            .then(|| crate::infra::codex_model_catalog::projection::routable_mapping_signature(&db))
+            .transpose()?;
+
+        let provider = providers::duplicate(
             &db,
             source.id,
             providers::ProviderUpsertParams {
@@ -306,12 +383,19 @@ pub(crate) async fn provider_duplicate(
                 stream_idle_timeout_seconds: source.stream_idle_timeout_seconds,
                 extension_values: None,
             },
-        )
+        )?;
+        let mapping_sources_changed = if let Some(before) = mapping_sources_before {
+            before
+                != crate::infra::codex_model_catalog::projection::routable_mapping_signature(&db)?
+        } else {
+            false
+        };
+        Ok::<_, crate::shared::error::AppError>((provider, mapping_sources_changed))
     })
     .await
-    .map_err(Into::into);
+    .map_err(String::from);
 
-    if let Ok(ref provider) = result {
+    if let Ok((ref provider, _)) = result {
         if provider.enabled {
             let cleared = app_gateway_clear_cli_route_runtime_state(&app, &provider.cli_key);
             tracing::info!(
@@ -331,7 +415,9 @@ pub(crate) async fn provider_duplicate(
         );
     }
 
-    result
+    let (provider, mapping_sources_changed) = result?;
+    refresh_codex_catalog_after_routing_change(&app, refresh_db, mapping_sources_changed).await;
+    Ok(provider)
 }
 
 pub(crate) async fn provider_set_enabled(
@@ -341,13 +427,28 @@ pub(crate) async fn provider_set_enabled(
     enabled: bool,
 ) -> Result<providers::ProviderSummary, String> {
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
+    let refresh_db = db.clone();
     let result = blocking::run("provider_set_enabled", move || {
-        providers::set_enabled(&db, provider_id, enabled)
+        let tracks_codex_mappings =
+            providers::cli_key_by_id(&db, provider_id)?.ok_or_else(|| {
+                crate::shared::error::AppError::from("DB_NOT_FOUND: provider not found")
+            })? == "codex";
+        let mapping_sources_before = tracks_codex_mappings
+            .then(|| crate::infra::codex_model_catalog::projection::routable_mapping_signature(&db))
+            .transpose()?;
+        let provider = providers::set_enabled(&db, provider_id, enabled)?;
+        let mapping_sources_changed = if let Some(before) = mapping_sources_before {
+            before
+                != crate::infra::codex_model_catalog::projection::routable_mapping_signature(&db)?
+        } else {
+            false
+        };
+        Ok::<_, crate::shared::error::AppError>((provider, mapping_sources_changed))
     })
     .await
-    .map_err(Into::into);
+    .map_err(String::from);
 
-    if let Ok(ref provider) = result {
+    if let Ok((ref provider, _)) = result {
         let cleared = app_gateway_clear_cli_route_runtime_state(&app, &provider.cli_key);
         tracing::info!(
             provider_id = provider.id,
@@ -358,7 +459,9 @@ pub(crate) async fn provider_set_enabled(
         );
     }
 
-    result
+    let (provider, mapping_sources_changed) = result?;
+    refresh_codex_catalog_after_routing_change(&app, refresh_db, mapping_sources_changed).await;
+    Ok(provider)
 }
 
 pub(crate) async fn provider_delete(
@@ -368,20 +471,34 @@ pub(crate) async fn provider_delete(
     clear_usage_stats: bool,
 ) -> Result<bool, String> {
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
+    let refresh_db = db.clone();
     let result = blocking::run(
         "provider_delete",
-        move || -> crate::shared::error::AppResult<(bool, String)> {
+        move || -> crate::shared::error::AppResult<(bool, String, bool)> {
             let cli_key = providers::cli_key_by_id(&db, provider_id)?.ok_or_else(|| {
                 crate::shared::error::AppError::from("DB_NOT_FOUND: provider not found")
             })?;
+            let mapping_sources_before = (cli_key == "codex")
+                .then(|| {
+                    crate::infra::codex_model_catalog::projection::routable_mapping_signature(&db)
+                })
+                .transpose()?;
             providers::delete(&db, provider_id, clear_usage_stats)?;
-            Ok((true, cli_key))
+            let mapping_sources_changed = if let Some(before) = mapping_sources_before {
+                before
+                    != crate::infra::codex_model_catalog::projection::routable_mapping_signature(
+                        &db,
+                    )?
+            } else {
+                false
+            };
+            Ok((true, cli_key, mapping_sources_changed))
         },
     )
     .await
-    .map_err(Into::into);
+    .map_err(String::from);
 
-    if let Ok((true, ref cli_key)) = result {
+    if let Ok((true, ref cli_key, _)) = result {
         let cleared = app_gateway_clear_cli_route_runtime_state(&app, cli_key);
         tracing::info!(
             provider_id = provider_id,
@@ -393,7 +510,9 @@ pub(crate) async fn provider_delete(
         );
     }
 
-    result.map(|(deleted, _)| deleted)
+    let (deleted, _, mapping_sources_changed) = result?;
+    refresh_codex_catalog_after_routing_change(&app, refresh_db, mapping_sources_changed).await;
+    Ok(deleted)
 }
 
 pub(crate) async fn providers_reorder(
@@ -442,13 +561,24 @@ pub(crate) async fn default_route_providers_set_order(
 ) -> Result<Vec<providers::ProviderRouteRow>, String> {
     let cli_key_for_log = cli_key.clone();
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
+    let refresh_db = db.clone();
     let result = blocking::run("default_route_providers_set_order", move || {
-        providers::default_route_set_order(&db, &cli_key, ordered_provider_ids)
+        let mapping_sources_before = (cli_key == "codex")
+            .then(|| crate::infra::codex_model_catalog::projection::routable_mapping_signature(&db))
+            .transpose()?;
+        let rows = providers::default_route_set_order(&db, &cli_key, ordered_provider_ids)?;
+        let mapping_sources_changed = if let Some(before) = mapping_sources_before {
+            before
+                != crate::infra::codex_model_catalog::projection::routable_mapping_signature(&db)?
+        } else {
+            false
+        };
+        Ok::<_, crate::shared::error::AppError>((rows, mapping_sources_changed))
     })
     .await
-    .map_err(Into::into);
+    .map_err(String::from);
 
-    if let Ok(ref rows) = result {
+    if let Ok((ref rows, _)) = result {
         let cleared = app_gateway_clear_cli_route_runtime_state(&app, &cli_key_for_log);
         tracing::info!(
             cli_key = %cli_key_for_log,
@@ -459,7 +589,9 @@ pub(crate) async fn default_route_providers_set_order(
         );
     }
 
-    result
+    let (rows, mapping_sources_changed) = result?;
+    refresh_codex_catalog_after_routing_change(&app, refresh_db, mapping_sources_changed).await;
+    Ok(rows)
 }
 
 #[cfg(test)]
