@@ -12,7 +12,7 @@
   "assignee": "KNaiFen",
   "createdAt": "2026-08-03",
   "completedAt": null,
-  "branch": "codex/upstream-claude-oauth",
+  "branch": null,
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,
@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "独立候选：原父任务的其他交付已进入 main 并归档。本任务仍需使用真实隔离账号完成登录、exchange、refresh 与 401 refresh 验证，未验证前不得合并。",
+  "notes": "用户已决定暂不处理；旧任务分支已删除，当前未委派且不影响其他工作。恢复前需重新确认方案、设置新任务分支，并使用真实隔离账号完成登录、exchange、refresh 与 401 refresh 验证，未验证前不得合并。",
   "meta": {}
 }
