@@ -9,12 +9,14 @@
 | `ci.yml` | `dev`/`main` push、面向两分支的 PR、`main` 手动运行 | 自动运行报告 required `ci-gate`；手动运行报告 `manual-ci-gate` |
 | `pr-title.yml` | PR opened、edited、reopened、synchronize | 独立 required `pr-title`，不 checkout PR 代码 |
 | `performance.yml` | 仅手动，且只允许 `main` | 非 required 的 Provider trend release benchmark |
-| `codeql.yml` | PR、push、每周计划、手动 | 非 required 的 JS/TS 与 Rust 代码扫描 |
+| `codeql.yml` | PR、push、每周计划、手动 | 非 required 的 JS/TS 与 Rust 代码扫描；两者均使用 `build-mode: none` |
 | `dev-build.yml` | 手动 | 按需生成未签名桌面集成制品 |
 | `release.yml` | 发布标签或手动指定既有标签 | 从成功的 main CI 候选制品发布，不重新构建 |
 | `sync-upstream.yml` | 每日计划或手动 | 使用 GitHub App 创建或更新人工审核 PR，不 push 或 merge |
 
 普通 PR 只等待自动触发的 `ci-gate` 与 `pr-title`。不要对同一 PR commit 再启动 `ci` 的 `workflow_dispatch`；手动 CI 只用于 `main` 恢复或候选构建。
+
+`manual-dispatch-guard` 在自动事件中按设计跳过。依赖它的条件 job 必须用 `always()` 解除 skipped 祖先的传播，并显式检查各直接依赖的 `result == 'success'`；否则 PR 与 push 的重任务会在分类成功后仍被 GitHub 跳过。CodeQL 的 Rust 分支不安装系统依赖或 Rust 工具链，也不调用 Autobuild，因为当前 Rust extractor 只支持 no-build 模式。
 
 ## Upstream Sync GitHub App
 

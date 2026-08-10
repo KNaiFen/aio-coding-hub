@@ -78,7 +78,10 @@ jobs:
 
   docs-contract:
     needs: change-scope
-    if: needs.change-scope.outputs.docs_checks == 'true'
+    if: >-
+      always() &&
+      needs.change-scope.result == 'success' &&
+      needs.change-scope.outputs.docs_checks == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -106,7 +109,10 @@ jobs:
 
   support-contract:
     needs: change-scope
-    if: needs.change-scope.outputs.full_ci == 'true'
+    if: >-
+      always() &&
+      needs.change-scope.result == 'success' &&
+      needs.change-scope.outputs.full_ci == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -158,7 +164,11 @@ jobs:
 
   frontend:
     needs: [change-scope, support-contract]
-    if: needs.change-scope.outputs.full_ci == 'true'
+    if: >-
+      always() &&
+      needs.change-scope.result == 'success' &&
+      needs.change-scope.outputs.full_ci == 'true' &&
+      needs.support-contract.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -214,7 +224,11 @@ jobs:
 
   rust:
     needs: [change-scope, support-contract]
-    if: needs.change-scope.outputs.full_ci == 'true'
+    if: >-
+      always() &&
+      needs.change-scope.result == 'success' &&
+      needs.change-scope.outputs.full_ci == 'true' &&
+      needs.support-contract.result == 'success'
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
@@ -317,6 +331,8 @@ jobs:
   candidate-plan:
     needs: change-scope
     if: >-
+      always() &&
+      needs.change-scope.result == 'success' &&
       needs.change-scope.outputs.full_ci == 'true' &&
       github.repository == 'KNaiFen/aio-coding-hub' &&
       github.ref == 'refs/heads/main' &&
@@ -368,7 +384,13 @@ jobs:
 
   build-release-candidate:
     needs: [support-contract, frontend, rust, candidate-plan]
-    if: needs.candidate-plan.outputs.should_build == 'true'
+    if: >-
+      always() &&
+      needs.support-contract.result == 'success' &&
+      needs.frontend.result == 'success' &&
+      needs.rust.result == 'success' &&
+      needs.candidate-plan.result == 'success' &&
+      needs.candidate-plan.outputs.should_build == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -524,7 +546,13 @@ jobs:
 
   build-tui-release-candidate:
     needs: [support-contract, frontend, rust, candidate-plan]
-    if: needs.candidate-plan.outputs.should_build == 'true'
+    if: >-
+      always() &&
+      needs.support-contract.result == 'success' &&
+      needs.frontend.result == 'success' &&
+      needs.rust.result == 'success' &&
+      needs.candidate-plan.result == 'success' &&
+      needs.candidate-plan.outputs.should_build == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -606,6 +634,7 @@ jobs:
     needs: [frontend, rust, candidate-plan, build-release-candidate, build-tui-release-candidate]
     if: >-
       always() &&
+      needs.candidate-plan.result == 'success' &&
       needs.candidate-plan.outputs.should_build == 'true' &&
       needs.frontend.result == 'success' &&
       needs.rust.result == 'success' &&

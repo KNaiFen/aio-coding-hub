@@ -216,6 +216,50 @@ for (const [name, fixture, expected] of [
     /ci\.yml ci-gate must use if: always\(\)/,
   ],
   [
+    "docs contract cannot inherit a skipped manual guard",
+    {
+      ...valid,
+      ciWorkflow: ciWorkflow.replace(
+        "    if: >-\n      always() &&\n      needs.change-scope.result == 'success' &&\n      needs.change-scope.outputs.docs_checks == 'true'",
+        "    if: needs.change-scope.outputs.docs_checks == 'true'"
+      ),
+    },
+    /ci\.yml docs-contract if must equal/,
+  ],
+  [
+    "frontend must require the support contract to succeed",
+    {
+      ...valid,
+      ciWorkflow: ciWorkflow.replace(
+        "      needs.change-scope.outputs.full_ci == 'true' &&\n      needs.support-contract.result == 'success'\n    runs-on: ubuntu-latest",
+        "      needs.change-scope.outputs.full_ci == 'true'\n    runs-on: ubuntu-latest"
+      ),
+    },
+    /ci\.yml frontend if must equal/,
+  ],
+  [
+    "candidate build cannot inherit a skipped manual guard",
+    {
+      ...valid,
+      ciWorkflow: ciWorkflow.replace(
+        "    if: >-\n      always() &&\n      needs.support-contract.result == 'success' &&\n      needs.frontend.result == 'success' &&\n      needs.rust.result == 'success' &&\n      needs.candidate-plan.result == 'success' &&\n      needs.candidate-plan.outputs.should_build == 'true'",
+        "    if: needs.candidate-plan.outputs.should_build == 'true'"
+      ),
+    },
+    /ci\.yml build-release-candidate if must equal/,
+  ],
+  [
+    "candidate assembly must require the plan job to succeed",
+    {
+      ...valid,
+      ciWorkflow: ciWorkflow.replace(
+        "      needs.candidate-plan.result == 'success' &&\n      needs.candidate-plan.outputs.should_build == 'true' &&\n      needs.frontend.result == 'success'",
+        "      needs.candidate-plan.outputs.should_build == 'true' &&\n      needs.frontend.result == 'success'"
+      ),
+    },
+    /ci\.yml assemble-release-candidate if must equal/,
+  ],
+  [
     "aggregate gate must consume the real full-CI output",
     {
       ...valid,
@@ -246,7 +290,7 @@ for (const [name, fixture, expected] of [
     {
       ...valid,
       codeqlWorkflow: codeqlWorkflow.replace(
-        "          - language: rust\n            build-mode: autobuild\n",
+        "          - language: rust\n            build-mode: none\n",
         ""
       ),
     },
@@ -305,15 +349,26 @@ for (const [name, fixture, expected] of [
     /codeql\.yml must retain the Initialize CodeQL action step/,
   ],
   [
-    "CodeQL matrix modes cannot be swapped",
+    "CodeQL Rust must use the supported no-build mode",
     {
       ...valid,
       codeqlWorkflow: codeqlWorkflow.replace(
-        "          - language: javascript-typescript\n            build-mode: none\n          - language: rust\n            build-mode: autobuild",
-        "          - language: javascript-typescript\n            build-mode: autobuild\n          - language: rust\n            build-mode: none"
+        "          - language: rust\n            build-mode: none",
+        "          - language: rust\n            build-mode: autobuild"
       ),
     },
     /codeql\.yml must retain the approved language\/build-mode pairs/,
+  ],
+  [
+    "CodeQL no-build matrix must not retain an Autobuild step",
+    {
+      ...valid,
+      codeqlWorkflow: codeqlWorkflow.replace(
+        "      - name: Analyze\n",
+        "      - name: Autobuild compiled language\n        uses: github/codeql-action/autobuild@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6\n\n      - name: Analyze\n"
+      ),
+    },
+    /codeql\.yml analyze must contain only checkout, Initialize CodeQL, and Analyze action steps/,
   ],
   [
     "CodeQL initialization cannot be skipped",

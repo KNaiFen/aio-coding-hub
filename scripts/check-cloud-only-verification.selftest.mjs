@@ -225,6 +225,47 @@ for (const [name, mutate, expected] of [
   expectContractFailure(name, mutate, expected);
 }
 
+expectContractFailure(
+  "docs contract must override skipped ancestors explicitly",
+  (fixture) => {
+    fixture.ciWorkflow = fixture.ciWorkflow.replace(
+      "    if: >-\n      always() &&\n      needs.change-scope.result == 'success' &&\n      needs.change-scope.outputs.docs_checks == 'true'",
+      "    if: needs.change-scope.outputs.docs_checks == 'true'"
+    );
+  },
+  /ci\.yml docs-contract if must equal/
+);
+expectContractFailure(
+  "frontend must require support contract success explicitly",
+  (fixture) => {
+    fixture.ciWorkflow = fixture.ciWorkflow.replace(
+      "      needs.change-scope.outputs.full_ci == 'true' &&\n      needs.support-contract.result == 'success'\n    runs-on: ubuntu-latest",
+      "      needs.change-scope.outputs.full_ci == 'true'\n    runs-on: ubuntu-latest"
+    );
+  },
+  /ci\.yml frontend if must equal/
+);
+expectContractFailure(
+  "candidate plan must override skipped ancestors explicitly",
+  (fixture) => {
+    fixture.ciWorkflow = fixture.ciWorkflow.replace(
+      "      always() &&\n      needs.change-scope.result == 'success' &&\n      needs.change-scope.outputs.full_ci == 'true' &&\n      github.repository == 'KNaiFen/aio-coding-hub' &&",
+      "      needs.change-scope.outputs.full_ci == 'true' &&\n      github.repository == 'KNaiFen/aio-coding-hub' &&"
+    );
+  },
+  /ci\.yml candidate-plan if must equal/
+);
+expectContractFailure(
+  "candidate builds must require every dependency explicitly",
+  (fixture) => {
+    fixture.ciWorkflow = fixture.ciWorkflow.replace(
+      "    if: >-\n      always() &&\n      needs.support-contract.result == 'success' &&\n      needs.frontend.result == 'success' &&\n      needs.rust.result == 'success' &&\n      needs.candidate-plan.result == 'success' &&\n      needs.candidate-plan.outputs.should_build == 'true'",
+      "    if: needs.candidate-plan.outputs.should_build == 'true'"
+    );
+  },
+  /ci\.yml build-release-candidate if must equal/
+);
+
 for (const [job, command] of [
   ["frontend", "pnpm install --frozen-lockfile"],
   ["frontend", "pnpm audit:deps"],

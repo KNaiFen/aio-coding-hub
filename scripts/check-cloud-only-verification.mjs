@@ -72,6 +72,40 @@ const CI_GATE_RESULT_ENV = new Map([
 ]);
 // The aggregation script's complete shell control flow is part of the required gate.
 const CI_GATE_RUN_SHA256 = "e05c0c0da1c482e4e96e5d4a5abcd487ad7493b5ff8b8cf32ffd23d59fac2eb6";
+const CI_JOB_CONDITIONS = new Map([
+  [
+    "docs-contract",
+    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.docs_checks == 'true'",
+  ],
+  [
+    "support-contract",
+    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.full_ci == 'true'",
+  ],
+  [
+    "frontend",
+    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.full_ci == 'true' && needs.support-contract.result == 'success'",
+  ],
+  [
+    "rust",
+    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.full_ci == 'true' && needs.support-contract.result == 'success'",
+  ],
+  [
+    "candidate-plan",
+    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.full_ci == 'true' && github.repository == 'KNaiFen/aio-coding-hub' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')",
+  ],
+  [
+    "build-release-candidate",
+    "always() && needs.support-contract.result == 'success' && needs.frontend.result == 'success' && needs.rust.result == 'success' && needs.candidate-plan.result == 'success' && needs.candidate-plan.outputs.should_build == 'true'",
+  ],
+  [
+    "build-tui-release-candidate",
+    "always() && needs.support-contract.result == 'success' && needs.frontend.result == 'success' && needs.rust.result == 'success' && needs.candidate-plan.result == 'success' && needs.candidate-plan.outputs.should_build == 'true'",
+  ],
+  [
+    "assemble-release-candidate",
+    "always() && needs.candidate-plan.result == 'success' && needs.candidate-plan.outputs.should_build == 'true' && needs.frontend.result == 'success' && needs.rust.result == 'success' && needs.build-release-candidate.result == 'success' && needs.build-tui-release-candidate.result == 'success'",
+  ],
+]);
 
 function readText(root, relativePath) {
   return readFileSync(join(root, relativePath), "utf8");
@@ -443,29 +477,6 @@ function assertCiGateClosure(workflow, failures) {
 }
 
 function assertCandidatePrBoundary(workflow, failures) {
-  const candidatePlanCondition = [
-    "needs.change-scope.outputs.full_ci == 'true' &&",
-    "github.repository == 'KNaiFen/aio-coding-hub' &&",
-    "github.ref == 'refs/heads/main' &&",
-    "(github.event_name == 'push' || github.event_name == 'workflow_dispatch')",
-  ].join(" ");
-  assertWorkflowJobPropertyEquals(
-    workflow,
-    "candidate-plan",
-    "if",
-    candidatePlanCondition,
-    failures
-  );
-  for (const job of ["build-release-candidate", "build-tui-release-candidate"]) {
-    assertWorkflowJobPropertyEquals(
-      workflow,
-      job,
-      "if",
-      "needs.candidate-plan.outputs.should_build == 'true'",
-      failures
-    );
-  }
-
   const ciGateRuns = workflowRunBodies(workflow, "ci-gate").join("\n");
   const mainCandidateCondition =
     'if [[ "$EVENT_REF" == "refs/heads/main" && ( "$EVENT_NAME" == "push" || "$EVENT_NAME" == "workflow_dispatch" ) ]]; then';
@@ -503,6 +514,12 @@ function assertCandidatePrBoundary(workflow, failures) {
   ].join("\n");
   if (!normalizedCiGate.includes(candidateBoundary)) {
     failures.push("ci.yml ci-gate must require candidate desktop/TUI jobs to be skipped outside eligible main runs");
+  }
+}
+
+function assertCiDependencyConditions(workflow, failures) {
+  for (const [job, expected] of CI_JOB_CONDITIONS) {
+    assertWorkflowJobPropertyEquals(workflow, job, "if", expected, failures);
   }
 }
 
@@ -701,6 +718,7 @@ export function assertCloudOnlyVerificationContract(fixture) {
   requireText(readme, "不要为常规验证额外手动运行 `ci`", "README.md", failures);
   requireText(readmeEn, "Do not start an additional manual `ci` run for routine validation.", "README_EN.md", failures);
   assertManualCiBoundary(ciWorkflow, failures);
+  assertCiDependencyConditions(ciWorkflow, failures);
   assertPrTitleWorkflow(prTitleWorkflow, failures);
   assertPerformanceWorkflow(performanceWorkflow, failures);
   assertWorkflowRunCommands(

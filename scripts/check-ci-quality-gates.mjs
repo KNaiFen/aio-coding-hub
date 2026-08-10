@@ -59,7 +59,41 @@ const CODEQL_STRATEGY_BLOCK = `strategy:
       - language: javascript-typescript
         build-mode: none
       - language: rust
-        build-mode: autobuild`;
+        build-mode: none`;
+const CI_JOB_CONDITIONS = new Map([
+  [
+    "docs-contract",
+    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.docs_checks == 'true'",
+  ],
+  [
+    "support-contract",
+    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.full_ci == 'true'",
+  ],
+  [
+    "frontend",
+    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.full_ci == 'true' && needs.support-contract.result == 'success'",
+  ],
+  [
+    "rust",
+    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.full_ci == 'true' && needs.support-contract.result == 'success'",
+  ],
+  [
+    "candidate-plan",
+    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.full_ci == 'true' && github.repository == 'KNaiFen/aio-coding-hub' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')",
+  ],
+  [
+    "build-release-candidate",
+    "always() && needs.support-contract.result == 'success' && needs.frontend.result == 'success' && needs.rust.result == 'success' && needs.candidate-plan.result == 'success' && needs.candidate-plan.outputs.should_build == 'true'",
+  ],
+  [
+    "build-tui-release-candidate",
+    "always() && needs.support-contract.result == 'success' && needs.frontend.result == 'success' && needs.rust.result == 'success' && needs.candidate-plan.result == 'success' && needs.candidate-plan.outputs.should_build == 'true'",
+  ],
+  [
+    "assemble-release-candidate",
+    "always() && needs.candidate-plan.result == 'success' && needs.candidate-plan.outputs.should_build == 'true' && needs.frontend.result == 'success' && needs.rust.result == 'success' && needs.build-release-candidate.result == 'success' && needs.build-tui-release-candidate.result == 'success'",
+  ],
+]);
 
 function workflowJobBody(workflow, jobName) {
   const job = new RegExp(`^  ${jobName}:\\s*$`, "m").exec(workflow);
@@ -233,6 +267,29 @@ function workflowJobScalar(workflow, jobName, property) {
   for (const line of body.split(/\r?\n/)) {
     const match = pattern.exec(line);
     if (match) return stripWorkflowComment(match[1]).trim();
+  }
+  return "";
+}
+
+function workflowJobProperty(workflow, jobName, property) {
+  const body = workflowJobBody(workflow, jobName);
+  if (!body) return "";
+
+  const lines = body.split(/\r?\n/);
+  const propertyPattern = new RegExp(`^ {4}${property}:\\s*(.*)$`);
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = propertyPattern.exec(lines[index]);
+    if (!match) continue;
+
+    const value = stripWorkflowComment(match[1]).trim();
+    if (!/^[>|]/.test(value)) return value;
+
+    const block = [];
+    while (index + 1 < lines.length && /^ {6}\S/.test(lines[index + 1])) {
+      block.push(stripWorkflowComment(lines[index + 1].slice(6)).trim());
+      index += 1;
+    }
+    return block.join(" ");
   }
   return "";
 }
@@ -431,6 +488,21 @@ function assertCodeqlContract(workflow, failures) {
   if (workflowJobBlock(workflow, "analyze", "strategy") !== CODEQL_STRATEGY_BLOCK) {
     failures.push("codeql.yml must retain the approved language/build-mode pairs");
   }
+  const codeqlSteps = workflowSteps(workflow, "analyze");
+  const expectedActions = [
+    "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+    "github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3",
+    "github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3",
+  ];
+  if (
+    codeqlSteps.some((step) => step.malformed.length > 0) ||
+    codeqlSteps.map((step) => step.properties.get("uses") ?? "").join("\n") !==
+      expectedActions.join("\n")
+  ) {
+    failures.push(
+      "codeql.yml analyze must contain only checkout, Initialize CodeQL, and Analyze action steps"
+    );
+  }
   requireCodeqlStep(
     workflow,
     "Initialize CodeQL",
@@ -444,14 +516,6 @@ function assertCodeqlContract(workflow, failures) {
   );
   requireCodeqlStep(
     workflow,
-    "Autobuild compiled language",
-    "github/codeql-action/autobuild@5595ccaf912efad79be6eef63a5619ff05969be3",
-    "matrix.build-mode == 'autobuild'",
-    [],
-    failures
-  );
-  requireCodeqlStep(
-    workflow,
     "Analyze",
     "github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3",
     undefined,
@@ -460,6 +524,14 @@ function assertCodeqlContract(workflow, failures) {
   );
   if (/pull_request_target|release-signing|TAURI_SIGNING_PRIVATE_KEY/.test(workflow)) {
     failures.push("codeql.yml must not use privileged PR triggers or release signing access");
+  }
+}
+
+function assertCiDependencyConditions(workflow, failures) {
+  for (const [job, expected] of CI_JOB_CONDITIONS) {
+    if (workflowJobProperty(workflow, job, "if") !== expected) {
+      failures.push(`ci.yml ${job} if must equal ${expected}`);
+    }
   }
 }
 
@@ -617,6 +689,7 @@ export function assertCiQualityGates({
   if (workflowJobBody(ciWorkflow, "pr-title") || ciGateNeeds.includes("pr-title")) {
     failures.push("ci.yml must keep pr-title independent from the aggregate quality gate");
   }
+  assertCiDependencyConditions(ciWorkflow, failures);
   assertCiGateClosure(ciWorkflow, failures);
   requireWorkflowRunScript(prTitleWorkflow, "pr-title.yml", "pr-title", PR_TITLE_RUN, failures);
   requireWorkflowRunScript(
