@@ -16,10 +16,6 @@ PR 标题检查迁移到独立的 `pr-title.yml`。它不 checkout、不执行�
 
 App 只安装到本仓库，不能写 Contents，不能批准 PR。现有 no-push/no-merge/人工审核合同不变。
 
-对已存在的上游同步 PR，工作流先用现有的受限 `gh pr list` 查询其编号并更新标题/正文。若没有已有 PR，`gh pr create` 的 stdout 是该次创建的唯一编号事实源：工作流保存完整 URL，要求它恰好以 `https://github.com/${GITHUB_REPOSITORY}/pull/` 开头，并要求剩余部分为不以零开头的正整数，再将其用作后续 `gh pr view` 参数。新建路径不得再 list，以免 GitHub 的列表索引尚未可见时把已创建的 PR 误判为失败。
-
-URL 前缀或编号不满足合同即退出；不会猜测、重试、搜索其他 PR 或绕过 merge-state 检查。后续 `DIRTY`、`UNKNOWN` 或空 merge state 仍写入摘要并失败，确保人工冲突处理保留为显式证据。
-
 ## 3. 安全与维护
 
 - `.github/dependabot.yml` 覆盖根 npm、`/src-tauri` Cargo 和 GitHub Actions，每周运行。

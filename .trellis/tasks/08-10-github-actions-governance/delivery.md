@@ -1,39 +1,23 @@
 # 交付报告：GitHub Actions 流程治理与提速
 
-> 本交付记录冻结修复候选 `cdc427b9c6b386ca6106a371880710155704a81e`。本文件本身提交后会产生新的文档 head，main 验收时必须以 PR 实时 head 和实时检查为准。
+> 本交付记录冻结代码实现候选 `09dfe0794522436c14e6bee278199ec6a5f9acfa`。本文件本身提交后会产生新的文档 head，main 验收时必须以 PR 实时 head 和实时检查为准。
 
 ## 交付状态
 
-- 结果：已完成受限既有 PR 查询与新建 PR stdout 编号解析修复；真实回归准确报告 #113 为 `DIRTY` 并要求人工解决，任务保持活动，等待 main 验收。
-- PR：[修复 #114](https://github.com/KNaiFen/aio-coding-hub/pull/114)（Draft，OPEN）
-- 分支：前序 `chore/github-actions-governance` 已合并；当前 `fix/upstream-sync-pr-resolution`
-- PR base：`main` @ `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`
-- 交付候选 head：`cdc427b9c6b386ca6106a371880710155704a81e`
-- 规划提交：`2016c25ef7cb6ae524f3f2b4e86996ef923981a3`
-- `ci-gate`：通过，[run 31506469918](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31506469918)（job 93836258759）
+- 结果：main 验收通过，等待合并；远端 owner 设置和真实场景运行仍为未完成项
+- PR：[#108](https://github.com/KNaiFen/aio-coding-hub/pull/108)
+- 分支：`chore/github-actions-governance`
+- PR base：`main` @ `9b05b28d5841584dc6f2a867947afd5d23f76246`
+- 交付候选 head：`09dfe0794522436c14e6bee278199ec6a5f9acfa`
+- 规划提交：`30a021269f3b6ae2c46f195faa273a1af81f26f9`
+- `ci-gate`：通过，[run 31451178867](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31451178867)（job 93658916582）
 - 其他检查：`pr-title`、`change-scope`、`docs-contract`、`support-contract`、`frontend`、`rust`、CodeQL JS/TS 和 Rust 均通过；候选制品 job 按 PR 条件跳过。
-- Sync Upstream 回归：[run 31508611251](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31508611251) 按预期失败，明确要求人工解决 #113 的 `DIRTY` 冲突。
-- 交付时间：2026-08-11T15:46:26Z
+- 交付时间：2026-08-11T02:25:57Z
 - 执行 session：正在提交本记录；提交后暂停写入，等待 main 验收。
 
 ## 阻塞快照
 
 无。
-
-## 合并后实际运行
-
-- PR #108 已于 2026-08-11 squash merge，merge commit 为 `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`。
-- owner 已完成 GitHub App 安装以及 `SYNC_UPSTREAM_APP_ID` variable、`SYNC_UPSTREAM_APP_PRIVATE_KEY` secret 配置；本记录不保存其值或私钥。
-- 手动 Sync Upstream [run 31487461146](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31487461146) 已成功完成凭据预检、短期 App token、checkout 与 fetch，且已创建 [PR #113](https://github.com/KNaiFen/aio-coding-hub/pull/113)。
-- 该 run 的 `gh pr create` 输出 URL 后，立即 `gh pr list` 尚未返回新 PR，导致 `Failed to resolve sync PR number.`。PR #113 当前为 `DIRTY`/冲突状态；工作流没有 push、merge、自动批准或修改目标分支。
-- 用户已确认修复：新建路径从创建返回 URL 严格解析编号，已有 PR 才使用 list；修复后对 #113 的回归运行应以清晰的人工冲突失败结束。
-
-### 修复 PR #114
-
-- 该修复从 `82820b2ea10ec6028d1fcb8d130a993bfae39b6d` 规划，规划提交为 `2016c25ef7cb6ae524f3f2b4e86996ef923981a3`；最终代码候选为 `cdc427b9c6b386ca6106a371880710155704a81e`，PR 为 Draft [#114](https://github.com/KNaiFen/aio-coding-hub/pull/114)。
-- 自动 `ci` [run 31506469918](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31506469918) 在该候选上通过：`ci-gate` [job 93836258759](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31506469918/job/93836258759)、`frontend`、`rust`、合同检查均为成功。相同 head 的 `pr-title` [run 31506469837](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31506469837) 和 CodeQL [run 31506469898](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31506469898) 也均成功。
-- 按任务计划以 `target_branch=main` 手动运行 [Sync Upstream 31508611251](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31508611251)。该 run 使用同一候选 head，15 秒后以 exit code 1 结束；失败步骤先输出 `https://github.com/KNaiFen/aio-coding-hub/pull/113`，然后输出 `PR #113 merge state is DIRTY. Manual conflict resolution required.`。
-- 回归日志没有 `Failed to resolve sync PR number.`。该失败是预期的 fail-closed 结果：不 push、不 merge、不自动批准，冲突继续由人工处理。
 
 ## 实现摘要
 
@@ -157,7 +141,7 @@
 
 > 仅 main 填写。
 
-前序功能 PR #108 已合并为 `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`。因 AC-05 的真实运行发现并已获授权修复的缺陷，任务尚未完成、不得归档或清理；待修复 PR 合并、真实回归运行和最终验收后再记录收尾。
+尚未合并，未归档或清理。
 
 ## 返工记录
 

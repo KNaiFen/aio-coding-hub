@@ -7,10 +7,9 @@
 3. **PR 分域验证（2026-08-11 确认）**：将二元 docs/full 分类扩展为 frontend、Rust、shared/unknown；PR 按域运行，主干 push 与 main 手动保持全量；同步 `ci-gate` 的预期 skipped 语义。
 4. **合同与文档**：同步 `ci-change-scope`、cloud-only/quality-gates checker 及 selftest；更新 README、AGENTS、现行 CI scope 合同和 cloud-only 合同。
 5. **同步安全**：修改 `sync-upstream.yml` 和 policy checker/selftest；准备 App 权限与 secret 操作说明，不把私钥写入仓库。
-6. **同步创建回归修复（2026-08-11 确认）**：新建路径捕获 `gh pr create` 返回 URL，严格验证当前仓库 URL 与正整数编号；已有 PR 保留一次 list 查询；禁止新建后重新 list。同步 policy checker/selftest 必须锁定直接解析、异常 fail-closed、无 push/merge/自动批准以及 `DIRTY`/`UNKNOWN` 人工冲突报告。
-7. **安全自动化**：添加 Dependabot、CodeQL、pin checker；将 pin checker 接入 support-contract；为全部既有 jobs 添加 timeout。
-8. **远端设置**：代码 PR 合并且验证后，按顺序启用 SHA pinning、Dependabot/alerts/security updates，再把 Ruleset required contexts 改为 `ci-gate` + `pr-title`。App 创建/安装/私钥生成由仓库 owner 在 GitHub 设置中完成。
-9. **Action 维护**：低风险 runtime action 单独升级；artifact pair、github-script、release action和 Tauri action 分别验证并可独立回滚。
+6. **安全自动化**：添加 Dependabot、CodeQL、pin checker；将 pin checker 接入 support-contract；为全部既有 jobs 添加 timeout。
+7. **远端设置**：代码 PR 合并且验证后，按顺序启用 SHA pinning、Dependabot/alerts/security updates，再把 Ruleset required contexts 改为 `ci-gate` + `pr-title`。App 创建/安装/私钥生成由仓库 owner 在 GitHub 设置中完成。
+8. **Action 维护**：低风险 runtime action 单独升级；artifact pair、github-script、release action和 Tauri action 分别验证并可独立回滚。
 
 ## 本地验证
 
@@ -28,6 +27,5 @@
 - 非 main 手动 dispatch 早失败；main 手动恢复和 `build_release_candidate=true` 成功。
 - 相关 Rust 路径自动 benchmark 成功；手动恢复无 benchmark；performance 手动 workflow 成功。
 - 缺失 App secret 早失败；有效 App token 创建/更新人工 PR且不 push/merge。
-- 新建同步 PR 使用创建返回 URL，而非后续 list；对于现有冲突 PR #113，修复后运行必须以“PR #113 merge state is DIRTY，需人工冲突处理”失败，不能再出现“Failed to resolve sync PR number.”。
 - CodeQL 两语言运行；Dependabot PR/告警出现；pin setting 开启后所有工作流仍可启动。
 - 候选 artifact 下载/assemble/release no-op 验证成功。
