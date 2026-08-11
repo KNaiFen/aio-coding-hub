@@ -4,7 +4,7 @@
 
 ## 交付状态
 
-- 结果：等待验收（分域实现候选已通过完整 PR CI）
+- 结果：main 验收通过，等待合并；远端 owner 设置和真实场景运行仍为未完成项
 - PR：[#108](https://github.com/KNaiFen/aio-coding-hub/pull/108)
 - 分支：`chore/github-actions-governance`
 - PR base：`main` @ `9b05b28d5841584dc6f2a867947afd5d23f76246`
@@ -128,7 +128,14 @@
 
 > 仅 main 填写。
 
-尚未验收。
+### Round 1 - 2026-08-11
+
+- 审查候选：`25ad19d0379b07c08cff06447779a539b5fd3460`（base `9b05b28d5841584dc6f2a867947afd5d23f76246`）。
+- CI 证据：自动 required `ci-gate` 成功，[run 31452473387](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31452473387)（job `93662790640`）；`frontend`、`rust`、`pr-title`、CodeQL JS/TS/Rust、合同检查均为成功，候选构建 jobs 依 PR 条件跳过。PR 当前可合并且无 review/comment 阻塞。
+- 审查范围：PRD/设计/交付与 `base..head` 的 33 个文件、路径分类和 `ci-gate` fail-closed 条件、main-only 手动 guard、候选制品边界、GitHub App token 权限/输入验证、CodeQL no-build、SHA pin/timeout 合同、最新远端检查与本地允许 Node 合同复验。
+- 结论：通过，准予合并该功能 PR；未创建 `findings.md`。代码实现符合锁定范围，没有发现权限提升、密钥泄露、命令注入、自动门禁 fail-open 或候选制品边界回归。
+- 接受的限制：AC-01/02/04 的真实单域与手动运行矩阵尚未执行；AC-03 的 `pr-title` Ruleset context、AC-05 的 App 凭据、AC-06 的 SHA pinning/Dependabot alerts/security updates 均按 `implement.md` 的合并后 owner 步骤保留。它们不是本 PR 代码合并的阻断项，任务归档前必须完成或由用户明确调整范围。
+- 记录提交会产生新的仅交付文档 head；main 将在该 head 的 CI 重新绿色后合并，并在收尾记录实际 merge commit 和未完成 owner 项。
 
 ## main 收尾
 
