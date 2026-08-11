@@ -303,6 +303,18 @@ expectRejected(
   /existing sync pull request exactly once/
 );
 expectRejected(
+  "existing PR list can page out the upstream PR",
+  "--limit 1000",
+  "--limit 30",
+  /existing sync pull request exactly once/
+);
+expectRejected(
+  "existing PR list does not select the upstream owner",
+  "headRepositoryOwner.login",
+  "headRepository.name",
+  /existing sync pull request exactly once/
+);
+expectRejected(
   "new PR URL repository validation removed",
   'if [[ "${created_pr_url}" != "${created_pr_url_prefix}"* ]]; then',
   "if false; then",

@@ -30,7 +30,7 @@ git remote add upstream "https://github.com/\${UPSTREAM_REPO}.git"
 git fetch origin "+refs/heads/\${TARGET_BRANCH}:refs/remotes/origin/\${TARGET_BRANCH}"
 git fetch upstream "+refs/heads/\${TARGET_BRANCH}:refs/remotes/upstream/\${TARGET_BRANCH}"`;
 // The full PR script is locked so indirect shell/API calls cannot bypass token policy.
-const EXPECTED_OPEN_PR_RUN_SHA256 = "431e4072bee08c5b5ef17daa304bf23f26c7b900b05e8070c53a2e3ed67a4990";
+const EXPECTED_OPEN_PR_RUN_SHA256 = "f064f98b484d84af6471412a2ab118e6a15f59288fbbed7549cf21a573858a62";
 const EXPECTED_SYNC_STEP_NAMES = [
   "Validate GitHub App credentials",
   "Create GitHub App token",
@@ -674,10 +674,17 @@ export function validateSyncUpstreamPolicy(source) {
     failures.push("workflow must retain existing pull request updates");
   }
   const existingPrLookup =
-    /existing_pr="\$\(\s*gh\s+pr\s+list\s+--repo\s+"\$\{GITHUB_REPOSITORY\}"\s+--head\s+"\$\{UPSTREAM_HEAD\}"\s+--base\s+"\$\{TARGET_BRANCH\}"\s+--state\s+open\s+--json\s+number\s+--jq\s+'\.\[0\]\.number\s+\/\/\s+empty'\s*\)"/.test(
+    /existing_pr="\$\(\s*gh\s+pr\s+list\s+--repo\s+"\$\{GITHUB_REPOSITORY\}"\s+--head\s+"\$\{TARGET_BRANCH\}"\s+--base\s+"\$\{TARGET_BRANCH\}"\s+--state\s+open\s+--limit\s+1000\s+--json\s+number,headRepositoryOwner/.test(
       commandText
     );
-  if (countMatchingLines(commandText, /^gh\s+pr\s+list(?:\s|$)/) !== 1 || !existingPrLookup) {
+  const upstreamOwnerSelection = commandText.includes(
+    'headRepositoryOwner.login == \\"${UPSTREAM_OWNER}\\"'
+  );
+  if (
+    countMatchingLines(commandText, /^gh\s+pr\s+list(?:\s|$)/) !== 1 ||
+    !existingPrLookup ||
+    !upstreamOwnerSelection
+  ) {
     failures.push(
       "workflow must query an existing sync pull request exactly once with the approved restricted list query"
     );

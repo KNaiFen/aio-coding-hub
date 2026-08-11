@@ -112,11 +112,12 @@ jobs:
             existing_pr="$(
               gh pr list \
                 --repo "${GITHUB_REPOSITORY}" \
-                --head "${UPSTREAM_HEAD}" \
+                --head "${TARGET_BRANCH}" \
                 --base "${TARGET_BRANCH}" \
                 --state open \
-                --json number \
-                --jq '.[0].number // empty'
+                --limit 1000 \
+                --json number,headRepositoryOwner \
+                --jq ".[] | select(.headRepositoryOwner.login == \"${UPSTREAM_OWNER}\") | .number"
             )"
 
             local pr_number
