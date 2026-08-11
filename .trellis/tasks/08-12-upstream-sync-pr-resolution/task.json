@@ -3,7 +3,7 @@
   "name": "upstream-sync-pr-resolution",
   "title": "修复 Sync Upstream PR 编号解析与冲突收敛",
   "description": "修复新建同步 PR 后的编号解析，并保持 DIRTY/UNKNOWN fail-closed 边界。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": "upstream-sync-pr-resolution",
   "package": "aio-coding-hub",

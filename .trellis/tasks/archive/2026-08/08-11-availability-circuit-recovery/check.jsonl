@@ -1,0 +1,3 @@
+{"file":".trellis/spec/aio-coding-hub/backend/index.md","reason":"审查 Rust runtime 行为、错误语义和测试覆盖。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/index.md","reason":"审查 Gateway 事件和无公开合同漂移。"}
+{"file":".trellis/spec/guides/index.md","reason":"审查状态机变更的边界与验证完整性。"}
