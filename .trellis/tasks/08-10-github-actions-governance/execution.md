@@ -14,8 +14,8 @@
 - 当前修复 PR：待创建；真实失败证据为 [run 31487461146](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31487461146) 与 [PR #113](https://github.com/KNaiFen/aio-coding-hub/pull/113)
 - 直接 main 迁移来源：无
 - PENDING 审阅：`AIO-PENDING-029` 明确排除，禁止触碰 `upgrade-tui.command`
-- 当前唯一写者：main session（仅完成规划；移交后由执行 session 独占写入）
-- 当前阶段：已确认的 post-merge 修复规划；等待规划提交、执行 session 施工、PR 与 CI。
+- 当前唯一写者：执行 session（待用户在本 worktree 启动；启动后独占写入）
+- 当前阶段：实施就绪；等待执行 session 施工、PR、CI 与 `delivery.md` 交付。
 
 ## 阅读顺序
 
