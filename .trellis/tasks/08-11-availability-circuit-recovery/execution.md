@@ -8,7 +8,7 @@
 - Worktree：`/Users/knaifen/Documents/Codex/aio-coding-hub/08-11-availability-circuit-recovery`
 - 分支：`fix/availability-circuit-recovery`
 - 基线：`origin/main` @ `9b05b28d5841584dc6f2a867947afd5d23f76246`
-- 规划提交：pending coordinator freeze; do not start until this field is replaced with the recorded SHA.
+- 规划提交：`e57fed359ec9112661c2a31579b1e96b49985982`（本任务的完整计划材料）。
 - 实施授权：已确认，2026-08-11；覆盖 `prd.md` 中 R-01 至 R-08 与 AC-01 至 AC-07。
 - PR 目标：`main`；PR：尚未创建。
 - 当前唯一写者：user execution session。

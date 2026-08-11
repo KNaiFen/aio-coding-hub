@@ -15,7 +15,7 @@
   "branch": "fix/availability-circuit-recovery",
   "base_branch": "main",
   "worktree_path": "/Users/knaifen/Documents/Codex/aio-coding-hub/08-11-availability-circuit-recovery",
-  "commit": null,
+  "commit": "e57fed359ec9112661c2a31579b1e96b49985982",
   "pr_url": null,
   "subtasks": [],
   "children": [],

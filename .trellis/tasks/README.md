@@ -11,7 +11,7 @@
 | 任务目录 | 阶段 | 分支 | base SHA | 规划提交 | Worktree | PR | 当前唯一写者 | 依赖/说明 |
 |---|---|---|---|---|---|---|---|---|
 | [`08-10-github-actions-governance`](./08-10-github-actions-governance/) | implementation | `chore/github-actions-governance` | `9b05b28d5841584dc6f2a867947afd5d23f76246` | `30a021269f3b6ae2c46f195faa273a1af81f26f9` | `/Users/knaifen/Documents/Codex/aio-coding-hub/08-10-github-actions-governance` | 尚未创建 | main session | 独立 worktree；排除 `AIO-PENDING-029`；GitHub App 创建/安装需要 owner 操作。 |
-| [`08-11-availability-circuit-recovery`](./08-11-availability-circuit-recovery/) | planning（材料已写，待执行窗口开工） | `fix/availability-circuit-recovery` | `9b05b28d5841584dc6f2a867947afd5d23f76246` | 待首次规划提交后冻结 | `/Users/knaifen/Documents/Codex/aio-coding-hub/08-11-availability-circuit-recovery` | 未创建 | user execution session | 与 `chore/github-actions-governance` worktree 无文件重叠；不处理 `AIO-PENDING-029`。 |
+| [`08-11-availability-circuit-recovery`](./08-11-availability-circuit-recovery/) | planning（材料已写，待执行窗口开工） | `fix/availability-circuit-recovery` | `9b05b28d5841584dc6f2a867947afd5d23f76246` | `7de76573b530f7e58b21e7cafbca0642e7e59b26` | `/Users/knaifen/Documents/Codex/aio-coding-hub/08-11-availability-circuit-recovery` | 未创建 | user execution session | 与 `chore/github-actions-governance` worktree 无文件重叠；不处理 `AIO-PENDING-029`。 |
 | [`08-03-upstream-claude-oauth`](./08-03-upstream-claude-oauth/) | planning（暂停，未委派） | 无（旧分支已删除） | 不适用 | 未登记 | 未创建 | 未创建 | main session | 用户已决定暂不处理；不影响当前工作。恢复前需重新确认方案，并完成真实隔离账号验证。 |
 
 ## 归档

@@ -5,7 +5,7 @@
 - Implementation authorization: confirmed
 - Confirmation date and summary: 2026-08-11；用户确认本任务创建独立 worktree，由单独执行窗口按本任务材料施工。
 - Confirmed coverage: 手动与定时可用性探测均可作为 HalfOpen 恢复证据；不缩短 Open 时长；HalfOpen 探测失败立即重新 Open；定时成功且写入后仍为 HalfOpen 时，30 秒后补测一次；Gateway 未运行时只记录可用性观测。
-- Planning revision: pending initial planning commit; the coordinator will freeze the full SHA before the execution session starts.
+- Planning revision: `e57fed359ec9112661c2a31579b1e96b49985982` (`docs(task): plan availability circuit recovery`).
 - Execution route: delegated worktree
 - Migrated from direct-main record: none
 
