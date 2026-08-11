@@ -151,7 +151,7 @@
 - 功能 PR：[#109](https://github.com/KNaiFen/aio-coding-hub/pull/109)，接受候选为 `8c1c9d27e046aeab8290308e40d4e6570218539c`；2026-08-12 已以 squash merge commit `15d08f4399d6b1a5361b48d8110e9b49ca3650bb` 进入 `main`。
 - 验收与 CI：Round 3 已复验 F-001/F-002；严格必需的 [`ci-gate` job 93919034995](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31531473148/job/93919034995) 和 `pr-title` 均成功，相关 Rust 与 CodeQL 检查亦成功。
 - 知识库与 PENDING：未引入新的公开合同、配置、迁移或需拆分的遗留事项；长期行为和取舍由已合并代码与本任务归档记录保留。
-- 归档与清理：本 records-only closeout PR 归档任务目录并更新索引。原任务 worktree 和分支须在本 PR 合并、且执行 session 确认停止后由 main 清理。
+- 归档与清理：records-only closeout PR [#117](https://github.com/KNaiFen/aio-coding-hub/pull/117) 已以 merge commit `706ac387df0a86df3160a2d55e8ecc7419717e2f` 合并。执行 session 已暂停后，main 已删除原任务 worktree、closeout worktree 及本地 `fix/availability-circuit-recovery`、`chore/close-availability-circuit-recovery` 分支；`git ls-remote --heads origin` 已确认两条对应远端分支不存在。
 
 ## 返工记录
 
