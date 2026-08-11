@@ -193,10 +193,7 @@ impl ScheduledProbeTarget {
 enum ProbeSource {
     Manual,
     Scheduled { boundary_ms: i64 },
-    Recovery {
-        due_at_ms: i64,
-        recovery_epoch: u64,
-    },
+    Recovery { due_at_ms: i64, recovery_epoch: u64 },
 }
 
 impl ProbeSource {
@@ -493,10 +490,7 @@ impl ProviderAvailabilityProbeRuntimeState {
             }
         }
 
-        let completed = CompletedProbe {
-            result,
-            recovery,
-        };
+        let completed = CompletedProbe { result, recovery };
         for waiter in in_flight.waiters {
             let _ = waiter.send(completed.clone());
         }
@@ -578,11 +572,7 @@ impl ProviderAvailabilityProbeRuntimeState {
         )
     }
 
-    async fn schedule_recovery_probe(
-        &self,
-        provider_id: i64,
-        recovery: RecoveryDirective,
-    ) {
+    async fn schedule_recovery_probe(&self, provider_id: i64, recovery: RecoveryDirective) {
         let mut inner = self.shared.inner.lock().await;
         queue_recovery_target(&mut inner, provider_id, recovery);
     }
@@ -974,11 +964,7 @@ fn take_due_recovery_targets(
     targets
 }
 
-fn queue_recovery_target(
-    inner: &mut RuntimeInner,
-    provider_id: i64,
-    recovery: RecoveryDirective,
-) {
+fn queue_recovery_target(inner: &mut RuntimeInner, provider_id: i64, recovery: RecoveryDirective) {
     let Some(entry) = inner.entries.get_mut(&provider_id) else {
         return;
     };
@@ -1317,17 +1303,10 @@ INSERT INTO providers(
         queue_recovery_target(&mut inner, 3, old_recovery);
         let old_due_at_ms = 10_000 + RECOVERY_PROBE_DELAY_MS;
 
-        assert!(
-            update_recovery_work_after_circuit_evidence(
-                &mut inner,
-                3,
-                generation,
-                10_000,
-                false,
-                false,
-            )
-            .is_none()
-        );
+        assert!(update_recovery_work_after_circuit_evidence(
+            &mut inner, 3, generation, 10_000, false, false,
+        )
+        .is_none());
         queue_recovery_target(&mut inner, 3, old_recovery);
         assert!(inner.entries[&3].recovery.is_none());
         let targets = reconcile_schedules_inner(
@@ -1353,17 +1332,10 @@ INSERT INTO providers(
         assert_eq!(targets.len(), 1);
         assert!(recovery_target_is_current(&inner, targets[0]));
 
-        assert!(
-            update_recovery_work_after_circuit_evidence(
-                &mut inner,
-                3,
-                generation,
-                20_000,
-                false,
-                false,
-            )
-            .is_none()
-        );
+        assert!(update_recovery_work_after_circuit_evidence(
+            &mut inner, 3, generation, 20_000, false, false,
+        )
+        .is_none());
         assert!(!recovery_target_is_current(&inner, targets[0]));
     }
 
@@ -1394,17 +1366,10 @@ INSERT INTO providers(
         .expect("claimed recovery target");
         assert!(recovery_target_is_current(&inner, target));
 
-        assert!(
-            update_recovery_work_after_circuit_evidence(
-                &mut inner,
-                3,
-                generation,
-                20_000,
-                true,
-                false,
-            )
-            .is_none()
-        );
+        assert!(update_recovery_work_after_circuit_evidence(
+            &mut inner, 3, generation, 20_000, true, false,
+        )
+        .is_none());
         assert!(!recovery_target_is_current(&inner, target));
     }
 
@@ -1814,17 +1779,10 @@ INSERT INTO providers(
             .into_iter()
             .next()
             .expect("claimed recovery target");
-            assert!(
-                update_recovery_work_after_circuit_evidence(
-                    &mut inner,
-                    6,
-                    generation,
-                    10_000,
-                    false,
-                    false,
-                )
-                .is_none()
-            );
+            assert!(update_recovery_work_after_circuit_evidence(
+                &mut inner, 6, generation, 10_000, false, false,
+            )
+            .is_none());
             target
         };
         let ScheduledProbeSource::Recovery { recovery_epoch } = target.source else {
@@ -1841,7 +1799,9 @@ INSERT INTO providers(
                 .await,
             ProbeDecision::Stale
         ));
-        assert!(state.shared.inner.lock().await.entries[&6].in_flight.is_none());
+        assert!(state.shared.inner.lock().await.entries[&6]
+            .in_flight
+            .is_none());
     }
 
     #[tokio::test]
