@@ -1,0 +1,4 @@
+{"file":".trellis/spec/aio-coding-hub/backend/index.md","reason":"Rust 后端运行时、错误与测试规范。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/index.md","reason":"Gateway 事件、合同和跨层验证规范。"}
+{"file":".trellis/spec/guides/index.md","reason":"通用设计与验证决策指南。"}
+{"file":".trellis/tasks/08-11-availability-circuit-recovery/research/confirmed-facts.md","reason":"规划期确认的熔断器与 probe runtime 调用链。"}
