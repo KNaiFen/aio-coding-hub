@@ -239,11 +239,21 @@ expectContractFailure(
   "frontend must require support contract success explicitly",
   (fixture) => {
     fixture.ciWorkflow = fixture.ciWorkflow.replace(
-      "      needs.change-scope.outputs.full_ci == 'true' &&\n      needs.support-contract.result == 'success'\n    runs-on: ubuntu-latest",
-      "      needs.change-scope.outputs.full_ci == 'true'\n    runs-on: ubuntu-latest"
+      "      needs.change-scope.outputs.frontend_ci == 'true' &&\n      needs.support-contract.result == 'success'\n    runs-on: ubuntu-latest",
+      "      needs.change-scope.outputs.frontend_ci == 'true'\n    runs-on: ubuntu-latest"
     );
   },
   /ci\.yml frontend if must equal/
+);
+expectContractFailure(
+  "support contract must run for either code domain",
+  (fixture) => {
+    fixture.ciWorkflow = fixture.ciWorkflow.replace(
+      "      (needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true')",
+      "      needs.change-scope.outputs.full_ci == 'true'"
+    );
+  },
+  /ci\.yml support-contract if must equal/
 );
 expectContractFailure(
   "candidate plan must override skipped ancestors explicitly",
@@ -458,6 +468,16 @@ expectContractFailure(
     fixture.ciWorkflow = fixture.ciWorkflow.replace(
       "          RUST_RESULT: ${{ needs.rust.result }}",
       "          RUST_RESULT: success"
+    );
+  },
+  /ci\.yml ci-gate must bind aggregation results directly from needs\.\*/
+);
+expectContractFailure(
+  "aggregate gate must bind the real frontend selection",
+  (fixture) => {
+    fixture.ciWorkflow = fixture.ciWorkflow.replace(
+      "          FRONTEND_CI: ${{ needs.change-scope.outputs.frontend_ci }}",
+      "          FRONTEND_CI: true"
     );
   },
   /ci\.yml ci-gate must bind aggregation results directly from needs\.\*/

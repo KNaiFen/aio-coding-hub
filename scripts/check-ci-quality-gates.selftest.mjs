@@ -231,11 +231,22 @@ for (const [name, fixture, expected] of [
     {
       ...valid,
       ciWorkflow: ciWorkflow.replace(
-        "      needs.change-scope.outputs.full_ci == 'true' &&\n      needs.support-contract.result == 'success'\n    runs-on: ubuntu-latest",
-        "      needs.change-scope.outputs.full_ci == 'true'\n    runs-on: ubuntu-latest"
+        "      needs.change-scope.outputs.frontend_ci == 'true' &&\n      needs.support-contract.result == 'success'\n    runs-on: ubuntu-latest",
+        "      needs.change-scope.outputs.frontend_ci == 'true'\n    runs-on: ubuntu-latest"
       ),
     },
     /ci\.yml frontend if must equal/,
+  ],
+  [
+    "support contract must run for either code domain",
+    {
+      ...valid,
+      ciWorkflow: ciWorkflow.replace(
+        "      (needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true')",
+        "      needs.change-scope.outputs.full_ci == 'true'"
+      ),
+    },
+    /ci\.yml support-contract if must equal/,
   ],
   [
     "candidate build cannot inherit a skipped manual guard",
@@ -266,6 +277,17 @@ for (const [name, fixture, expected] of [
       ciWorkflow: ciWorkflow.replace(
         "          FULL_CI: ${{ needs.change-scope.outputs.full_ci }}",
         "          FULL_CI: 'true'"
+      ),
+    },
+    /ci\.yml ci-gate must bind aggregation results directly from needs\.\*/,
+  ],
+  [
+    "aggregate gate must consume the real frontend-CI output",
+    {
+      ...valid,
+      ciWorkflow: ciWorkflow.replace(
+        "          FRONTEND_CI: ${{ needs.change-scope.outputs.frontend_ci }}",
+        "          FRONTEND_CI: 'true'"
       ),
     },
     /ci\.yml ci-gate must bind aggregation results directly from needs\.\*/,

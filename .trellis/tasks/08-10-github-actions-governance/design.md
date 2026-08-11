@@ -8,7 +8,7 @@
 
 PR 标题检查迁移到独立的 `pr-title.yml`。它不 checkout、不执行仓库代码，只读取事件 payload；`edited` 只触发该工作流，避免标题改动重新启动完整 CI。
 
-手动 `ci` 仍支持现有 `build_release_candidate` 输入。`workflow_dispatch` 的 scope 结果保持 full CI，但把 benchmark 输出置为 false；push/PR 的路径命中逻辑保持不变。`performance.yml` 只承接显式手动 benchmark，不参与 required gate。
+手动 `ci` 仍支持现有 `build_release_candidate` 输入。`workflow_dispatch` 的 scope 结果保持 full CI，但把 benchmark 输出置为 false；PR 使用分域输出，`dev`/`main` push 强制 full CI。`performance.yml` 只承接显式手动 benchmark，不参与 required gate。
 
 ## 2. 上游同步授权
 

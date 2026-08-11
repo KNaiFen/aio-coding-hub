@@ -41,6 +41,9 @@ const CI_GATE_RESULT_ENV = new Map([
   ["CHANGE_SCOPE_RESULT", "${{ needs.change-scope.result }}"],
   ["SCOPE", "${{ needs.change-scope.outputs.scope }}"],
   ["FULL_CI", "${{ needs.change-scope.outputs.full_ci }}"],
+  ["FRONTEND_CI", "${{ needs.change-scope.outputs.frontend_ci }}"],
+  ["RUST_CI", "${{ needs.change-scope.outputs.rust_ci }}"],
+  ["SHARED_CI", "${{ needs.change-scope.outputs.shared_ci }}"],
   ["DOCS_CHECKS", "${{ needs.change-scope.outputs.docs_checks }}"],
   ["DOCS_RESULT", "${{ needs.docs-contract.result }}"],
   ["SUPPORT_RESULT", "${{ needs.support-contract.result }}"],
@@ -67,15 +70,15 @@ const CI_JOB_CONDITIONS = new Map([
   ],
   [
     "support-contract",
-    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.full_ci == 'true'",
+    "always() && needs.change-scope.result == 'success' && (needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true')",
   ],
   [
     "frontend",
-    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.full_ci == 'true' && needs.support-contract.result == 'success'",
+    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.frontend_ci == 'true' && needs.support-contract.result == 'success'",
   ],
   [
     "rust",
-    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.full_ci == 'true' && needs.support-contract.result == 'success'",
+    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.rust_ci == 'true' && needs.support-contract.result == 'success'",
   ],
   [
     "candidate-plan",

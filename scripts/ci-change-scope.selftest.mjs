@@ -21,6 +21,9 @@ function expectScope(paths, expected) {
   const result = classifyPaths(paths, policy);
   assert.equal(result.scope, expected.scope);
   assert.equal(result.fullCi, expected.fullCi);
+  assert.equal(result.frontendCi, expected.frontendCi ?? expected.fullCi);
+  assert.equal(result.rustCi, expected.rustCi ?? expected.fullCi);
+  assert.equal(result.sharedCi, expected.sharedCi ?? expected.fullCi);
   assert.equal(result.docsChecks, expected.docsChecks);
   assert.equal(result.providerTrendBenchmark, expected.providerTrendBenchmark ?? false);
 }
@@ -41,8 +44,11 @@ expectScope(["PENDING.md", "docs/plugins/authoring.md"], {
   docsChecks: true,
 });
 expectScope(["src/main.tsx", "docs/plugins/authoring.md"], {
-  scope: "full",
-  fullCi: true,
+  scope: "frontend",
+  fullCi: false,
+  frontendCi: true,
+  rustCi: false,
+  sharedCi: false,
   docsChecks: true,
 });
 
@@ -56,12 +62,20 @@ for (const path of [
   "package.json",
   "pnpm-lock.yaml",
   "scripts/check-spec-links.mjs",
-  "src/main.tsx",
 ]) {
-  assert.equal(classifyPath(path, policy).tier, "full", path);
+  assert.equal(classifyPath(path, policy).tier, "shared", path);
+}
+for (const path of ["src/main.tsx", "src/styles.css", "packages/plugin-sdk/src/index.ts"]) {
+  assert.equal(classifyPath(path, policy).tier, "frontend", path);
+}
+for (const path of ["src-tauri/src/lib.rs", "src-tauri/Cargo.lock"]) {
+  assert.equal(classifyPath(path, policy).tier, "rust", path);
+}
+for (const path of ["src/generated/bindings.ts", "src-tauri/tauri.conf.json"]) {
+  assert.equal(classifyPath(path, policy).tier, "shared", path);
 }
 for (const path of ["../README.md", "/README.md", "docs\\guide.md", "docs//guide.md"]) {
-  assert.equal(classifyPath(path, policy).tier, "full", path);
+  assert.equal(classifyPath(path, policy).tier, "shared", path);
 }
 
 const permissivePolicy = structuredClone(policy);
@@ -90,10 +104,37 @@ expectScope([], {
 });
 
 expectScope(["src-tauri/src/domain/usage_stats/trend_common.rs"], {
-  scope: "full",
-  fullCi: true,
+  scope: "rust",
+  fullCi: false,
+  frontendCi: false,
+  rustCi: true,
+  sharedCi: false,
   docsChecks: false,
   providerTrendBenchmark: true,
+});
+expectScope(["src/main.tsx"], {
+  scope: "frontend",
+  fullCi: false,
+  frontendCi: true,
+  rustCi: false,
+  sharedCi: false,
+  docsChecks: false,
+});
+expectScope(["src/main.tsx", "src-tauri/src/lib.rs"], {
+  scope: "full",
+  fullCi: true,
+  frontendCi: true,
+  rustCi: true,
+  sharedCi: true,
+  docsChecks: false,
+});
+expectScope(["src/generated/bindings.ts"], {
+  scope: "full",
+  fullCi: true,
+  frontendCi: true,
+  rustCi: true,
+  sharedCi: true,
+  docsChecks: false,
 });
 assert.equal(
   shouldRunProviderTrendBenchmark(["src-tauri/src/infra/usage_provider_daily_rollup.rs"]),
@@ -120,8 +161,29 @@ expectScope(
   ),
   { scope: "process-docs", fullCi: false, docsChecks: false }
 );
-assert.equal(classifyNameStatus("R100\0PENDING.md\0src/pending.ts\0", policy).scope, "full");
+assert.equal(classifyNameStatus("R100\0PENDING.md\0src/pending.ts\0", policy).scope, "frontend");
 assert.equal(classifyNameStatus("D\0docs/removed.md\0", policy).scope, "checked-docs");
+for (const status of ["R100", "C090"]) {
+  for (const [from, to] of [
+    ["src/old.tsx", "src-tauri/src/new.rs"],
+    ["src-tauri/src/old.rs", "src/new.tsx"],
+  ]) {
+    const result = classifyNameStatus(`${status}\0${from}\0${to}\0`, policy);
+    assert.equal(result.scope, "full", `${status} ${from} -> ${to}`);
+    assert.equal(result.frontendCi, true);
+    assert.equal(result.rustCi, true);
+    assert.equal(result.sharedCi, true);
+  }
+}
+const docsToFrontendCopy = classifyNameStatus(
+  "C090\0docs/old.md\0src/copied.tsx\0",
+  policy
+);
+assert.equal(docsToFrontendCopy.scope, "frontend");
+assert.equal(docsToFrontendCopy.docsChecks, true);
+assert.equal(docsToFrontendCopy.frontendCi, true);
+assert.equal(docsToFrontendCopy.rustCi, false);
+assert.equal(classifyNameStatus("D\0src-tauri/src/removed.rs\0", policy).scope, "rust");
 
 const baseSha = sha("a");
 const headSha = sha("b");
@@ -171,21 +233,38 @@ const failedClosed = runClassifier({
 });
 assert.equal(failedClosed.scope, "full");
 assert.equal(failedClosed.fullCi, true);
+assert.equal(failedClosed.frontendCi, true);
+assert.equal(failedClosed.rustCi, true);
+assert.equal(failedClosed.sharedCi, true);
 assert.equal(failedClosed.providerTrendBenchmark, true);
 assert.equal(failedClosed.reason, "classification-error");
 
 const manual = runClassifier({ eventName: "workflow_dispatch", policyPath });
 assert.equal(manual.providerTrendBenchmark, false);
 assert.equal(manual.fullCi, true);
+assert.equal(manual.frontendCi, true);
+assert.equal(manual.rustCi, true);
+assert.equal(manual.sharedCi, true);
 assert.equal(manual.reason, "manual-dispatch");
+
+const branchPush = runClassifier(
+  { eventName: "push", beforeSha: baseSha, headSha, policyPath },
+  () => "M\0src/styles.css\0"
+);
+assert.equal(branchPush.scope, "full");
+assert.equal(branchPush.fullCi, true);
+assert.equal(branchPush.frontendCi, true);
+assert.equal(branchPush.rustCi, true);
+assert.equal(branchPush.sharedCi, true);
+assert.equal(branchPush.providerTrendBenchmark, false);
 
 assert.throws(
   () =>
     validatePolicy({
       ...policy,
-      version: 2,
+      version: 1,
     }),
-  /version must be 1/
+  /version must be 2/
 );
 
 console.log("CI change-scope self-test passed.");

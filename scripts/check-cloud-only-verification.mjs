@@ -59,6 +59,9 @@ const CI_GATE_RESULT_ENV = new Map([
   ["CHANGE_SCOPE_RESULT", "${{ needs.change-scope.result }}"],
   ["SCOPE", "${{ needs.change-scope.outputs.scope }}"],
   ["FULL_CI", "${{ needs.change-scope.outputs.full_ci }}"],
+  ["FRONTEND_CI", "${{ needs.change-scope.outputs.frontend_ci }}"],
+  ["RUST_CI", "${{ needs.change-scope.outputs.rust_ci }}"],
+  ["SHARED_CI", "${{ needs.change-scope.outputs.shared_ci }}"],
   ["DOCS_CHECKS", "${{ needs.change-scope.outputs.docs_checks }}"],
   ["DOCS_RESULT", "${{ needs.docs-contract.result }}"],
   ["SUPPORT_RESULT", "${{ needs.support-contract.result }}"],
@@ -71,7 +74,7 @@ const CI_GATE_RESULT_ENV = new Map([
   ["ASSEMBLE_RESULT", "${{ needs.assemble-release-candidate.result }}"],
 ]);
 // The aggregation script's complete shell control flow is part of the required gate.
-const CI_GATE_RUN_SHA256 = "e05c0c0da1c482e4e96e5d4a5abcd487ad7493b5ff8b8cf32ffd23d59fac2eb6";
+const CI_GATE_RUN_SHA256 = "4329b6fe09d4ead5cb55ca54a3b8ff98089d11642394a1ef98da40e24f0468bf";
 const CI_JOB_CONDITIONS = new Map([
   [
     "docs-contract",
@@ -79,15 +82,15 @@ const CI_JOB_CONDITIONS = new Map([
   ],
   [
     "support-contract",
-    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.full_ci == 'true'",
+    "always() && needs.change-scope.result == 'success' && (needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true')",
   ],
   [
     "frontend",
-    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.full_ci == 'true' && needs.support-contract.result == 'success'",
+    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.frontend_ci == 'true' && needs.support-contract.result == 'success'",
   ],
   [
     "rust",
-    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.full_ci == 'true' && needs.support-contract.result == 'success'",
+    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.rust_ci == 'true' && needs.support-contract.result == 'success'",
   ],
   [
     "candidate-plan",
@@ -491,6 +494,9 @@ function assertCandidatePrBoundary(workflow, failures) {
   const candidateBoundary = [
     'if [[ "$FULL_CI" == "true" ]]; then',
     '[[ "$SCOPE" == "full" ]]',
+    '[[ "$FRONTEND_CI" == "true" ]]',
+    '[[ "$RUST_CI" == "true" ]]',
+    '[[ "$SHARED_CI" == "true" ]]',
     '[[ "$SUPPORT_RESULT" == "success" ]]',
     '[[ "$FRONTEND_RESULT" == "success" ]]',
     '[[ "$RUST_RESULT" == "success" ]]',

@@ -47,6 +47,9 @@ jobs:
     outputs:
       scope: ${{ steps.scope.outputs.scope }}
       full_ci: ${{ steps.scope.outputs.full_ci }}
+      frontend_ci: ${{ steps.scope.outputs.frontend_ci }}
+      rust_ci: ${{ steps.scope.outputs.rust_ci }}
+      shared_ci: ${{ steps.scope.outputs.shared_ci }}
       docs_checks: ${{ steps.scope.outputs.docs_checks }}
       provider_trend_benchmark: ${{ steps.scope.outputs.provider_trend_benchmark }}
       reason: ${{ steps.scope.outputs.reason }}
@@ -112,7 +115,7 @@ jobs:
     if: >-
       always() &&
       needs.change-scope.result == 'success' &&
-      needs.change-scope.outputs.full_ci == 'true'
+      (needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -167,7 +170,7 @@ jobs:
     if: >-
       always() &&
       needs.change-scope.result == 'success' &&
-      needs.change-scope.outputs.full_ci == 'true' &&
+      needs.change-scope.outputs.frontend_ci == 'true' &&
       needs.support-contract.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -227,7 +230,7 @@ jobs:
     if: >-
       always() &&
       needs.change-scope.result == 'success' &&
-      needs.change-scope.outputs.full_ci == 'true' &&
+      needs.change-scope.outputs.rust_ci == 'true' &&
       needs.support-contract.result == 'success'
     runs-on: ubuntu-22.04
     timeout-minutes: 60
@@ -716,6 +719,9 @@ jobs:
           CHANGE_SCOPE_RESULT: ${{ needs.change-scope.result }}
           SCOPE: ${{ needs.change-scope.outputs.scope }}
           FULL_CI: ${{ needs.change-scope.outputs.full_ci }}
+          FRONTEND_CI: ${{ needs.change-scope.outputs.frontend_ci }}
+          RUST_CI: ${{ needs.change-scope.outputs.rust_ci }}
+          SHARED_CI: ${{ needs.change-scope.outputs.shared_ci }}
           DOCS_CHECKS: ${{ needs.change-scope.outputs.docs_checks }}
           DOCS_RESULT: ${{ needs.docs-contract.result }}
           SUPPORT_RESULT: ${{ needs.support-contract.result }}
@@ -737,6 +743,9 @@ jobs:
 
           [[ "$CHANGE_SCOPE_RESULT" == "success" ]]
           [[ "$FULL_CI" == "true" || "$FULL_CI" == "false" ]]
+          [[ "$FRONTEND_CI" == "true" || "$FRONTEND_CI" == "false" ]]
+          [[ "$RUST_CI" == "true" || "$RUST_CI" == "false" ]]
+          [[ "$SHARED_CI" == "true" || "$SHARED_CI" == "false" ]]
           [[ "$DOCS_CHECKS" == "true" || "$DOCS_CHECKS" == "false" ]]
           if [[ "$DOCS_CHECKS" == "true" ]]; then
             [[ "$DOCS_RESULT" == "success" ]]
@@ -746,6 +755,9 @@ jobs:
 
           if [[ "$FULL_CI" == "true" ]]; then
             [[ "$SCOPE" == "full" ]]
+            [[ "$FRONTEND_CI" == "true" ]]
+            [[ "$RUST_CI" == "true" ]]
+            [[ "$SHARED_CI" == "true" ]]
             [[ "$SUPPORT_RESULT" == "success" ]]
             [[ "$FRONTEND_RESULT" == "success" ]]
             [[ "$RUST_RESULT" == "success" ]]
@@ -767,14 +779,29 @@ jobs:
               [[ "$ASSEMBLE_RESULT" == "skipped" ]]
             fi
           else
-            if [[ "$DOCS_CHECKS" == "true" ]]; then
-              [[ "$SCOPE" == "checked-docs" ]]
+            [[ "$SHARED_CI" == "false" ]]
+            if [[ "$FRONTEND_CI" == "true" ]]; then
+              [[ "$RUST_CI" == "false" ]]
+              [[ "$SCOPE" == "frontend" ]]
+              [[ "$SUPPORT_RESULT" == "success" ]]
+              [[ "$FRONTEND_RESULT" == "success" ]]
+              [[ "$RUST_RESULT" == "skipped" ]]
+            elif [[ "$RUST_CI" == "true" ]]; then
+              [[ "$SCOPE" == "rust" ]]
+              [[ "$SUPPORT_RESULT" == "success" ]]
+              [[ "$FRONTEND_RESULT" == "skipped" ]]
+              [[ "$RUST_RESULT" == "success" ]]
             else
-              [[ "$SCOPE" == "process-docs" ]]
+              [[ "$RUST_CI" == "false" ]]
+              if [[ "$DOCS_CHECKS" == "true" ]]; then
+                [[ "$SCOPE" == "checked-docs" ]]
+              else
+                [[ "$SCOPE" == "process-docs" ]]
+              fi
+              [[ "$SUPPORT_RESULT" == "skipped" ]]
+              [[ "$FRONTEND_RESULT" == "skipped" ]]
+              [[ "$RUST_RESULT" == "skipped" ]]
             fi
-            [[ "$SUPPORT_RESULT" == "skipped" ]]
-            [[ "$FRONTEND_RESULT" == "skipped" ]]
-            [[ "$RUST_RESULT" == "skipped" ]]
             [[ "$PLAN_RESULT" == "skipped" ]]
             [[ "$BUILD_RESULT" == "skipped" ]]
             [[ "$TUI_BUILD_RESULT" == "skipped" ]]

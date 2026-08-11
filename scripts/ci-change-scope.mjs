@@ -4,7 +4,14 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const DEFAULT_POLICY_PATH = ".github/ci-scope.json";
-const POLICY_KEYS = ["checkedDocumentation", "processDocumentation", "version"];
+const POLICY_KEYS = [
+  "checkedDocumentation",
+  "frontendSource",
+  "processDocumentation",
+  "rustSource",
+  "sharedSource",
+  "version",
+];
 const RULE_SET_KEYS = ["exactPaths", "prefixRules"];
 const PREFIX_RULE_KEYS = ["extensions", "prefix"];
 const SHA_PATTERN = /^[0-9a-f]{40,64}$/i;
@@ -94,11 +101,14 @@ function validateRuleSet(ruleSet, label) {
 export function validatePolicy(policy) {
   assertObject(policy, "CI scope policy");
   assertExactKeys(policy, POLICY_KEYS, "CI scope policy");
-  if (policy.version !== 1) {
-    throw new Error("CI scope policy version must be 1");
+  if (policy.version !== 2) {
+    throw new Error("CI scope policy version must be 2");
   }
   validateRuleSet(policy.processDocumentation, "processDocumentation");
   validateRuleSet(policy.checkedDocumentation, "checkedDocumentation");
+  validateRuleSet(policy.frontendSource, "frontendSource");
+  validateRuleSet(policy.rustSource, "rustSource");
+  validateRuleSet(policy.sharedSource, "sharedSource");
   return policy;
 }
 
@@ -118,19 +128,40 @@ function matchesRuleSet(path, ruleSet) {
 
 export function classifyPath(path, policy) {
   if (!isSafeRepositoryPath(path)) {
-    return { path, tier: "full", reason: "unsafe-path" };
+    return { path, tier: "shared", reason: "unsafe-path" };
   }
   if (
     CONTROL_PLANE_EXACT_PATHS.has(path) ||
     CONTROL_PLANE_PREFIXES.some((prefix) => path.startsWith(prefix))
   ) {
-    return { path, tier: "full", reason: "ci-control-plane" };
+    return { path, tier: "shared", reason: "ci-control-plane" };
   }
 
   const processDocumentation = matchesRuleSet(path, policy.processDocumentation);
   const checkedDocumentation = matchesRuleSet(path, policy.checkedDocumentation);
   if (processDocumentation && checkedDocumentation) {
-    return { path, tier: "full", reason: "ambiguous-policy" };
+    return { path, tier: "shared", reason: "ambiguous-policy" };
+  }
+  const frontendSource = matchesRuleSet(path, policy.frontendSource);
+  const rustSource = matchesRuleSet(path, policy.rustSource);
+  const sharedSource = matchesRuleSet(path, policy.sharedSource);
+  if (
+    (processDocumentation || checkedDocumentation) &&
+    (frontendSource || rustSource || sharedSource)
+  ) {
+    return { path, tier: "shared", reason: "ambiguous-policy" };
+  }
+  if (sharedSource) {
+    return { path, tier: "shared", reason: "shared-source" };
+  }
+  if (frontendSource && rustSource) {
+    return { path, tier: "shared", reason: "ambiguous-policy" };
+  }
+  if (frontendSource) {
+    return { path, tier: "frontend", reason: "frontend-source" };
+  }
+  if (rustSource) {
+    return { path, tier: "rust", reason: "rust-source" };
   }
   if (checkedDocumentation) {
     return { path, tier: "checked-docs", reason: "checked-documentation" };
@@ -138,13 +169,16 @@ export function classifyPath(path, policy) {
   if (processDocumentation) {
     return { path, tier: "process-docs", reason: "process-documentation" };
   }
-  return { path, tier: "full", reason: "unclassified-path" };
+  return { path, tier: "shared", reason: "unclassified-path" };
 }
 
 export function fullCiResult(reason, error = undefined) {
   return {
     scope: "full",
     fullCi: true,
+    frontendCi: true,
+    rustCi: true,
+    sharedCi: true,
     docsChecks: false,
     providerTrendBenchmark: true,
     reason,
@@ -157,6 +191,18 @@ export function manualCiResult() {
   return {
     ...fullCiResult("manual-dispatch"),
     providerTrendBenchmark: false,
+  };
+}
+
+function forceFullResult(result, reason) {
+  return {
+    ...result,
+    scope: "full",
+    fullCi: true,
+    frontendCi: true,
+    rustCi: true,
+    sharedCi: true,
+    reason,
   };
 }
 
@@ -175,18 +221,39 @@ export function classifyPaths(paths, policy) {
   }
 
   const classifications = uniquePaths.map((path) => classifyPath(path, policy));
-  const fullCi = classifications.some(({ tier }) => tier === "full");
+  const frontendSource = classifications.some(({ tier }) => tier === "frontend");
+  const rustSource = classifications.some(({ tier }) => tier === "rust");
+  const sharedCi =
+    classifications.some(({ tier }) => tier === "shared") || (frontendSource && rustSource);
+  const fullCi = sharedCi;
+  const frontendCi = sharedCi || frontendSource;
+  const rustCi = sharedCi || rustSource;
   const docsChecks = classifications.some(({ tier }) => tier === "checked-docs");
   return {
-    scope: fullCi ? "full" : docsChecks ? "checked-docs" : "process-docs",
+    scope: fullCi
+      ? "full"
+      : frontendCi
+        ? "frontend"
+        : rustCi
+          ? "rust"
+          : docsChecks
+            ? "checked-docs"
+            : "process-docs",
     fullCi,
+    frontendCi,
+    rustCi,
+    sharedCi,
     docsChecks,
     providerTrendBenchmark: shouldRunProviderTrendBenchmark(uniquePaths),
     reason: fullCi
       ? "full-ci-path"
-      : docsChecks
-        ? "checked-documentation"
-        : "process-documentation",
+      : frontendCi
+        ? "frontend-path"
+        : rustCi
+          ? "rust-path"
+          : docsChecks
+            ? "checked-documentation"
+            : "process-documentation",
     classifications,
   };
 }
@@ -290,7 +357,8 @@ export function runClassifier(options, runGit = runGitCommand) {
     if (changed.forceFull) {
       return changed.reason === "manual-dispatch" ? manualCiResult() : fullCiResult(changed.reason);
     }
-    return classifyPaths(changed.paths, policy);
+    const result = classifyPaths(changed.paths, policy);
+    return options.eventName === "push" ? forceFullResult(result, "branch-push") : result;
   } catch (error) {
     return fullCiResult("classification-error", conciseError(error));
   }
@@ -330,6 +398,9 @@ function writeGitHubOutputs(result) {
     [
       `scope=${result.scope}`,
       `full_ci=${String(result.fullCi)}`,
+      `frontend_ci=${String(result.frontendCi)}`,
+      `rust_ci=${String(result.rustCi)}`,
+      `shared_ci=${String(result.sharedCi)}`,
       `docs_checks=${String(result.docsChecks)}`,
       `provider_trend_benchmark=${String(result.providerTrendBenchmark)}`,
       `reason=${result.reason}`,

@@ -16,6 +16,8 @@
 
 普通 PR 只等待自动触发的 `ci-gate` 与 `pr-title`。不要对同一 PR commit 再启动 `ci` 的 `workflow_dispatch`；手动 CI 只用于 `main` 恢复或候选构建。
 
+PR 的 `change-scope` 按 `.github/ci-scope.json` 分别输出 frontend、Rust 与 shared 选择：纯前端源码/样式只运行 frontend，纯 Rust/Cargo 路径只运行 Rust；生成绑定、根依赖、CI/工具脚本、未知路径及前后端混合改动运行两端。`dev`/`main` push 和 main 手动运行始终运行两端，确保分域优化不会削弱主干集成、候选制品或发布边界。required context 仍只有稳定的 `ci-gate`，它会验证未选 job 确实是 `skipped`，而不是静默漏跑。
+
 `manual-dispatch-guard` 在自动事件中按设计跳过。依赖它的条件 job 必须用 `always()` 解除 skipped 祖先的传播，并显式检查各直接依赖的 `result == 'success'`；否则 PR 与 push 的重任务会在分类成功后仍被 GitHub 跳过。CodeQL 的 Rust 分支不安装系统依赖或 Rust 工具链，也不调用 Autobuild，因为当前 Rust extractor 只支持 no-build 模式。
 
 ## Upstream Sync GitHub App
