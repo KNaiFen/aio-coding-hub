@@ -306,10 +306,18 @@ impl ProviderAvailabilityProbeRuntimeState {
                 } => Some((recovery_epoch, due_at_ms)),
                 ProbeSource::Manual | ProbeSource::Scheduled { .. } => None,
             };
-            match self
-                .begin_probe_with_recovery(provider_id, expected_generation, expected_recovery)
-                .await
-            {
+            let decision = match expected_recovery {
+                Some(expected_recovery) => {
+                    self.begin_probe_with_recovery(
+                        provider_id,
+                        expected_generation,
+                        Some(expected_recovery),
+                    )
+                    .await
+                }
+                None => self.begin_probe(provider_id, expected_generation).await,
+            };
+            match decision {
                 ProbeDecision::Stale => return None,
                 ProbeDecision::Wait(receiver) => {
                     return Some(
@@ -446,9 +454,7 @@ impl ProviderAvailabilityProbeRuntimeState {
 
         // Keep generation validation and the insert ordered against invalidation.
         // Credential writers invalidate first, then persist their new value.
-        let mut circuit_evidence_recorded = false;
-        let mut recovery = None;
-        if should_record {
+        let recovery = if should_record {
             if let Ok(probe) = result.as_ref() {
                 if let Err(error) = provider_availability::record_probe_observation(
                     db,
@@ -463,32 +469,37 @@ impl ProviderAvailabilityProbeRuntimeState {
                         "provider availability probe observation write failed"
                     );
                 }
-                circuit_evidence_recorded = record_probe_circuit_evidence(
+                if record_probe_circuit_evidence(
                     app,
                     db,
                     trace_id,
                     provider_id,
                     probe,
                     completed_at_unix,
-                );
-                if circuit_evidence_recorded {
+                ) {
                     let circuit_is_half_open = probe.ok
                         && running_gateway_circuit_is_half_open(
                             app,
                             provider_id,
                             completed_at_unix,
                         );
-                    recovery = update_recovery_work_after_circuit_evidence(
+                    update_recovery_work_after_circuit_evidence(
                         &mut inner,
                         provider_id,
                         generation,
                         completed_at_ms,
                         probe.ok,
                         circuit_is_half_open,
-                    );
+                    )
+                } else {
+                    None
                 }
+            } else {
+                None
             }
-        }
+        } else {
+            None
+        };
 
         let completed = CompletedProbe { result, recovery };
         for waiter in in_flight.waiters {
@@ -934,9 +945,9 @@ fn take_due_recovery_targets(
             if entry.schedule.is_none() || entry.generation != recovery.generation {
                 entry.recovery = None;
                 None
-            } else if recovery.phase == RecoveryProbePhase::Claimed {
-                None
-            } else if now_ms < recovery.due_at_ms {
+            } else if recovery.phase == RecoveryProbePhase::Claimed
+                || now_ms < recovery.due_at_ms
+            {
                 None
             } else if skip_missed || now_ms > recovery_due_deadline_ms(recovery.due_at_ms) {
                 entry.recovery = None;
