@@ -73,6 +73,7 @@ struct RuntimeEntry {
     generation: u64,
     schedule: Option<ScheduledProbeState>,
     recovery: Option<RecoveryProbeState>,
+    recovery_epoch: u64,
     schedule_seen_epoch: u64,
     // A configuration change advances the generation before its database write.
     // Retain the old flight until it completes so a new generation never runs a
@@ -89,7 +90,24 @@ struct InFlightProbe {
 #[derive(Clone)]
 struct CompletedProbe {
     result: AppResult<ProviderAvailabilityResult>,
-    circuit_evidence_recorded: bool,
+    recovery: Option<RecoveryDirective>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RecoveryDirective {
+    generation: u64,
+    recovery_epoch: u64,
+    due_at_ms: i64,
+}
+
+impl RecoveryDirective {
+    fn from_completion(generation: u64, recovery_epoch: u64, completed_at_ms: i64) -> Self {
+        Self {
+            generation,
+            recovery_epoch,
+            due_at_ms: completed_at_ms.saturating_add(RECOVERY_PROBE_DELAY_MS),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,7 +125,15 @@ struct ScheduledProbeState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct RecoveryProbeState {
     generation: u64,
+    recovery_epoch: u64,
     due_at_ms: i64,
+    phase: RecoveryProbePhase,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RecoveryProbePhase {
+    Pending,
+    Claimed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -127,7 +153,7 @@ struct LoadedScheduleBatch {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ScheduledProbeSource {
     Natural { boundary_ms: i64 },
-    Recovery,
+    Recovery { recovery_epoch: u64 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,21 +170,22 @@ impl ScheduledProbeTarget {
             ScheduledProbeSource::Natural { boundary_ms } => {
                 scheduled_due_deadline_ms(self.provider_id, boundary_ms)
             }
-            ScheduledProbeSource::Recovery => recovery_due_deadline_ms(self.due_at_ms),
+            ScheduledProbeSource::Recovery { .. } => recovery_due_deadline_ms(self.due_at_ms),
         }
     }
 
     fn probe_source(self) -> ProbeSource {
         match self.source {
             ScheduledProbeSource::Natural { boundary_ms } => ProbeSource::Scheduled { boundary_ms },
-            ScheduledProbeSource::Recovery => ProbeSource::Recovery {
+            ScheduledProbeSource::Recovery { recovery_epoch } => ProbeSource::Recovery {
                 due_at_ms: self.due_at_ms,
+                recovery_epoch,
             },
         }
     }
 
     fn is_recovery(self) -> bool {
-        matches!(self.source, ScheduledProbeSource::Recovery)
+        matches!(self.source, ScheduledProbeSource::Recovery { .. })
     }
 }
 
@@ -166,7 +193,10 @@ impl ScheduledProbeTarget {
 enum ProbeSource {
     Manual,
     Scheduled { boundary_ms: i64 },
-    Recovery { due_at_ms: i64 },
+    Recovery {
+        due_at_ms: i64,
+        recovery_epoch: u64,
+    },
 }
 
 impl ProbeSource {
@@ -176,7 +206,7 @@ impl ProbeSource {
             Self::Scheduled { boundary_ms } => {
                 now_ms > scheduled_due_deadline_ms(provider_id, boundary_ms)
             }
-            Self::Recovery { due_at_ms } => now_ms > recovery_due_deadline_ms(due_at_ms),
+            Self::Recovery { due_at_ms, .. } => now_ms > recovery_due_deadline_ms(due_at_ms),
         }
     }
 }
@@ -272,7 +302,17 @@ impl ProviderAvailabilityProbeRuntimeState {
             if source.is_expired(provider_id, crate::shared::time::now_unix_millis()) {
                 return None;
             }
-            match self.begin_probe(provider_id, expected_generation).await {
+            let expected_recovery = match source {
+                ProbeSource::Recovery {
+                    due_at_ms,
+                    recovery_epoch,
+                } => Some((recovery_epoch, due_at_ms)),
+                ProbeSource::Manual | ProbeSource::Scheduled { .. } => None,
+            };
+            match self
+                .begin_probe_with_recovery(provider_id, expected_generation, expected_recovery)
+                .await
+            {
                 ProbeDecision::Stale => return None,
                 ProbeDecision::Wait(receiver) => {
                     return Some(
@@ -293,7 +333,7 @@ impl ProviderAvailabilityProbeRuntimeState {
                         ProbeSource::Scheduled { boundary_ms } => {
                             scheduled_trace_id(provider_id, boundary_ms)
                         }
-                        ProbeSource::Recovery { due_at_ms } => {
+                        ProbeSource::Recovery { due_at_ms, .. } => {
                             recovery_trace_id(provider_id, due_at_ms)
                         }
                     };
@@ -326,6 +366,19 @@ impl ProviderAvailabilityProbeRuntimeState {
         provider_id: i64,
         expected_generation: Option<u64>,
     ) -> ProbeDecision {
+        self.begin_probe_with_recovery(provider_id, expected_generation, None)
+            .await
+    }
+
+    async fn begin_probe_with_recovery(
+        &self,
+        provider_id: i64,
+        expected_generation: Option<u64>,
+        expected_recovery: Option<(u64, i64)>,
+    ) -> ProbeDecision {
+        if expected_recovery.is_some() && expected_generation.is_none() {
+            return ProbeDecision::Stale;
+        }
         let _gate = self.provider_mutation_gate(provider_id).lock_owned().await;
         let mut inner = self.shared.inner.lock().await;
         if !inner.entries.contains_key(&provider_id) {
@@ -349,6 +402,11 @@ impl ProviderAvailabilityProbeRuntimeState {
             return ProbeDecision::Stale;
         }
         let generation = entry.generation;
+        if let Some((recovery_epoch, due_at_ms)) = expected_recovery {
+            if !recovery_claim_matches(entry, generation, recovery_epoch, due_at_ms) {
+                return ProbeDecision::Stale;
+            }
+        }
         if let Some(in_flight) = entry.in_flight.as_mut() {
             if in_flight.generation == generation {
                 let (sender, receiver) = oneshot::channel();
@@ -392,6 +450,7 @@ impl ProviderAvailabilityProbeRuntimeState {
         // Keep generation validation and the insert ordered against invalidation.
         // Credential writers invalidate first, then persist their new value.
         let mut circuit_evidence_recorded = false;
+        let mut recovery = None;
         if should_record {
             if let Ok(probe) = result.as_ref() {
                 if let Err(error) = provider_availability::record_probe_observation(
@@ -415,12 +474,28 @@ impl ProviderAvailabilityProbeRuntimeState {
                     probe,
                     completed_at_unix,
                 );
+                if circuit_evidence_recorded {
+                    let circuit_is_half_open = probe.ok
+                        && running_gateway_circuit_is_half_open(
+                            app,
+                            provider_id,
+                            completed_at_unix,
+                        );
+                    recovery = update_recovery_work_after_circuit_evidence(
+                        &mut inner,
+                        provider_id,
+                        generation,
+                        completed_at_ms,
+                        probe.ok,
+                        circuit_is_half_open,
+                    );
+                }
             }
         }
 
         let completed = CompletedProbe {
             result,
-            circuit_evidence_recorded,
+            recovery,
         };
         for waiter in in_flight.waiters {
             let _ = waiter.send(completed.clone());
@@ -506,11 +581,24 @@ impl ProviderAvailabilityProbeRuntimeState {
     async fn schedule_recovery_probe(
         &self,
         provider_id: i64,
-        generation: u64,
-        completed_at_ms: i64,
+        recovery: RecoveryDirective,
     ) {
         let mut inner = self.shared.inner.lock().await;
-        queue_recovery_target(&mut inner, provider_id, generation, completed_at_ms);
+        queue_recovery_target(&mut inner, provider_id, recovery);
+    }
+
+    async fn recovery_target_is_current(&self, target: ScheduledProbeTarget) -> bool {
+        let inner = self.shared.inner.lock().await;
+        recovery_target_is_current(&inner, target)
+    }
+
+    async fn settle_recovery_target(
+        &self,
+        target: ScheduledProbeTarget,
+        recovery: Option<RecoveryDirective>,
+    ) {
+        let mut inner = self.shared.inner.lock().await;
+        settle_recovery_target(&mut inner, target, recovery);
     }
 
     async fn run_scheduled_probe<R: tauri::Runtime>(
@@ -522,6 +610,7 @@ impl ProviderAvailabilityProbeRuntimeState {
         let now_ms = crate::shared::time::now_unix_millis();
         let remaining_ms = target.deadline_ms().saturating_sub(now_ms);
         if remaining_ms < 0 {
+            self.settle_recovery_target(target, None).await;
             return;
         }
         let permit = match tokio::time::timeout(
@@ -531,16 +620,24 @@ impl ProviderAvailabilityProbeRuntimeState {
         .await
         {
             Ok(Ok(permit)) => permit,
-            Ok(Err(_)) | Err(_) => return,
+            Ok(Err(_)) | Err(_) => {
+                self.settle_recovery_target(target, None).await;
+                return;
+            }
         };
-        if target.is_recovery()
-            && !running_gateway_circuit_is_half_open(
+        if target.is_recovery() {
+            if !self.recovery_target_is_current(target).await {
+                return;
+            }
+            if !running_gateway_circuit_is_half_open(
                 &app,
                 target.provider_id,
                 crate::shared::time::now_unix_seconds(),
-            )
-        {
-            return;
+            ) {
+                drop(permit);
+                self.settle_recovery_target(target, None).await;
+                return;
+            }
         }
         let completion = self
             .probe(
@@ -551,20 +648,12 @@ impl ProviderAvailabilityProbeRuntimeState {
                 target.probe_source(),
             )
             .await;
-        let completed_at_ms = crate::shared::time::now_unix_millis();
         drop(permit);
-        let should_schedule_recovery = completion.as_ref().is_some_and(|completed| {
-            completed.circuit_evidence_recorded
-                && completed.result.as_ref().is_ok_and(|probe| probe.ok)
-        });
-        if should_schedule_recovery
-            && running_gateway_circuit_is_half_open(
-                &app,
-                target.provider_id,
-                completed_at_ms.div_euclid(1_000),
-            )
-        {
-            self.schedule_recovery_probe(target.provider_id, target.generation, completed_at_ms)
+        let recovery = completion.as_ref().and_then(|completed| completed.recovery);
+        if target.is_recovery() {
+            self.settle_recovery_target(target, recovery).await;
+        } else if let Some(recovery) = recovery {
+            self.schedule_recovery_probe(target.provider_id, recovery)
                 .await;
         }
         if let Some(Err(error)) = completion.map(|completed| completed.result) {
@@ -583,7 +672,7 @@ fn coordinator_stopped_completion() -> CompletedProbe {
             "SYSTEM_ERROR",
             "provider probe coordinator stopped unexpectedly",
         )),
-        circuit_evidence_recorded: false,
+        recovery: None,
     }
 }
 
@@ -650,6 +739,79 @@ fn take_finished_flight(
     let in_flight = entry.in_flight.take()?;
     let should_record = entry.generation == generation;
     Some((in_flight, should_record))
+}
+
+fn invalidate_recovery_work(inner: &mut RuntimeInner, provider_id: i64, generation: u64) {
+    let Some(entry) = inner.entries.get_mut(&provider_id) else {
+        return;
+    };
+    if entry.generation != generation {
+        return;
+    }
+    entry.recovery = None;
+    entry.recovery_epoch = next_recovery_epoch(entry.recovery_epoch);
+}
+
+fn update_recovery_work_after_circuit_evidence(
+    inner: &mut RuntimeInner,
+    provider_id: i64,
+    generation: u64,
+    completed_at_ms: i64,
+    probe_ok: bool,
+    circuit_is_half_open: bool,
+) -> Option<RecoveryDirective> {
+    if !probe_ok || !circuit_is_half_open {
+        invalidate_recovery_work(inner, provider_id, generation);
+        return None;
+    }
+    inner.entries.get(&provider_id).and_then(|entry| {
+        (entry.generation == generation).then_some(RecoveryDirective::from_completion(
+            generation,
+            entry.recovery_epoch,
+            completed_at_ms,
+        ))
+    })
+}
+
+fn recovery_target_is_current(inner: &RuntimeInner, target: ScheduledProbeTarget) -> bool {
+    let ScheduledProbeSource::Recovery { recovery_epoch } = target.source else {
+        return false;
+    };
+    inner.entries.get(&target.provider_id).is_some_and(|entry| {
+        recovery_claim_matches(entry, target.generation, recovery_epoch, target.due_at_ms)
+    })
+}
+
+fn recovery_claim_matches(
+    entry: &RuntimeEntry,
+    generation: u64,
+    recovery_epoch: u64,
+    due_at_ms: i64,
+) -> bool {
+    entry.generation == generation
+        && entry.recovery.is_some_and(|recovery| {
+            recovery.generation == generation
+                && recovery.recovery_epoch == recovery_epoch
+                && recovery.due_at_ms == due_at_ms
+                && recovery.phase == RecoveryProbePhase::Claimed
+        })
+}
+
+fn settle_recovery_target(
+    inner: &mut RuntimeInner,
+    target: ScheduledProbeTarget,
+    recovery: Option<RecoveryDirective>,
+) {
+    if !target.is_recovery() || !recovery_target_is_current(inner, target) {
+        return;
+    }
+    if let Some(entry) = inner.entries.get_mut(&target.provider_id) {
+        entry.recovery = None;
+    }
+    if let Some(recovery) = recovery {
+        queue_recovery_target(inner, target.provider_id, recovery);
+    }
+    remove_idle_entry(inner, target.provider_id);
 }
 
 fn remove_idle_entry(inner: &mut RuntimeInner, provider_id: i64) {
@@ -782,18 +944,25 @@ fn take_due_recovery_targets(
             if entry.schedule.is_none() || entry.generation != recovery.generation {
                 entry.recovery = None;
                 None
+            } else if recovery.phase == RecoveryProbePhase::Claimed {
+                None
             } else if now_ms < recovery.due_at_ms {
                 None
             } else if skip_missed || now_ms > recovery_due_deadline_ms(recovery.due_at_ms) {
                 entry.recovery = None;
                 None
             } else {
-                entry.recovery = None;
+                entry.recovery = Some(RecoveryProbeState {
+                    phase: RecoveryProbePhase::Claimed,
+                    ..recovery
+                });
                 Some(ScheduledProbeTarget {
                     provider_id,
                     generation: recovery.generation,
                     due_at_ms: recovery.due_at_ms,
-                    source: ScheduledProbeSource::Recovery,
+                    source: ScheduledProbeSource::Recovery {
+                        recovery_epoch: recovery.recovery_epoch,
+                    },
                 })
             }
         };
@@ -808,19 +977,33 @@ fn take_due_recovery_targets(
 fn queue_recovery_target(
     inner: &mut RuntimeInner,
     provider_id: i64,
-    generation: u64,
-    completed_at_ms: i64,
+    recovery: RecoveryDirective,
 ) {
     let Some(entry) = inner.entries.get_mut(&provider_id) else {
         return;
     };
-    if entry.generation != generation || entry.schedule.is_none() || entry.recovery.is_some() {
+    if entry.generation != recovery.generation
+        || entry.recovery_epoch != recovery.recovery_epoch
+        || entry.schedule.is_none()
+        || entry.recovery.is_some()
+    {
         return;
     }
     entry.recovery = Some(RecoveryProbeState {
-        generation,
-        due_at_ms: completed_at_ms.saturating_add(RECOVERY_PROBE_DELAY_MS),
+        generation: recovery.generation,
+        recovery_epoch: recovery.recovery_epoch,
+        due_at_ms: recovery.due_at_ms,
+        phase: RecoveryProbePhase::Pending,
     });
+}
+
+fn next_recovery_epoch(current: u64) -> u64 {
+    let next = current.wrapping_add(1);
+    if next == 0 {
+        1
+    } else {
+        next
+    }
 }
 
 fn next_schedule_scan_epoch(current: u64) -> u64 {
@@ -1008,6 +1191,20 @@ INSERT INTO providers(
         }
     }
 
+    fn queue_recovery_from_completion(
+        inner: &mut RuntimeInner,
+        provider_id: i64,
+        generation: u64,
+        completed_at_ms: i64,
+    ) {
+        let recovery_epoch = inner.entries[&provider_id].recovery_epoch;
+        queue_recovery_target(
+            inner,
+            provider_id,
+            RecoveryDirective::from_completion(generation, recovery_epoch, completed_at_ms),
+        );
+    }
+
     #[test]
     fn startup_and_configuration_changes_schedule_only_the_next_boundary() {
         let mut inner = RuntimeInner::default();
@@ -1021,7 +1218,7 @@ INSERT INTO providers(
         );
         assert!(targets.is_empty());
         let first_generation = inner.entries[&7].generation;
-        queue_recovery_target(&mut inner, 7, first_generation, 55_000);
+        queue_recovery_from_completion(&mut inner, 7, first_generation, 55_000);
 
         let targets = reconcile_schedules_inner(
             &mut inner,
@@ -1052,8 +1249,9 @@ INSERT INTO providers(
             true,
         );
         let generation = inner.entries[&3].generation;
-        queue_recovery_target(&mut inner, 3, generation, 10_000);
-        queue_recovery_target(&mut inner, 3, generation, 20_000);
+        let recovery_epoch = inner.entries[&3].recovery_epoch;
+        queue_recovery_from_completion(&mut inner, 3, generation, 10_000);
+        queue_recovery_from_completion(&mut inner, 3, generation, 20_000);
         let due_at_ms = 10_000 + RECOVERY_PROBE_DELAY_MS;
         assert_eq!(inner.entries[&3].recovery.unwrap().due_at_ms, due_at_ms);
 
@@ -1076,10 +1274,17 @@ INSERT INTO providers(
             true,
         );
         assert_eq!(targets.len(), 1);
-        assert_eq!(targets[0].source, ScheduledProbeSource::Recovery);
+        assert_eq!(
+            targets[0].source,
+            ScheduledProbeSource::Recovery { recovery_epoch }
+        );
         assert_eq!(targets[0].generation, generation);
         assert_eq!(targets[0].due_at_ms, due_at_ms);
-        assert!(inner.entries[&3].recovery.is_none());
+        assert_eq!(
+            inner.entries[&3].recovery.unwrap().phase,
+            RecoveryProbePhase::Claimed
+        );
+        assert!(recovery_target_is_current(&inner, targets[0]));
 
         let targets = reconcile_schedules_inner(
             &mut inner,
@@ -1090,6 +1295,180 @@ INSERT INTO providers(
             true,
         );
         assert!(targets.is_empty());
+    }
+
+    #[test]
+    fn valid_half_open_failure_invalidates_pending_and_claimed_recovery_work() {
+        let mut inner = RuntimeInner::default();
+        reconcile_schedules_inner(
+            &mut inner,
+            vec![loaded(3, 1, 90_000)],
+            1_000,
+            false,
+            1,
+            true,
+        );
+        let generation = inner.entries[&3].generation;
+        let old_recovery = RecoveryDirective::from_completion(
+            generation,
+            inner.entries[&3].recovery_epoch,
+            10_000,
+        );
+        queue_recovery_target(&mut inner, 3, old_recovery);
+        let old_due_at_ms = 10_000 + RECOVERY_PROBE_DELAY_MS;
+
+        assert!(
+            update_recovery_work_after_circuit_evidence(
+                &mut inner,
+                3,
+                generation,
+                10_000,
+                false,
+                false,
+            )
+            .is_none()
+        );
+        queue_recovery_target(&mut inner, 3, old_recovery);
+        assert!(inner.entries[&3].recovery.is_none());
+        let targets = reconcile_schedules_inner(
+            &mut inner,
+            vec![loaded(3, 1, 90_000)],
+            old_due_at_ms,
+            false,
+            2,
+            true,
+        );
+        assert!(targets.is_empty());
+
+        queue_recovery_from_completion(&mut inner, 3, generation, 20_000);
+        let new_due_at_ms = 20_000 + RECOVERY_PROBE_DELAY_MS;
+        let targets = reconcile_schedules_inner(
+            &mut inner,
+            vec![loaded(3, 1, 90_000)],
+            new_due_at_ms,
+            false,
+            3,
+            true,
+        );
+        assert_eq!(targets.len(), 1);
+        assert!(recovery_target_is_current(&inner, targets[0]));
+
+        assert!(
+            update_recovery_work_after_circuit_evidence(
+                &mut inner,
+                3,
+                generation,
+                20_000,
+                false,
+                false,
+            )
+            .is_none()
+        );
+        assert!(!recovery_target_is_current(&inner, targets[0]));
+    }
+
+    #[test]
+    fn successful_circuit_closure_invalidates_claimed_recovery_work() {
+        let mut inner = RuntimeInner::default();
+        reconcile_schedules_inner(
+            &mut inner,
+            vec![loaded(3, 1, 90_000)],
+            1_000,
+            false,
+            1,
+            true,
+        );
+        let generation = inner.entries[&3].generation;
+        queue_recovery_from_completion(&mut inner, 3, generation, 10_000);
+        let due_at_ms = 10_000 + RECOVERY_PROBE_DELAY_MS;
+        let target = reconcile_schedules_inner(
+            &mut inner,
+            vec![loaded(3, 1, 90_000)],
+            due_at_ms,
+            false,
+            2,
+            true,
+        )
+        .into_iter()
+        .next()
+        .expect("claimed recovery target");
+        assert!(recovery_target_is_current(&inner, target));
+
+        assert!(
+            update_recovery_work_after_circuit_evidence(
+                &mut inner,
+                3,
+                generation,
+                20_000,
+                true,
+                false,
+            )
+            .is_none()
+        );
+        assert!(!recovery_target_is_current(&inner, target));
+    }
+
+    #[test]
+    fn settling_a_recovery_target_replaces_only_the_claimed_target() {
+        let mut inner = RuntimeInner::default();
+        reconcile_schedules_inner(
+            &mut inner,
+            vec![loaded(3, 1, 90_000)],
+            1_000,
+            false,
+            1,
+            true,
+        );
+        let generation = inner.entries[&3].generation;
+        queue_recovery_from_completion(&mut inner, 3, generation, 10_000);
+        let due_at_ms = 10_000 + RECOVERY_PROBE_DELAY_MS;
+        let mut targets = reconcile_schedules_inner(
+            &mut inner,
+            vec![loaded(3, 1, 90_000)],
+            due_at_ms,
+            false,
+            2,
+            true,
+        );
+        let target = targets.pop().expect("due recovery target");
+        let next_recovery = RecoveryDirective::from_completion(
+            generation,
+            inner.entries[&3].recovery_epoch,
+            50_000,
+        );
+
+        settle_recovery_target(&mut inner, target, Some(next_recovery));
+
+        let recovery = inner.entries[&3].recovery.expect("next recovery target");
+        assert_eq!(recovery.phase, RecoveryProbePhase::Pending);
+        assert_eq!(recovery.due_at_ms, 50_000 + RECOVERY_PROBE_DELAY_MS);
+    }
+
+    #[test]
+    fn recovery_due_uses_probe_completion_time_not_waiter_resume_time() {
+        let mut inner = RuntimeInner::default();
+        reconcile_schedules_inner(
+            &mut inner,
+            vec![loaded(3, 1, 90_000)],
+            1_000,
+            false,
+            1,
+            true,
+        );
+        let generation = inner.entries[&3].generation;
+        let completed_at_ms = 10_000;
+        let waiter_resumed_at_ms = 55_000;
+        let recovery = RecoveryDirective::from_completion(
+            generation,
+            inner.entries[&3].recovery_epoch,
+            completed_at_ms,
+        );
+
+        queue_recovery_target(&mut inner, 3, recovery);
+
+        let due_at_ms = inner.entries[&3].recovery.unwrap().due_at_ms;
+        assert_eq!(due_at_ms, completed_at_ms + RECOVERY_PROBE_DELAY_MS);
+        assert_ne!(due_at_ms, waiter_resumed_at_ms + RECOVERY_PROBE_DELAY_MS);
     }
 
     #[test]
@@ -1104,7 +1483,7 @@ INSERT INTO providers(
             true,
         );
         let first_generation = inner.entries[&4].generation;
-        queue_recovery_target(&mut inner, 4, first_generation, 10_000);
+        queue_recovery_from_completion(&mut inner, 4, first_generation, 10_000);
 
         reconcile_schedules_inner(
             &mut inner,
@@ -1118,7 +1497,7 @@ INSERT INTO providers(
         assert_ne!(inner.entries[&4].generation, first_generation);
 
         let generation = inner.entries[&4].generation;
-        queue_recovery_target(&mut inner, 4, generation, 10_000);
+        queue_recovery_from_completion(&mut inner, 4, generation, 10_000);
         let due_at_ms = 10_000 + RECOVERY_PROBE_DELAY_MS;
         let targets = reconcile_schedules_inner(
             &mut inner,
@@ -1187,7 +1566,7 @@ INSERT INTO providers(
             true,
         );
         let generation = inner.entries[&1].generation;
-        queue_recovery_target(&mut inner, 1, generation, 1_000);
+        queue_recovery_from_completion(&mut inner, 1, generation, 1_000);
         let mut disabled = loaded(1, 1, 60_000);
         disabled.active = false;
         reconcile_schedules_inner(&mut inner, vec![disabled], 2_000, false, 2, true);
@@ -1244,7 +1623,10 @@ INSERT INTO providers(
         let deadline_ms = scheduled_due_deadline_ms(9, 60_000);
         assert!(!source.is_expired(9, deadline_ms));
         assert!(source.is_expired(9, deadline_ms.saturating_add(1)));
-        let recovery = ProbeSource::Recovery { due_at_ms: 90_000 };
+        let recovery = ProbeSource::Recovery {
+            due_at_ms: 90_000,
+            recovery_epoch: 1,
+        };
         let recovery_deadline_ms = recovery_due_deadline_ms(90_000);
         assert!(!recovery.is_expired(9, recovery_deadline_ms));
         assert!(recovery.is_expired(9, recovery_deadline_ms.saturating_add(1)));
@@ -1328,7 +1710,7 @@ INSERT INTO providers(
         );
         assert!(inner.entries.contains_key(&600));
         let generation = inner.entries[&600].generation;
-        queue_recovery_target(&mut inner, 600, generation, 2_000);
+        queue_recovery_from_completion(&mut inner, 600, generation, 2_000);
 
         reconcile_schedules_inner(&mut inner, Vec::new(), 3_000, false, 2, true);
         assert!(!inner.entries.contains_key(&600));
@@ -1403,6 +1785,63 @@ INSERT INTO providers(
             _ => panic!("new configuration must lead after the old flight finishes"),
         };
         assert_ne!(replacement_generation, generation);
+    }
+
+    #[tokio::test]
+    async fn invalidated_claimed_recovery_cannot_start_a_flight() {
+        let state = ProviderAvailabilityProbeRuntimeState::default();
+        let target = {
+            let mut inner = state.shared.inner.lock().await;
+            reconcile_schedules_inner(
+                &mut inner,
+                vec![loaded(6, 1, 90_000)],
+                1_000,
+                false,
+                1,
+                true,
+            );
+            let generation = inner.entries[&6].generation;
+            queue_recovery_from_completion(&mut inner, 6, generation, 10_000);
+            let due_at_ms = 10_000 + RECOVERY_PROBE_DELAY_MS;
+            let target = reconcile_schedules_inner(
+                &mut inner,
+                vec![loaded(6, 1, 90_000)],
+                due_at_ms,
+                false,
+                2,
+                true,
+            )
+            .into_iter()
+            .next()
+            .expect("claimed recovery target");
+            assert!(
+                update_recovery_work_after_circuit_evidence(
+                    &mut inner,
+                    6,
+                    generation,
+                    10_000,
+                    false,
+                    false,
+                )
+                .is_none()
+            );
+            target
+        };
+        let ScheduledProbeSource::Recovery { recovery_epoch } = target.source else {
+            panic!("recovery target source");
+        };
+
+        assert!(matches!(
+            state
+                .begin_probe_with_recovery(
+                    target.provider_id,
+                    Some(target.generation),
+                    Some((recovery_epoch, target.due_at_ms)),
+                )
+                .await,
+            ProbeDecision::Stale
+        ));
+        assert!(state.shared.inner.lock().await.entries[&6].in_flight.is_none());
     }
 
     #[tokio::test]
