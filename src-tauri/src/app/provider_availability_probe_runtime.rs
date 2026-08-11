@@ -806,8 +806,6 @@ fn take_due_recovery_targets(
                     due_at_ms: recovery.due_at_ms,
                     source: ScheduledProbeSource::Recovery,
                 })
-            } else {
-                None
             }
         };
         if let Some(target) = target {
