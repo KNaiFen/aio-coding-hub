@@ -1811,4 +1811,27 @@ describe("components/home/HomeRequestLogsPanel", () => {
     expect(screen.getByText(/网关未继续向已熔断或冷却中的供应商发起上游请求/)).toBeInTheDocument();
     expect(screen.queryByText("Unknown")).not.toBeInTheDocument();
   });
+
+  it("shows the final reasoning effort only when the persisted log has one", () => {
+    render(
+      <MemoryRouter>
+        <HomeRequestLogsPanel
+          traces={[]}
+          requestLogs={makeRequestLogs([
+            { id: 1, trace_id: "with-effort", reasoning_effort: "high" },
+            { id: 2, trace_id: "without-effort", reasoning_effort: null },
+          ])}
+          requestLogsLoading={false}
+          requestLogsRefreshing={false}
+          requestLogsAvailable={true}
+          onRefreshRequestLogs={vi.fn()}
+          selectedLogId={null}
+          onSelectLogId={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByTitle("思考等级：high")).toHaveTextContent("思考high");
+    expect(screen.getAllByText("思考")).toHaveLength(1);
+  });
 });

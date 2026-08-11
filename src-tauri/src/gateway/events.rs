@@ -108,6 +108,14 @@ pub(super) struct FailoverAttempt {
     // (never parsed out of `outcome`); serializes as explicit null per the
     // gateway event contract.
     pub(super) timeout_secs: Option<u32>,
+    pub(super) reasoning_effort: Option<String>,
+    pub(super) upstream_sent: bool,
+    // Model mapping applied for this attempt, carried in-memory so request_end
+    // selects final values from attempts instead of re-parsing special_settings JSON.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) claude_model_mapping: Option<ClaudeModelMapping>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) model_redirect: Option<ModelRedirect>,
 }
 
 #[derive(Debug, Serialize, Clone, PartialEq, Eq, specta::Type)]
@@ -158,6 +166,7 @@ pub(crate) struct GatewayRequestEvent {
     effective_input_tokens: Option<i64>,
     claude_model_mapping: Option<ClaudeModelMapping>,
     model_redirect: Option<ModelRedirect>,
+    reasoning_effort: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone, specta::Type)]
@@ -367,6 +376,7 @@ fn bound_failover_attempt(mut attempt: FailoverAttempt) -> FailoverAttempt {
     attempt.base_url = truncate_chars(attempt.base_url, EVENT_URL_MAX_CHARS);
     attempt.outcome = truncate_chars(attempt.outcome, EVENT_STATE_MAX_CHARS);
     truncate_optional_chars(&mut attempt.reason, EVENT_QUERY_MAX_CHARS);
+    truncate_optional_chars(&mut attempt.reasoning_effort, EVENT_STATE_MAX_CHARS);
     attempt
 }
 
@@ -391,6 +401,7 @@ fn bound_request_event(mut payload: GatewayRequestEvent) -> GatewayRequestEvent 
     payload.claude_model_mapping =
         bound_optional_claude_model_mapping(payload.claude_model_mapping);
     payload.model_redirect = payload.model_redirect.map(bound_model_redirect);
+    truncate_optional_chars(&mut payload.reasoning_effort, EVENT_STATE_MAX_CHARS);
     payload
 }
 
@@ -427,6 +438,16 @@ fn request_event_effective_input_tokens(
         usage.cache_read_input_tokens,
         usage.cache_creation_input_tokens,
     )
+}
+
+fn final_reasoning_effort(attempts: &[FailoverAttempt]) -> Option<String> {
+    crate::infra::request_logs::semantics::final_reasoning_effort(attempts.iter().map(|attempt| {
+        (
+            attempt.outcome.as_str(),
+            attempt.upstream_sent,
+            attempt.reasoning_effort.as_deref(),
+        )
+    }))
 }
 
 pub(super) fn bound_attempt_event(mut payload: GatewayAttemptEvent) -> GatewayAttemptEvent {
@@ -492,6 +513,7 @@ pub(super) fn emit_request_event<R: tauri::Runtime>(
 
     let usage = usage.unwrap_or_default();
     let effective_input_tokens = request_event_effective_input_tokens(&cli_key, &attempts, &usage);
+    let reasoning_effort = final_reasoning_effort(&attempts);
     let payload = GatewayRequestEvent {
         trace_id,
         cli_key,
@@ -516,6 +538,7 @@ pub(super) fn emit_request_event<R: tauri::Runtime>(
         effective_input_tokens,
         claude_model_mapping,
         model_redirect,
+        reasoning_effort,
     };
 
     gated_emit(
@@ -679,6 +702,10 @@ mod tests {
             circuit_trigger_error_code: None,
             provider_bridged: Some(false),
             timeout_secs: None,
+            reasoning_effort: None,
+            upstream_sent: false,
+            claude_model_mapping: None,
+            model_redirect: None,
         }
     }
 
@@ -799,6 +826,10 @@ mod tests {
                 circuit_trigger_error_code: None,
                 provider_bridged: Some(false),
                 timeout_secs: None,
+                reasoning_effort: Some("high".to_string()),
+                upstream_sent: true,
+                claude_model_mapping: None,
+                model_redirect: None,
             }],
             input_tokens: Some(1200),
             output_tokens: Some(350),
@@ -811,6 +842,7 @@ mod tests {
             effective_input_tokens: Some(1200),
             claude_model_mapping: Some(fixture_mapping()),
             model_redirect: None,
+            reasoning_effort: Some("high".to_string()),
         };
 
         assert_matches_fixture(
@@ -1174,6 +1206,7 @@ mod tests {
             effective_input_tokens: None,
             claude_model_mapping: None,
             model_redirect: None,
+            reasoning_effort: None,
         };
 
         let value = serde_json::to_value(payload).expect("serializable request event");

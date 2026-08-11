@@ -121,6 +121,7 @@ function summaryOf(traceId: string): TraceSummary {
     effective_input_tokens: null,
     claude_model_mapping: null,
     model_redirect: null,
+    reasoning_effort: null,
   };
 }
 

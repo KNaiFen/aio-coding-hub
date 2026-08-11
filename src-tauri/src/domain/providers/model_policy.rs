@@ -118,7 +118,10 @@ impl ProviderModelPolicyV1 {
             .and_then(Self::normalized)
         {
             Ok(policy) => (Some(policy), ProviderModelPolicyStatus::Ready),
-            Err(_) => (None, ProviderModelPolicyStatus::Invalid),
+            Err(error) => {
+                tracing::warn!(cli_key, error = %error, "provider model policy decode failed");
+                (None, ProviderModelPolicyStatus::Invalid)
+            }
         }
     }
 

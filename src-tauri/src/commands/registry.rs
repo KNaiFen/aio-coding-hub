@@ -129,9 +129,9 @@ macro_rules! generated_command_registry {
             sort_mode_providers_set_order => crate::commands::sort_modes::sort_mode_providers_set_order,
             sort_mode_provider_set_enabled => crate::commands::sort_modes::sort_mode_provider_set_enabled,
             // ── model_prices ──
-            model_prices_list => crate::commands::model_prices::model_prices_list,
+            model_prices_list_all => crate::commands::model_prices::model_prices_list_all,
             model_price_upsert => crate::commands::model_prices::model_price_upsert,
-            model_prices_sync_basellm => crate::commands::model_prices::model_prices_sync_basellm,
+            model_prices_sync => crate::commands::model_prices::model_prices_sync,
             model_price_aliases_get => crate::commands::model_prices::model_price_aliases_get,
             model_price_aliases_set => crate::commands::model_prices::model_price_aliases_set,
             // ── prompts ──

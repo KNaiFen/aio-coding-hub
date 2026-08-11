@@ -151,7 +151,15 @@ describe("cross-layer contracts", () => {
     // space-constraint design (attempts_json must gain zero bytes on success
     // paths); both sides pin the omission with dedicated tests (Rust key-set
     // assertions in failover_loop/tests.rs, absence handling in attemptsJson).
-    const exemptFields = ["circuit_recover_at_unix", "circuit_trigger_error_code"];
+    // claude_model_mapping / model_redirect on FailoverAttempt follow the same
+    // space-constraint design: most attempts carry no mapping, and the frontend
+    // reads the request-event level fields instead of per-attempt entries.
+    const exemptFields = [
+      "circuit_recover_at_unix",
+      "circuit_trigger_error_code",
+      "claude_model_mapping",
+      "model_redirect",
+    ];
     const skippedFields = Array.from(
       gatewayEventsSource.matchAll(
         /#\[serde\(skip_serializing_if[^\]]*\)\]\s*(?:pub(?:\([^)]*\))?\s+)?(\w+):/g

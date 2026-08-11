@@ -814,6 +814,11 @@ describe("pages/providers/ProviderEditorDialog", () => {
       expect(dialog.getAllByText("gpt-5.5").length).toBeGreaterThanOrEqual(1);
     });
 
+    // cx2cc providers map models via CX2CC 模型映射 only; the generic policy
+    // mapping editor must not offer a second, conflicting mechanism.
+    fireEvent.click(dialog.getByText("模型路由"));
+    expect(dialog.queryByText("模型映射（可选）")).not.toBeInTheDocument();
+
     fireEvent.click(dialog.getByRole("button", { name: "保存" }));
 
     await waitFor(() =>
@@ -1023,6 +1028,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
     fireEvent.change(dialog.getByLabelText("新增显式模型"), {
       target: { value: "claude-3" },
     });
+    fireEvent.keyDown(dialog.getByLabelText("新增显式模型"), { key: "Enter" });
     await waitFor(() => expect(dialog.getByLabelText("显式模型 1")).toHaveValue("claude-3"));
     expect(dialog.queryByLabelText("上游模型 1")).not.toBeInTheDocument();
     expect(dialog.getByText("已获取 2 个候选 · https://example.com · 地址 1")).toBeInTheDocument();
@@ -1073,8 +1079,9 @@ describe("pages/providers/ProviderEditorDialog", () => {
     fireEvent.change(dialog.getByLabelText("新增显式模型"), {
       target: { value: "claude-3-5-sonnet" },
     });
+    fireEvent.keyDown(dialog.getByLabelText("新增显式模型"), { key: "Enter" });
     expect(dialog.getByLabelText("显式模型 1")).toHaveValue("claude-3-5-sonnet");
-    expect(dialog.getByText("保存后无法在界面切回旧策略")).toBeInTheDocument();
+    expect(dialog.getByText("保存后旧版映射不再生效，且无法在界面切回旧策略")).toBeInTheDocument();
     expect(providerModelsDiscover).toHaveBeenCalledWith({
       providerId: 1,
       cliKey: "claude",
@@ -1122,8 +1129,11 @@ describe("pages/providers/ProviderEditorDialog", () => {
     fireEvent.change(dialog.getByLabelText("新增显式模型"), {
       target: { value: "gpt-5.4" },
     });
+    fireEvent.keyDown(dialog.getByLabelText("新增显式模型"), { key: "Enter" });
     expect(dialog.getByLabelText("显式模型 1")).toHaveValue("gpt-5.4");
-    expect(dialog.queryByText("保存后无法在界面切回旧策略")).not.toBeInTheDocument();
+    expect(
+      dialog.queryByText("保存后旧版映射不再生效，且无法在界面切回旧策略")
+    ).not.toBeInTheDocument();
     expect(dialog.queryByRole("button", { name: "重置为全部可用" })).not.toBeInTheDocument();
   });
 
@@ -1164,6 +1174,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
     fireEvent.change(dialog.getByLabelText("新增显式模型"), {
       target: { value: "new-model" },
     });
+    fireEvent.keyDown(dialog.getByLabelText("新增显式模型"), { key: "Enter" });
     expect(dialog.getByLabelText("显式模型 1")).toHaveValue("new-model");
 
     resolveFirst({
@@ -1271,6 +1282,62 @@ describe("pages/providers/ProviderEditorDialog", () => {
     expect(dialog.getByLabelText("显式模型 1")).toBeInTheDocument();
     fireEvent.click(dialog.getByRole("button", { name: "删除显式模型 1" }));
     expect(composer).toHaveFocus();
+  });
+
+  it("guards close after edits outside react-hook-form state (base URL)", () => {
+    const onOpenChange = vi.fn();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    render(
+      <ProviderEditorDialog
+        mode="create"
+        open={true}
+        cliKey="codex"
+        onSaved={vi.fn()}
+        onOpenChange={onOpenChange}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    fireEvent.change(dialog.getByPlaceholderText("中转 endpoint（例如：https://example.com/v1）"), {
+      target: { value: "https://example.com/v1" },
+    });
+    fireEvent.click(dialog.getByRole("button", { name: "取消" }));
+
+    expect(confirmSpy).toHaveBeenCalledWith("有未保存的修改，确定关闭吗？");
+    expect(onOpenChange).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it("ignores clicks on the already-active auth tab but guards real switches", () => {
+    const onOpenChange = vi.fn();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    render(
+      <ProviderEditorDialog
+        mode="create"
+        open={true}
+        cliKey="codex"
+        onSaved={vi.fn()}
+        onOpenChange={onOpenChange}
+      />
+    );
+
+    const dialog = within(screen.getByRole("dialog"));
+    // Clicking the tab that is already active must not mark the editor dirty
+    // (nor invalidate model discovery) — closing stays confirm-free.
+    fireEvent.click(dialog.getByRole("tab", { name: "API 密钥" }));
+    fireEvent.click(dialog.getByRole("button", { name: "取消" }));
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+
+    // A real switch still counts as an edit and guards the close.
+    onOpenChange.mockClear();
+    fireEvent.click(dialog.getByRole("tab", { name: "OAuth 登录" }));
+    fireEvent.click(dialog.getByRole("button", { name: "取消" }));
+    expect(confirmSpy).toHaveBeenCalledWith("有未保存的修改，确定关闭吗？");
+    expect(onOpenChange).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
   });
 
   it("guards committed model policy changes but ignores uncommitted composer text", () => {

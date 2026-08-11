@@ -13,12 +13,9 @@ pub(crate) async fn sort_mode_delete(
     let refresh_db = db.clone();
     let (affected_cli_keys, mapping_sources_changed) =
         blocking::run("sort_mode_delete", move || {
-            let before =
-                crate::infra::codex_model_catalog::projection::routable_mapping_signature(&db)?;
-            let affected_cli_keys = sort_modes::delete_mode_with_affected_cli_keys(&db, mode_id)?;
-            let changed = before
-                != crate::infra::codex_model_catalog::projection::routable_mapping_signature(&db)?;
-            Ok::<_, crate::shared::error::AppError>((affected_cli_keys, changed))
+            crate::app::provider_service::with_codex_mapping_tracking(&db, true, || {
+                sort_modes::delete_mode_with_affected_cli_keys(&db, mode_id)
+            })
         })
         .await?;
 
@@ -29,8 +26,7 @@ pub(crate) async fn sort_mode_delete(
         &app,
         refresh_db,
         mapping_sources_changed,
-    )
-    .await;
+    );
     Ok(true)
 }
 
@@ -62,26 +58,18 @@ pub(crate) async fn sort_mode_providers_set_order(
     let cli_key_for_db = cli_key.clone();
     let (rows, mapping_sources_changed) =
         blocking::run("sort_mode_providers_set_order", move || {
-            let before = (cli_key_for_db == "codex")
-                .then(|| {
-                    crate::infra::codex_model_catalog::projection::routable_mapping_signature(&db)
-                })
-                .transpose()?;
-            let rows = sort_modes::set_mode_providers_order(
+            crate::app::provider_service::with_codex_mapping_tracking(
                 &db,
-                mode_id,
-                &cli_key_for_db,
-                ordered_provider_ids,
-            )?;
-            let changed = if let Some(before) = before {
-                before
-                    != crate::infra::codex_model_catalog::projection::routable_mapping_signature(
+                cli_key_for_db == "codex",
+                || {
+                    sort_modes::set_mode_providers_order(
                         &db,
-                    )?
-            } else {
-                false
-            };
-            Ok::<_, crate::shared::error::AppError>((rows, changed))
+                        mode_id,
+                        &cli_key_for_db,
+                        ordered_provider_ids,
+                    )
+                },
+            )
         })
         .await?;
 
@@ -90,8 +78,7 @@ pub(crate) async fn sort_mode_providers_set_order(
         &app,
         refresh_db,
         mapping_sources_changed,
-    )
-    .await;
+    );
     Ok(rows)
 }
 
@@ -108,27 +95,19 @@ pub(crate) async fn sort_mode_provider_set_enabled(
     let cli_key_for_db = cli_key.clone();
     let (row, mapping_sources_changed) =
         blocking::run("sort_mode_provider_set_enabled", move || {
-            let before = (cli_key_for_db == "codex")
-                .then(|| {
-                    crate::infra::codex_model_catalog::projection::routable_mapping_signature(&db)
-                })
-                .transpose()?;
-            let row = sort_modes::set_mode_provider_enabled(
+            crate::app::provider_service::with_codex_mapping_tracking(
                 &db,
-                mode_id,
-                &cli_key_for_db,
-                provider_id,
-                enabled,
-            )?;
-            let changed = if let Some(before) = before {
-                before
-                    != crate::infra::codex_model_catalog::projection::routable_mapping_signature(
+                cli_key_for_db == "codex",
+                || {
+                    sort_modes::set_mode_provider_enabled(
                         &db,
-                    )?
-            } else {
-                false
-            };
-            Ok::<_, crate::shared::error::AppError>((row, changed))
+                        mode_id,
+                        &cli_key_for_db,
+                        provider_id,
+                        enabled,
+                    )
+                },
+            )
         })
         .await?;
 
@@ -137,7 +116,6 @@ pub(crate) async fn sort_mode_provider_set_enabled(
         &app,
         refresh_db,
         mapping_sources_changed,
-    )
-    .await;
+    );
     Ok(row)
 }

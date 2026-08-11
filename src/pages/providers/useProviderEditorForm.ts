@@ -285,7 +285,6 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
   const editProviderSnapshotRef = useRef<ProviderSummary | null>(null);
 
   const { register, reset, setValue, watch } = form;
-  const formDirty = form.formState.isDirty;
   const enabled = watch("enabled");
   const dailyResetMode = watch("daily_reset_mode");
   const limit5hUsd = watch("limit_5h_usd");
@@ -323,9 +322,20 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
     setModelDiscoveryState({ status: "idle" });
   }, [open, editingProviderId, cliKey]);
 
+  // Dirty flag for editor state living outside react-hook-form (base URLs, tags,
+  // auth mode, CX2CC source, claude models, stream timeout) so closing the dialog
+  // warns about these edits too.
+  const [editorDirty, setEditorDirty] = useState(false);
+  useEffect(() => {
+    setEditorDirty(false);
+  }, [open, editingProviderId, cliKey]);
+
   const setBaseUrlModeFromUi = useCallback(
     (next: ProviderBaseUrlMode) => {
-      if (next !== baseUrlMode) invalidateModelDiscovery();
+      if (next !== baseUrlMode) {
+        invalidateModelDiscovery();
+        setEditorDirty(true);
+      }
       setBaseUrlMode(next);
     },
     [baseUrlMode, invalidateModelDiscovery]
@@ -338,7 +348,10 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
       const urlsChanged =
         previous.length !== resolved.length ||
         previous.some((row, index) => row.url !== resolved[index]?.url);
-      if (urlsChanged) invalidateModelDiscovery();
+      if (urlsChanged) {
+        invalidateModelDiscovery();
+        setEditorDirty(true);
+      }
       baseUrlRowsRef.current = resolved;
       setBaseUrlRows(resolved);
     },
@@ -368,7 +381,11 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
 
   const setAuthModeFromUi = useCallback(
     (next: "api_key" | "oauth" | "cx2cc") => {
+      // Tab clicks re-fire onChange for the already-active tab; a same-value
+      // "change" must not invalidate discovery results or mark the editor dirty.
+      if (next === authMode) return;
       invalidateModelDiscovery();
+      setEditorDirty(true);
       setAuthMode(next);
       if (next === "cx2cc") {
         setClaudeModels((prev) => withCx2ccDefaultModel(prev));
@@ -380,6 +397,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
       }
     },
     [
+      authMode,
       cx2ccSourceValue,
       invalidateModelDiscovery,
       resolveCx2ccInheritedMultiplier,
@@ -390,6 +408,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
   const setCx2ccSourceValueFromUi = useCallback(
     (value: string) => {
       invalidateModelDiscovery();
+      setEditorDirty(true);
       setCx2ccSourceValue(value);
       if (authMode === "cx2cc") {
         setCostMultiplierValue(resolveCx2ccInheritedMultiplier(value), {
@@ -459,6 +478,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
   const setExtensionValue = useCallback(
     (contribution: ActiveUiContribution, fieldKey: string, value: JsonValue) => {
       const key = contributionKey(contribution);
+      setEditorDirty(true);
       setExtensionValuesState((prev) => ({
         ...prev,
         valuesByContributionKey: {
@@ -537,7 +557,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
       if (!nextOpen) {
         if (
           !options?.bypassDirty &&
-          (form.formState.isDirty || modelPolicyDirty) &&
+          (form.formState.isDirty || modelPolicyDirty || editorDirty) &&
           typeof window !== "undefined" &&
           !window.confirm("有未保存的修改，确定关闭吗？")
         ) {
@@ -550,6 +570,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
     },
     [
       cancelActiveOAuthLoginAttempt,
+      editorDirty,
       form.formState.isDirty,
       invalidateModelDiscovery,
       modelPolicyDirty,
@@ -561,6 +582,21 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
     setModelPolicy(next);
     setModelPolicyStatus("ready");
     setModelPolicyDirty(true);
+  }, []);
+
+  const setTagsFromUi = useCallback((next: React.SetStateAction<string[]>) => {
+    setEditorDirty(true);
+    setTags(next);
+  }, []);
+
+  const setClaudeModelsFromUi = useCallback((next: React.SetStateAction<ClaudeModels>) => {
+    setEditorDirty(true);
+    setClaudeModels(next);
+  }, []);
+
+  const setStreamIdleTimeoutSecondsFromUi = useCallback((next: string) => {
+    setEditorDirty(true);
+    setStreamIdleTimeoutSeconds(next);
   }, []);
 
   useProviderEditorEffects({
@@ -614,6 +650,12 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
 
   const discoverModels = useCallback(async () => {
     const epoch = ++discoveryEpochRef.current;
+    // OAuth discovery reads the stored token by provider id; an unsaved provider
+    // has neither, and the backend's "unsupported" reply would mislead the user.
+    if (authMode === "oauth" && editingProviderId == null) {
+      setModelDiscoveryState({ status: "oauth_unsaved" });
+      return;
+    }
     setModelDiscoveryState({ status: "loading" });
 
     const input: ProviderModelDiscoveryInput = {
@@ -854,7 +896,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
     apiKeyConfigured,
     copyingApiKey,
     tags,
-    setTags,
+    setTags: setTagsFromUi,
     tagInput,
     setTagInput,
     baseUrlMode,
@@ -867,15 +909,13 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
     claudeModels,
     modelPolicy,
     modelPolicyStatus,
-    modelPolicyDirty,
     setModelPolicy: setModelPolicyFromUi,
     modelDiscoveryState,
     discoverModels,
-    formDirty,
-    setClaudeModels,
+    setClaudeModels: setClaudeModelsFromUi,
     claudeModelCount,
     streamIdleTimeoutSeconds,
-    setStreamIdleTimeoutSeconds,
+    setStreamIdleTimeoutSeconds: setStreamIdleTimeoutSecondsFromUi,
     oauthStatus,
     oauthLoading,
     oauthDeviceFlow,

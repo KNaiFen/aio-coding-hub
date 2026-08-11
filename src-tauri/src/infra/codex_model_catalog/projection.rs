@@ -43,16 +43,12 @@ pub(crate) fn parse_catalog_json(bytes: &[u8], label: &str) -> Result<Value, Str
     Ok(value)
 }
 
+/// Inputs must come from `parse_catalog_json`, which already validated the catalog shape.
 pub(crate) fn build_projection(
     bundled: &Value,
     user_catalog: Option<&Value>,
     policies: &[ProviderModelPolicyV1],
 ) -> Result<Option<CatalogProjection>, String> {
-    validate_catalog_shape(bundled, "bundled Codex catalog")?;
-    if let Some(user_catalog) = user_catalog {
-        validate_catalog_shape(user_catalog, "user Codex catalog")?;
-    }
-
     let mut models = merge_models(bundled, user_catalog)?;
     let baseline_slugs = models
         .iter()

@@ -1055,9 +1055,9 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
-  async modelPricesList(cliKey: string): Promise<Result<ModelPriceSummary[], string>> {
+  async modelPricesListAll(): Promise<Result<ModelPriceSummary[], string>> {
     try {
-      return { status: "ok", data: await TAURI_INVOKE("model_prices_list", { cliKey }) };
+      return { status: "ok", data: await TAURI_INVOKE("model_prices_list_all") };
     } catch (e) {
       if (e instanceof Error) throw e;
       else return { status: "error", error: e as any };
@@ -1078,11 +1078,9 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
-  async modelPricesSyncBasellm(
-    force: boolean | null
-  ): Promise<Result<ModelPricesSyncReport, string>> {
+  async modelPricesSync(): Promise<Result<ModelPricesSyncReport, string>> {
     try {
-      return { status: "ok", data: await TAURI_INVOKE("model_prices_sync_basellm", { force }) };
+      return { status: "ok", data: await TAURI_INVOKE("model_prices_sync") };
     } catch (e) {
       if (e instanceof Error) throw e;
       else return { status: "error", error: e as any };
@@ -2766,6 +2764,10 @@ export type FailoverAttempt = {
   circuit_trigger_error_code?: string | null;
   provider_bridged: boolean | null;
   timeout_secs: number | null;
+  reasoning_effort: string | null;
+  upstream_sent: boolean;
+  claude_model_mapping?: ClaudeModelMapping | null;
+  model_redirect?: ModelRedirect | null;
 };
 export type FrontendErrorReportInput = {
   source: string;
@@ -2884,6 +2886,7 @@ export type GatewayRequestEvent = {
   effective_input_tokens: number | null;
   claude_model_mapping: ClaudeModelMapping | null;
   model_redirect: ModelRedirect | null;
+  reasoning_effort: string | null;
 };
 export type GatewayRequestSignalEvent = {
   trace_id: string;
@@ -3184,18 +3187,25 @@ export type ModelPriceAliasesV1 = { version: number; rules: ModelPriceAliasRuleV
 export type ModelPriceSummary = {
   id: number;
   cli_key: string;
+  /**
+   * Upstream vendor key from the price source (e.g. "anthropic", "deepseek");
+   * empty for manually upserted rows.
+   */
+  vendor: string;
   model: string;
   currency: string;
   created_at: number;
   updated_at: number;
 };
 export type ModelPricesSyncReport = {
-  status: string;
+  status: ModelPricesSyncStatus;
   inserted: number;
   updated: number;
-  skipped: number;
+  unchanged: number;
   total: number;
+  error: string | null;
 };
+export type ModelPricesSyncStatus = "updated" | "not_modified" | "failed";
 export type ModelRedirect = {
   stage: string;
   providerId: number;
@@ -3824,6 +3834,7 @@ export type RequestLogDetail = {
   effective_input_tokens: number | null;
   usage_json: string | null;
   requested_model: string | null;
+  reasoning_effort: string | null;
   final_provider_id: number;
   final_provider_name: string;
   final_provider_source_id: number | null;
@@ -3861,6 +3872,7 @@ export type RequestLogSummary = {
   excluded_from_stats: boolean;
   special_settings_json: string | null;
   requested_model: string | null;
+  reasoning_effort: string | null;
   status: number | null;
   error_code: string | null;
   is_interrupted: boolean;

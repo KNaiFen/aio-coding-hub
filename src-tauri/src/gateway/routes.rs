@@ -3594,8 +3594,137 @@ module.exports.activate = function activate(api) {
         );
     }
 
+    // Legacy claude_models mappings surface as a unified model_redirect (stage
+    // "legacy") on the recorded attempts, alongside the persisted
+    // claude_model_mapping special setting.
     #[tokio::test(flavor = "current_thread")]
-    async fn provider_model_routing_applies_ready_cx2cc_bridge_policy_only_once() {
+    async fn legacy_claude_mapping_records_model_redirect_on_attempts() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 1;
+        app_settings.provider_cooldown_seconds = 0;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("legacy-mapping-redirect.sqlite"))
+            .expect("init test db");
+        let success_body = r#"{
+            "id":"msg_legacy",
+            "type":"message",
+            "role":"assistant",
+            "model":"legacy-target",
+            "content":[{"type":"text","text":"ok"}],
+            "usage":{"input_tokens":1,"output_tokens":1}
+        }"#;
+        let (upstream_base_url, capture_rx, upstream_task) =
+            spawn_capturing_json_upstream(success_body).await;
+        let provider_id = providers::upsert(
+            &db,
+            providers::ProviderUpsertParams {
+                provider_id: None,
+                cli_key: "claude".to_string(),
+                name: "Legacy Mapping Provider".to_string(),
+                base_urls: vec![upstream_base_url],
+                base_url_mode: providers::ProviderBaseUrlMode::Order,
+                auth_mode: None,
+                api_key: Some("sk-test".to_string()),
+                enabled: true,
+                cost_multiplier: 1.0,
+                priority: Some(0),
+                claude_models: Some(providers::ClaudeModels {
+                    sonnet_model: Some("legacy-target".to_string()),
+                    ..Default::default()
+                }),
+                model_policy: None,
+                limit_5h_usd: None,
+                limit_daily_usd: None,
+                daily_reset_mode: None,
+                daily_reset_time: None,
+                limit_weekly_usd: None,
+                limit_monthly_usd: None,
+                limit_total_usd: None,
+                tags: None,
+                note: None,
+                source_provider_id: None,
+                bridge_type: None,
+                stream_idle_timeout_seconds: None,
+                extension_values: None,
+            },
+        )
+        .expect("insert legacy provider")
+        .id;
+        append_default_route_provider(&db, "claude", provider_id);
+
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+        let router = build_router(gateway_state(app_handle, db, log_tx));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(format!("/claude/_aio/provider/{provider_id}/v1/messages"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"model":"claude-3-5-sonnet","max_tokens":128,"messages":[{"role":"user","content":"hello"}]}"#,
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let upstream_body: Value =
+            serde_json::from_str(&capture_rx.await.expect("upstream request capture"))
+                .expect("upstream body");
+        assert_eq!(
+            upstream_body.get("model").and_then(Value::as_str),
+            Some("legacy-target")
+        );
+
+        let log = recv_terminal_request_log(&mut log_rx).await;
+        let attempts: Value = serde_json::from_str(&log.attempts_json).expect("attempts json");
+        let redirect = attempts
+            .as_array()
+            .expect("attempt array")
+            .iter()
+            .find_map(|attempt| attempt.get("model_redirect"))
+            .expect("legacy attempt carries model_redirect");
+        assert_eq!(
+            redirect.get("stage").and_then(Value::as_str),
+            Some("legacy")
+        );
+        assert_eq!(
+            redirect.get("sourceModel").and_then(Value::as_str),
+            Some("claude-3-5-sonnet")
+        );
+        assert_eq!(
+            redirect.get("targetModel").and_then(Value::as_str),
+            Some("legacy-target")
+        );
+
+        // The persisted special setting keeps the legacy claude_model_mapping shape.
+        let special_settings: Value = serde_json::from_str(
+            log.special_settings_json
+                .as_deref()
+                .expect("special settings"),
+        )
+        .expect("special settings json");
+        assert!(special_settings
+            .as_array()
+            .expect("special settings array")
+            .iter()
+            .any(|setting| setting.get("type").and_then(Value::as_str)
+                == Some("claude_model_mapping")));
+
+        upstream_task.abort();
+    }
+
+    // cx2cc bridges map models through claude_models only; a ready model policy on the
+    // bridge must not overwrite the bridge-translated model (single mapping mechanism).
+    #[tokio::test(flavor = "current_thread")]
+    async fn provider_model_routing_cx2cc_bridge_uses_claude_models_not_policy() {
         let _env_lock = crate::test_support::test_env_lock();
         let home = tempfile::tempdir().expect("home dir");
         let _env = isolate_app_env(home.path());
@@ -3664,42 +3793,28 @@ module.exports.activate = function activate(api) {
         let upstream_body: Value =
             serde_json::from_str(&capture_rx.await.expect("upstream request capture"))
                 .expect("upstream body");
+        // claude_models bridge translation wins; the policy mapping (claude-3-5-sonnet
+        // -> bridge-target) must not overwrite it.
         assert_eq!(
             upstream_body.get("model").and_then(Value::as_str),
-            Some("bridge-target")
+            Some("gpt-5.4")
         );
 
         let log = recv_terminal_request_log(&mut log_rx).await;
-        let special_settings: Value = serde_json::from_str(
-            log.special_settings_json
-                .as_deref()
-                .expect("model redirect settings"),
-        )
-        .expect("special settings json");
-        let redirects: Vec<&Value> = special_settings
-            .as_array()
-            .expect("special settings array")
-            .iter()
+        let redirects: Vec<Value> = log
+            .special_settings_json
+            .as_deref()
+            .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+            .and_then(|settings| settings.as_array().cloned())
+            .unwrap_or_default()
+            .into_iter()
             .filter(|setting| setting.get("type").and_then(Value::as_str) == Some("model_redirect"))
             .collect();
-        assert_eq!(redirects.len(), 1);
-        let redirect = redirects[0];
-        assert_eq!(
-            redirect.get("stage").and_then(Value::as_str),
-            Some("bridge")
+        assert!(
+            redirects.is_empty(),
+            "policy mapping must not run on cx2cc bridges: {redirects:?}"
         );
-        assert_eq!(
-            redirect.get("providerId").and_then(Value::as_i64),
-            Some(bridge_provider_id)
-        );
-        assert_eq!(
-            redirect.get("sourceModel").and_then(Value::as_str),
-            Some("claude-3-5-sonnet")
-        );
-        assert_eq!(
-            redirect.get("targetModel").and_then(Value::as_str),
-            Some("bridge-target")
-        );
+        let _ = bridge_provider_id;
 
         upstream_task.abort();
     }

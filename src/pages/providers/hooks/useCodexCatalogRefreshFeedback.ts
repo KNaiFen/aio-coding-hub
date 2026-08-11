@@ -13,7 +13,7 @@ export function useCodexCatalogRefreshFeedback() {
         toast("模型映射已更新，重启 Codex 后生效");
         return;
       }
-      toast("Codex 模型目录未更新，请在 CLI 管理中同步代理");
+      toast("Codex 模型目录未更新，请到 CLI 管理重新接管 Codex");
     })
       .then((cleanup) => {
         if (disposed) {

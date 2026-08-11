@@ -32,7 +32,10 @@ describe("useCodexCatalogRefreshFeedback", () => {
     act(() => onEvent?.({ status: "updated" }));
     act(() => onEvent?.({ status: "failed" }));
     expect(toastMock).toHaveBeenNthCalledWith(1, "模型映射已更新，重启 Codex 后生效");
-    expect(toastMock).toHaveBeenNthCalledWith(2, "Codex 模型目录未更新，请在 CLI 管理中同步代理");
+    expect(toastMock).toHaveBeenNthCalledWith(
+      2,
+      "Codex 模型目录未更新，请到 CLI 管理重新接管 Codex"
+    );
 
     unmount();
     expect(cleanup).toHaveBeenCalledTimes(1);

@@ -76,6 +76,69 @@ PRAGMA user_version = 37;
 }
 
 #[test]
+fn migrate_v38_to_v39_adds_and_backfills_model_prices_vendor() {
+    let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
+    conn.execute_batch(
+        r#"
+CREATE TABLE model_prices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  cli_key TEXT NOT NULL,
+  model TEXT NOT NULL,
+  price_json TEXT NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'USD',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(cli_key, model)
+);
+INSERT INTO model_prices(cli_key, model, price_json, created_at, updated_at) VALUES
+  ('claude', 'claude-opus-4-5', '{}', 1, 1),
+  ('codex', 'gpt-5.4', '{}', 1, 1),
+  ('gemini', 'gemini-3-pro', '{}', 1, 1),
+  ('grok', 'grok-5', '{}', 1, 1);
+PRAGMA user_version = 38;
+        "#,
+    )
+    .expect("insert v38 model_prices");
+
+    v38_to_v39::migrate_v38_to_v39(&mut conn).expect("migrate v38->v39");
+
+    let vendors: Vec<(String, String)> = {
+        let mut stmt = conn
+            .prepare("SELECT cli_key, vendor FROM model_prices ORDER BY cli_key")
+            .expect("prepare vendor rows");
+        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .expect("query vendor rows")
+            .collect::<Result<_, _>>()
+            .expect("read vendor rows")
+    };
+    assert_eq!(
+        vendors,
+        vec![
+            ("claude".to_string(), "anthropic".to_string()),
+            ("codex".to_string(), "openai".to_string()),
+            ("gemini".to_string(), "google".to_string()),
+            ("grok".to_string(), "xai".to_string()),
+        ]
+    );
+
+    // Re-running must not fail or clobber a vendor written by a newer sync.
+    conn.execute(
+        "UPDATE model_prices SET vendor = 'deepseek' WHERE cli_key = 'claude'",
+        [],
+    )
+    .expect("simulate synced vendor");
+    v38_to_v39::migrate_v38_to_v39(&mut conn).expect("migrate v38->v39 twice");
+    let vendor: String = conn
+        .query_row(
+            "SELECT vendor FROM model_prices WHERE cli_key = 'claude'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read vendor after rerun");
+    assert_eq!(vendor, "deepseek");
+}
+
+#[test]
 fn migrate_v32_to_v33_backfills_pool_and_default_route_orders() {
     let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
     conn.execute_batch(

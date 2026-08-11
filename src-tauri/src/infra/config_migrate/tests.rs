@@ -279,12 +279,18 @@ INSERT INTO providers(
     )
     .expect("corrupt policy");
     drop(conn);
-    let Err(error) = config_export(&app, &test_app.db) else {
-        panic!("invalid policy must fail export");
-    };
-    assert_eq!(error.code(), "PROVIDER_MODEL_POLICY_INVALID");
-    assert!(error.to_string().contains("ready-policy-export"));
-    assert!(error.to_string().contains("reset and save"));
+    // An invalid policy must not block the whole backup: it degrades to the
+    // safe default policy in the exported bundle.
+    let bundle = config_export(&app, &test_app.db).expect("export with invalid policy");
+    let degraded = bundle
+        .providers
+        .iter()
+        .find(|provider| provider.name == "ready-policy-export")
+        .expect("degraded export");
+    assert_eq!(
+        degraded.model_policy,
+        Some(crate::providers::ProviderModelPolicyV1::all())
+    );
 }
 
 #[test]

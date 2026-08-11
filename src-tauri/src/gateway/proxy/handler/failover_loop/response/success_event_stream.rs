@@ -262,6 +262,10 @@ where
             circuit_trigger_error_code: None,
             provider_bridged: Some(provider_ctx_owned.provider_bridged),
             timeout_secs: None,
+            reasoning_effort: attempt_ctx.reasoning_effort.map(str::to_string),
+            upstream_sent: attempt_ctx.upstream_sent,
+            claude_model_mapping: provider_ctx_owned.claude_model_mapping.clone(),
+            model_redirect: provider_ctx_owned.model_redirect.clone(),
         });
 
         emit_attempt_event_and_log_with_circuit_before(

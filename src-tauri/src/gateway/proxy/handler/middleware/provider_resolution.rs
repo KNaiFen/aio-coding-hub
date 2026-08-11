@@ -80,8 +80,11 @@ impl ProviderResolutionMiddleware {
         ctx.effective_sort_mode_id = selection.effective_sort_mode_id;
         ctx.providers = selection.providers;
 
-        let model_policy_filter =
-            filter_providers_by_model_policy(&mut ctx.providers, ctx.requested_model.as_deref());
+        let model_policy_filter = filter_providers_by_model_policy(
+            &mut ctx.providers,
+            ctx.requested_model.as_deref(),
+            ctx.forced_provider_id,
+        );
         let initial_provider_ids = model_policy_filter.original_provider_ids.clone();
         let provider_ids_after_policy = provider_ids(&ctx.providers);
         let no_eligible_after_policy = ctx.requested_model.is_some()

@@ -3,18 +3,19 @@ import type { CodexCatalogEventPayload } from "../../generated/bindings";
 import { logToConsole } from "../consoleLog";
 import { listenDesktopEvent } from "../desktop/event";
 
-const CODEX_CATALOG_EVENT_STATUSES = ["updated", "failed"] as const;
+const CODEX_CATALOG_EVENT_STATUSES = [
+  "updated",
+  "failed",
+] as const satisfies readonly CodexCatalogEventPayload["status"][];
 
 export function parseCodexCatalogEventPayload(value: unknown): CodexCatalogEventPayload | null {
   if (value == null || typeof value !== "object" || Array.isArray(value)) return null;
   const status = (value as Record<string, unknown>).status;
-  if (
-    typeof status !== "string" ||
-    !(CODEX_CATALOG_EVENT_STATUSES as readonly string[]).includes(status)
-  ) {
+  const known = CODEX_CATALOG_EVENT_STATUSES.find((candidate) => candidate === status);
+  if (!known) {
     return null;
   }
-  return { status: status as CodexCatalogEventPayload["status"] };
+  return { status: known };
 }
 
 export async function listenProviderCodexCatalogEvents(

@@ -183,13 +183,13 @@ ORDER BY cli_key ASC, sort_order ASC, id ASC
                 );
             }
             ProviderModelPolicyStatus::Invalid => {
-                return Err(crate::shared::error::AppError::new(
-                    "PROVIDER_MODEL_POLICY_INVALID",
-                    format!(
-                        "reset and save the invalid model policy before exporting provider {}",
-                        provider.name
-                    ),
-                ));
+                // A single corrupted policy must not block the whole backup; the
+                // policy is already broken, so export the safe default instead.
+                tracing::warn!(
+                    provider = %provider.name,
+                    "invalid model policy replaced with the default during export"
+                );
+                provider.model_policy = Some(crate::providers::ProviderModelPolicyV1::all());
             }
         }
         providers.push(provider);

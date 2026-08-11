@@ -71,6 +71,49 @@ fn excluded_policy(source: &str) -> providers::ProviderModelPolicyV1 {
 }
 
 #[test]
+fn model_policy_filter_keeps_forced_fallback_provider_despite_explicit_sibling() {
+    // Provider 2 declares the model explicitly; provider 1 is a mode:all fallback the
+    // user forces via x-aio-provider-id. Forcing must not be rejected by the
+    // explicit-first narrowing — only the provider's own policy may block it.
+    let make = || {
+        vec![
+            gateway_provider(
+                1,
+                Some(providers::ProviderModelPolicyV1::all()),
+                providers::ProviderModelPolicyStatus::Ready,
+            ),
+            gateway_provider(
+                2,
+                Some(mapping_policy("gpt-5.6-luna", "deepseek-v4-flash")),
+                providers::ProviderModelPolicyStatus::Ready,
+            ),
+        ]
+    };
+
+    let mut providers = make();
+    let forced = filter_providers_by_model_policy(&mut providers, Some("gpt-5.6-luna"), Some(1));
+    assert_eq!(ids(&providers), vec![1, 2]);
+    assert!(forced.ineligible_provider_ids.is_empty());
+
+    // A forced provider whose own policy blocks the model is still rejected.
+    let mut providers = vec![
+        gateway_provider(
+            1,
+            Some(excluded_policy("gpt-5.6-luna")),
+            providers::ProviderModelPolicyStatus::Ready,
+        ),
+        gateway_provider(
+            2,
+            Some(mapping_policy("gpt-5.6-luna", "deepseek-v4-flash")),
+            providers::ProviderModelPolicyStatus::Ready,
+        ),
+    ];
+    let blocked = filter_providers_by_model_policy(&mut providers, Some("gpt-5.6-luna"), Some(1));
+    assert_eq!(ids(&providers), vec![2]);
+    assert_eq!(blocked.ineligible_provider_ids, vec![1]);
+}
+
+#[test]
 fn model_policy_filter_prefers_explicit_matches_and_preserves_order() {
     let mut providers = vec![
         gateway_provider(
@@ -90,7 +133,7 @@ fn model_policy_filter_prefers_explicit_matches_and_preserves_order() {
         ),
     ];
 
-    let first = filter_providers_by_model_policy(&mut providers, Some("gpt-5.6-luna"));
+    let first = filter_providers_by_model_policy(&mut providers, Some("gpt-5.6-luna"), None);
     assert_eq!(ids(&providers), vec![2]);
     assert_eq!(
         first,
@@ -118,7 +161,7 @@ fn model_policy_filter_prefers_explicit_matches_and_preserves_order() {
             providers::ProviderModelPolicyStatus::Ready,
         ),
     ];
-    filter_providers_by_model_policy(&mut providers, Some("gpt-5.4"));
+    filter_providers_by_model_policy(&mut providers, Some("gpt-5.4"), None);
     assert_eq!(ids(&providers), vec![2, 3]);
 
     let mut providers = vec![
@@ -133,7 +176,7 @@ fn model_policy_filter_prefers_explicit_matches_and_preserves_order() {
             providers::ProviderModelPolicyStatus::Ready,
         ),
     ];
-    filter_providers_by_model_policy(&mut providers, Some("gpt-5.5"));
+    filter_providers_by_model_policy(&mut providers, Some("gpt-5.5"), None);
     assert_eq!(ids(&providers), vec![1]);
 }
 
@@ -152,7 +195,7 @@ fn model_policy_filter_blocks_excluded_matches() {
         ),
     ];
 
-    let result = filter_providers_by_model_policy(&mut providers, Some("gpt-5.6-luna"));
+    let result = filter_providers_by_model_policy(&mut providers, Some("gpt-5.6-luna"), None);
     assert_eq!(ids(&providers), vec![2]);
     assert_eq!(result.ineligible_provider_ids, vec![1]);
 }
@@ -168,13 +211,13 @@ fn model_policy_filter_is_neutral_without_model_and_fails_closed_for_invalid_row
         ),
     ];
 
-    let result = filter_providers_by_model_policy(&mut providers, None);
+    let result = filter_providers_by_model_policy(&mut providers, None, None);
     assert_eq!(ids(&providers), vec![1, 2]);
     assert_eq!(result.original_provider_ids, vec![1, 2]);
     assert!(result.ineligible_provider_ids.is_empty());
     assert!(result.invalid_provider_ids.is_empty());
 
-    let result = filter_providers_by_model_policy(&mut providers, Some("gpt-5.4"));
+    let result = filter_providers_by_model_policy(&mut providers, Some("gpt-5.4"), None);
     assert_eq!(ids(&providers), vec![1]);
     assert_eq!(result.invalid_provider_ids, vec![2]);
 }

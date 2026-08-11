@@ -208,6 +208,8 @@ pub(super) struct ProviderCtxOwned {
     pub(super) provider_bridged: bool,
     pub(super) session_reuse: Option<bool>,
     pub(super) stream_idle_timeout_seconds: Option<u32>,
+    pub(super) claude_model_mapping: Option<ClaudeModelMapping>,
+    pub(super) model_redirect: Option<ModelRedirect>,
 }
 
 impl<'a> From<ProviderCtx<'a>> for ProviderCtxOwned {
@@ -221,6 +223,8 @@ impl<'a> From<ProviderCtx<'a>> for ProviderCtxOwned {
             provider_bridged: ctx.provider_bridged,
             session_reuse: ctx.session_reuse,
             stream_idle_timeout_seconds: ctx.stream_idle_timeout_seconds,
+            claude_model_mapping: ctx.claude_model_mapping.cloned(),
+            model_redirect: ctx.model_redirect.cloned(),
         }
     }
 }
@@ -291,6 +295,8 @@ pub(super) struct AttemptCtx<'a> {
     pub(super) gemini_oauth_response_mode: Option<gemini_oauth::GeminiOAuthResponseMode>,
     pub(super) cx2cc_active: bool,
     pub(super) anthropic_stream_requested: bool,
+    pub(super) reasoning_effort: Option<&'a str>,
+    pub(super) upstream_sent: bool,
 }
 
 pub(super) struct LoopState<'a, R: tauri::Runtime = tauri::Wry> {

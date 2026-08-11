@@ -82,6 +82,7 @@ function makeRequestEvent(overrides: Partial<GatewayRequestEvent> = {}): Gateway
     claude_model_mapping: null,
     ...overrides,
     model_redirect: overrides.model_redirect ?? null,
+    reasoning_effort: overrides.reasoning_effort ?? null,
   };
 }
 

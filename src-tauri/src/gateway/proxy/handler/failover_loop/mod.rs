@@ -50,6 +50,8 @@ mod attempt_auth;
 mod attempt_executor;
 #[path = "attempt/attempt_record.rs"]
 mod attempt_record;
+#[path = "attempt/reasoning_effort.rs"]
+mod reasoning_effort;
 #[path = "attempt/retry_engine.rs"]
 mod retry_engine;
 #[path = "attempt/send.rs"]

@@ -23,7 +23,7 @@ import {
 } from "../../utils/formatters";
 import { Clock, Server, CheckCircle2, XCircle } from "lucide-react";
 import { computeStatusBadge, resolveCacheCreationDisplay } from "./requestLogPresentation";
-import { FolderBadge, FreeBadge, SessionReuseBadge } from "./LogBadges";
+import { FolderBadge, FreeBadge, ReasoningEffortBadge, SessionReuseBadge } from "./LogBadges";
 import { formatModelRedirectText } from "./requestLogSpecialSettings";
 import { CliBrandIcon } from "./CliBrandIcon";
 import { getErrorCodeLabel } from "./requestLogErrorLabels";
@@ -329,6 +329,8 @@ export const RealtimeTraceCards = memo(function RealtimeTraceCards({
                     <span className="shrink-0">{cliLabel} /</span>
                     <span className="truncate">{modelText}</span>
                   </span>
+
+                  <ReasoningEffortBadge value={summary?.reasoning_effort} />
 
                   {sessionFolder && (
                     <FolderBadge

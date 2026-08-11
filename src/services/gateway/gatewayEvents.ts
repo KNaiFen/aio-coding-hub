@@ -8,7 +8,7 @@ import { subscribeGatewayEvent } from "./gatewayEventBus";
 import { ingestTraceAttempt, ingestTraceRequest, ingestTraceStart } from "./traceStore";
 import { ingestCacheAnomalyRequest, ingestCacheAnomalyRequestStart } from "./cacheAnomalyMonitor";
 import type { ClaudeModelMapping } from "./claudeModelMapping";
-import { normalizeModelRedirect, type ModelRedirect } from "./modelRedirect";
+import { normalizeModelRedirect } from "./modelRedirect";
 import { MAX_ATTEMPTS_PER_TRACE } from "./traceLimits";
 import type {
   FailoverAttempt,
@@ -219,10 +219,6 @@ function isNullableClaudeModelMapping(
   return isNullish(value) || isClaudeModelMapping(value);
 }
 
-function isNullableModelRedirect(value: unknown): value is ModelRedirect | null | undefined {
-  return isNullish(value) || normalizeModelRedirect(value) !== null;
-}
-
 function isGatewayAttempt(payload: unknown): payload is GatewayAttempt {
   if (!isRecord(payload)) return false;
   return (
@@ -334,13 +330,18 @@ export function normalizeGatewayAttemptEvent(payload: unknown): GatewayAttemptEv
     !isNullableString(payload.circuit_state_after) ||
     !isNullableNumber(payload.circuit_failure_count) ||
     !isNullableNumber(payload.circuit_failure_threshold) ||
-    !isNullableClaudeModelMapping(payload.claude_model_mapping) ||
-    !isNullableModelRedirect(payload.model_redirect)
+    !isNullableClaudeModelMapping(payload.claude_model_mapping)
   ) {
     return null;
   }
 
-  const modelRedirect = normalizeModelRedirect(payload.model_redirect);
+  // Normalize once; a present-but-invalid redirect rejects the payload.
+  const modelRedirect = isNullish(payload.model_redirect)
+    ? null
+    : normalizeModelRedirect(payload.model_redirect);
+  if (!isNullish(payload.model_redirect) && modelRedirect === null) {
+    return null;
+  }
 
   return {
     trace_id: payload.trace_id,
@@ -373,6 +374,13 @@ export function normalizeGatewayAttemptEvent(payload: unknown): GatewayAttemptEv
 
 export function normalizeGatewayRequestEvent(payload: unknown): GatewayRequestEvent | null {
   if (!isRecord(payload)) return null;
+  // Normalize once; a present-but-invalid redirect rejects the payload below.
+  const modelRedirect = isNullish(payload.model_redirect)
+    ? null
+    : normalizeModelRedirect(payload.model_redirect);
+  if (!isNullish(payload.model_redirect) && modelRedirect === null) {
+    return null;
+  }
   const attempts = payload.attempts;
   if (!Array.isArray(attempts)) return null;
   const boundedAttempts =
@@ -405,9 +413,8 @@ export function normalizeGatewayRequestEvent(payload: unknown): GatewayRequestEv
     isNullableNumber(payload.cache_creation_1h_input_tokens) &&
     isNullableNumber(payload.effective_input_tokens) &&
     isNullableClaudeModelMapping(payload.claude_model_mapping) &&
-    isNullableModelRedirect(payload.model_redirect)
+    isNullableStringWithin(payload.reasoning_effort, EVENT_STATE_MAX_LENGTH)
   ) {
-    const modelRedirect = normalizeModelRedirect(payload.model_redirect);
     return {
       trace_id: payload.trace_id,
       cli_key: payload.cli_key,
@@ -434,6 +441,8 @@ export function normalizeGatewayRequestEvent(payload: unknown): GatewayRequestEv
       effective_input_tokens: payload.effective_input_tokens ?? null,
       claude_model_mapping: payload.claude_model_mapping ?? null,
       model_redirect: modelRedirect,
+      reasoning_effort:
+        truncateNullableString(payload.reasoning_effort, EVENT_STATE_MAX_LENGTH) ?? null,
     };
   }
 

@@ -17,7 +17,6 @@ import { ProviderEditorDialog } from "./ProviderEditorDialog";
 import { SortableProviderCard } from "./SortableProviderCard";
 import { SortableProviderOrderItem } from "./SortableProviderOrderItem";
 import { useProvidersViewDataModel } from "./hooks/useProvidersViewDataModel";
-import { useCodexCatalogRefreshFeedback } from "./hooks/useCodexCatalogRefreshFeedback";
 
 export type ProvidersViewProps = {
   activeCli: CliKey;
@@ -790,7 +789,6 @@ function PendingRouteActivationDialog({
 }
 
 export function ProvidersView({ activeCli }: ProvidersViewProps) {
-  useCodexCatalogRefreshFeedback();
   const model = useProvidersViewDataModel(activeCli);
   const { providers, providersLoading, filteredProviders, setDeleteTarget } = model;
   const providersListScrollRef = useRef<HTMLDivElement | null>(null);

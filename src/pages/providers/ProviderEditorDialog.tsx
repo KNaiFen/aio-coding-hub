@@ -123,6 +123,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
           modelDiscoveryState={f.modelDiscoveryState}
           onDiscoverModels={f.discoverModels}
           hasMultipleBaseUrls={f.baseUrlRows.filter((row) => row.url.trim()).length > 1}
+          showMappings={!(f.cliKey === "claude" && f.authMode === "cx2cc")}
         />
         <LimitsSection form={f} />
         {f.cliKey === "claude" && f.authMode === "cx2cc" ? <ClaudeModelSection form={f} /> : null}

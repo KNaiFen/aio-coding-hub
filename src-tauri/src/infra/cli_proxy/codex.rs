@@ -57,19 +57,43 @@ fn root_model_catalog_value(config: Option<&[u8]>) -> Option<String> {
     find_root_key_value(&lines, "model_catalog_json")
 }
 
+/// Projection is an enhancement on top of the proxy takeover: enabling/syncing the
+/// proxy must not fail just because the Codex CLI is missing or too old to export
+/// its bundled catalog. The refresh path stays strict so the UI can report that
+/// model mappings did not apply.
+pub(super) fn resolve_projection(
+    result: AppResult<Option<crate::infra::codex_model_catalog::projection::CatalogProjection>>,
+    degrade_failure: bool,
+) -> AppResult<Option<crate::infra::codex_model_catalog::projection::CatalogProjection>> {
+    match result {
+        Err(error) if degrade_failure => {
+            tracing::warn!(
+                error = %error,
+                "codex catalog projection failed; applying proxy config without projection"
+            );
+            Ok(None)
+        }
+        other => other,
+    }
+}
+
 fn prepare_catalog_apply_plan<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     current_config: Option<Vec<u8>>,
     current_catalog: Option<Vec<u8>>,
     db_override: Option<&crate::db::Db>,
+    degrade_projection_failure: bool,
 ) -> AppResult<CatalogApplyPlan> {
     let original_config = manifest_original_bytes(app, "codex_config_toml", current_config)?;
     let original_catalog = manifest_original_bytes(app, CODEX_MODEL_CATALOG_KIND, current_catalog)?;
-    let projection = crate::infra::codex_model_catalog::projection::build_for_proxy(
-        app,
-        original_config.as_deref(),
-        original_catalog.as_deref(),
-        db_override,
+    let projection = resolve_projection(
+        crate::infra::codex_model_catalog::projection::build_for_proxy(
+            app,
+            original_config.as_deref(),
+            original_catalog.as_deref(),
+            db_override,
+        ),
+        degrade_projection_failure,
     )?;
 
     let catalog_pointer = projection
@@ -106,6 +130,10 @@ fn build_codex_catalog_pointer_config(
     output.into_bytes()
 }
 
+/// (path, current bytes, new bytes) for `auth.json`.
+type AuthFileWrite<'a> = (&'a Path, Option<Vec<u8>>, &'a [u8]);
+
+/// Only the proxy enable path writes `auth`; the catalog refresh path passes `None`.
 fn apply_catalog_and_config(
     config_path: &Path,
     current_config: Option<Vec<u8>>,
@@ -113,8 +141,9 @@ fn apply_catalog_and_config(
     catalog_path: &Path,
     current_catalog: Option<Vec<u8>>,
     catalog_bytes: Option<&[u8]>,
+    auth: Option<AuthFileWrite<'_>>,
 ) -> AppResult<bool> {
-    let snapshots = [
+    let mut snapshots = vec![
         super::FileSnapshot {
             path: config_path.to_path_buf(),
             max_bytes: super::CLI_PROXY_FILE_MAX_BYTES,
@@ -128,6 +157,14 @@ fn apply_catalog_and_config(
             bytes: current_catalog,
         },
     ];
+    if let Some((auth_path, current_auth, _)) = &auth {
+        snapshots.push(super::FileSnapshot {
+            path: auth_path.to_path_buf(),
+            max_bytes: super::CLI_PROXY_FILE_MAX_BYTES,
+            existed: current_auth.is_some(),
+            bytes: current_auth.clone(),
+        });
+    }
 
     let write_result = (|| -> AppResult<bool> {
         let mut changed = false;
@@ -136,6 +173,13 @@ fn apply_catalog_and_config(
                 catalog_path,
                 bytes,
                 crate::infra::codex_model_catalog::CODEX_CATALOG_MAX_BYTES,
+            )?;
+        }
+        if let Some((auth_path, _, auth_bytes)) = &auth {
+            changed |= write_cli_proxy_file_atomic_if_changed_with_max_len(
+                auth_path,
+                auth_bytes,
+                super::CLI_PROXY_FILE_MAX_BYTES,
             )?;
         }
         changed |= write_cli_proxy_file_atomic_if_changed_with_max_len(
@@ -179,6 +223,7 @@ pub(super) fn refresh_model_catalog<R: tauri::Runtime>(
         current_config.clone(),
         current_catalog.clone(),
         Some(db),
+        false,
     )?;
     let config_bytes = build_codex_catalog_pointer_config(
         current_config.clone(),
@@ -192,6 +237,7 @@ pub(super) fn refresh_model_catalog<R: tauri::Runtime>(
         &catalog_path,
         current_catalog,
         catalog_plan.catalog_bytes.as_deref(),
+        None,
     )
 }
 
@@ -207,8 +253,13 @@ pub(super) fn apply_proxy_config<R: tauri::Runtime>(
         &catalog_path,
         crate::infra::codex_model_catalog::CODEX_CATALOG_MAX_BYTES,
     )?;
-    let catalog_plan =
-        prepare_catalog_apply_plan(app, current_config.clone(), current_catalog.clone(), None)?;
+    let catalog_plan = prepare_catalog_apply_plan(
+        app,
+        current_config.clone(),
+        current_catalog.clone(),
+        None,
+        true,
+    )?;
 
     let config_bytes = if super::codex_oauth_compatible_proxy_mode(app) {
         build_codex_config_toml_for_proxy(
@@ -247,63 +298,20 @@ pub(super) fn apply_proxy_config<R: tauri::Runtime>(
         None => None,
     };
 
-    let mut snapshots = vec![
-        super::FileSnapshot {
-            path: config_path.clone(),
-            max_bytes: super::CLI_PROXY_FILE_MAX_BYTES,
-            existed: current_config.is_some(),
-            bytes: current_config,
-        },
-        super::FileSnapshot {
-            path: catalog_path.clone(),
-            max_bytes: crate::infra::codex_model_catalog::CODEX_CATALOG_MAX_BYTES,
-            existed: current_catalog.is_some(),
-            bytes: current_catalog,
-        },
-    ];
-    if let Some(auth) = current_auth {
-        snapshots.push(super::FileSnapshot {
-            path: auth_path.clone(),
-            max_bytes: super::CLI_PROXY_FILE_MAX_BYTES,
-            existed: auth.is_some(),
-            bytes: auth,
-        });
-    }
+    let auth = match (current_auth, auth_bytes.as_deref()) {
+        (Some(current), Some(bytes)) => Some((auth_path.as_path(), current, bytes)),
+        _ => None,
+    };
 
-    let write_result = (|| -> AppResult<()> {
-        if let Some(bytes) = catalog_plan.catalog_bytes.as_ref() {
-            write_cli_proxy_file_atomic_if_changed_with_max_len(
-                &catalog_path,
-                bytes,
-                crate::infra::codex_model_catalog::CODEX_CATALOG_MAX_BYTES,
-            )?;
-        }
-        if let Some(auth_bytes) = auth_bytes.as_ref() {
-            write_cli_proxy_file_atomic_if_changed_with_max_len(
-                &auth_path,
-                auth_bytes,
-                super::CLI_PROXY_FILE_MAX_BYTES,
-            )?;
-        }
-        write_cli_proxy_file_atomic_if_changed_with_max_len(
-            &config_path,
-            &config_bytes,
-            super::CLI_PROXY_FILE_MAX_BYTES,
-        )?;
-        if catalog_plan.catalog_bytes.is_none() && catalog_path.exists() {
-            std::fs::remove_file(&catalog_path)
-                .map_err(|error| format!("failed to remove {}: {error}", catalog_path.display()))?;
-        }
-        Ok(())
-    })();
-
-    if let Err(error) = write_result {
-        let restore_error = restore_file_snapshots(&snapshots).err();
-        if let Some(restore_error) = restore_error {
-            return Err(format!("{error}; rollback failed: {restore_error}").into());
-        }
-        return Err(error);
-    }
+    apply_catalog_and_config(
+        &config_path,
+        current_config,
+        &config_bytes,
+        &catalog_path,
+        current_catalog,
+        catalog_plan.catalog_bytes.as_deref(),
+        auth,
+    )?;
     Ok(())
 }
 
@@ -1207,6 +1215,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn resolve_projection_degrades_failure_only_for_apply_paths() {
+        let error = || -> AppResult<Option<crate::infra::codex_model_catalog::projection::CatalogProjection>> {
+            Err("CLI_PROXY_CODEX_CATALOG_FAILED: Codex CLI not found".to_string().into())
+        };
+
+        // Enable/sync path: a missing/old Codex CLI degrades to "no projection".
+        assert!(resolve_projection(error(), true)
+            .expect("degraded")
+            .is_none());
+
+        // Refresh path stays strict so the UI can report the failure.
+        let err = resolve_projection(error(), false).expect_err("strict");
+        assert!(err.to_string().contains("Codex CLI not found"));
+
+        // A successful projection passes through untouched.
+        let projection = crate::infra::codex_model_catalog::projection::CatalogProjection {
+            bytes: b"{}".to_vec(),
+            affected_sources: vec!["gpt-test".to_string()],
+        };
+        let passed = resolve_projection(Ok(Some(projection.clone())), true).expect("ok");
+        assert_eq!(passed, Some(projection));
+    }
+
+    #[test]
     fn catalog_pointer_patch_replaces_and_removes_only_the_root_key() {
         let input =
             b"model_catalog_json_backup = \"keep.json\"\nmodel_catalog_json = \"user.json\"\nmodel = \"gpt-test\"\n\n[other]\nvalue = 1\n".to_vec();
@@ -1247,6 +1279,7 @@ mod tests {
             &catalog_path,
             Some(old_catalog.clone()),
             Some(b"{\"models\":[{\"slug\":\"new\"}]}\n"),
+            None,
         )
         .expect_err("config write should fail");
 

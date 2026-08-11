@@ -156,13 +156,9 @@ impl OAuthProvider for CodexOAuthProvider {
 pub(crate) fn parse_chatgpt_account_id(id_token: Option<&str>) -> Option<String> {
     let token = id_token.map(str::trim).filter(|value| !value.is_empty())?;
     let payload_part = token.split('.').nth(1)?;
-    let payload = URL_SAFE_NO_PAD.decode(payload_part).ok().or_else(|| {
-        let mut padded = payload_part.to_string();
-        while padded.len() % 4 != 0 {
-            padded.push('=');
-        }
-        URL_SAFE_NO_PAD.decode(padded).ok()
-    })?;
+    // RFC 7515 JWT segments are unpadded base64url; NO_PAD rejects padded input,
+    // so there is no fallback worth attempting.
+    let payload = URL_SAFE_NO_PAD.decode(payload_part).ok()?;
     let json: serde_json::Value = serde_json::from_slice(&payload).ok()?;
     json.get("https://api.openai.com/auth")
         .and_then(|value| value.get("chatgpt_account_id"))

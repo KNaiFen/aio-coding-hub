@@ -574,6 +574,10 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
         circuit_trigger_error_code: None,
         provider_bridged: Some(provider_ctx.provider_bridged),
         timeout_secs: None,
+        reasoning_effort: attempt_ctx.reasoning_effort.map(str::to_string),
+        upstream_sent: attempt_ctx.upstream_sent,
+        claude_model_mapping: provider_ctx.claude_model_mapping.cloned(),
+        model_redirect: provider_ctx.model_redirect.cloned(),
     });
 
     emit_attempt_event_and_log(

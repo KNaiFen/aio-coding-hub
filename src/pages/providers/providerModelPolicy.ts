@@ -84,5 +84,6 @@ export type ProviderModelDiscoveryUiState =
     }
   | { status: "empty"; origin: string; baseUrlIndex: number | null }
   | { status: "unsupported"; reason: ProviderModelDiscoveryUnsupportedReason }
+  | { status: "oauth_unsaved" }
   | { status: "error"; code: ProviderModelDiscoveryErrorCode; httpStatus: number | null }
   | { status: "unexpected_error" };

@@ -28,13 +28,15 @@ export type ProviderModelPolicySectionProps = {
   modelDiscoveryState: ProviderModelDiscoveryUiState;
   onDiscoverModels: () => void | Promise<void>;
   hasMultipleBaseUrls: boolean;
+  // cx2cc providers map models via CX2CC 模型映射; hide the generic mapping editor there.
+  showMappings?: boolean;
 };
 
 const MODE_OPTIONS = [
   {
     value: "all",
     label: "全部可用",
-    description: "默认可用；显式匹配 Provider 集合为最终候选集",
+    description: "接收所有模型；列出常用模型可让它们优先走本供应商",
   },
   { value: "selected", label: "仅这些可用", description: "只接收列出或映射的模型" },
   { value: "excluded", label: "排除这些", description: "列出的模型不可用，其余模型默认可用" },
@@ -50,6 +52,7 @@ export function ProviderModelPolicySection({
   modelDiscoveryState,
   onDiscoverModels,
   hasMultipleBaseUrls,
+  showMappings = true,
 }: ProviderModelPolicySectionProps) {
   const [localDraft, setLocalDraft] = useState<ProviderModelPolicyV1>(() =>
     cloneProviderModelPolicy(policy ?? DEFAULT_PROVIDER_MODEL_POLICY)
@@ -64,8 +67,6 @@ export function ProviderModelPolicySection({
   const patternComposerRef = useRef<HTMLInputElement | null>(null);
   const mappingComposerRef = useRef<HTMLInputElement | null>(null);
   const focusRef = useRef<{ kind: "pattern" | "mapping"; index: number } | null>(null);
-  const previousStatusRef = useRef(status);
-
   useEffect(() => {
     if (status === "ready" && policy) setLocalDraft(cloneProviderModelPolicy(policy));
     const focus = focusRef.current;
@@ -74,18 +75,10 @@ export function ProviderModelPolicySection({
     focusRef.current = null;
   }, [policy, status]);
 
-  useEffect(() => {
-    if (previousStatusRef.current === "legacy" && status === "ready") {
-      setShowCutoverWarning(true);
-    }
-    previousStatusRef.current = status;
-  }, [status]);
-
   const currentPolicy = status === "ready" && policy ? policy : localDraft;
   const candidateModels = modelDiscoveryState.status === "ready" ? modelDiscoveryState.models : [];
   const candidateListId = `${cliKey}-provider-model-candidates`;
   const policyError = validateProviderModelPolicy(currentPolicy);
-  const canEdit = status === "ready" || editingLegacy;
 
   const emit = (next: ProviderModelPolicyV1) => {
     const normalized = normalizeProviderModelPolicyDraft(next);
@@ -201,7 +194,7 @@ export function ProviderModelPolicySection({
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <span className="text-sm font-semibold text-foreground">模型路由</span>
           <span className="text-xs text-muted-foreground">
-            {policySummary(status, currentPolicy)}
+            {policySummary(status, currentPolicy, showMappings)}
           </span>
         </div>
         <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
@@ -264,8 +257,27 @@ export function ProviderModelPolicySection({
                 role="alert"
                 className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-foreground"
               >
-                保存后无法在界面切回旧策略
+                保存后旧版映射不再生效，且无法在界面切回旧策略
               </p>
+            ) : null}
+
+            {editingLegacy && legacyMappings.length > 0 && showMappings ? (
+              <div
+                aria-label="旧版模型映射参考"
+                className="rounded-md border border-border p-3 text-xs text-muted-foreground"
+              >
+                <p className="mb-1 font-medium text-foreground">
+                  旧版映射（供照抄为下方的模型映射）
+                </p>
+                <ul className="space-y-1">
+                  {legacyMappings.map(([label, value]) => (
+                    <li key={label} className="flex flex-wrap gap-x-2">
+                      <span>{label}：</span>
+                      <code className="break-all text-foreground">{value}</code>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             ) : null}
 
             <section className="space-y-3" aria-labelledby={`${cliKey}-model-range-title`}>
@@ -290,7 +302,7 @@ export function ProviderModelPolicySection({
                   })
                 }
                 options={MODE_OPTIONS}
-                disabled={saving || !canEdit}
+                disabled={saving}
               />
 
               {discoveryRow(false)}
@@ -302,18 +314,14 @@ export function ProviderModelPolicySection({
                     aria-label={`新增${rangeItemLabel(currentPolicy.mode)}`}
                     list={candidateListId}
                     value={patternInput}
-                    onChange={(event) => {
-                      const value = event.currentTarget.value;
-                      if (candidateModels.includes(value.trim())) addPattern(value);
-                      else setPatternInput(value);
-                    }}
+                    onChange={(event) => setPatternInput(event.currentTarget.value)}
                     onKeyDown={(event) => {
                       if (event.key !== "Enter") return;
                       event.preventDefault();
                       addPattern();
                     }}
                     placeholder="例如 gpt-5.6-luna 或 gpt-*"
-                    disabled={saving || !canEdit}
+                    disabled={saving}
                     mono
                   />
                 </FormField>
@@ -321,7 +329,7 @@ export function ProviderModelPolicySection({
                   type="button"
                   variant="secondary"
                   onClick={() => addPattern()}
-                  disabled={saving || !canEdit || !patternInput.trim()}
+                  disabled={saving || !patternInput.trim()}
                 >
                   <Plus className="h-4 w-4" aria-hidden="true" />
                   {rangeAddLabel(currentPolicy.mode)}
@@ -348,7 +356,7 @@ export function ProviderModelPolicySection({
                         value={pattern}
                         onChange={(event) => updatePattern(index, event.currentTarget.value)}
                         placeholder="例如 gpt-5.6-luna 或 gpt-*"
-                        disabled={saving || !canEdit}
+                        disabled={saving}
                         mono
                       />
                     </FormField>
@@ -360,7 +368,7 @@ export function ProviderModelPolicySection({
                       aria-label={`删除${rangeItemLabel(currentPolicy.mode)} ${index + 1}`}
                       title="删除"
                       onClick={() => deletePattern(index)}
-                      disabled={saving || !canEdit}
+                      disabled={saving}
                     >
                       <Trash2 className="h-4 w-4" aria-hidden="true" />
                     </Button>
@@ -369,124 +377,124 @@ export function ProviderModelPolicySection({
               </div>
             </section>
 
-            <section
-              className="space-y-3 border-t border-border pt-4"
-              aria-labelledby={`${cliKey}-model-mapping-title`}
-            >
-              <h3
-                id={`${cliKey}-model-mapping-title`}
-                className="text-sm font-semibold text-foreground"
+            {showMappings ? (
+              <section
+                className="space-y-3 border-t border-border pt-4"
+                aria-labelledby={`${cliKey}-model-mapping-title`}
               >
-                模型映射（可选）
-              </h3>
-
-              <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_1rem_minmax(0,1fr)_auto] md:items-end">
-                <FormField label="请求模型">
-                  <Input
-                    ref={mappingComposerRef}
-                    aria-label="映射请求模型"
-                    list={candidateListId}
-                    value={mappingSourceInput}
-                    onChange={(event) => setMappingSourceInput(event.currentTarget.value)}
-                    onKeyDown={(event) => {
-                      if (event.key !== "Enter") return;
-                      event.preventDefault();
-                      addMapping();
-                    }}
-                    placeholder="例如 gpt-5.6-luna"
-                    disabled={saving || !canEdit}
-                    mono
-                  />
-                </FormField>
-                <ArrowRight
-                  className="mb-3 hidden h-4 w-4 text-muted-foreground md:block"
-                  aria-hidden="true"
-                />
-                <FormField label="上游模型">
-                  <Input
-                    aria-label="映射上游模型"
-                    list={candidateListId}
-                    value={mappingTargetInput}
-                    onChange={(event) => setMappingTargetInput(event.currentTarget.value)}
-                    onKeyDown={(event) => {
-                      if (event.key !== "Enter") return;
-                      event.preventDefault();
-                      addMapping();
-                    }}
-                    placeholder="例如 deepseek-v4-flash"
-                    disabled={saving || !canEdit}
-                    mono
-                  />
-                </FormField>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={addMapping}
-                  disabled={
-                    saving || !canEdit || !mappingSourceInput.trim() || !mappingTargetInput.trim()
-                  }
+                <h3
+                  id={`${cliKey}-model-mapping-title`}
+                  className="text-sm font-semibold text-foreground"
                 >
-                  <Plus className="h-4 w-4" aria-hidden="true" />
-                  添加映射
-                </Button>
-              </div>
+                  模型映射（可选）
+                </h3>
 
-              {currentPolicy.mappings.length === 0 ? (
-                <p className="text-sm text-muted-foreground">暂无模型映射</p>
-              ) : null}
-              <div className="space-y-2">
-                {currentPolicy.mappings.map((mapping, index) => (
-                  <div
-                    key={index}
-                    className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_1rem_minmax(0,1fr)_2.5rem] md:items-end"
-                  >
-                    <FormField label="请求模型">
-                      <Input
-                        ref={(element) => {
-                          mappingRefs.current[index] = element;
-                        }}
-                        aria-label={`请求模型 ${index + 1}`}
-                        value={mapping.source}
-                        onChange={(event) =>
-                          updateMapping(index, "source", event.currentTarget.value)
-                        }
-                        placeholder="例如 gpt-5.6-luna"
-                        disabled={saving || !canEdit}
-                        mono
-                      />
-                    </FormField>
-                    <ArrowRight
-                      className="mb-3 hidden h-4 w-4 text-muted-foreground md:block"
-                      aria-hidden="true"
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_1rem_minmax(0,1fr)_auto] md:items-end">
+                  <FormField label="请求模型">
+                    <Input
+                      ref={mappingComposerRef}
+                      aria-label="映射请求模型"
+                      list={candidateListId}
+                      value={mappingSourceInput}
+                      onChange={(event) => setMappingSourceInput(event.currentTarget.value)}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter") return;
+                        event.preventDefault();
+                        addMapping();
+                      }}
+                      placeholder="例如 gpt-5.6-luna"
+                      disabled={saving}
+                      mono
                     />
-                    <FormField label="上游模型">
-                      <Input
-                        aria-label={`上游模型 ${index + 1}`}
-                        value={mapping.target}
-                        onChange={(event) =>
-                          updateMapping(index, "target", event.currentTarget.value)
-                        }
-                        placeholder="例如 deepseek-v4-flash"
-                        disabled={saving || !canEdit}
-                        mono
-                      />
-                    </FormField>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="icon"
-                      className="h-10 w-10 justify-self-end"
-                      aria-label={`删除模型映射 ${index + 1}`}
-                      title="删除映射"
-                      onClick={() => deleteMapping(index)}
-                      disabled={saving || !canEdit}
+                  </FormField>
+                  <ArrowRight
+                    className="mb-3 hidden h-4 w-4 text-muted-foreground md:block"
+                    aria-hidden="true"
+                  />
+                  <FormField label="上游模型">
+                    <Input
+                      aria-label="映射上游模型"
+                      list={candidateListId}
+                      value={mappingTargetInput}
+                      onChange={(event) => setMappingTargetInput(event.currentTarget.value)}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter") return;
+                        event.preventDefault();
+                        addMapping();
+                      }}
+                      placeholder="例如 deepseek-v4-flash"
+                      disabled={saving}
+                      mono
+                    />
+                  </FormField>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={addMapping}
+                    disabled={saving || !mappingSourceInput.trim() || !mappingTargetInput.trim()}
+                  >
+                    <Plus className="h-4 w-4" aria-hidden="true" />
+                    添加映射
+                  </Button>
+                </div>
+
+                {currentPolicy.mappings.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">暂无模型映射</p>
+                ) : null}
+                <div className="space-y-2">
+                  {currentPolicy.mappings.map((mapping, index) => (
+                    <div
+                      key={index}
+                      className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_1rem_minmax(0,1fr)_2.5rem] md:items-end"
                     >
-                      <Trash2 className="h-4 w-4" aria-hidden="true" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            </section>
+                      <FormField label="请求模型">
+                        <Input
+                          ref={(element) => {
+                            mappingRefs.current[index] = element;
+                          }}
+                          aria-label={`请求模型 ${index + 1}`}
+                          value={mapping.source}
+                          onChange={(event) =>
+                            updateMapping(index, "source", event.currentTarget.value)
+                          }
+                          placeholder="例如 gpt-5.6-luna"
+                          disabled={saving}
+                          mono
+                        />
+                      </FormField>
+                      <ArrowRight
+                        className="mb-3 hidden h-4 w-4 text-muted-foreground md:block"
+                        aria-hidden="true"
+                      />
+                      <FormField label="上游模型">
+                        <Input
+                          aria-label={`上游模型 ${index + 1}`}
+                          value={mapping.target}
+                          onChange={(event) =>
+                            updateMapping(index, "target", event.currentTarget.value)
+                          }
+                          placeholder="例如 deepseek-v4-flash"
+                          disabled={saving}
+                          mono
+                        />
+                      </FormField>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="icon"
+                        className="h-10 w-10 justify-self-end"
+                        aria-label={`删除模型映射 ${index + 1}`}
+                        title="删除映射"
+                        onClick={() => deleteMapping(index)}
+                        disabled={saving}
+                      >
+                        <Trash2 className="h-4 w-4" aria-hidden="true" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ) : null}
 
             {policyError ? (
               <p role="alert" className="text-xs text-destructive">
@@ -500,10 +508,16 @@ export function ProviderModelPolicySection({
   );
 }
 
-function policySummary(status: ProviderModelPolicyStatus, policy: ProviderModelPolicyV1) {
+function policySummary(
+  status: ProviderModelPolicyStatus,
+  policy: ProviderModelPolicyV1,
+  showMappings: boolean
+) {
   if (status === "legacy") return "旧版";
   if (status === "invalid") return "无效";
-  const mapping = policy.mappings.length ? ` · 映射 ${policy.mappings.length}` : "";
+  // Hidden mapping editor (cx2cc) → mappings are neither editable nor applied;
+  // counting them in the summary would advertise a knob that does nothing.
+  const mapping = showMappings && policy.mappings.length ? ` · 映射 ${policy.mappings.length}` : "";
   if (policy.mode === "all") {
     const explicit = policy.modelPatterns.length ? ` · 显式 ${policy.modelPatterns.length}` : "";
     return `全部可用${explicit}${mapping}`;
@@ -515,7 +529,8 @@ function policySummary(status: ProviderModelPolicyStatus, policy: ProviderModelP
 }
 
 function modeHint(mode: ProviderModelPolicyV1["mode"]) {
-  if (mode === "all") return "未列出的模型也可用；存在显式匹配时只在匹配 Provider 集合内路由。";
+  if (mode === "all")
+    return "未列出的模型也可用。一个模型只要被任何供应商显式列出，请求它时就只走列出它的供应商。";
   if (mode === "selected") return "只接收下列模型和映射中的请求模型。";
   return "下列模型不可用；其余模型保持可用。";
 }
@@ -562,6 +577,8 @@ function discoveryMessage(state: ProviderModelDiscoveryUiState) {
       return state.reason === "cx_2cc"
         ? "CX2CC 请在对应 Codex Provider 获取"
         : "当前 OAuth 连接不支持获取";
+    case "oauth_unsaved":
+      return "请先保存并完成 OAuth 登录后再获取";
     case "error": {
       if (state.httpStatus === 429) return "上游限流（HTTP 429），请稍后重试";
       if (state.httpStatus != null && state.httpStatus >= 500) {

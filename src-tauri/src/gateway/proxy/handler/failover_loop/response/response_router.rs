@@ -67,6 +67,8 @@ where
         gemini_oauth_response_mode: prepared.gemini_oauth_response_mode,
         cx2cc_active: prepared.cx2cc_active,
         anthropic_stream_requested: prepared.anthropic_stream_requested,
+        reasoning_effort: timing.reasoning_effort.as_deref(),
+        upstream_sent: timing.upstream_sent,
     };
     let provider_ctx = ProviderCtx {
         provider_id: prepared.provider_id,
@@ -169,6 +171,8 @@ where
         gemini_oauth_response_mode: prepared.gemini_oauth_response_mode,
         cx2cc_active: prepared.cx2cc_active,
         anthropic_stream_requested: prepared.anthropic_stream_requested,
+        reasoning_effort: timing.reasoning_effort.as_deref(),
+        upstream_sent: timing.upstream_sent,
     };
     let provider_ctx = ProviderCtx {
         provider_id: prepared.provider_id,

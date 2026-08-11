@@ -47,7 +47,13 @@ import {
   computeStatusBadge,
   resolveCacheCreationDisplay,
 } from "./requestLogPresentation";
-import { FastModeBadge, FolderBadge, FreeBadge, SessionReuseBadge } from "./LogBadges";
+import {
+  FastModeBadge,
+  FolderBadge,
+  FreeBadge,
+  ReasoningEffortBadge,
+  SessionReuseBadge,
+} from "./LogBadges";
 import {
   formatModelRedirectText,
   hasPriorityServiceTierSpecialSetting,
@@ -244,6 +250,8 @@ const RequestLogCard = memo(function RequestLogCard({
                 <span className="shrink-0">{cliLabel} /</span>
                 <span className={compactTextClass}>{modelText}</span>
               </span>
+
+              <ReasoningEffortBadge value={log.reasoning_effort} />
 
               {isCodexSystemRequest ? (
                 <span className="shrink-0 whitespace-nowrap rounded-md border border-border/60 bg-muted px-2 py-0.5 text-[11px] font-semibold text-foreground">

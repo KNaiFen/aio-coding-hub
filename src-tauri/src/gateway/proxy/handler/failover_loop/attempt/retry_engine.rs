@@ -143,7 +143,7 @@ where
 fn build_error_contexts<'a, R: tauri::Runtime>(
     _input: &RequestContext<R>,
     prepared: &'a PreparedProvider,
-    timing: &AttemptTiming,
+    timing: &'a AttemptTiming,
     attempt_index: u32,
     retry_index: u32,
 ) -> (AttemptCtx<'a>, ProviderCtx<'a>) {
@@ -157,6 +157,8 @@ fn build_error_contexts<'a, R: tauri::Runtime>(
         gemini_oauth_response_mode: prepared.gemini_oauth_response_mode,
         cx2cc_active: prepared.cx2cc_active,
         anthropic_stream_requested: prepared.anthropic_stream_requested,
+        reasoning_effort: timing.reasoning_effort.as_deref(),
+        upstream_sent: timing.upstream_sent,
     };
     let provider_ctx = ProviderCtx {
         provider_id: prepared.provider_id,

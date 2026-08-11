@@ -23,6 +23,7 @@ pub(super) struct ModelPolicyFilterResult {
 pub(super) fn filter_providers_by_model_policy(
     providers: &mut Vec<providers::ProviderForGateway>,
     requested_model: Option<&str>,
+    forced_provider_id: Option<i64>,
 ) -> ModelPolicyFilterResult {
     let original_provider_ids = providers.iter().map(|provider| provider.id).collect();
     let Some(requested_model) = requested_model.filter(|model| !model.is_empty()) else {
@@ -60,9 +61,13 @@ pub(super) fn filter_providers_by_model_policy(
             (provider.id, class)
         })
         .collect::<Vec<_>>();
-    let use_explicit = classified
-        .iter()
-        .any(|(_, class)| *class == CandidateClass::Explicit);
+    // Explicit-first narrowing is a routing preference, not an eligibility rule:
+    // a forced provider (x-aio-provider-id) must only be rejected when its own
+    // policy blocks the model, not because a sibling declared it explicitly.
+    let use_explicit = forced_provider_id.is_none()
+        && classified
+            .iter()
+            .any(|(_, class)| *class == CandidateClass::Explicit);
     let is_eligible = |class: CandidateClass| {
         class == CandidateClass::Explicit || (!use_explicit && class == CandidateClass::Fallback)
     };

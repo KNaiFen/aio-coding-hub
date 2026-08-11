@@ -136,6 +136,7 @@ function mergeTraceWithRequestLog(
       summary?.requested_model ?? trace.requested_model ?? requestLog.requested_model ?? null,
     claude_model_mapping: summary?.claude_model_mapping ?? claudeModelMapping ?? null,
     model_redirect: summary?.model_redirect ?? modelRedirect ?? null,
+    reasoning_effort: summary?.reasoning_effort ?? requestLog.reasoning_effort ?? null,
     status: summary?.status ?? requestLog.status ?? null,
     error_category: summary?.error_category ?? null,
     error_code: summary?.error_code ?? requestLog.error_code ?? null,

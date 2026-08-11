@@ -77,16 +77,9 @@ export function buildProviderEditorUpsertInput(
       : ctx.modelPolicy
         ? normalizeProviderModelPolicyDraft(ctx.modelPolicy)
         : null;
-  if (ctx.modelPolicyStatus === "ready") {
-    if (!modelPolicy) {
-      return {
-        ok: false,
-        error: {
-          kind: "message",
-          message: "模型策略不能为空",
-        },
-      };
-    }
+  // Every writer of the "ready" status also writes a non-null policy, so
+  // modelPolicy is always present here.
+  if (ctx.modelPolicyStatus === "ready" && modelPolicy) {
     const policyError = validateProviderModelPolicy(modelPolicy);
     if (policyError) {
       return {

@@ -9,7 +9,6 @@ import {
 import { normalizeModelRedirect, type ModelRedirect } from "../../services/gateway/modelRedirect";
 
 export {
-  hasClaudeModelMappingSpecialSetting,
   resolveClaudeModelMappingFromSpecialSettings,
   resolveModelRedirectFromSpecialSettings,
 } from "../../services/gateway/requestLogSpecialSettings";

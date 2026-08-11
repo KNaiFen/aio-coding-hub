@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  hasClaudeModelMappingSpecialSetting,
   hasCodexSystemRequestSpecialSetting,
   resolveClaudeModelMappingFromSpecialSettings,
   resolveModelRedirectFromSpecialSettings,
@@ -46,7 +45,6 @@ describe("services/gateway/requestLogSpecialSettings", () => {
       sourceModel: "claude-sonnet",
       targetModel: "gpt-5.4",
     });
-    expect(hasClaudeModelMappingSpecialSetting(settings)).toBe(true);
   });
 
   it("resolves generic model redirect with final provider preference", () => {
@@ -105,7 +103,6 @@ describe("services/gateway/requestLogSpecialSettings", () => {
         ])
       )
     ).toBeNull();
-    expect(hasClaudeModelMappingSpecialSetting("bad-json")).toBe(false);
   });
 
   it("identifies only the structured Codex system request marker", () => {

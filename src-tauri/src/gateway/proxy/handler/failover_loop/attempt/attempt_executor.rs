@@ -35,6 +35,8 @@ impl RetryLoopState {
 pub(super) struct AttemptTiming {
     pub(super) attempt_started_ms: u128,
     pub(super) attempt_started: Instant,
+    pub(super) reasoning_effort: Option<String>,
+    pub(super) upstream_sent: bool,
 }
 
 /// Result of building + sending one attempt.
@@ -193,6 +195,7 @@ where
     }
 
     headers = semantic_headers;
+    let reasoning_effort = prepared.reasoning_effort.clone();
     let upstream_body = body_state_for_attempt
         .finalize_for_upstream(&mut headers, crate::gateway::util::max_request_body_bytes());
 
@@ -206,13 +209,30 @@ where
         &upstream_body,
     );
 
-    let timing = AttemptTiming {
+    let mut timing = AttemptTiming {
         attempt_started_ms,
         attempt_started: Instant::now(),
+        reasoning_effort,
+        upstream_sent: true,
     };
 
     let send_result =
         send::send_upstream(ctx, input.req_method.clone(), url, headers, upstream_body).await;
+
+    if let send::SendResult::Err(err) = &send_result {
+        // DNS/connect failures never reached the upstream; keep upstream_sent truthful
+        // for the "last sent attempt" attribution in events and logs.
+        if err.is_connect() {
+            timing.upstream_sent = false;
+        }
+    }
+
+    // The "started" snapshot was captured before the send; refresh the abort
+    // guard so a client abort mid-stream records truthful upstream_sent /
+    // reasoning_effort values instead of the pre-send defaults.
+    loop_state
+        .abort_guard
+        .update_in_flight_attempt_send_state(timing.reasoning_effort.clone(), timing.upstream_sent);
 
     match send_result {
         send::SendResult::Ok(resp) => AttemptSendOutcome::Response(resp, timing),
@@ -366,6 +386,8 @@ fn build_attempt_ctx<'a>(
         gemini_oauth_response_mode: prepared.gemini_oauth_response_mode,
         cx2cc_active: prepared.cx2cc_active,
         anthropic_stream_requested: prepared.anthropic_stream_requested,
+        reasoning_effort: None,
+        upstream_sent: false,
     }
 }
 
@@ -422,6 +444,10 @@ fn emit_started_event<R: tauri::Runtime>(
         circuit_trigger_error_code: None,
         provider_bridged: Some(prepared.provider_bridged),
         timeout_secs: None,
+        reasoning_effort: None,
+        upstream_sent: false,
+        claude_model_mapping: prepared.claude_model_mapping.clone(),
+        model_redirect: prepared.model_redirect.clone(),
     };
     let started_event = input.observe_request.then(|| {
         bound_attempt_event(GatewayAttemptEvent {

@@ -78,7 +78,7 @@ describe("pages/providers/ProviderModelPolicySection", () => {
   });
 
   it.each(["all", "selected", "excluded"] as const)(
-    "selects a discovery candidate in %s mode without creating an empty row",
+    "typing a discovery candidate in %s mode never auto-commits; Enter commits",
     (mode) => {
       const onChange = renderSection(
         "codex",
@@ -92,15 +92,16 @@ describe("pages/providers/ProviderModelPolicySection", () => {
         }
       );
 
-      fireEvent.change(
-        screen.getByLabelText(
-          `新增${mode === "all" ? "显式" : mode === "selected" ? "可用" : "排除"}模型`
-        ),
-        {
-          target: { value: "candidate-model" },
-        }
+      const composer = screen.getByLabelText(
+        `新增${mode === "all" ? "显式" : mode === "selected" ? "可用" : "排除"}模型`
       );
+      // Typing text that equals a candidate (e.g. a prefix of a longer model
+      // name) must not hijack the input by auto-adding the pattern.
+      fireEvent.change(composer, { target: { value: "candidate-model" } });
+      expect(onChange).not.toHaveBeenCalled();
+      expect(composer).toHaveValue("candidate-model");
 
+      fireEvent.keyDown(composer, { key: "Enter" });
       expect(onChange).toHaveBeenCalledWith({
         version: 1,
         mode,
@@ -149,12 +150,85 @@ describe("pages/providers/ProviderModelPolicySection", () => {
     expect(screen.getByText("未配置，沿用请求模型。")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "改用通用模型策略" }));
     expect(legacyChange).toHaveBeenCalledWith(allPolicy);
-    expect(screen.getByText("保存后无法在界面切回旧策略")).toBeInTheDocument();
+    expect(screen.getByText("保存后旧版映射不再生效，且无法在界面切回旧策略")).toBeInTheDocument();
 
     cleanup();
     renderSection("codex", "invalid", null);
     expect(screen.getByRole("alert")).toHaveTextContent("模型策略无效");
     fireEvent.click(screen.getByRole("button", { name: "重置为全部可用" }));
+  });
+
+  it("keeps legacy mappings visible for reference after cutover", () => {
+    render(
+      <ProviderModelPolicySection
+        cliKey="claude"
+        status="legacy"
+        policy={null}
+        legacyClaudeModels={{ sonnet_model: "legacy-sonnet" }}
+        saving={false}
+        onChange={vi.fn()}
+        modelDiscoveryState={{ status: "idle" }}
+        onDiscoverModels={vi.fn()}
+        hasMultipleBaseUrls={false}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "改用通用模型策略" }));
+    expect(screen.getByLabelText("旧版模型映射参考")).toHaveTextContent("legacy-sonnet");
+    expect(screen.getByText("保存后旧版映射不再生效，且无法在界面切回旧策略")).toBeInTheDocument();
+  });
+
+  it("hides the generic mapping editor when showMappings is false", () => {
+    render(
+      <ProviderModelPolicySection
+        cliKey="claude"
+        status="ready"
+        policy={{
+          version: 1,
+          mode: "all",
+          modelPatterns: [],
+          mappings: [{ source: "gpt-5.6-luna", target: "deepseek-v4-flash" }],
+        }}
+        saving={false}
+        onChange={vi.fn()}
+        modelDiscoveryState={{ status: "idle" }}
+        onDiscoverModels={vi.fn()}
+        hasMultipleBaseUrls={false}
+        showMappings={false}
+      />
+    );
+
+    expect(screen.getByText("模型范围")).toBeInTheDocument();
+    expect(screen.queryByText("模型映射（可选）")).not.toBeInTheDocument();
+    // The header summary must not count mappings the user can neither see nor use.
+    expect(screen.queryByText(/映射 1/)).not.toBeInTheDocument();
+  });
+
+  it("hides the legacy copy reference when the mapping editor is hidden", () => {
+    render(
+      <ProviderModelPolicySection
+        cliKey="claude"
+        status="legacy"
+        policy={null}
+        legacyClaudeModels={{ sonnet_model: "legacy-sonnet" }}
+        saving={false}
+        onChange={vi.fn()}
+        modelDiscoveryState={{ status: "idle" }}
+        onDiscoverModels={vi.fn()}
+        hasMultipleBaseUrls={false}
+        showMappings={false}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "改用通用模型策略" }));
+    // The reference block tells the user to copy values into the mapping editor
+    // below — pointless when that editor is not rendered.
+    expect(screen.queryByLabelText("旧版模型映射参考")).not.toBeInTheDocument();
+  });
+
+  it("tells unsaved OAuth providers to save before discovering models", () => {
+    renderSection("codex", "ready", allPolicy, { status: "oauth_unsaved" });
+    expect(screen.getByText("请先保存并完成 OAuth 登录后再获取")).toBeInTheDocument();
   });
 
   it("shows configured legacy Claude mappings without editing controls", () => {
@@ -223,7 +297,9 @@ describe("pages/providers/ProviderModelPolicySection", () => {
   it("describes all, selected, and excluded modes plainly", () => {
     renderSection("codex");
     expect(
-      screen.getByText("未列出的模型也可用；存在显式匹配时只在匹配 Provider 集合内路由。")
+      screen.getByText(
+        "未列出的模型也可用。一个模型只要被任何供应商显式列出，请求它时就只走列出它的供应商。"
+      )
     ).toBeInTheDocument();
 
     cleanup();

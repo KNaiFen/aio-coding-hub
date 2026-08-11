@@ -41,6 +41,9 @@ pub(super) struct PreparedProvider {
     pub(super) stream_idle_timeout_seconds: Option<u32>,
     pub(super) claude_model_mapping: Option<ClaudeModelMapping>,
     pub(super) model_redirect: Option<ModelRedirect>,
+    // Telemetry extracted once per provider from the final prepared body, so the
+    // send loop does not re-parse a potentially MB-sized JSON body per retry.
+    pub(super) reasoning_effort: Option<String>,
 }
 
 /// Counters accumulated across all providers in the iteration loop.
@@ -179,8 +182,13 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
         Some(adapter) => adapter,
         None => return PreparationOutcome::Skipped,
     };
-    let policy_target_model =
-        provider_model_policy::resolve_target_model(provider, input.requested_model.as_deref());
+    // cx2cc bridges map models through their own claude_models config; the generic
+    // policy mapping is not applied on top, keeping a single mapping mechanism per provider.
+    let policy_target_model = if provider.is_cx2cc_bridge() {
+        None
+    } else {
+        provider_model_policy::resolve_target_model(provider, input.requested_model.as_deref())
+    };
 
     let mut upstream_forwarded_path = input.forwarded_path.clone();
     let mut upstream_query = input.query.clone();
@@ -295,7 +303,6 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
     let mut claude_model_mapping = None;
     let model_redirect = provider_model_policy::apply_if_needed(
         ctx,
-        provider,
         provider_ctx,
         input.requested_model_location,
         policy_target_model.as_deref(),
@@ -326,6 +333,21 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
         );
     }
 
+    // Legacy claude mapping surfaces as a model_redirect (stage "legacy") so events
+    // and logs expose one unified redirect channel regardless of mapping mechanism.
+    let model_redirect = model_redirect.or_else(|| {
+        claude_model_mapping
+            .as_ref()
+            .filter(|mapping| mapping.applied && mapping.requested_model != mapping.effective_model)
+            .map(|mapping| ModelRedirect {
+                stage: "legacy".to_string(),
+                provider_id,
+                provider_name: provider_name_base.clone(),
+                source_model: mapping.requested_model.clone(),
+                target_model: mapping.effective_model.clone(),
+            })
+    });
+
     claude_metadata_user_id_injection::apply_if_needed(
         claude_metadata_user_id_injection::ApplyClaudeMetadataUserIdInjectionInput {
             ctx,
@@ -350,6 +372,13 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
     let request_body_mutated_before_attempt = input.request_body_state.is_mutated()
         || upstream_body_bytes != input.request_body_state.decoded_clone()
         || strip_request_content_encoding;
+
+    let reasoning_effort =
+        crate::gateway::proxy::forwarder::failover_loop::reasoning_effort::extract(
+            &upstream_body_bytes,
+            &upstream_forwarded_path,
+            gemini_oauth_response_mode,
+        );
 
     PreparationOutcome::Ready(Box::new(PreparedProvider {
         provider_id,
@@ -379,6 +408,7 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
         stream_idle_timeout_seconds: provider.stream_idle_timeout_seconds,
         claude_model_mapping,
         model_redirect,
+        reasoning_effort,
     }))
 }
 

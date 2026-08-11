@@ -482,14 +482,15 @@ export const handlers = [
   http.post(`${TAURI_ENDPOINT}/app_restart`, () => HttpResponse.json(true)),
 
   // ---- Model Prices ----
-  http.post(`${TAURI_ENDPOINT}/model_prices_list`, () => HttpResponse.json([])),
-  http.post(`${TAURI_ENDPOINT}/model_prices_sync_basellm`, () =>
+  http.post(`${TAURI_ENDPOINT}/model_prices_list_all`, () => HttpResponse.json([])),
+  http.post(`${TAURI_ENDPOINT}/model_prices_sync`, () =>
     HttpResponse.json({
       status: "not_modified",
       inserted: 0,
       updated: 0,
-      skipped: 0,
+      unchanged: 0,
       total: 0,
+      error: null,
     })
   ),
   http.post(`${TAURI_ENDPOINT}/model_price_aliases_get`, () =>

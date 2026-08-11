@@ -211,10 +211,7 @@ fn origin_for_url(url: &reqwest::Url) -> String {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ModelCatalogDescriptor {
-    ApiKey {
-        cli_key: &'static str,
-        format: ModelCatalogFormat,
-    },
+    ApiKey { format: ModelCatalogFormat },
     CodexOAuth,
     GrokOAuth,
 }
@@ -222,7 +219,7 @@ enum ModelCatalogDescriptor {
 impl ModelCatalogDescriptor {
     fn format(self) -> ModelCatalogFormat {
         match self {
-            Self::ApiKey { format, .. } => format,
+            Self::ApiKey { format } => format,
             Self::CodexOAuth => ModelCatalogFormat::DataIds,
             Self::GrokOAuth => ModelCatalogFormat::GrokOAuth,
         }
@@ -230,29 +227,18 @@ impl ModelCatalogDescriptor {
 
     fn endpoint_path(self) -> &'static str {
         match self {
-            Self::ApiKey { cli_key, .. } => {
-                if cli_key == "gemini" {
-                    "/v1beta/models"
-                } else {
-                    "/v1/models"
-                }
-            }
+            Self::ApiKey {
+                format: ModelCatalogFormat::GeminiNames,
+            } => "/v1beta/models",
+            Self::ApiKey { .. } => "/v1/models",
             Self::CodexOAuth | Self::GrokOAuth => "/models",
         }
     }
 }
 
 fn api_key_descriptor(cli_key: &str) -> Option<ModelCatalogDescriptor> {
-    let format = catalog_format(cli_key)?;
     Some(ModelCatalogDescriptor::ApiKey {
-        cli_key: match cli_key {
-            "claude" => "claude",
-            "codex" => "codex",
-            "gemini" => "gemini",
-            "grok" => "grok",
-            _ => return None,
-        },
-        format,
+        format: catalog_format(cli_key)?,
     })
 }
 
@@ -268,7 +254,8 @@ async fn fetch_model_catalog(
         return discovery_error(ProviderModelDiscoveryErrorCode::InvalidConfig, None);
     };
     let mut headers = HeaderMap::new();
-    let auth_result = match cli_key {
+    // api_key_descriptor() above already limits cli_key to the four supported CLIs.
+    match cli_key {
         "claude" => {
             headers.insert(
                 "x-api-key",
@@ -286,7 +273,6 @@ async fn fetch_model_catalog(
                 "anthropic-version",
                 reqwest::header::HeaderValue::from_static("2023-06-01"),
             );
-            Ok(())
         }
         "gemini" => {
             headers.insert(
@@ -301,9 +287,8 @@ async fn fetch_model_catalog(
                     }
                 },
             );
-            Ok(())
         }
-        "codex" | "grok" => {
+        _ => {
             headers.insert(
                 AUTHORIZATION,
                 match reqwest::header::HeaderValue::from_str(&format!("Bearer {api_key}")) {
@@ -316,12 +301,7 @@ async fn fetch_model_catalog(
                     }
                 },
             );
-            Ok(())
         }
-        _ => Err(()),
-    };
-    if auth_result.is_err() {
-        return discovery_error(ProviderModelDiscoveryErrorCode::InvalidConfig, None);
     }
 
     fetch_model_catalog_with_descriptor(

@@ -165,8 +165,7 @@ export function useProviderEditorEffects(d: EffectDeps) {
 
     const initialAuthMode = deriveAuthMode(snapshot);
     const initialCx2ccSourceValue = deriveCx2ccSourceValue(snapshot);
-    const initialModelPolicyStatus: ProviderModelPolicyStatus =
-      snapshot.model_policy_status ?? (snapshot.cli_key === "claude" ? "legacy" : "ready");
+    const initialModelPolicyStatus: ProviderModelPolicyStatus = snapshot.model_policy_status;
     setAuthMode(initialAuthMode);
     setCx2ccSourceValue(initialCx2ccSourceValue);
     setOauthStatus(null);

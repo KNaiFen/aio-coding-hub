@@ -1299,7 +1299,6 @@ pub fn sync_enabled<R: tauri::Runtime>(
 
         if manifest.base_origin.as_deref() == Some(base_origin)
             && is_proxy_config_applied(app, cli_key, base_origin)
-            && cli_key != "codex"
             && !manifest_targets_added
         {
             out.push(CliProxyResult::success(
