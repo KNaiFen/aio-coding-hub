@@ -3,7 +3,7 @@
   "name": "availability-circuit-recovery",
   "title": "熔断恢复探测接入",
   "description": "将手动与定时可用性探测接入 HalfOpen 熔断恢复，并在定时成功后安排 30 秒恢复探测。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": "provider availability probes and HalfOpen circuit recovery",
   "package": "aio-coding-hub",
