@@ -19,7 +19,7 @@
 
 - 只修正本任务正式记录和 `.trellis/tasks/README.md` 的本任务索引行；不得改动 GitHub Actions 产品代码、同步脚本或测试合同。
 - 最终业务结果必须如实记录为“部分完成并已拆分后续修复”：#108 的 CI 治理功能已合并；实际 Sync Upstream 运行发现的编号解析问题属于独立 follow-up。
-- follow-up 仅作交叉引用：[08-11-upstream-sync-pr-resolution](../08-11-upstream-sync-pr-resolution/) / [PR #114](https://github.com/KNaiFen/aio-coding-hub/pull/114)。不得在本任务记录 #114 的实现、head SHA、CI run 或验收结论。
+- follow-up 仅作交叉引用：任务 ID `08-12-upstream-sync-pr-resolution` / [PR #114](https://github.com/KNaiFen/aio-coding-hub/pull/114)。不得在本任务记录 #114 的实现、head SHA、CI run 或验收结论。
 - `task.json.pr_url` 继续指向 #108，且保持 `status: in_progress`、`completedAt: null`；只有 main 才能在 records-only PR 合并后归档。
 - 不运行 `task.py archive`，不合并 PR、不启用 auto-merge、不删除 worktree/分支，也不推送 `main`。
 

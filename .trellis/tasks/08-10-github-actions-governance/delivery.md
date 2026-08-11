@@ -22,7 +22,7 @@
 
 - #108 中的 CI 治理功能已经合并，merge commit 为 `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`。
 - 实际 Sync Upstream 运行发现的编号解析问题未被表述为 #108 已解决。本任务的最终业务结果因此为“部分完成并已拆分后续修复”。
-- 该后续修复仅交叉引用到 [08-11-upstream-sync-pr-resolution](../08-11-upstream-sync-pr-resolution/) 和 [PR #114](https://github.com/KNaiFen/aio-coding-hub/pull/114)。本记录不复制其实现、head SHA、CI run 或验收结论。
+- 该后续修复仅交叉引用到任务 ID `08-12-upstream-sync-pr-resolution` 和 [PR #114](https://github.com/KNaiFen/aio-coding-hub/pull/114)。本记录不复制其实现、head SHA、CI run 或验收结论。
 
 ## 实现摘要
 
@@ -121,7 +121,7 @@
 
 ## 未完成项与阻塞
 
-- 后续修复：实际 Sync Upstream 运行发现的编号解析问题已拆分到 [08-11-upstream-sync-pr-resolution](../08-11-upstream-sync-pr-resolution/) / [PR #114](https://github.com/KNaiFen/aio-coding-hub/pull/114)。该链接不代表本任务拥有或验证其实施状态。
+- 后续修复：实际 Sync Upstream 运行发现的编号解析问题已拆分到任务 ID `08-12-upstream-sync-pr-resolution` / [PR #114](https://github.com/KNaiFen/aio-coding-hub/pull/114)。该链接不代表本任务拥有或验证其实施状态。
 - 已核验的远端治理状态：Actions SHA pinning、Ruleset 的 `ci-gate` + `pr-title` required contexts、Dependabot alerts/security updates 均已启用；`SYNC_UPSTREAM_APP_ID` variable 和 `SYNC_UPSTREAM_APP_PRIVATE_KEY` secret 的名称存在。未读取或记录任何 secret 值。
 - main 仍需验收、合并本 records-only closeout PR，并在合并后按任务规则决定归档和清理。本 execution session 不运行 `task.py archive`，不删除 worktree 或分支。
 
@@ -155,4 +155,8 @@
 
 ## 返工记录
 
-无。
+### Round 1 - F-001 执行回应
+
+- 已将本任务正式记录中的错误任务 ID 改为纯文本 `08-12-upstream-sync-pr-resolution`，并删除所有指向未进入当前分支或 `main` 的任务目录相对链接。
+- 后续修复仅保留 [PR #114](https://github.com/KNaiFen/aio-coding-hub/pull/114) 的持久链接；#108 merge commit、部分完成结论及“不继承 #114 实现、CI、验收事实”的边界保持不变。
+- 本返工提交只修复 F-001；未改动 `main 验收记录` 或 `main 收尾`。推送后等待 PR #115 最新 head 的 `ci-gate` 与 `pr-title`。
