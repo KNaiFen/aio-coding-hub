@@ -1,6 +1,6 @@
 # 施工入口：修复 Sync Upstream PR 编号解析与冲突收敛
 
-> 阶段 A 已完成。main 于 2026-08-12 授权阶段 B；本文件是唯一施工入口，执行 session 必须按下列顺序同步 PR #114、重绑交付并暂停等待 main 验收。
+> 阶段 A 已完成。main 于 2026-08-12 授权阶段 B，但授权提交 `e4e797e4...` 未产生自动检查；main 正在推送事实准确的交接记录更新以恢复正常 PR CI。只有 main 明确通知新 head 已通过对应自动检查后，执行 session 才能按下列顺序施工。
 
 ## 快速定位
 
@@ -15,8 +15,8 @@
 - PR：[PR #114](https://github.com/KNaiFen/aio-coding-hub/pull/114)（Draft）
 - 前序 PR：[#108](https://github.com/KNaiFen/aio-coding-hub/pull/108) 已合并，merge commit `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`。
 - PENDING 审阅：`AIO-PENDING-029` 明确排除，禁止触碰 `upgrade-tui.command`。
-- 当前唯一写者：main（本授权提交）；提交推送并完成交接后，恰好一个执行 session 成为唯一写者。
-- 当前阶段：阶段 A 已完成；阶段 B 已授权、待执行 session 接手。
+- 当前唯一写者：main（修复授权提交未触发 CI 的交接记录）；新候选的自动检查绿色且 main 交接后，恰好一个执行 session 成为唯一写者。
+- 当前阶段：阶段 A 已完成；阶段 B 已授权但因当前候选没有自动检查而暂不启动。
 
 ## 阅读顺序
 
@@ -42,6 +42,7 @@
 
 ## 阶段 B 施工指令
 
+0. 开始条件：收到 main 明确发送的启动交接包，其中包含本次记录更新后的完整 PR head、对应自动检查已绿色的证据和本 worktree 的绝对路径。未收到该通知时，不得打开/恢复执行 session、手动 dispatch、推空提交或自行尝试修复 CI 触发。
 1. 确认当前目录和分支分别为本 worktree 与 `fix/upstream-sync-pr-resolution`。`git status --short` 只允许出现既有未跟踪的 `SESSION_REMEDIATION_PLAN.md`；任何其他改动、rebase/merge 进行中状态或无法归属的文件都必须停止并报告 main。
 2. 执行 `git fetch origin`，重新查询 PR #114 的 head、base、Draft、merge state 和检查。历史快照为 head `6316204274eeb6db9332b4eef0e5f182c5c31ca7`、PR base `82820b2e...`；它们仅供比对，实时结果优先。
 3. 确认没有上述阻塞后，运行 `python3 ./.trellis/scripts/task.py start .trellis/tasks/08-12-upstream-sync-pr-resolution`，使 Trellis 生命周期进入 `in_progress`。随后本执行 session 成为唯一写者。
