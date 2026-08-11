@@ -4,9 +4,9 @@
 
 ## 交付状态
 
-- 结果：main 验收通过，等待合并；远端 owner 设置和真实场景运行仍为未完成项
-- PR：[#108](https://github.com/KNaiFen/aio-coding-hub/pull/108)
-- 分支：`chore/github-actions-governance`
+- 结果：前序 PR 已合并；真实 Sync Upstream 运行发现新建 PR 编号解析缺陷，用户已确认后续修复，任务保持活动。
+- PR：前序 [#108](https://github.com/KNaiFen/aio-coding-hub/pull/108) 已合并；修复 PR 待创建
+- 分支：前序 `chore/github-actions-governance` 已合并；当前 `fix/upstream-sync-pr-resolution`
 - PR base：`main` @ `9b05b28d5841584dc6f2a867947afd5d23f76246`
 - 交付候选 head：`09dfe0794522436c14e6bee278199ec6a5f9acfa`
 - 规划提交：`30a021269f3b6ae2c46f195faa273a1af81f26f9`
@@ -18,6 +18,14 @@
 ## 阻塞快照
 
 无。
+
+## 合并后实际运行
+
+- PR #108 已于 2026-08-11 squash merge，merge commit 为 `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`。
+- owner 已完成 GitHub App 安装以及 `SYNC_UPSTREAM_APP_ID` variable、`SYNC_UPSTREAM_APP_PRIVATE_KEY` secret 配置；本记录不保存其值或私钥。
+- 手动 Sync Upstream [run 31487461146](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31487461146) 已成功完成凭据预检、短期 App token、checkout 与 fetch，且已创建 [PR #113](https://github.com/KNaiFen/aio-coding-hub/pull/113)。
+- 该 run 的 `gh pr create` 输出 URL 后，立即 `gh pr list` 尚未返回新 PR，导致 `Failed to resolve sync PR number.`。PR #113 当前为 `DIRTY`/冲突状态；工作流没有 push、merge、自动批准或修改目标分支。
+- 用户已确认修复：新建路径从创建返回 URL 严格解析编号，已有 PR 才使用 list；修复后对 #113 的回归运行应以清晰的人工冲突失败结束。
 
 ## 实现摘要
 
@@ -141,7 +149,7 @@
 
 > 仅 main 填写。
 
-尚未合并，未归档或清理。
+前序功能 PR #108 已合并为 `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`。因 AC-05 的真实运行发现并已获授权修复的缺陷，任务尚未完成、不得归档或清理；待修复 PR 合并、真实回归运行和最终验收后再记录收尾。
 
 ## 返工记录
 
