@@ -7,7 +7,7 @@
 - 分支：`fix/upstream-sync-pr-resolution`
 - 基线：`origin/main`
 - 完整 base SHA：`82820b2ea10ec6028d1fcb8d130a993bfae39b6d`
-- 规划提交：待本规划检查点提交后回填；未回填前不得开始施工。
+- 规划提交：`2016c25ef7cb6ae524f3f2b4e86996ef923981a3`
 - 实施授权：已确认；2026-08-10 按审查结果实施，2026-08-11 确认扩展 PR 前端/Rust/共享路径分域验证；同日确认修复 Sync Upstream 新建 PR 后的编号解析。Rust 并行化仍延后独立实验。
 - PR 目标：`main`
 - 已合并前序 PR：[#108](https://github.com/KNaiFen/aio-coding-hub/pull/108)，merge commit `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`

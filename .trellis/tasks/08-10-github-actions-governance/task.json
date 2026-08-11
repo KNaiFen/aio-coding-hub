@@ -15,7 +15,7 @@
   "branch": "fix/upstream-sync-pr-resolution",
   "base_branch": "main",
   "worktree_path": "/Users/knaifen/Documents/Codex/aio-coding-hub/08-11-upstream-sync-pr-resolution",
-  "commit": "30a021269f3b6ae2c46f195faa273a1af81f26f9",
+  "commit": "2016c25ef7cb6ae524f3f2b4e86996ef923981a3",
   "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/108",
   "subtasks": [],
   "children": [],
