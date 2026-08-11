@@ -150,9 +150,7 @@ impl ScheduledProbeTarget {
 
     fn probe_source(self) -> ProbeSource {
         match self.source {
-            ScheduledProbeSource::Natural { boundary_ms } => {
-                ProbeSource::Scheduled { boundary_ms }
-            }
+            ScheduledProbeSource::Natural { boundary_ms } => ProbeSource::Scheduled { boundary_ms },
             ScheduledProbeSource::Recovery => ProbeSource::Recovery {
                 due_at_ms: self.due_at_ms,
             },
@@ -566,12 +564,8 @@ impl ProviderAvailabilityProbeRuntimeState {
                 completed_at_ms.div_euclid(1_000),
             )
         {
-            self.schedule_recovery_probe(
-                target.provider_id,
-                target.generation,
-                completed_at_ms,
-            )
-            .await;
+            self.schedule_recovery_probe(target.provider_id, target.generation, completed_at_ms)
+                .await;
         }
         if let Some(Err(error)) = completion.map(|completed| completed.result) {
             tracing::warn!(
@@ -659,12 +653,9 @@ fn take_finished_flight(
 }
 
 fn remove_idle_entry(inner: &mut RuntimeInner, provider_id: i64) {
-    let should_remove = inner
-        .entries
-        .get(&provider_id)
-        .is_some_and(|entry| {
-            entry.schedule.is_none() && entry.recovery.is_none() && entry.in_flight.is_none()
-        });
+    let should_remove = inner.entries.get(&provider_id).is_some_and(|entry| {
+        entry.schedule.is_none() && entry.recovery.is_none() && entry.in_flight.is_none()
+    });
     if should_remove {
         inner.entries.remove(&provider_id);
     }
@@ -681,14 +672,15 @@ fn reconcile_schedules_inner(
     let mut targets = Vec::new();
     for loaded in schedules {
         if !loaded.active {
-            let had_scheduled_work = inner
-                .entries
-                .get_mut(&loaded.provider_id)
-                .is_some_and(|entry| {
-                    let had_schedule = entry.schedule.take().is_some();
-                    let had_recovery = entry.recovery.take().is_some();
-                    had_schedule || had_recovery
-                });
+            let had_scheduled_work =
+                inner
+                    .entries
+                    .get_mut(&loaded.provider_id)
+                    .is_some_and(|entry| {
+                        let had_schedule = entry.schedule.take().is_some();
+                        let had_recovery = entry.recovery.take().is_some();
+                        had_schedule || had_recovery
+                    });
             if had_scheduled_work {
                 let generation = inner.allocate_generation();
                 if let Some(entry) = inner.entries.get_mut(&loaded.provider_id) {
@@ -754,14 +746,11 @@ fn reconcile_schedules_inner(
             })
             .collect::<Vec<_>>();
         for provider_id in missing_provider_ids {
-            let had_scheduled_work = inner
-                .entries
-                .get_mut(&provider_id)
-                .is_some_and(|entry| {
-                    let had_schedule = entry.schedule.take().is_some();
-                    let had_recovery = entry.recovery.take().is_some();
-                    had_schedule || had_recovery
-                });
+            let had_scheduled_work = inner.entries.get_mut(&provider_id).is_some_and(|entry| {
+                let had_schedule = entry.schedule.take().is_some();
+                let had_recovery = entry.recovery.take().is_some();
+                had_schedule || had_recovery
+            });
             if had_scheduled_work {
                 let generation = inner.allocate_generation();
                 if let Some(entry) = inner.entries.get_mut(&provider_id) {
@@ -825,10 +814,7 @@ fn queue_recovery_target(
     let Some(entry) = inner.entries.get_mut(&provider_id) else {
         return;
     };
-    if entry.generation != generation
-        || entry.schedule.is_none()
-        || entry.recovery.is_some()
-    {
+    if entry.generation != generation || entry.schedule.is_none() || entry.recovery.is_some() {
         return;
     }
     entry.recovery = Some(RecoveryProbeState {
@@ -1258,9 +1244,7 @@ INSERT INTO providers(
         let deadline_ms = scheduled_due_deadline_ms(9, 60_000);
         assert!(!source.is_expired(9, deadline_ms));
         assert!(source.is_expired(9, deadline_ms.saturating_add(1)));
-        let recovery = ProbeSource::Recovery {
-            due_at_ms: 90_000,
-        };
+        let recovery = ProbeSource::Recovery { due_at_ms: 90_000 };
         let recovery_deadline_ms = recovery_due_deadline_ms(90_000);
         assert!(!recovery.is_expired(9, recovery_deadline_ms));
         assert!(recovery.is_expired(9, recovery_deadline_ms.saturating_add(1)));
