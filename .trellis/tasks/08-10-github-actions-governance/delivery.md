@@ -1,23 +1,28 @@
 # 交付报告：GitHub Actions 流程治理与提速
 
-> 本交付记录冻结代码实现候选 `09dfe0794522436c14e6bee278199ec6a5f9acfa`。本文件本身提交后会产生新的文档 head，main 验收时必须以 PR 实时 head 和实时检查为准。
+> 功能实现已随 [#108](https://github.com/KNaiFen/aio-coding-hub/pull/108) 合并到 `main`，实际 merge commit 为 `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`。本记录用于纠正任务终态；本次 Draft PR 仅包含记录，不是新的功能交付。任何记录提交都会产生新的文档 head，main 验收时仍须以 PR 实时 head 和实时检查为准。
 
 ## 交付状态
 
-- 结果：main 验收通过，等待合并；远端 owner 设置和真实场景运行仍为未完成项
-- PR：[#108](https://github.com/KNaiFen/aio-coding-hub/pull/108)
-- 分支：`chore/github-actions-governance`
-- PR base：`main` @ `9b05b28d5841584dc6f2a867947afd5d23f76246`
-- 交付候选 head：`09dfe0794522436c14e6bee278199ec6a5f9acfa`
-- 规划提交：`30a021269f3b6ae2c46f195faa273a1af81f26f9`
-- `ci-gate`：通过，[run 31451178867](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31451178867)（job 93658916582）
-- 其他检查：`pr-title`、`change-scope`、`docs-contract`、`support-contract`、`frontend`、`rust`、CodeQL JS/TS 和 Rust 均通过；候选制品 job 按 PR 条件跳过。
-- 交付时间：2026-08-11T02:25:57Z
-- 执行 session：正在提交本记录；提交后暂停写入，等待 main 验收。
+- 最终业务结果：部分完成并已拆分后续修复。
+- 功能 PR：[#108](https://github.com/KNaiFen/aio-coding-hub/pull/108) 已合并到 `main`；实际 merge commit 为 `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`。
+- 功能分支：`chore/github-actions-governance`；远端跟踪分支已在合并后删除。
+- 功能 PR base：`main` @ `9b05b28d5841584dc6f2a867947afd5d23f76246`。
+- 历史功能交付候选 head：`09dfe0794522436c14e6bee278199ec6a5f9acfa`；历史 `ci-gate` 证据为[run 31451178867](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31451178867)。
+- records-only closeout 分支：`docs/close-08-10-github-actions-governance`，基线为 `main` @ `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`。
+- records-only Draft PR：[#115](https://github.com/KNaiFen/aio-coding-hub/pull/115)。
+- records-only 交付快照：本记录更新前的完整 head 为 `ebac0bb60745d15839dde2f0425aaac363550c8c`；[`ci-gate` run 31526356676](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31526356676) 与 [`pr-title` run 31526356680](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31526356680) 均通过。
+- 本次交付记录提交会产生新的 PR head；执行 session 将等待该最新 head 的 `ci-gate` 与 `pr-title` 重新绿色后暂停，main 验收必须读取实时 PR 状态。不得把 #114 的任何交付证据写入此处。
 
 ## 阻塞快照
 
-无。
+无。任务保持 `in_progress`，直至 main 验收并合并 records-only closeout PR 后决定归档；这不是功能开发阻塞。
+
+## 最终业务结果
+
+- #108 中的 CI 治理功能已经合并，merge commit 为 `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`。
+- 实际 Sync Upstream 运行发现的编号解析问题未被表述为 #108 已解决。本任务的最终业务结果因此为“部分完成并已拆分后续修复”。
+- 该后续修复仅交叉引用到任务 ID `08-12-upstream-sync-pr-resolution` 和 [PR #114](https://github.com/KNaiFen/aio-coding-hub/pull/114)。本记录不复制其实现、head SHA、CI run 或验收结论。
 
 ## 实现摘要
 
@@ -36,15 +41,17 @@
 
 ## 验收标准对应
 
+下表保留 #108 功能交付时的证据快照；任务的当前终态以“最终业务结果”一节为准，records-only closeout PR 另行接受 `ci-gate` 与 `pr-title` 验证。
+
 | 标准 | 结果 | 证据 |
 |---|---|---|
 | AC-01 自动 required gate、重复运行与分域边界 | 通过（共享路径实机；单域路径合同） | 当前 PR 修改 CI 控制面，按 fail-closed 规则实机运行 frontend 与 Rust 并由 `ci-gate` 成功汇总；`ci-change-scope`、quality-gate 和 cloud-only selftest 覆盖 frontend-only、Rust-only、shared、混合、rename/copy 与 docs 混合路径。未为验证而制造额外 PR/dispatch。 |
 | AC-02 main-only 手动 CI | 合同通过，未做真实 dispatch | `manual-dispatch-guard`、`change-scope` 和 aggregate contract/selftest 通过；仓库规则禁止为常规验证触发手动 CI。 |
-| AC-03 独立 PR 标题门禁 | 部分完成 | 当前 `pr-title` 成功；Ruleset required context 更新是合并后仓库设置。 |
+| AC-03 独立 PR 标题门禁 | 通过 | #108 的 `pr-title` 成功；合并后已核验 Ruleset required contexts 为 `ci-gate` 与 `pr-title`。 |
 | AC-04 benchmark 分离 | 合同通过，未做真实 performance dispatch | `ci-change-scope` 的 manual 输出、`performance.yml` 合同与 selftest 通过；本 PR 非 benchmark 路径，Rust benchmark 正确跳过。 |
-| AC-05 上游 App token 边界 | 合同通过，待 owner 配置 | sync policy checker/selftest 通过；GitHub App 安装、ID 和私钥由仓库 owner 合并后配置及实际验证。 |
-| AC-06 Dependabot、CodeQL、pin 与 timeout | 部分完成 | CodeQL 两个 matrix job 实际成功；pin/timeout、quality 和 sync 合同通过；远端 SHA pinning 与 Dependabot alerts/security updates 待 owner 启用。 |
-| AC-07 本地合同和 PR CI | 通过（实现候选） | 本地允许矩阵全部通过；同一 `09dfe079...` head 的 `ci-gate` 及相关 CI 已通过。交付记录提交后的最新 head 仍需 main 复验。 |
+| AC-05 上游 App token 边界 | 部分完成并已拆分后续修复 | 凭据名称已在远端存在且未读取任何值；实际运行发现的编号解析问题交由 [PR #114](https://github.com/KNaiFen/aio-coding-hub/pull/114) 的独立 follow-up 处理，本记录不陈述其实施或验证事实。 |
+| AC-06 Dependabot、CodeQL、pin 与 timeout | 通过 | CodeQL 两个 matrix job 实际成功；合并后已核验 Actions SHA pinning、Dependabot alerts/security updates 均已启用。 |
+| AC-07 本地合同和 PR CI | #108 通过；records-only closeout 待验 | 同一 `09dfe079...` head 的 `ci-gate` 及相关 CI 已通过且 #108 已合并；本次 records-only PR 的最新 head 必须单独通过 `ci-gate` 与 `pr-title`。 |
 
 ## 主要代码位置
 
@@ -114,8 +121,9 @@
 
 ## 未完成项与阻塞
 
-- 合并后由仓库 owner 依照 `docs/operations/github-actions-governance.md` 依次配置 GitHub App 凭据、SHA pinning、Dependabot alerts/security updates 和 Ruleset `ci-gate` + `pr-title` contexts；这些远端写入未获本次授权。
-- 真实 main-only recovery、performance 和 upstream-sync 运行属于显式运维验证，不应由常规 PR 自动触发。
+- 后续修复：实际 Sync Upstream 运行发现的编号解析问题已拆分到任务 ID `08-12-upstream-sync-pr-resolution` / [PR #114](https://github.com/KNaiFen/aio-coding-hub/pull/114)。该链接不代表本任务拥有或验证其实施状态。
+- 已核验的远端治理状态：Actions SHA pinning、Ruleset 的 `ci-gate` + `pr-title` required contexts、Dependabot alerts/security updates 均已启用；`SYNC_UPSTREAM_APP_ID` variable 和 `SYNC_UPSTREAM_APP_PRIVATE_KEY` secret 的名称存在。未读取或记录任何 secret 值。
+- main 仍需验收、合并本 records-only closeout PR，并在合并后按任务规则决定归档和清理。本 execution session 不运行 `task.py archive`，不删除 worktree 或分支。
 
 ## 建议 main 重点审查
 
@@ -137,12 +145,27 @@
 - 接受的限制：AC-01/02/04 的真实单域与手动运行矩阵尚未执行；AC-03 的 `pr-title` Ruleset context、AC-05 的 App 凭据、AC-06 的 SHA pinning/Dependabot alerts/security updates 均按 `implement.md` 的合并后 owner 步骤保留。它们不是本 PR 代码合并的阻断项，任务归档前必须完成或由用户明确调整范围。
 - 记录提交会产生新的仅交付文档 head；main 将在该 head 的 CI 重新绿色后合并，并在收尾记录实际 merge commit 和未完成 owner 项。
 
+### Round 2 - 2026-08-12
+
+- 审查候选：records-only PR [#115](https://github.com/KNaiFen/aio-coding-hub/pull/115) @ `6b52d775a5484c5d1272231fd649be684a833d2c`（base `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`）。
+- CI 证据：该 head 的 [`ci-gate` run 31527846703](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31527846703)、[`pr-title` run 31527846689](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31527846689) 与 CodeQL JS/TS/Rust 均成功；PR 为 Draft、OPEN、CLEAN。
+- 审查范围：#108 实际 merge 事实、records-only 终态、任务元数据和活动索引；返工文件 `findings.md` 的 F-001；以及 PR diff 未扩展到 `.github/`、产品代码、同步脚本、测试合同或 `upgrade-tui.command`。
+- F-001 复验：所有 08-10 正式记录已改用纯文本任务 ID `08-12-upstream-sync-pr-resolution`，删除了指向不存在目录的相对链接，仅保留 PR #114 的持久链接；返工记录已随同一候选提交。
+- 结论：通过，准予合并 records-only closeout PR。该结论只认可 #108 的“部分完成并已拆分后续修复”终态，不认可或预先接受 PR #114 的实现、CI 或验收结果。
+- 本 main 验收记录会产生新的文档 head；main 仅在该最新 head 的 required CI 重新绿色后执行合并和后续归档。
+
 ## main 收尾
 
 > 仅 main 填写。
 
-尚未合并，未归档或清理。
+- 功能 PR [#108](https://github.com/KNaiFen/aio-coding-hub/pull/108) 已合并，实际 merge commit 为 `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`。
+- 本任务最终业务结果为“部分完成并已拆分后续修复”；后续项仅链接 [PR #114](https://github.com/KNaiFen/aio-coding-hub/pull/114)，不得将其实现或 CI 事实回写为 #108 证据。
+- 本次 execution session 已创建 [#115](https://github.com/KNaiFen/aio-coding-hub/pull/115) 并将提交交付记录后暂停。main 负责其验收、合并、归档和清理；截至本记录更新时，未运行 archive，未删除 worktree 或分支。
 
 ## 返工记录
 
-无。
+### Round 1 - F-001 执行回应
+
+- 已将本任务正式记录中的错误任务 ID 改为纯文本 `08-12-upstream-sync-pr-resolution`，并删除所有指向未进入当前分支或 `main` 的任务目录相对链接。
+- 后续修复仅保留 [PR #114](https://github.com/KNaiFen/aio-coding-hub/pull/114) 的持久链接；#108 merge commit、部分完成结论及“不继承 #114 实现、CI、验收事实”的边界保持不变。
+- 本返工提交只修复 F-001；未改动 `main 验收记录` 或 `main 收尾`。推送后等待 PR #115 最新 head 的 `ci-gate` 与 `pr-title`。
