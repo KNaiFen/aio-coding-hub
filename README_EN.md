@@ -204,7 +204,7 @@ node scripts/check-cloud-only-verification.mjs
 git diff --check
 ```
 
-For a changed `.mjs` file, `node --check <changed-file.mjs>` is also allowed directly. Dependency installation, complete frontend quality gates, Rust, generated bindings, and artifacts belong to a full `ci` workflow_dispatch. Run `dev-build` from Actions only when a desktop integration artifact is needed.
+For a changed `.mjs` file, `node --check <changed-file.mjs>` is also allowed directly. Regular pull requests and protected-branch pushes trigger `ci` automatically; use the commit's `ci-gate` and `pr-title` results. Do not start an additional manual `ci` run for routine validation. `workflow_dispatch` is reserved for `main` recovery or candidate builds, while the Provider trend release benchmark runs on relevant automatic CI paths or the standalone `performance` workflow. Run `dev-build` from Actions only when a desktop integration artifact is needed.
 
 <!-- SUPPORT_MATRIX_SOURCE_BUILD:START -->
 | Scope | Cloud workflow target | Notes |

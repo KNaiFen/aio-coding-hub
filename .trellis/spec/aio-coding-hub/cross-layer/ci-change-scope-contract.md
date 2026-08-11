@@ -9,11 +9,13 @@ not implicitly grant a cheaper CI route.
 
 ### 2. Execution Tiers
 
-| Tier                  | Required jobs                                                 | Intended content                                                         |
-| --------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| Process documentation | `change-scope`, PR title when applicable, `ci-gate`           | Task records, pending lists, agent/process notes                         |
-| Checked documentation | Process jobs plus `docs-contract`                             | READMEs, product Markdown, Trellis specs/workflow                        |
-| Complete CI           | Existing support, frontend, Rust, and eligible candidate jobs | Code, configuration, contracts, tooling, locks, unknown or mixed changes |
+| Tier                  | Required jobs                                                 | Intended content                                                             |
+| --------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Process documentation | `change-scope`, independent `pr-title`, `ci-gate`             | Task records, pending lists, agent/process notes                             |
+| Checked documentation | Process jobs plus `docs-contract`                             | READMEs, product Markdown, Trellis specs/workflow                            |
+| Frontend CI           | `support-contract`, `frontend`, `ci-gate`                     | Frontend source, assets, and frontend-only workspace packages                |
+| Rust CI               | `support-contract`, `rust`, `ci-gate`                         | Rust source, Cargo manifests, and Cargo lockfiles                            |
+| Complete CI           | Support, frontend, Rust, and eligible candidate jobs          | Shared/generated files, CI control plane, unknown or mixed frontend/Rust changes |
 
 The required workflow must always start. Workflow-level `paths-ignore` is
 forbidden because a skipped required workflow can leave branch protection
@@ -22,19 +24,25 @@ waiting for a check that never reports.
 ### 3. Classification Contract
 
 - Only exact paths and prefix-plus-extension rules in `.github/ci-scope.json`
-  may select either documentation tier.
+  may select a documentation, frontend, or Rust-only tier.
 - `.github/**` and the classifier/self-test scripts are immutable control-plane
   exceptions: code hard-codes them to complete CI, so the policy cannot grant
   itself or its interpreter a cheaper route.
-- `.github/**`, `.trellis/scripts/**`, `.trellis/config.yaml`, source and build
-  files, lockfiles, and `docs/plugins/plugin-api-v1-contract.json` require
-  complete CI. Unknown paths also require complete CI.
-- A path matching both documentation tiers requires complete CI; policy
-  ambiguity must never reduce validation.
-- Checked documentation and complete CI are independent flags. A mixed change
-  can run both the targeted documentation job and the complete suites.
-- Pull requests use their base/head merge base. Pushes use the event's
-  `before` and head objects. Manual and unsupported events require complete CI.
+- `.github/**`, `.trellis/scripts/**`, `.trellis/config.yaml`, root dependency
+  files, CI/tooling scripts, generated frontend bindings, and
+  `docs/plugins/plugin-api-v1-contract.json` require complete CI. Unknown paths
+  also require complete CI.
+- A path matching conflicting documentation or source tiers requires complete
+  CI; policy ambiguity must never reduce validation. An explicit shared rule
+  takes precedence over a broader frontend prefix.
+- Checked documentation, frontend, Rust, and shared selection are independent
+  flags. Mixed documentation plus one source domain runs the targeted docs and
+  source jobs; frontend plus Rust or any shared path runs complete CI.
+- Pull requests use their base/head merge base and may use domain selection.
+  Pushes use the event's `before` and head objects but are forced to complete CI
+  because `ci.yml` only accepts `dev`/`main` pushes. Main-only manual and
+  unsupported events also require complete CI; manual CI omits the release
+  benchmark because it has a dedicated workflow.
 - Parse NUL-delimited `git diff --name-status` records. Renames and copies
   classify both old and new paths; deletions classify the old path.
 - Invalid/all-zero SHAs, missing history, Git errors, malformed policy,
@@ -42,20 +50,23 @@ waiting for a check that never reports.
 
 ### 4. Workflow Contract
 
-- `change-scope` is the only owner of `scope`, `full_ci`, and `docs_checks`
-  outputs and must run before selectable suites.
+- `change-scope` is the only owner of `scope`, `full_ci`, `frontend_ci`,
+  `rust_ci`, `shared_ci`, and `docs_checks` outputs and must run before
+  selectable suites.
 - `docs-contract` uses dependency-free Node.js checks only. It must validate
   the cloud-only verification boundary, plugin documentation, the plugin API
   contract, Trellis spec links, and the standalone TUI README/release contract.
-- Support, frontend, Rust, and candidate planning run only when
-  `full_ci=true`. Candidate assembly retains all existing version-change and
+- `support-contract` runs when either source domain is selected. Frontend and
+  Rust consume only their respective selection output. Candidate planning still
+  requires `full_ci=true` and retains all existing main/version-change and
   signed-build requirements.
 - `ci-gate` uses `always()`, depends on every selectable job, and validates both
   selected successes and unselected `skipped` results. A classifier failure,
   missing output, unexpected skip, cancellation, or selected-suite failure must
   fail the gate.
-- `ci-gate` remains named exactly `ci-gate` so the protected branch's strict
-  required-check rule stays stable.
+- The automatic gate remains named exactly `ci-gate` so the protected branch's
+  strict required-check rule stays stable. Manual runs use `manual-ci-gate` and
+  cannot satisfy that rule. PR title validation is a separate required check.
 
 ### 5. Change Rules
 
@@ -70,9 +81,10 @@ waiting for a check that never reports.
 
 ### 6. Tests Required
 
-- Exact paths, prefix extension filters, unknown files, and mixed tiers.
+- Exact paths, prefix extension filters, frontend-only, Rust-only, shared,
+  unknown files, and mixed tiers.
 - Rename/copy in both directions across tier boundaries, plus deletions.
 - Pull-request merge-base and push-before range construction.
 - Empty output, invalid SHA, malformed name-status records, and policy errors.
-- A complete-CI implementation PR followed by a real process-doc-only PR that
-  proves the lightweight protected-branch route.
+- A complete-CI implementation PR followed by real frontend-only, Rust-only,
+  and process-doc-only PRs that prove each protected-branch route.

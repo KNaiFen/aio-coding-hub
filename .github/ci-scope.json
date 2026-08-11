@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "processDocumentation": {
     "exactPaths": ["AGENTS.md", "CHANGELOG.md", "PENDING.md", "PENDING_COMPLETED.md"],
     "prefixRules": [
@@ -31,6 +31,41 @@
       {
         "prefix": "docs/",
         "extensions": [".md"]
+      }
+    ]
+  },
+  "frontendSource": {
+    "exactPaths": ["index.html", "tsconfig.app.json", "tsconfig.json", "tsconfig.node.json", "vite.config.ts"],
+    "prefixRules": [
+      {
+        "prefix": "src/",
+        "extensions": [".css", ".js", ".jsx", ".json", ".svg", ".ts", ".tsx"]
+      },
+      {
+        "prefix": "public/",
+        "extensions": [".css", ".html", ".ico", ".jpeg", ".jpg", ".json", ".png", ".svg", ".webp"]
+      },
+      {
+        "prefix": "packages/",
+        "extensions": [".css", ".js", ".json", ".ts", ".tsx"]
+      }
+    ]
+  },
+  "rustSource": {
+    "exactPaths": [],
+    "prefixRules": [
+      {
+        "prefix": "src-tauri/",
+        "extensions": [".lock", ".rs", ".toml"]
+      }
+    ]
+  },
+  "sharedSource": {
+    "exactPaths": ["package.json", "pnpm-lock.yaml", "src/generated/bindings.ts"],
+    "prefixRules": [
+      {
+        "prefix": "scripts/",
+        "extensions": [".js", ".mjs"]
       }
     ]
   }
