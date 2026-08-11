@@ -73,6 +73,8 @@ F-001 的 recovery epoch/claim 生命周期已经阻止旧 target 跨越失败�
 - Round 2 测试整改：将 `run_scheduled_probe` 的 completion 后处理提取为其直接调用的私有 `consume_scheduled_completion` 消费路径，并用 `scheduled_completion_uses_probe_completion_time_not_waiter_resume_time` 经过该生产路径完成入队；运行时仍只透传 `CompletedProbe.recovery`，未改变 F-001 生命周期或调度语义。
 - Round 2 确定性证据：测试固定 HTTP completion 为 `10_000ms`、scheduled waiter resume 为 `55_000ms`，并断言入队 due 等于 `10_000 + RECOVERY_PROBE_DELAY_MS`、不等于 `55_000 + RECOVERY_PROBE_DELAY_MS`。若消费路径恢复为 waiter/current-time 重算，该测试会失败。本地 cloud-only self-test、合同检查和 `git diff --check` 通过；新候选云端 Rust tests 与 `ci-gate` 待提交后验证。
 - 计划偏移：无；仍复用既有 scheduler、generation、四槽 limiter 与 in-flight 合并，不引入裸 `sleep`。
+- Round 2 云端证据：功能候选 `9baeeb72522dff47178f0ff6675bc1904dd39f84` 已通过自动 PR CI；[`rust` job 93867720063](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31517935633/job/93867720063)、[`ci-gate` job 93873788290](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31517935633/job/93873788290)、[`pr-title` job 93867621012](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31517935618/job/93867621012) 与 [CodeQL run 31517935626](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31517935626) 均为成功，且均绑定该完整 head。
+- 交付状态：执行 session 已完成 F-002 返工并暂停，等待 main 进行 Round 2 再次验收；未改写上方 main 复验结论。
 
 **main 复验**
 

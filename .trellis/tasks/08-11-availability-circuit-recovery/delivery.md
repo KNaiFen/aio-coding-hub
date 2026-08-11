@@ -1,19 +1,19 @@
 # 交付报告：可用性探测熔断恢复
 
-> 本文件正在记录 Round 2 的 F-002 测试返工，等待新候选自动 CI。
+> 本文件记录 Round 2 的 F-002 测试返工；功能候选已通过自动 PR CI，等待 main 再次验收。
 
 ## 交付状态
 
-- 结果：Round 2 云端复验待提交
+- 结果：Round 2 返工候选已通过自动 PR CI，等待 main 再次验收
 - PR：[#109](https://github.com/KNaiFen/aio-coding-hub/pull/109)
 - 分支：`fix/availability-circuit-recovery`
 - PR base：`main` @ `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`（初始规划 base 为 `9b05b28d5841584dc6f2a867947afd5d23f76246`）
-- 交付候选 head：待本轮提交（冻结起点为 `36ef9df65b7d6eeb22eb3a19ecbf892e39194a02`）
+- 交付候选 head（功能实现）：`9baeeb72522dff47178f0ff6675bc1904dd39f84`（冻结起点为 `36ef9df65b7d6eeb22eb3a19ecbf892e39194a02`）
 - 规划提交：`7de765738df6a0be4a31309a0f0c1a28852f1657`
-- `ci-gate`：待本轮候选自动 PR CI
-- 其他必需检查：待本轮候选自动 PR CI
+- `ci-gate`：通过，[job 93873788290](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31517935633/job/93873788290)
+- 其他必需检查：`rust`、`pr-title`、`change-scope`、`support-contract` 与 CodeQL 通过；`frontend` 按 Rust-only scope 预期跳过
 - 交付时间：2026-08-12
-- 执行 session：Round 2 返工中
+- 执行 session：Round 2 返工完成，等待 main 再次验收
 
 ## 阻塞快照
 
@@ -155,5 +155,6 @@
 - 实现：`run_scheduled_probe` 在 probe waiter 返回后调用私有 `consume_scheduled_completion`；该消费路径只使用 `CompletedProbe.recovery` 入队或 settle，不以 waiter resume/current time 改写 due。
 - 测试：`scheduled_completion_uses_probe_completion_time_not_waiter_resume_time` 通过上述生产消费路径，固定 completion=`10_000ms`、waiter resume=`55_000ms`，断言 recovery due 恒等于 completion 加 `RECOVERY_PROBE_DELAY_MS` 且不等于 waiter resume 加该延迟。
 - 本地证据：cloud-only self-test、合同检查和 `git diff --check` 通过；按仓库规则未运行 Cargo、pnpm、构建、测试或格式化。
-- 返工候选：待本轮提交。
-- 云端证据：待最新候选自动 PR CI。
+- 功能候选：`9baeeb72522dff47178f0ff6675bc1904dd39f84`；`1f60e4130236e75539acdadbf01ad18965ac35e3` 新增生产 scheduled completion 消费路径回归测试，`9baeeb72522dff47178f0ff6675bc1904dd39f84` 仅应用云端 Rust 格式化 artifact。
+- 云端证据：自动 [`ci` run 31517935633](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31517935633) 成功，含 [`rust` job 93867720063](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31517935633/job/93867720063)、[`ci-gate` job 93873788290](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31517935633/job/93873788290)、`change-scope` 与 `support-contract`；[`pr-title` job 93867621012](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31517935618/job/93867621012) 和 [CodeQL run 31517935626](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31517935626) 亦成功。上述检查均绑定该完整功能候选 SHA。
+- 交付说明：本次仅补充 CI 证据的 Markdown 提交不改变功能实现候选；推送后仍会等待 PR 最新 head 的自动必需检查终态，再暂停等待 main 复验。
