@@ -10,8 +10,9 @@ use super::access_token::GatewayAccessControl;
 use super::active_requests::{ActiveRequestFinishReason, ActiveRequestRegistry};
 use super::background_tasks::GatewayBackgroundTasks;
 use super::codex_session_id::CodexSessionIdCache;
+use super::events::emit_circuit_transition;
 use super::plugins::pipeline::GatewayPluginPipeline;
-use super::proxy::{ProviderBaseUrlPingCache, RecentErrorCache};
+use super::proxy::{provider_router, ProviderBaseUrlPingCache, RecentErrorCache};
 use super::{GatewayProviderCircuitStatus, GatewayStatus};
 
 pub(in crate::gateway) struct GatewayAppState<R: tauri::Runtime = tauri::Wry> {
@@ -124,6 +125,146 @@ mod tests {
 
         gate.set_enabled(7, true);
         assert!(gate.allows(7));
+    }
+
+    fn availability_runtime() -> (tokio::runtime::Runtime, GatewayRuntime) {
+        let runtime = tokio::runtime::Runtime::new().expect("runtime");
+        let gateway = GatewayRuntime::for_tests(
+            &runtime,
+            Arc::new(session_manager::SessionManager::new()),
+            Arc::new(Mutex::new(RecentErrorCache::default())),
+        );
+        (runtime, gateway)
+    }
+
+    fn record_availability_probe_outcome(
+        gateway: &GatewayRuntime,
+        provider_id: i64,
+        now_unix: i64,
+        ok: bool,
+    ) -> bool {
+        gateway.record_availability_probe_outcome(
+            None::<&tauri::AppHandle<tauri::Wry>>,
+            "availability-probe:test",
+            "codex",
+            provider_id,
+            "Provider test",
+            "https://provider.test",
+            now_unix,
+            ok,
+        )
+    }
+
+    #[test]
+    fn availability_success_does_not_shorten_an_open_circuit() {
+        let (_runtime, gateway) = availability_runtime();
+        let provider_id = 7;
+        let now = 1_000;
+        gateway.update_circuit_config(1, 60);
+        gateway.circuit.record_failure(provider_id, now, None);
+        let before = gateway.circuit.snapshot(provider_id, now);
+
+        assert!(!record_availability_probe_outcome(
+            &gateway,
+            provider_id,
+            now + 1,
+            true,
+        ));
+
+        let after = gateway.circuit.snapshot(provider_id, now + 1);
+        assert_eq!(after.state, circuit_breaker::CircuitState::Open);
+        assert_eq!(after.failure_count, before.failure_count);
+        assert_eq!(after.open_until, before.open_until);
+    }
+
+    #[test]
+    fn availability_success_closes_only_after_three_half_open_results() {
+        let (_runtime, gateway) = availability_runtime();
+        let provider_id = 8;
+        let now = 1_000;
+        gateway.update_circuit_config(1, 60);
+        gateway.circuit.record_failure(provider_id, now, None);
+        let open_until = gateway
+            .circuit
+            .snapshot(provider_id, now)
+            .open_until
+            .expect("open_until");
+
+        assert!(record_availability_probe_outcome(
+            &gateway,
+            provider_id,
+            open_until,
+            true,
+        ));
+        assert_eq!(
+            gateway.circuit.snapshot(provider_id, open_until).state,
+            circuit_breaker::CircuitState::HalfOpen
+        );
+        assert!(record_availability_probe_outcome(
+            &gateway,
+            provider_id,
+            open_until + 1,
+            true,
+        ));
+        assert_eq!(
+            gateway.circuit.snapshot(provider_id, open_until + 1).state,
+            circuit_breaker::CircuitState::HalfOpen
+        );
+        assert!(record_availability_probe_outcome(
+            &gateway,
+            provider_id,
+            open_until + 2,
+            true,
+        ));
+        assert_eq!(
+            gateway.circuit.snapshot(provider_id, open_until + 2).state,
+            circuit_breaker::CircuitState::Closed
+        );
+    }
+
+    #[test]
+    fn availability_failure_reopens_a_half_open_circuit() {
+        let (_runtime, gateway) = availability_runtime();
+        let provider_id = 9;
+        let now = 1_000;
+        gateway.update_circuit_config(1, 60);
+        gateway.circuit.record_failure(provider_id, now, None);
+        let open_until = gateway
+            .circuit
+            .snapshot(provider_id, now)
+            .open_until
+            .expect("open_until");
+
+        assert!(record_availability_probe_outcome(
+            &gateway,
+            provider_id,
+            open_until,
+            false,
+        ));
+
+        let after = gateway.circuit.snapshot(provider_id, open_until);
+        assert_eq!(after.state, circuit_breaker::CircuitState::Open);
+        assert!(after.open_until.is_some_and(|until| until > open_until));
+    }
+
+    #[test]
+    fn availability_outcomes_do_not_clear_closed_failure_history() {
+        let (_runtime, gateway) = availability_runtime();
+        let provider_id = 10;
+        let now = 1_000;
+        gateway.update_circuit_config(2, 60);
+        gateway.circuit.record_failure(provider_id, now, None);
+
+        assert!(!record_availability_probe_outcome(
+            &gateway,
+            provider_id,
+            now + 1,
+            true,
+        ));
+
+        let after = gateway.circuit.snapshot(provider_id, now + 1);
+        assert_eq!(after.state, circuit_breaker::CircuitState::Closed);
+        assert_eq!(after.failure_count, 1);
     }
 }
 
@@ -305,6 +446,67 @@ impl GatewayRuntime {
                 }
             })
             .collect()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn record_availability_probe_outcome<R: tauri::Runtime>(
+        &self,
+        app: Option<&tauri::AppHandle<R>>,
+        trace_id: &str,
+        cli_key: &str,
+        provider_id: i64,
+        provider_name: &str,
+        provider_base_url: &str,
+        now_unix: i64,
+        ok: bool,
+    ) -> bool {
+        // Availability probes are HalfOpen recovery evidence; they must not
+        // clear or prune a Closed circuit's request-failure history.
+        let snapshot = self.circuit.snapshot(provider_id, now_unix);
+        if snapshot.state == circuit_breaker::CircuitState::Closed {
+            return false;
+        }
+        let allow = self.circuit.should_allow(provider_id, now_unix);
+        if let (Some(app), Some(transition)) = (app, allow.transition.as_ref()) {
+            emit_circuit_transition(
+                app,
+                trace_id,
+                cli_key,
+                provider_id,
+                provider_name,
+                provider_base_url,
+                transition,
+                now_unix,
+                None,
+                None,
+            );
+        }
+
+        if !allow.allow || allow.after.state != circuit_breaker::CircuitState::HalfOpen {
+            return false;
+        }
+
+        let args = provider_router::RecordCircuitArgs::new(
+            app,
+            self.circuit.as_ref(),
+            trace_id,
+            cli_key,
+            provider_id,
+            provider_name,
+            provider_base_url,
+            now_unix,
+        );
+        if ok {
+            let _ = provider_router::record_success_and_emit_transition(args);
+        } else {
+            let _ = provider_router::record_failure_and_emit_transition(args);
+        }
+        true
+    }
+
+    pub(crate) fn circuit_is_half_open(&self, provider_id: i64, now_unix: i64) -> bool {
+        self.circuit.snapshot(provider_id, now_unix).state
+            == circuit_breaker::CircuitState::HalfOpen
     }
 
     pub(crate) fn circuit_reset_provider(&self, provider_id: i64, now_unix: i64) {
