@@ -668,12 +668,8 @@ impl ProviderAvailabilityProbeRuntimeState {
             .await;
         drop(permit);
         let waiter_resumed_at_ms = crate::shared::time::now_unix_millis();
-        self.consume_scheduled_completion(
-            target,
-            completion.as_ref(),
-            waiter_resumed_at_ms,
-        )
-        .await;
+        self.consume_scheduled_completion(target, completion.as_ref(), waiter_resumed_at_ms)
+            .await;
         if let Some(Err(error)) = completion.map(|completed| completed.result) {
             tracing::warn!(
                 error = %error.code(),
