@@ -1,10 +1,10 @@
 # 交付报告：修复 Sync Upstream PR 编号解析与冲突收敛
 
-> 本文件先保存阶段 A 的任务归属迁移快照。它不是 PR #114 的最终验收交付；任务归属分离提交推送后，main 必须以 GitHub 的实时 head 和实时检查决定是否进入阶段 B。
+> 本文件保留阶段 A 的任务归属迁移快照。2026-08-12 main 已授权阶段 B；阶段 B 的正式交付必须以同步后的实时 PR head 和自动检查为准。
 
 ## 交付状态
 
-- 结果：阶段 A 任务归属分离完成后暂停，等待 main 指令；本阶段不改变 Sync Upstream 代码。
+- 结果：阶段 A 已完成；阶段 B 已授权但尚未由执行 session 开始。本次 main 授权提交不改变 Sync Upstream 代码。
 - PR：[修复 #114](https://github.com/KNaiFen/aio-coding-hub/pull/114)（Draft，OPEN）
 - 分支：`fix/upstream-sync-pr-resolution`
 - PR base：`main` @ `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`
@@ -14,11 +14,11 @@
 - 其他检查：`pr-title` 通过，[run 31509027080](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31509027080)；CodeQL JS/TS 与 Rust 通过，[run 31509027104](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31509027104)。
 - #113 回归：[Sync Upstream run 31508611251](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31508611251) 按预期失败，输出 PR #113 的 `DIRTY` 状态并要求人工冲突处理。
 - 交付时间：2026-08-12（阶段 A 快照）
-- 执行 session：完成阶段 A 提交和推送后暂停。
+- 执行 session：阶段 A session 已暂停；main 正在提交阶段 B 授权，随后交接给一个执行 session。
 
 ## 阻塞快照
 
-- 阶段 B 被明确暂停，等待 main 指令；这不是代码或 CI 阻塞。
+- 无代码或 CI 阻塞。阶段 B 已获授权，执行 session 开始前必须重新查询实时 PR 状态并同步当前 `origin/main`。
 
 ## 实现摘要
 
@@ -71,13 +71,21 @@
 
 ## 未完成项与阻塞
 
-- 阶段 B 的交付重绑、最新 head CI 复核与后续维护未开始，必须等待 main 指令。
+- 阶段 B 的同步、交付重绑和最新 head CI 复核尚未由执行 session开始；详见 `execution.md` 的阶段 B 施工指令。
 
 ## 建议 main 重点审查
 
 - 新任务目录与 `.trellis/tasks/README.md`：确认 PR #114、分支、base、worktree 和唯一写者仅指向本包。
 - `.trellis/tasks/08-10-github-actions-governance/`：确认相对 `origin/main` 没有 #114 差异。
 - `.github/workflows/sync-upstream.yml` 与 policy contract：阶段 A 未改动；后续只允许维持严格 stdout 解析和 fail-closed 边界。
+
+## 阶段 B 授权（main）
+
+- 授权日期：2026-08-12。
+- 授权范围：同步 `fix/upstream-sync-pr-resolution` 到开始施工时最新 `origin/main`，解决预期的 `.trellis/tasks/README.md` 冲突，更新 Trellis 生命周期和交付/CI 证据。
+- 已知快照：当前 `origin/main` 为 `9aa8e4ab8e6417be4816b0811178c3f401e34171`；PR #114 旧 head 为 `6316204274eeb6db9332b4eef0e5f182c5c31ca7`，旧必需 CI 已通过。执行 session 必须在写入前重新查询，不能把快照当最终证据。
+- 锁定边界：保留 #113 的 fail-closed 人工处理路径；不得修改 stdout 严格解析、放宽 `DIRTY`/`UNKNOWN`/空状态处理、读取或处理 `upgrade-tui.command`、读取或提交 `SESSION_REMEDIATION_PLAN.md`，也不得合并 PR 或推送 `main`。
+- 接手条件：main 授权提交推送后，只有一个执行 session 可写入本 worktree；其余 session 保持暂停。
 
 ## main 验收记录
 

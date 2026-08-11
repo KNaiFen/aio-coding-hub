@@ -10,8 +10,7 @@
 
 | 任务目录 | 阶段 | 分支 | base SHA | 规划提交 | Worktree | PR | 当前唯一写者 | 依赖/说明 |
 |---|---|---|---|---|---|---|---|---|
-| [`08-10-github-actions-governance`](./08-10-github-actions-governance/) | records-only closeout（待启动） | `chore/github-actions-governance` | `9b05b28d5841584dc6f2a867947afd5d23f76246` | `30a021269f3b6ae2c46f195faa273a1af81f26f9` | `/Users/knaifen/Documents/Codex/aio-coding-hub/08-10-github-actions-governance` | [#108](https://github.com/KNaiFen/aio-coding-hub/pull/108) 已合并 @ `82820b2ea10ec6028d1fcb8d130a993bfae39b6d` | records-only closeout session（待启动） | PR #114 的材料已迁入 `08-12-upstream-sync-pr-resolution`；旧任务只保留 #108 历史，排除 `AIO-PENDING-029`。 |
-| [`08-12-upstream-sync-pr-resolution`](./08-12-upstream-sync-pr-resolution/) | planning（阶段 A 归属分离；阶段 B 等待 main） | `fix/upstream-sync-pr-resolution` | `82820b2ea10ec6028d1fcb8d130a993bfae39b6d` | `2016c25ef7cb6ae524f3f2b4e86996ef923981a3` | `/Users/knaifen/Documents/Codex/aio-coding-hub/08-11-upstream-sync-pr-resolution` | [#114](https://github.com/KNaiFen/aio-coding-hub/pull/114) Draft | 本执行 session（阶段 A；推送后暂停） | 新建 PR 从 stdout 严格解析；#113 的 `DIRTY`/`UNKNOWN` 只保留 fail-closed 人工处理边界。 |
+| [`08-12-upstream-sync-pr-resolution`](./08-12-upstream-sync-pr-resolution/) | 阶段 A 完成；阶段 B 已授权、待接手 | `fix/upstream-sync-pr-resolution` | `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`（当前同步目标另见 `execution.md`） | `2016c25ef7cb6ae524f3f2b4e86996ef923981a3` | `/Users/knaifen/Documents/Codex/aio-coding-hub/08-11-upstream-sync-pr-resolution` | [#114](https://github.com/KNaiFen/aio-coding-hub/pull/114) Draft | main（授权提交）；交接后一个执行 session | 同步当前主线仅预期 README 冲突；保留 08-10/08-11 归档，stdout 严格解析和 #113 `DIRTY`/`UNKNOWN` fail-closed 不变。 |
 | [`08-03-upstream-claude-oauth`](./08-03-upstream-claude-oauth/) | planning（暂停，未委派） | 无（旧分支已删除） | 不适用 | 未登记 | 未创建 | 未创建 | main session | 用户已决定暂不处理；不影响当前工作。恢复前需重新确认方案，并完成真实隔离账号验证。 |
 
 ## 归档
