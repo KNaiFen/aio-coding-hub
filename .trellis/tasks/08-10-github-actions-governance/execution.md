@@ -10,6 +10,7 @@
 - 实施授权：已确认；2026-08-12 main 审计授权仅完成 records-only closeout。
 - PR 目标：`main`
 - 功能 PR：[#108](https://github.com/KNaiFen/aio-coding-hub/pull/108) 已合并，实际 merge commit 为 `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`。
+- records-only Draft PR：[#115](https://github.com/KNaiFen/aio-coding-hub/pull/115)；本记录更新前的交付快照 head 为 `ebac0bb60745d15839dde2f0425aaac363550c8c`，`ci-gate` 与 `pr-title` 已通过。
 - PENDING 审阅：`AIO-PENDING-029` 明确排除，禁止触碰 `upgrade-tui.command`。
 - 当前唯一写者：08-10 records-only closeout execution session。
 - 当前阶段：功能开发已结束；仅创建并交付 records-only closeout Draft PR，随后暂停等待 main 验收、合并、归档和清理。

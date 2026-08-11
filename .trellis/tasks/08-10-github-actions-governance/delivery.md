@@ -10,8 +10,9 @@
 - 功能 PR base：`main` @ `9b05b28d5841584dc6f2a867947afd5d23f76246`。
 - 历史功能交付候选 head：`09dfe0794522436c14e6bee278199ec6a5f9acfa`；历史 `ci-gate` 证据为[run 31451178867](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31451178867)。
 - records-only closeout 分支：`docs/close-08-10-github-actions-governance`，基线为 `main` @ `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`。
-- records-only Draft PR、head SHA 与 CI URL：待本记录首次提交、推送和自动检查后补充；不得把 #114 的任何交付证据写入此处。
-- 执行 session：仅交付 records-only closeout；PR 最新 head 的 `ci-gate` 与 `pr-title` 绿色后暂停等待 main 验收。
+- records-only Draft PR：[#115](https://github.com/KNaiFen/aio-coding-hub/pull/115)。
+- records-only 交付快照：本记录更新前的完整 head 为 `ebac0bb60745d15839dde2f0425aaac363550c8c`；[`ci-gate` run 31526356676](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31526356676) 与 [`pr-title` run 31526356680](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31526356680) 均通过。
+- 本次交付记录提交会产生新的 PR head；执行 session 将等待该最新 head 的 `ci-gate` 与 `pr-title` 重新绿色后暂停，main 验收必须读取实时 PR 状态。不得把 #114 的任何交付证据写入此处。
 
 ## 阻塞快照
 
@@ -150,7 +151,7 @@
 
 - 功能 PR [#108](https://github.com/KNaiFen/aio-coding-hub/pull/108) 已合并，实际 merge commit 为 `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`。
 - 本任务最终业务结果为“部分完成并已拆分后续修复”；后续项仅链接 [PR #114](https://github.com/KNaiFen/aio-coding-hub/pull/114)，不得将其实现或 CI 事实回写为 #108 证据。
-- 本次 execution session 将交付 records-only Draft PR 后暂停。main 负责其验收、合并、归档和清理；截至本记录首次提交时，未运行 archive，未删除 worktree 或分支。
+- 本次 execution session 已创建 [#115](https://github.com/KNaiFen/aio-coding-hub/pull/115) 并将提交交付记录后暂停。main 负责其验收、合并、归档和清理；截至本记录更新时，未运行 archive，未删除 worktree 或分支。
 
 ## 返工记录
 
