@@ -241,6 +241,12 @@ expectRejected(
   /must not merge/
 );
 expectRejected(
+  "automatic pull request approval",
+  'echo "Manual review and merge required."',
+  'gh pr review "${pr_number}" --repo "${GITHUB_REPOSITORY}" --approve\n              echo "Manual review and merge required."',
+  /must not approve/
+);
+expectRejected(
   "automatic API merge",
   'echo "Manual review and merge required."',
   'gh api -X PUT "repos/${GITHUB_REPOSITORY}/pulls/${pr_number}/merge"\n              echo "Manual review and merge required."',
@@ -279,6 +285,36 @@ expectRejected(
   /retain pull request creation/
 );
 expectRejected(
+  "new PR stdout is not captured",
+  '              created_pr_url="$(\n',
+  '              created_pr_url="not-a-command"\n',
+  /capture gh pr create stdout/
+);
+expectRejected(
+  "new PR list fallback",
+  '              if [[ ! "${pr_number}" =~ ^[1-9][0-9]*$ ]]; then',
+  '              gh pr list\n\n              if [[ ! "${pr_number}" =~ ^[1-9][0-9]*$ ]]; then',
+  /existing sync pull request exactly once/
+);
+expectRejected(
+  "existing PR list is not limited to open PRs",
+  "--state open",
+  "--state all",
+  /existing sync pull request exactly once/
+);
+expectRejected(
+  "new PR URL repository validation removed",
+  'if [[ "${created_pr_url}" != "${created_pr_url_prefix}"* ]]; then',
+  "if false; then",
+  /new pull request URL is outside the current repository/
+);
+expectRejected(
+  "new PR zero number allowed",
+  "^[1-9][0-9]*$",
+  "^[0-9][0-9]*$",
+  /not a non-zero positive integer/
+);
+expectRejected(
   "missing manual review body",
   "Please review and merge manually.",
   "This pull request is ready.",
@@ -307,6 +343,12 @@ expectRejected(
   '[ "${merge_state}" = "DIRTY" ]',
   '[ "${merge_state}" = "CLEAN" ]',
   /fail closed when the open PR has conflicts/
+);
+expectRejected(
+  "missing unavailable merge-state failure",
+  '[ -z "${merge_state}" ] ||',
+  '[ "${merge_state}" = "CLEAN" ] ||',
+  /merge state is unavailable/
 );
 expectRejected(
   "review-blocked PR remains open",
