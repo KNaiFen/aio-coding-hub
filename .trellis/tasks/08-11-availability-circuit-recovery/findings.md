@@ -6,18 +6,18 @@
 
 - 结论：需要整改
 - PR：[#109](https://github.com/KNaiFen/aio-coding-hub/pull/109)
-- 审查轮次：Round 1
-- 审查版本：`d68050e6c8f0efdd0a5917755d1f93bd56feff85`
-- CI 状态：`ci-gate`、`pr-title`、`rust`、`support-contract`、`change-scope` 和 CodeQL 均已通过；[ci-gate job 93800301051](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31495975865/job/93800301051)。
-- 审查范围：完整任务；PRD/设计/交付材料、当前 PR diff、Gateway 熔断状态机、probe scheduler 与实时 PR 状态。
+- 审查轮次：Round 2
+- 审查版本：`36ef9df65b7d6eeb22eb3a19ecbf892e39194a02`
+- CI 状态：`ci-gate`、`pr-title`、`rust`、`support-contract`、`change-scope` 和 CodeQL 均已通过；[ci-gate job 93853377435](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31511661925/job/93853377435)。
+- 审查范围：F-001、F-002 复验；首轮候选到当前 head 的整改 diff、相关测试与实时 PR 状态。
 
 ## 总结
 
-自动检查属于当前候选且为绿色，但恢复补测的生命周期仍有两处与锁定语义不符：HalfOpen 失败不会撤销已经排队的旧补测，且 30 秒延迟从 waiter 恢复执行时计算而不是从 HTTP probe 实际完成时计算。两者会导致过期恢复链跨越重新 Open，或让补测明显晚于指定时刻，当前版本不能合并。
+F-001 的 recovery epoch/claim 生命周期已经阻止旧 target 跨越失败或 Closed；F-002 的运行时代码也已从实际 HTTP completion 时刻生成 due。当前剩余阻塞是 F-002 的新增测试只直接构造 directive 并调用 queue helper，没有经过 `finish_probe -> CompletedProbe -> scheduled consumer`，因此恢复旧的 waiter-time 调度代码时测试仍会通过，尚未形成要求中的回归保护。
 
-## 未解决问题
+## 当前问题状态
 
-- [ ] F-001 HalfOpen 失败必须撤销已有 recovery target
+- [x] F-001 HalfOpen 失败必须撤销已有 recovery target（Round 2 已解决）
 - [ ] F-002 Recovery target 必须以实际 probe 完成时刻计算 due time
 
 ## Round 1
@@ -42,16 +42,16 @@
 
 - 修改：有效 HalfOpen 证据完成后统一更新 recovery work。`ok: false` 重新 Open，或 `ok: true` 已使电路 Closed，都会清除 Pending/Claimed target 并推进私有 epoch；只有成功且写入后仍为 HalfOpen 才保留下一次 recovery directive。recovery 开始路径在创建或加入 in-flight 前原子校验 generation、epoch、due 和 Claimed 状态，失效 target 返回 Stale，不会发出 HTTP。
 - 代码位置：`src-tauri/src/app/provider_availability_probe_runtime.rs` 的 `finish_probe`、`update_recovery_work_after_circuit_evidence`、`begin_probe_with_recovery`、`take_due_recovery_targets` 和 `recovery_claim_matches`。
-- 验证：新增 `valid_half_open_failure_invalidates_pending_and_claimed_recovery_work`、`invalidated_claimed_recovery_cannot_start_a_flight` 与 `successful_circuit_closure_invalidates_claimed_recovery_work`。本地 `git diff --check`、cloud-only self-test 和合同检查通过；Rust tests / `ci-gate` 待新候选推送后由 GitHub Actions 验证。
+- 验证：新增 `valid_half_open_failure_invalidates_pending_and_claimed_recovery_work`、`invalidated_claimed_recovery_cannot_start_a_flight` 与 `successful_circuit_closure_invalidates_claimed_recovery_work`。本地 `git diff --check`、cloud-only self-test 和合同检查通过；返工最终候选 `36ef9df65b7d6eeb22eb3a19ecbf892e39194a02` 的云端 `rust` 与 [ci-gate](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31511661925/job/93853377435) 均通过。
 - 计划偏移：无产品语义偏移；以私有 recovery epoch/claim 生命周期实现既有“失败或关闭后不保留旧恢复链”的锁定行为。
 
 **main 复验**
 
-- 状态：待复验
-- 复验候选 head：
-- `ci-gate`：
-- 结论与证据：
-- 日期：
+- 状态：已解决
+- 复验候选 head：`36ef9df65b7d6eeb22eb3a19ecbf892e39194a02`
+- `ci-gate`：通过，[job 93853377435](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31511661925/job/93853377435)
+- 结论与证据：`finish_probe` 在有效失败或成功关闭后经 `update_recovery_work_after_circuit_evidence` 清除 Pending/Claimed target 并推进 epoch；`begin_probe_with_recovery` 在任何 Lead/Wait 分支前校验 generation、epoch、due 与 Claimed 状态。新增测试覆盖 pending、claimed、Closed 和失效 target 不创建 flight，满足 F-001。
+- 日期：2026-08-12
 
 ### F-002：Recovery target 必须以实际 probe 完成时刻计算 due time
 
@@ -69,16 +69,26 @@
 
 - 修改：`finish_probe` 在实际 HTTP completion 时刻构造 `RecoveryDirective { due_at_ms = completed_at_ms + 30_000 }`，通过 `CompletedProbe` 交给 scheduled caller；`run_scheduled_probe` 只消费该 directive，不再用 waiter 恢复时刻重新计算延迟。
 - 代码位置：`src-tauri/src/app/provider_availability_probe_runtime.rs` 的 `RecoveryDirective::from_completion`、`finish_probe`、`CompletedProbe`、`schedule_recovery_probe` 和 `queue_recovery_target`。
-- 验证：新增 `recovery_due_uses_probe_completion_time_not_waiter_resume_time`，固定 completion/waiter 时刻并断言 due 恒等于 completion 加 `RECOVERY_PROBE_DELAY_MS`；本地允许检查通过，云端 Rust tests / `ci-gate` 待新候选验证。
+- 验证：新增 `recovery_due_uses_probe_completion_time_not_waiter_resume_time`，固定 completion/waiter 时刻并断言 due 恒等于 completion 加 `RECOVERY_PROBE_DELAY_MS`；本地允许检查通过，返工最终候选 `36ef9df65b7d6eeb22eb3a19ecbf892e39194a02` 的云端 Rust tests 与 [ci-gate](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31511661925/job/93853377435) 均通过。
+- Round 2 测试整改：将 `run_scheduled_probe` 的 completion 后处理提取为其直接调用的私有 `consume_scheduled_completion` 消费路径，并用 `scheduled_completion_uses_probe_completion_time_not_waiter_resume_time` 经过该生产路径完成入队；运行时仍只透传 `CompletedProbe.recovery`，未改变 F-001 生命周期或调度语义。
+- Round 2 确定性证据：测试固定 HTTP completion 为 `10_000ms`、scheduled waiter resume 为 `55_000ms`，并断言入队 due 等于 `10_000 + RECOVERY_PROBE_DELAY_MS`、不等于 `55_000 + RECOVERY_PROBE_DELAY_MS`。若消费路径恢复为 waiter/current-time 重算，该测试会失败。本地 cloud-only self-test、合同检查和 `git diff --check` 通过；新候选云端 Rust tests 与 `ci-gate` 待提交后验证。
 - 计划偏移：无；仍复用既有 scheduler、generation、四槽 limiter 与 in-flight 合并，不引入裸 `sleep`。
 
 **main 复验**
 
-- 状态：待复验
-- 复验候选 head：
-- `ci-gate`：
-- 结论与证据：
-- 日期：
+- 状态：未解决
+- 复验候选 head：`36ef9df65b7d6eeb22eb3a19ecbf892e39194a02`
+- `ci-gate`：通过，[job 93853377435](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31511661925/job/93853377435)
+- 结论与证据：实现已在 `finish_probe` 以实际 completion time 构造 `RecoveryDirective`，`run_scheduled_probe` 只消费该 directive，运行时语义正确。但 `recovery_due_uses_probe_completion_time_not_waiter_resume_time`（`provider_availability_probe_runtime.rs:1422`）仅直接调用 `RecoveryDirective::from_completion` 和 `queue_recovery_target`；它没有经过 scheduled consumer，也没有让 waiter 实际延迟。若 `run_scheduled_probe` 恢复为用当前时间重算 due，该测试仍会通过，不满足本 finding 要求的确定性回归测试。
+- 日期：2026-08-12
+
+## Round 2
+
+- 本轮整改候选 head：`36ef9df65b7d6eeb22eb3a19ecbf892e39194a02`
+- `ci-gate`：通过，[job 93853377435](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31511661925/job/93853377435)
+- 本轮范围：F-001、F-002 复验
+- 结论：F-001 已解决；F-002 的实现已修正，但回归测试尚未覆盖原始缺陷路径，仍需整改。
+- F-002 最小复验目标：新增或重构一个会经过实际 scheduled completion 消费逻辑的确定性测试，使 completion 与 waiter resume 使用不同时间，并保证任何重新以 waiter/current time 覆盖 directive due 的改动都会导致测试失败。不得仅重复测试 `RecoveryDirective::from_completion` 本身。
 
 ## CI、编译或环境问题
 
@@ -86,13 +96,12 @@
 
 ## 计划偏移需要处理
 
-- 两项问题均需恢复 `prd.md` 和 `design.md` 的既有锁定行为，不需要新的产品决策。
+- F-001 与 F-002 的产品语义均已恢复；F-002 仍需补齐首轮明确要求的回归保护，不需要新的产品决策。
 
 ## 本轮返工边界
 
 ### 必须处理
 
-- F-001
 - F-002
 
 ### 不要顺带处理
@@ -106,7 +115,7 @@
 
 ## 再次交付要求
 
-- [ ] F-001 和 F-002 均有执行回应、代码证据和相应回归测试。
+- [ ] F-002 已增加会覆盖 actual scheduled consumer 的确定性回归测试，且恢复 waiter-time 重算逻辑时该测试会失败。
 - [ ] 本 `findings.md` 已随返工提交保留在 PR 中，`delivery.md` 已更新实现、偏移、验证和返工记录。
 - [ ] 新提交已推送，PR 最新 head 的必需 CI 和相关编译为绿色。
 - [ ] 新候选完整 head SHA 和对应 `ci-gate` 已写入 `delivery.md` 与本文件。

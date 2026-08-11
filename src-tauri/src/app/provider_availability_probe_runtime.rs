@@ -602,6 +602,23 @@ impl ProviderAvailabilityProbeRuntimeState {
         settle_recovery_target(&mut inner, target, recovery);
     }
 
+    async fn consume_scheduled_completion(
+        &self,
+        target: ScheduledProbeTarget,
+        completion: Option<&CompletedProbe>,
+        _waiter_resumed_at_ms: i64,
+    ) {
+        // The recovery directive is fixed at HTTP completion; waiter scheduling
+        // latency must not shift its due time.
+        let recovery = completion.and_then(|completed| completed.recovery);
+        if target.is_recovery() {
+            self.settle_recovery_target(target, recovery).await;
+        } else if let Some(recovery) = recovery {
+            self.schedule_recovery_probe(target.provider_id, recovery)
+                .await;
+        }
+    }
+
     async fn run_scheduled_probe<R: tauri::Runtime>(
         &self,
         app: tauri::AppHandle<R>,
@@ -650,13 +667,13 @@ impl ProviderAvailabilityProbeRuntimeState {
             )
             .await;
         drop(permit);
-        let recovery = completion.as_ref().and_then(|completed| completed.recovery);
-        if target.is_recovery() {
-            self.settle_recovery_target(target, recovery).await;
-        } else if let Some(recovery) = recovery {
-            self.schedule_recovery_probe(target.provider_id, recovery)
-                .await;
-        }
+        let waiter_resumed_at_ms = crate::shared::time::now_unix_millis();
+        self.consume_scheduled_completion(
+            target,
+            completion.as_ref(),
+            waiter_resumed_at_ms,
+        )
+        .await;
         if let Some(Err(error)) = completion.map(|completed| completed.result) {
             tracing::warn!(
                 error = %error.code(),
@@ -1418,28 +1435,53 @@ INSERT INTO providers(
         assert_eq!(recovery.due_at_ms, 50_000 + RECOVERY_PROBE_DELAY_MS);
     }
 
-    #[test]
-    fn recovery_due_uses_probe_completion_time_not_waiter_resume_time() {
-        let mut inner = RuntimeInner::default();
-        reconcile_schedules_inner(
-            &mut inner,
-            vec![loaded(3, 1, 90_000)],
-            1_000,
-            false,
-            1,
-            true,
-        );
-        let generation = inner.entries[&3].generation;
+    #[tokio::test]
+    async fn scheduled_completion_uses_probe_completion_time_not_waiter_resume_time() {
+        let state = ProviderAvailabilityProbeRuntimeState::default();
+        let (generation, recovery_epoch) = {
+            let mut inner = state.shared.inner.lock().await;
+            reconcile_schedules_inner(
+                &mut inner,
+                vec![loaded(3, 1, 90_000)],
+                1_000,
+                false,
+                1,
+                true,
+            );
+            let entry = &inner.entries[&3];
+            (entry.generation, entry.recovery_epoch)
+        };
         let completed_at_ms = 10_000;
         let waiter_resumed_at_ms = 55_000;
-        let recovery = RecoveryDirective::from_completion(
+        let target = ScheduledProbeTarget {
+            provider_id: 3,
             generation,
-            inner.entries[&3].recovery_epoch,
-            completed_at_ms,
-        );
+            due_at_ms: scheduled_due_at_ms(3, 0),
+            source: ScheduledProbeSource::Natural { boundary_ms: 0 },
+        };
+        let completion = CompletedProbe {
+            result: Ok(ProviderAvailabilityResult {
+                ok: true,
+                provider_id: 3,
+                provider_name: "test provider".to_string(),
+                base_url: "https://example.test".to_string(),
+                status: Some(200),
+                latency_ms: 1,
+                error: None,
+                response_preview: None,
+            }),
+            recovery: Some(RecoveryDirective::from_completion(
+                generation,
+                recovery_epoch,
+                completed_at_ms,
+            )),
+        };
 
-        queue_recovery_target(&mut inner, 3, recovery);
+        state
+            .consume_scheduled_completion(target, Some(&completion), waiter_resumed_at_ms)
+            .await;
 
+        let inner = state.shared.inner.lock().await;
         let due_at_ms = inner.entries[&3].recovery.unwrap().due_at_ms;
         assert_eq!(due_at_ms, completed_at_ms + RECOVERY_PROBE_DELAY_MS);
         assert_ne!(due_at_ms, waiter_resumed_at_ms + RECOVERY_PROBE_DELAY_MS);
