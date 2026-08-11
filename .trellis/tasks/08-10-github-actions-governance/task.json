@@ -12,7 +12,7 @@
   "assignee": "main",
   "createdAt": "2026-08-10",
   "completedAt": null,
-  "branch": "chore/github-actions-governance",
+  "branch": "docs/close-08-10-github-actions-governance",
   "base_branch": "main",
   "worktree_path": "/Users/knaifen/Documents/Codex/aio-coding-hub/08-10-github-actions-governance",
   "commit": "30a021269f3b6ae2c46f195faa273a1af81f26f9",
@@ -21,6 +21,6 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "",
+  "notes": "功能 PR #108 已合并为 82820b2ea10ec6028d1fcb8d130a993bfae39b6d。本任务最终业务结果为“部分完成并已拆分后续修复”；后续项仅交叉引用 .trellis/tasks/08-11-upstream-sync-pr-resolution/ 和 https://github.com/KNaiFen/aio-coding-hub/pull/114，不记录其实现、head 或 CI 事实。",
   "meta": {}
 }

@@ -4,38 +4,30 @@
 
 - 任务目录：`.trellis/tasks/08-10-github-actions-governance/`
 - Worktree：`/Users/knaifen/Documents/Codex/aio-coding-hub/08-10-github-actions-governance`
-- 分支：`chore/github-actions-governance`
-- 基线：`origin/main`
-- 完整 base SHA：`9b05b28d5841584dc6f2a867947afd5d23f76246`
+- records-only 分支：`docs/close-08-10-github-actions-governance`
+- 基线：`origin/main` @ `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`
 - 规划提交：`30a021269f3b6ae2c46f195faa273a1af81f26f9`
-- 实施授权：已确认；2026-08-10 按审查结果实施，2026-08-11 确认扩展 PR 前端/Rust/共享路径分域验证；Rust 并行化仍延后独立实验。
+- 实施授权：已确认；2026-08-12 main 审计授权仅完成 records-only closeout。
 - PR 目标：`main`
-- PR：[#108](https://github.com/KNaiFen/aio-coding-hub/pull/108)
-- 直接 main 迁移来源：无
-- PENDING 审阅：`AIO-PENDING-029` 明确排除，禁止触碰 `upgrade-tui.command`
-- 当前唯一写者：main session
-- 当前阶段：分域实现候选 `09dfe0794522436c14e6bee278199ec6a5f9acfa` 已通过一轮完整 PR CI；正在写入交付记录。该记录提交后必须以新的 PR head 重新验收。
+- 功能 PR：[#108](https://github.com/KNaiFen/aio-coding-hub/pull/108) 已合并，实际 merge commit 为 `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`。
+- PENDING 审阅：`AIO-PENDING-029` 明确排除，禁止触碰 `upgrade-tui.command`。
+- 当前唯一写者：08-10 records-only closeout execution session。
+- 当前阶段：功能开发已结束；仅创建并交付 records-only closeout Draft PR，随后暂停等待 main 验收、合并、归档和清理。
 
-## 阅读顺序
+## 本轮范围与边界
 
-1. 根目录及 worktree 生效的 `AGENTS.md`。
-2. 本文件、`prd.md`、`design.md`、`implement.md`。
-3. `.github/workflows/ci.yml`、`sync-upstream.yml`、现有 contracts/selftests。
-4. `delivery.md`（完成实现、PR 与 CI 后补齐）。
+- 只修正本任务正式记录和 `.trellis/tasks/README.md` 的本任务索引行；不得改动 GitHub Actions 产品代码、同步脚本或测试合同。
+- 最终业务结果必须如实记录为“部分完成并已拆分后续修复”：#108 的 CI 治理功能已合并；实际 Sync Upstream 运行发现的编号解析问题属于独立 follow-up。
+- follow-up 仅作交叉引用：[08-11-upstream-sync-pr-resolution](../08-11-upstream-sync-pr-resolution/) / [PR #114](https://github.com/KNaiFen/aio-coding-hub/pull/114)。不得在本任务记录 #114 的实现、head SHA、CI run 或验收结论。
+- `task.json.pr_url` 继续指向 #108，且保持 `status: in_progress`、`completedAt: null`；只有 main 才能在 records-only PR 合并后归档。
+- 不运行 `task.py archive`，不合并 PR、不启用 auto-merge、不删除 worktree/分支，也不推送 `main`。
 
-## 锁定边界
+## 交付定义
 
-- 自动 PR 的 required `ci-gate` 不能被手动运行替代。
-- `pr-title` 必须独立并覆盖 `edited`。
-- 候选制品、签名环境、release 选择和 main push 验证不能削弱。
-- 仅 PR 可以按路径分域跳过 frontend 或 Rust；`dev`/`main` push、main 手动恢复和候选构建必须全量，未知/共享/控制面路径必须 fail-closed。
-- 不启用 CODEOWNERS、人工 PR 审批或发布人工审批环境。
-- 不改 Rust 测试并行度，不处理 `upgrade-tui.command`。
-
-## 完成定义
-
-所有允许修改范围内的代码、合同、自测和文档完成；frontend-only、Rust-only、shared、docs 与主干全量语义都有自测；PR 最新 head 的 required CI 与 `ci-gate` 通过；`delivery.md` 记录完整 head/base SHA、CI URL、验收结果和未完成外部设置。
+- records-only Draft PR 指向 `main`，其最新 head 的自动 `ci-gate` 与 `pr-title` 均为绿色。
+- `delivery.md` 记录 #108 的实际 merge commit、部分完成结论、follow-up 的纯链接，以及 records-only PR 的交付快照。
+- 推送并更新交付记录后立即暂停；main 负责验收、合并、归档和清理。
 
 ## Git 与 PR
 
-执行中只写本 worktree；提交按逻辑切片，禁止推送或合并 `main`、禁止自动合并。完成后创建 Draft PR，CI 绿色并更新 `delivery.md` 后暂停等待 main 验收。
+执行中只写本 worktree 的允许记录文件；显式暂存这些文件，不包含 `SESSION_REMEDIATION_PLAN.md` 或任何其他未授权路径。完成后创建 Draft records-only PR，等待最新 head 的 required checks 绿色并更新交付记录后暂停等待 main 验收。
