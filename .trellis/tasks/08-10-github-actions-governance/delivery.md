@@ -145,6 +145,15 @@
 - 接受的限制：AC-01/02/04 的真实单域与手动运行矩阵尚未执行；AC-03 的 `pr-title` Ruleset context、AC-05 的 App 凭据、AC-06 的 SHA pinning/Dependabot alerts/security updates 均按 `implement.md` 的合并后 owner 步骤保留。它们不是本 PR 代码合并的阻断项，任务归档前必须完成或由用户明确调整范围。
 - 记录提交会产生新的仅交付文档 head；main 将在该 head 的 CI 重新绿色后合并，并在收尾记录实际 merge commit 和未完成 owner 项。
 
+### Round 2 - 2026-08-12
+
+- 审查候选：records-only PR [#115](https://github.com/KNaiFen/aio-coding-hub/pull/115) @ `6b52d775a5484c5d1272231fd649be684a833d2c`（base `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`）。
+- CI 证据：该 head 的 [`ci-gate` run 31527846703](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31527846703)、[`pr-title` run 31527846689](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31527846689) 与 CodeQL JS/TS/Rust 均成功；PR 为 Draft、OPEN、CLEAN。
+- 审查范围：#108 实际 merge 事实、records-only 终态、任务元数据和活动索引；返工文件 `findings.md` 的 F-001；以及 PR diff 未扩展到 `.github/`、产品代码、同步脚本、测试合同或 `upgrade-tui.command`。
+- F-001 复验：所有 08-10 正式记录已改用纯文本任务 ID `08-12-upstream-sync-pr-resolution`，删除了指向不存在目录的相对链接，仅保留 PR #114 的持久链接；返工记录已随同一候选提交。
+- 结论：通过，准予合并 records-only closeout PR。该结论只认可 #108 的“部分完成并已拆分后续修复”终态，不认可或预先接受 PR #114 的实现、CI 或验收结果。
+- 本 main 验收记录会产生新的文档 head；main 仅在该最新 head 的 required CI 重新绿色后执行合并和后续归档。
+
 ## main 收尾
 
 > 仅 main 填写。

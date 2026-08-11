@@ -10,7 +10,7 @@
 
 | 任务目录 | 阶段 | 分支 | base SHA | 规划提交 | Worktree | PR | 当前唯一写者 | 依赖/说明 |
 |---|---|---|---|---|---|---|---|---|
-| [`08-10-github-actions-governance`](./08-10-github-actions-governance/) | records-only closeout | `docs/close-08-10-github-actions-governance` | `82820b2ea10ec6028d1fcb8d130a993bfae39b6d` | `30a021269f3b6ae2c46f195faa273a1af81f26f9` | `/Users/knaifen/Documents/Codex/aio-coding-hub/08-10-github-actions-governance` | [#115](https://github.com/KNaiFen/aio-coding-hub/pull/115) Draft records-only closeout；功能 PR [#108](https://github.com/KNaiFen/aio-coding-hub/pull/108) 已合并 | 08-10 records-only closeout execution session（交付后暂停） | 最终业务结果：部分完成并已拆分后续修复；#108 merge commit `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`；仅交叉引用 [PR #114](https://github.com/KNaiFen/aio-coding-hub/pull/114)，等待 main 验收、合并、归档和清理；排除 `AIO-PENDING-029`。 |
+| [`08-10-github-actions-governance`](./08-10-github-actions-governance/) | accepted records-only closeout（等待最新 CI） | `docs/close-08-10-github-actions-governance` | `82820b2ea10ec6028d1fcb8d130a993bfae39b6d` | `30a021269f3b6ae2c46f195faa273a1af81f26f9` | `/Users/knaifen/Documents/Codex/aio-coding-hub/08-10-github-actions-governance` | [#115](https://github.com/KNaiFen/aio-coding-hub/pull/115) Draft records-only closeout；功能 PR [#108](https://github.com/KNaiFen/aio-coding-hub/pull/108) 已合并 | main session（Round 2 验收） | 最终业务结果：部分完成并已拆分后续修复；#108 merge commit `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`；仅交叉引用 [PR #114](https://github.com/KNaiFen/aio-coding-hub/pull/114)，等待最新 CI 后由 main 合并、归档和清理；排除 `AIO-PENDING-029`。 |
 | [`08-03-upstream-claude-oauth`](./08-03-upstream-claude-oauth/) | planning（暂停，未委派） | 无（旧分支已删除） | 不适用 | 未登记 | 未创建 | 未创建 | main session | 用户已决定暂不处理；不影响当前工作。恢复前需重新确认方案，并完成真实隔离账号验证。 |
 
 ## 归档
