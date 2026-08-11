@@ -1,19 +1,19 @@
 # 交付报告：可用性探测熔断恢复
 
-> 本文件记录 Round 2 的 F-002 测试返工；功能候选已通过自动 PR CI，等待 main 再次验收。
+> 本文件记录 F-001/F-002 返工、Round 3 验收和功能 PR 合并事实；任务已进入 records-only 归档收尾。
 
 ## 交付状态
 
-- 结果：Round 2 返工候选已通过自动 PR CI，等待 main 再次验收
+- 结果：完成；功能 PR 已合并，等待 records-only closeout PR 合并归档
 - PR：[#109](https://github.com/KNaiFen/aio-coding-hub/pull/109)
 - 分支：`fix/availability-circuit-recovery`
 - PR base：`main` @ `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`（初始规划 base 为 `9b05b28d5841584dc6f2a867947afd5d23f76246`）
-- 交付候选 head（功能实现）：`9baeeb72522dff47178f0ff6675bc1904dd39f84`（冻结起点为 `36ef9df65b7d6eeb22eb3a19ecbf892e39194a02`）
+- 接受候选 head：`8c1c9d27e046aeab8290308e40d4e6570218539c`（功能实现候选为 `9baeeb72522dff47178f0ff6675bc1904dd39f84`）
 - 规划提交：`7de765738df6a0be4a31309a0f0c1a28852f1657`
-- `ci-gate`：通过，[job 93873788290](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31517935633/job/93873788290)
-- 其他必需检查：`rust`、`pr-title`、`change-scope`、`support-contract` 与 CodeQL 通过；`frontend` 按 Rust-only scope 预期跳过
+- `ci-gate`：通过，[job 93919034995](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31531473148/job/93919034995)
+- 其他必需检查：`pr-title`、`rust`、`change-scope`、`support-contract` 与 CodeQL 通过；`frontend` 按 Rust-only scope 预期跳过
 - 交付时间：2026-08-12
-- 执行 session：Round 2 返工完成，等待 main 再次验收
+- 执行 session：已暂停；main 已在 Round 3 接受并合并功能 PR
 
 ## 阻塞快照
 
@@ -135,9 +135,23 @@
 - 结论：不接受，当前候选不能合并；仅需补齐 F-002 的有效回归测试后再次交付。
 - 接受的偏移或风险：无。
 
+### Round 3 - 通过
+
+- 审查日期：2026-08-12
+- 审查候选 head：`8c1c9d27e046aeab8290308e40d4e6570218539c`；该提交仅将任务分支同步到 `main@20cd2edc4a2f821c735d18ecdbfba46266846d40`，未引入新的功能代码。
+- 实时 PR 状态：[#109](https://github.com/KNaiFen/aio-coding-hub/pull/109) 为 Ready for review、`CLEAN`，head 与审查候选一致。
+- 实时 CI：严格必需的 [`ci-gate` job 93919034995](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31531473148/job/93919034995) 与 [`pr-title` job 93912283035](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31531473151/job/93912283035) 均成功；同一 head 的 `rust`、`change-scope`、`support-contract` 和 CodeQL 亦成功。
+- 审查范围：Round 1 F-001/F-002 整改、当前恢复生命周期、scheduled completion 消费路径、回归测试、任务索引冲突处理及最新 PR/CI 快照。
+- 结论：接受。HalfOpen 失败或成功关闭会失效 Pending/Claimed recovery；过期 claimed target 在加入或创建 flight 前被拒绝；recovery due 固定为实际 probe completion 加 30 秒，且定时 consumer 测试覆盖了 waiter 延迟路径。
+- 接受的偏移或风险：无产品语义偏移。未在本地执行 Cargo、pnpm、构建或 Rust tests，遵循 cloud-only 规则；对应云端 Rust 与严格门禁均已通过。
+
 ## main 收尾
 
-> 仅 main 填写。
+- 最终结果：完成。
+- 功能 PR：[#109](https://github.com/KNaiFen/aio-coding-hub/pull/109)，接受候选为 `8c1c9d27e046aeab8290308e40d4e6570218539c`；2026-08-12 已以 squash merge commit `15d08f4399d6b1a5361b48d8110e9b49ca3650bb` 进入 `main`。
+- 验收与 CI：Round 3 已复验 F-001/F-002；严格必需的 [`ci-gate` job 93919034995](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31531473148/job/93919034995) 和 `pr-title` 均成功，相关 Rust 与 CodeQL 检查亦成功。
+- 知识库与 PENDING：未引入新的公开合同、配置、迁移或需拆分的遗留事项；长期行为和取舍由已合并代码与本任务归档记录保留。
+- 归档与清理：本 records-only closeout PR 归档任务目录并更新索引。原任务 worktree 和分支须在本 PR 合并、且执行 session 确认停止后由 main 清理。
 
 ## 返工记录
 

@@ -10,13 +10,13 @@
 
 | 任务目录 | 阶段 | 分支 | base SHA | 规划提交 | Worktree | PR | 当前唯一写者 | 依赖/说明 |
 |---|---|---|---|---|---|---|---|---|
-| [`08-11-availability-circuit-recovery`](./08-11-availability-circuit-recovery/) | planning（材料已写，待执行窗口开工） | `fix/availability-circuit-recovery` | `9b05b28d5841584dc6f2a867947afd5d23f76246` | `7de765738df6a0be4a31309a0f0c1a28852f1657` | `/Users/knaifen/Documents/Codex/aio-coding-hub/08-11-availability-circuit-recovery` | 未创建 | user execution session | 与 `chore/github-actions-governance` worktree 无文件重叠；不处理 `AIO-PENDING-029`。 |
 | [`08-03-upstream-claude-oauth`](./08-03-upstream-claude-oauth/) | planning（暂停，未委派） | 无（旧分支已删除） | 不适用 | 未登记 | 未创建 | 未创建 | main session | 用户已决定暂不处理；不影响当前工作。恢复前需重新确认方案，并完成真实隔离账号验证。 |
 
 ## 归档
 
 - [按月份浏览已归档任务](./archive/)
 - 2026-08：[08-10 GitHub Actions Governance](./archive/2026-08/08-10-github-actions-governance/)；功能 PR [#108](https://github.com/KNaiFen/aio-coding-hub/pull/108) 与 records-only closeout PR [#115](https://github.com/KNaiFen/aio-coding-hub/pull/115) 均已合并，最终业务结果为“部分完成并已拆分后续修复”。
+- 2026-08：[08-11 Availability Circuit Recovery](./archive/2026-08/08-11-availability-circuit-recovery/)；功能 PR [#109](https://github.com/KNaiFen/aio-coding-hub/pull/109) 已合并，最终结果为“完成”。
 - 归档任务保留原始 PRD、设计、计划、研究、实施与检查记录，作为交付证据，不作为当前行为规范。
 
 ## 生命周期
