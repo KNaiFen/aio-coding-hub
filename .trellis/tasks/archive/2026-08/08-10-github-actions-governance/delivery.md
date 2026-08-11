@@ -160,7 +160,9 @@
 
 - 功能 PR [#108](https://github.com/KNaiFen/aio-coding-hub/pull/108) 已合并，实际 merge commit 为 `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`。
 - 本任务最终业务结果为“部分完成并已拆分后续修复”；后续项仅链接 [PR #114](https://github.com/KNaiFen/aio-coding-hub/pull/114)，不得将其实现或 CI 事实回写为 #108 证据。
-- 本次 execution session 已创建 [#115](https://github.com/KNaiFen/aio-coding-hub/pull/115) 并将提交交付记录后暂停。main 负责其验收、合并、归档和清理；截至本记录更新时，未运行 archive，未删除 worktree 或分支。
+- records-only closeout PR [#115](https://github.com/KNaiFen/aio-coding-hub/pull/115) 已于 2026-08-12 squash merge，merge commit 为 `585acf9c9367e3f1387494512609f5f86c41684a`。
+- main 已于 2026-08-12 使用 `task.py archive --no-commit` 归档本任务，并运行 `task.py validate --all`；129 个 manifest 均通过。
+- 归档变更将通过独立 archive PR 合并。其合并后，main 才会删除本 worktree 与已合并分支；不会清理仍活动的 PR #114 worktree。
 
 ## 返工记录
 
