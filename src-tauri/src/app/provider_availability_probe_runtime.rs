@@ -2,7 +2,7 @@
 
 use crate::domain::provider_availability::{self, ProviderAvailabilityResult};
 use crate::shared::error::{db_err, AppError, AppResult};
-use crate::{blocking, db};
+use crate::{blocking, db, providers};
 use rusqlite::params;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -11,11 +11,14 @@ use std::time::{Duration, Instant};
 use tauri::Manager;
 use tokio::sync::{oneshot, Mutex, OwnedMutexGuard, Semaphore};
 
+use super::gateway_state;
+
 const SCHEDULER_TICK: Duration = Duration::from_secs(1);
 const SCHEDULER_SUSPEND_GAP: Duration = Duration::from_secs(10);
 const SCHEDULED_PROBE_DELAY_MS: i64 = 5_000;
 const SCHEDULED_PROBE_JITTER_SLOTS: i64 = 4;
 const SCHEDULED_DUE_GRACE_MS: i64 = 5_000;
+const RECOVERY_PROBE_DELAY_MS: i64 = 30_000;
 const SCHEDULED_PROVIDER_PAGE_SIZE: usize = 512;
 const MAX_CONCURRENT_SCHEDULED_PROBES: usize = 4;
 
@@ -69,6 +72,7 @@ impl RuntimeInner {
 struct RuntimeEntry {
     generation: u64,
     schedule: Option<ScheduledProbeState>,
+    recovery: Option<RecoveryProbeState>,
     schedule_seen_epoch: u64,
     // A configuration change advances the generation before its database write.
     // Retain the old flight until it completes so a new generation never runs a
@@ -78,8 +82,14 @@ struct RuntimeEntry {
 
 struct InFlightProbe {
     generation: u64,
-    waiters: Vec<oneshot::Sender<AppResult<ProviderAvailabilityResult>>>,
+    waiters: Vec<oneshot::Sender<CompletedProbe>>,
     turn_waiters: Vec<oneshot::Sender<()>>,
+}
+
+#[derive(Clone)]
+struct CompletedProbe {
+    result: AppResult<ProviderAvailabilityResult>,
+    circuit_evidence_recorded: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,6 +102,12 @@ struct ScheduledProbeConfig {
 struct ScheduledProbeState {
     config: ScheduledProbeConfig,
     next_boundary_ms: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RecoveryProbeState {
+    generation: u64,
+    due_at_ms: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,33 +125,70 @@ struct LoadedScheduleBatch {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScheduledProbeSource {
+    Natural { boundary_ms: i64 },
+    Recovery,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ScheduledProbeTarget {
     provider_id: i64,
     generation: u64,
-    boundary_ms: i64,
+    due_at_ms: i64,
+    source: ScheduledProbeSource,
+}
+
+impl ScheduledProbeTarget {
+    fn deadline_ms(self) -> i64 {
+        match self.source {
+            ScheduledProbeSource::Natural { boundary_ms } => {
+                scheduled_due_deadline_ms(self.provider_id, boundary_ms)
+            }
+            ScheduledProbeSource::Recovery => recovery_due_deadline_ms(self.due_at_ms),
+        }
+    }
+
+    fn probe_source(self) -> ProbeSource {
+        match self.source {
+            ScheduledProbeSource::Natural { boundary_ms } => {
+                ProbeSource::Scheduled { boundary_ms }
+            }
+            ScheduledProbeSource::Recovery => ProbeSource::Recovery {
+                due_at_ms: self.due_at_ms,
+            },
+        }
+    }
+
+    fn is_recovery(self) -> bool {
+        matches!(self.source, ScheduledProbeSource::Recovery)
+    }
 }
 
 #[derive(Clone, Copy)]
 enum ProbeSource {
     Manual,
     Scheduled { boundary_ms: i64 },
+    Recovery { due_at_ms: i64 },
 }
 
 impl ProbeSource {
     fn is_expired(self, provider_id: i64, now_ms: i64) -> bool {
-        let Self::Scheduled { boundary_ms } = self else {
-            return false;
-        };
-        now_ms > scheduled_due_deadline_ms(provider_id, boundary_ms)
+        match self {
+            Self::Manual => false,
+            Self::Scheduled { boundary_ms } => {
+                now_ms > scheduled_due_deadline_ms(provider_id, boundary_ms)
+            }
+            Self::Recovery { due_at_ms } => now_ms > recovery_due_deadline_ms(due_at_ms),
+        }
     }
 }
 
 enum ProbeDecision {
     Lead {
         generation: u64,
-        receiver: oneshot::Receiver<AppResult<ProviderAvailabilityResult>>,
+        receiver: oneshot::Receiver<CompletedProbe>,
     },
-    Wait(oneshot::Receiver<AppResult<ProviderAvailabilityResult>>),
+    Wait(oneshot::Receiver<CompletedProbe>),
     WaitForTurn(oneshot::Receiver<()>),
     Stale,
 }
@@ -189,6 +242,7 @@ impl ProviderAvailabilityProbeRuntimeState {
             let entry = inner.entries.entry(provider_id).or_default();
             entry.generation = generation;
             entry.schedule = None;
+            entry.recovery = None;
         }
         remove_idle_entry(&mut inner, provider_id);
     }
@@ -205,6 +259,7 @@ impl ProviderAvailabilityProbeRuntimeState {
         self.probe(app, db, provider_id, None, ProbeSource::Manual)
             .await
             .ok_or_else(|| AppError::new("SYSTEM_ERROR", "provider probe became stale"))?
+            .result
     }
 
     async fn probe<R: tauri::Runtime>(
@@ -214,7 +269,7 @@ impl ProviderAvailabilityProbeRuntimeState {
         provider_id: i64,
         expected_generation: Option<u64>,
         source: ProbeSource,
-    ) -> Option<AppResult<ProviderAvailabilityResult>> {
+    ) -> Option<CompletedProbe> {
         loop {
             if source.is_expired(provider_id, crate::shared::time::now_unix_millis()) {
                 return None;
@@ -222,12 +277,11 @@ impl ProviderAvailabilityProbeRuntimeState {
             match self.begin_probe(provider_id, expected_generation).await {
                 ProbeDecision::Stale => return None,
                 ProbeDecision::Wait(receiver) => {
-                    return Some(receiver.await.unwrap_or_else(|_| {
-                        Err(AppError::new(
-                            "SYSTEM_ERROR",
-                            "provider probe coordinator stopped unexpectedly",
-                        ))
-                    }));
+                    return Some(
+                        receiver
+                            .await
+                            .unwrap_or_else(|_| coordinator_stopped_completion()),
+                    );
                 }
                 ProbeDecision::WaitForTurn(receiver) => {
                     let _ = receiver.await;
@@ -241,6 +295,9 @@ impl ProviderAvailabilityProbeRuntimeState {
                         ProbeSource::Scheduled { boundary_ms } => {
                             scheduled_trace_id(provider_id, boundary_ms)
                         }
+                        ProbeSource::Recovery { due_at_ms } => {
+                            recovery_trace_id(provider_id, due_at_ms)
+                        }
                     };
                     // The requester may time out or disconnect. Keep the real probe
                     // alive so its shared flight is always completed and released.
@@ -253,15 +310,14 @@ impl ProviderAvailabilityProbeRuntimeState {
                         )
                         .await;
                         state
-                            .finish_probe(&db, provider_id, generation, &trace_id, result)
+                            .finish_probe(&app, &db, provider_id, generation, &trace_id, result)
                             .await;
                     });
-                    return Some(receiver.await.unwrap_or_else(|_| {
-                        Err(AppError::new(
-                            "SYSTEM_ERROR",
-                            "provider probe coordinator stopped unexpectedly",
-                        ))
-                    }));
+                    return Some(
+                        receiver
+                            .await
+                            .unwrap_or_else(|_| coordinator_stopped_completion()),
+                    );
                 }
             }
         }
@@ -317,14 +373,17 @@ impl ProviderAvailabilityProbeRuntimeState {
         }
     }
 
-    async fn finish_probe(
+    async fn finish_probe<R: tauri::Runtime>(
         &self,
+        app: &tauri::AppHandle<R>,
         db: &db::Db,
         provider_id: i64,
         generation: u64,
         trace_id: &str,
         result: AppResult<ProviderAvailabilityResult>,
     ) {
+        let completed_at_ms = crate::shared::time::now_unix_millis();
+        let completed_at_unix = completed_at_ms.div_euclid(1_000);
         let mut inner = self.shared.inner.lock().await;
         let Some((in_flight, should_record)) =
             take_finished_flight(&mut inner, provider_id, generation)
@@ -334,13 +393,14 @@ impl ProviderAvailabilityProbeRuntimeState {
 
         // Keep generation validation and the insert ordered against invalidation.
         // Credential writers invalidate first, then persist their new value.
+        let mut circuit_evidence_recorded = false;
         if should_record {
             if let Ok(probe) = result.as_ref() {
                 if let Err(error) = provider_availability::record_probe_observation(
                     db,
                     trace_id,
                     provider_id,
-                    crate::shared::time::now_unix_millis(),
+                    completed_at_ms,
                     probe.ok,
                 ) {
                     tracing::warn!(
@@ -349,11 +409,23 @@ impl ProviderAvailabilityProbeRuntimeState {
                         "provider availability probe observation write failed"
                     );
                 }
+                circuit_evidence_recorded = record_probe_circuit_evidence(
+                    app,
+                    db,
+                    trace_id,
+                    provider_id,
+                    probe,
+                    completed_at_unix,
+                );
             }
         }
 
+        let completed = CompletedProbe {
+            result,
+            circuit_evidence_recorded,
+        };
         for waiter in in_flight.waiters {
-            let _ = waiter.send(result.clone());
+            let _ = waiter.send(completed.clone());
         }
         for waiter in in_flight.turn_waiters {
             let _ = waiter.send(());
@@ -433,6 +505,16 @@ impl ProviderAvailabilityProbeRuntimeState {
         )
     }
 
+    async fn schedule_recovery_probe(
+        &self,
+        provider_id: i64,
+        generation: u64,
+        completed_at_ms: i64,
+    ) {
+        let mut inner = self.shared.inner.lock().await;
+        queue_recovery_target(&mut inner, provider_id, generation, completed_at_ms);
+    }
+
     async fn run_scheduled_probe<R: tauri::Runtime>(
         &self,
         app: tauri::AppHandle<R>,
@@ -440,8 +522,7 @@ impl ProviderAvailabilityProbeRuntimeState {
         target: ScheduledProbeTarget,
     ) {
         let now_ms = crate::shared::time::now_unix_millis();
-        let remaining_ms = scheduled_due_deadline_ms(target.provider_id, target.boundary_ms)
-            .saturating_sub(now_ms);
+        let remaining_ms = target.deadline_ms().saturating_sub(now_ms);
         if remaining_ms < 0 {
             return;
         }
@@ -454,19 +535,45 @@ impl ProviderAvailabilityProbeRuntimeState {
             Ok(Ok(permit)) => permit,
             Ok(Err(_)) | Err(_) => return,
         };
-        let result = self
+        if target.is_recovery()
+            && !running_gateway_circuit_is_half_open(
+                &app,
+                target.provider_id,
+                crate::shared::time::now_unix_seconds(),
+            )
+        {
+            return;
+        }
+        let completion = self
             .probe(
-                app,
+                app.clone(),
                 db,
                 target.provider_id,
                 Some(target.generation),
-                ProbeSource::Scheduled {
-                    boundary_ms: target.boundary_ms,
-                },
+                target.probe_source(),
             )
             .await;
+        let completed_at_ms = crate::shared::time::now_unix_millis();
         drop(permit);
-        if let Some(Err(error)) = result {
+        let should_schedule_recovery = completion.as_ref().is_some_and(|completed| {
+            completed.circuit_evidence_recorded
+                && completed.result.as_ref().is_ok_and(|probe| probe.ok)
+        });
+        if should_schedule_recovery
+            && running_gateway_circuit_is_half_open(
+                &app,
+                target.provider_id,
+                completed_at_ms.div_euclid(1_000),
+            )
+        {
+            self.schedule_recovery_probe(
+                target.provider_id,
+                target.generation,
+                completed_at_ms,
+            )
+            .await;
+        }
+        if let Some(Err(error)) = completion.map(|completed| completed.result) {
             tracing::warn!(
                 error = %error.code(),
                 provider_id = target.provider_id,
@@ -474,6 +581,67 @@ impl ProviderAvailabilityProbeRuntimeState {
             );
         }
     }
+}
+
+fn coordinator_stopped_completion() -> CompletedProbe {
+    CompletedProbe {
+        result: Err(AppError::new(
+            "SYSTEM_ERROR",
+            "provider probe coordinator stopped unexpectedly",
+        )),
+        circuit_evidence_recorded: false,
+    }
+}
+
+fn record_probe_circuit_evidence<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    db: &db::Db,
+    trace_id: &str,
+    provider_id: i64,
+    probe: &ProviderAvailabilityResult,
+    completed_at_unix: i64,
+) -> bool {
+    if probe.provider_id != provider_id {
+        return false;
+    }
+    let cli_key = match providers::cli_key_by_id(db, provider_id) {
+        Ok(Some(cli_key)) => cli_key,
+        Ok(None) => return false,
+        Err(error) => {
+            tracing::warn!(
+                error = %error.code(),
+                provider_id,
+                "failed to load Provider cli_key for circuit evidence"
+            );
+            return false;
+        }
+    };
+    gateway_state::try_with_app_running_gateway(app, |runtime| {
+        runtime.is_some_and(|runtime| {
+            runtime.record_availability_probe_outcome(
+                Some(app),
+                trace_id,
+                &cli_key,
+                provider_id,
+                &probe.provider_name,
+                &probe.base_url,
+                completed_at_unix,
+                probe.ok,
+            )
+        })
+    })
+    .unwrap_or(false)
+}
+
+fn running_gateway_circuit_is_half_open<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    provider_id: i64,
+    now_unix: i64,
+) -> bool {
+    gateway_state::try_with_app_running_gateway(app, |runtime| {
+        runtime.is_some_and(|runtime| runtime.circuit_is_half_open(provider_id, now_unix))
+    })
+    .unwrap_or(false)
 }
 
 fn take_finished_flight(
@@ -494,7 +662,9 @@ fn remove_idle_entry(inner: &mut RuntimeInner, provider_id: i64) {
     let should_remove = inner
         .entries
         .get(&provider_id)
-        .is_some_and(|entry| entry.schedule.is_none() && entry.in_flight.is_none());
+        .is_some_and(|entry| {
+            entry.schedule.is_none() && entry.recovery.is_none() && entry.in_flight.is_none()
+        });
     if should_remove {
         inner.entries.remove(&provider_id);
     }
@@ -511,11 +681,15 @@ fn reconcile_schedules_inner(
     let mut targets = Vec::new();
     for loaded in schedules {
         if !loaded.active {
-            let had_schedule = inner
+            let had_scheduled_work = inner
                 .entries
                 .get_mut(&loaded.provider_id)
-                .is_some_and(|entry| entry.schedule.take().is_some());
-            if had_schedule {
+                .is_some_and(|entry| {
+                    let had_schedule = entry.schedule.take().is_some();
+                    let had_recovery = entry.recovery.take().is_some();
+                    had_schedule || had_recovery
+                });
+            if had_scheduled_work {
                 let generation = inner.allocate_generation();
                 if let Some(entry) = inner.entries.get_mut(&loaded.provider_id) {
                     entry.generation = generation;
@@ -542,6 +716,7 @@ fn reconcile_schedules_inner(
                 config,
                 next_boundary_ms: loaded.next_boundary_ms,
             });
+            entry.recovery = None;
             continue;
         }
 
@@ -564,7 +739,8 @@ fn reconcile_schedules_inner(
         targets.push(ScheduledProbeTarget {
             provider_id: loaded.provider_id,
             generation: entry.generation,
-            boundary_ms,
+            due_at_ms,
+            source: ScheduledProbeSource::Natural { boundary_ms },
         });
     }
 
@@ -578,11 +754,15 @@ fn reconcile_schedules_inner(
             })
             .collect::<Vec<_>>();
         for provider_id in missing_provider_ids {
-            let had_schedule = inner
+            let had_scheduled_work = inner
                 .entries
                 .get_mut(&provider_id)
-                .is_some_and(|entry| entry.schedule.take().is_some());
-            if had_schedule {
+                .is_some_and(|entry| {
+                    let had_schedule = entry.schedule.take().is_some();
+                    let had_recovery = entry.recovery.take().is_some();
+                    had_schedule || had_recovery
+                });
+            if had_scheduled_work {
                 let generation = inner.allocate_generation();
                 if let Some(entry) = inner.entries.get_mut(&provider_id) {
                     entry.generation = generation;
@@ -591,7 +771,72 @@ fn reconcile_schedules_inner(
             remove_idle_entry(inner, provider_id);
         }
     }
+    targets.extend(take_due_recovery_targets(inner, now_ms, skip_missed));
     targets
+}
+
+fn take_due_recovery_targets(
+    inner: &mut RuntimeInner,
+    now_ms: i64,
+    skip_missed: bool,
+) -> Vec<ScheduledProbeTarget> {
+    let provider_ids = inner.entries.keys().copied().collect::<Vec<_>>();
+    let mut targets = Vec::new();
+    for provider_id in provider_ids {
+        let target = {
+            let Some(entry) = inner.entries.get_mut(&provider_id) else {
+                continue;
+            };
+            let Some(recovery) = entry.recovery else {
+                continue;
+            };
+            if entry.schedule.is_none() || entry.generation != recovery.generation {
+                entry.recovery = None;
+                None
+            } else if now_ms < recovery.due_at_ms {
+                None
+            } else if skip_missed || now_ms > recovery_due_deadline_ms(recovery.due_at_ms) {
+                entry.recovery = None;
+                None
+            } else {
+                entry.recovery = None;
+                Some(ScheduledProbeTarget {
+                    provider_id,
+                    generation: recovery.generation,
+                    due_at_ms: recovery.due_at_ms,
+                    source: ScheduledProbeSource::Recovery,
+                })
+            } else {
+                None
+            }
+        };
+        if let Some(target) = target {
+            targets.push(target);
+        }
+        remove_idle_entry(inner, provider_id);
+    }
+    targets
+}
+
+fn queue_recovery_target(
+    inner: &mut RuntimeInner,
+    provider_id: i64,
+    generation: u64,
+    completed_at_ms: i64,
+) {
+    let Some(entry) = inner.entries.get_mut(&provider_id) else {
+        return;
+    };
+    if entry.generation != generation
+        || entry.schedule.is_none()
+        || entry.recovery.is_some()
+    {
+        return;
+    }
+    entry.recovery = Some(RecoveryProbeState {
+        generation,
+        due_at_ms: completed_at_ms.saturating_add(RECOVERY_PROBE_DELAY_MS),
+    });
 }
 
 fn next_schedule_scan_epoch(current: u64) -> u64 {
@@ -714,8 +959,16 @@ fn scheduled_due_deadline_ms(provider_id: i64, boundary_ms: i64) -> i64 {
     scheduled_due_at_ms(provider_id, boundary_ms).saturating_add(SCHEDULED_DUE_GRACE_MS)
 }
 
+fn recovery_due_deadline_ms(due_at_ms: i64) -> i64 {
+    due_at_ms.saturating_add(SCHEDULED_DUE_GRACE_MS)
+}
+
 fn scheduled_trace_id(provider_id: i64, boundary_ms: i64) -> String {
     format!("availability-probe:{provider_id}:{boundary_ms}")
+}
+
+fn recovery_trace_id(provider_id: i64, due_at_ms: i64) -> String {
+    format!("availability-probe:recovery:{provider_id}:{due_at_ms}")
 }
 
 fn manual_trace_id(provider_id: i64) -> String {
@@ -783,6 +1036,8 @@ INSERT INTO providers(
             true,
         );
         assert!(targets.is_empty());
+        let first_generation = inner.entries[&7].generation;
+        queue_recovery_target(&mut inner, 7, first_generation, 55_000);
 
         let targets = reconcile_schedules_inner(
             &mut inner,
@@ -797,6 +1052,100 @@ INSERT INTO providers(
             inner.entries[&7].schedule.unwrap().next_boundary_ms,
             120_000
         );
+        assert!(inner.entries[&7].recovery.is_none());
+        assert_ne!(inner.entries[&7].generation, first_generation);
+    }
+
+    #[test]
+    fn recovery_targets_run_once_without_replay_or_replacement() {
+        let mut inner = RuntimeInner::default();
+        reconcile_schedules_inner(
+            &mut inner,
+            vec![loaded(3, 1, 90_000)],
+            1_000,
+            false,
+            1,
+            true,
+        );
+        let generation = inner.entries[&3].generation;
+        queue_recovery_target(&mut inner, 3, generation, 10_000);
+        queue_recovery_target(&mut inner, 3, generation, 20_000);
+        let due_at_ms = 10_000 + RECOVERY_PROBE_DELAY_MS;
+        assert_eq!(inner.entries[&3].recovery.unwrap().due_at_ms, due_at_ms);
+
+        let targets = reconcile_schedules_inner(
+            &mut inner,
+            vec![loaded(3, 1, 90_000)],
+            due_at_ms - 1,
+            false,
+            2,
+            true,
+        );
+        assert!(targets.is_empty());
+
+        let targets = reconcile_schedules_inner(
+            &mut inner,
+            vec![loaded(3, 1, 90_000)],
+            due_at_ms,
+            false,
+            3,
+            true,
+        );
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].source, ScheduledProbeSource::Recovery);
+        assert_eq!(targets[0].generation, generation);
+        assert_eq!(targets[0].due_at_ms, due_at_ms);
+        assert!(inner.entries[&3].recovery.is_none());
+
+        let targets = reconcile_schedules_inner(
+            &mut inner,
+            vec![loaded(3, 1, 90_000)],
+            due_at_ms + 1,
+            false,
+            4,
+            true,
+        );
+        assert!(targets.is_empty());
+    }
+
+    #[test]
+    fn recovery_targets_cancel_on_schedule_change_and_missed_deadline() {
+        let mut inner = RuntimeInner::default();
+        reconcile_schedules_inner(
+            &mut inner,
+            vec![loaded(4, 1, 90_000)],
+            1_000,
+            false,
+            1,
+            true,
+        );
+        let first_generation = inner.entries[&4].generation;
+        queue_recovery_target(&mut inner, 4, first_generation, 10_000);
+
+        reconcile_schedules_inner(
+            &mut inner,
+            vec![loaded(4, 2, 90_000)],
+            2_000,
+            false,
+            2,
+            true,
+        );
+        assert!(inner.entries[&4].recovery.is_none());
+        assert_ne!(inner.entries[&4].generation, first_generation);
+
+        let generation = inner.entries[&4].generation;
+        queue_recovery_target(&mut inner, 4, generation, 10_000);
+        let due_at_ms = 10_000 + RECOVERY_PROBE_DELAY_MS;
+        let targets = reconcile_schedules_inner(
+            &mut inner,
+            vec![loaded(4, 2, 90_000)],
+            recovery_due_deadline_ms(due_at_ms).saturating_add(1),
+            true,
+            3,
+            true,
+        );
+        assert!(targets.is_empty());
+        assert!(inner.entries[&4].recovery.is_none());
     }
 
     #[test]
@@ -820,7 +1169,12 @@ INSERT INTO providers(
             true,
         );
         assert_eq!(targets.len(), 1);
-        assert_eq!(targets[0].boundary_ms, 60_000);
+        assert_eq!(
+            targets[0].source,
+            ScheduledProbeSource::Natural {
+                boundary_ms: 60_000
+            }
+        );
 
         let targets = reconcile_schedules_inner(
             &mut inner,
@@ -849,6 +1203,7 @@ INSERT INTO providers(
             true,
         );
         let generation = inner.entries[&1].generation;
+        queue_recovery_target(&mut inner, 1, generation, 1_000);
         let mut disabled = loaded(1, 1, 60_000);
         disabled.active = false;
         reconcile_schedules_inner(&mut inner, vec![disabled], 2_000, false, 2, true);
@@ -888,6 +1243,10 @@ INSERT INTO providers(
             scheduled_trace_id(9, 123_000),
             "availability-probe:9:123000"
         );
+        assert_eq!(
+            recovery_trace_id(9, 153_000),
+            "availability-probe:recovery:9:153000"
+        );
         let jitter = stable_jitter_ms(9);
         assert!((0..=3_000).contains(&jitter));
         assert_eq!(jitter, stable_jitter_ms(9));
@@ -901,6 +1260,12 @@ INSERT INTO providers(
         let deadline_ms = scheduled_due_deadline_ms(9, 60_000);
         assert!(!source.is_expired(9, deadline_ms));
         assert!(source.is_expired(9, deadline_ms.saturating_add(1)));
+        let recovery = ProbeSource::Recovery {
+            due_at_ms: 90_000,
+        };
+        let recovery_deadline_ms = recovery_due_deadline_ms(90_000);
+        assert!(!recovery.is_expired(9, recovery_deadline_ms));
+        assert!(recovery.is_expired(9, recovery_deadline_ms.saturating_add(1)));
         assert!(!ProbeSource::Manual.is_expired(9, i64::MAX));
     }
 
@@ -980,6 +1345,8 @@ INSERT INTO providers(
             false,
         );
         assert!(inner.entries.contains_key(&600));
+        let generation = inner.entries[&600].generation;
+        queue_recovery_target(&mut inner, 600, generation, 2_000);
 
         reconcile_schedules_inner(&mut inner, Vec::new(), 3_000, false, 2, true);
         assert!(!inner.entries.contains_key(&600));
@@ -1054,6 +1421,26 @@ INSERT INTO providers(
             _ => panic!("new configuration must lead after the old flight finishes"),
         };
         assert_ne!(replacement_generation, generation);
+    }
+
+    #[tokio::test]
+    async fn coalesced_probe_flight_has_only_one_recording_owner() {
+        let state = ProviderAvailabilityProbeRuntimeState::default();
+        let generation = match state.begin_probe(5, None).await {
+            ProbeDecision::Lead { generation, .. } => generation,
+            _ => panic!("first probe must lead"),
+        };
+        assert!(matches!(
+            state.begin_probe(5, None).await,
+            ProbeDecision::Wait(_)
+        ));
+
+        let mut inner = state.shared.inner.lock().await;
+        let (in_flight, should_record) = take_finished_flight(&mut inner, 5, generation)
+            .expect("coalesced flight finishes once");
+        assert_eq!(in_flight.waiters.len(), 2);
+        assert!(should_record);
+        assert!(take_finished_flight(&mut inner, 5, generation).is_none());
     }
 
     #[tokio::test]
