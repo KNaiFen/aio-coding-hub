@@ -10,16 +10,16 @@
 - PR base：`main` @ `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`
 - 归属迁移前的远端 head 快照：`ed4a7527f75ea09ff55517afa3789babd0f922a6`
 - 源规划提交：`2016c25ef7cb6ae524f3f2b4e86996ef923981a3`
-- 阶段 B 授权提交：`e4e797e42274e8c87f70121d70f9c51a160be9f5` 已推送，但 GitHub 没有为该 head 创建任何 Actions run、check suite 或 check run；这不是绿色或失败的 CI 证据。
+- 阶段 B 授权提交：`e4e797e42274e8c87f70121d70f9c51a160be9f5` 及随后记录更新 `1326a6f391a15d6c351bbc367bc232c15087d88e` 都未产生 Actions run、check suite 或 check run；PR #114 当前为 `DIRTY`/`CONFLICTING`，本地三方合并确认唯一冲突为 `.trellis/tasks/README.md`，所以这些 head 都不是可验证 CI 候选。
 - `ci-gate`：通过，[run 31509027197](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31509027197)
 - 其他检查：`pr-title` 通过，[run 31509027080](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31509027080)；CodeQL JS/TS 与 Rust 通过，[run 31509027104](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31509027104)。
 - #113 回归：[Sync Upstream run 31508611251](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31508611251) 按预期失败，输出 PR #113 的 `DIRTY` 状态并要求人工冲突处理。
 - 交付时间：2026-08-12（阶段 A 快照）
-- 执行 session：阶段 A session 已暂停；尚未创建阶段 B 执行 session。main 将推送一项事实准确的交接记录更新以重新发出正常 PR 事件，只有其新 head 自动检查绿色后才交接。
+- 执行 session：阶段 A session 已暂停；尚未创建阶段 B 执行 session。main 将发送冲突恢复交接包；执行 session 必须先解决唯一 README 冲突并推送干净 head，之后才等待自动检查。
 
 ## 阻塞快照
 
-- 无代码或失败 CI 阻塞；当前阻塞是授权提交 `e4e797e4...` 缺少任何自动检查。用户已授权 main 只通过记录更新重新发出正常 PR 事件；不得手动 dispatch、推空提交或修改工作流。阶段 B 在新 head 的实时自动检查绿色前不得开始。
+- 无代码或失败 CI 阻塞；当前 PR 冲突阻止现有 head 产生常规自动检查。用户已授权按已锁定的阶段 B 范围先解决唯一 README 冲突；不得手动 dispatch、推空提交或修改工作流。解决冲突并推送新 head 后才等待实时自动检查。
 
 ## 实现摘要
 
@@ -56,7 +56,7 @@
 
 ### GitHub CI 与编译
 
-- 上述云端证据属于归属迁移前的 #114 head 快照。授权提交 `e4e797e4...` 没有自动检查，不能作为当前候选；main 将以事实准确的交接记录更新产生新的普通 PR head 并重新观察自动 CI，不手动触发工作流。
+- 上述云端证据属于归属迁移前的 #114 head 快照。`e4e797e4...` 和 `1326a6f3...` 因 PR 冲突没有自动检查，不能作为当前候选；执行 session 解决唯一 README 冲突并推送干净 head 后，main 再观察自动 CI，不手动触发工作流。
 
 ### 人工验证
 
@@ -72,7 +72,7 @@
 
 ## 未完成项与阻塞
 
-- 阶段 B 的同步、交付重绑和最新 head CI 复核尚未由执行 session开始；当前先等待 main 的记录更新产生自动检查，详见 `execution.md` 的启动条件。
+- 阶段 B 的同步、交付重绑和最新 head CI 复核尚未由执行 session开始；当前先按 `execution.md` 的冲突恢复启动条件解决 README 冲突，再等待自动检查。
 
 ## 建议 main 重点审查
 
@@ -86,7 +86,7 @@
 - 授权范围：同步 `fix/upstream-sync-pr-resolution` 到开始施工时最新 `origin/main`，解决预期的 `.trellis/tasks/README.md` 冲突，更新 Trellis 生命周期和交付/CI 证据。
 - 已知快照：当前 `origin/main` 为 `9aa8e4ab8e6417be4816b0811178c3f401e34171`；PR #114 旧 head 为 `6316204274eeb6db9332b4eef0e5f182c5c31ca7`，旧必需 CI 已通过。执行 session 必须在写入前重新查询，不能把快照当最终证据。
 - 锁定边界：保留 #113 的 fail-closed 人工处理路径；不得修改 stdout 严格解析、放宽 `DIRTY`/`UNKNOWN`/空状态处理、读取或处理 `upgrade-tui.command`、读取或提交 `SESSION_REMEDIATION_PLAN.md`，也不得合并 PR 或推送 `main`。
-- 接手条件：main 的记录更新推送后，只有其新 head 的自动检查绿色、head 未漂移且 main 发送启动交接包时，一个执行 session 才可写入本 worktree；其余 session 保持暂停。
+- 接手条件：main 发送冲突恢复交接包后，一个执行 session 可写入本 worktree，仅同步 `origin/main` 并解决预期 README 冲突；其推送的新 head 自动检查绿色、head 未漂移后，才进入 main 验收交接。其余 session 保持暂停。
 
 ## main 验收记录
 

@@ -19,7 +19,7 @@
 | PR #113 是既有冲突 PR；`DIRTY`、`UNKNOWN` 或空 merge state 必须 fail-closed，并要求人工处理。 | run `31508611251` 与现行 workflow | confirmed；不得在本任务中处理或合并 #113 |
 | 旧 `08-10-github-actions-governance` 的 PRD、设计、施工、交付与 `task.json` 被 #114 链条改写，造成任务归属不一致。 | `origin/main...HEAD` 差异与 main 审计 | confirmed；阶段 A 必须将该目录恢复至 `origin/main` |
 | 阶段 B 已获 main 授权；开始前必须重新查询实时 PR 状态。 | 2026-08-12 main 指令 | confirmed；当前同步目标为 `origin/main@9aa8e4ab8e6417be4816b0811178c3f401e34171`，不得把该值误写为历史 PR base |
-| 阶段 B 授权提交 `e4e797e42274e8c87f70121d70f9c51a160be9f5` 已推送，但 GitHub 未为该 head 创建 Actions run、check suite 或 check run；同仓库 Draft PR #119 的 CI 正常触发，且 `ci.yml` 的 `pull_request` 没有路径/分支过滤。 | GitHub REST Actions/check-runs 查询、PR #114/#119 实时状态与 `ci.yml` | confirmed 为本次 `synchronize` 事件缺失；用户已授权 main 推送事实准确的记录更新以重新发出正常 PR 事件。不得手动 dispatch、空提交或修改 CI 行为；阶段 B 等待新 head 的实时自动检查。 |
+| 授权提交 `e4e797e42274e8c87f70121d70f9c51a160be9f5` 与随后记录更新 `1326a6f391a15d6c351bbc367bc232c15087d88e` 都未产生自动检查；PR #114 实时为 `DIRTY`/`CONFLICTING`，本地三方合并确认唯一冲突是 `.trellis/tasks/README.md`。同仓库 Draft PR #119 的 CI 正常触发，且 `ci.yml` 的 `pull_request` 没有路径/分支过滤。 | GitHub REST Actions/check-runs 查询、PR #114/#119 实时状态、`ci.yml` 与 `git merge-tree --name-only --messages origin/main HEAD` | confirmed 为冲突 PR 无法生成普通检查候选，而非工作流 YAML 过滤。用户已授权阶段 B 先按既定范围解决唯一 README 冲突；不得手动 dispatch、空提交或修改 CI 行为。新的干净 head 推送后才等待自动检查。 |
 
 ## Goal
 
@@ -54,7 +54,7 @@
 |---|---|---|---|
 | 2026-08-12 | 从旧 CI 治理任务包中拆出 PR #114，创建独立 follow-up 包；阶段 A 只处理归属与记录。 | AC-01 至 AC-04 | main 审计决定；阶段 B 需 main 明确指令 |
 | 2026-08-12 | 阶段 B 获授权：同步最新 `origin/main`、解决唯一 README 冲突并重绑交付/CI，不新增工作流语义。 | AC-05 至 AC-08 | main；执行 session 必须按 `execution.md` 的阶段 B 步骤施工 |
-| 2026-08-12 | 授权提交 `e4e797e4...` 未产生任何自动检查。main 仅修正交接记录并推送正常 PR 更新以恢复候选 CI，不改变工作流、不手动 dispatch、不推空提交，也不开始阶段 B。 | AC-07、AC-08 | 用户授权；新 head 的自动检查终态绿色、head 未漂移且 main 明确通知后，执行 session 才可开工 |
+| 2026-08-12 | `e4e797e4...` 和记录更新 `1326a6f3...` 都没有自动检查，原因是 PR #114 为 `DIRTY`/`CONFLICTING`，且唯一预期 README 冲突尚未解决。main 不改工作流、不手动 dispatch、不推空提交；阶段 B 先解决该冲突并推送干净 head，之后再等待自动检查。 | AC-05 至 AC-08 | 用户授权；main 发送冲突恢复交接包后，一个执行 session 可开工。新的干净 head 自动检查终态绿色、head 未漂移后进入验收 |
 
 ## PENDING Review
 
