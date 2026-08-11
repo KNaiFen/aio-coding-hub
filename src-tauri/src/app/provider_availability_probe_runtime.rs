@@ -945,9 +945,7 @@ fn take_due_recovery_targets(
             if entry.schedule.is_none() || entry.generation != recovery.generation {
                 entry.recovery = None;
                 None
-            } else if recovery.phase == RecoveryProbePhase::Claimed
-                || now_ms < recovery.due_at_ms
-            {
+            } else if recovery.phase == RecoveryProbePhase::Claimed || now_ms < recovery.due_at_ms {
                 None
             } else if skip_missed || now_ms > recovery_due_deadline_ms(recovery.due_at_ms) {
                 entry.recovery = None;
