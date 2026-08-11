@@ -25,6 +25,6 @@
     "scripts/check-sync-upstream-policy.mjs",
     "scripts/check-sync-upstream-policy.selftest.mjs"
   ],
-  "notes": "2026-08-12 从 08-10-github-actions-governance 拆分的独立 follow-up。PR #114 修复新建同步 PR 的编号解析；PR #113 仅保留 DIRTY/UNKNOWN fail-closed 人工处理证据。阶段 A 已完成；main 已授权阶段 B 同步当前主线、解决 README 冲突并重绑交付/CI。e4e797e4 和 1326a6f3 未产生自动检查，因 PR 当前 DIRTY/CONFLICTING 且唯一 README 冲突未解；main 交接后先解决该冲突，再等待新 head CI。",
+  "notes": "2026-08-12 从 08-10-github-actions-governance 拆分的独立 follow-up。PR #114 修复新建同步 PR 的编号解析；PR #113 仅保留 DIRTY/UNKNOWN fail-closed 人工处理证据。阶段 A 已完成；main 已授权阶段 B 同步当前主线、解决 README 冲突并重绑交付/CI。执行 session 先解决唯一预期 README 冲突并推送新 head，再等待 CI；main 专属协调诊断不复制到本任务材料。",
   "meta": {}
 }

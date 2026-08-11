@@ -10,7 +10,7 @@
 
 | 任务目录 | 阶段 | 分支 | base SHA | 规划提交 | Worktree | PR | 当前唯一写者 | 依赖/说明 |
 |---|---|---|---|---|---|---|---|---|
-| [`08-12-upstream-sync-pr-resolution`](./08-12-upstream-sync-pr-resolution/) | 阶段 A 完成；阶段 B 已授权，先解决 README 冲突 | `fix/upstream-sync-pr-resolution` | `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`（当前同步目标另见 `execution.md`） | `2016c25ef7cb6ae524f3f2b4e86996ef923981a3` | `/Users/knaifen/Documents/Codex/aio-coding-hub/08-11-upstream-sync-pr-resolution` | [#114](https://github.com/KNaiFen/aio-coding-hub/pull/114) Draft | main（冲突恢复交接）；交接后一个执行 session | PR 当前 `DIRTY`/`CONFLICTING`，唯一预期冲突为 README；执行 session 先合并当前主线并解决该冲突，推送干净 head 后等待 CI。保留 08-10/08-11 归档，stdout 严格解析和 #113 `DIRTY`/`UNKNOWN` fail-closed 不变。 |
+| [`08-12-upstream-sync-pr-resolution`](./08-12-upstream-sync-pr-resolution/) | 阶段 A 完成；阶段 B 已授权，先解决 README 冲突 | `fix/upstream-sync-pr-resolution` | `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`（当前同步目标另见 `execution.md`） | `2016c25ef7cb6ae524f3f2b4e86996ef923981a3` | `/Users/knaifen/Documents/Codex/aio-coding-hub/08-11-upstream-sync-pr-resolution` | [#114](https://github.com/KNaiFen/aio-coding-hub/pull/114) Draft | main（交接中）；交接后一个执行 session | 唯一预期冲突为 README；执行 session 先合并当前主线并解决该冲突，推送新 head 后等待 CI。保留 08-10/08-11 归档，stdout 严格解析和 #113 `DIRTY`/`UNKNOWN` fail-closed 不变。 |
 | [`08-03-upstream-claude-oauth`](./08-03-upstream-claude-oauth/) | planning（暂停，未委派） | 无（旧分支已删除） | 不适用 | 未登记 | 未创建 | 未创建 | main session | 用户已决定暂不处理；不影响当前工作。恢复前需重新确认方案，并完成真实隔离账号验证。 |
 
 ## 归档
