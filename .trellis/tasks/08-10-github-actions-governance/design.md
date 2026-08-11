@@ -4,6 +4,8 @@
 
 `ci.yml` 继续监听 `push`、`pull_request` 和 `workflow_dispatch`。自动事件的聚合 job 保持 job id `ci-gate`，并将 job `name` 依据事件显示为 `ci-gate` 或 `manual-ci-gate`；这样 Ruleset 只匹配自动门禁。手动入口先运行无 checkout 的 `manual-dispatch-guard`，只有 `refs/heads/main` 才允许下游 jobs。该 guard 在自动事件中按设计为 skipped，因此所有下游条件 job 必须显式使用 `always()` 并逐项检查直接依赖的成功结果，不能依赖 GitHub 隐式注入的 `success()`。
 
+2026-08-11 确认的范围扩展：PR 分类器输出 `frontend_ci`、`rust_ci` 与 `shared_ci`。前端路径只运行 frontend，Rust 路径只运行 Rust；跨层生成绑定、依赖/构建配置、CI 控制面、未知路径以及分类错误均运行两端。`dev`/`main` push 和 `workflow_dispatch` 强制两端运行，保证候选制品与主干集成验证不因路径优化被削弱。`ci-gate` 必须根据输出分别断言成功或预期 skipped，不能把一端的预期 skipped 当作失败。
+
 PR 标题检查迁移到独立的 `pr-title.yml`。它不 checkout、不执行仓库代码，只读取事件 payload；`edited` 只触发该工作流，避免标题改动重新启动完整 CI。
 
 手动 `ci` 仍支持现有 `build_release_candidate` 输入。`workflow_dispatch` 的 scope 结果保持 full CI，但把 benchmark 输出置为 false；push/PR 的路径命中逻辑保持不变。`performance.yml` 只承接显式手动 benchmark，不参与 required gate。

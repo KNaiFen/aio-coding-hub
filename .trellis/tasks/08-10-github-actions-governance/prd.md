@@ -3,9 +3,9 @@
 ## Plan Status
 
 - Implementation authorization: confirmed by user
-- Confirmation date and summary: 2026-08-10；按审查结果实施触发去重、门禁语义分离、性能基准拆分、上游 App 令牌、安全自动化、超时与 Action 维护；Rust 并行化延后为独立实验。
-- Confirmed coverage: workflow files, CI contracts/selftests, current operational docs, GitHub Actions settings, upstream-sync credentials, Dependabot and CodeQL
-- Planning revision: initial implementation of the approved plan
+- Confirmation date and summary: 2026-08-10 实施初版；2026-08-11 用户确认扩展为 PR 按前端、Rust 与共享路径分别验证，主干推送与手动候选构建保持全量。
+- Confirmed coverage: workflow files, CI contracts/selftests, current operational docs, GitHub Actions settings, upstream-sync credentials, Dependabot, CodeQL, and CI path-domain classification
+- Planning revision: v2; add domain-specific PR validation after the initial implementation
 - Execution route: delegated worktree, main-owned implementation and acceptance
 - Migrated from direct-main record: none
 
@@ -27,6 +27,7 @@ Do not start implementation with a material open question. Record approved scope
 ## Requirements
 
 - 自动 PR/push CI 继续产生唯一 required `ci-gate`；PR 标题校验迁移为独立 required `pr-title`，覆盖标题编辑而不启动完整 CI。
+- PR 变更分类必须独立输出前端、Rust 与共享/未知范围；纯前端路径不运行 Rust，纯 Rust 路径不运行前端，跨层、控制面、依赖与未知路径保守运行两者。`dev`/`main` push 与 `main` 手动运行始终全量，候选制品边界不变。
 - `workflow_dispatch` 保留在 `ci.yml`，但仅 `main` 可进入重任务；手动聚合状态命名为 `manual-ci-gate`，不得满足自动 required gate。
 - 手动恢复 CI 不运行 Provider trend release benchmark；相关自动代码路径仍保留现有 benchmark 覆盖，新 `performance.yml` 提供 main-only 手动 benchmark。
 - 保留候选桌面/TUI 制品仅来自主仓 `main` 的 push/manual、签名环境和 release 选择合同；不改发布人工审批、CODEOWNERS 或 merge queue。
@@ -35,7 +36,7 @@ Do not start implementation with a material open question. Record approved scope
 
 ## Acceptance Criteria
 
-- [ ] AC-01：docs-only PR 只运行轻量检查；普通 PR 自动 `ci-gate` 通过时不需要同 SHA 手动 `ci`。
+- [ ] AC-01：docs-only PR 只运行轻量检查；前端-only 与 Rust-only PR 分别只运行所属验证；共享、未知、`dev`/`main` push 与 main 手动运行保持全量；普通 PR 自动 `ci-gate` 通过时不需要同 SHA 手动 `ci`。
 - [ ] AC-02：手动非 `main` 运行在 checkout/前端/Rust/候选构建前失败，手动 `main` 恢复与候选场景均能完成并产生 `manual-ci-gate`。
 - [ ] AC-03：`pr-title` 在 opened/synchronize/reopened/edited 上正确校验；Ruleset required contexts 最终为 `ci-gate` + `pr-title`。
 - [ ] AC-04：自动相关 Rust 路径仍运行 benchmark；手动恢复不运行 benchmark；`performance.yml` 可独立运行 benchmark。
@@ -48,6 +49,7 @@ Do not start implementation with a material open question. Record approved scope
 | Date | Old / new decision | Affected acceptance criteria | Decision owner / resume condition |
 |---|---|---|---|
 | 2026-08-10 | Rust 测试并行化从本期实施改为后续独立实验 | AC-04、未来性能路线 | 用户确认；需单独非 required 实验、稳定性和 p50/p95 门槛 |
+| 2026-08-11 | PR 从二元 docs/full 分类改为 frontend/Rust/shared 域分类；主干推送和手动候选构建仍全量 | AC-01、AC-07 | 用户确认；未知、CI 控制面、依赖和跨层路径 fail-closed 运行两端 |
 
 ## PENDING Review
 
