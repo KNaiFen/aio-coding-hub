@@ -4,21 +4,21 @@
 
 ## 当前结论
 
-- 结论：需要整改
+- 结论：已解决并接受，功能 PR 已合并
 - PR：[#109](https://github.com/KNaiFen/aio-coding-hub/pull/109)
-- 审查轮次：Round 2
-- 审查版本：`36ef9df65b7d6eeb22eb3a19ecbf892e39194a02`
-- CI 状态：`ci-gate`、`pr-title`、`rust`、`support-contract`、`change-scope` 和 CodeQL 均已通过；[ci-gate job 93853377435](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31511661925/job/93853377435)。
-- 审查范围：F-001、F-002 复验；首轮候选到当前 head 的整改 diff、相关测试与实时 PR 状态。
+- 审查轮次：Round 3
+- 审查版本：`8c1c9d27e046aeab8290308e40d4e6570218539c`
+- CI 状态：严格必需的 [`ci-gate` job 93919034995](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31531473148/job/93919034995) 与 [`pr-title` job 93912283035](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31531473151/job/93912283035) 均通过；同一 head 的 Rust、support-contract、change-scope 和 CodeQL 亦成功。
+- 审查范围：F-001、F-002 最终复验、最新 PR diff、任务索引冲突处理与实时 PR 状态。
 
 ## 总结
 
-F-001 的 recovery epoch/claim 生命周期已经阻止旧 target 跨越失败或 Closed；F-002 的运行时代码也已从实际 HTTP completion 时刻生成 due。当前剩余阻塞是 F-002 的新增测试只直接构造 directive 并调用 queue helper，没有经过 `finish_probe -> CompletedProbe -> scheduled consumer`，因此恢复旧的 waiter-time 调度代码时测试仍会通过，尚未形成要求中的回归保护。
+F-001 的 recovery epoch/claim 生命周期已阻止旧 target 跨越失败或 Closed。F-002 已补充经过 `consume_scheduled_completion` 生产消费路径的确定性测试，completion 与 waiter resume 使用不同时间；恢复 waiter-time 重算会使断言失败。最新 head 的严格门禁与相关云端检查均通过，PR #109 已以 merge commit `15d08f4399d6b1a5361b48d8110e9b49ca3650bb` 合并。
 
 ## 当前问题状态
 
 - [x] F-001 HalfOpen 失败必须撤销已有 recovery target（Round 2 已解决）
-- [ ] F-002 Recovery target 必须以实际 probe 完成时刻计算 due time
+- [x] F-002 Recovery target 必须以实际 probe 完成时刻计算 due time（Round 3 已解决）
 
 ## Round 1
 
@@ -117,11 +117,19 @@ F-001 的 recovery epoch/claim 生命周期已经阻止旧 target 跨越失败�
 
 ## 再次交付要求
 
-- [ ] F-002 已增加会覆盖 actual scheduled consumer 的确定性回归测试，且恢复 waiter-time 重算逻辑时该测试会失败。
-- [ ] 本 `findings.md` 已随返工提交保留在 PR 中，`delivery.md` 已更新实现、偏移、验证和返工记录。
-- [ ] 新提交已推送，PR 最新 head 的必需 CI 和相关编译为绿色。
-- [ ] 新候选完整 head SHA 和对应 `ci-gate` 已写入 `delivery.md` 与本文件。
-- [ ] 执行 session 已暂停并通知 main 复验。
+- [x] F-002 已增加会覆盖 actual scheduled consumer 的确定性回归测试，且恢复 waiter-time 重算逻辑时该测试会失败。
+- [x] 本 `findings.md` 已随返工提交保留在 PR 中，`delivery.md` 已更新实现、偏移、验证和返工记录。
+- [x] 新提交已推送，PR 最新 head 的必需 CI 和相关编译为绿色。
+- [x] 新候选完整 head SHA 和对应 `ci-gate` 已写入 `delivery.md` 与本文件。
+- [x] 执行 session 已暂停并通知 main 复验。
+
+## Round 3
+
+- 本轮验收候选 head：`8c1c9d27e046aeab8290308e40d4e6570218539c`
+- `ci-gate`：通过，[job 93919034995](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31531473148/job/93919034995)
+- 本轮范围：F-002 scheduled completion 消费路径回归测试、F-001 生命周期复验、任务分支同步和最新 PR 状态。
+- 结论：F-001、F-002 均已解决。`scheduled_completion_uses_probe_completion_time_not_waiter_resume_time` 经生产 consumer 固定 completion=`10_000ms`、waiter resume=`55_000ms`，证明 due 固定为 completion 加 30 秒；过期 claimed recovery 的生命周期保护保持有效。
+- 合并事实：PR #109 于 2026-08-12 合并，merge commit 为 `15d08f4399d6b1a5361b48d8110e9b49ca3650bb`。
 
 ## 建议项
 
