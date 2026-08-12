@@ -120,6 +120,18 @@
 - 接受的偏移或风险：无。代码和 CI 绿色不替代最终交付记录与生命周期事实的同步。
 - 日期：2026-08-12。
 
+### Round 2
+
+- 结论：通过。F-001、F-002 均已解决；允许进入验收记录提交的自动 CI 与合并前复核。
+- 审查范围：Round 1 findings 的执行回应、阶段 B 同步与 README 冲突收敛、任务归属和生命周期、PR 相对 base 的完整 diff、workflow/policy/selftest 合同、最新冻结 head 的实时 PR 状态与自动检查。
+- 审查候选 head：`76d13b5ee2b2d227e6468cf7d349ff13e2901f14`（PR base `366b92fd8429f5e747d77a632cbd0299522065de`，OPEN、Ready for review、CLEAN/MERGEABLE）。
+- 交付证据分层：`8005a625faf99d74f053947b9f3d77ac31a02838` 是执行 session 完成 F-001/F-002 整改的交付候选，对应 `ci-gate` run `31578042883`、`pr-title` run `31578042866` 和 CodeQL run `31578042790`；其后 `76d13b5...` 只更新 `delivery.md`、`execution.md`、`findings.md` 以绑定该交付证据，没有产品、workflow、policy 或 selftest 变化。
+- 最新检查：`76d13b5...` 的 `ci-gate` 通过，[run 31580090972](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31580090972)；同一 head 的 `pr-title` [run 31580090988](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31580090988)、CodeQL [run 31580090954](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31580090954)、frontend、rust、change-scope、docs-contract、support-contract 均成功。仓库严格必需检查 `ci-gate`、`pr-title` 均通过。
+- 复验结论：F-001 已解决，交付候选、base 与 CI 证据一致，阶段 B merge commit `7589a3a6...` 仅保留为历史同步快照；F-002 已解决，受验 head 的 README 与施工入口均显示阶段 B 完成、执行 session 暂停、main 接管验收，`task.json.status` 正确保留为 `in_progress`。
+- 范围与合同：阶段 B 同步提交的第二父仍为 `origin/main@366b92fd...`，唯一冲突仍限于 `.trellis/tasks/README.md`；08-10/08-11 归档与 08-12 活动行均保留。允许的 Node policy/selftest、Trellis validate、旧 08-10 目录差异检查和 `git diff --check` 通过；未运行本地依赖安装、pnpm、Cargo、构建、格式化或产品测试。
+- 接受的偏移或风险：接受 `8005a625...` 交付候选与其后纯记录 head `76d13b5...` 的两层证据；这是提交内容不能自引用其自身 SHA 的记录边界，不改变被验收实现。写入本轮记录会产生一个新的纯记录 head；main 只在该 head 的自动检查全部成功、相对 `76d13b5...` 仍仅为本轮验收/生命周期记录且 PR head 未漂移时合并，实际合并 head 与 merge commit 在 records-only 收尾 PR 中落盘。
+- 日期：2026-08-12。
+
 ## main 收尾
 
 > 仅 main 填写。任务保持活动，未合并、未归档、未删除 worktree 或分支。

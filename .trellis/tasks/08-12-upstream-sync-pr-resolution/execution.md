@@ -1,6 +1,6 @@
 # 施工入口：修复 Sync Upstream PR 编号解析与冲突收敛
 
-> 阶段 A 已完成。阶段 B 与 F-001/F-002 整改已完成并推送；PR 已 Ready for review，执行 session 已暂停，待 main 验收、合并和收尾。
+> 阶段 A、阶段 B 与 F-001/F-002 整改均已完成并推送；main Round 2 验收通过。执行 session 保持暂停，待本次纯记录提交的自动 CI 通过后由 main 合并和收尾。
 
 ## 快速定位
 
@@ -16,7 +16,7 @@
 - 前序 PR：[#108](https://github.com/KNaiFen/aio-coding-hub/pull/108) 已合并，merge commit `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`。
 - PENDING 审阅：`AIO-PENDING-029` 明确排除，禁止触碰 `upgrade-tui.command`。
 - 当前唯一写者：执行 session 已暂停；main 负责验收、合并和收尾。
-- 当前阶段：阶段 B 已完成，待 main 验收。
+- 当前阶段：main Round 2 验收通过，待验收记录提交的自动 CI 与合并前复核。
 
 ## 阅读顺序
 

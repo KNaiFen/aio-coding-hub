@@ -58,3 +58,12 @@
 - 返工交付候选 head：`8005a625faf99d74f053947b9f3d77ac31a02838`；PR base：`366b92fd8429f5e747d77a632cbd0299522065de`。
 - 该 head 的自动 `ci-gate`、`pr-title`、CodeQL 和相关检查均已终态成功。PR 保持 Ready for review，执行 session 已暂停并等待 main 复验。
 - 变更文件限于本任务的 `delivery.md`、`execution.md`、`.trellis/tasks/README.md` 和本文件；未读取、编辑、暂存、删除或提交 `SESSION_REMEDIATION_PLAN.md`，未触碰 `upgrade-tui.command`。
+
+## Round 2（main 复验）
+
+- 复验 head：`76d13b5ee2b2d227e6468cf7d349ff13e2901f14`；PR base：`366b92fd8429f5e747d77a632cbd0299522065de`。
+- 实时状态：PR #114 为 OPEN、Ready for review、CLEAN/MERGEABLE；`ci-gate` run `31580090972`、`pr-title` run `31580090988`、CodeQL run `31580090954` 及 frontend、rust、change-scope、docs-contract、support-contract 均成功。
+- F-001：已解决。执行整改候选 `8005a625...` 及对应 CI 已由交付记录绑定；`8005a625... -> 76d13b5...` 仅更新本任务的 `delivery.md`、`execution.md`、`findings.md`，最新纯记录 head 自身也已通过完整自动检查。阶段 B merge commit `7589a3a6...` 仅作为历史同步快照保留。
+- F-002：已解决。受验 head 的活动索引和施工入口均为“阶段 B 完成，待 main 验收”，PR 标为 Ready for review，执行 session 已暂停，main 是验收、合并和收尾写者；`task.json.status` 仍为 `in_progress`。
+- 范围复验：未发现产品、workflow、policy/selftest 回归；08-10 旧任务目录相对当前 PR base 无差异；未处理 PR #113，未触发手动 workflow，未启用 auto-merge。
+- 结论：Round 1 必须整改项全部关闭，main 验收通过。写入该结论产生的纯记录 head 仍须自动 CI 全绿并通过最终 head/diff 复核，之后才能合并；实际合并 head 与 merge commit 由 main 在 records-only 收尾 PR 中记录。
