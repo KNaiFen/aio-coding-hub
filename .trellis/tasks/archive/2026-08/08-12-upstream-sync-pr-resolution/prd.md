@@ -43,10 +43,10 @@
 - [x] AC-02：PR #114 对 `.trellis/tasks/08-10-github-actions-governance/` 不再有任何差异；#108 历史未被改写。
 - [x] AC-03：交付快照只引用 PR #114 的代码、当前 head、`ci-gate`、`pr-title`、CodeQL 和 #113 的 fail-closed 回归证据；旧 `cdc427b9` / run `31506469918` 仅可作为历史背景，不能当作最终候选。
 - [x] AC-04：阶段 A 以一个任务归属分离切片提交并只推送 `fix/upstream-sync-pr-resolution`；不进入阶段 B。
-- [ ] AC-05：分支已同步至开始施工时最新 `origin/main`，且仅解决 `.trellis/tasks/README.md` 的预期冲突；主线的 08-10、08-11 归档记录保持不变。
-- [ ] AC-06：阶段 B 后任务索引只将 PR #114 归属到 `08-12-upstream-sync-pr-resolution`，旧 08-10 任务不重新出现为活动任务。
-- [ ] AC-07：`delivery.md` 记录实际同步候选、最新 PR head、对应 `ci-gate`、`pr-title`、CodeQL 与 #113 fail-closed 证据；PR 最新 head 的严格必需检查均为绿色。
-- [ ] AC-08：不改变 stdout 严格解析、`DIRTY`/`UNKNOWN` fail-closed、无 direct push/merge/approval 的工作流边界；允许的本地 policy/selftest 和 Trellis 验证通过。
+- [x] AC-05：分支已同步至开始施工时最新 `origin/main`，且仅解决 `.trellis/tasks/README.md` 的预期冲突；主线的 08-10、08-11 归档记录保持不变。
+- [x] AC-06：阶段 B 后任务索引只将 PR #114 归属到 `08-12-upstream-sync-pr-resolution`，旧 08-10 任务不重新出现为活动任务。
+- [x] AC-07：`delivery.md` 记录实际同步候选、最新 PR head、对应 `ci-gate`、`pr-title`、CodeQL 与 #113 fail-closed 证据；PR 最新 head 的严格必需检查均为绿色。
+- [x] AC-08：不改变 stdout 严格解析、`DIRTY`/`UNKNOWN` fail-closed、无 direct push/merge/approval 的工作流边界；允许的本地 policy/selftest 和 Trellis 验证通过。
 
 ## Scope and Decision Changes
 

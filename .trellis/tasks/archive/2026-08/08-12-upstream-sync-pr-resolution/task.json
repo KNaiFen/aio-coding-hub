@@ -3,7 +3,7 @@
   "name": "upstream-sync-pr-resolution",
   "title": "修复 Sync Upstream PR 编号解析与冲突收敛",
   "description": "修复新建同步 PR 后的编号解析，并保持 DIRTY/UNKNOWN fail-closed 边界。",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": null,
   "scope": "upstream-sync-pr-resolution",
   "package": "aio-coding-hub",
@@ -11,7 +11,7 @@
   "creator": "main",
   "assignee": "main",
   "createdAt": "2026-08-12",
-  "completedAt": null,
+  "completedAt": "2026-08-12",
   "branch": "fix/upstream-sync-pr-resolution",
   "base_branch": "main",
   "worktree_path": "/Users/knaifen/Documents/Codex/aio-coding-hub/08-11-upstream-sync-pr-resolution",
@@ -25,6 +25,6 @@
     "scripts/check-sync-upstream-policy.mjs",
     "scripts/check-sync-upstream-policy.selftest.mjs"
   ],
-  "notes": "2026-08-12 从 08-10-github-actions-governance 拆分的独立 follow-up。PR #114 修复新建同步 PR 的编号解析；PR #113 仅保留 DIRTY/UNKNOWN fail-closed 人工处理证据。阶段 A 已完成；main 已授权阶段 B 同步当前主线、解决 README 冲突并重绑交付/CI。执行 session 先解决唯一预期 README 冲突并推送新 head，再等待 CI；main 专属协调诊断不复制到本任务材料。",
+  "notes": "2026-08-12 从 08-10-github-actions-governance 拆分的独立 follow-up。PR #114 修复新建同步 PR 的编号解析并保持 PR #113 的 DIRTY/UNKNOWN fail-closed 人工处理边界；阶段 A、阶段 B、F-001/F-002 整改、main 验收与功能 PR 合并均已完成，最终 merge commit 为 683b8c8fdb802303d2fb0b79abe2d63197bb8a4b。",
   "meta": {}
 }

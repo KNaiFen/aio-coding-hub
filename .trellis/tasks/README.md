@@ -10,7 +10,6 @@
 
 | 任务目录 | 阶段 | 分支 | base SHA | 规划提交 | Worktree | PR | 当前唯一写者 | 依赖/说明 |
 |---|---|---|---|---|---|---|---|---|
-| [`08-12-upstream-sync-pr-resolution`](./08-12-upstream-sync-pr-resolution/) | main Round 2 验收通过，待记录 CI 与合并前复核 | `fix/upstream-sync-pr-resolution` | `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`（阶段 B 同步源 `origin/main@366b92fd8429f5e747d77a632cbd0299522065de`） | `2016c25ef7cb6ae524f3f2b4e86996ef923981a3` | `/Users/knaifen/Documents/Codex/aio-coding-hub/08-11-upstream-sync-pr-resolution` | [#114](https://github.com/KNaiFen/aio-coding-hub/pull/114) Ready for review | 执行 session 已暂停；main 负责验收、合并和收尾 | 阶段 B 仅同步主线并收敛预期 README 冲突；保留 08-10/08-11 归档，stdout 严格解析和 #113 `DIRTY`/`UNKNOWN` fail-closed 不变。 |
 | [`08-03-upstream-claude-oauth`](./08-03-upstream-claude-oauth/) | planning（暂停，未委派） | 无（旧分支已删除） | 不适用 | 未登记 | 未创建 | 未创建 | main session | 用户已决定暂不处理；不影响当前工作。恢复前需重新确认方案，并完成真实隔离账号验证。 |
 
 ## 归档
@@ -18,6 +17,7 @@
 - [按月份浏览已归档任务](./archive/)
 - 2026-08：[08-10 GitHub Actions Governance](./archive/2026-08/08-10-github-actions-governance/)；功能 PR [#108](https://github.com/KNaiFen/aio-coding-hub/pull/108) 与 records-only closeout PR [#115](https://github.com/KNaiFen/aio-coding-hub/pull/115) 均已合并，最终业务结果为“部分完成并已拆分后续修复”。
 - 2026-08：[08-11 Availability Circuit Recovery](./archive/2026-08/08-11-availability-circuit-recovery/)；功能 PR [#109](https://github.com/KNaiFen/aio-coding-hub/pull/109) 与 records-only closeout PR [#117](https://github.com/KNaiFen/aio-coding-hub/pull/117) 均已合并，最终结果为“完成”。
+- 2026-08：[08-12 Upstream Sync PR Resolution](./archive/2026-08/08-12-upstream-sync-pr-resolution/)；功能 PR [#114](https://github.com/KNaiFen/aio-coding-hub/pull/114) 已合并，最终结果为“完成”；records-only closeout PR 待本归档分支创建并通过 CI。
 - 归档任务保留原始 PRD、设计、计划、研究、实施与检查记录，作为交付证据，不作为当前行为规范。
 
 ## 生命周期
