@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.60.51](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.51) (2026-08-13)
+
+### Highlights
+
+* restore availability circuit recovery after scheduled provider probes
+* harden GitHub Actions validation, cloud-only verification, and release promotion
+* improve upstream synchronization and multi-worktree delivery safeguards
+
 ## [0.60.50](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.50) (2026-08-09)
 
 ### Highlights
