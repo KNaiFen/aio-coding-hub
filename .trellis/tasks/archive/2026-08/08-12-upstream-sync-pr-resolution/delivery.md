@@ -136,17 +136,17 @@
 
 ## main 收尾
 
-> 仅 main 填写。功能 PR 已合并，Trellis 任务已归档；records-only 收尾 PR 合并前，归档结果尚未进入 `main`。
+> 仅 main 填写。功能 PR 与 records-only 收尾 PR 均已合并，Trellis 任务已归档；本节保留最终验收、归档与清理事实。
 
 - 最终结果：完成。
 - 功能 PR 与验收候选：[PR #114](https://github.com/KNaiFen/aio-coding-hub/pull/114)；main Round 2 接受候选为 `fdaeee98b5cf28593885eb9fbce86a080408757e`，其父级执行整改交付候选为 `8005a625faf99d74f053947b9f3d77ac31a02838`。
 - main 合并提交：`683b8c8fdb802303d2fb0b79abe2d63197bb8a4b`，2026-08-12 squash merge 到 `main`。
 - 合并前 CI：最终验收 head 的 required `ci-gate` run `31584126489` / job `94079397690`、`pr-title` run `31584126488`、CodeQL run `31584126486` 及 frontend、rust、change-scope、docs-contract、support-contract 均成功；候选/release 条件任务按范围跳过。
-- 收尾记录 PR：[PR #123](https://github.com/KNaiFen/aio-coding-hub/pull/123) 承载 records-only closeout；初始归档候选为 `01fad4fbed526d28496ace3bd232c69a23681469`，其 `ci-gate` run `31587130217` / job `94083493507`、`pr-title` run `31587130190`、CodeQL run `31587130213` 与 change-scope 均成功。写入本条证据产生的最终纯记录 head 仍须重新通过自动检查并在合并前冻结复核。
+- 收尾记录 PR：[PR #123](https://github.com/KNaiFen/aio-coding-hub/pull/123) 已合并；初始归档候选为 `01fad4fbed526d28496ace3bd232c69a23681469`。最终纯记录 head `f3714653b78420b5d51b50e7e75d820e09d7ffc8` 的 `ci-gate` run `31587473735` / job `94084619694`、`pr-title` run `31587473678`、CodeQL run `31587473704` 与 change-scope 均成功；2026-08-12 以 squash merge commit `131272d556c88730de1b03a6b112b138307b6a72` 进入 `main`。
 - 知识库与合同：长期有效的 Sync Upstream stdout 严格解析、受限查询和 `DIRTY`/`UNKNOWN`/空状态 fail-closed 合同已随功能 PR 更新到 `docs/operations/github-actions-governance.md`；`docs/README.md` 已有入口，无需重复改动。
 - PENDING 去向：无迁移或新增。`AIO-PENDING-029` 仍为 `pending`，仅涉及明确排除的 `upgrade-tui.command`；本任务不读取、执行或处置该文件。
 - 归档：main 已于 2026-08-12 运行 `python3 ./.trellis/scripts/task.py archive --no-commit 08-12-upstream-sync-pr-resolution`，任务已迁入 `.trellis/tasks/archive/2026-08/08-12-upstream-sync-pr-resolution/`，`task.json` 已更新为 `completed`；README 活动行同步转换为归档条目，随后运行 `python3 ./.trellis/scripts/task.py validate --all`。
-- worktree 与分支清理：2026-08-12 以 `git ls-remote --heads origin fix/upstream-sync-pr-resolution` 核验功能分支远端 ref 已删除；原执行 worktree `/Users/knaifen/Documents/Codex/aio-coding-hub/08-11-upstream-sync-pr-resolution` 仍保留，因其中有未跟踪 `SESSION_REMEDIATION_PLAN.md` 且来源未确认，main 不清理该文件、不删除该 worktree 或本地分支。records-only closeout worktree 在其 PR 合并后清理。
+- worktree 与分支清理：2026-08-12 以 `git ls-remote --heads origin` 核验功能分支与 records-only closeout 分支的远端 ref 均已删除；PR #123 合并后，main 已删除 closeout worktree `/Users/knaifen/Documents/Codex/aio-coding-hub/08-12-upstream-sync-pr-resolution-closeout` 及本地 `docs/close-08-12-upstream-sync-pr-resolution` 分支。原执行 worktree `/Users/knaifen/Documents/Codex/aio-coding-hub/08-11-upstream-sync-pr-resolution` 仍保留，因其中有未跟踪 `SESSION_REMEDIATION_PLAN.md` 且来源未确认，main 不清理该文件、不删除该 worktree 或本地 `fix/upstream-sync-pr-resolution` 分支。
 - 遗留风险：仅剩未跟踪文件的归属确认与相应清理；不影响已合并功能或当前 CI 合同。
 
 ## 返工记录
