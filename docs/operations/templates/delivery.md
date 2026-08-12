@@ -145,8 +145,11 @@
 ### Round {{N}}
 
 - 对应整改：`findings.md` 中的 `{{finding-id}}`（例如 `F-001`；不要依赖会随标题变化的 Markdown 锚点）
+- 返工责任：{{执行 session / main-direct-fix}}
 - 返工候选 head：`{{完整 PR head SHA}}`
 - `ci-gate`：{{通过 / 未通过 / 阻塞}}，{{URL}}
 - 修改内容：{{文件、符号和行为。}}
-- 验证证据：{{测试和 CI。}}
+- 验证证据：{{测试和 CI；如为 `main-direct-fix`，还要列出实时 `change-scope` 的 `scope`、`full_ci`、`frontend_ci`、`rust_ci`、`shared_ci`、`docs_checks` 以及选中/跳过的 jobs。}}
 - 尚未解决：{{无 / finding ID 与原因。}}
+
+当返工责任为 `main-direct-fix` 时，填写 `findings.md` 的接管补充记录、实际分类字段和选中/跳过 jobs；不要求执行 session 补写“执行回应”，但必须保留原始问题、责任标记和唯一写者交接记录。
