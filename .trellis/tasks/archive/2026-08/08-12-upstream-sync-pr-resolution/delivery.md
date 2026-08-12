@@ -146,8 +146,8 @@
 - 知识库与合同：长期有效的 Sync Upstream stdout 严格解析、受限查询和 `DIRTY`/`UNKNOWN`/空状态 fail-closed 合同已随功能 PR 更新到 `docs/operations/github-actions-governance.md`；`docs/README.md` 已有入口，无需重复改动。
 - PENDING 去向：无迁移或新增。`AIO-PENDING-029` 仍为 `pending`，仅涉及明确排除的 `upgrade-tui.command`；本任务不读取、执行或处置该文件。
 - 归档：main 已于 2026-08-12 运行 `python3 ./.trellis/scripts/task.py archive --no-commit 08-12-upstream-sync-pr-resolution`，任务已迁入 `.trellis/tasks/archive/2026-08/08-12-upstream-sync-pr-resolution/`，`task.json` 已更新为 `completed`；README 活动行同步转换为归档条目，随后运行 `python3 ./.trellis/scripts/task.py validate --all`。
-- worktree 与分支清理：2026-08-12 以 `git ls-remote --heads origin` 核验功能分支与 records-only closeout 分支的远端 ref 均已删除；PR #123 合并后，main 已删除 closeout worktree `/Users/knaifen/Documents/Codex/aio-coding-hub/08-12-upstream-sync-pr-resolution-closeout` 及本地 `docs/close-08-12-upstream-sync-pr-resolution` 分支。原执行 worktree `/Users/knaifen/Documents/Codex/aio-coding-hub/08-11-upstream-sync-pr-resolution` 仍保留，因其中有未跟踪 `SESSION_REMEDIATION_PLAN.md` 且来源未确认，main 不清理该文件、不删除该 worktree 或本地 `fix/upstream-sync-pr-resolution` 分支。
-- 遗留风险：仅剩未跟踪文件的归属确认与相应清理；不影响已合并功能或当前 CI 合同。
+- worktree 与分支清理：2026-08-12 以 `git ls-remote --heads origin` 核验功能分支与 records-only closeout 分支的远端 ref 均已删除；PR #123 合并后，main 已删除 closeout worktree `/Users/knaifen/Documents/Codex/aio-coding-hub/08-12-upstream-sync-pr-resolution-closeout` 及本地 `docs/close-08-12-upstream-sync-pr-resolution` 分支。用户随后明确授权清理原执行 worktree；main 已删除其中未跟踪且不受 Git 保护的 `SESSION_REMEDIATION_PLAN.md`、原执行 worktree `/Users/knaifen/Documents/Codex/aio-coding-hub/08-11-upstream-sync-pr-resolution` 和本地 `fix/upstream-sync-pr-resolution` 分支。
+- 遗留风险：无。功能、归档和执行 worktree 清理均已完成。
 
 ## 返工记录
 
