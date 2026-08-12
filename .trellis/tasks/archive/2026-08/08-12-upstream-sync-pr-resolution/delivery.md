@@ -1,11 +1,11 @@
 # 交付报告：修复 Sync Upstream PR 编号解析与冲突收敛
 
-> 本文件记录阶段 B 同步、返工整改和当前冻结交付候选。旧阶段 B merge commit 仅作历史快照；main 的验收记录保留在下方，当前候选以 PR 实时 head 和对应检查为准。
+> 本文件记录阶段 B 同步、返工整改、main 验收和功能 PR 合并事实。旧阶段 B merge commit 仅作历史快照；功能 PR 已合并，当前记录进入 records-only 收尾与归档。
 
 ## 交付状态
 
-- 结果：阶段 B 的主线同步、唯一 README 冲突收敛、F-001/F-002 记录整改和生命周期更新已完成；交付候选的自动检查已通过，待 main 验收。
-- PR：[修复 #114](https://github.com/KNaiFen/aio-coding-hub/pull/114)（OPEN，Ready for review）
+- 结果：完成。阶段 B 的主线同步、唯一 README 冲突收敛、F-001/F-002 记录整改和生命周期更新已完成；main Round 2 验收通过，功能 PR 已合并，任务已进入 records-only 归档收尾。
+- PR：[修复 #114](https://github.com/KNaiFen/aio-coding-hub/pull/114)（MERGED）
 - 分支：`fix/upstream-sync-pr-resolution`
 - 历史 PR base：`main` @ `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`；阶段 B 实时 PR base：`main` @ `366b92fd8429f5e747d77a632cbd0299522065de`
 - 归属迁移前的远端 head 快照：`ed4a7527f75ea09ff55517afa3789babd0f922a6`
@@ -16,7 +16,9 @@
 - 其他检查：`pr-title` 通过，[run 31578042866](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31578042866)；CodeQL JS/TS 与 Rust 通过，[run 31578042790](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31578042790)；frontend、rust、change-scope、docs-contract、support-contract 均通过，candidate-plan、manual-dispatch-guard 和 release-candidate jobs 按范围跳过（均绑定上述交付候选）。
 - #113 回归：[Sync Upstream run 31508611251](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31508611251) 按预期失败，输出 PR #113 的 `DIRTY` 状态并要求人工冲突处理。
 - 交付时间：2026-08-12（交付候选 `8005a625…` 的检查已终态成功）。
-- 执行 session：阶段 B 和 F-001/F-002 整改已完成；PR 已 Ready for review；执行 session 已暂停，main 负责验收、合并和收尾。
+- 接受候选 head：`fdaeee98b5cf28593885eb9fbce86a080408757e`；该纯记录 head 的 `ci-gate` run `31584126489`（job `94079397690`）、`pr-title` run `31584126488` 和 CodeQL run `31584126486` 均成功。
+- 功能 PR merge commit：`683b8c8fdb802303d2fb0b79abe2d63197bb8a4b`（2026-08-12，以 squash merge 进入 `main`）。
+- 执行 session：阶段 B 和 F-001/F-002 整改已完成；执行 session 已暂停，main 已完成验收和功能 PR 合并，继续负责 records-only 收尾与归档。
 
 ## 阶段 B 施工记录
 
@@ -52,7 +54,7 @@
 | AC-04 不进入阶段 B | 阶段 A 交付项 | 阶段 A 未运行 `task.py start`；阶段 B 已按授权只推送本任务分支 |
 | AC-05 主线同步与 README 冲突 | 通过 | merge commit `7589a3a6...` 的第二父为 `origin/main@366b92fd...`；唯一冲突按索引规则收敛 |
 | AC-06 任务索引归属 | 通过 | `.trellis/tasks/README.md` 同时保留 08-10/08-11 归档和 08-12 活动行 |
-| AC-07 同步候选与云端证据 | 通过，待 main 验收 | 交付候选 `8005a625faf99d74f053947b9f3d77ac31a02838`；`ci-gate` run 31578042883、`pr-title` run 31578042866、CodeQL run 31578042790 及相关检查均绑定该 head |
+| AC-07 同步候选与云端证据 | 通过，main 已验收并合并 | 交付候选 `8005a625faf99d74f053947b9f3d77ac31a02838` 及纯记录验收 head `fdaeee98b5cf28593885eb9fbce86a080408757e`；两层 head 的对应 `ci-gate`、`pr-title`、CodeQL 和相关检查均成功 |
 | AC-08 工作流边界和本地合同 | 通过 | 下列 Node 合同/selftest、Trellis 验证与差异检查均通过；未改 workflow/policy/selftest |
 
 `cdc427b9c6b386ca6106a371880710155704a81e` / run `31506469918` 仅是历史候选背景，不能作为本任务的最终交付候选或最终 CI 证据。
@@ -72,7 +74,7 @@
 
 ### GitHub CI 与编译
 
-- 交付候选 `8005a625faf99d74f053947b9f3d77ac31a02838` 的自动检查已经通过：`ci-gate` / `pr-title` / CodeQL 与相关 CI job 的 run、head 和结论如本文件顶部及阶段 B 记录所述。未手动触发工作流。
+- 交付候选 `8005a625faf99d74f053947b9f3d77ac31a02838` 与最终验收记录 head `fdaeee98b5cf28593885eb9fbce86a080408757e` 的自动检查均已通过；最终 `ci-gate` 为 run `31584126489` / job `94079397690`，未手动触发工作流。功能 PR 已以 merge commit `683b8c8f...` 进入 `main`。
 
 ### 人工验证
 
@@ -84,11 +86,11 @@
 - 数据与配置：无。
 - 安全与隐私：不读取或记录 secret、App 私钥或 token；保持 no-push/no-merge/no-auto-approve 边界。
 - 回滚方式：回退任务归属分离提交可恢复原有记录布局，但不应把 #114 重新归属到旧任务。
-- 剩余风险：无自动检查阻塞；main 仍需按交付候选和 PR 实时状态审查需求、范围与本轮整改。
+- 剩余风险：无自动检查或产品范围阻塞；原执行 worktree 存在未跟踪且来源未确认的 `SESSION_REMEDIATION_PLAN.md`，main 未读取、暂存、编辑或删除，因此该 worktree 和任务分支清理暂缓并需后续归属确认。
 
 ## 未完成项与阻塞
 
-- main 验收、合并和收尾仍未进行；任务保持 `in_progress`，执行 session 已暂停。
+- main Round 2 验收、功能 PR 合并和 Trellis 归档已完成；records-only 收尾 PR 合并与可安全执行的 worktree 清理仍待完成。
 
 ## 建议 main 重点审查
 
@@ -134,7 +136,18 @@
 
 ## main 收尾
 
-> 仅 main 填写。任务保持活动，未合并、未归档、未删除 worktree 或分支。
+> 仅 main 填写。功能 PR 已合并，Trellis 任务已归档；records-only 收尾 PR 合并前，归档结果尚未进入 `main`。
+
+- 最终结果：完成。
+- 功能 PR 与验收候选：[PR #114](https://github.com/KNaiFen/aio-coding-hub/pull/114)；main Round 2 接受候选为 `fdaeee98b5cf28593885eb9fbce86a080408757e`，其父级执行整改交付候选为 `8005a625faf99d74f053947b9f3d77ac31a02838`。
+- main 合并提交：`683b8c8fdb802303d2fb0b79abe2d63197bb8a4b`，2026-08-12 squash merge 到 `main`。
+- 合并前 CI：最终验收 head 的 required `ci-gate` run `31584126489` / job `94079397690`、`pr-title` run `31584126488`、CodeQL run `31584126486` 及 frontend、rust、change-scope、docs-contract、support-contract 均成功；候选/release 条件任务按范围跳过。
+- 收尾记录 PR：[PR #123](https://github.com/KNaiFen/aio-coding-hub/pull/123) 承载 records-only closeout；初始归档候选为 `01fad4fbed526d28496ace3bd232c69a23681469`，其 `ci-gate` run `31587130217` / job `94083493507`、`pr-title` run `31587130190`、CodeQL run `31587130213` 与 change-scope 均成功。写入本条证据产生的最终纯记录 head 仍须重新通过自动检查并在合并前冻结复核。
+- 知识库与合同：长期有效的 Sync Upstream stdout 严格解析、受限查询和 `DIRTY`/`UNKNOWN`/空状态 fail-closed 合同已随功能 PR 更新到 `docs/operations/github-actions-governance.md`；`docs/README.md` 已有入口，无需重复改动。
+- PENDING 去向：无迁移或新增。`AIO-PENDING-029` 仍为 `pending`，仅涉及明确排除的 `upgrade-tui.command`；本任务不读取、执行或处置该文件。
+- 归档：main 已于 2026-08-12 运行 `python3 ./.trellis/scripts/task.py archive --no-commit 08-12-upstream-sync-pr-resolution`，任务已迁入 `.trellis/tasks/archive/2026-08/08-12-upstream-sync-pr-resolution/`，`task.json` 已更新为 `completed`；README 活动行同步转换为归档条目，随后运行 `python3 ./.trellis/scripts/task.py validate --all`。
+- worktree 与分支清理：2026-08-12 以 `git ls-remote --heads origin fix/upstream-sync-pr-resolution` 核验功能分支远端 ref 已删除；原执行 worktree `/Users/knaifen/Documents/Codex/aio-coding-hub/08-11-upstream-sync-pr-resolution` 仍保留，因其中有未跟踪 `SESSION_REMEDIATION_PLAN.md` 且来源未确认，main 不清理该文件、不删除该 worktree 或本地分支。records-only closeout worktree 在其 PR 合并后清理。
+- 遗留风险：仅剩未跟踪文件的归属确认与相应清理；不影响已合并功能或当前 CI 合同。
 
 ## 返工记录
 

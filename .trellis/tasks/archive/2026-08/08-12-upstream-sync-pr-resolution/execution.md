@@ -1,10 +1,10 @@
 # 施工入口：修复 Sync Upstream PR 编号解析与冲突收敛
 
-> 阶段 A、阶段 B 与 F-001/F-002 整改均已完成并推送；main Round 2 验收通过。执行 session 保持暂停，待本次纯记录提交的自动 CI 通过后由 main 合并和收尾。
+> 本文件是已完成任务的历史施工入口，不再授权恢复施工。阶段 A、阶段 B 与 F-001/F-002 整改均已完成，main Round 2 验收通过，功能 PR 已合并；后续仅由 main 完成 records-only 归档收尾。
 
 ## 快速定位
 
-- 任务目录：`.trellis/tasks/08-12-upstream-sync-pr-resolution/`
+- 归档任务目录：`.trellis/tasks/archive/2026-08/08-12-upstream-sync-pr-resolution/`
 - Worktree：`/Users/knaifen/Documents/Codex/aio-coding-hub/08-11-upstream-sync-pr-resolution`
 - 分支：`fix/upstream-sync-pr-resolution`
 - 历史 PR base：`main` @ `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`
@@ -12,11 +12,11 @@
 - 源规划提交：`2016c25ef7cb6ae524f3f2b4e86996ef923981a3`
 - 实施授权：2026-08-12 阶段 B 已获 main 授权，范围为主线同步、README 冲突收敛、交付和 CI 重绑。
 - PR 目标：`main`
-- PR：[PR #114](https://github.com/KNaiFen/aio-coding-hub/pull/114)（Ready for review，OPEN）
+- PR：[PR #114](https://github.com/KNaiFen/aio-coding-hub/pull/114)（MERGED，merge commit `683b8c8fdb802303d2fb0b79abe2d63197bb8a4b`）
 - 前序 PR：[#108](https://github.com/KNaiFen/aio-coding-hub/pull/108) 已合并，merge commit `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`。
 - PENDING 审阅：`AIO-PENDING-029` 明确排除，禁止触碰 `upgrade-tui.command`。
 - 当前唯一写者：执行 session 已暂停；main 负责验收、合并和收尾。
-- 当前阶段：main Round 2 验收通过，待验收记录提交的自动 CI 与合并前复核。
+- 当前阶段：功能 PR 已合并，任务已归档；main 正在完成 records-only 收尾。
 
 ## 阅读顺序
 
@@ -40,9 +40,11 @@
 - 不得修改、读取、执行、移动、删除或暂存 `upgrade-tui.command`，也不得暂存、编辑、删除或提交 `SESSION_REMEDIATION_PLAN.md`。
 - 不得运行 pnpm、Cargo、依赖安装、构建、格式化、Rust tests 或本地服务；不得合并 PR、开启 auto-merge、归档、删除 worktree/分支或推送 `main`。
 
-## 阶段 B 施工指令
+## 阶段 B 历史施工指令
 
-0. 当前状态：阶段 B 与 F-001/F-002 整改已完成；PR 已 Ready for review；执行 session 已暂停。后续验收、合并和收尾由 main 负责。
+> 以下步骤仅保留当时的执行约束与证据，不是当前可恢复的施工指令。
+
+0. 终态：阶段 B 与 F-001/F-002 整改已完成，PR #114 已由 main 验收并合并；执行 session 保持暂停。
 1. 确认当前目录和分支分别为本 worktree 与 `fix/upstream-sync-pr-resolution`。`git status --short` 只允许出现既有未跟踪的 `SESSION_REMEDIATION_PLAN.md`；任何其他改动、rebase/merge 进行中状态或无法归属的文件都必须停止并报告 main。
 2. 执行 `git fetch origin`，重新查询 PR #114 的 head、base、Draft、merge state 和检查。历史快照为 head `6316204274eeb6db9332b4eef0e5f182c5c31ca7`、PR base `82820b2e...`；它们仅供比对，实时结果优先。
 3. 确认没有上述阻塞后，运行 `python3 ./.trellis/scripts/task.py start .trellis/tasks/08-12-upstream-sync-pr-resolution`，使 Trellis 生命周期进入 `in_progress`。随后本执行 session 成为唯一写者。
