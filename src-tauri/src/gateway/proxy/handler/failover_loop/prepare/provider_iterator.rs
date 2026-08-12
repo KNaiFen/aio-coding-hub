@@ -369,6 +369,26 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
         );
     }
 
+    if let Some(next_body) = grok_chat_usage::ensure_stream_usage_option(
+        input.cli_key.as_str(),
+        upstream_forwarded_path.as_str(),
+        &upstream_body_bytes,
+    ) {
+        upstream_body_bytes = next_body;
+        strip_request_content_encoding = true;
+        response_fixer::push_special_setting(
+            ctx.special_settings,
+            serde_json::json!({
+                "type": "grok_chat_stream_usage",
+                "scope": "request",
+                "hit": true,
+                "providerId": provider_id,
+                "providerName": provider_name_base,
+                "includeUsage": true,
+            }),
+        );
+    }
+
     let request_body_mutated_before_attempt = input.request_body_state.is_mutated()
         || upstream_body_bytes != input.request_body_state.decoded_clone()
         || strip_request_content_encoding;

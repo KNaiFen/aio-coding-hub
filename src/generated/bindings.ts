@@ -2678,6 +2678,7 @@ export type CodexModelCatalogState = {
   models: CodexModelCapability[];
 };
 export type CodexModelCatalogStatus = "ready" | "degraded" | "unavailable";
+export type CodexPriorityBillingSource = "requested" | "actual";
 export type CodexReasoningEffortOption = { reasoning_effort: string; description: string | null };
 export type CodexSessionIdCompletionUpdate = { enableCodexSessionIdCompletion: boolean };
 export type CommandContribution = { command: string; title: string; category?: string | null };
@@ -2851,8 +2852,12 @@ export type GatewayProviderCircuitStatus = {
 export type GatewayRectifierSettingsUpdate = {
   verboseProviderError: boolean;
   interceptAnthropicWarmupRequests: boolean;
+  enableThinkingEffortConflictRectifier: boolean;
   enableThinkingSignatureRectifier: boolean;
   enableThinkingBudgetRectifier: boolean;
+  enableGeminiFunctionIdRectifier: boolean;
+  enableResponseInputRectifier: boolean;
+  codexPriorityBillingSource: CodexPriorityBillingSource;
   enableBillingHeaderRectifier: boolean;
   enableClaudeMetadataUserIdInjection: boolean;
   enableResponseFixer: boolean;
@@ -3939,8 +3944,12 @@ export type SettingsUpdate = {
   upstreamStreamIdleTimeoutSeconds: number | null;
   upstreamRequestTimeoutNonStreamingSeconds: number | null;
   interceptAnthropicWarmupRequests: boolean | null;
+  enableThinkingEffortConflictRectifier: boolean | null;
   enableThinkingSignatureRectifier: boolean | null;
   enableThinkingBudgetRectifier: boolean | null;
+  enableGeminiFunctionIdRectifier: boolean | null;
+  enableResponseInputRectifier: boolean | null;
+  codexPriorityBillingSource: CodexPriorityBillingSource | null;
   enableBillingHeaderRectifier: boolean | null;
   enableClaudeMetadataUserIdInjection: boolean | null;
   enableCacheAnomalyMonitor: boolean | null;
@@ -4016,8 +4025,12 @@ export type SettingsView = {
   enable_circuit_breaker_notice: boolean;
   verbose_provider_error: boolean;
   intercept_anthropic_warmup_requests: boolean;
+  enable_thinking_effort_conflict_rectifier: boolean;
   enable_thinking_signature_rectifier: boolean;
   enable_thinking_budget_rectifier: boolean;
+  enable_gemini_function_id_rectifier: boolean;
+  enable_response_input_rectifier: boolean;
+  codex_priority_billing_source: CodexPriorityBillingSource;
   enable_billing_header_rectifier: boolean;
   enable_codex_session_id_completion: boolean;
   enable_claude_metadata_user_id_injection: boolean;

@@ -194,10 +194,15 @@ where
             FirstChunkProbe::Skipped => {}
         }
 
+        let fake_200_profile = crate::gateway::proxy::Fake200Profile::for_request(
+            common.cli_key.as_str(),
+            common.forwarded_path.as_str(),
+        );
         if upstream_first_byte_timeout.is_some()
             && first_chunk.is_none()
             && initial_first_byte_ms.is_none()
             && probe_is_empty_event_stream
+            && !fake_200_profile.detects_empty_stream()
         {
             let error_code = GatewayErrorCode::StreamError.as_str();
             let decision = if retry_index < max_attempts_per_provider {
@@ -279,6 +284,7 @@ where
 
         codex_service_tier::append_result_if_detected(
             common.cli_key.as_str(),
+            common.codex_priority_billing_source,
             common.introspection_body.as_slice(),
             None,
             &common.special_settings,

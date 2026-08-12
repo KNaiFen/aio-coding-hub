@@ -198,16 +198,24 @@ where
             loop_state: loop_state.reborrow(),
             enable_thinking_signature_rectifier: input.enable_thinking_signature_rectifier,
             enable_thinking_budget_rectifier: input.enable_thinking_budget_rectifier,
+            enable_thinking_effort_conflict_rectifier: input
+                .enable_thinking_effort_conflict_rectifier,
+            enable_gemini_function_id_rectifier: input.enable_gemini_function_id_rectifier,
             resp,
             upstream: upstream_error::UpstreamRequestState {
                 upstream_body_bytes: &mut prepared.upstream_body_bytes,
                 strip_request_content_encoding: &mut prepared.strip_request_content_encoding,
                 codex_previous_response_id_rectifier_retried: &mut retry_state
                     .codex_previous_response_id_rectifier_retried,
+                thinking_effort_conflict_rectifier_retried: &mut retry_state
+                    .thinking_effort_conflict_rectifier_retried,
                 thinking_signature_rectifier_retried: &mut retry_state
                     .thinking_signature_rectifier_retried,
                 thinking_budget_rectifier_retried: &mut retry_state
                     .thinking_budget_rectifier_retried,
+                gemini_function_id_rectifier_retried: &mut retry_state
+                    .gemini_function_id_rectifier_retried,
+                additional_repair_retry_slots: &mut retry_state.additional_repair_retry_slots,
             },
         },
     )

@@ -76,6 +76,53 @@ PRAGMA user_version = 37;
 }
 
 #[test]
+fn migrate_v39_to_v40_resets_undecodable_model_policies_to_default() {
+    let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
+    conn.execute_batch(
+        r#"
+CREATE TABLE providers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  cli_key TEXT NOT NULL,
+  name TEXT NOT NULL,
+  model_policy_json TEXT NULL
+);
+INSERT INTO providers(cli_key, name, model_policy_json) VALUES
+  ('codex', 'draft-shape', '{"version":1,"mode":"all","rules":[]}'),
+  ('codex', 'valid-policy', '{"version":1,"mode":"excluded","modelPatterns":["gpt-5.6-luna"],"mappings":[]}'),
+  ('claude', 'legacy', NULL),
+  ('gemini', 'missing', NULL);
+PRAGMA user_version = 39;
+        "#,
+    )
+    .expect("insert v39 providers");
+
+    v39_to_v40::migrate_v39_to_v40(&mut conn).expect("migrate v39->v40");
+
+    fn policy(conn: &Connection, name: &str) -> Option<String> {
+        conn.query_row(
+            "SELECT model_policy_json FROM providers WHERE name = ?1",
+            [name],
+            |row| row.get(0),
+        )
+        .expect("read policy")
+    }
+
+    // Pre-release draft shape and non-claude NULL both reset to the default.
+    let default_json = r#"{"version":1,"mode":"all","modelPatterns":[],"mappings":[]}"#;
+    assert_eq!(policy(&conn, "draft-shape").as_deref(), Some(default_json));
+    assert_eq!(policy(&conn, "missing").as_deref(), Some(default_json));
+    // A valid policy is untouched; claude NULL keeps its legacy-mapping meaning.
+    assert_eq!(
+        policy(&conn, "valid-policy").as_deref(),
+        Some(r#"{"version":1,"mode":"excluded","modelPatterns":["gpt-5.6-luna"],"mappings":[]}"#)
+    );
+    assert_eq!(policy(&conn, "legacy"), None);
+
+    v39_to_v40::migrate_v39_to_v40(&mut conn).expect("migrate v39->v40 twice");
+    assert_eq!(policy(&conn, "legacy"), None);
+}
+
+#[test]
 fn migrate_v38_to_v39_adds_and_backfills_model_prices_vendor() {
     let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
     conn.execute_batch(

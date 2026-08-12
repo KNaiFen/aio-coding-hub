@@ -15,8 +15,11 @@ pub(super) struct RetryLoopState {
     pub(super) claude_api_key_bearer_fallback: bool,
     pub(super) oauth_reactive_refreshed_once: bool,
     pub(super) codex_previous_response_id_rectifier_retried: bool,
+    pub(super) thinking_effort_conflict_rectifier_retried: bool,
     pub(super) thinking_signature_rectifier_retried: bool,
     pub(super) thinking_budget_rectifier_retried: bool,
+    pub(super) gemini_function_id_rectifier_retried: bool,
+    pub(super) additional_repair_retry_slots: u32,
 }
 
 impl RetryLoopState {
@@ -25,10 +28,30 @@ impl RetryLoopState {
             claude_api_key_bearer_fallback: false,
             oauth_reactive_refreshed_once: false,
             codex_previous_response_id_rectifier_retried: false,
+            thinking_effort_conflict_rectifier_retried: false,
             thinking_signature_rectifier_retried: false,
             thinking_budget_rectifier_retried: false,
+            gemini_function_id_rectifier_retried: false,
+            additional_repair_retry_slots: 0,
         }
     }
+
+    pub(super) fn effective_attempt_limit(&self, base_limit: u32) -> u32 {
+        base_limit.saturating_add(self.additional_repair_retry_slots)
+    }
+}
+
+pub(super) fn grant_repair_retry_slot_if_needed(
+    additional_repair_retry_slots: &mut u32,
+    retry_index: u32,
+    base_limit: u32,
+) -> bool {
+    let effective_limit = base_limit.saturating_add(*additional_repair_retry_slots);
+    if retry_index < effective_limit {
+        return false;
+    }
+    *additional_repair_retry_slots = additional_repair_retry_slots.saturating_add(1);
+    true
 }
 
 /// Timing captured at the start of an attempt, before the upstream send.
@@ -328,6 +351,30 @@ fn emit_upstream_attempt_fingerprint<R: tauri::Runtime>(
             fingerprint.debug,
         )
     });
+
+    if input.cli_key == "claude" {
+        if let Some(fingerprint_debug) =
+            crate::gateway::claude_client_fingerprint::compute(&input.forwarded_path, headers, body)
+        {
+            tracing::debug!(
+                trace_id = %input.trace_id,
+                provider_id = prepared.provider_id,
+                retry_index,
+                claude_client_fingerprint = %fingerprint_debug,
+                "computed final Claude client fingerprint"
+            );
+            emit_gateway_debug_log_lazy(&ctx.state.app, || {
+                format!(
+                    "[CLAUDE_CLIENT_FP] trace_id={} provider={} (id={}) retry={} {}",
+                    input.trace_id,
+                    prepared.provider_name_base,
+                    prepared.provider_id,
+                    retry_index,
+                    fingerprint_debug,
+                )
+            });
+        }
+    }
 }
 
 async fn handle_url_build_failure<R: tauri::Runtime>(

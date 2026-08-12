@@ -28,6 +28,8 @@ mod codex_service_tier;
 mod codex_session_id_completion;
 #[path = "prepare/cx2cc_preparation.rs"]
 mod cx2cc_preparation;
+#[path = "prepare/grok_chat_usage.rs"]
+mod grok_chat_usage;
 #[path = "prepare/oauth.rs"]
 mod oauth;
 #[path = "prepare/provider_checks.rs"]
@@ -198,6 +200,7 @@ where
         upstream_request_timeout_non_streaming: input.upstream_request_timeout_non_streaming,
         verbose_provider_error: input.verbose_provider_error,
         max_attempts_per_provider: input.max_attempts_per_provider,
+        codex_priority_billing_source: input.codex_priority_billing_source,
         enable_response_fixer: input.enable_response_fixer,
         response_fixer_stream_config: input.response_fixer_stream_config,
         response_fixer_non_stream_config: input.response_fixer_non_stream_config,
