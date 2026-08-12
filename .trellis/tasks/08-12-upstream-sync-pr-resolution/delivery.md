@@ -108,6 +108,17 @@
 
 > 仅 main 填写。
 
+### Round 1
+
+- 结论：需要整改。
+- 审查范围：阶段 B 同步提交、README 冲突收敛、任务归属与生命周期记录、最新 PR diff、workflow/policy 合同和冻结候选的云端检查。
+- 审查候选 head：`880196484bb291754b783d8cd7de3b5ca588f24e`（PR base `366b92fd8429f5e747d77a632cbd0299522065de`）。
+- `ci-gate`：通过，[run 31544998029](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31544998029)；同一 head 的 `pr-title` [run 31544998027](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31544998027)、CodeQL [run 31544998030](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31544998030)、frontend、rust、合同检查均成功。
+- 通过项：`7589a3a6...` 的第二父正确为 `origin/main@366b92fd...`；唯一 README 冲突保留 08-10/08-11 归档与 08-12 活动行；本轮同步未新增 workflow/policy 语义，既有 stdout 严格解析与 `DIRTY`/`UNKNOWN`/空 merge state fail-closed 合同保持有效。
+- 未通过项：`delivery.md` 仍将最终证据绑定到旧代码候选 `7589a3a6...`，并明确 records-only head 待重核验；活动索引和 `execution.md` 仍写 Draft、阶段 B 开工前及 main 交接中状态。详细可执行整改见 `findings.md` 的 F-001、F-002。
+- 接受的偏移或风险：无。代码和 CI 绿色不替代最终交付记录与生命周期事实的同步。
+- 日期：2026-08-12。
+
 ## main 收尾
 
 > 仅 main 填写。任务保持活动，未合并、未归档、未删除 worktree 或分支。
