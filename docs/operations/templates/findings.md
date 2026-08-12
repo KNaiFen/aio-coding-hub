@@ -22,6 +22,8 @@
 
 按严重性排序。顶部清单以每项最新“main 复验”状态为准，finding ID 永不复用；纯建议写入“建议项”，不要放进必须整改清单。
 
+每个 finding 都必须填写“返工责任”。若责任为 `main-direct-fix`，还必须记录接管时间、接管原因、修改范围、预期与实际 `change-scope` 字段（`scope`、`full_ci`、`frontend_ci`、`rust_ci`、`shared_ci`、`docs_checks`）、选中/跳过的 jobs、保持不变的行为，以及实际 scope 选中长任务时交回执行 session 的处理。
+
 ## Round {{N}}
 
 - 本轮整改候选 head：`{{完整 PR head SHA；首次写验收时的 head}}`
@@ -31,6 +33,7 @@
 ### F-001：{{问题标题}}
 
 - 严重程度：{{阻塞 / 重要 / 一般}}
+- 返工责任：{{执行 session / main-direct-fix}}
 - 对应要求：{{AC、PRD、设计决定、现行合同或质量风险}}
 - 证据：`path/to/file:line`、`Symbol`、失败测试、CI 日志或复现步骤
 - 当前行为：{{准确描述实际行为。}}
@@ -57,9 +60,18 @@
 - 结论与证据：
 - 日期：
 
+**main-direct-fix 补充记录（仅责任为 `main-direct-fix` 时填写）**
+
+- 接管时间、冻结 head、工作树状态和未提交内容归属：
+- 接管原因与修改范围：
+- 预期/实际 `change-scope` 字段（`scope`、`full_ci`、`frontend_ci`、`rust_ci`、`shared_ci`、`docs_checks`）：
+- 选中/跳过的 jobs：
+- 若实际 scope 选中长任务，交回执行 session 的时间、原因、最后安全 head、恢复条件和通知证据：
+
 ### F-002：{{问题标题}}
 
 - 严重程度：
+- 返工责任：{{执行 session / main-direct-fix}}
 - 对应要求：
 - 证据：
 - 当前行为：
@@ -83,6 +95,14 @@
 - `ci-gate`：
 - 结论与证据：
 - 日期：
+
+**main-direct-fix 补充记录（仅责任为 `main-direct-fix` 时填写）**
+
+- 接管时间、冻结 head、工作树状态和未提交内容归属：
+- 接管原因与修改范围：
+- 预期/实际 `change-scope` 字段（`scope`、`full_ci`、`frontend_ci`、`rust_ci`、`shared_ci`、`docs_checks`）：
+- 选中/跳过的 jobs：
+- 若实际 scope 选中长任务，交回执行 session 的时间、原因、最后安全 head、恢复条件和通知证据：
 
 ## CI、编译或环境问题
 
