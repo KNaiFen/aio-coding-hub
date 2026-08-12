@@ -1,6 +1,6 @@
 # 施工入口：修复 Sync Upstream PR 编号解析与冲突收敛
 
-> 阶段 A 已完成。main 于 2026-08-12 授权阶段 B。执行 session 先解决唯一预期的 `.trellis/tasks/README.md` 冲突并推送新 head，随后才等待自动检查。
+> 阶段 A 已完成。阶段 B 已完成并推送；PR 已 Ready for review。本轮 F-001/F-002 最终交付绑定完成后，执行 session 暂停，待 main 验收、合并和收尾。
 
 ## 快速定位
 
@@ -8,15 +8,15 @@
 - Worktree：`/Users/knaifen/Documents/Codex/aio-coding-hub/08-11-upstream-sync-pr-resolution`
 - 分支：`fix/upstream-sync-pr-resolution`
 - 历史 PR base：`main` @ `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`
-- 当前同步目标快照：`origin/main` @ `9aa8e4ab8e6417be4816b0811178c3f401e34171`；开始前必须重新 `git fetch origin`，不得机械复用此值
+- 阶段 B 同步目标：`origin/main` @ `366b92fd8429f5e747d77a632cbd0299522065de`；仅作实际同步来源记录
 - 源规划提交：`2016c25ef7cb6ae524f3f2b4e86996ef923981a3`
 - 实施授权：2026-08-12 阶段 B 已获 main 授权，范围为主线同步、README 冲突收敛、交付和 CI 重绑。
 - PR 目标：`main`
-- PR：[PR #114](https://github.com/KNaiFen/aio-coding-hub/pull/114)（Draft）
+- PR：[PR #114](https://github.com/KNaiFen/aio-coding-hub/pull/114)（Ready for review，OPEN）
 - 前序 PR：[#108](https://github.com/KNaiFen/aio-coding-hub/pull/108) 已合并，merge commit `82820b2ea10ec6028d1fcb8d130a993bfae39b6d`。
 - PENDING 审阅：`AIO-PENDING-029` 明确排除，禁止触碰 `upgrade-tui.command`。
-- 当前唯一写者：main（交接中）；main 发送启动交接包后，恰好一个执行 session 成为唯一写者。
-- 当前阶段：阶段 A 已完成；阶段 B 已授权，先解决唯一 README 冲突以恢复新候选的自动 CI。
+- 当前唯一写者：整改期间为执行 session；本轮最终交付绑定完成后暂停，main 负责验收、合并和收尾。
+- 当前阶段：阶段 B 已完成，待 main 验收。
 
 ## 阅读顺序
 
@@ -42,7 +42,7 @@
 
 ## 阶段 B 施工指令
 
-0. 开始条件：收到 main 明确发送的启动交接包，其中包含当前完整 PR head、本 worktree 的绝对路径和唯一 README 冲突的施工条件。先同步主线并解决该冲突，再等待新 head 的自动 CI；不得手动 dispatch、推空提交或自行修改 CI 触发。
+0. 当前状态：阶段 B 已完成；PR 已 Ready for review；仅处理 F-001/F-002 的最终交付绑定，完成后执行 session 暂停。后续验收、合并和收尾由 main 负责。
 1. 确认当前目录和分支分别为本 worktree 与 `fix/upstream-sync-pr-resolution`。`git status --short` 只允许出现既有未跟踪的 `SESSION_REMEDIATION_PLAN.md`；任何其他改动、rebase/merge 进行中状态或无法归属的文件都必须停止并报告 main。
 2. 执行 `git fetch origin`，重新查询 PR #114 的 head、base、Draft、merge state 和检查。历史快照为 head `6316204274eeb6db9332b4eef0e5f182c5c31ca7`、PR base `82820b2e...`；它们仅供比对，实时结果优先。
 3. 确认没有上述阻塞后，运行 `python3 ./.trellis/scripts/task.py start .trellis/tasks/08-12-upstream-sync-pr-resolution`，使 Trellis 生命周期进入 `in_progress`。随后本执行 session 成为唯一写者。
@@ -50,4 +50,4 @@
 5. 不修改 `.github/workflows/sync-upstream.yml` 或 policy/selftest 的既有行为，除非同步冲突迫使改动且 main 先确认。始终保持新建 PR stdout 严格解析、`DIRTY`/`UNKNOWN`/空状态 fail-closed，以及无 direct push、merge、approval 的边界；不得处理 #113。
 6. 在提交前运行允许的验证：`node --check scripts/check-sync-upstream-policy.mjs`、`node --check scripts/check-sync-upstream-policy.selftest.mjs`、`node scripts/check-sync-upstream-policy.mjs`、`node scripts/check-sync-upstream-policy.selftest.mjs`、`python3 ./.trellis/scripts/task.py validate 08-12-upstream-sync-pr-resolution`、`git diff --check`，以及 `git diff --name-only origin/main...HEAD -- .trellis/tasks/08-10-github-actions-governance`（必须无输出）。不得运行 pnpm、Cargo、构建、格式化、Rust tests、服务或手动 workflow dispatch。
 7. 仅提交阶段 B 的同步、Trellis 生命周期和交付记录，推送 `fix/upstream-sync-pr-resolution`。等待自动 PR CI，不得开启 auto-merge、执行 `gh pr merge`、推送 `main`、归档或删除 worktree/分支。
-8. CI 完成后更新 `delivery.md`：说明实际同步结果、冲突处理、最新可验证候选、对应 `ci-gate`/`pr-title`/CodeQL、#113 fail-closed 证据和未执行项。将 PR 标为 Ready for review 后停止写入，向 main 报告完整 head SHA、检查链接、变更文件和最终 `git status`。
+8. 阶段 B 施工已完成；F-001/F-002 整改完成时，`delivery.md` 绑定最终推送 head、PR base、对应 `ci-gate`/`pr-title`/CodeQL 和相关检查。PR 保持 Ready for review，执行 session 随即暂停，main 负责验收、合并和收尾。
