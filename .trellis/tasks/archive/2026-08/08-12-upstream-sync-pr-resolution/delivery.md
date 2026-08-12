@@ -142,7 +142,7 @@
 - 功能 PR 与验收候选：[PR #114](https://github.com/KNaiFen/aio-coding-hub/pull/114)；main Round 2 接受候选为 `fdaeee98b5cf28593885eb9fbce86a080408757e`，其父级执行整改交付候选为 `8005a625faf99d74f053947b9f3d77ac31a02838`。
 - main 合并提交：`683b8c8fdb802303d2fb0b79abe2d63197bb8a4b`，2026-08-12 squash merge 到 `main`。
 - 合并前 CI：最终验收 head 的 required `ci-gate` run `31584126489` / job `94079397690`、`pr-title` run `31584126488`、CodeQL run `31584126486` 及 frontend、rust、change-scope、docs-contract、support-contract 均成功；候选/release 条件任务按范围跳过。
-- 收尾记录 PR：本归档分支承载 records-only closeout；PR 创建后在本节补记 URL 与冻结候选，并以其最新 head 的自动 `ci-gate`、`pr-title` 和相关合同检查为准。
+- 收尾记录 PR：[PR #123](https://github.com/KNaiFen/aio-coding-hub/pull/123) 承载 records-only closeout；初始归档候选为 `01fad4fbed526d28496ace3bd232c69a23681469`，其 `ci-gate` run `31587130217` / job `94083493507`、`pr-title` run `31587130190`、CodeQL run `31587130213` 与 change-scope 均成功。写入本条证据产生的最终纯记录 head 仍须重新通过自动检查并在合并前冻结复核。
 - 知识库与合同：长期有效的 Sync Upstream stdout 严格解析、受限查询和 `DIRTY`/`UNKNOWN`/空状态 fail-closed 合同已随功能 PR 更新到 `docs/operations/github-actions-governance.md`；`docs/README.md` 已有入口，无需重复改动。
 - PENDING 去向：无迁移或新增。`AIO-PENDING-029` 仍为 `pending`，仅涉及明确排除的 `upgrade-tui.command`；本任务不读取、执行或处置该文件。
 - 归档：main 已于 2026-08-12 运行 `python3 ./.trellis/scripts/task.py archive --no-commit 08-12-upstream-sync-pr-resolution`，任务已迁入 `.trellis/tasks/archive/2026-08/08-12-upstream-sync-pr-resolution/`，`task.json` 已更新为 `completed`；README 活动行同步转换为归档条目，随后运行 `python3 ./.trellis/scripts/task.py validate --all`。

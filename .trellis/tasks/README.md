@@ -17,7 +17,7 @@
 - [按月份浏览已归档任务](./archive/)
 - 2026-08：[08-10 GitHub Actions Governance](./archive/2026-08/08-10-github-actions-governance/)；功能 PR [#108](https://github.com/KNaiFen/aio-coding-hub/pull/108) 与 records-only closeout PR [#115](https://github.com/KNaiFen/aio-coding-hub/pull/115) 均已合并，最终业务结果为“部分完成并已拆分后续修复”。
 - 2026-08：[08-11 Availability Circuit Recovery](./archive/2026-08/08-11-availability-circuit-recovery/)；功能 PR [#109](https://github.com/KNaiFen/aio-coding-hub/pull/109) 与 records-only closeout PR [#117](https://github.com/KNaiFen/aio-coding-hub/pull/117) 均已合并，最终结果为“完成”。
-- 2026-08：[08-12 Upstream Sync PR Resolution](./archive/2026-08/08-12-upstream-sync-pr-resolution/)；功能 PR [#114](https://github.com/KNaiFen/aio-coding-hub/pull/114) 已合并，最终结果为“完成”；records-only closeout PR 待本归档分支创建并通过 CI。
+- 2026-08：[08-12 Upstream Sync PR Resolution](./archive/2026-08/08-12-upstream-sync-pr-resolution/)；功能 PR [#114](https://github.com/KNaiFen/aio-coding-hub/pull/114) 已合并，最终结果为“完成”；records-only closeout PR [#123](https://github.com/KNaiFen/aio-coding-hub/pull/123) 已创建，待最终纯记录 head 的自动 CI 与 main 合并。
 - 归档任务保留原始 PRD、设计、计划、研究、实施与检查记录，作为交付证据，不作为当前行为规范。
 
 ## 生命周期
