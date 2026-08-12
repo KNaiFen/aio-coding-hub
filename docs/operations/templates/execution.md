@@ -21,7 +21,7 @@
 
 ## 阅读顺序
 
-1. 父目录和当前 worktree 生效的 `AGENTS.md`。
+1. 当前 worktree 仓库根目录的 `AGENTS.md`。
 2. 本文件。
 3. `prd.md`。
 4. `design.md`（如有）。
