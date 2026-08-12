@@ -32,9 +32,9 @@ PR 的 `change-scope` 按 `.github/ci-scope.json` 分别输出 frontend、Rust �
 
 工作流先验证变量和私钥非空，再生成仅限本仓库的短期 installation token。checkout 与 `gh` 都只使用该输出；没有 `github.token` 或 PAT 回退，job 结束时 token 自动撤销。
 
-同步策略检查器只接受当前批准的六个有序步骤，并把 App token 的消费者限定为 checkout 与 `GH_TOKEN`。凭据预检、fetch 和 PR 创建脚本是完整正文合同；调整这些步骤时必须同时更新 policy selftest，不能用附加 action 或间接 Shell 调用扩展写权限。
+同步策略检查器只接受当前批准的六个有序步骤，并把 App token 的消费者限定为 checkout 与 `GH_TOKEN`。已有同步 PR 时，只能执行一次以当前仓库、目标 head 分支、目标 base 与 open 状态限定的 `gh pr list` 查询，并将结果上限显式设为 1000，在同一 JSON 响应中按上游仓库 owner 精确选择编号；不能把 `owner:branch` 直接传给 `--head`，否则 GitHub CLI 不会匹配跨仓 PR。新建 PR 时必须捕获 `gh pr create` 的 stdout，严格接受当前仓库的 `https://github.com/${GITHUB_REPOSITORY}/pull/<正整数>` URL 并直接取出编号，不能再 list、猜测或重试。URL、编号或 merge state 异常均 fail-closed，且不得 push、merge 或自动批准。凭据预检、fetch 和 PR 创建脚本是完整正文合同；调整这些步骤时必须同时更新 policy selftest，不能用附加 action 或间接 Shell 调用扩展写权限。
 
-配置后手动运行一次 `Sync Upstream`：无漂移应成功 no-op；存在漂移时应创建或更新跨仓 PR并要求人工审核。缺失凭据会在 checkout 前失败；App 未安装或权限不足会在 token 生成阶段失败。轮换私钥时先更新 secret，再撤销旧私钥并复验工作流。
+配置后手动运行一次 `Sync Upstream`：无漂移应成功 no-op；存在漂移时应创建或更新跨仓 PR并要求人工审核。若已有 PR 的 merge state 是 `DIRTY`、`UNKNOWN` 或空值，运行必须明确报告需人工冲突处理并失败，不得将其误报为 PR 编号解析错误。缺失凭据会在 checkout 前失败；App 未安装或权限不足会在 token 生成阶段失败。轮换私钥时先更新 secret，再撤销旧私钥并复验工作流。
 
 ## 合并后仓库设置
 

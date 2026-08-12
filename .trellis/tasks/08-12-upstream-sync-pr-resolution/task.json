@@ -1,0 +1,30 @@
+{
+  "id": "upstream-sync-pr-resolution",
+  "name": "upstream-sync-pr-resolution",
+  "title": "修复 Sync Upstream PR 编号解析与冲突收敛",
+  "description": "修复新建同步 PR 后的编号解析，并保持 DIRTY/UNKNOWN fail-closed 边界。",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": "upstream-sync-pr-resolution",
+  "package": "aio-coding-hub",
+  "priority": "P2",
+  "creator": "main",
+  "assignee": "main",
+  "createdAt": "2026-08-12",
+  "completedAt": null,
+  "branch": "fix/upstream-sync-pr-resolution",
+  "base_branch": "main",
+  "worktree_path": "/Users/knaifen/Documents/Codex/aio-coding-hub/08-11-upstream-sync-pr-resolution",
+  "commit": "2016c25ef7cb6ae524f3f2b4e86996ef923981a3",
+  "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/114",
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    ".github/workflows/sync-upstream.yml",
+    "scripts/check-sync-upstream-policy.mjs",
+    "scripts/check-sync-upstream-policy.selftest.mjs"
+  ],
+  "notes": "2026-08-12 从 08-10-github-actions-governance 拆分的独立 follow-up。PR #114 修复新建同步 PR 的编号解析；PR #113 仅保留 DIRTY/UNKNOWN fail-closed 人工处理证据。阶段 A 已完成；main 已授权阶段 B 同步当前主线、解决 README 冲突并重绑交付/CI。执行 session 先解决唯一预期 README 冲突并推送新 head，再等待 CI；main 专属协调诊断不复制到本任务材料。",
+  "meta": {}
+}

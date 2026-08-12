@@ -30,7 +30,7 @@ git remote add upstream "https://github.com/\${UPSTREAM_REPO}.git"
 git fetch origin "+refs/heads/\${TARGET_BRANCH}:refs/remotes/origin/\${TARGET_BRANCH}"
 git fetch upstream "+refs/heads/\${TARGET_BRANCH}:refs/remotes/upstream/\${TARGET_BRANCH}"`;
 // The full PR script is locked so indirect shell/API calls cannot bypass token policy.
-const EXPECTED_OPEN_PR_RUN_SHA256 = "ac4de6bf2e3c746fe57a2ca010acaaea7f1d4f990f02cd3011c5ca25ee385281";
+const EXPECTED_OPEN_PR_RUN_SHA256 = "f064f98b484d84af6471412a2ab118e6a15f59288fbbed7549cf21a573858a62";
 const EXPECTED_SYNC_STEP_NAMES = [
   "Validate GitHub App credentials",
   "Create GitHub App token",
@@ -652,6 +652,12 @@ export function validateSyncUpstreamPolicy(source) {
   if (/\bgh\s+pr\s+merge(?:\s|$)/m.test(allCommandText)) {
     failures.push("workflow must not merge a pull request automatically");
   }
+  if (/\bgh\s+pr\s+review(?:\s|$)/m.test(allCommandText)) {
+    failures.push("workflow must not approve a pull request automatically");
+  }
+  if (/\bgh\s+api(?:\s|$)/m.test(allCommandText)) {
+    failures.push("workflow must not invoke GitHub API commands, including automatic merge or approval");
+  }
   if (
     /\bgh\s+api\b[^\n]*(?:\/pulls\/[^\s]+\/merge(?=["'\s]|$)|mergePullRequest)/m.test(
       allCommandText
@@ -667,6 +673,48 @@ export function validateSyncUpstreamPolicy(source) {
   if (!commands.some((line) => /^gh\s+pr\s+edit(?:\s|$)/.test(line))) {
     failures.push("workflow must retain existing pull request updates");
   }
+  const existingPrLookup =
+    /existing_pr="\$\(\s*gh\s+pr\s+list\s+--repo\s+"\$\{GITHUB_REPOSITORY\}"\s+--head\s+"\$\{TARGET_BRANCH\}"\s+--base\s+"\$\{TARGET_BRANCH\}"\s+--state\s+open\s+--limit\s+1000\s+--json\s+number,headRepositoryOwner/.test(
+      commandText
+    );
+  const upstreamOwnerSelection = commandText.includes(
+    'headRepositoryOwner.login == \\"${UPSTREAM_OWNER}\\"'
+  );
+  if (
+    countMatchingLines(commandText, /^gh\s+pr\s+list(?:\s|$)/) !== 1 ||
+    !existingPrLookup ||
+    !upstreamOwnerSelection
+  ) {
+    failures.push(
+      "workflow must query an existing sync pull request exactly once with the approved restricted list query"
+    );
+  }
+  if (countMatchingLines(commandText, /^gh\s+pr\s+create(?:\s|$)/) !== 1) {
+    failures.push("workflow must create a new sync pull request exactly once");
+  }
+  if (!/created_pr_url="\$\(\s*gh\s+pr\s+create(?:\s|$)/.test(commandText)) {
+    failures.push("workflow must capture gh pr create stdout as the new pull request URL");
+  }
+  requireCommandText(
+    'local created_pr_url_prefix="https://github.com/${GITHUB_REPOSITORY}/pull/"',
+    "workflow must bind new pull request URLs to the current GitHub repository"
+  );
+  requireCommandText(
+    'if [[ "${created_pr_url}" != "${created_pr_url_prefix}"* ]]; then',
+    "workflow must fail closed when the new pull request URL is outside the current repository"
+  );
+  requireCommandText(
+    'pr_number="${created_pr_url#"$created_pr_url_prefix"}"',
+    "workflow must extract the new pull request number directly from gh pr create output"
+  );
+  requireCommandText(
+    'if [[ ! "${pr_number}" =~ ^[1-9][0-9]*$ ]]; then',
+    "workflow must fail closed when the new pull request number is not a non-zero positive integer"
+  );
+  requireCommandText(
+    "Failed to resolve sync PR number from gh pr create output. Manual handling required.",
+    "workflow must report malformed gh pr create output as requiring manual handling"
+  );
   requireCommandText('--base "${TARGET_BRANCH}"', "sync pull requests must target TARGET_BRANCH");
   requireCommandText('--head "${UPSTREAM_HEAD}"', "sync pull requests must use the upstream head");
   requireCommandText("Please review and merge manually.", "pull request body must require manual review");
@@ -694,6 +742,10 @@ export function validateSyncUpstreamPolicy(source) {
     "workflow must fetch the target branch from upstream"
   );
   requireCommandText("--json mergeStateStatus", "workflow must inspect the open PR merge state once");
+  requireCommandText(
+    '[ -z "${merge_state}" ]',
+    "workflow must fail closed when the open PR merge state is unavailable"
+  );
   requireCommandText(
     '[ "${merge_state}" = "DIRTY" ]',
     "workflow must fail closed when the open PR has conflicts"

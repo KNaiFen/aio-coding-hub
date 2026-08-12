@@ -112,11 +112,12 @@ jobs:
             existing_pr="$(
               gh pr list \
                 --repo "${GITHUB_REPOSITORY}" \
-                --head "${UPSTREAM_HEAD}" \
+                --head "${TARGET_BRANCH}" \
                 --base "${TARGET_BRANCH}" \
                 --state open \
-                --json number \
-                --jq '.[0].number // empty'
+                --limit 1000 \
+                --json number,headRepositoryOwner \
+                --jq ".[] | select(.headRepositoryOwner.login == \"${UPSTREAM_OWNER}\") | .number"
             )"
 
             local pr_number
@@ -127,28 +128,28 @@ jobs:
                 --body "${body}"
               pr_number="${existing_pr}"
             else
-              gh pr create \
-                --repo "${GITHUB_REPOSITORY}" \
-                --base "${TARGET_BRANCH}" \
-                --head "${UPSTREAM_HEAD}" \
-                --title "${title}" \
-                --body "${body}" \
-                --no-maintainer-edit
-
-              pr_number="$(
-                gh pr list \
+              local created_pr_url
+              created_pr_url="$(
+                gh pr create \
                   --repo "${GITHUB_REPOSITORY}" \
-                  --head "${UPSTREAM_HEAD}" \
                   --base "${TARGET_BRANCH}" \
-                  --state open \
-                  --json number \
-                  --jq '.[0].number // empty'
+                  --head "${UPSTREAM_HEAD}" \
+                  --title "${title}" \
+                  --body "${body}" \
+                  --no-maintainer-edit
               )"
-            fi
 
-            if [ -z "${pr_number}" ]; then
-              echo "Failed to resolve sync PR number." >&2
-              exit 1
+              local created_pr_url_prefix="https://github.com/${GITHUB_REPOSITORY}/pull/"
+              if [[ "${created_pr_url}" != "${created_pr_url_prefix}"* ]]; then
+                echo "Failed to resolve sync PR number from gh pr create output. Manual handling required." >&2
+                exit 1
+              fi
+
+              pr_number="${created_pr_url#"$created_pr_url_prefix"}"
+              if [[ ! "${pr_number}" =~ ^[1-9][0-9]*$ ]]; then
+                echo "Failed to resolve sync PR number from gh pr create output. Manual handling required." >&2
+                exit 1
+              fi
             fi
 
             local merge_state
