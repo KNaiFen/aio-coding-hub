@@ -434,8 +434,10 @@ fn duplicate_provider_in_db(
     db: &crate::db::Db,
     provider_id: i64,
 ) -> crate::shared::error::AppResult<providers::ProviderSummary> {
-    let conn = db.open_connection()?;
-    let source = providers::get_by_id(&conn, provider_id)?;
+    let source = {
+        let conn = db.open_connection()?;
+        providers::get_by_id(&conn, provider_id)?
+    };
     let siblings = providers::list_by_cli(db, &source.cli_key)?;
     let api_key = if source.auth_mode == "api_key" && source.source_provider_id.is_none() {
         Some(providers::get_api_key_plaintext(db, provider_id)?)
