@@ -162,6 +162,28 @@ git diff --check origin/main...HEAD
 - 完成后把 PR 标记 Ready for review，填写同目录 `delivery.md` 的实际结果、关键符号、每条 AC、偏移、验证、风险、完整 head/base/ci-gate，停止写入并通知 main。
 - 不得 merge PR、开自动合并、运行 `/trellis:finish-work`、archive 任务、删除 worktree/分支或写 main 验收。
 
+## 可直接粘贴的执行 session 启动提示
+
+```text
+Active task: /Users/knaifen/Documents/Codex/aio-coding-hub/08-13-cross-provider-model-routing/.trellis/tasks/08-13-cross-provider-model-routing
+
+你是本任务唯一执行 session。当前目录必须是
+/Users/knaifen/Documents/Codex/aio-coding-hub/08-13-cross-provider-model-routing，
+分支必须是 feat/cross-provider-model-routing。先完整阅读本任务的 execution.md、prd.md、design.md、implement.md，
+以及 implement.jsonl/check.jsonl 引用的规范；不要创建 sibling、worktree 或子代理。
+
+开工前只做 preflight：确认 task.json.status=in_progress、规划提交
+71392b672ee665b6ee96e13bf3871b2816185873 存在、当前 HEAD 以登记 base SHA 为 merge-base、
+且 PR #136 已合并并已由 main 更新本任务的 base/规划登记。任何一项失败都停止并报告 main，不猜测、不自行修基线。
+
+通过 preflight 后，严格按 implement.md 的 0 -> 8 顺序施工：每个阶段先读范围和完成信号，完成最小允许验证后提交；尽早创建指向 main 的 Draft PR，
+持续推送并修复本任务范围内的 CI。跨供应商规则只能存在供应商覆盖的 named mode；目标 B 必须使用完整成员快照，最多一次跳转，复用公共 gate/重试/Ready 预算，
+不重跑 selection/session API，不更新 B 的 session binding；TUI format.rs、aio/... 受管路由和所有明确禁止范围保持不变。
+
+本地只运行 execution.md 列出的 cloud-only checker、selftest、task.py validate、变更 .mjs 的 node --check 和 git diff --check；不要安装依赖、运行 pnpm/Cargo/Rust 测试/构建/生成/格式化。
+完成代码、测试、合同、迁移、PR 和绿色 CI 后，按模板重写 delivery.md，标记 PR Ready for review，停止写入并通知 main；不得 merge、archive、删除 worktree 或运行 finish-work。
+```
+
 ### 必须停止并报告 main
 
 - PR #136 未合并或 base/head/规划提交不一致。
