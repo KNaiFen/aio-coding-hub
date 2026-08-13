@@ -9,7 +9,7 @@
 - 分支：`feat/cross-provider-model-routing`
 - PR base：`main` @ `875ff441c5ba9f1a7f235ad95dadb945a41bba61`（与 TUI sibling 共用基线；TUI 未合并不阻止本任务 PR）
 - 交付候选 head：尚未提交
-- 规划提交：`71392b672ee665b6ee96e13bf3871b2816185873`；登记同步提交：`2b8e52e7071fb59cc54a8082bb9bc05f10b8cf1c`、`01915697174eacd623c4e75a03cc10030cde2f9c`
+- 规划提交：`c6d59507c7a1de46abdb07427aa8bc153c69739c`；历史 checkpoint：`71392b672ee665b6ee96e13bf3871b2816185873`，登记同步提交：`2b8e52e7071fb59cc54a8082bb9bc05f10b8cf1c`、`01915697174eacd623c4e75a03cc10030cde2f9c`
 - `ci-gate`：未触发
 - 其他必需检查：待执行 session 开工后由实时 PR scope 决定
 - 交付时间：尚未开始

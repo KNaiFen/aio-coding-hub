@@ -10,7 +10,7 @@
 
 | 任务目录 | 阶段 | 分支 | base SHA | 规划提交 | Worktree | PR | 当前唯一写者 | 依赖/说明 |
 |---|---|---|---|---|---|---|---|---|
-| [`08-13-cross-provider-model-routing`](./08-13-cross-provider-model-routing/) | planning（规划已冻结；可与 TUI sibling 并行） | `feat/cross-provider-model-routing` | `875ff441c5ba9f1a7f235ad95dadb945a41bba61` | 待登记修订提交 | `/Users/knaifen/Documents/Codex/aio-coding-hub/08-13-cross-provider-model-routing` | 尚未创建 | main session（规划）；登记修订后交接执行 session | TUI PR #136（OPEN/CLEAN，head `2b12c68cd99f7bc7c21fb8fa2b5354c9992a229b`）只改 TUI formatter，可并行；最终集成时如 README 冲突由 main 处理。本任务不改 TUI `format.rs`。 |
+| [`08-13-cross-provider-model-routing`](./08-13-cross-provider-model-routing/) | planning（规划已冻结；可与 TUI sibling 并行） | `feat/cross-provider-model-routing` | `875ff441c5ba9f1a7f235ad95dadb945a41bba61` | `c6d59507c7a1de46abdb07427aa8bc153c69739c` | `/Users/knaifen/Documents/Codex/aio-coding-hub/08-13-cross-provider-model-routing` | 尚未创建 | main session（规划）；登记修订后交接执行 session | TUI PR #136（OPEN/CLEAN，head `2b12c68cd99f7bc7c21fb8fa2b5354c9992a229b`）只改 TUI formatter，可并行；最终集成时如 README 冲突由 main 处理。本任务不改 TUI `format.rs`。 |
 | [`08-03-upstream-claude-oauth`](./08-03-upstream-claude-oauth/) | planning（暂停，未委派） | 无（旧分支已删除） | 不适用 | 未登记 | 未创建 | 未创建 | main session | 用户已决定暂不处理；不影响当前工作。恢复前需重新确认方案，并完成真实隔离账号验证。 |
 
 ## 归档

@@ -9,8 +9,8 @@
 - 分支：`feat/cross-provider-model-routing`
 - 基线：`origin/main`
 - 完整 base SHA：`875ff441c5ba9f1a7f235ad95dadb945a41bba61`（两个 sibling 均从该完整 `origin/main` SHA 派生；最终集成时由 main 处理分支漂移）
-- 规划提交：待本次并行边界修订提交后回填完整 SHA（历史冻结 checkpoint：`71392b672ee665b6ee96e13bf3871b2816185873`）
-- 其后 `2b8e52e7071fb59cc54a8082bb9bc05f10b8cf1c`、`01915697174eacd623c4e75a03cc10030cde2f9c` 仅同步规划登记、交付占位和阶段事实；执行 session 仍以 `71392b...` 的 PRD/设计/实施内容为权威，不得把登记提交误解为新产品决定。
+- 规划提交：`c6d59507c7a1de46abdb07427aa8bc153c69739c`（包含并行 sibling 边界、PRD、设计、实施计划、施工入口、初始交付记录和活动索引）
+- 历史 checkpoint `71392b672ee665b6ee96e13bf3871b2816185873` 与其后 `2b8e52e7071fb59cc54a8082bb9bc05f10b8cf1c`、`01915697174eacd623c4e75a03cc10030cde2f9c` 是本次修订之前的计划登记；执行 session 以本 checkpoint 中的 PRD/设计/实施内容为权威，不得把早期“等待 TUI 合并”表述当作现行门禁。
 - 实施授权：已确认（2026-08-13；用户确认本任务全部 PRD 决定、AC 和单 sibling 端到端交付路线）
 - PR 目标：`main`
 - PR：尚未创建；执行 session 开工后尽早创建 Draft PR
@@ -173,7 +173,7 @@ Active task: /Users/knaifen/Documents/Codex/aio-coding-hub/08-13-cross-provider-
 以及 implement.jsonl/check.jsonl 引用的规范；不要创建 sibling、worktree 或子代理。
 
 开工前只做 preflight：确认 task.json.status=in_progress、规划提交
-71392b672ee665b6ee96e13bf3871b2816185873 存在、当前 HEAD 以登记 base SHA 为 merge-base、
+`c6d59507c7a1de46abdb07427aa8bc153c69739c` 存在、当前 HEAD 以登记 base SHA 为 merge-base、
 且已核对 TUI sibling PR #136 只修改 TUI formatter/任务材料，本任务不会触碰其文件。PR #136 未合并不构成启动门禁；任何路径、分支、base、规划提交或写者不一致仍停止并报告 main，不猜测、不自行修基线。
 
 通过 preflight 后，严格按 implement.md 的 0 -> 8 顺序施工：每个阶段先读范围和完成信号，完成最小允许验证后提交；尽早创建指向 main 的 Draft PR，
