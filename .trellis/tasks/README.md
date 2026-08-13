@@ -10,6 +10,7 @@
 
 | 任务目录 | 阶段 | 分支 | base SHA | 规划提交 | Worktree | PR | 当前唯一写者 | 依赖/说明 |
 |---|---|---|---|---|---|---|---|---|
+| [`08-13-cross-provider-model-routing`](./08-13-cross-provider-model-routing/) | planning（材料待冻结；TUI 依赖未合并） | `feat/cross-provider-model-routing` | `875ff441c5ba9f1a7f235ad95dadb945a41bba61` | 待提交 | `/Users/knaifen/Documents/Codex/aio-coding-hub/08-13-cross-provider-model-routing` | 尚未创建 | main session（规划）；交接后执行 session | 依赖 TUI PR #136 合并；本任务仅改跨供应商模型路由，不改 TUI `format.rs`。 |
 | [`08-03-upstream-claude-oauth`](./08-03-upstream-claude-oauth/) | planning（暂停，未委派） | 无（旧分支已删除） | 不适用 | 未登记 | 未创建 | 未创建 | main session | 用户已决定暂不处理；不影响当前工作。恢复前需重新确认方案，并完成真实隔离账号验证。 |
 
 ## 归档
