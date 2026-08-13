@@ -1,6 +1,6 @@
 # 交付报告：TUI 请求卡片改用首字时间与紧凑路由计数
 
-> 本文件描述 PR #136 的实际交付候选。功能候选及其云端证据固定如下；包含本文件的记录提交会形成新的仅记录 PR head，执行 session 仍会等待该实时最新 head 的自动检查全部绿色后再暂停。
+> 本文件描述 PR #136 的实际交付候选。功能实现候选与最近已验证的记录 head 分层记录；本次交付状态记录提交会形成新的 records-only PR head，main 验收时仍须读取实时 PR head 与实时检查。
 
 ## 交付状态
 
@@ -8,13 +8,13 @@
 - PR：[#136](https://github.com/KNaiFen/aio-coding-hub/pull/136)
 - 分支：`fix/tui-request-card-ttfb`
 - PR base：`main` @ `875ff441c5ba9f1a7f235ad95dadb945a41bba61`
-- 功能交付候选 head：`5b8414b9f6dfd156c702b4d229cde69d013136b6`
-- 实时 PR head：本记录提交推送后以 [PR #136](https://github.com/KNaiFen/aio-coding-hub/pull/136) 为准；该提交只增加任务记录，不改变上述功能候选
+- 功能实现候选 head：`5b8414b9f6dfd156c702b4d229cde69d013136b6`
+- 最近已验证记录 head：`139ed0c5e8a9fcf9f4cda8f3d65835e658dc80d3`（仅任务记录提交，产品 diff 与功能实现候选相同）
 - 规划提交：`bd91552393f36419ce215d9de283b7519c0efb07`
-- `ci-gate`：功能候选通过，[job 94376200331](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31676371396/job/94376200331)
-- 其他必需检查：功能候选的 `pr-title`、`rust`、`support-contract`、`change-scope` 与两项 CodeQL 均通过；`frontend` 按 Rust-only scope 跳过
+- `ci-gate`：最近已验证记录通过，[job 94383913838](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31678728115/job/94383913838)
+- 其他必需检查：最近已验证记录的 `pr-title`、`rust`、`support-contract`、`change-scope` 与两项 CodeQL 均通过；`frontend` 按 Rust-only scope 跳过
 - 交付时间：2026-08-13T15:29:41+08:00
-- 执行 session：记录提交推送后停止写入；等待实时最新 head 的自动检查绿色后标记 Ready 并通知 main
+- 执行 session：本记录推送后停止写入；等待实时最新 head 的自动检查绿色后，PR 保持 Ready 并通知 main 验收
 
 ## Preflight
 
@@ -52,7 +52,7 @@
 | AC-03 缺失 TTFB 与输出速率 | 通过 | 邻近测试断言 `ttfb_ms=None` 时为 `直连  —  100.0 t/s`；功能候选 Rust job 通过。 |
 | AC-04 共享/详情文案不回归 | 通过 | 新测试断言共享及详情路由为 `切换1/重试3`，详情仍含 `耗时  2.0s` 与 `首字  500ms`；功能候选 Rust job 通过。 |
 | AC-05 变更范围 | 通过 | 相对 base 的产品代码仅改 `src-tauri/crates/aio-tui/src/format.rs`；其余为本任务 Trellis 记录与活动索引。 |
-| AC-06 本地合同与云端检查 | 通过（功能候选） | 四项允许的本地检查通过；功能候选的 `ci-gate`、`pr-title`、Rust 相关检查及 CodeQL 均绿色。记录提交的最新 head 仍须重新等待自动检查。 |
+| AC-06 本地合同与云端检查 | 通过（最近已验证记录） | 四项允许的本地检查通过；记录 `139ed0c5…` 的 `ci-gate`、`pr-title`、Rust 相关检查及 CodeQL 均绿色。本记录推送后的实时 head 仍须自动复验。 |
 
 ## 主要代码位置
 
@@ -83,11 +83,11 @@
 
 | Workflow / Job | 结果 | 链接或说明 |
 |---|---|---|
-| `ci-gate` | 通过 | [功能候选 job 94376200331](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31676371396/job/94376200331) |
-| `rust` | 通过 | [job 94371826810](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31676371396/job/94371826810)，覆盖云端格式、绑定导出、Clippy、Rust tests 与 audit。 |
-| `support-contract`、`change-scope` | 通过 | [自动 PR workflow 31676371396](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31676371396)；scope 为 Rust-only。 |
-| `pr-title` | 通过 | [run 31676371483](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31676371483) |
-| CodeQL | 通过 | [run 31676371422](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31676371422)，JavaScript/TypeScript 与 Rust 均成功。 |
+| `ci-gate` | 通过 | [最近已验证记录 job 94383913838](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31678728115/job/94383913838) |
+| `rust` | 通过 | [job 94379144418](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31678728115/job/94379144418)，覆盖云端格式、绑定导出、Clippy、Rust tests 与 audit。 |
+| `support-contract`、`change-scope` | 通过 | [自动 PR workflow 31678728115](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31678728115)；scope 为 Rust-only。 |
+| `pr-title` | 通过 | [job 94379057915](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31678728014/job/94379057915) |
+| CodeQL | 通过 | [run 31678728066](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31678728066)，JavaScript/TypeScript 与 Rust 均成功。 |
 | `frontend`、候选发布 jobs | 按范围跳过 | `ci-gate` 已接受 Rust-only scope 的预期跳过。 |
 
 ### 人工验证
@@ -111,7 +111,7 @@
 
 ## 未完成项与阻塞
 
-- 无。记录提交推送后只等待实时最新 PR head 的自动检查终态，不再修改实现或任务记录。
+- 无。推送本交付状态记录后，只等待实时最新 PR head 的自动检查终态；随后执行 session 停止写入，等待 main 验收。
 
 ## 建议 main 重点审查
 

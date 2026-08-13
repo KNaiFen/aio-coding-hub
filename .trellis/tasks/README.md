@@ -10,7 +10,7 @@
 
 | 任务目录 | 阶段 | 分支 | base SHA | 规划提交 | Worktree | PR | 当前唯一写者 | 依赖/说明 |
 |---|---|---|---|---|---|---|---|---|
-| [`08-13-tui-request-card-ttfb`](./08-13-tui-request-card-ttfb/) | in_progress（等待 main 验收） | `fix/tui-request-card-ttfb` | `875ff441c5ba9f1a7f235ad95dadb945a41bba61` | `bd91552393f36419ce215d9de283b7519c0efb07` | `/Users/knaifen/Documents/Codex/aio-coding-hub/08-13-tui-request-card-ttfb` | [#136](https://github.com/KNaiFen/aio-coding-hub/pull/136) | 独立执行 session（交付后暂停） | 功能候选 `5b8414b9f6dfd156c702b4d229cde69d013136b6` 已通过自动 Rust CI；记录提交的最新 head 绿色后通知 main 验收。不影响暂停中的 OAuth 任务。 |
+| [`08-13-tui-request-card-ttfb`](./08-13-tui-request-card-ttfb/) | in_progress（等待 main 验收） | `fix/tui-request-card-ttfb` | `875ff441c5ba9f1a7f235ad95dadb945a41bba61` | `bd91552393f36419ce215d9de283b7519c0efb07` | `/Users/knaifen/Documents/Codex/aio-coding-hub/08-13-tui-request-card-ttfb` | [#136](https://github.com/KNaiFen/aio-coding-hub/pull/136) | 独立执行 session（最新 head 复验后暂停） | 最近已验证记录 `139ed0c5e8a9fcf9f4cda8f3d65835e658dc80d3` 已通过自动 Rust CI，PR 已 Ready；本记录推送后的实时 head 绿色后通知 main 验收。不影响暂停中的 OAuth 任务。 |
 | [`08-03-upstream-claude-oauth`](./08-03-upstream-claude-oauth/) | planning（暂停，未委派） | 无（旧分支已删除） | 不适用 | 未登记 | 未创建 | 未创建 | main session | 用户已决定暂不处理；不影响当前工作。恢复前需重新确认方案，并完成真实隔离账号验证。 |
 
 ## 归档

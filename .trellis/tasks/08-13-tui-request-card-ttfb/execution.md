@@ -12,8 +12,8 @@
 - 规划提交：`bd91552393f36419ce215d9de283b7519c0efb07`
 - 实施授权：已确认（2026-08-13，范围见 `prd.md`）
 - PR：[#136](https://github.com/KNaiFen/aio-coding-hub/pull/136)；功能候选 `5b8414b9f6dfd156c702b4d229cde69d013136b6` 的自动必需 CI 已绿色
-- 当前唯一写者：独立执行 session（本 worktree 的唯一写者）
-- 当前阶段：等待 main 验收；记录提交推送后等待实时最新 head 绿色并暂停
+- 当前唯一写者：独立执行 session（本记录推送与最新 head 复验后暂停）
+- 当前阶段：等待 main 验收；最近已验证记录 `139ed0c5e8a9fcf9f4cda8f3d65835e658dc80d3` 已绿色，最终以实时 PR head 为准
 - PENDING：已审阅，当前无未解决条目
 
 ## 开工前阅读顺序
