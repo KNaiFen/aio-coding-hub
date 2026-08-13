@@ -31,11 +31,9 @@ pub use persistence::{
     request_log_retention_days_fail_open, set_settings_finalize_failpoint_for_tests,
     set_settings_finalize_restore_failpoint_for_tests, update, write,
 };
-#[cfg(test)]
 pub use types::{CrossProviderModelRoutingRule, ModelRoutingRule};
 pub use types::{
-    AppSettings, CodexHomeMode, CrossProviderModelRoutingPolicy, GatewayListenMode, HomeUsagePeriod,
-    ModelRoutingPolicy,
+    AppSettings, CodexHomeMode, GatewayListenMode, HomeUsagePeriod, ModelRoutingPolicy,
     UpstreamErrorMessageBehavior, UpstreamErrorResponseMatchMode, UpstreamErrorResponseRule,
     UpstreamErrorStatusBehavior, UpstreamHttpRetryRule, UpstreamRetryPolicy,
     UpstreamStreamInternalErrorPolicy, UpstreamTransportRetryKind, WslHostAddressMode,
