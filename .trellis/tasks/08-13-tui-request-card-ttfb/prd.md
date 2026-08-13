@@ -5,7 +5,7 @@
 - Implementation authorization: 已确认。2026-08-13 用户明确要求实施，并指定采用多 worktree、多 session 协作模式。
 - Confirmation date and summary: 2026-08-13。请求卡片的时间摘要由总耗时改为首字时间；请求卡片中的 `切换1/重试3` 改为 `切1/重3`。
 - Confirmed coverage: 仅 standalone TUI 请求卡片的 route 行及其单元测试；详情页、状态行、Observer 协议和快照投影保持现状。
-- Planning revision: 第一笔规划提交完成后由 main 回填完整 SHA；执行 session 必须以回填值做 preflight。
+- Planning revision: `bd91552393f36419ce215d9de283b7519c0efb07`（冻结需求、AC、执行边界与上下文清单的源规划提交）。
 - Execution route: delegated worktree `/Users/knaifen/Documents/Codex/aio-coding-hub/08-13-tui-request-card-ttfb`。
 - Migrated from direct-main record: 无。本任务从一开始即采用 Trellis delegated worktree，不存在 main 检出的实现改动。
 

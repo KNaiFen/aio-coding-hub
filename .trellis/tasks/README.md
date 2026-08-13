@@ -10,7 +10,7 @@
 
 | 任务目录 | 阶段 | 分支 | base SHA | 规划提交 | Worktree | PR | 当前唯一写者 | 依赖/说明 |
 |---|---|---|---|---|---|---|---|---|
-| [`08-13-tui-request-card-ttfb`](./08-13-tui-request-card-ttfb/) | planning（规划材料待提交） | `fix/tui-request-card-ttfb` | `875ff441c5ba9f1a7f235ad95dadb945a41bba61` | 待回填 | `/Users/knaifen/Documents/Codex/aio-coding-hub/08-13-tui-request-card-ttfb` | 未创建 | main session | 用户已授权实施与多 worktree、多 session 路线；仅改请求卡片时间指标和路由计数缩写，不影响暂停中的 OAuth 任务。 |
+| [`08-13-tui-request-card-ttfb`](./08-13-tui-request-card-ttfb/) | in_progress（已移交施工） | `fix/tui-request-card-ttfb` | `875ff441c5ba9f1a7f235ad95dadb945a41bba61` | `bd91552393f36419ce215d9de283b7519c0efb07` | `/Users/knaifen/Documents/Codex/aio-coding-hub/08-13-tui-request-card-ttfb` | 未创建 | 独立执行 session | 用户已授权实施与多 worktree、多 session 路线；仅改请求卡片时间指标和路由计数缩写，不影响暂停中的 OAuth 任务。 |
 | [`08-03-upstream-claude-oauth`](./08-03-upstream-claude-oauth/) | planning（暂停，未委派） | 无（旧分支已删除） | 不适用 | 未登记 | 未创建 | 未创建 | main session | 用户已决定暂不处理；不影响当前工作。恢复前需重新确认方案，并完成真实隔离账号验证。 |
 
 ## 归档
