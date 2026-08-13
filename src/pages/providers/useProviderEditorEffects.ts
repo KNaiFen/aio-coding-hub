@@ -74,6 +74,7 @@ export type EffectDeps = {
   setUpstreamRetryPolicyDraft: (v: UpstreamRetryPolicy) => void;
   setModelRoutingPolicyOverrideEnabled: (v: boolean) => void;
   setModelRoutingPolicyDraft: (v: ModelRoutingPolicy) => void;
+  initializeEditModelRoutingPolicy: boolean;
   setAuthMode: (v: "api_key" | "oauth" | "cx2cc") => void;
   setCx2ccSourceValue: (v: string) => void;
   setCodexBridgeTarget: (v: CodexBridgeTarget) => void;
@@ -130,6 +131,7 @@ export function useProviderEditorEffects(d: EffectDeps) {
     setUpstreamRetryPolicyDraft,
     setModelRoutingPolicyOverrideEnabled,
     setModelRoutingPolicyDraft,
+    initializeEditModelRoutingPolicy,
     setAuthMode,
     setCx2ccSourceValue,
     setCodexBridgeTarget,
@@ -246,12 +248,14 @@ export function useProviderEditorEffects(d: EffectDeps) {
         snapshot.upstream_retry_policy_override ?? DEFAULT_UPSTREAM_RETRY_POLICY
       )
     );
-    setModelRoutingPolicyOverrideEnabled(snapshot.model_routing_policy_override != null);
-    setModelRoutingPolicyDraft(
-      cloneModelRoutingPolicy(
-        snapshot.model_routing_policy_override ?? DEFAULT_MODEL_ROUTING_POLICY
-      )
-    );
+    if (initializeEditModelRoutingPolicy) {
+      setModelRoutingPolicyOverrideEnabled(snapshot.model_routing_policy_override != null);
+      setModelRoutingPolicyDraft(
+        cloneModelRoutingPolicy(
+          snapshot.model_routing_policy_override ?? DEFAULT_MODEL_ROUTING_POLICY
+        )
+      );
+    }
     reset({
       name: snapshot.name,
       api_key: "",
@@ -302,6 +306,7 @@ export function useProviderEditorEffects(d: EffectDeps) {
     setUpstreamRetryPolicyOverrideEnabled,
     setModelRoutingPolicyDraft,
     setModelRoutingPolicyOverrideEnabled,
+    initializeEditModelRoutingPolicy,
     setTagInput,
     setTags,
   ]);

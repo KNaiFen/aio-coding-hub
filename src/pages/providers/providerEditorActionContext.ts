@@ -102,6 +102,7 @@ export type ProviderEditorPayloadContext = {
   upstreamRetryPolicyDraft: UpstreamRetryPolicy;
   modelRoutingPolicyOverrideEnabled: boolean;
   modelRoutingPolicyDraft: ModelRoutingPolicy;
+  modelRoutingPolicyManagedSeparately?: boolean;
   apiKeyConfigured: boolean;
   isCodexGatewaySource: boolean;
   sourceProviderId: number | null;
@@ -137,6 +138,7 @@ export type SaveActionContext = ProviderActionContext &
   Pick<FormActionContext, "saving" | "setSaving" | "form"> &
   Pick<AuthActionContext, "oauthStatus" | "setOauthStatus" | "refreshOauthStatus"> & {
     persistProvider: (input: ProviderUpsertInput) => Promise<ProviderSummary>;
+    persistRoutingPolicies?: (provider: ProviderSummary) => Promise<boolean>;
     refreshProviderModels: (
       providerId: number,
       providerUuid: string

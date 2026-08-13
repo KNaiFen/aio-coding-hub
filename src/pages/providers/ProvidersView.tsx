@@ -595,6 +595,23 @@ export function ProvidersView({
             if (!nextOpen) setEditTarget(null);
           }}
           provider={editTarget}
+          routeMode={
+            selectedSortMode
+              ? {
+                  modeId: selectedSortMode.id,
+                  modeUuid: selectedSortMode.mode_uuid,
+                  name: selectedSortMode.name,
+                }
+              : null
+          }
+          routeModes={sortModes.map((mode) => ({
+            modeId: mode.id,
+            modeUuid: mode.mode_uuid,
+            name: mode.name,
+          }))}
+          onRouteModeChange={(modeId) =>
+            selectRouteDraft(modeId == null ? "default" : `mode:${modeId}`)
+          }
           codexProviders={codexProviders}
           bridgeSourceProviders={bridgeSourceProviders}
           onSaved={(cliKey) => {

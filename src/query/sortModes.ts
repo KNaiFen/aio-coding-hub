@@ -27,7 +27,7 @@ import {
   validateSortModeId,
   validateSortModeUuid,
 } from "../services/providers/sortModes";
-import { sortModesKeys } from "./keys";
+import { providersKeys, sortModesKeys } from "./keys";
 
 export function sortModeProvidersQueryPrefix(cliKey: CliKey) {
   return [...sortModesKeys.all, "providers", validateProviderCliKey(cliKey)] as const;
@@ -304,6 +304,10 @@ export function useProviderRoutingPolicySaveMutation() {
         modeUuid: view.selected_mode?.mode_uuid ?? null,
       });
       queryClient.setQueryData(queryKey, view);
+      await queryClient.invalidateQueries({
+        queryKey: providersKeys.list(input.cliKey),
+        exact: true,
+      });
       if (view.selected_mode != null) {
         await queryClient.invalidateQueries({
           queryKey: routingProviderCandidatesQueryKey({
