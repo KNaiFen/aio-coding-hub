@@ -115,8 +115,7 @@ pub(in crate::gateway) struct CrossPlanRequest<'a> {
     pub(in crate::gateway) source_reasoning_effort: Option<&'a str>,
     pub(in crate::gateway) managed_model_route: bool,
     pub(in crate::gateway) effective_sort_mode_uuid: Option<&'a str>,
-    pub(in crate::gateway) policy:
-        Option<&'a crate::settings::CrossProviderModelRoutingPolicy>,
+    pub(in crate::gateway) policy: Option<&'a crate::settings::CrossProviderModelRoutingPolicy>,
 }
 
 pub(in crate::gateway) fn resolve_cross_plan(
