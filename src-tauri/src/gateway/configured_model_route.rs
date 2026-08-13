@@ -22,6 +22,13 @@ pub(in crate::gateway) struct ConfiguredModelRouteOutcome {
     pub(in crate::gateway) reasoning_effort_applied: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::gateway) struct CrossProviderRoutePlan {
+    pub(in crate::gateway) target_provider_uuid: String,
+    pub(in crate::gateway) target_model: Option<String>,
+    pub(in crate::gateway) target_reasoning_effort: Option<String>,
+}
+
 impl ConfiguredModelRouteOutcome {
     fn applied(&self) -> bool {
         self.model_applied || self.reasoning_effort_applied
@@ -95,6 +102,77 @@ pub(in crate::gateway) fn resolve_ordinary_rule<'a>(
                 rule.source_model == requested_model && rule.source_reasoning_effort.is_none()
             })
         })
+}
+
+/// Cross-provider rules have the same exact-before-wildcard matching semantics
+/// as ordinary rules. The caller resolves the target UUID against the request's
+/// immutable named-mode member snapshot before constructing an execution route.
+pub(in crate::gateway) fn resolve_cross_plan(
+    cli_key: &str,
+    method: &str,
+    path: &str,
+    requested_model: Option<&str>,
+    source_reasoning_effort: Option<&str>,
+    managed_model_route: bool,
+    effective_sort_mode_uuid: Option<&str>,
+    policy: Option<&crate::settings::CrossProviderModelRoutingPolicy>,
+) -> Option<CrossProviderRoutePlan> {
+    if managed_model_route
+        || effective_sort_mode_uuid.is_none()
+        || !crate::gateway::observation::is_model_inference_request(cli_key, method, path)
+    {
+        return None;
+    }
+
+    let requested_model = requested_model
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    if requested_model.starts_with("aio/") {
+        return None;
+    }
+
+    let policy = policy.filter(|policy| policy.enabled)?;
+    let rule = resolve_cross_rule(&policy.rules, requested_model, source_reasoning_effort)?;
+    Some(CrossProviderRoutePlan {
+        target_provider_uuid: rule.target_provider_uuid.clone(),
+        target_model: rule.target_model.clone(),
+        target_reasoning_effort: rule.target_reasoning_effort.clone(),
+    })
+}
+
+pub(in crate::gateway) fn resolve_cross_rule<'a>(
+    rules: &'a [crate::settings::CrossProviderModelRoutingRule],
+    requested_model: &str,
+    source_reasoning_effort: Option<&str>,
+) -> Option<&'a crate::settings::CrossProviderModelRoutingRule> {
+    source_reasoning_effort
+        .and_then(|effort| {
+            rules.iter().find(|rule| {
+                rule.source_model == requested_model
+                    && rule.source_reasoning_effort.as_deref() == Some(effort)
+            })
+        })
+        .or_else(|| {
+            rules.iter().find(|rule| {
+                rule.source_model == requested_model && rule.source_reasoning_effort.is_none()
+            })
+        })
+}
+
+pub(in crate::gateway) fn cross_execution_route(
+    target_provider_id: i64,
+    target_provider_name: &str,
+    source_model: &str,
+    plan: &CrossProviderRoutePlan,
+) -> ConfiguredModelRoute {
+    ConfiguredModelRoute {
+        provider_id: target_provider_id,
+        provider_name: target_provider_name.to_string(),
+        policy_source: "provider_cross",
+        source_model: source_model.to_string(),
+        target_model: plan.target_model.clone(),
+        reasoning_effort: plan.target_reasoning_effort.clone(),
+    }
 }
 
 pub(in crate::gateway) fn mark_pending(
@@ -433,6 +511,120 @@ mod tests {
                 .and_then(|rule| rule.target_model.as_deref()),
             Some("fallback")
         );
+    }
+
+    fn cross_policy(
+        rules: Vec<crate::settings::CrossProviderModelRoutingRule>,
+    ) -> crate::settings::CrossProviderModelRoutingPolicy {
+        crate::settings::CrossProviderModelRoutingPolicy {
+            enabled: true,
+            rules,
+        }
+    }
+
+    #[test]
+    fn cross_exact_effort_wins_over_wildcard_and_builds_target_route() {
+        let policy = cross_policy(vec![
+            crate::settings::CrossProviderModelRoutingRule {
+                source_model: "fable5".to_string(),
+                source_reasoning_effort: None,
+                target_provider_uuid: "00000000-0000-4000-8000-000000000002".to_string(),
+                target_model: Some("fallback".to_string()),
+                target_reasoning_effort: None,
+            },
+            crate::settings::CrossProviderModelRoutingRule {
+                source_model: "fable5".to_string(),
+                source_reasoning_effort: Some("high".to_string()),
+                target_provider_uuid: "00000000-0000-4000-8000-000000000003".to_string(),
+                target_model: Some("precise".to_string()),
+                target_reasoning_effort: Some("low".to_string()),
+            },
+        ]);
+
+        let plan = resolve_cross_plan(
+            "claude",
+            "POST",
+            "/v1/messages",
+            Some("fable5"),
+            Some("high"),
+            false,
+            Some("10000000-0000-4000-8000-000000000001"),
+            Some(&policy),
+        )
+        .expect("cross plan");
+        assert_eq!(
+            plan.target_provider_uuid,
+            "00000000-0000-4000-8000-000000000003"
+        );
+
+        let route = cross_execution_route(3, "target", "fable5", &plan);
+        assert_eq!(route.provider_id, 3);
+        assert_eq!(route.provider_name, "target");
+        assert_eq!(route.policy_source, "provider_cross");
+        assert_eq!(route.target_model.as_deref(), Some("precise"));
+        assert_eq!(route.reasoning_effort.as_deref(), Some("low"));
+    }
+
+    #[test]
+    fn cross_plan_requires_named_inference_and_excludes_managed_aliases() {
+        let policy = cross_policy(vec![crate::settings::CrossProviderModelRoutingRule {
+            source_model: "fable5".to_string(),
+            source_reasoning_effort: None,
+            target_provider_uuid: "00000000-0000-4000-8000-000000000002".to_string(),
+            target_model: None,
+            target_reasoning_effort: None,
+        }]);
+
+        for (method, path, model, managed, mode_uuid) in [
+            ("POST", "/v1/messages", "fable5", false, None),
+            (
+                "POST",
+                "/v1/messages",
+                "fable5",
+                true,
+                Some("10000000-0000-4000-8000-000000000001"),
+            ),
+            (
+                "POST",
+                "/v1/messages/count_tokens",
+                "fable5",
+                false,
+                Some("10000000-0000-4000-8000-000000000001"),
+            ),
+            (
+                "GET",
+                "/v1/messages",
+                "fable5",
+                false,
+                Some("10000000-0000-4000-8000-000000000001"),
+            ),
+            (
+                "POST",
+                "/v1/messages",
+                "aio/00000000-0000-4000-8000-000000000001",
+                false,
+                Some("10000000-0000-4000-8000-000000000001"),
+            ),
+            (
+                "POST",
+                "/v1/messages",
+                "Fable5",
+                false,
+                Some("10000000-0000-4000-8000-000000000001"),
+            ),
+        ] {
+            assert!(resolve_cross_plan(
+                "claude",
+                method,
+                path,
+                Some(model),
+                None,
+                managed,
+                mode_uuid,
+                Some(&policy),
+            )
+            .is_none());
+        }
     }
 
     #[test]

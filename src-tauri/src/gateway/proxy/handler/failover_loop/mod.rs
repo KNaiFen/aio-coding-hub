@@ -126,6 +126,7 @@ use axum::{
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
 };
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -256,6 +257,66 @@ fn sync_codex_prepared_active_requested_model<R: tauri::Runtime>(
     }
 }
 
+enum ProviderWorkItem {
+    Baseline {
+        provider_index: usize,
+    },
+    CrossTemporary {
+        target: crate::providers::ProviderForGateway,
+        route: crate::gateway::configured_model_route::ConfiguredModelRoute,
+    },
+}
+
+fn request_reasoning_effort<R: tauri::Runtime>(input: &RequestContext<R>) -> Option<String> {
+    input.special_settings.lock().ok().and_then(|settings| {
+        settings.iter().rev().find_map(|setting| {
+            (setting.get("type").and_then(serde_json::Value::as_str)
+                == Some("request_reasoning_effort"))
+            .then(|| setting.get("effort").and_then(serde_json::Value::as_str))
+            .flatten()
+            .map(str::to_string)
+        })
+    })
+}
+
+fn cross_temporary_work_item<R: tauri::Runtime>(
+    input: &RequestContext<R>,
+    source: &crate::providers::ProviderForGateway,
+    source_reasoning_effort: Option<&str>,
+) -> Option<ProviderWorkItem> {
+    let source_model = input.requested_model.as_deref()?;
+    let plan = crate::gateway::configured_model_route::resolve_cross_plan(
+        &input.cli_key,
+        &input.method_hint,
+        &input.forwarded_path,
+        Some(source_model),
+        source_reasoning_effort,
+        input.managed_model_route.is_some(),
+        input.effective_sort_mode_uuid.as_deref(),
+        source.cross_provider_model_routing_policy.as_ref(),
+    )?;
+    let target = input.sort_mode_members.iter().find(|candidate| {
+        candidate.provider_uuid == plan.target_provider_uuid
+            && candidate.provider_uuid != source.provider_uuid
+    })?;
+    let target_name = if target.name.trim().is_empty() {
+        format!("Provider #{} (auto-fixed)", target.id)
+    } else {
+        target.name.clone()
+    };
+    let route = crate::gateway::configured_model_route::cross_execution_route(
+        target.id,
+        &target_name,
+        source_model,
+        &plan,
+    );
+
+    Some(ProviderWorkItem::CrossTemporary {
+        target: target.clone(),
+        route,
+    })
+}
+
 /// Main failover loop: iterate providers, retry attempts, handle responses.
 ///
 /// This is a thin orchestrator that delegates to:
@@ -318,17 +379,60 @@ where
         original_anthropic_stream_requested(input.introspection_json.as_ref())
             || stream_flag_from_raw_body(&introspection_body);
 
-    let providers: Vec<_> = input.providers.clone();
+    let baseline_providers = input.providers.clone();
+    let source_reasoning_effort = request_reasoning_effort(&input);
+    let mut work_items: VecDeque<_> = (0..baseline_providers.len())
+        .map(|provider_index| ProviderWorkItem::Baseline { provider_index })
+        .collect();
 
-    for provider in providers.iter() {
+    while let Some(work_item) = work_items.pop_front() {
+        let (provider, route_override, cross_temporary) = match work_item {
+            ProviderWorkItem::Baseline { provider_index } => {
+                let Some(provider) = baseline_providers.get(provider_index) else {
+                    continue;
+                };
+                if run_state.processed_provider_ids.contains(&provider.id) {
+                    continue;
+                }
+                if !run_state.cross_jump_used {
+                    if let Some(cross_work_item) = cross_temporary_work_item(
+                        &input,
+                        provider,
+                        source_reasoning_effort.as_deref(),
+                    ) {
+                        let ProviderWorkItem::CrossTemporary { target, .. } = &cross_work_item else {
+                            unreachable!("cross planner returned a baseline work item")
+                        };
+                        if !run_state.processed_provider_ids.contains(&target.id) {
+                            run_state.cross_jump_used = true;
+                            run_state.processed_provider_ids.insert(target.id);
+                            work_items.push_front(ProviderWorkItem::Baseline { provider_index });
+                            work_items.push_front(cross_work_item);
+                            continue;
+                        }
+                    }
+                }
+                run_state.processed_provider_ids.insert(provider.id);
+                (provider.clone(), None, false)
+            }
+            ProviderWorkItem::CrossTemporary { target, route } => (
+                target,
+                Some(provider_iterator::RouteExecutionOverride {
+                    route,
+                    session_binding_allowed: false,
+                }),
+                true,
+            ),
+        };
         let preparation = provider_iterator::prepare_provider(
             ctx,
             &input,
-            provider,
+            &provider,
             &mut counters,
             &mut run_state.attempts,
             &run_state.failed_provider_ids,
             anthropic_stream_requested,
+            route_override,
         )
         .await;
 
@@ -391,6 +495,10 @@ where
         .await
         {
             return resp;
+        }
+        if cross_temporary {
+            run_state.active_requested_model = input.requested_model.clone();
+            crate::gateway::response_fixer::clear_configured_model_route(&input.special_settings);
         }
     }
 

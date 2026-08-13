@@ -37,6 +37,14 @@ fn bind_non_stream_session_success(
     )
 }
 
+fn session_binding_enabled(
+    session_binding_allowed: bool,
+    enable_session_reuse: bool,
+    managed_model_route: bool,
+) -> bool {
+    session_binding_allowed && enable_session_reuse && !managed_model_route
+}
+
 fn resolve_requested_model_for_log(
     requested_model: Option<String>,
     fallback_model: Option<&str>,
@@ -1478,8 +1486,11 @@ where
             last.circuit_failure_threshold = Some(change.after.failure_threshold);
         }
         if (200..300).contains(&status.as_u16())
-            && common.enable_session_reuse
-            && common.managed_model_route.is_none()
+            && session_binding_enabled(
+                provider_ctx_owned.session_binding_allowed,
+                common.enable_session_reuse,
+                common.managed_model_route.is_some(),
+            )
         {
             let _ = bind_non_stream_session_success(
                 state.session.as_ref(),
@@ -1541,7 +1552,8 @@ mod tests {
         bind_non_stream_session_success, buffer_cx2cc_event_stream_as_json,
         cache_bridge_non_stream_response, classify_cx2cc_success_payload,
         read_non_stream_body_with_limit, resolve_requested_model_for_log,
-        should_passthrough_non_stream_success, translate_bridge_non_stream_body,
+        session_binding_enabled, should_passthrough_non_stream_success,
+        translate_bridge_non_stream_body,
         Cx2ccSuccessPayloadKind, NonStreamBodyReadError,
     };
     use crate::domain::usage;
@@ -1552,6 +1564,14 @@ mod tests {
     use std::time::{Duration, Instant};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
+
+    #[test]
+    fn non_stream_binding_requires_attempt_permission_and_session_reuse() {
+        assert!(session_binding_enabled(true, true, false));
+        assert!(!session_binding_enabled(false, true, false));
+        assert!(!session_binding_enabled(true, false, false));
+        assert!(!session_binding_enabled(true, true, true));
+    }
 
     #[test]
     fn stale_generation_non_stream_late_success_does_not_overwrite_current_binding() {
