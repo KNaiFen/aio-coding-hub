@@ -16,8 +16,8 @@
 - PR：尚未创建；执行 session 开工后尽早创建 Draft PR
 - 并行 sibling：TUI PR #136（`fix/tui-request-card-ttfb`，当前 head `2b12c68cd99f7bc7c21fb8fa2b5354c9992a229b`）与本任务无产品代码重叠；可在本任务施工期间独立 CI/合并。不能从 TUI head 派生、cherry-pick 或修改 TUI `format.rs`。最终集成时若任务索引 README 同时变更，由 main 解决文档冲突。
 - PENDING 审阅：`PENDING.md` 已审阅，当前无 `pending`/`planned` 条目
-- 当前唯一写者：规划阶段为 main；main 明确交接后为本执行 session；暂停后由 main 临时接手并落盘记录
-- 当前阶段：规划边界修订后即可启动；TUI sibling 未合并不构成阻塞
+- 当前唯一写者：执行 session（main 已完成规划交接）；暂停后由 main 临时接手并落盘记录
+- 当前阶段：施工中；TUI sibling 未合并不构成阻塞
 
 ## 阅读顺序
 
@@ -198,6 +198,6 @@ Active task: /Users/knaifen/Documents/Codex/aio-coding-hub/08-13-cross-provider-
 
 - 结果：尚未开始（规划材料阶段）
 - PR/head/CI：尚未创建/尚未提交/未触发
-- 当前唯一写者：main（规划）；交接后执行 session
+- 当前唯一写者：执行 session；暂停后由 main 临时接手并落盘记录
 - 阻塞：无；TUI sibling 可并行，最终集成时由 main 处理任务索引文档冲突
-- 任务状态：`planning`，等待 main 运行 `task.py start` 后交接执行 session
+- 任务状态：`in_progress`，执行 session 按本入口施工并在交付后暂停

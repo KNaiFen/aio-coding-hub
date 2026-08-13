@@ -4,7 +4,7 @@
 
 ## 交付状态
 
-- 结果：尚未开始（规划阶段）
+- 结果：施工中（执行 session 已接手）
 - PR：尚未创建
 - 分支：`feat/cross-provider-model-routing`
 - PR base：`main` @ `875ff441c5ba9f1a7f235ad95dadb945a41bba61`（与 TUI sibling 共用基线；TUI 未合并不阻止本任务 PR）
@@ -12,17 +12,17 @@
 - 规划提交：`c6d59507c7a1de46abdb07427aa8bc153c69739c`；历史 checkpoint：`71392b672ee665b6ee96e13bf3871b2816185873`，登记同步提交：`2b8e52e7071fb59cc54a8082bb9bc05f10b8cf1c`、`01915697174eacd623c4e75a03cc10030cde2f9c`
 - `ci-gate`：未触发
 - 其他必需检查：待执行 session 开工后由实时 PR scope 决定
-- 交付时间：尚未开始
-- 执行 session：尚未启动；本次登记修订后由 main 交接唯一写权
+- 交付时间：2026-08-13，执行 session 已接手
+- 执行 session：已启动；当前唯一写者为执行 session
 
 ## 并行交接快照
 
 - 证据：TUI PR #136 当前 OPEN/CLEAN，head `2b12c68cd99f7bc7c21fb8fa2b5354c9992a229b`；只修改 TUI formatter 与 TUI 任务材料，与本任务产品代码无重叠，可并行施工。
 - 最后安全提交：`875ff441c5ba9f1a7f235ad95dadb945a41bba61`（基线，无本任务代码）
-- 工作树状态：规划 checkpoint 已提交；无产品代码修改
+- 工作树状态：交接提交已提交；执行 session 开始前无产品代码修改
 - 受影响的 AC/范围：无产品 AC 阻塞；最终集成时任务索引 README 可能需要文档冲突处理
-- 需要的决定：main 完成登记修订并运行 `task.py start`，随后交接执行 session
-- 恢复条件：登记修订提交、`task.py start`、执行 session preflight 通过
+- 需要的决定：无；规划、授权和并行边界已冻结
+- 恢复条件：执行 session 按 `execution.md` 完成 preflight；若发现材料性冲突则暂停回报 main
 
 ## 实现摘要
 
@@ -89,7 +89,7 @@
 ## 未完成项与阻塞
 
 - TUI PR #136 尚未合并但不阻止实现；head `2b12c68cd99f7bc7c21fb8fa2b5354c9992a229b`。最终合并阶段仅需处理任务索引 README 的可能冲突。
-- 产品代码、测试、功能 PR、CI、人工验证均未开始；规划 checkpoint 已冻结。
+- 产品代码、测试、功能 PR、CI、人工验证由执行 session 按 `implement.md` 施工；当前尚未形成交付候选。
 
 ## 建议 main 重点审查
 
