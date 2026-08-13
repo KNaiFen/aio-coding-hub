@@ -1940,6 +1940,34 @@ mod tests {
     }
 
     #[test]
+    fn provider_share_v2_contains_only_ordinary_routing_policy() {
+        let mut share = minimal_share();
+        share.provider.configuration.model_routing_policy_override =
+            Some(crate::settings::ModelRoutingPolicy {
+                enabled: true,
+                rules: vec![crate::settings::ModelRoutingRule {
+                    source_model: "source-model".to_string(),
+                    source_reasoning_effort: Some("high".to_string()),
+                    target_model: Some("target-model".to_string()),
+                    reasoning_effort: Some("medium".to_string()),
+                }],
+            });
+
+        let bytes = serialize_provider_share_v2(&share).expect("serialize provider share");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("provider share JSON");
+        let configuration = value["provider"]["configuration"]
+            .as_object()
+            .expect("configuration object");
+        assert!(configuration.contains_key("model_routing_policy_override"));
+        assert!(!configuration.contains_key("cross_provider_model_routing_policy"));
+        assert!(!configuration.contains_key("mode_uuid"));
+        assert!(!configuration.contains_key("sort_mode"));
+        assert!(!String::from_utf8(bytes)
+            .expect("provider share UTF-8")
+            .contains("target_provider_uuid"));
+    }
+
+    #[test]
     fn provider_share_import_disables_custom_account_usage_configuration() {
         let mut share = minimal_share();
         share.provider.extensions.push(ProviderShareExtensionV1 {

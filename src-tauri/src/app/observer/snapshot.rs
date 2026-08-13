@@ -1243,7 +1243,10 @@ fn parse_configured_model_route(
         }
         let source_model = bounded_optional(object.get("sourceModel")?.as_str(), 256)?;
         let effective_model = bounded_optional(object.get("effectiveModel")?.as_str(), 256)?;
-        let policy_source = known_value(object.get("policySource")?, &["global", "provider"])?;
+        let policy_source = known_value(
+            object.get("policySource")?,
+            &["global", "provider", "provider_cross"],
+        )?;
         let model_applied = object.get("modelApplied")?.as_bool()?;
         let reasoning_effort_applied = object.get("reasoningEffortApplied")?.as_bool()?;
         if !model_applied && !reasoning_effort_applied {
@@ -1434,6 +1437,13 @@ mod tests {
         assert_eq!(route.effective_model, "opus4.8");
         assert_eq!(route.reasoning_effort.as_deref(), Some("low"));
         assert_eq!(route.policy_source, "provider");
+        let cross_raw = r#"[{"type":"configured_model_route","providerId":7,"policySource":"provider_cross","sourceModel":"fable5","effectiveModel":"opus4.8","reasoningEffort":"low","applied":true,"modelApplied":true,"reasoningEffortApplied":true}]"#;
+        assert_eq!(
+            parse_configured_model_route(Some(cross_raw), Some(7))
+                .expect("valid cross route marker")
+                .policy_source,
+            "provider_cross"
+        );
         assert!(parse_configured_model_route(Some(raw), Some(8)).is_none());
         assert!(parse_configured_model_route(Some("not-json"), Some(7)).is_none());
         assert!(parse_configured_model_route(

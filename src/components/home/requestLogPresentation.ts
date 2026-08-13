@@ -19,6 +19,7 @@ import {
   resolveCodexReasoningEffort,
   resolveClaudeModelMappingFromSpecialSettings,
   resolveConfiguredModelRouteFromSpecialSettings,
+  resolveCrossProviderModelRouteFromSpecialSettings,
   type ConfiguredModelRoute,
   type ModelRouteMapping,
 } from "../../services/gateway/requestLogSpecialSettings";
@@ -223,9 +224,15 @@ function formatConfiguredRouteText(route: ConfiguredModelRoute): string {
 }
 
 function configuredRouteTitle(route: ConfiguredModelRoute): string {
+  const policyLabel =
+    route.policySource === "provider_cross"
+      ? "跨供应商规则"
+      : route.policySource === "provider"
+        ? "供应商覆盖"
+        : "全局";
   const parts = [
     "已应用模型路由",
-    `策略：${route.policySource === "provider" ? "供应商覆盖" : "全局"}`,
+    `策略：${policyLabel}`,
     `模型：${route.sourceModel} -> ${route.effectiveModel}`,
   ];
   if (route.reasoningEffortApplied) {
@@ -487,6 +494,12 @@ export function buildRequestLogAuditMeta(log: RequestLogAuditInput): RequestLogA
     log.special_settings_json,
     log.final_provider_id
   );
+  const crossProviderRoute = isSuccessful && !log.error_code
+    ? resolveCrossProviderModelRouteFromSpecialSettings(
+        log.special_settings_json,
+        log.final_provider_id
+      )
+    : null;
 
   const tags: RequestLogAuditTag[] = [];
 
@@ -553,6 +566,24 @@ export function buildRequestLogAuditMeta(log: RequestLogAuditInput): RequestLogA
     );
   }
 
+  if (crossProviderRoute) {
+    const source = formatModelRoutePart(
+      crossProviderRoute.sourceModel,
+      crossProviderRoute.sourceReasoningEffort
+    );
+    const target = formatModelRoutePart(
+      crossProviderRoute.targetModel ?? crossProviderRoute.sourceModel,
+      crossProviderRoute.targetReasoningEffort
+    );
+    tags.push(
+      auditTag(
+        "跨供应商路由",
+        "bg-teal-50/80 text-teal-700 ring-1 ring-inset ring-teal-500/15 dark:bg-teal-500/15 dark:text-teal-200 dark:ring-teal-400/25",
+        `${crossProviderRoute.sourceProviderName} / ${source} -> ${crossProviderRoute.targetProviderName} / ${target}`
+      )
+    );
+  }
+
   if (excludedFromStats) {
     tags.push(
       auditTag(
@@ -581,6 +612,16 @@ export function buildRequestLogAuditMeta(log: RequestLogAuditInput): RequestLogA
       : `模型路由检测：${resolveModelRouteMismatchLabel(modelRouteMapping)}。`;
   } else if (managedModelRoute) {
     summary = `AIO 已将 ${managedModelRoute.canonicalModel} 固定路由到 Provider #${managedModelRoute.providerId} 的 ${managedModelRoute.requestedUpstreamModel}。`;
+  } else if (crossProviderRoute) {
+    const source = formatModelRoutePart(
+      crossProviderRoute.sourceModel,
+      crossProviderRoute.sourceReasoningEffort
+    );
+    const target = formatModelRoutePart(
+      crossProviderRoute.targetModel ?? crossProviderRoute.sourceModel,
+      crossProviderRoute.targetReasoningEffort
+    );
+    summary = `跨供应商路由：${crossProviderRoute.sourceProviderName} / ${source} -> ${crossProviderRoute.targetProviderName} / ${target}。`;
   } else if (isAllProvidersUnavailable) {
     summary = "当前没有可用 Provider，网关未继续向已熔断或冷却中的供应商发起上游请求。";
   } else if (isClientAbort) {

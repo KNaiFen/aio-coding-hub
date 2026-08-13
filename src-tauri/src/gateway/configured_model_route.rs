@@ -175,6 +175,119 @@ pub(in crate::gateway) fn cross_execution_route(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(in crate::gateway) fn mark_cross_provider_route(
+    special_settings: &Arc<Mutex<Vec<Value>>>,
+    mode_uuid: &str,
+    source_provider_id: i64,
+    source_provider_uuid: &str,
+    source_provider_name: &str,
+    target_provider_id: Option<i64>,
+    target_provider_name: Option<&str>,
+    source_model: &str,
+    source_reasoning_effort: Option<&str>,
+    plan: &CrossProviderRoutePlan,
+    status: &'static str,
+    reason: Option<&'static str>,
+) {
+    crate::gateway::response_fixer::upsert_cross_provider_model_route(
+        special_settings,
+        json!({
+            "type": "cross_provider_model_route",
+            "scope": "request",
+            "modeUuid": mode_uuid,
+            "sourceProviderId": source_provider_id,
+            "sourceProviderUuid": source_provider_uuid,
+            "sourceProviderName": source_provider_name,
+            "targetProviderId": target_provider_id,
+            "targetProviderUuid": plan.target_provider_uuid,
+            "targetProviderName": target_provider_name,
+            "sourceModel": source_model,
+            "sourceReasoningEffort": source_reasoning_effort,
+            "targetModel": plan.target_model,
+            "targetReasoningEffort": plan.target_reasoning_effort,
+            "status": status,
+            "reason": reason,
+            "singleHop": true,
+        }),
+    );
+}
+
+pub(in crate::gateway) fn update_cross_provider_route_status(
+    special_settings: &Arc<Mutex<Vec<Value>>>,
+    status: &'static str,
+    reason: Option<&'static str>,
+) {
+    let Some(mut marker) = special_settings.lock().ok().and_then(|settings| {
+        settings
+            .iter()
+            .rev()
+            .find(|setting| {
+                setting.get("type").and_then(Value::as_str)
+                    == Some("cross_provider_model_route")
+            })
+            .cloned()
+    }) else {
+        return;
+    };
+    let Some(marker) = marker.as_object_mut() else {
+        return;
+    };
+    marker.insert("status".to_string(), json!(status));
+    marker.insert("reason".to_string(), json!(reason));
+    crate::gateway::response_fixer::upsert_cross_provider_model_route(
+        special_settings,
+        Value::Object(marker.clone()),
+    );
+}
+
+fn matched_cross_provider_route_marker(setting: &mut Value) -> Option<&mut Map<String, Value>> {
+    let marker = setting.as_object_mut()?;
+    (marker.get("type").and_then(Value::as_str) == Some("cross_provider_model_route")
+        && marker.get("status").and_then(Value::as_str) == Some("matched"))
+    .then_some(marker)
+}
+
+pub(in crate::gateway) fn finalize_cross_provider_route_json(
+    special_settings_json: Option<String>,
+    status: Option<u16>,
+    error_code: Option<&str>,
+) -> Option<String> {
+    let mut raw = special_settings_json?;
+    let successful = error_code.is_none()
+        && status.is_some_and(|status| (200..300).contains(&status));
+    if successful {
+        return Some(raw);
+    }
+
+    let Ok(mut settings) = serde_json::from_str::<Value>(&raw) else {
+        return Some(raw);
+    };
+    let marker = match &mut settings {
+        Value::Array(settings) => settings
+            .iter_mut()
+            .rev()
+            .find_map(matched_cross_provider_route_marker),
+        Value::Object(marker)
+            if marker.get("type").and_then(Value::as_str)
+                == Some("cross_provider_model_route")
+                && marker.get("status").and_then(Value::as_str) == Some("matched") =>
+        {
+            Some(marker)
+        }
+        _ => None,
+    };
+    let Some(marker) = marker else {
+        return Some(raw);
+    };
+    marker.insert("status".to_string(), json!("failed"));
+    marker.insert("reason".to_string(), json!("target_terminal_error"));
+    if let Ok(serialized) = serde_json::to_string(&settings) {
+        raw = serialized;
+    }
+    Some(raw)
+}
+
 pub(in crate::gateway) fn mark_pending(
     special_settings: &Arc<Mutex<Vec<Value>>>,
     route: &ConfiguredModelRoute,
@@ -625,6 +738,47 @@ mod tests {
             )
             .is_none());
         }
+    }
+
+    #[test]
+    fn terminal_cross_marker_json_only_changes_unresolved_failures() {
+        let marker = json!([{
+            "type": "cross_provider_model_route",
+            "status": "matched",
+            "reason": null,
+            "singleHop": true,
+        }])
+        .to_string();
+
+        let success = finalize_cross_provider_route_json(Some(marker.clone()), Some(200), None)
+            .expect("success marker");
+        assert_eq!(success, marker);
+
+        let failure = finalize_cross_provider_route_json(
+            Some(marker),
+            Some(502),
+            Some("UPSTREAM_ERROR"),
+        )
+        .expect("failure marker");
+        let failure: Value = serde_json::from_str(&failure).expect("failure marker JSON");
+        assert_eq!(failure[0]["status"], "failed");
+        assert_eq!(failure[0]["reason"], "target_terminal_error");
+
+        let already_failed = json!([{
+            "type": "cross_provider_model_route",
+            "status": "failed",
+            "reason": "target_attempt_failed",
+            "singleHop": true,
+        }])
+        .to_string();
+        assert_eq!(
+            finalize_cross_provider_route_json(Some(already_failed.clone()), Some(200), None),
+            Some(already_failed)
+        );
+        assert_eq!(
+            finalize_cross_provider_route_json(Some("not-json".to_string()), Some(500), None),
+            Some("not-json".to_string())
+        );
     }
 
     #[test]

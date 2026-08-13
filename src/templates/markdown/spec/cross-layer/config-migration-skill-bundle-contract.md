@@ -316,3 +316,23 @@ do not bolt marker deletion or case handling onto the write phase.
   with O_NOFOLLOW and O_CLOEXEC, then perform the existing type, identity, and
   single-link checks. The production FIFO replacement regression must use an
   external bounded watchdog so a blocking open cannot make the test hang.
+
+## Config Bundle V5 Sort-Mode Identity
+
+- Export schema v5 preserves canonical provider UUIDs from v4 and adds
+  canonical named-mode UUIDs, member provider UUID links, member
+  order/enable/reuse values, optional member cross-provider policy, and active
+  mode references by UUID.
+- Keep capability thresholds independent: full Skill payload begins at v2,
+  account snapshots at v3, provider identity at v4, and sort-mode UUID/cross
+  policy at v5. Schema validation accepts v1 through v5 only.
+- V5 preparation validates unique mode UUIDs, member UUID/CLI references, and
+  active UUID references before acquiring the import lock or clearing data.
+  Numeric database IDs are rebuilt transactionally while UUIDs remain stable.
+- V1-v4 restore generates fresh mode UUIDs, uses legacy name/member links, and
+  imports no cross policy. Malformed cross rules and non-standard effort values
+  fail open per rule; a valid but absent target UUID remains an invalid
+  projection rather than being rebound to the source.
+- Tests cover v1-v5 compatibility, v5 round trip, pre-lock identity rejection,
+  old-bundle UUID generation, per-rule fail-open sanitization, and missing
+  target preservation.

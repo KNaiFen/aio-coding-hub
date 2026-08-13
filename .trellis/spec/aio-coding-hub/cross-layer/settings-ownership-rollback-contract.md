@@ -46,6 +46,16 @@ owns. `settings::write(app, snapshot)` is a whole-snapshot primitive reserved fo
   the 12 rectifier/response-fixer fields, and gateway repair conditionally owns only `preferred_port`.
 - Ordinary `SettingsUpdate` / generated bindings / frontend ordinary payload must not include rectifier
   exclusive fields. Future `AppSettings` fields do not automatically become ordinary-owner fields.
+- Global model routing remains an `AppSettings` ordinary-owner field and never
+  accepts cross-provider targets. One provider editor composes provider-row
+  ordinary policy with named-mode member cross policy, but saves them through
+  one owner-scoped SQLite transaction with independent revisions. Default mode
+  and non-members have no member-policy write authority.
+- The combined model-routing save validates provider UUID, mode ID/UUID, CLI,
+  enabled membership, both expected revisions, and the complete candidate
+  before either owner changes. A stale ordinary or cross revision rolls back
+  both fields. Route generation/session invalidation occurs only after durable
+  commit and never after failed validation/conflict.
 - Complete config import may replace the whole snapshot only through `compare_and_swap` (or the shared
   autostart coordinator that wraps it); the canonical snapshot used for preparation is the expected value.
 - A writer with external side effects records the exact owned-field value it committed. Rollback restores
@@ -99,6 +109,8 @@ owns. `settings::write(app, snapshot)` is a whole-snapshot primitive reserved fo
 | External side effect fails and committed token still matches | Restore only owned fields | Report original operation failure |
 | External side effect fails after newer owned-field commit | Skip rollback and old runtime restoration | Preserve newer value; safe warning allowed |
 | Atomic settings persistence fails | Leave last durable snapshot authoritative | Return persistence error without partial file |
+| Combined ordinary/cross policy save has either stale revision | Preserve both current owners | Conflict; no partial policy write or runtime invalidation |
+| Cross save targets Default, another CLI, non-member, or mismatched UUID | Reject before write | Preserve ordinary and member policy |
 
 ### 5. Good / Base / Bad Cases
 
@@ -137,6 +149,9 @@ owns. `settings::write(app, snapshot)` is a whole-snapshot primitive reserved fo
 - Unit-test the Windows adapter without real registry mutation: open/delete success, missing key, missing value,
   and non-`NotFound` open/delete failures.
 - Search production Rust sources for `settings::write(` and allow only test fixtures/seeding.
+- Interleave ordinary and cross policy writers against the combined save;
+  prove stale revision on either owner rolls back both, mode/provider UUIDs and
+  membership are revalidated, and failure has no runtime invalidation.
 - GitHub Actions must run settings, gateway, Grok, CLI proxy, config-migration
   focused suites and the full Rust library suite; locally use only the
   cloud-only allowlist.

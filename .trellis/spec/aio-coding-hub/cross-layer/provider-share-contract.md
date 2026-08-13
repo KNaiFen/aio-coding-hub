@@ -175,6 +175,18 @@ value while a create uses the disabled/10-minute default. Explicit `false` and
 explicit interval values remain authoritative. Upsert input bindings therefore
 keep both fields optional, while Provider summary output remains concrete.
 
+Named sort-mode identity and member-scoped cross-provider model routing are
+not portable properties of one Provider. V2 may serialize the ordinary
+`model_routing_policy_override`, but must not serialize a mode UUID,
+membership, active route, target provider UUID, or cross policy. The strict
+`deny_unknown_fields` boundary remains unchanged.
+
+Share import creates a fresh provider UUID, leaves the provider disabled, and
+does not add it to Default or any named mode. Local duplication may copy the
+ordinary provider policy and other provider-owned fields, but the new identity
+receives no `sort_mode_providers` row or member cross policy. The source member
+policy remains attached only to the source UUID.
+
 #### Secret And Native-I/O Boundary
 
 The full envelope and credentials stay in Rust memory. Export commands write
@@ -306,6 +318,10 @@ extension values.
   configuration/credential/extension round-trips, referenced-provider refusal,
   standalone `cx2cc`, collision naming, disabled/no-route import, scheduled
   probe exclusion with disabled/10-minute import defaults, and rollback.
+- Assert share v2 round-trips ordinary model policy while serialized JSON has
+  no mode/cross/target-provider UUID field. Assert duplication creates a fresh
+  UUID with no route membership/cross policy and does not mutate the source
+  member policy.
 - Plugin tests: missing/unavailable owner, exact version mismatch, manifest
   ID/version mismatch, missing capability/namespace/target CLI, built-in owner
   recreation, and a compatibility change between preview and confirm. Assert

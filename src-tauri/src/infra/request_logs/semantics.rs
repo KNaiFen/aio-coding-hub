@@ -346,4 +346,35 @@ mod tests {
             None
         );
     }
+
+    #[test]
+    fn failed_cross_marker_does_not_override_final_provider_cost_basis() {
+        let json = serde_json::json!([
+            {
+                "type": "cross_provider_model_route",
+                "sourceProviderId": 7,
+                "targetProviderId": 8,
+                "status": "failed",
+                "singleHop": true
+            },
+            {
+                "type": "configured_model_route",
+                "providerId": 7,
+                "policySource": "provider",
+                "pricedCliKey": "codex",
+                "pricedModel": "source-final",
+                "applied": true
+            }
+        ])
+        .to_string();
+
+        assert_eq!(
+            resolve_configured_model_cost_basis(Some(&json), Some(7)),
+            Some(("codex".to_string(), "source-final".to_string()))
+        );
+        assert_eq!(
+            resolve_configured_model_cost_basis(Some(&json), Some(8)),
+            None
+        );
+    }
 }

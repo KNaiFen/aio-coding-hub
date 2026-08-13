@@ -3,9 +3,10 @@ use super::json::JsonFixer;
 use super::sse::SseFixer;
 use super::{
     process_non_stream, push_model_route_mapping_special_setting, push_special_setting,
-    special_settings_json, upsert_cx2cc_cost_basis, ResponseFixerConfig, ResponseFixerStream,
-    DEFAULT_MAX_FIX_SIZE, DEFAULT_MAX_JSON_DEPTH, SPECIAL_SETTINGS_JSON_MAX_BYTES,
-    SPECIAL_SETTINGS_MAX_ENTRIES, SPECIAL_SETTINGS_STRING_PREVIEW_BYTES,
+    special_settings_json, upsert_cross_provider_model_route, upsert_cx2cc_cost_basis,
+    ResponseFixerConfig, ResponseFixerStream, DEFAULT_MAX_FIX_SIZE, DEFAULT_MAX_JSON_DEPTH,
+    SPECIAL_SETTINGS_JSON_MAX_BYTES, SPECIAL_SETTINGS_MAX_ENTRIES,
+    SPECIAL_SETTINGS_STRING_PREVIEW_BYTES,
 };
 use axum::body::Bytes;
 use futures_core::Stream;
@@ -193,6 +194,45 @@ fn cx2cc_cost_basis_survives_entry_cap_and_replaces_stale_attempt() {
             .and_then(serde_json::Value::as_str),
         Some("special_settings_truncated")
     );
+}
+
+#[test]
+fn cross_provider_route_survives_entry_cap_and_replaces_stale_status() {
+    let special_settings = Arc::new(Mutex::new(Vec::new()));
+    for index in 0..SPECIAL_SETTINGS_MAX_ENTRIES {
+        push_special_setting(
+            &special_settings,
+            serde_json::json!({"type": "diagnostic", "index": index}),
+        );
+    }
+
+    for status in ["matched", "failed"] {
+        upsert_cross_provider_model_route(
+            &special_settings,
+            serde_json::json!({
+                "type": "cross_provider_model_route",
+                "scope": "request",
+                "modeUuid": "11111111-1111-4111-8111-111111111111",
+                "sourceProviderId": 1,
+                "targetProviderId": 2,
+                "status": status,
+                "singleHop": true,
+            }),
+        );
+    }
+
+    let encoded = special_settings_json(&special_settings).expect("special settings json");
+    let decoded: Vec<serde_json::Value> = serde_json::from_str(&encoded).expect("valid json");
+    assert!(encoded.len() <= SPECIAL_SETTINGS_JSON_MAX_BYTES);
+    let routes: Vec<_> = decoded
+        .iter()
+        .filter(|value| {
+            value.get("type").and_then(serde_json::Value::as_str)
+                == Some("cross_provider_model_route")
+        })
+        .collect();
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0]["status"], "failed");
 }
 
 #[test]

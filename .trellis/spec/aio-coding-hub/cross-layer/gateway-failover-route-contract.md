@@ -150,6 +150,28 @@ buildRequestRouteMeta({
   succeeds. After commit, retry is unsafe: forward the original event and let
   stream completion update the optimistic success attempt with the same bounded
   evidence. Old or malformed evidence remains observational and fail-open.
+- A named-mode source candidate may insert one request-private
+  `CrossTemporary` target before itself. The target must be another enabled
+  member of the same CLI and immutable mode snapshot. It reuses the complete
+  `ProviderForGateway` snapshot and the normal gate, credential, bridge,
+  retry, circuit, and Ready-provider budget; no target index or fresh provider
+  selection query is authoritative.
+- A request consumes at most one cross jump. Mark the temporary target as
+  processed before preparing it, so it is not retried if it also appears in
+  the baseline. The target executes only the source rule's model/effort and
+  does not resolve its own ordinary or cross rule. Its Ready preparation
+  consumes the shared provider cap; gate skips preserve the existing attempt
+  and Ready-count semantics.
+- Temporary-target session binding is always disabled. A successful B does
+  not create, update, or clear a binding. If normal failover classification
+  permits continuation after B fails, restore the original requested model,
+  clear B's configured-route marker, and resume the unmodified A-to-C
+  baseline. Terminal preparation/failure retains the existing terminal result.
+- Persist the explanatory bounded `cross_provider_model_route` marker without
+  body, URL, headers, or credentials. It may explain matched, skipped, or
+  failed planning but never creates an attempt, provider hop, Ready count, or
+  `provider_switch_count`. Final provider/model/cost still come from actual
+  attempts and the final provider-scoped configured-route marker.
 
 ### 4. Validation & Error Matrix
 
@@ -174,6 +196,10 @@ buildRequestRouteMeta({
 | Upstream 401/403 body contains a credential-like value | Keep status and safe reason, but persist/log none of the body |
 | Gzip body exceeds the decoded scan prefix | Match only decoded bytes within the first 64 KiB; never scan compressed fallback bytes |
 | Native Codex `response.failed` contains a credential and a capacity phrase | Retry only before commit; persist the redacted structured evidence and no raw SSE |
+| A cross rule targets B before baseline A | Prepare/send B through the common loop once; consume one Ready slot only if B becomes Ready |
+| B is gate-skipped | Preserve the existing skip-attempt semantics, use no Ready slot, then resume A when the existing decision permits |
+| B fails, then A succeeds | Attempts retain B then A; final provider/model/cost and session binding belong to A |
+| B succeeds before A is sent | Final provider/model/cost belong to B; B creates no session binding and the effective switch count is normally zero |
 
 ### 5. Good / Base / Bad Cases
 
@@ -247,6 +273,10 @@ buildRequestRouteMeta({
 - Frontend-test the rich route panel in light/dark themes, long wrapped content,
   collision-bounded scrolling, known-reason deduplication, and preservation of
   unknown future reasons without changing the default short-tooltip surface.
+- Route-test non-stream and SSE cross success, gate skip, retry exhaustion,
+  terminal preparation, and B-to-A recovery. Assert one jump, processed
+  de-duplication, shared Ready/retry budgets, complete attempts, unchanged
+  switch-count derivation, no B binding, and normal A/C binding after recovery.
 - GitHub Actions must run the full Rust library suite after shared failover
   selection or gate changes, plus generated bindings, typecheck, lint, and Rust
   format checks; locally use only the cloud-only allowlist.

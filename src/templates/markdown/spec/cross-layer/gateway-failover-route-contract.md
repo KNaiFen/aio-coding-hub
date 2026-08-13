@@ -67,6 +67,17 @@ buildRequestRouteMeta({
   `error_details_json`. The bounded body may remain in memory only as needed by
   existing failover/auth classification. Serialization defensively strips a
   supplied 401/403 preview even when an earlier layer accidentally included it.
+- A named-mode source candidate may insert at most one request-private
+  `CrossTemporary` target before itself. B must be another enabled same-CLI
+  member from the immutable mode snapshot and reuse the complete provider
+  snapshot plus the normal gate, credentials, bridge, retries, circuit, and
+  Ready-provider budget. Mark B processed before preparation; B does not parse
+  its own routes and is not sent again from the baseline.
+- B never creates, updates, or clears session binding. If existing failover
+  policy permits continuation after B fails, restore the original model and
+  unmodified A-to-C baseline. Cross audit metadata is bounded and explanatory;
+  attempts, final provider/model/cost, and switch counts remain derived from
+  actual sends and existing final-provider markers.
 
 ### 4. Validation & Error Matrix
 
@@ -82,6 +93,8 @@ buildRequestRouteMeta({
 | Two Ready providers consume cap 2, then a circuit-open candidate follows | Record the third skipped attempt/route; make no third upstream call |
 | Route has 3 hops and 4 attempt rows | 3 providers, 2 transitions, 4 attempts |
 | Upstream 401/403 body contains a credential-like value | Keep status and safe reason, but persist/log none of the body |
+| Cross target B becomes Ready | Consume the shared Ready-provider budget and provider retry budget once |
+| B fails and A succeeds | Preserve B-to-A attempts; final projection and binding belong to A |
 
 ### 5. Good / Base / Bad Cases
 
@@ -114,6 +127,8 @@ buildRequestRouteMeta({
 - Keep model-discovery strict-attempt and health-neutral circuit tests passing;
   shared gate changes must not broaden those requests.
 - Frontend-test provider, transition, and attempt counts with skips and retries.
+- Route-test cross success/failure for non-stream and SSE, processed de-dup,
+  shared Ready/retry budgets, binding suppression, and baseline recovery.
 - Run the full Rust library suite after shared failover selection or gate
   changes, then generated bindings, typecheck, lint, and Rust format checks.
 

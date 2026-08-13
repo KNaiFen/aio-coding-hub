@@ -1,4 +1,5 @@
 import { normalizeClaudeModelMapping, type ClaudeModelMapping } from "./claudeModelMapping";
+import { isCanonicalUuidV4 } from "../providers/uuid";
 
 export type ParsedRequestLogSpecialSetting = {
   type?: string;
@@ -94,7 +95,7 @@ export type AioManagedModelRoute = {
 export type ConfiguredModelRoute = {
   providerId: number;
   providerName: string | null;
-  policySource: "global" | "provider";
+  policySource: "global" | "provider" | "provider_cross";
   sourceModel: string;
   targetModel: string | null;
   effectiveModel: string;
@@ -103,6 +104,23 @@ export type ConfiguredModelRoute = {
   modelApplied: boolean;
   reasoningEffortApplied: boolean;
   applied: true;
+};
+
+export type CrossProviderModelRoute = {
+  modeUuid: string;
+  sourceProviderId: number;
+  sourceProviderUuid: string;
+  sourceProviderName: string;
+  targetProviderId: number;
+  targetProviderUuid: string;
+  targetProviderName: string;
+  sourceModel: string;
+  sourceReasoningEffort: string | null;
+  targetModel: string | null;
+  targetReasoningEffort: string | null;
+  status: "matched" | "skipped" | "failed";
+  reason: string | null;
+  singleHop: true;
 };
 
 type KnownCodexReasoningEffort = Exclude<CodexReasoningEffort, "unknown">;
@@ -605,7 +623,9 @@ function normalizeConfiguredModelRouteSetting(
     providerId <= 0 ||
     !sourceModel ||
     !effectiveModel ||
-    (policySource !== "global" && policySource !== "provider") ||
+    (policySource !== "global" &&
+      policySource !== "provider" &&
+      policySource !== "provider_cross") ||
     (!modelApplied && !reasoningEffortApplied)
   ) {
     return null;
@@ -630,6 +650,74 @@ function normalizeConfiguredModelRouteSetting(
     reasoningEffortApplied,
     applied: true,
   };
+}
+
+function normalizeCrossProviderModelRouteSetting(
+  setting: ParsedRequestLogSpecialSetting
+): CrossProviderModelRoute | null {
+  if (setting.type !== "cross_provider_model_route" || setting.singleHop !== true) return null;
+
+  const sourceProviderId = normalizeRouteNumber(setting.sourceProviderId);
+  const targetProviderId = normalizeRouteNumber(setting.targetProviderId);
+  const status = setting.status;
+  const modeUuid = normalizeConfiguredRouteText(setting.modeUuid, 64);
+  const sourceProviderUuid = normalizeConfiguredRouteText(setting.sourceProviderUuid, 64);
+  const targetProviderUuid = normalizeConfiguredRouteText(setting.targetProviderUuid, 64);
+  const sourceProviderName = normalizeConfiguredRouteText(setting.sourceProviderName, 128);
+  const targetProviderName = normalizeConfiguredRouteText(setting.targetProviderName, 128);
+  const sourceModel = normalizeConfiguredRouteText(setting.sourceModel);
+  if (
+    sourceProviderId == null ||
+    sourceProviderId <= 0 ||
+    targetProviderId == null ||
+    targetProviderId <= 0 ||
+    sourceProviderId === targetProviderId ||
+    !modeUuid ||
+    !sourceProviderUuid ||
+    !targetProviderUuid ||
+    !isCanonicalUuidV4(modeUuid) ||
+    !isCanonicalUuidV4(sourceProviderUuid) ||
+    !isCanonicalUuidV4(targetProviderUuid) ||
+    sourceProviderUuid === targetProviderUuid ||
+    !sourceProviderName ||
+    !targetProviderName ||
+    !sourceModel ||
+    (status !== "matched" && status !== "skipped" && status !== "failed")
+  ) {
+    return null;
+  }
+
+  return {
+    modeUuid,
+    sourceProviderId,
+    sourceProviderUuid,
+    sourceProviderName,
+    targetProviderId,
+    targetProviderUuid,
+    targetProviderName,
+    sourceModel,
+    sourceReasoningEffort: normalizeConfiguredRouteText(setting.sourceReasoningEffort, 128),
+    targetModel: normalizeConfiguredRouteText(setting.targetModel),
+    targetReasoningEffort: normalizeConfiguredRouteText(setting.targetReasoningEffort, 128),
+    status,
+    reason: normalizeConfiguredRouteText(setting.reason, 128),
+    singleHop: true,
+  };
+}
+
+export function resolveCrossProviderModelRouteFromSpecialSettings(
+  specialSettingsJson: string | null | undefined,
+  finalProviderId?: number | null
+): CrossProviderModelRoute | null {
+  const routes = parseRequestLogSpecialSettings(specialSettingsJson)
+    .map(normalizeCrossProviderModelRouteSetting)
+    .filter((route): route is CrossProviderModelRoute => route !== null);
+  if (routes.length === 0) return null;
+
+  const route = routes[routes.length - 1] ?? null;
+  if (route?.status !== "matched") return null;
+  if (finalProviderId == null || route.targetProviderId !== finalProviderId) return null;
+  return route;
 }
 
 export function resolveConfiguredModelRouteFromSpecialSettings(

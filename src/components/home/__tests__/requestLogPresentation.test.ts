@@ -148,6 +148,77 @@ describe("components/home/requestLogPresentation", () => {
     expect(audit.tags.find((tag) => tag.label === "模型路由")?.className).toContain("rose");
   });
 
+  it("shows a successful cross-provider route without treating failed targets as final", () => {
+    const marker = {
+      type: "cross_provider_model_route",
+      modeUuid: "11111111-1111-4111-8111-111111111111",
+      sourceProviderId: 1,
+      sourceProviderUuid: "22222222-2222-4222-8222-222222222222",
+      sourceProviderName: "Source",
+      targetProviderId: 2,
+      targetProviderUuid: "33333333-3333-4333-8333-333333333333",
+      targetProviderName: "Target",
+      sourceModel: "gpt-source",
+      sourceReasoningEffort: "high",
+      targetModel: "gpt-target",
+      targetReasoningEffort: "low",
+      status: "matched",
+      reason: null,
+      singleHop: true,
+    };
+    const configured = {
+      type: "configured_model_route",
+      providerId: 2,
+      providerName: "Target",
+      policySource: "provider_cross",
+      sourceModel: "gpt-source",
+      targetModel: "gpt-target",
+      effectiveModel: "gpt-target",
+      reasoningEffort: "low",
+      pricedCliKey: "codex",
+      applied: true,
+      modelApplied: true,
+      reasoningEffortApplied: true,
+    };
+    const specialSettings = JSON.stringify([marker, configured]);
+
+    const display = resolveRequestLogModelDisplayMeta(
+      "codex",
+      "gpt-source",
+      specialSettings,
+      null,
+      2
+    );
+    expect(display.isConfiguredRoute).toBe(true);
+    expect(display.title).toContain("跨供应商规则");
+
+    const success = buildRequestLogAuditMeta({
+      cli_key: "codex",
+      path: "/v1/responses",
+      status: 200,
+      special_settings_json: specialSettings,
+      final_provider_id: 2,
+    });
+    expect(success.tags.find((tag) => tag.label === "跨供应商路由")?.title).toBe(
+      "Source / gpt-source-high -> Target / gpt-target-low"
+    );
+    expect(success.summary).toContain("Source / gpt-source-high -> Target / gpt-target-low");
+
+    for (const failed of [
+      { ...marker, status: "failed", reason: "target_attempt_failed" },
+      { ...marker, status: "matched" },
+    ]) {
+      const audit = buildRequestLogAuditMeta({
+        cli_key: "codex",
+        path: "/v1/responses",
+        status: 200,
+        special_settings_json: JSON.stringify([failed]),
+        final_provider_id: 1,
+      });
+      expect(audit.tags.map((tag) => tag.label)).not.toContain("跨供应商路由");
+    }
+  });
+
   it("shows an AIO managed route as neutral audit information", () => {
     const specialSettings = JSON.stringify([
       {

@@ -401,68 +401,7 @@ pub(crate) async fn provider_duplicate(
 ) -> Result<providers::ProviderSummary, String> {
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
     let result = blocking::run("provider_duplicate", move || {
-        let conn = db.open_connection()?;
-        let source = providers::get_by_id(&conn, provider_id)?;
-        let siblings = providers::list_by_cli(&db, &source.cli_key)?;
-        let api_key = if source.auth_mode == "api_key" && source.source_provider_id.is_none() {
-            Some(providers::get_api_key_plaintext(&db, provider_id)?)
-        } else {
-            None
-        };
-        let extension_values = Some(
-            source
-                .extension_values
-                .iter()
-                .map(|value| providers::ProviderExtensionValuesInput {
-                    plugin_id: value.plugin_id.clone(),
-                    namespace: value.namespace.clone(),
-                    values: value.values.clone(),
-                })
-                .collect(),
-        );
-
-        providers::upsert(
-            &db,
-            providers::ProviderUpsertParams {
-                provider_id: None,
-                cli_key: source.cli_key.clone(),
-                name: build_duplicated_provider_name(&source.name, &siblings),
-                base_urls: source.base_urls.clone(),
-                base_url_mode: source.base_url_mode,
-                auth_mode: match source.auth_mode.as_str() {
-                    "oauth" => Some(providers::ProviderAuthMode::Oauth),
-                    _ => Some(providers::ProviderAuthMode::ApiKey),
-                },
-                api_key,
-                enabled: source.enabled,
-                cost_multiplier: source.cost_multiplier,
-                priority: None,
-                claude_models: Some(source.claude_models.clone()),
-                model_mapping: Some(source.model_mapping.clone()),
-                availability_test_model: source.availability_test_model.clone(),
-                availability_probe_enabled: source.availability_probe_enabled,
-                availability_probe_interval_minutes: source.availability_probe_interval_minutes,
-                limit_5h_usd: source.limit_5h_usd,
-                limit_daily_usd: source.limit_daily_usd,
-                daily_reset_mode: Some(source.daily_reset_mode),
-                daily_reset_time: Some(source.daily_reset_time.clone()),
-                limit_weekly_usd: source.limit_weekly_usd,
-                limit_monthly_usd: source.limit_monthly_usd,
-                limit_total_usd: source.limit_total_usd,
-                tags: Some(source.tags.clone()),
-                note: Some(source.note.clone()),
-                source_provider_id: source.source_provider_id,
-                bridge_type: source.bridge_type.clone(),
-                stream_idle_timeout_seconds: source.stream_idle_timeout_seconds,
-                extension_values,
-                account_usage_credentials_patch: None,
-                account_usage_credentials_copy_from_provider_id: Some(provider_id),
-                upstream_retry_policy_override: source.upstream_retry_policy_override.clone(),
-                upstream_retry_policy_override_specified: true,
-                model_routing_policy_override: source.model_routing_policy_override.clone(),
-                model_routing_policy_override_specified: true,
-            },
-        )
+        duplicate_provider_in_db(&db, provider_id)
     })
     .await
     .map_err(Into::into);
@@ -489,6 +428,74 @@ pub(crate) async fn provider_duplicate(
     }
 
     result
+}
+
+fn duplicate_provider_in_db(
+    db: &crate::db::Db,
+    provider_id: i64,
+) -> crate::shared::error::AppResult<providers::ProviderSummary> {
+    let conn = db.open_connection()?;
+    let source = providers::get_by_id(&conn, provider_id)?;
+    let siblings = providers::list_by_cli(db, &source.cli_key)?;
+    let api_key = if source.auth_mode == "api_key" && source.source_provider_id.is_none() {
+        Some(providers::get_api_key_plaintext(db, provider_id)?)
+    } else {
+        None
+    };
+    let extension_values = Some(
+        source
+            .extension_values
+            .iter()
+            .map(|value| providers::ProviderExtensionValuesInput {
+                plugin_id: value.plugin_id.clone(),
+                namespace: value.namespace.clone(),
+                values: value.values.clone(),
+            })
+            .collect(),
+    );
+
+    providers::upsert(
+        db,
+        providers::ProviderUpsertParams {
+            provider_id: None,
+            cli_key: source.cli_key.clone(),
+            name: build_duplicated_provider_name(&source.name, &siblings),
+            base_urls: source.base_urls.clone(),
+            base_url_mode: source.base_url_mode,
+            auth_mode: match source.auth_mode.as_str() {
+                "oauth" => Some(providers::ProviderAuthMode::Oauth),
+                _ => Some(providers::ProviderAuthMode::ApiKey),
+            },
+            api_key,
+            enabled: source.enabled,
+            cost_multiplier: source.cost_multiplier,
+            priority: None,
+            claude_models: Some(source.claude_models.clone()),
+            model_mapping: Some(source.model_mapping.clone()),
+            availability_test_model: source.availability_test_model.clone(),
+            availability_probe_enabled: source.availability_probe_enabled,
+            availability_probe_interval_minutes: source.availability_probe_interval_minutes,
+            limit_5h_usd: source.limit_5h_usd,
+            limit_daily_usd: source.limit_daily_usd,
+            daily_reset_mode: Some(source.daily_reset_mode),
+            daily_reset_time: Some(source.daily_reset_time.clone()),
+            limit_weekly_usd: source.limit_weekly_usd,
+            limit_monthly_usd: source.limit_monthly_usd,
+            limit_total_usd: source.limit_total_usd,
+            tags: Some(source.tags.clone()),
+            note: Some(source.note.clone()),
+            source_provider_id: source.source_provider_id,
+            bridge_type: source.bridge_type.clone(),
+            stream_idle_timeout_seconds: source.stream_idle_timeout_seconds,
+            extension_values,
+            account_usage_credentials_patch: None,
+            account_usage_credentials_copy_from_provider_id: Some(provider_id),
+            upstream_retry_policy_override: source.upstream_retry_policy_override.clone(),
+            upstream_retry_policy_override_specified: true,
+            model_routing_policy_override: source.model_routing_policy_override.clone(),
+            model_routing_policy_override_specified: true,
+        },
+    )
 }
 
 pub(crate) async fn provider_set_enabled(
@@ -671,6 +678,53 @@ pub(crate) async fn default_route_provider_set_session_reuse_priority(
 mod tests {
     use super::*;
 
+    fn insert_duplicate_test_provider(
+        db: &crate::db::Db,
+        name: &str,
+        ordinary_policy: Option<crate::settings::ModelRoutingPolicy>,
+    ) -> providers::ProviderSummary {
+        providers::upsert(
+            db,
+            providers::ProviderUpsertParams {
+                provider_id: None,
+                cli_key: "claude".to_string(),
+                name: name.to_string(),
+                base_urls: vec!["https://example.invalid/v1".to_string()],
+                base_url_mode: providers::ProviderBaseUrlMode::Order,
+                auth_mode: Some(providers::ProviderAuthMode::ApiKey),
+                api_key: Some("test-key".to_string()),
+                enabled: true,
+                cost_multiplier: 1.0,
+                priority: Some(100),
+                claude_models: None,
+                model_mapping: None,
+                availability_test_model: None,
+                availability_probe_enabled: false,
+                availability_probe_interval_minutes: 10,
+                limit_5h_usd: None,
+                limit_daily_usd: None,
+                daily_reset_mode: Some(providers::DailyResetMode::Fixed),
+                daily_reset_time: Some("00:00:00".to_string()),
+                limit_weekly_usd: None,
+                limit_monthly_usd: None,
+                limit_total_usd: None,
+                tags: None,
+                note: None,
+                source_provider_id: None,
+                bridge_type: None,
+                stream_idle_timeout_seconds: None,
+                extension_values: None,
+                account_usage_credentials_patch: None,
+                account_usage_credentials_copy_from_provider_id: None,
+                upstream_retry_policy_override: None,
+                upstream_retry_policy_override_specified: false,
+                model_routing_policy_override: ordinary_policy,
+                model_routing_policy_override_specified: true,
+            },
+        )
+        .expect("insert duplicate test provider")
+    }
+
     #[test]
     fn custom_account_usage_permission_precheck_classifies_invalid_input() {
         let values = vec![providers::ProviderExtensionValuesInput {
@@ -760,6 +814,80 @@ mod tests {
             input.daily_reset_mode,
             Some(providers::DailyResetMode::Rolling)
         );
+    }
+
+    #[test]
+    fn provider_duplicate_copies_ordinary_policy_without_mode_membership_or_cross_policy() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = crate::db::init_for_tests(&dir.path().join("provider-duplicate-routing.db"))
+            .expect("init db");
+        let ordinary_policy = crate::settings::ModelRoutingPolicy {
+            enabled: true,
+            rules: vec![crate::settings::ModelRoutingRule {
+                source_model: "source-model".to_string(),
+                source_reasoning_effort: None,
+                target_model: Some("ordinary-target".to_string()),
+                reasoning_effort: None,
+            }],
+        };
+        let source = insert_duplicate_test_provider(&db, "Source", Some(ordinary_policy.clone()));
+        let target = insert_duplicate_test_provider(&db, "Target", None);
+        let mode = crate::sort_modes::create_mode(&db, "Mode").expect("create mode");
+        crate::sort_modes::set_mode_providers_order(
+            &db,
+            mode.id,
+            "claude",
+            vec![source.id, target.id],
+        )
+        .expect("set mode members");
+        let cross_policy = crate::settings::CrossProviderModelRoutingPolicy {
+            enabled: true,
+            rules: vec![crate::settings::CrossProviderModelRoutingRule {
+                source_model: "source-model".to_string(),
+                source_reasoning_effort: None,
+                target_provider_uuid: target.provider_uuid.clone(),
+                target_model: Some("cross-target".to_string()),
+                target_reasoning_effort: None,
+            }],
+        };
+        let conn = db.open_connection().expect("open db");
+        conn.execute(
+            "UPDATE sort_mode_providers SET cross_provider_model_routing_policy_json = ?1 WHERE mode_id = ?2 AND provider_id = ?3",
+            rusqlite::params![
+                serde_json::to_string(&cross_policy).expect("serialize cross policy"),
+                mode.id,
+                source.id
+            ],
+        )
+        .expect("seed source cross policy");
+        drop(conn);
+
+        let duplicate = duplicate_provider_in_db(&db, source.id).expect("duplicate provider");
+        assert_ne!(duplicate.provider_uuid, source.provider_uuid);
+        assert_eq!(
+            duplicate.model_routing_policy_override.as_ref(),
+            Some(&ordinary_policy)
+        );
+
+        let conn = db.open_connection().expect("reopen db");
+        let duplicate_memberships: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sort_mode_providers WHERE provider_id = ?1",
+                [duplicate.id],
+                |row| row.get(0),
+            )
+            .expect("count duplicate memberships");
+        assert_eq!(duplicate_memberships, 0);
+        let source_cross: Option<String> = conn
+            .query_row(
+                "SELECT cross_provider_model_routing_policy_json FROM sort_mode_providers WHERE mode_id = ?1 AND provider_id = ?2",
+                rusqlite::params![mode.id, source.id],
+                |row| row.get(0),
+            )
+            .expect("read source cross policy");
+        assert!(source_cross
+            .as_deref()
+            .is_some_and(|raw| raw.contains(&target.provider_uuid)));
     }
 
     #[test]

@@ -15,13 +15,15 @@ use crate::{db, settings};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-pub const CONFIG_BUNDLE_SCHEMA_VERSION: u32 = 4;
+pub const CONFIG_BUNDLE_SCHEMA_VERSION: u32 = 5;
 pub const CONFIG_BUNDLE_SCHEMA_VERSION_V1: u32 = 1;
 pub const CONFIG_BUNDLE_SCHEMA_VERSION_V2: u32 = 2;
 pub const CONFIG_BUNDLE_SCHEMA_VERSION_V3: u32 = 3;
+pub const CONFIG_BUNDLE_SCHEMA_VERSION_V4: u32 = 4;
 pub(crate) const CONFIG_BUNDLE_FULL_SKILL_PAYLOAD_MIN_VERSION: u32 = 2;
 pub(crate) const CONFIG_BUNDLE_ACCOUNT_USAGE_SNAPSHOT_MIN_VERSION: u32 = 3;
 pub(crate) const CONFIG_BUNDLE_PROVIDER_UUID_MIN_VERSION: u32 = 4;
+pub(crate) const CONFIG_BUNDLE_SORT_MODE_UUID_MIN_VERSION: u32 = 5;
 /// Shared encoded budget for config export serialization and import file reads.
 pub(crate) const CONFIG_BUNDLE_ENCODED_MAX_BYTES: usize = 64 * 1024 * 1024;
 /// Compatibility alias for the shared encoded budget.
@@ -134,6 +136,8 @@ pub struct ProviderAccountUsageCredentialsExport {
 
 #[derive(Serialize, Deserialize, specta::Type)]
 pub struct SortModeExport {
+    #[serde(default)]
+    pub mode_uuid: Option<String>,
     pub name: String,
     pub is_default: bool,
     pub providers: Vec<SortModeProviderExport>,
@@ -142,11 +146,49 @@ pub struct SortModeExport {
 #[derive(Serialize, Deserialize, specta::Type)]
 pub struct SortModeProviderExport {
     pub cli_key: String,
+    #[serde(default)]
+    pub provider_uuid: Option<String>,
     pub provider_cli_key: String,
     pub sort_order: i64,
     pub enabled: bool,
     #[serde(default)]
     pub session_reuse_priority: i64,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_cross_policy_fail_open",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub cross_provider_model_routing_policy:
+        Option<settings::CrossProviderModelRoutingPolicy>,
+}
+
+fn deserialize_optional_cross_policy_fail_open<'de, D>(
+    deserializer: D,
+) -> Result<Option<settings::CrossProviderModelRoutingPolicy>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let Some(value) = Option::<serde_json::Value>::deserialize(deserializer)? else {
+        return Ok(None);
+    };
+    let Some(object) = value.as_object() else {
+        return Ok(None);
+    };
+    let enabled = object
+        .get("enabled")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let rules = object
+        .get("rules")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|rule| serde_json::from_value(rule.clone()).ok())
+        .collect();
+    Ok(Some(settings::CrossProviderModelRoutingPolicy {
+        enabled,
+        rules,
+    }))
 }
 
 #[derive(Serialize, Deserialize, specta::Type)]
@@ -273,14 +315,16 @@ fn validate_bundle_schema_version(schema_version: u32) -> AppResult<()> {
         CONFIG_BUNDLE_SCHEMA_VERSION_V1
             | CONFIG_BUNDLE_SCHEMA_VERSION_V2
             | CONFIG_BUNDLE_SCHEMA_VERSION_V3
+            | CONFIG_BUNDLE_SCHEMA_VERSION_V4
             | CONFIG_BUNDLE_SCHEMA_VERSION
     ) {
         return Err(format!(
-            "SEC_INVALID_INPUT: unsupported config bundle schema_version={}, expected one of [{}, {}, {}, {}]",
+            "SEC_INVALID_INPUT: unsupported config bundle schema_version={}, expected one of [{}, {}, {}, {}, {}]",
             schema_version,
             CONFIG_BUNDLE_SCHEMA_VERSION_V1,
             CONFIG_BUNDLE_SCHEMA_VERSION_V2,
             CONFIG_BUNDLE_SCHEMA_VERSION_V3,
+            CONFIG_BUNDLE_SCHEMA_VERSION_V4,
             CONFIG_BUNDLE_SCHEMA_VERSION
         )
         .into());
@@ -347,6 +391,109 @@ fn prepare_provider_identities(
             return Err(crate::shared::error::AppError::new(
                 "SEC_INVALID_INPUT",
                 "config bundle v4 source_provider_uuid requires bridge_type",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn prepare_sort_mode_identities(
+    schema_version: u32,
+    providers: &[ProviderExport],
+    sort_modes: &mut [SortModeExport],
+    sort_mode_active: &HashMap<String, String>,
+) -> AppResult<()> {
+    let uses_uuid_links = schema_version >= CONFIG_BUNDLE_SORT_MODE_UUID_MIN_VERSION;
+    if !uses_uuid_links {
+        for mode in sort_modes.iter_mut() {
+            mode.mode_uuid = Some(crate::shared::uuid::new_uuid_v4());
+            for member in &mut mode.providers {
+                member.provider_uuid = None;
+                member.cross_provider_model_routing_policy = None;
+            }
+        }
+    }
+
+    let providers_by_uuid: HashMap<&str, &str> = providers
+        .iter()
+        .filter_map(|provider| {
+            provider
+                .provider_uuid
+                .as_deref()
+                .map(|provider_uuid| (provider_uuid, provider.cli_key.as_str()))
+        })
+        .collect();
+    let mut mode_uuids = HashSet::with_capacity(sort_modes.len());
+    let mut mode_names = HashSet::with_capacity(sort_modes.len());
+    for mode in sort_modes.iter_mut() {
+        let mode_uuid = mode.mode_uuid.as_deref().ok_or_else(|| {
+            crate::shared::error::AppError::new(
+                "SEC_INVALID_INPUT",
+                "config bundle v5 sort mode is missing mode_uuid",
+            )
+        })?;
+        let mode_name = mode.name.trim();
+        if !crate::shared::uuid::is_canonical_uuid_v4(mode_uuid)
+            || !mode_uuids.insert(mode_uuid.to_string())
+            || mode_name.is_empty()
+            || mode_name.chars().nth(32).is_some()
+            || mode_name.eq_ignore_ascii_case("default")
+            || mode_name == "默认"
+            || !mode_names.insert(mode_name.to_string())
+        {
+            return Err(crate::shared::error::AppError::new(
+                "SEC_INVALID_INPUT",
+                "config bundle v5 contains an invalid or duplicate sort mode identity",
+            ));
+        }
+        mode.name = mode_name.to_string();
+
+        let mut members = HashSet::with_capacity(mode.providers.len());
+        for member in &mut mode.providers {
+            crate::shared::cli_key::validate_cli_key(&member.cli_key)?;
+            if !(0..=crate::providers::MAX_SESSION_REUSE_PRIORITY)
+                .contains(&member.session_reuse_priority)
+            {
+                return Err(format!(
+                    "SEC_INVALID_INPUT: session_reuse_priority must be between 0 and {}",
+                    crate::providers::MAX_SESSION_REUSE_PRIORITY
+                )
+                .into());
+            }
+            if uses_uuid_links {
+                let provider_uuid = member.provider_uuid.as_deref().ok_or_else(|| {
+                    crate::shared::error::AppError::new(
+                        "SEC_INVALID_INPUT",
+                        "config bundle v5 sort mode member is missing provider_uuid",
+                    )
+                })?;
+                if !crate::shared::uuid::is_canonical_uuid_v4(provider_uuid)
+                    || providers_by_uuid.get(provider_uuid).copied()
+                        != Some(member.cli_key.as_str())
+                    || !members.insert((member.cli_key.clone(), provider_uuid.to_string()))
+                {
+                    return Err(crate::shared::error::AppError::new(
+                        "SEC_INVALID_INPUT",
+                        "config bundle v5 contains an invalid sort mode provider reference",
+                    ));
+                }
+            }
+            if let Some(policy) = member.cross_provider_model_routing_policy.as_mut() {
+                settings::sanitize_cross_provider_model_routing_policy(policy);
+            }
+        }
+    }
+    for (cli_key, mode_reference) in sort_mode_active {
+        crate::shared::cli_key::validate_cli_key(cli_key)?;
+        let exists = if uses_uuid_links {
+            mode_uuids.contains(mode_reference)
+        } else {
+            mode_names.contains(mode_reference)
+        };
+        if !exists {
+            return Err(crate::shared::error::AppError::new(
+                "SEC_INVALID_INPUT",
+                "config bundle active sort mode reference is invalid",
             ));
         }
     }
@@ -445,7 +592,7 @@ pub(crate) fn prepare_config_import(bundle: ConfigBundle) -> AppResult<PreparedC
         app_version: _,
         settings,
         mut providers,
-        sort_modes,
+        mut sort_modes,
         sort_mode_active,
         workspaces,
         mcp_servers,
@@ -456,6 +603,12 @@ pub(crate) fn prepare_config_import(bundle: ConfigBundle) -> AppResult<PreparedC
     } = bundle;
 
     prepare_provider_identities(bundle_schema_version, &mut providers)?;
+    prepare_sort_mode_identities(
+        bundle_schema_version,
+        &providers,
+        &mut sort_modes,
+        &sort_mode_active,
+    )?;
 
     if !imports_account_usage_snapshot {
         for provider in &mut providers {
@@ -606,6 +759,7 @@ pub fn config_import<R: tauri::Runtime>(
         &local_skills,
         legacy_skill_state.as_ref(),
         bundle_schema_version >= CONFIG_BUNDLE_PROVIDER_UUID_MIN_VERSION,
+        bundle_schema_version >= CONFIG_BUNDLE_SORT_MODE_UUID_MIN_VERSION,
     )?;
     if bundle_schema_version >= CONFIG_BUNDLE_PROVIDER_UUID_MIN_VERSION {
         local_provider_state.restore(

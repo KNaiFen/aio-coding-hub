@@ -295,10 +295,28 @@ fn cross_temporary_work_item<R: tauri::Runtime>(
         input.effective_sort_mode_uuid.as_deref(),
         source.cross_provider_model_routing_policy.as_ref(),
     )?;
+    let mode_uuid = input.effective_sort_mode_uuid.as_deref()?;
     let target = input.sort_mode_members.iter().find(|candidate| {
         candidate.provider_uuid == plan.target_provider_uuid
             && candidate.provider_uuid != source.provider_uuid
-    })?;
+    });
+    let Some(target) = target else {
+        crate::gateway::configured_model_route::mark_cross_provider_route(
+            &input.special_settings,
+            mode_uuid,
+            source.id,
+            &source.provider_uuid,
+            &source.name,
+            None,
+            None,
+            source_model,
+            source_reasoning_effort,
+            &plan,
+            "skipped",
+            Some("target_not_eligible"),
+        );
+        return None;
+    };
     let target_name = if target.name.trim().is_empty() {
         format!("Provider #{} (auto-fixed)", target.id)
     } else {
@@ -309,6 +327,20 @@ fn cross_temporary_work_item<R: tauri::Runtime>(
         &target_name,
         source_model,
         &plan,
+    );
+    crate::gateway::configured_model_route::mark_cross_provider_route(
+        &input.special_settings,
+        mode_uuid,
+        source.id,
+        &source.provider_uuid,
+        &source.name,
+        Some(target.id),
+        Some(&target_name),
+        source_model,
+        source_reasoning_effort,
+        &plan,
+        "matched",
+        None,
     );
 
     Some(ProviderWorkItem::CrossTemporary {
@@ -439,9 +471,39 @@ where
 
         let mut prepared = match preparation {
             provider_iterator::PreparationOutcome::Ready(p) => *p,
-            provider_iterator::PreparationOutcome::ReadyLimitReached => break,
-            provider_iterator::PreparationOutcome::Skipped => continue,
+            provider_iterator::PreparationOutcome::ReadyLimitReached => {
+                if cross_temporary {
+                    crate::gateway::configured_model_route::update_cross_provider_route_status(
+                        &input.special_settings,
+                        "skipped",
+                        Some("ready_provider_limit"),
+                    );
+                }
+                break;
+            }
+            provider_iterator::PreparationOutcome::Skipped => {
+                if cross_temporary {
+                    crate::gateway::configured_model_route::update_cross_provider_route_status(
+                        &input.special_settings,
+                        "skipped",
+                        Some("target_gate_skipped"),
+                    );
+                }
+                continue;
+            }
             provider_iterator::PreparationOutcome::Terminal(reason) => {
+                if cross_temporary {
+                    crate::gateway::configured_model_route::update_cross_provider_route_status(
+                        &input.special_settings,
+                        "failed",
+                        Some("target_prepare_terminal"),
+                    );
+                    run_state.active_requested_model = input.requested_model.clone();
+                    crate::gateway::response_fixer::clear_configured_model_route(
+                        &input.special_settings,
+                    );
+                    continue;
+                }
                 let owned = finalize_owned_from_input(&input);
                 return finalize::terminal_request_error(finalize::TerminalRequestErrorInput {
                     state: &input.state,
@@ -495,9 +557,21 @@ where
         )
         .await
         {
+            if cross_temporary && !resp.status().is_success() {
+                crate::gateway::configured_model_route::update_cross_provider_route_status(
+                    &input.special_settings,
+                    "failed",
+                    Some("target_terminal_error"),
+                );
+            }
             return resp;
         }
         if cross_temporary {
+            crate::gateway::configured_model_route::update_cross_provider_route_status(
+                &input.special_settings,
+                "failed",
+                Some("target_attempt_failed"),
+            );
             run_state.active_requested_model = input.requested_model.clone();
             crate::gateway::response_fixer::clear_configured_model_route(&input.special_settings);
         }
