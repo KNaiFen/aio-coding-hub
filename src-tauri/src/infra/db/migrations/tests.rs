@@ -554,6 +554,7 @@ PRAGMA user_version = 32;
 "#,
     )
     .expect("create legacy snapshot schema");
+    ensure_declared_legacy_sort_mode_tables(&conn);
 
     assert!(!test_has_column(
         &conn,
@@ -850,6 +851,32 @@ fn test_has_column(conn: &Connection, table: &str, column: &str) -> bool {
     false
 }
 
+fn ensure_declared_legacy_sort_mode_tables(conn: &Connection) {
+    conn.execute_batch(
+        r#"
+CREATE TABLE IF NOT EXISTS sort_modes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sort_mode_providers (
+  mode_id INTEGER NOT NULL,
+  cli_key TEXT NOT NULL,
+  provider_id INTEGER NOT NULL,
+  sort_order INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY(mode_id, cli_key, provider_id),
+  FOREIGN KEY(mode_id) REFERENCES sort_modes(id) ON DELETE CASCADE,
+  FOREIGN KEY(provider_id) REFERENCES providers(id) ON DELETE CASCADE
+);
+"#,
+    )
+    .expect("complete declared legacy sort-mode schema");
+}
+
 fn test_has_table(conn: &Connection, table: &str) -> bool {
     conn.query_row(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1",
@@ -956,6 +983,7 @@ PRAGMA user_version = 29;
 "#,
     )
     .expect("create legacy sort_mode_providers schema");
+    ensure_declared_legacy_sort_mode_tables(&conn);
 
     assert!(!test_has_column(&conn, "sort_mode_providers", "enabled"));
 
@@ -1005,6 +1033,7 @@ PRAGMA user_version = 30;
 "#,
     )
     .expect("create legacy v30 schema without oauth columns");
+    ensure_declared_legacy_sort_mode_tables(&conn);
 
     conn.execute(
         r#"
@@ -1147,6 +1176,7 @@ PRAGMA user_version = 29;
 "#,
     )
     .expect("create legacy v29 tables");
+    ensure_declared_legacy_sort_mode_tables(&conn);
 
     conn.execute(
         r#"
@@ -1841,6 +1871,7 @@ PRAGMA user_version = 33;
 "#,
     )
     .expect("create dev schema");
+    ensure_declared_legacy_sort_mode_tables(&conn);
 
     conn.execute(
         "INSERT INTO workspaces(id, cli_key, name, normalized_name, created_at, updated_at) VALUES (1, 'claude', 'Dev', 'dev', 1, 1)",
