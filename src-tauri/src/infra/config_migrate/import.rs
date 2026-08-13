@@ -352,6 +352,8 @@ INSERT INTO providers(
     })
 }
 
+type ImportedSortModes = (u32, HashMap<String, i64>, HashMap<String, i64>);
+
 fn import_sort_modes(
     tx: &Connection,
     now: i64,
@@ -359,7 +361,7 @@ fn import_sort_modes(
     provider_id_by_cli_and_name: &HashMap<(String, String), i64>,
     provider_id_by_uuid: &HashMap<String, i64>,
     use_sort_mode_uuid_links: bool,
-) -> AppResult<(u32, HashMap<String, i64>, HashMap<String, i64>)> {
+) -> AppResult<ImportedSortModes> {
     let mut imported = 0_u32;
     let mut sort_mode_id_by_name = HashMap::new();
     let mut sort_mode_id_by_uuid = HashMap::new();

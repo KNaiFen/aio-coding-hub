@@ -107,32 +107,46 @@ pub(in crate::gateway) fn resolve_ordinary_rule<'a>(
 /// Cross-provider rules have the same exact-before-wildcard matching semantics
 /// as ordinary rules. The caller resolves the target UUID against the request's
 /// immutable named-mode member snapshot before constructing an execution route.
+pub(in crate::gateway) struct CrossPlanRequest<'a> {
+    pub(in crate::gateway) cli_key: &'a str,
+    pub(in crate::gateway) method: &'a str,
+    pub(in crate::gateway) path: &'a str,
+    pub(in crate::gateway) requested_model: Option<&'a str>,
+    pub(in crate::gateway) source_reasoning_effort: Option<&'a str>,
+    pub(in crate::gateway) managed_model_route: bool,
+    pub(in crate::gateway) effective_sort_mode_uuid: Option<&'a str>,
+    pub(in crate::gateway) policy:
+        Option<&'a crate::settings::CrossProviderModelRoutingPolicy>,
+}
+
 pub(in crate::gateway) fn resolve_cross_plan(
-    cli_key: &str,
-    method: &str,
-    path: &str,
-    requested_model: Option<&str>,
-    source_reasoning_effort: Option<&str>,
-    managed_model_route: bool,
-    effective_sort_mode_uuid: Option<&str>,
-    policy: Option<&crate::settings::CrossProviderModelRoutingPolicy>,
+    request: CrossPlanRequest<'_>,
 ) -> Option<CrossProviderRoutePlan> {
-    if managed_model_route
-        || effective_sort_mode_uuid.is_none()
-        || !crate::gateway::observation::is_model_inference_request(cli_key, method, path)
+    if request.managed_model_route
+        || request.effective_sort_mode_uuid.is_none()
+        || !crate::gateway::observation::is_model_inference_request(
+            request.cli_key,
+            request.method,
+            request.path,
+        )
     {
         return None;
     }
 
-    let requested_model = requested_model
+    let requested_model = request
+        .requested_model
         .map(str::trim)
         .filter(|value| !value.is_empty())?;
     if requested_model.starts_with("aio/") {
         return None;
     }
 
-    let policy = policy.filter(|policy| policy.enabled)?;
-    let rule = resolve_cross_rule(&policy.rules, requested_model, source_reasoning_effort)?;
+    let policy = request.policy.filter(|policy| policy.enabled)?;
+    let rule = resolve_cross_rule(
+        &policy.rules,
+        requested_model,
+        request.source_reasoning_effort,
+    )?;
     Some(CrossProviderRoutePlan {
         target_provider_uuid: rule.target_provider_uuid.clone(),
         target_model: rule.target_model.clone(),
@@ -652,16 +666,16 @@ mod tests {
             },
         ]);
 
-        let plan = resolve_cross_plan(
-            "claude",
-            "POST",
-            "/v1/messages",
-            Some("fable5"),
-            Some("high"),
-            false,
-            Some("10000000-0000-4000-8000-000000000001"),
-            Some(&policy),
-        )
+        let plan = resolve_cross_plan(CrossPlanRequest {
+            cli_key: "claude",
+            method: "POST",
+            path: "/v1/messages",
+            requested_model: Some("fable5"),
+            source_reasoning_effort: Some("high"),
+            managed_model_route: false,
+            effective_sort_mode_uuid: Some("10000000-0000-4000-8000-000000000001"),
+            policy: Some(&policy),
+        })
         .expect("cross plan");
         assert_eq!(
             plan.target_provider_uuid,
@@ -724,16 +738,16 @@ mod tests {
                 Some("10000000-0000-4000-8000-000000000001"),
             ),
         ] {
-            assert!(resolve_cross_plan(
-                "claude",
+            assert!(resolve_cross_plan(CrossPlanRequest {
+                cli_key: "claude",
                 method,
                 path,
-                Some(model),
-                None,
-                managed,
-                mode_uuid,
-                Some(&policy),
-            )
+                requested_model: Some(model),
+                source_reasoning_effort: None,
+                managed_model_route: managed,
+                effective_sort_mode_uuid: mode_uuid,
+                policy: Some(&policy),
+            })
             .is_none());
         }
     }

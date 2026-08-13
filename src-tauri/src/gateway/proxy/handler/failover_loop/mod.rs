@@ -262,7 +262,7 @@ enum ProviderWorkItem {
         provider_index: usize,
     },
     CrossTemporary {
-        target: crate::providers::ProviderForGateway,
+        target: Box<crate::providers::ProviderForGateway>,
         route: crate::gateway::configured_model_route::ConfiguredModelRoute,
     },
 }
@@ -286,14 +286,16 @@ fn cross_temporary_work_item<R: tauri::Runtime>(
 ) -> Option<ProviderWorkItem> {
     let source_model = input.requested_model.as_deref()?;
     let plan = crate::gateway::configured_model_route::resolve_cross_plan(
-        &input.cli_key,
-        &input.method_hint,
-        &input.forwarded_path,
-        Some(source_model),
-        source_reasoning_effort,
-        input.managed_model_route.is_some(),
-        input.effective_sort_mode_uuid.as_deref(),
-        source.cross_provider_model_routing_policy.as_ref(),
+        crate::gateway::configured_model_route::CrossPlanRequest {
+            cli_key: &input.cli_key,
+            method: &input.method_hint,
+            path: &input.forwarded_path,
+            requested_model: Some(source_model),
+            source_reasoning_effort,
+            managed_model_route: input.managed_model_route.is_some(),
+            effective_sort_mode_uuid: input.effective_sort_mode_uuid.as_deref(),
+            policy: source.cross_provider_model_routing_policy.as_ref(),
+        },
     )?;
     let mode_uuid = input.effective_sort_mode_uuid.as_deref()?;
     let target = input.sort_mode_members.iter().find(|candidate| {
@@ -344,7 +346,7 @@ fn cross_temporary_work_item<R: tauri::Runtime>(
     );
 
     Some(ProviderWorkItem::CrossTemporary {
-        target: target.clone(),
+        target: Box::new(target.clone()),
         route,
     })
 }
@@ -449,7 +451,7 @@ where
                 (provider.clone(), None, false)
             }
             ProviderWorkItem::CrossTemporary { target, route } => (
-                target,
+                *target,
                 Some(provider_iterator::RouteExecutionOverride {
                     route,
                     session_binding_allowed: false,
@@ -464,8 +466,10 @@ where
             &mut counters,
             &mut run_state.attempts,
             &run_state.failed_provider_ids,
-            anthropic_stream_requested,
-            route_override,
+            provider_iterator::ProviderPreparationOptions {
+                anthropic_stream_requested,
+                route_override,
+            },
         )
         .await;
 

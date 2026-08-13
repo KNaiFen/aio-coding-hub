@@ -56,6 +56,11 @@ pub(super) struct RouteExecutionOverride {
     pub(super) session_binding_allowed: bool,
 }
 
+pub(super) struct ProviderPreparationOptions {
+    pub(super) anthropic_stream_requested: bool,
+    pub(super) route_override: Option<RouteExecutionOverride>,
+}
+
 /// Counters accumulated across all providers in the iteration loop.
 pub(super) struct IterationCounters {
     pub(super) providers_tried: usize,
@@ -105,9 +110,12 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
     counters: &mut IterationCounters,
     attempts: &mut Vec<FailoverAttempt>,
     failed_provider_ids: &HashSet<i64>,
-    anthropic_stream_requested: bool,
-    route_override: Option<RouteExecutionOverride>,
+    options: ProviderPreparationOptions,
 ) -> PreparationOutcome {
+    let ProviderPreparationOptions {
+        anthropic_stream_requested,
+        route_override,
+    } = options;
     let provider_id = provider.id;
     let provider_name_base = if provider.name.trim().is_empty() {
         format!("Provider #{} (auto-fixed)", provider.id)
