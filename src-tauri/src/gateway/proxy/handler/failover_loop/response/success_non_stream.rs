@@ -1551,9 +1551,8 @@ mod tests {
     use super::{
         bind_non_stream_session_success, buffer_cx2cc_event_stream_as_json,
         cache_bridge_non_stream_response, classify_cx2cc_success_payload,
-        read_non_stream_body_with_limit, resolve_requested_model_for_log,
-        session_binding_enabled, should_passthrough_non_stream_success,
-        translate_bridge_non_stream_body,
+        read_non_stream_body_with_limit, resolve_requested_model_for_log, session_binding_enabled,
+        should_passthrough_non_stream_success, translate_bridge_non_stream_body,
         Cx2ccSuccessPayloadKind, NonStreamBodyReadError,
     };
     use crate::domain::usage;

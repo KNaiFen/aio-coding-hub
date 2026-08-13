@@ -1305,11 +1305,7 @@ WHERE mode_id = ?2 AND cli_key = ?3 AND provider_id = ?4
         .expect("set cross policy");
     }
 
-    fn set_ordinary_routing_policy(
-        db: &db::Db,
-        provider_id: i64,
-        target_model: &str,
-    ) {
+    fn set_ordinary_routing_policy(db: &db::Db, provider_id: i64, target_model: &str) {
         let policy = settings::ModelRoutingPolicy {
             enabled: true,
             rules: vec![settings::ModelRoutingRule {
@@ -2600,18 +2596,13 @@ INSERT INTO codex_managed_profiles(
         let db_dir = tempfile::tempdir().expect("db dir");
         let db = db::init_for_tests(&db_dir.path().join("cross-provider-success.sqlite"))
             .expect("init test db");
-        let (source_url, source_calls, source_task) = spawn_counting_status_upstream(
-            StatusCode::OK,
-            r#"{"id":"source-must-not-run"}"#,
-        )
-        .await;
+        let (source_url, source_calls, source_task) =
+            spawn_counting_status_upstream(StatusCode::OK, r#"{"id":"source-must-not-run"}"#).await;
         let target_response = r#"{"id":"cross-target","object":"response","model":"grok-target","output":[],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}"#;
         let (target_url, target_captured_rx, target_task) =
             spawn_capturing_json_upstream(target_response).await;
-        let source_id =
-            insert_provider_with_priority(&db, "grok", "Cross Source", source_url, 0);
-        let target_id =
-            insert_provider_with_priority(&db, "grok", "Cross Target", target_url, 1);
+        let source_id = insert_provider_with_priority(&db, "grok", "Cross Source", source_url, 0);
+        let target_id = insert_provider_with_priority(&db, "grok", "Cross Target", target_url, 1);
         let mode_id = insert_sort_mode_route(
             &db,
             "Cross success mode",

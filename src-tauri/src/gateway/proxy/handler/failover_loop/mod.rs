@@ -400,7 +400,8 @@ where
                         provider,
                         source_reasoning_effort.as_deref(),
                     ) {
-                        let ProviderWorkItem::CrossTemporary { target, .. } = &cross_work_item else {
+                        let ProviderWorkItem::CrossTemporary { target, .. } = &cross_work_item
+                        else {
                             unreachable!("cross planner returned a baseline work item")
                         };
                         if !run_state.processed_provider_ids.contains(&target.id) {

@@ -380,8 +380,9 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
             .map(str::to_string)
         })
     });
-    let configured_model_route = route_override.map(|route_override| route_override.route).or_else(
-        || {
+    let configured_model_route = route_override
+        .map(|route_override| route_override.route)
+        .or_else(|| {
             crate::gateway::configured_model_route::resolve(
                 &input.cli_key,
                 &input.method_hint,
@@ -394,8 +395,7 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
                 provider_id,
                 &provider_name_base,
             )
-        },
-    );
+        });
     if let Some(route) = configured_model_route.as_ref() {
         crate::gateway::configured_model_route::mark_pending(&input.special_settings, route);
     }
