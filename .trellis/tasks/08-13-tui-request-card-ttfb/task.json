@@ -16,7 +16,7 @@
   "base_branch": "main",
   "worktree_path": "/Users/knaifen/Documents/Codex/aio-coding-hub/08-13-tui-request-card-ttfb",
   "commit": "bd91552393f36419ce215d9de283b7519c0efb07",
-  "pr_url": null,
+  "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/136",
   "subtasks": [],
   "children": [],
   "parent": null,
