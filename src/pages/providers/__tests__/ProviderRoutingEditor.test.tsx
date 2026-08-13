@@ -314,9 +314,11 @@ describe("pages/providers/ProviderRoutingEditor", () => {
     const targetSelect = screen.getByLabelText("跨供应商模型路由规则 1 目标供应商");
     expect(targetSelect).toHaveValue(TARGET_UUID);
     await waitFor(() => expect(providerModelsGet).toHaveBeenCalledWith(2, TARGET_UUID));
-    expect(
-      document.querySelector('datalist option[value="target-catalog-model"]')
-    ).not.toBeNull();
+    await waitFor(() =>
+      expect(
+        document.querySelector('datalist option[value="target-catalog-model"]')
+      ).not.toBeNull()
+    );
     fireEvent.click(
       screen.getByRole("button", { name: "删除跨供应商模型路由规则 1" })
     );
