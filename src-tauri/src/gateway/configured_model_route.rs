@@ -34,6 +34,7 @@ pub(in crate::gateway) fn resolve(
     method: &str,
     path: &str,
     requested_model: Option<&str>,
+    source_reasoning_effort: Option<&str>,
     managed_model_route: bool,
     global_policy: &crate::settings::ModelRoutingPolicy,
     provider_policy: Option<&crate::settings::ModelRoutingPolicy>,
@@ -60,10 +61,7 @@ pub(in crate::gateway) fn resolve(
         return None;
     }
 
-    let rule = policy
-        .rules
-        .iter()
-        .find(|rule| rule.source_model == requested_model)?;
+    let rule = resolve_ordinary_rule(&policy.rules, requested_model, source_reasoning_effort)?;
     if rule.target_model.is_none() && rule.reasoning_effort.is_none() {
         return None;
     }
@@ -76,6 +74,27 @@ pub(in crate::gateway) fn resolve(
         target_model: rule.target_model.clone(),
         reasoning_effort: rule.reasoning_effort.clone(),
     })
+}
+
+/// Source-model matching is exact and case-sensitive. An explicit source effort
+/// wins over the legacy model-only wildcard regardless of saved rule order.
+pub(in crate::gateway) fn resolve_ordinary_rule<'a>(
+    rules: &'a [crate::settings::ModelRoutingRule],
+    requested_model: &str,
+    source_reasoning_effort: Option<&str>,
+) -> Option<&'a crate::settings::ModelRoutingRule> {
+    source_reasoning_effort
+        .and_then(|effort| {
+            rules.iter().find(|rule| {
+                rule.source_model == requested_model
+                    && rule.source_reasoning_effort.as_deref() == Some(effort)
+            })
+        })
+        .or_else(|| {
+            rules.iter().find(|rule| {
+                rule.source_model == requested_model && rule.source_reasoning_effort.is_none()
+            })
+        })
 }
 
 pub(in crate::gateway) fn mark_pending(
@@ -270,13 +289,8 @@ fn apply_reasoning_effort(
         let Some(thinking_config) = object_slot(generation_config, "thinkingConfig") else {
             return false;
         };
-        if let Ok(budget) = effort.parse::<i64>() {
-            thinking_config.insert("thinkingBudget".to_string(), json!(budget));
-            thinking_config.remove("thinkingLevel");
-        } else {
-            thinking_config.insert("thinkingLevel".to_string(), json!(effort));
-            thinking_config.remove("thinkingBudget");
-        }
+        thinking_config.insert("thinkingLevel".to_string(), json!(effort));
+        thinking_config.remove("thinkingBudget");
         return true;
     }
 
@@ -334,6 +348,7 @@ mod tests {
     fn provider_policy_overrides_global_policy_as_a_whole() {
         let global = policy(crate::settings::ModelRoutingRule {
             source_model: "fable5".to_string(),
+            source_reasoning_effort: None,
             target_model: Some("opus4.8".to_string()),
             reasoning_effort: None,
         });
@@ -344,6 +359,7 @@ mod tests {
             "POST",
             "/v1/messages",
             Some("fable5"),
+            None,
             false,
             &global,
             Some(&provider),
@@ -357,6 +373,7 @@ mod tests {
     fn exact_case_sensitive_matching_and_managed_alias_exclusion() {
         let global = policy(crate::settings::ModelRoutingRule {
             source_model: "fable5".to_string(),
+            source_reasoning_effort: None,
             target_model: Some("opus4.8".to_string()),
             reasoning_effort: None,
         });
@@ -366,6 +383,7 @@ mod tests {
             "POST",
             "/v1/messages",
             Some("Fable5"),
+            None,
             false,
             &global,
             None,
@@ -378,6 +396,7 @@ mod tests {
             "POST",
             "/v1/responses",
             Some("aio/11111111-1111-4111-8111-111111111111"),
+            None,
             false,
             &global,
             None,
@@ -385,6 +404,35 @@ mod tests {
             "backup",
         )
         .is_none());
+    }
+
+    #[test]
+    fn source_effort_exact_rule_wins_over_model_only_wildcard() {
+        let rules = vec![
+            crate::settings::ModelRoutingRule {
+                source_model: "fable5".to_string(),
+                source_reasoning_effort: None,
+                target_model: Some("fallback".to_string()),
+                reasoning_effort: None,
+            },
+            crate::settings::ModelRoutingRule {
+                source_model: "fable5".to_string(),
+                source_reasoning_effort: Some("high".to_string()),
+                target_model: Some("precise".to_string()),
+                reasoning_effort: None,
+            },
+        ];
+
+        assert_eq!(
+            resolve_ordinary_rule(&rules, "fable5", Some("high"))
+                .and_then(|rule| rule.target_model.as_deref()),
+            Some("precise")
+        );
+        assert_eq!(
+            resolve_ordinary_rule(&rules, "fable5", Some("low"))
+                .and_then(|rule| rule.target_model.as_deref()),
+            Some("fallback")
+        );
     }
 
     #[test]
@@ -414,14 +462,14 @@ mod tests {
     }
 
     #[test]
-    fn rewrites_gemini_path_and_numeric_thinking_budget() {
+    fn rewrites_gemini_path_and_thinking_level() {
         let route = ConfiguredModelRoute {
             provider_id: 7,
             provider_name: "backup".to_string(),
             policy_source: "provider",
             source_model: "gemini-pro".to_string(),
             target_model: Some("publisher/gemini-flash".to_string()),
-            reasoning_effort: Some("1024".to_string()),
+            reasoning_effort: Some("high".to_string()),
         };
         let mut path = "/v1beta/models/gemini-pro:streamGenerateContent".to_string();
         let mut query = None;
@@ -430,11 +478,11 @@ mod tests {
 
         assert!(path.contains("/models/publisher%2Fgemini-flash:streamGenerateContent"));
         assert_eq!(
-            body["generationConfig"]["thinkingConfig"]["thinkingBudget"],
-            1024
+            body["generationConfig"]["thinkingConfig"]["thinkingLevel"],
+            "high"
         );
         assert!(body["generationConfig"]["thinkingConfig"]
-            .get("thinkingLevel")
+            .get("thinkingBudget")
             .is_none());
         assert_eq!(
             outcome.effective_model.as_deref(),
@@ -526,6 +574,7 @@ mod tests {
     fn resolve_excludes_auxiliary_and_non_post_requests() {
         let global = policy(crate::settings::ModelRoutingRule {
             source_model: "fable5".to_string(),
+            source_reasoning_effort: None,
             target_model: Some("opus4.8".to_string()),
             reasoning_effort: None,
         });
@@ -540,6 +589,7 @@ mod tests {
                 method,
                 path,
                 Some("fable5"),
+                None,
                 false,
                 &global,
                 None,

@@ -40,10 +40,10 @@ impl ModelInferenceMiddleware {
         ctx.requested_model = model_info.model;
         ctx.requested_model_location = model_info.location;
 
-        record_codex_reasoning_effort(
+        record_request_reasoning_effort(
             &ctx.cli_key,
+            &ctx.forwarded_path,
             ctx.introspection_json.as_ref(),
-            ctx.requested_model.as_deref(),
             &ctx.special_settings,
         );
 
@@ -135,68 +135,100 @@ pub(in crate::gateway::proxy::handler) fn large_body_missing_model_message(
     )
 }
 
-fn record_codex_reasoning_effort(
+fn record_request_reasoning_effort(
     cli_key: &str,
+    forwarded_path: &str,
     introspection_json: Option<&serde_json::Value>,
-    requested_model: Option<&str>,
     special_settings: &std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
 ) {
-    if cli_key != "codex" {
-        return;
-    }
-
     let Some(root) = introspection_json else {
         return;
     };
-    let Some(extracted) = extract_codex_reasoning_effort(root) else {
+    let Some(extracted) = extract_request_reasoning_effort(cli_key, forwarded_path, root) else {
         return;
     };
 
+    let raw_effort: String = extracted.raw_effort.chars().take(64).collect();
     response_fixer::push_special_setting(
         special_settings,
         serde_json::json!({
-            "type": "codex_reasoning_effort",
+            "type": "request_reasoning_effort",
             "scope": "request",
             "source": "request",
+            "cli": cli_key,
             "effort": extracted.effort,
-            "rawEffort": extracted.raw_effort,
-            "requestedModel": requested_model,
+            "rawEffort": raw_effort,
             "pointer": extracted.pointer,
         }),
     );
+    // Keep the existing Codex observation projection additive while routing
+    // consumes the CLI-neutral marker above.
+    if cli_key == "codex" {
+        response_fixer::push_special_setting(
+            special_settings,
+            serde_json::json!({
+                "type": "codex_reasoning_effort",
+                "scope": "request",
+                "source": "request",
+                "effort": extracted.effort,
+                "rawEffort": raw_effort,
+                "pointer": extracted.pointer,
+            }),
+        );
+    }
 }
 
-struct ExtractedCodexReasoningEffort {
+struct ExtractedRequestReasoningEffort {
     effort: Option<String>,
     raw_effort: String,
     pointer: &'static str,
 }
 
-fn extract_codex_reasoning_effort(
+fn extract_request_reasoning_effort(
+    cli_key: &str,
+    forwarded_path: &str,
     root: &serde_json::Value,
-) -> Option<ExtractedCodexReasoningEffort> {
-    for (pointer, value) in [
-        (
-            "/reasoning/effort",
-            root.pointer("/reasoning/effort")
-                .and_then(serde_json::Value::as_str),
-        ),
-        (
-            "/reasoning_effort",
-            root.get("reasoning_effort")
-                .and_then(serde_json::Value::as_str),
-        ),
-        (
-            "/reasoningEffort",
-            root.get("reasoningEffort")
-                .and_then(serde_json::Value::as_str),
-        ),
-    ] {
+) -> Option<ExtractedRequestReasoningEffort> {
+    let path = forwarded_path
+        .split('?')
+        .next()
+        .unwrap_or(forwarded_path)
+        .trim_end_matches('/')
+        .to_ascii_lowercase();
+    let values: [(&str, Option<&str>); 3] = match cli_key {
+        "codex" => [
+            ("/reasoning/effort", root.pointer("/reasoning/effort").and_then(serde_json::Value::as_str)),
+            ("/reasoning_effort", root.get("reasoning_effort").and_then(serde_json::Value::as_str)),
+            ("/reasoningEffort", root.get("reasoningEffort").and_then(serde_json::Value::as_str)),
+        ],
+        "claude" => [
+            ("/output_config/effort", root.pointer("/output_config/effort").and_then(serde_json::Value::as_str)),
+            ("", None),
+            ("", None),
+        ],
+        "gemini" => [
+            ("/generationConfig/thinkingConfig/thinkingLevel", root.pointer("/generationConfig/thinkingConfig/thinkingLevel").and_then(serde_json::Value::as_str)),
+            ("", None),
+            ("", None),
+        ],
+        "grok" if path.ends_with("/chat/completions") => [
+            ("/reasoning_effort", root.get("reasoning_effort").and_then(serde_json::Value::as_str)),
+            ("", None),
+            ("", None),
+        ],
+        "grok" if path.ends_with("/responses") => [
+            ("/reasoning/effort", root.pointer("/reasoning/effort").and_then(serde_json::Value::as_str)),
+            ("", None),
+            ("", None),
+        ],
+        _ => return None,
+    };
+    for (pointer, value) in values {
         let Some(raw_effort) = value else {
             continue;
         };
-        return Some(ExtractedCodexReasoningEffort {
-            effort: normalize_codex_reasoning_effort(raw_effort),
+        return Some(ExtractedRequestReasoningEffort {
+            effort: normalize_request_reasoning_effort(raw_effort),
             raw_effort: raw_effort.trim().to_string(),
             pointer,
         });
@@ -204,7 +236,7 @@ fn extract_codex_reasoning_effort(
     None
 }
 
-fn normalize_codex_reasoning_effort(value: &str) -> Option<String> {
+fn normalize_request_reasoning_effort(value: &str) -> Option<String> {
     let effort = value.trim().to_ascii_lowercase();
     match effort.as_str() {
         "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra" => Some(effort),
@@ -267,7 +299,8 @@ mod tests {
             "reasoningEffort": "medium"
         });
 
-        let extracted = extract_codex_reasoning_effort(&root).expect("effort");
+        let extracted = extract_request_reasoning_effort("codex", "/v1/responses", &root)
+            .expect("effort");
         assert_eq!(extracted.effort.as_deref(), Some("high"));
         assert_eq!(extracted.raw_effort, "HIGH");
         assert_eq!(extracted.pointer, "/reasoning/effort");
@@ -278,8 +311,10 @@ mod tests {
         let snake = serde_json::json!({ "reasoning_effort": "xhigh" });
         let camel = serde_json::json!({ "reasoningEffort": "minimal" });
 
-        let snake_extracted = extract_codex_reasoning_effort(&snake).expect("snake effort");
-        let camel_extracted = extract_codex_reasoning_effort(&camel).expect("camel effort");
+        let snake_extracted = extract_request_reasoning_effort("codex", "/v1/responses", &snake)
+            .expect("snake effort");
+        let camel_extracted = extract_request_reasoning_effort("codex", "/v1/responses", &camel)
+            .expect("camel effort");
 
         assert_eq!(snake_extracted.effort.as_deref(), Some("xhigh"));
         assert_eq!(snake_extracted.raw_effort, "xhigh");
@@ -294,8 +329,10 @@ mod tests {
         let max = serde_json::json!({ "reasoning_effort": "max" });
         let ultra = serde_json::json!({ "reasoningEffort": "Ultra" });
 
-        let max_extracted = extract_codex_reasoning_effort(&max).expect("max effort");
-        let ultra_extracted = extract_codex_reasoning_effort(&ultra).expect("ultra effort");
+        let max_extracted = extract_request_reasoning_effort("codex", "/v1/responses", &max)
+            .expect("max effort");
+        let ultra_extracted = extract_request_reasoning_effort("codex", "/v1/responses", &ultra)
+            .expect("ultra effort");
 
         assert_eq!(max_extracted.effort.as_deref(), Some("max"));
         assert_eq!(max_extracted.raw_effort, "max");
@@ -313,12 +350,59 @@ mod tests {
             "reasoningEffort": 123
         });
 
-        let extracted = extract_codex_reasoning_effort(&root).expect("explicit effort field");
+        let extracted = extract_request_reasoning_effort("codex", "/v1/responses", &root)
+            .expect("explicit effort field");
         assert_eq!(extracted.effort, None);
         assert_eq!(extracted.raw_effort, "turbo");
         assert_eq!(extracted.pointer, "/reasoning/effort");
-        assert!(normalize_codex_reasoning_effort("medium").is_some());
-        assert!(normalize_codex_reasoning_effort("unknown").is_none());
+        assert!(normalize_request_reasoning_effort("medium").is_some());
+        assert!(normalize_request_reasoning_effort("unknown").is_none());
+    }
+
+    #[test]
+    fn extracts_each_protocol_without_reading_budget_fields() {
+        let claude = serde_json::json!({
+            "output_config": { "effort": " HIGH " },
+            "thinking": { "budget_tokens": 1024 }
+        });
+        let gemini = serde_json::json!({
+            "generationConfig": { "thinkingConfig": { "thinkingLevel": "minimal", "thinkingBudget": 1024 } }
+        });
+        let grok_chat = serde_json::json!({ "reasoning_effort": "xhigh" });
+        let grok_responses = serde_json::json!({ "reasoning": { "effort": "max" } });
+
+        assert_eq!(
+            extract_request_reasoning_effort("claude", "/v1/messages", &claude)
+                .and_then(|value| value.effort),
+            Some("high".to_string())
+        );
+        assert_eq!(
+            extract_request_reasoning_effort(
+                "gemini",
+                "/v1beta/models/gemini-pro:streamGenerateContent",
+                &gemini,
+            )
+            .and_then(|value| value.effort),
+            Some("minimal".to_string())
+        );
+        assert_eq!(
+            extract_request_reasoning_effort("grok", "/v1/chat/completions", &grok_chat)
+                .and_then(|value| value.effort),
+            Some("xhigh".to_string())
+        );
+        assert_eq!(
+            extract_request_reasoning_effort("grok", "/v1/responses", &grok_responses)
+                .and_then(|value| value.effort),
+            Some("max".to_string())
+        );
+        assert!(extract_request_reasoning_effort("claude", "/v1/messages", &serde_json::json!({
+            "thinking": { "budget_tokens": 1024 }
+        }))
+        .is_none());
+        assert!(extract_request_reasoning_effort("gemini", "/v1beta/models/gemini-pro:generateContent", &serde_json::json!({
+            "generationConfig": { "thinkingConfig": { "thinkingBudget": 1024 } }
+        }))
+        .is_none());
     }
 
     fn compact_body() -> serde_json::Value {
