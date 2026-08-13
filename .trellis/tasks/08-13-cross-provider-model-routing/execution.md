@@ -16,7 +16,7 @@
 - 关联依赖：TUI PR #136（`fix/tui-request-card-ttfb`，当前 head `2b12c68cd99f7bc7c21fb8fa2b5354c9992a229b`）必须先合并；不能从 TUI head 派生或修改 TUI `format.rs`
 - PENDING 审阅：`PENDING.md` 已审阅，当前无 `pending`/`planned` 条目
 - 当前唯一写者：规划阶段为 main；main 明确交接后为本执行 session；暂停后由 main 临时接手并落盘记录
-- 当前阶段：规划材料待冻结；依赖未合并，暂不启动实现
+- 当前阶段：规划已冻结；依赖未合并，暂不启动实现
 
 ## 阅读顺序
 
