@@ -120,7 +120,16 @@
 
 ## main 验收记录
 
-> 仅 main 填写。
+### Round 1 - 通过，待验收记录提交的最新 head 复验
+
+- 审查日期：2026-08-13。
+- 审查候选 head：`2b12c68cd99f7bc7c21fb8fa2b5354c9992a229b`；PR base 为 `875ff441c5ba9f1a7f235ad95dadb945a41bba61`，PR #136 为 Ready for review、`CLEAN`。
+- 写权与工作树：执行 session 已暂停；main 接手时 worktree 干净、无未提交内容。本轮仅写入验收/生命周期记录，不改产品代码或测试逻辑。
+- 实时 CI：同一 head 的严格必需 [`ci-gate` job 94399249451](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31683320910/job/94399249451)、[`pr-title`](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31683320919/job/94393553329) 均成功；`rust`、`change-scope`、`support-contract` 和 CodeQL 亦成功，`frontend`、文档合同、候选/发布 jobs 按 Rust-only scope 跳过。
+- 审查范围：任务 PRD/施工入口/交付材料、相对 base 的完整 PR diff、`request_card_lines` 与路由 formatter、邻近单元测试、Observer/TUI 合同、实时 PR 元数据与检查。
+- 验收结论：通过。AC-01 至 AC-04 分别由 TTFB 来源、紧凑且独立的 `切`/`重` formatter、缺失 TTFB 加输出速率回归以及共享/详情完整文案回归测试覆盖；AC-05 确认产品代码仅改 `src-tauri/crates/aio-tui/src/format.rs`；AC-06 的允许本地检查和当前 head 云端检查均通过。
+- 接受的偏移或风险：无产品行为偏移。未在本地运行 Cargo、Rust tests、格式化或构建，遵循 cloud-only 规则，云端 Rust job 已覆盖格式、生成绑定、Clippy、测试与 audit。
+- 后续门：本验收记录会产生新的纯记录 head；main 仅在该 head 的自动检查终态成功、PR head 未漂移且相对本候选仍仅为验收/生命周期记录时合并。
 
 ## main 收尾
 
