@@ -578,3 +578,15 @@
 - **验收标准**：关闭时零额外请求；启动、唤醒、刚开启不补当前/历史周期；真实请求、桌面、Observer/TUI 和定时测试结果等权进入状态条；Base URL Ping 除外。
 - **Trellis**：[`08-09-provider-scheduled-availability-probe`](./.trellis/tasks/archive/2026-08/08-09-provider-scheduled-availability-probe/)
 - **交付证据**：统一功能 PR [#98](https://github.com/KNaiFen/aio-coding-hub/pull/98) 交付 schema 52、Provider 配置贯通、有界全量调度、Provider 级单飞、过期目标丢弃、手动/定时观测统一投影与 Observer/TUI 快照；精确 head 全量 Actions 通过并以 `66b9716690d3026b9d1b8d3d8765ead46d17e291` 合并，正式版本为 `aio-coding-hub-v0.60.50`。
+
+### AIO-PENDING-029：排查 upgrade-tui.command
+
+- **状态**：`done`
+- **日期**：2026-08-10
+- **完成日期**：2026-08-13
+- **观察问题**：main worktree 根目录曾存在未跟踪文件 `upgrade-tui.command`；其来源、用途、内容安全性，以及应保留、纳入版本控制、忽略还是移除尚未确认。该文件当时也使协调 main 无法达到完全干净状态。
+- **锁定决策**：登记阶段只记录排查事项，不读取、执行、修改、移动或删除该文件；记录待办不代表授权调查或处置，尤其不得直接运行脚本。
+- **拟议方向**：原计划是在用户明确授权排查后，先以只读方式确认文件元数据、来源和内容，再判断它与升级流程的关系及安全风险，向用户提供保留、跟踪、忽略或移除的具体建议。
+- **验收标准**：明确文件来源、实际用途和风险；给出有证据的处置方案并取得用户决定；执行决定时不丢失未知工作，最终让 main worktree 的该项状态符合用户选择。
+- **完成结果**：用户确认该文件已由其处理，并明确要求将本条目标记为已处理；2026-08-13 main 只读核验确认仓库根 `upgrade-tui.command` 已不存在，且迁移前 `main` 与 `origin/main` 同步、工作树干净。由于文件已由用户先行处置，本次未读取、执行或追溯其内容，也不补写无法验证的来源、用途或安全结论。
+- **交付证据**：待本次 records-only PR 合并后补齐。
