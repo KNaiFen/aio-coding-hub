@@ -3629,6 +3629,10 @@ export type ModelPricesSyncReport = {
 export type ModelRoutingPolicy = { enabled: boolean; rules: ModelRoutingRule[] };
 export type ModelRoutingRule = {
   source_model: string;
+  /**
+   * An absent effort preserves the legacy model-only rule semantics.
+   */
+  source_reasoning_effort: string | null;
   target_model: string | null;
   reasoning_effort: string | null;
 };

@@ -358,19 +358,15 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
         None => None,
     };
     crate::gateway::response_fixer::clear_configured_model_route(&input.special_settings);
-    let source_reasoning_effort = input
-        .special_settings
-        .lock()
-        .ok()
-        .and_then(|settings| {
-            settings.iter().rev().find_map(|setting| {
-                (setting.get("type").and_then(serde_json::Value::as_str)
-                    == Some("request_reasoning_effort"))
-                .then(|| setting.get("effort").and_then(serde_json::Value::as_str))
-                .flatten()
-                .map(str::to_string)
-            })
-        });
+    let source_reasoning_effort = input.special_settings.lock().ok().and_then(|settings| {
+        settings.iter().rev().find_map(|setting| {
+            (setting.get("type").and_then(serde_json::Value::as_str)
+                == Some("request_reasoning_effort"))
+            .then(|| setting.get("effort").and_then(serde_json::Value::as_str))
+            .flatten()
+            .map(str::to_string)
+        })
+    });
     let configured_model_route = crate::gateway::configured_model_route::resolve(
         &input.cli_key,
         &input.method_hint,

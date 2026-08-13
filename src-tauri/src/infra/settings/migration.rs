@@ -3,9 +3,8 @@
 use super::defaults::*;
 use super::types::{
     AppSettings, CodexHomeMode, CrossProviderModelRoutingPolicy, CrossProviderModelRoutingRule,
-    ModelRoutingPolicy, ModelRoutingRule, UpstreamErrorMessageBehavior,
-    UpstreamErrorResponseRule, UpstreamErrorStatusBehavior, UpstreamHttpRetryRule,
-    UpstreamRetryPolicy,
+    ModelRoutingPolicy, ModelRoutingRule, UpstreamErrorMessageBehavior, UpstreamErrorResponseRule,
+    UpstreamErrorStatusBehavior, UpstreamHttpRetryRule, UpstreamRetryPolicy,
 };
 use crate::shared::error::AppResult;
 use std::collections::HashSet;
@@ -438,7 +437,8 @@ fn normalize_model_routing_rule_for_write(
     }
 
     let raw_source_effort = rule.source_reasoning_effort.take();
-    rule.source_reasoning_effort = normalize_optional_model_routing_effort(raw_source_effort.clone());
+    rule.source_reasoning_effort =
+        normalize_optional_model_routing_effort(raw_source_effort.clone());
     if raw_source_effort.is_some() && rule.source_reasoning_effort.is_none() {
         return Err(format!(
             "SEC_INVALID_INPUT: model_routing_policy.rules[{index}].source_reasoning_effort must be a standard reasoning effort"
@@ -478,7 +478,10 @@ pub fn normalize_model_routing_policy_for_write(
     let mut seen = HashSet::new();
     for (index, rule) in policy.rules.iter_mut().enumerate() {
         normalize_model_routing_rule_for_write(rule, index)?;
-        if !seen.insert((rule.source_model.clone(), rule.source_reasoning_effort.clone())) {
+        if !seen.insert((
+            rule.source_model.clone(),
+            rule.source_reasoning_effort.clone(),
+        )) {
             return Err(format!(
                 "SEC_INVALID_INPUT: model_routing_policy.rules[{index}].source_model and source_reasoning_effort must be unique"
             )
@@ -548,8 +551,10 @@ pub fn sanitize_cross_provider_model_routing_policy(
             let raw_target_effort = rule.target_reasoning_effort;
             let target_reasoning_effort =
                 normalize_optional_model_routing_effort(raw_target_effort.clone());
-            let target_model =
-                normalize_optional_model_routing_text(rule.target_model, MAX_MODEL_ROUTING_MODEL_BYTES);
+            let target_model = normalize_optional_model_routing_text(
+                rule.target_model,
+                MAX_MODEL_ROUTING_MODEL_BYTES,
+            );
             if source_model.is_empty()
                 || source_model.len() > MAX_MODEL_ROUTING_MODEL_BYTES
                 || source_model.chars().any(char::is_control)
@@ -1810,7 +1815,10 @@ mod tests {
         assert_eq!(policy.rules[0].source_model, "fable5");
         assert_eq!(policy.rules[0].target_model.as_deref(), Some("opus4.8"));
         assert_eq!(policy.rules[1].reasoning_effort.as_deref(), Some("low"));
-        assert_eq!(policy.rules[1].source_reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(
+            policy.rules[1].source_reasoning_effort.as_deref(),
+            Some("high")
+        );
     }
 
     #[test]
