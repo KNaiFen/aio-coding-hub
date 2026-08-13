@@ -1274,6 +1274,7 @@ pub(crate) fn active_sort_mode_id_for_gateway(
     .map(Option::flatten)
 }
 
+#[allow(dead_code)] // Used by provider-selection tests and the stage-5 failover scheduler.
 pub(crate) fn list_enabled_for_gateway_in_mode(
     db: &db::Db,
     cli_key: &str,
