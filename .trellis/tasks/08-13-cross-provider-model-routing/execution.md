@@ -13,11 +13,11 @@
 - 历史 checkpoint `71392b672ee665b6ee96e13bf3871b2816185873` 与其后 `2b8e52e7071fb59cc54a8082bb9bc05f10b8cf1c`、`01915697174eacd623c4e75a03cc10030cde2f9c` 是本次修订之前的计划登记；执行 session 以本 checkpoint 中的 PRD/设计/实施内容为权威，不得把早期“等待 TUI 合并”表述当作现行门禁。
 - 实施授权：已确认（2026-08-13；用户确认本任务全部 PRD 决定、AC 和单 sibling 端到端交付路线）
 - PR 目标：`main`
-- PR：尚未创建；执行 session 开工后尽早创建 Draft PR
-- 并行 sibling：TUI PR #136（`fix/tui-request-card-ttfb`，当前 head `2b12c68cd99f7bc7c21fb8fa2b5354c9992a229b`）与本任务无产品代码重叠；可在本任务施工期间独立 CI/合并。不能从 TUI head 派生、cherry-pick 或修改 TUI `format.rs`。最终集成时若任务索引 README 同时变更，由 main 解决文档冲突。
+- PR：[KNaiFen/aio-coding-hub#137](https://github.com/KNaiFen/aio-coding-hub/pull/137)（Draft；冻结 head `bbe3e8bb96ef09cdff6b791b7ee4d1d9c29b9f4d`，Round 1 待返工）
+- 并行 sibling：TUI PR #136 已合并并完成归档；其产品边界仍只包含 TUI formatter。本任务不得修改 `src-tauri/crates/aio-tui/src/format.rs`，同步 `origin/main` 时须保留该 sibling 的归档与索引事实。
 - PENDING 审阅：`PENDING.md` 已审阅，当前无 `pending`/`planned` 条目
-- 当前唯一写者：执行 session（main 已完成规划交接）；暂停后由 main 临时接手并落盘记录
-- 当前阶段：施工中；TUI sibling 未合并不构成阻塞
+- 当前唯一写者：执行 session 待返工（main 于 2026-08-14 07:34:17 CST 交回）。main 曾于 07:32:54 CST 以 `main-direct-fix` 临时接管记录性文档；冻结 head `bbe3e8bb96ef09cdff6b791b7ee4d1d9c29b9f4d`，接管前工作树干净，本地与远端 head 一致，无未提交内容。main 只新增 `findings.md` 并更新本文件、`delivery.md` 和活动索引，未修改产品代码、测试、依赖或现行合同。
+- 当前阶段：Round 1 待返工；执行 session 按 `findings.md` 的 `F-001` 恢复，完成后再次暂停并通知 main 验收。
 
 ## 阅读顺序
 

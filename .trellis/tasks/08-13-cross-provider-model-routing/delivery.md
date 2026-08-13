@@ -133,6 +133,16 @@
 
 ## main 验收记录
 
+### Round 1
+
+- 结论：返工。候选 head `bbe3e8bb96ef09cdff6b791b7ee4d1d9c29b9f4d` 的 frontend 与 `ci-gate` 失败，AC-10 未满足；尚未进入产品 diff 的最终验收。
+- 审查范围：实时 PR #137 状态、候选 head/base、执行 session 终态、工作树归属、失败 CI 根因和 main 基线修复。
+- CI 证据：[run 31736969410](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31736969410)；frontend job `94570993792` 因 `nanoid 3.3.17 / GHSA-2v37-7h3g-55p8` 失败，Rust 和其余合同检查通过，`ci-gate` job `94577125786` 因 frontend 失败而失败。
+- 基线处置：main 已通过 PR #140 修复 `nanoid 3.3.18`，实际 merge commit 为 `a0f6823be399b2a2a31fb27b9fdfb0b6cb60e885`；最终基线 CI [run 31752575312](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31752575312) 全绿。
+- finding：见 `findings.md` 的 `F-001`。执行 session 只需普通 merge 最新 `origin/main`、重新取得同一新 head 的完整 CI、更新 `delivery.md` 并标记 Ready；不把基线依赖修复重复提交到功能分支，不改变产品行为。
+- 接受的偏移或风险：当前不接受 CI 缺口；真实 UI/真实供应商人工验证仍可作为新交付 head 的剩余风险报告，但不能替代必需 CI。
+- 日期：2026-08-14。
+
 ### Round 0
 
 - 结论：尚未验收（规划阶段）
