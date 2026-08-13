@@ -5,9 +5,9 @@
 - Implementation authorization: 已确认。
 - Confirmation date and summary: 2026-08-13；用户要求采用一个 sibling worktree，由一个执行 session 端到端实现、提交、创建 PR、等待 CI 并暂停；用户确认本文件的全部行为、兼容边界和验收标准。
 - Confirmed coverage: 供应商覆盖中的普通/跨供应商模型路由、命名调用方案绑定、配置迁移/导入/分享/复制、运行时一次性临时跳转、请求审计和日志投影；不包含全局跨供应商规则、`aio/...` 受管别名和 TUI 任务本身。
-- Planning revision: 2；规划提交后由 main 回填完整 SHA，执行 session 不得以占位值开工。
+- Planning revision: 3；本次修订明确两个 sibling 可并行施工，规划提交后由 main 回填完整 SHA，执行 session 不得以占位值开工。
 - Execution route: delegated sibling worktree `/Users/knaifen/Documents/Codex/aio-coding-hub/08-13-cross-provider-model-routing`。
-- Base: `origin/main` @ `875ff441c5ba9f1a7f235ad95dadb945a41bba61`；TUI PR #136 当前尚未合并，执行启动门禁见 `execution.md`。
+- Base: `origin/main` @ `875ff441c5ba9f1a7f235ad95dadb945a41bba61`；TUI PR #136 与本任务从同一基线并行施工，不是本任务的实现启动门禁。最终集成时仅处理任务索引等文档冲突。
 - Migrated from direct-main record: 无。
 
 ## Material Facts, Assumptions, and Open Questions
@@ -16,7 +16,7 @@
 |---|---|---|
 | 现有普通模型路由是全局策略或供应商整份覆盖，当前只改已选供应商的模型/强度，不选择供应商。 | 现行代码与 configured-model-routing contract | confirmed；普通规则兼容语义必须保持 |
 | `effective_sort_mode_id` 是请求实际采用的命名方案；`None` 表示 Default，不能在请求中途重新读取 active 指针。 | provider selection 代码与方案域调查 | confirmed |
-| TUI PR #136（`fix/tui-request-card-ttfb`，head `2b12c68cd99f7bc7c21fb8fa2b5354c9992a229b`）已通过必需 CI 但未合并。 | GitHub/local refs，2026-08-13 | confirmed；本任务启动实现前必须由 main 确认已合并并更新 base/规划登记；本任务不得修改 TUI `format.rs` |
+| TUI sibling PR #136（`fix/tui-request-card-ttfb`，head `2b12c68cd99f7bc7c21fb8fa2b5354c9992a229b`）只修改 TUI formatter 与其任务材料，当前尚未合并。 | GitHub/local refs，2026-08-13 | confirmed；与本任务可并行施工，不从其 head 派生、不 cherry-pick；本任务不得修改 TUI `format.rs`。最终合并/索引同步时处理可能的 README 文档冲突 |
 | PENDING 当前无 `pending`/`planned` 条目。 | `PENDING.md` | confirmed |
 | 旧规则中的非标准目标强度（含 Gemini 数值预算文本）应如何处理。 | 用户决定 | closed：迁移时删除整条无效规则 |
 | 供应商覆盖关闭、方案成员缺失、方案切换草稿、复制与分享边界。 | 用户决定 | closed，详见“锁定决策” |

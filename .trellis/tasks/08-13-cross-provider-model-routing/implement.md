@@ -18,7 +18,7 @@
    BASE_SHA="<execution.md 中登记值>"; test "$(git merge-base "$BASE_SHA" HEAD)" = "$BASE_SHA"
    git status --short --branch
    ```
-3. 在 main 确认 PR #136 已合并后，main 更新 `prd.md`、`execution.md`、任务索引中的 base/head 事实；执行 session 不自行改基线。
+3. 核对 TUI sibling PR #136 的文件边界，确认它只改 `src-tauri/crates/aio-tui/src/format.rs` 与 TUI 任务材料；它未合并也不阻止本任务开工。不得从 TUI head 派生或 cherry-pick；执行 session 不自行改基线。
 4. 由 main 执行 `task.py start <task-dir>`，确认 `task.json.status=in_progress`；执行 session 不提前 start 或写产品代码。
 5. 尽早创建指向 `main` 的 Draft PR，PR 正文链接 `.trellis/tasks/08-13-cross-provider-model-routing/`，注明本任务不改 TUI `format.rs`。
 

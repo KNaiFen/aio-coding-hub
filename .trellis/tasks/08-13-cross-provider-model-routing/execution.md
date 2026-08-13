@@ -8,16 +8,16 @@
 - Worktree：`/Users/knaifen/Documents/Codex/aio-coding-hub/08-13-cross-provider-model-routing`
 - 分支：`feat/cross-provider-model-routing`
 - 基线：`origin/main`
-- 完整 base SHA：`875ff441c5ba9f1a7f235ad95dadb945a41bba61`（若 PR #136 合并后 main 更新基线，必须由 main 改写本文件并提交新规划 SHA）
-- 规划提交：`71392b672ee665b6ee96e13bf3871b2816185873`（本 checkpoint 包含本目录全部规划材料和活动索引；未满足依赖更新门前仍禁止写产品代码）
+- 完整 base SHA：`875ff441c5ba9f1a7f235ad95dadb945a41bba61`（两个 sibling 均从该完整 `origin/main` SHA 派生；最终集成时由 main 处理分支漂移）
+- 规划提交：待本次并行边界修订提交后回填完整 SHA（历史冻结 checkpoint：`71392b672ee665b6ee96e13bf3871b2816185873`）
 - 其后 `2b8e52e7071fb59cc54a8082bb9bc05f10b8cf1c`、`01915697174eacd623c4e75a03cc10030cde2f9c` 仅同步规划登记、交付占位和阶段事实；执行 session 仍以 `71392b...` 的 PRD/设计/实施内容为权威，不得把登记提交误解为新产品决定。
 - 实施授权：已确认（2026-08-13；用户确认本任务全部 PRD 决定、AC 和单 sibling 端到端交付路线）
 - PR 目标：`main`
 - PR：尚未创建；执行 session 开工后尽早创建 Draft PR
-- 关联依赖：TUI PR #136（`fix/tui-request-card-ttfb`，当前 head `2b12c68cd99f7bc7c21fb8fa2b5354c9992a229b`）必须先合并；不能从 TUI head 派生或修改 TUI `format.rs`
+- 并行 sibling：TUI PR #136（`fix/tui-request-card-ttfb`，当前 head `2b12c68cd99f7bc7c21fb8fa2b5354c9992a229b`）与本任务无产品代码重叠；可在本任务施工期间独立 CI/合并。不能从 TUI head 派生、cherry-pick 或修改 TUI `format.rs`。最终集成时若任务索引 README 同时变更，由 main 解决文档冲突。
 - PENDING 审阅：`PENDING.md` 已审阅，当前无 `pending`/`planned` 条目
 - 当前唯一写者：规划阶段为 main；main 明确交接后为本执行 session；暂停后由 main 临时接手并落盘记录
-- 当前阶段：规划已冻结；依赖未合并，暂不启动实现
+- 当前阶段：规划边界修订后即可启动；TUI sibling 未合并不构成阻塞
 
 ## 阅读顺序
 
@@ -53,7 +53,7 @@ test -f .trellis/tasks/08-13-cross-provider-model-routing/execution.md
 
 1. `task.json.status=in_progress`，不是 `planning`；只有 main 在计划审阅后运行 `task.py start`。
 2. 本文件已经回填真实规划提交 SHA，且该提交存在。
-3. main 明确确认 PR #136 已合并，并把新的 `origin/main` base SHA 同步到 `prd.md`、本文件、任务索引和 `task.json`；若仍未合并，停止，不得实现。
+3. TUI sibling PR #136 的文件边界已核对；未合并不影响本任务实现。确认本任务不修改 `src-tauri/crates/aio-tui/src/format.rs`，且当前 worktree 以登记 base SHA 为 merge-base。
 4. worktree 没有来源不明或其他 session 的未提交内容；当前唯一写者已登记为本执行 session。
 
 任一项失败都只报告 main，不通过聊天猜测或自行修复基线。
@@ -115,7 +115,7 @@ test -f .trellis/tasks/08-13-cross-provider-model-routing/execution.md
 
 ### 并行任务与冲突边界
 
-- TUI sibling `fix/tui-request-card-ttfb` / PR #136 只改 TUI formatter；本任务从 `origin/main` 派生，待其合并后 main 更新本任务 base。不得 cherry-pick 未合并 TUI head。
+- TUI sibling `fix/tui-request-card-ttfb` / PR #136 只改 TUI formatter；本任务从同一 `origin/main` 基线派生，可并行施工。不得 cherry-pick 未合并 TUI head；最终集成时只处理任务索引等文档冲突。
 - 当前只有这一个跨供应商实现 sibling；执行 session 不再创建 sibling/子代理工作树。其他活动任务若触碰共享模块，暂停并报告 main。
 
 ## 技术导航
@@ -174,7 +174,7 @@ Active task: /Users/knaifen/Documents/Codex/aio-coding-hub/08-13-cross-provider-
 
 开工前只做 preflight：确认 task.json.status=in_progress、规划提交
 71392b672ee665b6ee96e13bf3871b2816185873 存在、当前 HEAD 以登记 base SHA 为 merge-base、
-且 PR #136 已合并并已由 main 更新本任务的 base/规划登记。任何一项失败都停止并报告 main，不猜测、不自行修基线。
+且已核对 TUI sibling PR #136 只修改 TUI formatter/任务材料，本任务不会触碰其文件。PR #136 未合并不构成启动门禁；任何路径、分支、base、规划提交或写者不一致仍停止并报告 main，不猜测、不自行修基线。
 
 通过 preflight 后，严格按 implement.md 的 0 -> 8 顺序施工：每个阶段先读范围和完成信号，完成最小允许验证后提交；尽早创建指向 main 的 Draft PR，
 持续推送并修复本任务范围内的 CI。跨供应商规则只能存在供应商覆盖的 named mode；目标 B 必须使用完整成员快照，最多一次跳转，复用公共 gate/重试/Ready 预算，
@@ -186,7 +186,7 @@ Active task: /Users/knaifen/Documents/Codex/aio-coding-hub/08-13-cross-provider-
 
 ### 必须停止并报告 main
 
-- PR #136 未合并或 base/head/规划提交不一致。
+- 当前路径、分支、base、规划提交、任务授权或唯一写者不一致；或发现 TUI sibling 实际修改了本任务产品代码范围。
 - 用户锁定决定、现行合同和当前代码冲突，或需要新增产品决定/破坏兼容性。
 - 必须修改禁止范围、其他活动 worktree 的共享语义、公共 API、迁移边界或真实凭据。
 - `change-scope` 意外选中不应触发的长任务，或 CI 失败无法证明有任务内修法。
@@ -199,5 +199,5 @@ Active task: /Users/knaifen/Documents/Codex/aio-coding-hub/08-13-cross-provider-
 - 结果：尚未开始（规划材料阶段）
 - PR/head/CI：尚未创建/尚未提交/未触发
 - 当前唯一写者：main（规划）；交接后执行 session
-- 阻塞：PR #136 合并门；恢复条件见上文
-- 任务状态：`planning`，不得自行 start
+- 阻塞：无；TUI sibling 可并行，最终集成时由 main 处理任务索引文档冲突
+- 任务状态：`planning`，等待 main 运行 `task.py start` 后交接执行 session
