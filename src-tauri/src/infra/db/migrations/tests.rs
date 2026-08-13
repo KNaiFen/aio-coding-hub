@@ -3867,6 +3867,181 @@ PRAGMA user_version = 51;
     assert_eq!(cursor, None);
 }
 
+fn create_v52_sort_mode_fixture(conn: &Connection) {
+    conn.execute_batch(
+        r#"
+PRAGMA foreign_keys = ON;
+CREATE TABLE providers (
+  id INTEGER PRIMARY KEY,
+  provider_uuid TEXT NOT NULL UNIQUE
+);
+CREATE TABLE sort_modes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE TABLE sort_mode_providers (
+  mode_id INTEGER NOT NULL,
+  cli_key TEXT NOT NULL,
+  provider_id INTEGER NOT NULL,
+  sort_order INTEGER NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  session_reuse_priority INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY(mode_id, cli_key, provider_id),
+  FOREIGN KEY(mode_id) REFERENCES sort_modes(id) ON DELETE CASCADE,
+  FOREIGN KEY(provider_id) REFERENCES providers(id) ON DELETE CASCADE
+);
+INSERT INTO providers(id, provider_uuid)
+VALUES (1, '11111111-1111-4111-8111-111111111111');
+INSERT INTO sort_modes(id, name, created_at, updated_at)
+VALUES (1, 'Mode A', 1, 1), (2, 'Mode B', 1, 1);
+INSERT INTO sort_mode_providers(
+  mode_id, cli_key, provider_id, sort_order, enabled,
+  session_reuse_priority, created_at, updated_at
+) VALUES (1, 'claude', 1, 0, 1, 0, 1, 1);
+PRAGMA user_version = 52;
+"#,
+    )
+    .expect("create v52 sort-mode fixture");
+}
+
+#[test]
+fn migrate_v52_to_v53_backfills_stable_identities_and_member_policy() {
+    let mut conn = Connection::open_in_memory().expect("open v52 migration db");
+    create_v52_sort_mode_fixture(&conn);
+
+    v52_to_v53::migrate_v52_to_v53(&mut conn).expect("migrate v52->v53");
+
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("read v53 version");
+    assert_eq!(version, 53);
+    assert!(test_has_table(&conn, "sort_mode_identities"));
+    assert!(test_has_column(
+        &conn,
+        "sort_mode_providers",
+        "cross_provider_model_routing_policy_json"
+    ));
+    let identities: Vec<(i64, String)> = {
+        let mut statement = conn
+            .prepare("SELECT mode_id, mode_uuid FROM sort_mode_identities ORDER BY mode_id")
+            .expect("prepare identity query");
+        statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .expect("query identities")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("read identities")
+    };
+    assert_eq!(identities.len(), 2);
+    assert!(identities
+        .iter()
+        .all(|(_, value)| crate::shared::uuid::is_canonical_uuid_v4(value)));
+    assert_ne!(identities[0].1, identities[1].1);
+
+    conn.execute(
+        "UPDATE sort_mode_providers SET cross_provider_model_routing_policy_json = ?1 WHERE mode_id = 1",
+        [r#"{"enabled":true,"rules":[]}"#],
+    )
+    .expect("store member policy");
+    let before = identities;
+    v52_to_v53::migrate_v52_to_v53(&mut conn).expect("repeat v52->v53 migration");
+    let after: Vec<(i64, String)> = {
+        let mut statement = conn
+            .prepare("SELECT mode_id, mode_uuid FROM sort_mode_identities ORDER BY mode_id")
+            .expect("prepare repeated identity query");
+        statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .expect("query repeated identities")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("read repeated identities")
+    };
+    assert_eq!(after, before);
+    let policy: String = conn
+        .query_row(
+            "SELECT cross_provider_model_routing_policy_json FROM sort_mode_providers WHERE mode_id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read preserved member policy");
+    assert_eq!(policy, r#"{"enabled":true,"rules":[]}"#);
+}
+
+#[test]
+fn migrate_v52_to_v53_enforces_uuid_immutability_and_delete_cascade() {
+    let mut conn = Connection::open_in_memory().expect("open v52 migration db");
+    create_v52_sort_mode_fixture(&conn);
+    v52_to_v53::migrate_v52_to_v53(&mut conn).expect("migrate v52->v53");
+
+    let update_error = conn
+        .execute(
+            "UPDATE sort_mode_identities SET mode_uuid = '22222222-2222-4222-8222-222222222222' WHERE mode_id = 1",
+            [],
+        )
+        .expect_err("mode UUID must be immutable");
+    assert!(update_error.to_string().contains("mode_uuid is immutable"));
+
+    conn.execute("DELETE FROM sort_modes WHERE id = 1", [])
+        .expect("delete sort mode");
+    let identity_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sort_mode_identities WHERE mode_id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count cascaded identities");
+    let member_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sort_mode_providers WHERE mode_id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count cascaded members");
+    assert_eq!((identity_count, member_count), (0, 0));
+}
+
+#[test]
+fn migrate_v52_to_v53_rolls_back_invalid_existing_identity() {
+    let mut conn = Connection::open_in_memory().expect("open v52 migration db");
+    create_v52_sort_mode_fixture(&conn);
+    conn.execute_batch(
+        r#"
+CREATE TABLE sort_mode_identities (
+  mode_id INTEGER PRIMARY KEY,
+  mode_uuid TEXT NOT NULL UNIQUE,
+  FOREIGN KEY(mode_id) REFERENCES sort_modes(id) ON DELETE CASCADE
+);
+INSERT INTO sort_mode_identities(mode_id, mode_uuid) VALUES (1, 'invalid');
+"#,
+    )
+    .expect("create invalid identity fixture");
+
+    let error = v52_to_v53::migrate_v52_to_v53(&mut conn)
+        .expect_err("invalid identity must roll back migration");
+    assert!(error
+        .to_string()
+        .contains("invalid or duplicate sort-mode identity"));
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("read rolled-back version");
+    assert_eq!(version, 52);
+    assert!(!test_has_column(
+        &conn,
+        "sort_mode_providers",
+        "cross_provider_model_routing_policy_json"
+    ));
+    let trigger_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'sort_mode_identities_uuid_%'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count rolled-back triggers");
+    assert_eq!(trigger_count, 0);
+}
+
 #[test]
 fn fresh_schema_contains_recovery_journal_and_coordinator() {
     let mut conn = Connection::open_in_memory().expect("open fresh migration db");
@@ -3891,6 +4066,12 @@ fn fresh_schema_contains_recovery_journal_and_coordinator() {
         &conn,
         "usage_provider_daily_rollups",
         "success_output_tokens_per_second_sum"
+    ));
+    assert!(test_has_table(&conn, "sort_mode_identities"));
+    assert!(test_has_column(
+        &conn,
+        "sort_mode_providers",
+        "cross_provider_model_routing_policy_json"
     ));
     apply_migrations(&mut conn).expect("repeat current schema ensure");
 }

@@ -21,9 +21,10 @@ pub use defaults::{
     SCHEMA_VERSION,
 };
 pub(crate) use migration::{
+    normalize_cross_provider_model_routing_policy_for_write,
     normalize_model_routing_policy_for_write, normalize_upstream_error_response_rules_for_write,
-    normalize_upstream_retry_policy_for_write, sanitize_model_routing_policy,
-    sanitize_upstream_retry_policy,
+    normalize_upstream_retry_policy_for_write, sanitize_cross_provider_model_routing_policy,
+    sanitize_model_routing_policy, sanitize_upstream_retry_policy,
 };
 pub(crate) use persistence::validate_bounds;
 pub use persistence::{

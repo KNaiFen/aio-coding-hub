@@ -261,7 +261,13 @@ beforeEach(() => {
   vi.mocked(useSortModeCreateMutation).mockReturnValue({
     mutateAsync: vi
       .fn()
-      .mockResolvedValue({ id: 10, name: "新模板", created_at: 1, updated_at: 1 }),
+      .mockResolvedValue({
+        id: 10,
+        mode_uuid: "11111111-1111-4111-8111-111111111111",
+        name: "新模板",
+        created_at: 1,
+        updated_at: 1,
+      }),
   } as any);
   vi.mocked(useSortModeRenameMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
   vi.mocked(useSortModeDeleteMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
@@ -1192,7 +1198,15 @@ describe("pages/providers/ProvidersView", () => {
     } as any);
     vi.mocked(useGatewayCircuitResetCliMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
     vi.mocked(useSortModesListQuery).mockReturnValue({
-      data: [{ id: 10, name: "Review Mode", created_at: 1, updated_at: 1 }],
+      data: [
+        {
+          id: 10,
+          mode_uuid: "11111111-1111-4111-8111-111111111111",
+          name: "Review Mode",
+          created_at: 1,
+          updated_at: 1,
+        },
+      ],
       isLoading: false,
     } as any);
     vi.mocked(useSortModeActiveListQuery).mockReturnValue({
@@ -1299,8 +1313,8 @@ describe("pages/providers/ProvidersView", () => {
 
     sortModesResult = {
       data: [
-        { id: 10, name: "Review", created_at: 1, updated_at: 1 },
-        { id: 20, name: "Fallback", created_at: 1, updated_at: 1 },
+        { id: 10, mode_uuid: "11111111-1111-4111-8111-111111111111", name: "Review", created_at: 1, updated_at: 1 },
+        { id: 20, mode_uuid: "22222222-2222-4222-8222-222222222222", name: "Fallback", created_at: 1, updated_at: 1 },
       ],
       isLoading: false,
     };
@@ -1394,7 +1408,7 @@ describe("pages/providers/ProvidersView", () => {
     } as any);
     vi.mocked(useGatewayCircuitResetCliMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
     vi.mocked(useSortModesListQuery).mockReturnValue({
-      data: [{ id: 10, name: "Review Mode", created_at: 1, updated_at: 1 }],
+      data: [{ id: 10, mode_uuid: "11111111-1111-4111-8111-111111111111", name: "Review Mode", created_at: 1, updated_at: 1 }],
       isLoading: false,
     } as any);
     vi.mocked(useSortModeProvidersListQuery).mockReturnValue({
@@ -1472,7 +1486,7 @@ describe("pages/providers/ProvidersView", () => {
     } as any);
     vi.mocked(useGatewayCircuitResetCliMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
     vi.mocked(useSortModesListQuery).mockReturnValue({
-      data: [{ id: 10, name: "Review Mode", created_at: 1, updated_at: 1 }],
+      data: [{ id: 10, mode_uuid: "11111111-1111-4111-8111-111111111111", name: "Review Mode", created_at: 1, updated_at: 1 }],
       isLoading: false,
     } as any);
     vi.mocked(useSortModeProvidersListQuery).mockReturnValue({
@@ -2752,7 +2766,7 @@ describe("pages/providers/ProvidersView", () => {
       isFetching: false,
     } as any);
     vi.mocked(useSortModesListQuery).mockReturnValue({
-      data: [{ id: 10, name: "Review", created_at: 1, updated_at: 1 }],
+      data: [{ id: 10, mode_uuid: "11111111-1111-4111-8111-111111111111", name: "Review", created_at: 1, updated_at: 1 }],
       isLoading: false,
     } as any);
     vi.mocked(useSortModeActiveListQuery).mockReturnValue({
@@ -2875,7 +2889,7 @@ describe("pages/providers/ProvidersView", () => {
     expect(toast).toHaveBeenCalledWith("已激活：Review");
 
     act(() => {
-      result.current.setDeleteModeTarget({ id: 10, name: "Review", created_at: 1, updated_at: 1 });
+      result.current.setDeleteModeTarget({ id: 10, mode_uuid: "11111111-1111-4111-8111-111111111111", name: "Review", created_at: 1, updated_at: 1 });
     });
     await act(async () => {
       await result.current.deleteSortMode();
@@ -3132,7 +3146,7 @@ describe("pages/providers/ProvidersView", () => {
       isFetching: false,
     } as any);
     vi.mocked(useSortModesListQuery).mockReturnValue({
-      data: [{ id: 10, name: "Review", created_at: 1, updated_at: 1 }],
+      data: [{ id: 10, mode_uuid: "11111111-1111-4111-8111-111111111111", name: "Review", created_at: 1, updated_at: 1 }],
       isLoading: false,
     } as any);
     vi.mocked(useSortModeProvidersListQuery).mockReturnValue({

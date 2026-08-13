@@ -29,11 +29,12 @@ mod v48_to_v49;
 mod v49_to_v50;
 mod v50_to_v51;
 mod v51_to_v52;
+mod v52_to_v53;
 
 use rusqlite::Connection;
 
-const LATEST_SCHEMA_VERSION: i64 = 52;
-const MAX_COMPAT_SCHEMA_VERSION: i64 = 52;
+const LATEST_SCHEMA_VERSION: i64 = 53;
+const MAX_COMPAT_SCHEMA_VERSION: i64 = 53;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 25;
 
 pub(super) fn apply_migrations(conn: &mut Connection) -> crate::shared::error::AppResult<()> {
@@ -93,6 +94,7 @@ pub(super) fn apply_migrations(conn: &mut Connection) -> crate::shared::error::A
             49 => v49_to_v50::migrate_v49_to_v50(conn)?,
             50 => v50_to_v51::migrate_v50_to_v51(conn)?,
             51 => v51_to_v52::migrate_v51_to_v52(conn)?,
+            52 => v52_to_v53::migrate_v52_to_v53(conn)?,
             v => {
                 tracing::error!(
                     version = v,

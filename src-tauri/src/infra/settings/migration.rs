@@ -561,7 +561,6 @@ pub fn sanitize_cross_provider_model_routing_policy(
                 || !is_canonical_uuid_v4(&target_provider_uuid)
                 || (raw_source_effort.is_some() && source_reasoning_effort.is_none())
                 || (raw_target_effort.is_some() && target_reasoning_effort.is_none())
-                || (target_model.is_none() && target_reasoning_effort.is_none())
                 || !seen.insert((source_model.clone(), source_reasoning_effort.clone()))
             {
                 return None;
@@ -579,6 +578,75 @@ pub fn sanitize_cross_provider_model_routing_policy(
         policy.enabled = false;
     }
     *policy != original
+}
+
+pub fn normalize_cross_provider_model_routing_policy_for_write(
+    policy: &mut CrossProviderModelRoutingPolicy,
+) -> AppResult<bool> {
+    let original = policy.clone();
+    if policy.rules.len() > MAX_MODEL_ROUTING_RULES {
+        return Err(format!(
+            "SEC_INVALID_INPUT: cross_provider_model_routing_policy.rules must contain <= {MAX_MODEL_ROUTING_RULES} entries"
+        )
+        .into());
+    }
+
+    let mut seen = HashSet::new();
+    for (index, rule) in policy.rules.iter_mut().enumerate() {
+        rule.source_model = rule.source_model.trim().to_string();
+        if rule.source_model.is_empty()
+            || rule.source_model.len() > MAX_MODEL_ROUTING_MODEL_BYTES
+            || rule.source_model.chars().any(char::is_control)
+        {
+            return Err(format!(
+                "SEC_INVALID_INPUT: cross_provider_model_routing_policy.rules[{index}].source_model is invalid"
+            )
+            .into());
+        }
+
+        let source_effort = rule.source_reasoning_effort.take();
+        rule.source_reasoning_effort =
+            normalize_optional_model_routing_effort(source_effort.clone());
+        if source_effort.is_some() && rule.source_reasoning_effort.is_none() {
+            return Err(format!(
+                "SEC_INVALID_INPUT: cross_provider_model_routing_policy.rules[{index}].source_reasoning_effort must be a standard reasoning effort"
+            )
+            .into());
+        }
+
+        rule.target_provider_uuid = rule.target_provider_uuid.trim().to_ascii_lowercase();
+        if !is_canonical_uuid_v4(&rule.target_provider_uuid) {
+            return Err(format!(
+                "SEC_INVALID_INPUT: cross_provider_model_routing_policy.rules[{index}].target_provider_uuid must be a canonical UUIDv4"
+            )
+            .into());
+        }
+
+        rule.target_model = normalize_optional_model_routing_text(
+            rule.target_model.take(),
+            MAX_MODEL_ROUTING_MODEL_BYTES,
+        );
+        let target_effort = rule.target_reasoning_effort.take();
+        rule.target_reasoning_effort =
+            normalize_optional_model_routing_effort(target_effort.clone());
+        if target_effort.is_some() && rule.target_reasoning_effort.is_none() {
+            return Err(format!(
+                "SEC_INVALID_INPUT: cross_provider_model_routing_policy.rules[{index}].target_reasoning_effort must be a standard reasoning effort"
+            )
+            .into());
+        }
+
+        if !seen.insert((
+            rule.source_model.clone(),
+            rule.source_reasoning_effort.clone(),
+        )) {
+            return Err(format!(
+                "SEC_INVALID_INPUT: cross_provider_model_routing_policy.rules[{index}].source_model and source_reasoning_effort must be unique"
+            )
+            .into());
+        }
+    }
+    Ok(*policy != original)
 }
 
 fn is_canonical_uuid_v4(value: &str) -> bool {

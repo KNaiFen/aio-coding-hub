@@ -206,3 +206,66 @@ pub(crate) async fn sort_mode_provider_set_session_reuse_priority(
 
     result
 }
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn provider_model_routing_policy_get(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    provider_id: i64,
+    provider_uuid: String,
+    mode_id: Option<i64>,
+    mode_uuid: Option<String>,
+) -> Result<sort_modes::ProviderModelRoutingPolicyView, String> {
+    let db = ensure_db_ready(app, db_state.inner()).await?;
+    blocking::run("provider_model_routing_policy_get", move || {
+        sort_modes::provider_model_routing_policy_get(
+            &db,
+            provider_id,
+            &provider_uuid,
+            mode_id,
+            mode_uuid.as_deref(),
+        )
+    })
+    .await
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn provider_model_routing_policy_save(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    input: sort_modes::ProviderModelRoutingPolicySaveInput,
+) -> Result<sort_modes::ProviderModelRoutingPolicyView, String> {
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
+    let cli_key = blocking::run("provider_model_routing_policy_save_cli", {
+        let db = db.clone();
+        let provider_id = input.provider_id;
+        move || crate::providers::cli_key_by_id(&db, provider_id)
+    })
+    .await?;
+    let result = blocking::run("provider_model_routing_policy_save", move || {
+        sort_modes::provider_model_routing_policy_save(&db, input)
+    })
+    .await?;
+    app_gateway_clear_cli_route_runtime_state(&app, &cli_key);
+    Ok(result)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn routing_provider_candidates_list(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    mode_id: i64,
+    mode_uuid: String,
+    cli_key: String,
+) -> Result<Vec<sort_modes::RoutingProviderCandidate>, String> {
+    let db = ensure_db_ready(app, db_state.inner()).await?;
+    blocking::run("routing_provider_candidates_list", move || {
+        sort_modes::routing_provider_candidates_list(&db, mode_id, &mode_uuid, &cli_key)
+    })
+    .await
+    .map_err(Into::into)
+}

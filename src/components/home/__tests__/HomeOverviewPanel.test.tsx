@@ -312,7 +312,15 @@ describe("components/home/HomeOverviewPanel", () => {
     const onSetCliActiveMode = vi.fn();
     renderPanel({
       visibleCliKeys: ["codex"],
-      sortModes: [{ id: 1, name: "工作策略", created_at: 1, updated_at: 1 }],
+      sortModes: [
+        {
+          id: 1,
+          mode_uuid: "11111111-1111-4111-8111-111111111111",
+          name: "工作策略",
+          created_at: 1,
+          updated_at: 1,
+        },
+      ],
       onSetCliActiveMode,
     });
 

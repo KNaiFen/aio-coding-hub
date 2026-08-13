@@ -154,6 +154,9 @@ macro_rules! generated_command_registry {
             sort_mode_providers_set_order => crate::commands::sort_modes::sort_mode_providers_set_order,
             sort_mode_provider_set_enabled => crate::commands::sort_modes::sort_mode_provider_set_enabled,
             sort_mode_provider_set_session_reuse_priority => crate::commands::sort_modes::sort_mode_provider_set_session_reuse_priority,
+            provider_model_routing_policy_get => crate::commands::sort_modes::provider_model_routing_policy_get,
+            provider_model_routing_policy_save => crate::commands::sort_modes::provider_model_routing_policy_save,
+            routing_provider_candidates_list => crate::commands::sort_modes::routing_provider_candidates_list,
             // ── model_prices ──
             model_prices_list => crate::commands::model_prices::model_prices_list,
             model_price_upsert => crate::commands::model_prices::model_price_upsert,

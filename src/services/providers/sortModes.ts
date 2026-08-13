@@ -6,8 +6,22 @@ import { validateProviderCliKey, validateSessionReusePriority, type CliKey } fro
 export const MAX_SORT_MODE_NAME_CHARS = 32;
 export const MAX_SORT_MODE_PROVIDER_IDS = 512;
 
+export type CrossProviderModelRoutingRule = {
+  source_model: string;
+  source_reasoning_effort: string | null;
+  target_provider_uuid: string;
+  target_model: string | null;
+  target_reasoning_effort: string | null;
+};
+
+export type CrossProviderModelRoutingPolicy = {
+  enabled: boolean;
+  rules: CrossProviderModelRoutingRule[];
+};
+
 export type SortModeSummary = {
   id: number;
+  mode_uuid: string;
   name: string;
   created_at: number;
   updated_at: number;
@@ -21,8 +35,10 @@ export type SortModeActiveRow = {
 
 export type SortModeProviderRow = {
   provider_id: number;
+  provider_uuid: string;
   enabled: boolean;
   session_reuse_priority: number;
+  cross_policy: CrossProviderModelRoutingPolicy | null;
 };
 
 function normalizeSortModeName(name: string) {
