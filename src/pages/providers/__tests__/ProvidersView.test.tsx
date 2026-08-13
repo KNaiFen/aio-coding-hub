@@ -1445,6 +1445,7 @@ describe("pages/providers/ProvidersView", () => {
     await waitFor(() =>
       expect(setModeProviderEnabled).toHaveBeenCalledWith({
         modeId: 10,
+        modeUuid: "11111111-1111-4111-8111-111111111111",
         cliKey: "claude",
         providerId: 1,
         enabled: true,
@@ -2846,6 +2847,7 @@ describe("pages/providers/ProvidersView", () => {
     await waitFor(() => expect(modeSetOrder).toHaveBeenCalledTimes(1));
     expect(modeSetOrder).toHaveBeenNthCalledWith(1, {
       modeId: 10,
+      modeUuid: "11111111-1111-4111-8111-111111111111",
       cliKey: "claude",
       orderedProviderIds: [1, 2],
     });
@@ -2856,6 +2858,7 @@ describe("pages/providers/ProvidersView", () => {
     });
     expect(modeSetEnabled).toHaveBeenNthCalledWith(1, {
       modeId: 10,
+      modeUuid: "11111111-1111-4111-8111-111111111111",
       cliKey: "claude",
       providerId: 1,
       enabled: false,
@@ -2894,7 +2897,10 @@ describe("pages/providers/ProvidersView", () => {
     await act(async () => {
       await result.current.deleteSortMode();
     });
-    expect(deleteMode).toHaveBeenCalledWith({ modeId: 10 });
+    expect(deleteMode).toHaveBeenCalledWith({
+      modeId: 10,
+      modeUuid: "11111111-1111-4111-8111-111111111111",
+    });
     expect(toast).toHaveBeenCalledWith("排序模板已删除");
   });
 

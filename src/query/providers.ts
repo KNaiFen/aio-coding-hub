@@ -52,7 +52,11 @@ import {
   providerModelsKeys,
   providersKeys,
 } from "./keys";
-import { sortModeProvidersQueryPrefix } from "./sortModes";
+import {
+  invalidateRoutingEditorForCli,
+  invalidateRoutingEditorForProvider,
+  sortModeProvidersQueryPrefix,
+} from "./sortModes";
 
 export function useProvidersListQuery(cliKey: CliKey, options?: { enabled?: boolean }) {
   const normalizedCliKey = validateProviderCliKey(cliKey);
@@ -263,6 +267,11 @@ export function useProviderSetEnabledMutation() {
           return prev.map((row) => (row.id === updated.id ? updated : row));
         }
       );
+      void invalidateRoutingEditorForProvider(queryClient, {
+        cliKey: updated.cli_key,
+        providerId: updated.id,
+        providerUuid: updated.provider_uuid,
+      });
     },
   });
 }
@@ -322,6 +331,11 @@ export function useProviderUpsertMutation() {
       await invalidateProviderModelCatalog(queryClient, saved.id, saved.provider_uuid, {
         advanceGeneration: providerModelConnectionChanged(previous, saved, variables.input),
       });
+      await invalidateRoutingEditorForProvider(queryClient, {
+        cliKey: saved.cli_key,
+        providerId: saved.id,
+        providerUuid: saved.provider_uuid,
+      });
       void queryClient.invalidateQueries({ queryKey: providersKeys.list(saved.cli_key) });
       void queryClient.invalidateQueries({ queryKey: gatewayKeys.circuitStatus(saved.cli_key) });
     },
@@ -376,7 +390,15 @@ export function useProviderDeleteMutation() {
         queryKey: providerModelsKeys.catalogsByProvider(providerId),
       });
 
-      await Promise.all([routeInvalidations, providerModelCancellation]);
+      const routingEditorInvalidation = invalidateRoutingEditorForProvider(queryClient, {
+        cliKey,
+        providerId,
+      });
+      await Promise.all([
+        routeInvalidations,
+        providerModelCancellation,
+        routingEditorInvalidation,
+      ]);
       queryClient.removeQueries({
         queryKey: providerModelsKeys.catalogsByProvider(providerId),
       });
@@ -581,6 +603,7 @@ export function useProviderDuplicateMutation() {
       } else {
         await queryClient.invalidateQueries({ queryKey: providersKeys.list(cliKey) });
       }
+      await invalidateRoutingEditorForCli(queryClient, cliKey);
     },
   });
 }

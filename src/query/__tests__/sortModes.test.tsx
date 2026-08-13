@@ -4,8 +4,12 @@ import type {
   SortModeActiveRow,
   SortModeProviderRow,
   SortModeSummary,
+  ProviderModelRoutingPolicyView,
 } from "../../services/providers/sortModes";
 import {
+  providerModelRoutingPolicyGet,
+  providerModelRoutingPolicySave,
+  routingProviderCandidatesList,
   sortModeActiveList,
   sortModeActiveSet,
   sortModeCreate,
@@ -24,6 +28,11 @@ import { sortModesKeys } from "../keys";
 import {
   sortModeProvidersQueryKey,
   sortModeProvidersQueryPrefix,
+  providerRoutingPolicyQueryKey,
+  routingProviderCandidatesQueryKey,
+  useProviderRoutingPolicyQuery,
+  useProviderRoutingPolicySaveMutation,
+  useRoutingProviderCandidatesQuery,
   useSortModeActiveListQuery,
   useSortModeActiveSetMutation,
   useSortModeCreateMutation,
@@ -52,13 +61,21 @@ vi.mock("../../services/providers/sortModes", async () => {
     sortModeProvidersSetOrder: vi.fn(),
     sortModeProviderSetEnabled: vi.fn(),
     sortModeProviderSetSessionReusePriority: vi.fn(),
+    providerModelRoutingPolicyGet: vi.fn(),
+    providerModelRoutingPolicySave: vi.fn(),
+    routingProviderCandidatesList: vi.fn(),
   };
 });
+
+const MODE_UUID = "11111111-1111-4111-8111-111111111111";
+const OTHER_MODE_UUID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const PROVIDER_UUID = "22222222-2222-4222-8222-222222222222";
+const REVISION = "a".repeat(64);
 
 function makeSortModeSummary(overrides: Partial<SortModeSummary> = {}): SortModeSummary {
   return {
     id: 1,
-    mode_uuid: "11111111-1111-4111-8111-111111111111",
+    mode_uuid: MODE_UUID,
     name: "Work",
     created_at: 0,
     updated_at: 0,
@@ -79,12 +96,38 @@ function makeSortModeProviderRow(
   };
 }
 
+function makeRoutingPolicyView(
+  overrides: Partial<ProviderModelRoutingPolicyView> = {}
+): ProviderModelRoutingPolicyView {
+  return {
+    provider_id: 101,
+    provider_uuid: PROVIDER_UUID,
+    cli_key: "claude",
+    provider_override_enabled: true,
+    ordinary_policy: { enabled: true, rules: [] },
+    ordinary_policy_revision: REVISION,
+    selected_mode: { mode_id: 1, mode_uuid: MODE_UUID, name: "Work" },
+    cross_policy: { enabled: true, rules: [] },
+    cross_policy_revision: REVISION,
+    source_member_enabled: true,
+    source_member_present: true,
+    ...overrides,
+  };
+}
+
 describe("query/sortModes", () => {
-  it("builds normalized CLI-wide provider prefixes and exact mode keys", () => {
+  it("builds normalized CLI-wide prefixes and UUID-qualified mode keys", () => {
     const prefix = sortModeProvidersQueryPrefix(" claude " as never);
 
     expect(prefix).toEqual([...sortModesKeys.all, "providers", "claude"]);
-    expect(sortModeProvidersQueryKey(7, " claude " as never)).toEqual([...prefix, 7]);
+    expect(sortModeProvidersQueryKey(7, MODE_UUID, " claude " as never)).toEqual([
+      ...prefix,
+      7,
+      MODE_UUID,
+    ]);
+    expect(sortModeProvidersQueryKey(7, OTHER_MODE_UUID, "claude")).not.toEqual(
+      sortModeProvidersQueryKey(7, MODE_UUID, "claude")
+    );
     expect(() => sortModeProvidersQueryPrefix("opencode" as never)).toThrow("SEC_INVALID_INPUT");
   });
 
@@ -114,18 +157,249 @@ describe("query/sortModes", () => {
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);
 
-    renderHook(() => useSortModeProvidersListQuery({ modeId: 1, cliKey: " claude " as never }), {
-      wrapper,
-    });
+    renderHook(
+      () =>
+        useSortModeProvidersListQuery({
+          modeId: 1,
+          modeUuid: MODE_UUID,
+          cliKey: " claude " as never,
+        }),
+      { wrapper }
+    );
 
     await waitFor(() => {
       expect(sortModeProvidersList).toHaveBeenCalledWith({ mode_id: 1, cli_key: "claude" });
     });
 
-    expect(client.getQueryState(sortModeProvidersQueryKey(1, "claude"))).toBeTruthy();
+    expect(client.getQueryState(sortModeProvidersQueryKey(1, MODE_UUID, "claude"))).toBeTruthy();
     expect(
       client.getQueryState([...sortModesKeys.all, "providers", " claude ", 1] as const)
     ).toBeUndefined();
+  });
+
+  it("isolates provider policy and candidate caches by stable UUID scope", () => {
+    expect(
+      providerRoutingPolicyQueryKey({
+        cliKey: "claude",
+        providerId: 101,
+        providerUuid: PROVIDER_UUID,
+        modeId: 1,
+        modeUuid: MODE_UUID,
+      })
+    ).not.toEqual(
+      providerRoutingPolicyQueryKey({
+        cliKey: "claude",
+        providerId: 101,
+        providerUuid: PROVIDER_UUID,
+        modeId: 1,
+        modeUuid: OTHER_MODE_UUID,
+      })
+    );
+    expect(
+      routingProviderCandidatesQueryKey({ cliKey: "claude", modeId: 1, modeUuid: MODE_UUID })
+    ).not.toEqual(
+      routingProviderCandidatesQueryKey({
+        cliKey: "claude",
+        modeId: 1,
+        modeUuid: OTHER_MODE_UUID,
+      })
+    );
+  });
+
+  it("rejects incomplete provider and mode identities before creating routing keys", () => {
+    expect(() =>
+      providerRoutingPolicyQueryKey({
+        cliKey: "claude",
+        providerId: 101,
+        providerUuid: null,
+        modeId: null,
+        modeUuid: null,
+      })
+    ).toThrow("SEC_INVALID_INPUT");
+    expect(() =>
+      providerRoutingPolicyQueryKey({
+        cliKey: "claude",
+        providerId: 101,
+        providerUuid: PROVIDER_UUID,
+        modeId: 1,
+        modeUuid: null,
+      })
+    ).toThrow("SEC_INVALID_INPUT");
+  });
+
+  it("queries named provider policy and narrow candidates with the full identity scope", async () => {
+    setTauriRuntime();
+    vi.mocked(providerModelRoutingPolicyGet).mockResolvedValue(makeRoutingPolicyView());
+    vi.mocked(routingProviderCandidatesList).mockResolvedValue([
+      {
+        provider_id: 102,
+        provider_uuid: "33333333-3333-4333-8333-333333333333",
+        cli_key: "claude",
+        name: "Target",
+        enabled: true,
+        source_provider_id: null,
+        bridge_type: null,
+        model_catalog_supported: true,
+      },
+    ]);
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    renderHook(
+      () =>
+        useProviderRoutingPolicyQuery({
+          cliKey: "claude",
+          providerId: 101,
+          providerUuid: PROVIDER_UUID,
+          modeId: 1,
+          modeUuid: MODE_UUID,
+        }),
+      { wrapper }
+    );
+    renderHook(
+      () =>
+        useRoutingProviderCandidatesQuery({
+          cliKey: "claude",
+          modeId: 1,
+          modeUuid: MODE_UUID,
+        }),
+      { wrapper }
+    );
+
+    await waitFor(() => {
+      expect(providerModelRoutingPolicyGet).toHaveBeenCalledWith({
+        provider_id: 101,
+        provider_uuid: PROVIDER_UUID,
+        mode_id: 1,
+        mode_uuid: MODE_UUID,
+      });
+      expect(routingProviderCandidatesList).toHaveBeenCalledWith({
+        mode_id: 1,
+        mode_uuid: MODE_UUID,
+        cli_key: "claude",
+      });
+    });
+  });
+
+  it("does not query cross-provider candidates for Default", () => {
+    setTauriRuntime();
+    vi.mocked(routingProviderCandidatesList).mockClear();
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    const { result } = renderHook(
+      () =>
+        useRoutingProviderCandidatesQuery({
+          cliKey: "claude",
+          modeId: null,
+          modeUuid: null,
+        }),
+      { wrapper }
+    );
+
+    expect(result.current.fetchStatus).toBe("idle");
+    expect(routingProviderCandidatesList).not.toHaveBeenCalled();
+  });
+
+  it("stores a saved policy only under its exact identity and invalidates its candidates", async () => {
+    setTauriRuntime();
+    const saved = makeRoutingPolicyView();
+    vi.mocked(providerModelRoutingPolicySave).mockResolvedValue(saved);
+    const client = createTestQueryClient();
+    const otherKey = providerRoutingPolicyQueryKey({
+      cliKey: "claude",
+      providerId: 101,
+      providerUuid: PROVIDER_UUID,
+      modeId: 1,
+      modeUuid: OTHER_MODE_UUID,
+    });
+    client.setQueryData(otherKey, { marker: "other identity" });
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    const wrapper = createQueryWrapper(client);
+    const { result } = renderHook(() => useProviderRoutingPolicySaveMutation(), { wrapper });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        cliKey: "claude",
+        provider_id: 101,
+        provider_uuid: PROVIDER_UUID,
+        mode_id: 1,
+        mode_uuid: MODE_UUID,
+        provider_override_enabled: true,
+        ordinary_policy: { enabled: true, rules: [] },
+        expected_ordinary_policy_revision: REVISION,
+        cross_policy: { enabled: true, rules: [] },
+        expected_cross_policy_revision: REVISION,
+      });
+    });
+
+    const exactKey = providerRoutingPolicyQueryKey({
+      cliKey: "claude",
+      providerId: 101,
+      providerUuid: PROVIDER_UUID,
+      modeId: 1,
+      modeUuid: MODE_UUID,
+    });
+    expect(client.getQueryData(exactKey)).toEqual(saved);
+    expect(client.getQueryData(otherKey)).toEqual({ marker: "other identity" });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: routingProviderCandidatesQueryKey({
+        cliKey: "claude",
+        modeId: 1,
+        modeUuid: MODE_UUID,
+      }),
+      exact: true,
+    });
+  });
+
+  it("rejects a policy response that belongs to another CLI", async () => {
+    setTauriRuntime();
+    vi.mocked(providerModelRoutingPolicyGet).mockResolvedValue(
+      makeRoutingPolicyView({ cli_key: "codex" })
+    );
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+    const { result } = renderHook(
+      () =>
+        useProviderRoutingPolicyQuery({
+          cliKey: "claude",
+          providerId: 101,
+          providerUuid: PROVIDER_UUID,
+          modeId: 1,
+          modeUuid: MODE_UUID,
+        }),
+      { wrapper }
+    );
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error).toEqual(
+      expect.objectContaining({ message: "IPC_INVALID_SCOPE: provider routing policy CLI" })
+    );
+  });
+
+  it("rejects a saved policy response that belongs to another CLI", async () => {
+    setTauriRuntime();
+    vi.mocked(providerModelRoutingPolicySave).mockResolvedValue(
+      makeRoutingPolicyView({ cli_key: "codex" })
+    );
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+    const { result } = renderHook(() => useProviderRoutingPolicySaveMutation(), { wrapper });
+
+    await expect(
+      result.current.mutateAsync({
+        cliKey: "claude",
+        provider_id: 101,
+        provider_uuid: PROVIDER_UUID,
+        mode_id: 1,
+        mode_uuid: MODE_UUID,
+        provider_override_enabled: true,
+        ordinary_policy: { enabled: true, rules: [] },
+        expected_ordinary_policy_revision: REVISION,
+        cross_policy: { enabled: true, rules: [] },
+        expected_cross_policy_revision: REVISION,
+      })
+    ).rejects.toThrow("IPC_INVALID_SCOPE: saved provider routing policy CLI");
   });
 
   it("rejects invalid sort mode provider cliKey before creating query adapters", () => {
@@ -135,9 +409,15 @@ describe("query/sortModes", () => {
     const wrapper = createQueryWrapper(client);
 
     expect(() =>
-      renderHook(() => useSortModeProvidersListQuery({ modeId: 1, cliKey: "opencode" as never }), {
-        wrapper,
-      })
+      renderHook(
+        () =>
+          useSortModeProvidersListQuery({
+            modeId: 1,
+            modeUuid: MODE_UUID,
+            cliKey: "opencode" as never,
+          }),
+        { wrapper }
+      )
     ).toThrow("SEC_INVALID_INPUT");
     expect(sortModeProvidersList).not.toHaveBeenCalled();
   });
@@ -154,9 +434,19 @@ describe("query/sortModes", () => {
     const invalidateSpy = vi.spyOn(client, "invalidateQueries");
     const wrapper = createQueryWrapper(client);
 
-    expect(() => sortModeProvidersQueryKey(0, "claude")).toThrow("SEC_INVALID_INPUT");
+    expect(() => sortModeProvidersQueryKey(0, MODE_UUID, "claude")).toThrow(
+      "SEC_INVALID_INPUT"
+    );
     expect(() =>
-      renderHook(() => useSortModeProvidersListQuery({ modeId: 0, cliKey: "claude" }), { wrapper })
+      renderHook(
+        () =>
+          useSortModeProvidersListQuery({
+            modeId: 0,
+            modeUuid: MODE_UUID,
+            cliKey: "claude",
+          }),
+        { wrapper }
+      )
     ).toThrow("SEC_INVALID_INPUT");
     expect(sortModeProvidersList).not.toHaveBeenCalled();
 
@@ -171,13 +461,14 @@ describe("query/sortModes", () => {
     await expect(
       orderResult.result.current.mutateAsync({
         modeId: 0,
+        modeUuid: MODE_UUID,
         cliKey: "claude",
         orderedProviderIds: [101],
       })
     ).rejects.toThrow("SEC_INVALID_INPUT");
     expect(sortModeProvidersSetOrder).not.toHaveBeenCalled();
     expect(invalidateSpy).not.toHaveBeenCalledWith({
-      queryKey: [...sortModesKeys.all, "providers", "claude", 0] as const,
+      queryKey: [...sortModesKeys.all, "providers", "claude", 0, MODE_UUID] as const,
     });
   });
 
@@ -327,7 +618,7 @@ describe("query/sortModes", () => {
 
     const { result } = renderHook(() => useSortModeDeleteMutation(), { wrapper });
     await act(async () => {
-      await result.current.mutateAsync({ modeId: 3 });
+      await result.current.mutateAsync({ modeId: 3, modeUuid: MODE_UUID });
     });
 
     expect(sortModeDelete).toHaveBeenCalledWith({ mode_id: 3 });
@@ -348,6 +639,7 @@ describe("query/sortModes", () => {
     await act(async () => {
       await result.current.mutateAsync({
         modeId: 3,
+        modeUuid: MODE_UUID,
         cliKey: " codex " as never,
         orderedProviderIds: [101],
       });
@@ -359,7 +651,7 @@ describe("query/sortModes", () => {
       ordered_provider_ids: [101],
     });
     expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: sortModeProvidersQueryKey(3, "codex"),
+      queryKey: sortModeProvidersQueryKey(3, MODE_UUID, "codex"),
     });
   });
 
@@ -378,6 +670,7 @@ describe("query/sortModes", () => {
     await act(async () => {
       await result.current.mutateAsync({
         modeId: 4,
+        modeUuid: MODE_UUID,
         cliKey: " gemini " as never,
         providerId: 101,
         enabled: false,
@@ -391,7 +684,7 @@ describe("query/sortModes", () => {
       enabled: false,
     });
     expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: sortModeProvidersQueryKey(4, "gemini"),
+      queryKey: sortModeProvidersQueryKey(4, MODE_UUID, "gemini"),
     });
   });
 
@@ -412,6 +705,7 @@ describe("query/sortModes", () => {
     await act(async () => {
       await result.current.mutateAsync({
         modeId: 4,
+        modeUuid: MODE_UUID,
         cliKey: " gemini " as never,
         providerId: 101,
         sessionReusePriority: 75,
@@ -425,7 +719,7 @@ describe("query/sortModes", () => {
       session_reuse_priority: 75,
     });
     expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: sortModeProvidersQueryKey(4, "gemini"),
+      queryKey: sortModeProvidersQueryKey(4, MODE_UUID, "gemini"),
     });
   });
 });

@@ -3,6 +3,7 @@ import { commands } from "../../../generated/bindings";
 import {
   MAX_SORT_MODE_NAME_CHARS,
   MAX_SORT_MODE_PROVIDER_IDS,
+  type ProviderModelRoutingPolicyView,
   type SortModeActiveRow,
   type SortModeProviderRow,
   type SortModeSummary,
@@ -16,7 +17,12 @@ import {
   sortModeProvidersSetOrder,
   sortModeRename,
   sortModesList,
+  providerModelRoutingPolicyGet,
+  providerModelRoutingPolicySave,
+  routingProviderCandidatesList,
+  validateRoutingPolicyRevision,
   validateSortModeId,
+  validateSortModeUuid,
 } from "../sortModes";
 
 vi.mock("../../../generated/bindings", async () => {
@@ -37,14 +43,22 @@ vi.mock("../../../generated/bindings", async () => {
       sortModeProvidersSetOrder: vi.fn(),
       sortModeProviderSetEnabled: vi.fn(),
       sortModeProviderSetSessionReusePriority: vi.fn(),
+      providerModelRoutingPolicyGet: vi.fn(),
+      providerModelRoutingPolicySave: vi.fn(),
+      routingProviderCandidatesList: vi.fn(),
     },
   };
 });
 
+const MODE_UUID = "11111111-1111-4111-8111-111111111111";
+const PROVIDER_UUID = "22222222-2222-4222-8222-222222222222";
+const TARGET_UUID = "33333333-3333-4333-8333-333333333333";
+const REVISION = "a".repeat(64);
+
 function makeSortModeSummary(overrides: Partial<SortModeSummary> = {}): SortModeSummary {
   return {
     id: 1,
-    mode_uuid: "11111111-1111-4111-8111-111111111111",
+    mode_uuid: MODE_UUID,
     name: "Work",
     created_at: 0,
     updated_at: 0,
@@ -70,6 +84,25 @@ function makeSortModeProviderRow(
     enabled: true,
     session_reuse_priority: 0,
     cross_policy: null,
+    ...overrides,
+  };
+}
+
+function makeRoutingPolicyView(
+  overrides: Partial<ProviderModelRoutingPolicyView> = {}
+): ProviderModelRoutingPolicyView {
+  return {
+    provider_id: 101,
+    provider_uuid: PROVIDER_UUID,
+    cli_key: "claude",
+    provider_override_enabled: true,
+    ordinary_policy: { enabled: true, rules: [] },
+    ordinary_policy_revision: REVISION,
+    selected_mode: { mode_id: 1, mode_uuid: MODE_UUID, name: "Work" },
+    cross_policy: { enabled: true, rules: [] },
+    cross_policy_revision: REVISION,
+    source_member_enabled: true,
+    source_member_present: true,
     ...overrides,
   };
 }
@@ -263,5 +296,184 @@ describe("services/providers/sortModes", () => {
     expect(commands.sortModeProvidersSetOrder).not.toHaveBeenCalled();
     expect(commands.sortModeProviderSetEnabled).not.toHaveBeenCalled();
     expect(commands.sortModeProviderSetSessionReusePriority).not.toHaveBeenCalled();
+  });
+
+  it("gets and saves combined routing policy under exact identities", async () => {
+    const view = makeRoutingPolicyView();
+    vi.mocked(commands.providerModelRoutingPolicyGet).mockResolvedValue({
+      status: "ok",
+      data: view,
+    });
+    vi.mocked(commands.providerModelRoutingPolicySave).mockResolvedValue({
+      status: "ok",
+      data: view,
+    });
+
+    await expect(
+      providerModelRoutingPolicyGet({
+        provider_id: 101,
+        provider_uuid: PROVIDER_UUID,
+        mode_id: 1,
+        mode_uuid: MODE_UUID,
+      })
+    ).resolves.toEqual(view);
+    expect(commands.providerModelRoutingPolicyGet).toHaveBeenCalledWith(
+      101,
+      PROVIDER_UUID,
+      1,
+      MODE_UUID
+    );
+
+    await providerModelRoutingPolicySave({
+      provider_id: 101,
+      provider_uuid: PROVIDER_UUID,
+      mode_id: 1,
+      mode_uuid: MODE_UUID,
+      provider_override_enabled: true,
+      ordinary_policy: {
+        enabled: true,
+        rules: [
+          {
+            source_model: " source ",
+            source_reasoning_effort: " HIGH ",
+            target_model: " target ",
+            reasoning_effort: " LOW ",
+          },
+        ],
+      },
+      expected_ordinary_policy_revision: REVISION,
+      cross_policy: {
+        enabled: true,
+        rules: [
+          {
+            source_model: " source ",
+            source_reasoning_effort: " HIGH ",
+            target_provider_uuid: TARGET_UUID,
+            target_model: " target ",
+            target_reasoning_effort: " MEDIUM ",
+          },
+        ],
+      },
+      expected_cross_policy_revision: REVISION,
+    });
+
+    expect(commands.providerModelRoutingPolicySave).toHaveBeenCalledWith({
+      providerId: 101,
+      providerUuid: PROVIDER_UUID,
+      modeId: 1,
+      modeUuid: MODE_UUID,
+      providerOverrideEnabled: true,
+      ordinaryPolicy: {
+        enabled: true,
+        rules: [
+          {
+            source_model: "source",
+            source_reasoning_effort: "high",
+            target_model: "target",
+            reasoning_effort: "low",
+          },
+        ],
+      },
+      expectedOrdinaryPolicyRevision: REVISION,
+      crossPolicy: {
+        enabled: true,
+        rules: [
+          {
+            source_model: "source",
+            source_reasoning_effort: "high",
+            target_provider_uuid: TARGET_UUID,
+            target_model: "target",
+            target_reasoning_effort: "medium",
+          },
+        ],
+      },
+      expectedCrossPolicyRevision: REVISION,
+    });
+  });
+
+  it("rejects malformed identities, revisions, and Default cross policy before IPC", async () => {
+    vi.mocked(commands.providerModelRoutingPolicyGet).mockClear();
+    vi.mocked(commands.providerModelRoutingPolicySave).mockClear();
+
+    expect(() => validateSortModeUuid("not-a-uuid")).toThrow("SEC_INVALID_INPUT");
+    expect(() => validateRoutingPolicyRevision("A".repeat(64))).toThrow("SEC_INVALID_INPUT");
+    await expect(
+      providerModelRoutingPolicyGet({
+        provider_id: 101,
+        provider_uuid: PROVIDER_UUID,
+        mode_id: 1,
+        mode_uuid: null,
+      })
+    ).rejects.toThrow("modeId and modeUuid must be provided together");
+    await expect(
+      providerModelRoutingPolicySave({
+        provider_id: 101,
+        provider_uuid: PROVIDER_UUID,
+        mode_id: null,
+        mode_uuid: null,
+        provider_override_enabled: true,
+        ordinary_policy: { enabled: true, rules: [] },
+        expected_ordinary_policy_revision: REVISION,
+        cross_policy: { enabled: true, rules: [] },
+        expected_cross_policy_revision: null,
+      })
+    ).rejects.toThrow("Default cannot save cross-provider policy");
+    expect(commands.providerModelRoutingPolicyGet).not.toHaveBeenCalled();
+    expect(commands.providerModelRoutingPolicySave).not.toHaveBeenCalled();
+  });
+
+  it("rejects an identity-mismatched policy response", async () => {
+    vi.mocked(commands.providerModelRoutingPolicyGet).mockResolvedValue({
+      status: "ok",
+      data: makeRoutingPolicyView({ provider_uuid: TARGET_UUID }),
+    });
+
+    await expect(
+      providerModelRoutingPolicyGet({
+        provider_id: 101,
+        provider_uuid: PROVIDER_UUID,
+        mode_id: 1,
+        mode_uuid: MODE_UUID,
+      })
+    ).rejects.toThrow("IPC_INVALID_SCOPE");
+  });
+
+  it("projects candidate responses to the bounded non-secret DTO", async () => {
+    vi.mocked(commands.routingProviderCandidatesList).mockResolvedValue({
+      status: "ok",
+      data: [
+        {
+          provider_id: 102,
+          provider_uuid: TARGET_UUID,
+          cli_key: "claude",
+          name: "Target",
+          enabled: true,
+          source_provider_id: null,
+          bridge_type: null,
+          model_catalog_supported: true,
+          api_key: "must-not-escape",
+          base_urls: ["https://sensitive.invalid"],
+        } as never,
+      ],
+    });
+
+    await expect(
+      routingProviderCandidatesList({
+        mode_id: 1,
+        mode_uuid: MODE_UUID,
+        cli_key: "claude",
+      })
+    ).resolves.toEqual([
+      {
+        provider_id: 102,
+        provider_uuid: TARGET_UUID,
+        cli_key: "claude",
+        name: "Target",
+        enabled: true,
+        source_provider_id: null,
+        bridge_type: null,
+        model_catalog_supported: true,
+      },
+    ]);
   });
 });

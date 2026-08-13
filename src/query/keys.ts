@@ -145,6 +145,30 @@ export const sortModesKeys = {
   all: sortModesAllKey,
   list: () => [...sortModesAllKey, "list"] as const,
   activeList: () => [...sortModesAllKey, "activeList"] as const,
+  providers: (cliKey: CliKey, modeId: number | null, modeUuid: string | null) =>
+    [...sortModesAllKey, "providers", cliKey, modeId, modeUuid] as const,
+  routingPolicies: (cliKey: CliKey) =>
+    [...sortModesAllKey, "routingPolicy", cliKey] as const,
+  routingPolicy: (
+    cliKey: CliKey,
+    modeId: number | null,
+    modeUuid: string | null,
+    providerId: number | null,
+    providerUuid: string | null
+  ) =>
+    [
+      ...sortModesAllKey,
+      "routingPolicy",
+      cliKey,
+      modeId,
+      modeUuid,
+      providerId,
+      providerUuid,
+    ] as const,
+  routingCandidatesForCli: (cliKey: CliKey) =>
+    [...sortModesAllKey, "routingCandidates", cliKey] as const,
+  routingCandidates: (cliKey: CliKey, modeId: number | null, modeUuid: string | null) =>
+    [...sortModesAllKey, "routingCandidates", cliKey, modeId, modeUuid] as const,
 };
 
 const usageAllKey = ["usage"] as const;
