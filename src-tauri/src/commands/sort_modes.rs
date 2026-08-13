@@ -239,17 +239,11 @@ pub(crate) async fn provider_model_routing_policy_save(
     input: sort_modes::ProviderModelRoutingPolicySaveInput,
 ) -> Result<sort_modes::ProviderModelRoutingPolicyView, String> {
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
-    let cli_key = blocking::run("provider_model_routing_policy_save_cli", {
-        let db = db.clone();
-        let provider_id = input.provider_id;
-        move || crate::providers::cli_key_by_id(&db, provider_id)
-    })
-    .await?;
     let result = blocking::run("provider_model_routing_policy_save", move || {
         sort_modes::provider_model_routing_policy_save(&db, input)
     })
     .await?;
-    app_gateway_clear_cli_route_runtime_state(&app, &cli_key);
+    app_gateway_clear_cli_route_runtime_state(&app, &result.cli_key);
     Ok(result)
 }
 

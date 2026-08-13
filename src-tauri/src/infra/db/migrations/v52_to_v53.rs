@@ -70,7 +70,7 @@ fn validate_sort_mode_identity_schema(tx: &Transaction<'_>) -> Result<(), String
         let mut statement = tx
             .prepare("PRAGMA table_info(sort_mode_identities)")
             .map_err(|error| format!("failed to inspect sort-mode identity columns: {error}"))?;
-        statement
+        let columns = statement
             .query_map([], |row| {
                 Ok((
                     row.get::<_, String>(1)?,
@@ -80,7 +80,8 @@ fn validate_sort_mode_identity_schema(tx: &Transaction<'_>) -> Result<(), String
             })
             .map_err(|error| format!("failed to query sort-mode identity columns: {error}"))?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| format!("failed to read sort-mode identity columns: {error}"))?
+            .map_err(|error| format!("failed to read sort-mode identity columns: {error}"))?;
+        columns
     };
     let mode_id_valid = columns
         .iter()

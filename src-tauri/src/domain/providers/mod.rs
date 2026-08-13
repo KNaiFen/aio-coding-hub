@@ -32,8 +32,7 @@ pub(crate) use queries::{
     get_account_usage_credential_context, get_account_usage_fetch_context, get_by_id,
     get_enabled_direct_codex_for_gateway_by_identity, get_oauth_details,
     get_source_provider_for_availability, get_source_provider_for_gateway,
-    list_enabled_for_gateway_in_mode, list_enabled_for_gateway_in_mode_selection,
-    list_enabled_for_gateway_using_active_mode,
+    list_enabled_for_gateway_in_mode_selection, list_enabled_for_gateway_using_active_mode,
     list_enabled_gateway_provider_identities_using_active_mode,
     list_oauth_providers_needing_refresh, list_observer_rows,
     model_routing_policy_override_from_json, model_routing_policy_override_to_json,
@@ -41,6 +40,8 @@ pub(crate) use queries::{
     resolve_effective_transport_credential_with_probe_runtime, set_enabled, set_oauth_last_error,
     update_oauth_tokens, update_oauth_tokens_if_last_refreshed_matches,
 };
+#[cfg(test)]
+pub(crate) use queries::list_enabled_for_gateway_in_mode;
 
 pub(crate) use share::{
     export_provider_share_v2, import_provider_share, parse_provider_share, preview_provider_share,
