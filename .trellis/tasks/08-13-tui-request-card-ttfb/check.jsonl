@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/aio-coding-hub/cross-layer/index.md", "reason": "复核本地验证边界、窄终端要求与 GitHub Actions 必需门。"}
+{"file": ".trellis/spec/aio-coding-hub/cross-layer/local-observer-tui-contract.md", "reason": "复核请求卡片与详情边界、两个路由计数独立语义以及缺失字段降级。"}

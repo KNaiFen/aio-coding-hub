@@ -10,7 +10,8 @@
 
 | 任务目录 | 阶段 | 分支 | base SHA | 规划提交 | Worktree | PR | 当前唯一写者 | 依赖/说明 |
 |---|---|---|---|---|---|---|---|---|
-| [`08-13-cross-provider-model-routing`](./08-13-cross-provider-model-routing/) | in_progress（执行 session 施工中；可与 TUI sibling 并行） | `feat/cross-provider-model-routing` | `875ff441c5ba9f1a7f235ad95dadb945a41bba61` | `c6d59507c7a1de46abdb07427aa8bc153c69739c` | `/Users/knaifen/Documents/Codex/aio-coding-hub/08-13-cross-provider-model-routing` | 尚未创建 | 执行 session（唯一写者）；交付后 main 验收 | TUI PR #136（OPEN/CLEAN，head `2b12c68cd99f7bc7c21fb8fa2b5354c9992a229b`）只改 TUI formatter，可并行；最终集成时如 README 冲突由 main 处理。本任务不改 TUI `format.rs`。 |
+| [`08-13-cross-provider-model-routing`](./08-13-cross-provider-model-routing/) | in_progress（执行 session 施工中） | `feat/cross-provider-model-routing` | `875ff441c5ba9f1a7f235ad95dadb945a41bba61` | `c6d59507c7a1de46abdb07427aa8bc153c69739c` | `/Users/knaifen/Documents/Codex/aio-coding-hub/08-13-cross-provider-model-routing` | [#137](https://github.com/KNaiFen/aio-coding-hub/pull/137) | 执行 session（唯一写者）；交付后 main 验收 | 已合入 TUI PR #136 的 `origin/main` 以恢复自动 PR 检查；本任务不修改 TUI `format.rs`。 |
+| [`08-13-tui-request-card-ttfb`](./08-13-tui-request-card-ttfb/) | in_progress（main 验收中） | `fix/tui-request-card-ttfb` | `875ff441c5ba9f1a7f235ad95dadb945a41bba61` | `bd91552393f36419ce215d9de283b7519c0efb07` | `/Users/knaifen/Documents/Codex/aio-coding-hub/08-13-tui-request-card-ttfb` | [#136](https://github.com/KNaiFen/aio-coding-hub/pull/136) | 执行 session 已暂停；main 验收 | 冻结 head `2b12c68cd99f7bc7c21fb8fa2b5354c9992a229b`，接手时工作树干净、无未提交内容；`ci-gate`、`pr-title`、Rust、CodeQL 均通过。main 验收记录提交后以新 head 的自动检查为准。不影响暂停中的 OAuth 任务。 |
 | [`08-03-upstream-claude-oauth`](./08-03-upstream-claude-oauth/) | planning（暂停，未委派） | 无（旧分支已删除） | 不适用 | 未登记 | 未创建 | 未创建 | main session | 用户已决定暂不处理；不影响当前工作。恢复前需重新确认方案，并完成真实隔离账号验证。 |
 
 ## 归档

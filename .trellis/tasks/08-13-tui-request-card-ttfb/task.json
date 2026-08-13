@@ -1,0 +1,28 @@
+{
+  "id": "tui-request-card-ttfb",
+  "name": "tui-request-card-ttfb",
+  "title": "TUI 请求卡片改用首字时间与紧凑路由计数",
+  "description": "请求卡片使用 TTFB 替代总耗时，并将卡片中的切换/重试摘要缩写为切N/重N；详情保持原行为。",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": "aio-tui-request-card",
+  "package": "aio-coding-hub",
+  "priority": "P2",
+  "creator": "main",
+  "assignee": "main",
+  "createdAt": "2026-08-13",
+  "completedAt": null,
+  "branch": "fix/tui-request-card-ttfb",
+  "base_branch": "main",
+  "worktree_path": "/Users/knaifen/Documents/Codex/aio-coding-hub/08-13-tui-request-card-ttfb",
+  "commit": "bd91552393f36419ce215d9de283b7519c0efb07",
+  "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/136",
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "src-tauri/crates/aio-tui/src/format.rs"
+  ],
+  "notes": "2026-08-13 用户授权采用多 worktree、多 session 协作。任务仅调整请求卡片的时间指标和路由计数缩写；详情页与协议保持不变。",
+  "meta": {}
+}
