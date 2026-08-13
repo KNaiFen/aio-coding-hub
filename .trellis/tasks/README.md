@@ -10,7 +10,6 @@
 
 | 任务目录 | 阶段 | 分支 | base SHA | 规划提交 | Worktree | PR | 当前唯一写者 | 依赖/说明 |
 |---|---|---|---|---|---|---|---|---|
-| [`08-13-tui-request-card-ttfb`](./08-13-tui-request-card-ttfb/) | in_progress（main 验收中） | `fix/tui-request-card-ttfb` | `875ff441c5ba9f1a7f235ad95dadb945a41bba61` | `bd91552393f36419ce215d9de283b7519c0efb07` | `/Users/knaifen/Documents/Codex/aio-coding-hub/08-13-tui-request-card-ttfb` | [#136](https://github.com/KNaiFen/aio-coding-hub/pull/136) | 执行 session 已暂停；main 验收 | 冻结 head `2b12c68cd99f7bc7c21fb8fa2b5354c9992a229b`，接手时工作树干净、无未提交内容；`ci-gate`、`pr-title`、Rust、CodeQL 均通过。main 验收记录提交后以新 head 的自动检查为准。不影响暂停中的 OAuth 任务。 |
 | [`08-03-upstream-claude-oauth`](./08-03-upstream-claude-oauth/) | planning（暂停，未委派） | 无（旧分支已删除） | 不适用 | 未登记 | 未创建 | 未创建 | main session | 用户已决定暂不处理；不影响当前工作。恢复前需重新确认方案，并完成真实隔离账号验证。 |
 
 ## 归档
@@ -19,6 +18,7 @@
 - 2026-08：[08-10 GitHub Actions Governance](./archive/2026-08/08-10-github-actions-governance/)；功能 PR [#108](https://github.com/KNaiFen/aio-coding-hub/pull/108) 与 records-only closeout PR [#115](https://github.com/KNaiFen/aio-coding-hub/pull/115) 均已合并，最终业务结果为“部分完成并已拆分后续修复”。
 - 2026-08：[08-11 Availability Circuit Recovery](./archive/2026-08/08-11-availability-circuit-recovery/)；功能 PR [#109](https://github.com/KNaiFen/aio-coding-hub/pull/109) 与 records-only closeout PR [#117](https://github.com/KNaiFen/aio-coding-hub/pull/117) 均已合并，最终结果为“完成”。
 - 2026-08：[08-12 Upstream Sync PR Resolution](./archive/2026-08/08-12-upstream-sync-pr-resolution/)；功能 PR [#114](https://github.com/KNaiFen/aio-coding-hub/pull/114) 与 records-only closeout PR [#123](https://github.com/KNaiFen/aio-coding-hub/pull/123) 均已合并，最终结果为“完成”。
+- 2026-08：[08-13 TUI 请求卡片改用首字时间与紧凑路由计数](./archive/2026-08/08-13-tui-request-card-ttfb/)；功能 PR [#136](https://github.com/KNaiFen/aio-coding-hub/pull/136) 已合并，records-only closeout PR 待创建，最终结果为“完成”。
 - 归档任务保留原始 PRD、设计、计划、研究、实施与检查记录，作为交付证据，不作为当前行为规范。
 
 ## 生命周期

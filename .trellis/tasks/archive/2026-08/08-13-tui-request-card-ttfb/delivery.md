@@ -133,7 +133,18 @@
 
 ## main 收尾
 
-> 仅 main 填写。
+> 仅 main 填写。功能 PR 已合并；本节随 records-only 收尾 PR 持久化归档事实，尚未发生的收尾 PR 合并与 worktree 清理保持显式待办。
+
+- 最终结果：完成。
+- 功能 PR 与验收候选：[PR #136](https://github.com/KNaiFen/aio-coding-hub/pull/136)；main 最终接受并合并的完整 head 为 `94b071f2b20be9ecf3693e463775de9a99273ca4`。
+- main 合并提交：`6effa37d31de5f7e8f8c30b6a06f1cb93cae4243`，2026-08-13 squash merge 到 `main`。
+- 合并前 CI：最终验收 head 的 required [`ci-gate` job 94459062001](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31701888756/job/94459062001)、[`pr-title` job 94452789964](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31701888782/job/94452789964)、[`rust` job 94452930311](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31701888756/job/94452930311) 与 [CodeQL run 31701888795](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31701888795) 均成功；`change-scope`、`support-contract` 同样成功，frontend 与候选/发布 jobs 按 Rust-only scope 跳过。
+- 收尾记录 PR：待本归档分支提交并推送后创建；PR URL、固定 head 和同一 head 的自动检查证据将在合并前回填。
+- 知识库与合同：本任务没有产生新的长期知识、公共接口、协议或运维合同；现行 TUI 合同已覆盖请求卡片与详情的语义边界，无需新增知识库条目。
+- 配置、迁移与 PENDING：无配置或数据迁移；`PENDING.md` 当前无未解决条目，本任务不新增或迁移 PENDING 项。
+- 归档：main 已于 2026-08-13 运行 `python3 ./.trellis/scripts/task.py archive --no-commit 08-13-tui-request-card-ttfb`，任务已迁入 `.trellis/tasks/archive/2026-08/08-13-tui-request-card-ttfb/`，`task.json` 已更新为 `completed`；README 活动行同步转换为归档条目，随后运行全量 Trellis 校验。
+- worktree 与分支清理：功能分支远端 ref 已由 GitHub 合并流程删除；原执行 worktree `/Users/knaifen/Documents/Codex/aio-coding-hub/08-13-tui-request-card-ttfb` 与 closeout worktree `/Users/knaifen/Documents/Codex/aio-coding-hub/08-13-tui-request-card-ttfb-closeout` 当前均干净，保留至 records-only 收尾 PR 合并后再删除对应本地分支与 worktree。
+- 遗留风险：无产品风险；仅剩 records-only 收尾 PR、其自动检查与合并后清理。
 
 ## 返工记录
 
