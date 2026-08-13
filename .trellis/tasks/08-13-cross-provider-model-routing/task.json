@@ -3,7 +3,7 @@
   "name": "cross-provider-model-routing",
   "title": "跨供应商模型路由",
   "description": "在供应商覆盖模型路由中增加绑定命名调用方案的跨供应商目标选择、标准强度匹配、一次性临时 failover、配置迁移和日志审计。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": "feature",
   "scope": "backend,cross-layer,frontend,config-migration",
   "package": "aio-coding-hub",
