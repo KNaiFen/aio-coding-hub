@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/aio-coding-hub/cross-layer/index.md", "reason": "应用 local observer/TUI 变更的 pre-development checklist 与 cloud-only quality boundary。"}
+{"file": ".trellis/spec/aio-coding-hub/cross-layer/local-observer-tui-contract.md", "reason": "保持请求卡片语义行、路由计数独立语义和 TUI 安全降级合同。"}

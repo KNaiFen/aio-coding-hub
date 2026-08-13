@@ -383,8 +383,8 @@ pub fn request_card_lines(
         .unwrap_or_default();
     let folder = request.folder_name.as_deref().unwrap_or("无目录");
     let provider = request.provider_name.as_deref().unwrap_or("未上游");
-    let duration = request
-        .duration_ms
+    let ttfb = request
+        .ttfb_ms
         .map(format_duration)
         .unwrap_or_else(|| "—".to_string());
     let (input, output, cache) = request
@@ -414,11 +414,11 @@ pub fn request_card_lines(
     let route_summary = match output_tokens_per_second(request) {
         Some(rate) => format!(
             "{}  {}  {}",
-            route_result(request),
-            duration,
+            request_card_route_result(request),
+            ttfb,
             format_tokens_per_second_short(rate)
         ),
-        None => format!("{}  {}", route_result(request), duration),
+        None => format!("{}  {}", request_card_route_result(request), ttfb),
     };
     let mut lines = vec![RequestCardLine::new(
         truncate_display(
@@ -804,6 +804,25 @@ pub fn route_result(request: &ObserverRequest) -> String {
     "未上游".to_string()
 }
 
+fn request_card_route_result(request: &ObserverRequest) -> String {
+    if request.provider_switch_count > 0 {
+        if request.retry_count > 0 {
+            return format!(
+                "切{}/重{}",
+                request.provider_switch_count, request.retry_count
+            );
+        }
+        return format!("切{}", request.provider_switch_count);
+    }
+    if request.retry_count > 0 {
+        return format!("重{}", request.retry_count);
+    }
+    if request.attempt_count > 0 {
+        return "直连".to_string();
+    }
+    "未上游".to_string()
+}
+
 pub fn terminal_status(request: &ObserverRequest) -> String {
     if request.interrupted {
         return "499".to_string();
@@ -1181,7 +1200,7 @@ mod tests {
     }
 
     #[test]
-    fn request_card_keeps_provider_before_folder_and_appends_output_rate() {
+    fn request_card_uses_ttfb_and_keeps_provider_before_folder_and_output_rate() {
         let mut request = request_with_route_counts(1, 0, 0);
         request.provider_name = Some("INPUT 大春".to_string());
         request.folder_name = Some("aio-coding-hub".to_string());
@@ -1202,10 +1221,52 @@ mod tests {
         assert_eq!(lines[1].kind, RequestCardLineKind::Model);
         assert_eq!(lines[1].text, "Codex / gpt-5");
         assert_eq!(lines[2].text, "INPUT 大春  aio-coding-hub");
-        assert_eq!(lines[3].text, "直连  2.0s  100.0 t/s");
+        assert_eq!(lines[3].text, "直连  500ms  100.0 t/s");
         assert!(request_card_lines(&request, 60_001, 15)[2]
             .text
             .starts_with("INPUT 大春"));
+
+        request.ttfb_ms = None;
+        assert_eq!(
+            request_card_lines(&request, 60_001, 80)[3].text,
+            "直连  —  100.0 t/s"
+        );
+    }
+
+    #[test]
+    fn request_card_compacts_route_counts_without_changing_shared_views() {
+        let mut request = request_with_route_counts(5, 3, 1);
+        request.duration_ms = Some(2_000);
+        request.ttfb_ms = Some(500);
+
+        assert_eq!(
+            request_card_lines(&request, 60_001, 80)[3].text,
+            "切1/重3  500ms"
+        );
+        assert_eq!(request_card_route_result(&request), "切1/重3");
+        assert_eq!(route_result(&request), "切换1/重试3");
+
+        let details = detail_lines(&request, 60_001);
+        assert!(details.iter().any(|line| line == "路由  切换1/重试3"));
+        assert!(details.iter().any(|line| line == "耗时  2.0s"));
+        assert!(details.iter().any(|line| line == "首字  500ms"));
+
+        assert_eq!(
+            request_card_route_result(&request_with_route_counts(2, 0, 1)),
+            "切1"
+        );
+        assert_eq!(
+            request_card_route_result(&request_with_route_counts(4, 3, 0)),
+            "重3"
+        );
+        assert_eq!(
+            request_card_route_result(&request_with_route_counts(1, 0, 0)),
+            "直连"
+        );
+        assert_eq!(
+            request_card_route_result(&request_with_route_counts(0, 0, 0)),
+            "未上游"
+        );
     }
 
     #[test]
