@@ -200,7 +200,9 @@ where
         allow_session_reuse: false,
         route_generation: None,
         effective_sort_mode_id: None,
+        effective_sort_mode_uuid: None,
         providers: vec![],
+        sort_mode_members: vec![],
         session_bound_provider_id: None,
         fingerprint_key: 0,
         fingerprint_debug: String::new(),
@@ -382,6 +384,7 @@ mod tests {
     fn provider(id: i64) -> crate::providers::ProviderForGateway {
         crate::providers::ProviderForGateway {
             id,
+            provider_uuid: format!("00000000-0000-4000-8000-{id:012}"),
             session_reuse_priority: 0,
             name: format!("p{id}"),
             base_urls: vec!["https://example.com".to_string()],
@@ -404,6 +407,7 @@ mod tests {
             extension_values: vec![],
             upstream_retry_policy_override: None,
             model_routing_policy_override: None,
+            cross_provider_model_routing_policy: None,
         }
     }
 
@@ -482,7 +486,9 @@ mod tests {
             allow_session_reuse: false,
             route_generation: None,
             effective_sort_mode_id: None,
+            effective_sort_mode_uuid: None,
             providers: vec![],
+            sort_mode_members: vec![],
             session_bound_provider_id: None,
             fingerprint_key: 0,
             fingerprint_debug: String::new(),
@@ -561,7 +567,9 @@ mod tests {
             allow_session_reuse: false,
             route_generation: None,
             effective_sort_mode_id: None,
+            effective_sort_mode_uuid: None,
             providers: vec![],
+            sort_mode_members: vec![],
             session_bound_provider_id: None,
             fingerprint_key: 0,
             fingerprint_debug: String::new(),
@@ -616,7 +624,9 @@ mod tests {
             allow_session_reuse: false,
             route_generation: None,
             effective_sort_mode_id: None,
+            effective_sort_mode_uuid: None,
             providers: vec![],
+            sort_mode_members: vec![],
             session_bound_provider_id: None,
             fingerprint_key: 0,
             fingerprint_debug: String::new(),

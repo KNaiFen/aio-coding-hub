@@ -1694,6 +1694,7 @@ fn default_route_gateway_uses_membership_and_global_enabled() {
     let selection =
         list_enabled_for_gateway_using_active_mode(&db, "claude").expect("list gateway providers");
     assert_eq!(selection.sort_mode_id, None);
+    assert_eq!(selection.sort_mode_uuid, None);
     assert_eq!(
         selection
             .providers

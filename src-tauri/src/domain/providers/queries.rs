@@ -103,6 +103,18 @@ pub(crate) fn model_routing_policy_override_to_json(
     })
 }
 
+fn cross_provider_model_routing_policy_from_json(
+    raw: Option<String>,
+) -> Option<crate::settings::CrossProviderModelRoutingPolicy> {
+    let raw = raw?;
+    let mut policy = serde_json::from_str::<crate::settings::CrossProviderModelRoutingPolicy>(
+        raw.trim(),
+    )
+    .ok()?;
+    crate::settings::sanitize_cross_provider_model_routing_policy(&mut policy);
+    Some(policy)
+}
+
 fn decode_provider_row(
     row: &rusqlite::Row<'_>,
     cli_key: &str,
@@ -808,6 +820,7 @@ fn map_gateway_provider_row(
 
     Ok(ProviderForGateway {
         id: decoded.id,
+        provider_uuid: row.get("provider_uuid")?,
         session_reuse_priority,
         name: decoded.name,
         base_urls: decoded.base_urls,
@@ -832,6 +845,10 @@ fn map_gateway_provider_row(
         extension_values: Vec::new(),
         upstream_retry_policy_override: decoded.upstream_retry_policy_override,
         model_routing_policy_override: decoded.model_routing_policy_override,
+        cross_provider_model_routing_policy: cross_provider_model_routing_policy_from_json(
+            row.get::<_, Option<String>>("cross_provider_model_routing_policy_json")
+                .unwrap_or(None),
+        ),
     })
 }
 
@@ -847,6 +864,7 @@ fn list_enabled_for_gateway_in_sort_mode(
 SELECT
   mp.session_reuse_priority,
   p.id,
+  p.provider_uuid,
   p.name,
   p.base_url,
   p.base_urls_json,
@@ -870,7 +888,8 @@ SELECT
   p.bridge_type,
   p.stream_idle_timeout_seconds,
   p.upstream_retry_policy_json,
-  p.model_routing_policy_json
+  p.model_routing_policy_json,
+  mp.cross_provider_model_routing_policy_json
 FROM sort_mode_providers mp
 JOIN providers p ON p.id = mp.provider_id
 WHERE mp.mode_id = ?1
@@ -909,6 +928,7 @@ fn list_enabled_for_gateway_default(
 SELECT
   drp.session_reuse_priority,
   p.id,
+  p.provider_uuid,
   p.name,
   p.base_url,
   p.base_urls_json,
@@ -963,9 +983,12 @@ pub(crate) fn list_enabled_for_gateway_using_active_mode(
     cli_key: &str,
 ) -> crate::shared::error::AppResult<GatewayProvidersSelection> {
     validate_cli_key(cli_key)?;
-    let conn = db.open_connection()?;
+    let mut conn = db.open_connection()?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| db_err!("failed to start gateway selection transaction: {e}"))?;
 
-    let active_mode_id: Option<i64> = conn
+    let active_mode_id: Option<i64> = tx
         .query_row(
             "SELECT mode_id FROM sort_mode_active WHERE cli_key = ?1",
             params![cli_key],
@@ -975,19 +998,78 @@ pub(crate) fn list_enabled_for_gateway_using_active_mode(
         .map_err(|e| db_err!("failed to query sort_mode_active: {e}"))?
         .flatten();
 
-    if let Some(mode_id) = active_mode_id {
-        let providers = list_enabled_for_gateway_in_sort_mode(&conn, cli_key, mode_id)?;
-        return Ok(GatewayProvidersSelection {
+    let selection = if let Some(mode_id) = active_mode_id {
+        let providers = list_enabled_for_gateway_in_sort_mode(&tx, cli_key, mode_id)?;
+        let sort_mode_uuid = tx
+            .query_row(
+                "SELECT mode_uuid FROM sort_mode_identities WHERE mode_id = ?1",
+                params![mode_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|e| db_err!("failed to query active sort-mode identity: {e}"))?
+            .ok_or_else(|| {
+                crate::shared::error::AppError::from(
+                    "DB_NOT_FOUND: active sort mode identity not found",
+                )
+            })?;
+        GatewayProvidersSelection {
             sort_mode_id: Some(mode_id),
+            sort_mode_uuid: Some(sort_mode_uuid),
             providers,
-        });
-    }
+        }
+    } else {
+        GatewayProvidersSelection {
+            sort_mode_id: None,
+            sort_mode_uuid: None,
+            providers: list_enabled_for_gateway_default(&tx, cli_key)?,
+        }
+    };
+    tx.commit()
+        .map_err(|e| db_err!("failed to commit gateway selection transaction: {e}"))?;
+    Ok(selection)
+}
 
-    let providers = list_enabled_for_gateway_default(&conn, cli_key)?;
-    Ok(GatewayProvidersSelection {
-        sort_mode_id: None,
-        providers,
-    })
+pub(crate) fn list_enabled_for_gateway_in_mode_selection(
+    db: &db::Db,
+    cli_key: &str,
+    sort_mode_id: Option<i64>,
+) -> crate::shared::error::AppResult<GatewayProvidersSelection> {
+    validate_cli_key(cli_key)?;
+    let mut conn = db.open_connection()?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| db_err!("failed to start gateway mode selection transaction: {e}"))?;
+
+    let Some(mode_id) = sort_mode_id else {
+        let selection = GatewayProvidersSelection {
+            sort_mode_id: None,
+            sort_mode_uuid: None,
+            providers: list_enabled_for_gateway_default(&tx, cli_key)?,
+        };
+        tx.commit()
+            .map_err(|e| db_err!("failed to commit gateway mode selection transaction: {e}"))?;
+        return Ok(selection);
+    };
+    let sort_mode_uuid = tx
+        .query_row(
+            "SELECT mode_uuid FROM sort_mode_identities WHERE mode_id = ?1",
+            params![mode_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|e| db_err!("failed to query sort-mode identity: {e}"))?
+        .ok_or_else(|| {
+            crate::shared::error::AppError::from("DB_NOT_FOUND: sort mode identity not found")
+        })?;
+    let selection = GatewayProvidersSelection {
+        sort_mode_id: Some(mode_id),
+        sort_mode_uuid: Some(sort_mode_uuid),
+        providers: list_enabled_for_gateway_in_sort_mode(&tx, cli_key, mode_id)?,
+    };
+    tx.commit()
+        .map_err(|e| db_err!("failed to commit gateway mode selection transaction: {e}"))?;
+    Ok(selection)
 }
 
 pub(crate) fn list_enabled_gateway_provider_identities_using_active_mode(
@@ -1250,6 +1332,7 @@ fn get_source_provider(
     let sql = r#"
 SELECT
   id,
+  provider_uuid,
   name,
   base_url,
   base_urls_json,
@@ -1325,6 +1408,7 @@ pub(crate) fn get_enabled_direct_codex_for_gateway_by_identity(
             r#"
 SELECT
   id,
+  provider_uuid,
   name,
   base_url,
   base_urls_json,

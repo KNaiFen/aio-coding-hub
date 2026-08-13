@@ -364,6 +364,7 @@ pub const MAX_SESSION_REUSE_PRIORITY: i64 = 1000;
 #[derive(Debug, Clone)]
 pub(crate) struct ProviderForGateway {
     pub id: i64,
+    pub provider_uuid: String,
     pub session_reuse_priority: i64,
     pub name: String,
     pub base_urls: Vec<String>,
@@ -387,6 +388,8 @@ pub(crate) struct ProviderForGateway {
     pub extension_values: Vec<ProviderExtensionValues>,
     pub upstream_retry_policy_override: Option<crate::settings::UpstreamRetryPolicy>,
     pub model_routing_policy_override: Option<crate::settings::ModelRoutingPolicy>,
+    pub cross_provider_model_routing_policy:
+        Option<crate::settings::CrossProviderModelRoutingPolicy>,
 }
 
 #[derive(Debug, Clone)]
@@ -401,6 +404,7 @@ pub(crate) struct ProviderTransportContext {
 #[derive(Debug, Clone)]
 pub(crate) struct GatewayProvidersSelection {
     pub sort_mode_id: Option<i64>,
+    pub sort_mode_uuid: Option<String>,
     pub providers: Vec<ProviderForGateway>,
 }
 

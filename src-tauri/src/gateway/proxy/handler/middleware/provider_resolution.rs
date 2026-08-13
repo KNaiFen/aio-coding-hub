@@ -61,7 +61,9 @@ impl ProviderResolutionMiddleware {
                     Ok(ProviderSelection {
                         route_generation,
                         effective_sort_mode_id: None,
+                        effective_sort_mode_uuid: None,
                         providers,
+                        sort_mode_members: Vec::new(),
                         bound_provider_order: None,
                         active_sort_mode_id: None,
                         session_bound_sort_mode_id: None,
@@ -111,6 +113,8 @@ impl ProviderResolutionMiddleware {
         let initial_provider_ids = provider_ids(&selection.providers);
         ctx.route_generation = Some(selection.route_generation);
         ctx.effective_sort_mode_id = selection.effective_sort_mode_id;
+        ctx.effective_sort_mode_uuid = selection.effective_sort_mode_uuid.clone();
+        ctx.sort_mode_members = selection.sort_mode_members.clone();
         ctx.providers = selection.providers;
 
         // A known OAuth or spend-limit exhaustion is route eligibility, not a

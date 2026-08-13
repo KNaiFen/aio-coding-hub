@@ -18,6 +18,7 @@ fn provider_for_base_url_test(
 ) -> providers::ProviderForGateway {
     providers::ProviderForGateway {
         id: 1,
+        provider_uuid: "00000000-0000-4000-8000-000000000001".to_string(),
         session_reuse_priority: 0,
         name: "test".to_string(),
         base_urls: base_urls.into_iter().map(str::to_string).collect(),
@@ -40,6 +41,7 @@ fn provider_for_base_url_test(
         extension_values: vec![],
         upstream_retry_policy_override: None,
         model_routing_policy_override: None,
+        cross_provider_model_routing_policy: None,
     }
 }
 
