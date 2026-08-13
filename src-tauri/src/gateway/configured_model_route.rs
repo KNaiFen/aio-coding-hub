@@ -223,8 +223,7 @@ pub(in crate::gateway) fn update_cross_provider_route_status(
             .iter()
             .rev()
             .find(|setting| {
-                setting.get("type").and_then(Value::as_str)
-                    == Some("cross_provider_model_route")
+                setting.get("type").and_then(Value::as_str) == Some("cross_provider_model_route")
             })
             .cloned()
     }) else {
@@ -254,8 +253,8 @@ pub(in crate::gateway) fn finalize_cross_provider_route_json(
     error_code: Option<&str>,
 ) -> Option<String> {
     let mut raw = special_settings_json?;
-    let successful = error_code.is_none()
-        && status.is_some_and(|status| (200..300).contains(&status));
+    let successful =
+        error_code.is_none() && status.is_some_and(|status| (200..300).contains(&status));
     if successful {
         return Some(raw);
     }
@@ -269,8 +268,7 @@ pub(in crate::gateway) fn finalize_cross_provider_route_json(
             .rev()
             .find_map(matched_cross_provider_route_marker),
         Value::Object(marker)
-            if marker.get("type").and_then(Value::as_str)
-                == Some("cross_provider_model_route")
+            if marker.get("type").and_then(Value::as_str) == Some("cross_provider_model_route")
                 && marker.get("status").and_then(Value::as_str) == Some("matched") =>
         {
             Some(marker)
@@ -754,12 +752,9 @@ mod tests {
             .expect("success marker");
         assert_eq!(success, marker);
 
-        let failure = finalize_cross_provider_route_json(
-            Some(marker),
-            Some(502),
-            Some("UPSTREAM_ERROR"),
-        )
-        .expect("failure marker");
+        let failure =
+            finalize_cross_provider_route_json(Some(marker), Some(502), Some("UPSTREAM_ERROR"))
+                .expect("failure marker");
         let failure: Value = serde_json::from_str(&failure).expect("failure marker JSON");
         assert_eq!(failure[0]["status"], "failed");
         assert_eq!(failure[0]["reason"], "target_terminal_error");

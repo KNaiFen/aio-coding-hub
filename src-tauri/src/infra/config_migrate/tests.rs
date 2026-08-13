@@ -545,10 +545,9 @@ ORDER BY mp.sort_order ASC
     assert_eq!(restored[1].1, 0);
     assert_eq!(restored[1].2, mode.mode_uuid);
     assert!(restored[1].3.is_none());
-    let restored_policy: settings::CrossProviderModelRoutingPolicy = serde_json::from_str(
-        restored[0].3.as_deref().expect("restored cross policy"),
-    )
-    .expect("parse restored cross policy");
+    let restored_policy: settings::CrossProviderModelRoutingPolicy =
+        serde_json::from_str(restored[0].3.as_deref().expect("restored cross policy"))
+            .expect("parse restored cross policy");
     assert_eq!(
         restored_policy.rules[0].target_provider_uuid,
         fallback.provider_uuid
@@ -2208,21 +2207,16 @@ fn config_v5_sort_mode_preflight_rejects_invalid_identity_before_import_lock() {
     let test_app = ConfigMigrateTestApp::new();
     let app = test_app.handle();
     let provider = seed_direct_codex_provider(&test_app, "Mode Guard");
-    let mode = crate::sort_modes::create_mode(&test_app.db, "Guard Route")
-        .expect("create guard route");
-    crate::sort_modes::set_mode_providers_order(
-        &test_app.db,
-        mode.id,
-        "codex",
-        vec![provider.id],
-    )
-    .expect("set guard member");
+    let mode =
+        crate::sort_modes::create_mode(&test_app.db, "Guard Route").expect("create guard route");
+    crate::sort_modes::set_mode_providers_order(&test_app.db, mode.id, "codex", vec![provider.id])
+        .expect("set guard member");
 
     let mut invalid_mode = config_export(&app, &test_app.db).expect("export invalid mode probe");
     invalid_mode.sort_modes[0].mode_uuid = Some("invalid".to_string());
     reset_config_import_lock_attempts_for_test();
-    let error = config_import(&app, &test_app.db, invalid_mode)
-        .expect_err("invalid mode UUID must fail");
+    let error =
+        config_import(&app, &test_app.db, invalid_mode).expect_err("invalid mode UUID must fail");
     assert_eq!(error.code(), "SEC_INVALID_INPUT");
     assert_eq!(config_import_lock_attempts_for_test(), 0);
 
@@ -2335,10 +2329,7 @@ WHERE mode.name = 'Missing Target Route' AND provider.provider_uuid = ?1
     let restored: settings::CrossProviderModelRoutingPolicy =
         serde_json::from_str(&raw).expect("parse missing target cross policy");
     assert_eq!(restored.rules.len(), 1);
-    assert_eq!(
-        restored.rules[0].target_provider_uuid,
-        missing_target_uuid
-    );
+    assert_eq!(restored.rules[0].target_provider_uuid, missing_target_uuid);
 }
 
 #[test]
@@ -2347,8 +2338,8 @@ fn config_v4_sort_mode_import_generates_identity_and_drops_cross_policy() {
     let app = test_app.handle();
     let source = seed_direct_codex_provider(&test_app, "Legacy Source");
     let target = seed_direct_codex_provider(&test_app, "Legacy Target");
-    let mode = crate::sort_modes::create_mode(&test_app.db, "Legacy Route")
-        .expect("create legacy route");
+    let mode =
+        crate::sort_modes::create_mode(&test_app.db, "Legacy Route").expect("create legacy route");
     crate::sort_modes::set_mode_providers_order(
         &test_app.db,
         mode.id,
@@ -2364,8 +2355,8 @@ fn config_v4_sort_mode_import_generates_identity_and_drops_cross_policy() {
     for member in &mut bundle.sort_modes[0].providers {
         member.provider_uuid = None;
     }
-    bundle.sort_modes[0].providers[0].cross_provider_model_routing_policy = Some(
-        settings::CrossProviderModelRoutingPolicy {
+    bundle.sort_modes[0].providers[0].cross_provider_model_routing_policy =
+        Some(settings::CrossProviderModelRoutingPolicy {
             enabled: true,
             rules: vec![settings::CrossProviderModelRoutingRule {
                 source_model: "gpt-source".to_string(),
@@ -2374,8 +2365,7 @@ fn config_v4_sort_mode_import_generates_identity_and_drops_cross_policy() {
                 target_model: None,
                 target_reasoning_effort: None,
             }],
-        },
-    );
+        });
 
     config_import(&app, &test_app.db, bundle).expect("import v4 fixture");
     let conn = test_app.db.open_connection().expect("open restored db");

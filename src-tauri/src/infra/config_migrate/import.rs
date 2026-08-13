@@ -460,11 +460,7 @@ INSERT INTO sort_mode_providers(
         imported += 1;
     }
 
-    Ok((
-        imported,
-        sort_mode_id_by_name,
-        sort_mode_id_by_uuid,
-    ))
+    Ok((imported, sort_mode_id_by_name, sort_mode_id_by_uuid))
 }
 
 fn import_sort_mode_active(
@@ -482,11 +478,11 @@ fn import_sort_mode_active(
             sort_mode_id_by_name.get(&mode_reference)
         }
         .copied()
-            .ok_or_else(|| {
-                crate::shared::error::AppError::from(format!(
-                    "DB_NOT_FOUND: active sort mode not found: {mode_reference}"
-                ))
-            })?;
+        .ok_or_else(|| {
+            crate::shared::error::AppError::from(format!(
+                "DB_NOT_FOUND: active sort mode not found: {mode_reference}"
+            ))
+        })?;
         tx.execute(
             r#"
 INSERT INTO sort_mode_active(cli_key, mode_id, updated_at)

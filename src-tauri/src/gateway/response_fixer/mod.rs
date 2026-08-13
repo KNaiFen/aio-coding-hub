@@ -163,10 +163,7 @@ pub(super) fn upsert_configured_model_route(shared: &Arc<Mutex<Vec<Value>>>, set
     }
 }
 
-pub(super) fn upsert_cross_provider_model_route(
-    shared: &Arc<Mutex<Vec<Value>>>,
-    setting: Value,
-) {
+pub(super) fn upsert_cross_provider_model_route(shared: &Arc<Mutex<Vec<Value>>>, setting: Value) {
     if !is_cross_provider_model_route(&setting) {
         push_special_setting(shared, setting);
         return;

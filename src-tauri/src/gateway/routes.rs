@@ -2677,10 +2677,7 @@ INSERT INTO codex_managed_profiles(
             .find(|entry| entry["type"] == "cross_provider_model_route")
             .expect("cross route marker");
         assert_eq!(cross_marker["sourceProviderId"], source_id);
-        assert_eq!(
-            cross_marker["sourceProviderUuid"],
-            source_uuid
-        );
+        assert_eq!(cross_marker["sourceProviderUuid"], source_uuid);
         assert_eq!(cross_marker["targetProviderId"], target_id);
         assert_eq!(cross_marker["targetProviderUuid"], target_uuid);
         assert_eq!(cross_marker["sourceModel"], "grok-source");
@@ -2726,8 +2723,7 @@ INSERT INTO codex_managed_profiles(
         let db = db::init_for_tests(&db_dir.path().join("cross-provider-sse.sqlite"))
             .expect("init test db");
         let (source_url, source_calls, source_task) =
-            spawn_counting_status_upstream(StatusCode::OK, r#"{"id":"source-must-not-run"}"#)
-                .await;
+            spawn_counting_status_upstream(StatusCode::OK, r#"{"id":"source-must-not-run"}"#).await;
         let sse_body = concat!(
             "event: response.output_text.delta\n",
             "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n",
@@ -2933,10 +2929,7 @@ INSERT INTO codex_managed_profiles(
             .find(|entry| entry["type"] == "cross_provider_model_route")
             .expect("cross route marker");
         assert_eq!(cross_marker["sourceProviderId"], source_id);
-        assert_eq!(
-            cross_marker["sourceProviderUuid"],
-            source_uuid
-        );
+        assert_eq!(cross_marker["sourceProviderUuid"], source_uuid);
         assert_eq!(cross_marker["targetProviderId"], target_id);
         assert_eq!(cross_marker["targetProviderUuid"], target_uuid);
         assert_eq!(cross_marker["status"], "failed");
@@ -2985,13 +2978,8 @@ INSERT INTO codex_managed_profiles(
         let source_response = r#"{"id":"source-success","object":"response","model":"grok-ordinary","output":[],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}"#;
         let (source_url, source_captured_rx, source_task) =
             spawn_capturing_json_upstream(source_response).await;
-        let source_id = insert_provider_with_priority(
-            &db,
-            "codex",
-            "Prepare Fallback Source",
-            source_url,
-            0,
-        );
+        let source_id =
+            insert_provider_with_priority(&db, "codex", "Prepare Fallback Source", source_url, 0);
         let bridge_source_id = insert_provider_with_priority(
             &db,
             "codex",

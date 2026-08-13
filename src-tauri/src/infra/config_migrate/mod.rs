@@ -158,8 +158,7 @@ pub struct SortModeProviderExport {
         deserialize_with = "deserialize_optional_cross_policy_fail_open",
         skip_serializing_if = "Option::is_none"
     )]
-    pub cross_provider_model_routing_policy:
-        Option<settings::CrossProviderModelRoutingPolicy>,
+    pub cross_provider_model_routing_policy: Option<settings::CrossProviderModelRoutingPolicy>,
 }
 
 fn deserialize_optional_cross_policy_fail_open<'de, D>(
