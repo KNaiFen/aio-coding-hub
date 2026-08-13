@@ -9,7 +9,7 @@
 - 分支：`feat/cross-provider-model-routing`
 - PR base：`main` @ `875ff441c5ba9f1a7f235ad95dadb945a41bba61`（TUI PR #136 合并后需由 main 更新）
 - 交付候选 head：尚未提交
-- 规划提交：待提交
+- 规划提交：`71392b672ee665b6ee96e13bf3871b2816185873`
 - `ci-gate`：未触发
 - 其他必需检查：待执行 session 开工后由实时 PR scope 决定
 - 交付时间：尚未开始
@@ -19,7 +19,7 @@
 
 - 证据：TUI PR #136 当前 OPEN/CLEAN，head `2b12c68cd99f7bc7c21fb8fa2b5354c9992a229b`；本任务必须等其合并后再更新 `origin/main` base。
 - 最后安全提交：`875ff441c5ba9f1a7f235ad95dadb945a41bba61`（基线，无本任务代码）
-- 工作树状态：规划材料未提交；无产品代码修改
+- 工作树状态：规划 checkpoint 已提交；无产品代码修改
 - 受影响的 AC/范围：AC-10 开工门；产品 AC 暂未开始
 - 需要的决定：main 确认 PR #136 已合并并更新本任务登记
 - 恢复条件：依赖合并、fetch origin、更新 base/规划 SHA、`task.py start` 后交接执行 session
@@ -56,8 +56,9 @@
 
 | 命令 | 结果 | 说明 |
 |---|---|---|
-| `python3 ./.trellis/scripts/task.py validate .trellis/tasks/08-13-cross-provider-model-routing` | 待规划材料提交后运行 | 仅验证 JSONL manifest |
-| `git diff --check` | 待运行 | 规划提交前运行 |
+| `python3 ./.trellis/scripts/task.py validate .trellis/tasks/08-13-cross-provider-model-routing` | 通过 | 12 implement / 11 check entries |
+| `python3 ./.trellis/scripts/task.py validate --all` | 通过 | 133 manifests |
+| `git diff --check` | 通过 | 规划 checkpoint 及后续登记修改均无 whitespace error |
 
 ### GitHub CI 与编译
 
@@ -73,7 +74,7 @@
 ## 测试、文档与合同
 
 - 测试：尚未修改。
-- 现行文档：规划材料引用相关 backend/cross-layer contracts；执行 session 根据实际行为更新合同。
+- 现行文档：规划材料已明确必须同步 configured-routing、failover、bundle v5、provider-share、observer/TUI、settings ownership 合同；执行 session 根据实际代码更新并在 delivery 绑定证据。
 - 类型或机器合同：尚未修改。
 - 迁移或发布说明：尚未修改。
 
@@ -87,8 +88,8 @@
 
 ## 未完成项与阻塞
 
-- TUI PR #136 尚未合并，阻止实现启动。
-- 产品代码、测试、PR、CI、人工验证均未开始。
+- TUI PR #136 尚未合并，阻止实现启动；head `2b12c68cd99f7bc7c21fb8fa2b5354c9992a229b`。
+- 产品代码、测试、功能 PR、CI、人工验证均未开始；规划 checkpoint 已冻结。
 
 ## 建议 main 重点审查
 

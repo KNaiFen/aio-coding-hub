@@ -9,7 +9,7 @@
 - 分支：`feat/cross-provider-model-routing`
 - 基线：`origin/main`
 - 完整 base SHA：`875ff441c5ba9f1a7f235ad95dadb945a41bba61`（若 PR #136 合并后 main 更新基线，必须由 main 改写本文件并提交新规划 SHA）
-- 规划提交：`待 main 提交后回填；未回填前禁止写产品代码`
+- 规划提交：`71392b672ee665b6ee96e13bf3871b2816185873`（本 checkpoint 包含本目录全部规划材料和活动索引；未满足依赖更新门前仍禁止写产品代码）
 - 实施授权：已确认（2026-08-13；用户确认本任务全部 PRD 决定、AC 和单 sibling 端到端交付路线）
 - PR 目标：`main`
 - PR：尚未创建；执行 session 开工后尽早创建 Draft PR

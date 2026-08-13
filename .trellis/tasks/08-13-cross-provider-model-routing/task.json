@@ -15,7 +15,7 @@
   "branch": "feat/cross-provider-model-routing",
   "base_branch": "main",
   "worktree_path": "/Users/knaifen/Documents/Codex/aio-coding-hub/08-13-cross-provider-model-routing",
-  "commit": null,
+  "commit": "71392b672ee665b6ee96e13bf3871b2816185873",
   "pr_url": null,
   "subtasks": [],
   "children": [],
@@ -36,5 +36,5 @@
     "src/pages/providers/ProviderEditorDialog.tsx",
     "src/pages/providers/ProvidersView.tsx"
   ],
-  "notes": "单一 sibling 执行 session。TUI PR #136 合并前不得启动实现；本任务不得修改 src-tauri/crates/aio-tui/src/format.rs。规划材料事实源位于本 worktree 的同名任务目录。"
+  "notes": "单一 sibling 执行 session。规划 checkpoint=71392b672ee665b6ee96e13bf3871b2816185873；TUI PR #136 合并前不得启动实现。依赖合并后由 main fetch origin、更新 base/规划登记，再运行 task.py start 并交接。执行 session 不得修改 src-tauri/crates/aio-tui/src/format.rs。规划材料事实源位于本 worktree 的同名任务目录。"
 }
