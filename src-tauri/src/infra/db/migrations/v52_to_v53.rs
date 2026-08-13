@@ -120,7 +120,9 @@ fn backfill_and_validate_identities(tx: &Transaction<'_>) -> Result<(), String> 
             .map_err(|error| format!("failed to prepare sort-mode identity backfill: {error}"))?;
         let rows = statement
             .query_map([], |row| row.get::<_, i64>(0))
-            .map_err(|error| format!("failed to query sort modes for identity backfill: {error}"))?;
+            .map_err(|error| {
+                format!("failed to query sort modes for identity backfill: {error}")
+            })?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|error| format!("failed to read sort mode for identity backfill: {error}"))?
     };
@@ -185,9 +187,7 @@ ORDER BY identity.mode_id ASC
     Ok(())
 }
 
-pub(super) fn migrate_v52_to_v53(
-    conn: &mut Connection,
-) -> crate::shared::error::AppResult<()> {
+pub(super) fn migrate_v52_to_v53(conn: &mut Connection) -> crate::shared::error::AppResult<()> {
     let foreign_keys_enabled: bool = conn
         .pragma_query_value(None, "foreign_keys", |row| row.get(0))
         .map_err(|error| format!("failed to inspect foreign-key enforcement: {error}"))?;

@@ -107,10 +107,9 @@ fn cross_provider_model_routing_policy_from_json(
     raw: Option<String>,
 ) -> Option<crate::settings::CrossProviderModelRoutingPolicy> {
     let raw = raw?;
-    let mut policy = serde_json::from_str::<crate::settings::CrossProviderModelRoutingPolicy>(
-        raw.trim(),
-    )
-    .ok()?;
+    let mut policy =
+        serde_json::from_str::<crate::settings::CrossProviderModelRoutingPolicy>(raw.trim())
+            .ok()?;
     crate::settings::sanitize_cross_provider_model_routing_policy(&mut policy);
     Some(policy)
 }

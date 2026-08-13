@@ -301,8 +301,9 @@ INSERT INTO sort_modes(
         params![id, crate::shared::uuid::new_uuid_v4()],
     )
     .map_err(|e| db_err!("failed to insert sort-mode identity: {e}"))?;
-    let result = tx.query_row(
-        r#"
+    let result = tx
+        .query_row(
+            r#"
 SELECT
   mode.id AS id,
   identity.mode_uuid AS mode_uuid,
@@ -313,10 +314,10 @@ FROM sort_modes mode
 JOIN sort_mode_identities identity ON identity.mode_id = mode.id
 WHERE mode.id = ?1
 "#,
-        params![id],
-        row_to_mode_summary,
-    )
-    .map_err(|e| db_err!("failed to query inserted sort_mode: {e}"))?;
+            params![id],
+            row_to_mode_summary,
+        )
+        .map_err(|e| db_err!("failed to query inserted sort_mode: {e}"))?;
     tx.commit()
         .map_err(|e| db_err!("failed to commit sort-mode create transaction: {e}"))?;
     Ok(result)
@@ -942,8 +943,9 @@ fn validate_cross_policy_targets(
         return Ok(());
     }
     if target_uuids.contains(source_provider_uuid) {
-        return Err("SEC_INVALID_INPUT: cross-provider target must differ from the source provider"
-            .into());
+        return Err(
+            "SEC_INVALID_INPUT: cross-provider target must differ from the source provider".into(),
+        );
     }
 
     let placeholders = db::sql_placeholders(target_uuids.len());
@@ -1012,7 +1014,12 @@ pub fn provider_model_routing_policy_get(
     if view.provider_uuid != provider_uuid {
         return Err("PROVIDER_ROUTING_IDENTITY_CHANGED: provider identity changed".into());
     }
-    if view.selected_mode.as_ref().map(|mode| mode.mode_uuid.as_str()) != mode_uuid {
+    if view
+        .selected_mode
+        .as_ref()
+        .map(|mode| mode.mode_uuid.as_str())
+        != mode_uuid
+    {
         return Err("SORT_MODE_ROUTING_IDENTITY_CHANGED: sort mode identity changed".into());
     }
     Ok(view)
@@ -1042,7 +1049,9 @@ pub fn provider_model_routing_policy_save(
         || input.mode_id.is_none() && input.cross_policy.is_some()
         || input.mode_id.is_none() && input.expected_cross_policy_revision.is_some()
     {
-        return Err("SEC_INVALID_INPUT: Default cannot persist cross-provider routing policy".into());
+        return Err(
+            "SEC_INVALID_INPUT: Default cannot persist cross-provider routing policy".into(),
+        );
     }
     crate::settings::normalize_model_routing_policy_for_write(&mut input.ordinary_policy)?;
     let ordinary_json = if input.provider_override_enabled {
@@ -1101,7 +1110,9 @@ pub fn provider_model_routing_policy_save(
             )
             .optional()
             .map_err(|e| db_err!("failed to validate sort-mode routing identity: {e}"))?
-            .ok_or_else(|| crate::shared::error::AppError::from("DB_NOT_FOUND: sort_mode not found"))?;
+            .ok_or_else(|| {
+                crate::shared::error::AppError::from("DB_NOT_FOUND: sort_mode not found")
+            })?;
         if actual_mode_uuid != mode_uuid {
             return Err("SORT_MODE_ROUTING_IDENTITY_CHANGED: sort mode identity changed".into());
         }
@@ -1317,13 +1328,15 @@ mod tests {
         target_provider_uuid: &str,
     ) -> crate::settings::CrossProviderModelRoutingPolicy {
         let mut policy = cross_policy(target_provider_uuid);
-        policy.rules.push(crate::settings::CrossProviderModelRoutingRule {
-            source_model: "second-source-model".to_string(),
-            source_reasoning_effort: Some("high".to_string()),
-            target_provider_uuid: target_provider_uuid.to_string(),
-            target_model: Some("target-model".to_string()),
-            target_reasoning_effort: Some("medium".to_string()),
-        });
+        policy
+            .rules
+            .push(crate::settings::CrossProviderModelRoutingRule {
+                source_model: "second-source-model".to_string(),
+                source_reasoning_effort: Some("high".to_string()),
+                target_provider_uuid: target_provider_uuid.to_string(),
+                target_model: Some("target-model".to_string()),
+                target_reasoning_effort: Some("medium".to_string()),
+            });
         policy
     }
 
@@ -1537,7 +1550,10 @@ END;
 
         let after = routing_view(&db, &source, &mode);
         assert!(!after.provider_override_enabled);
-        assert_eq!(after.ordinary_policy, crate::settings::ModelRoutingPolicy::default());
+        assert_eq!(
+            after.ordinary_policy,
+            crate::settings::ModelRoutingPolicy::default()
+        );
         assert_eq!(after.cross_policy, None);
     }
 
@@ -1689,18 +1705,13 @@ END;
         assert!(!disabled_saved.source_member_enabled);
         assert_eq!(disabled_saved.cross_policy, saved.cross_policy);
 
-        let default = provider_model_routing_policy_get(
-            &db,
-            source.id,
-            &source.provider_uuid,
-            None,
-            None,
-        )
-        .expect("read Default routing view");
+        let default =
+            provider_model_routing_policy_get(&db, source.id, &source.provider_uuid, None, None)
+                .expect("read Default routing view");
         let mut default_input = save_input(&default, ordinary_policy("default-ordinary"), None);
         default_input.provider_override_enabled = false;
         let default_saved = provider_model_routing_policy_save(&db, default_input)
-        .expect("save Default ordinary policy");
+            .expect("save Default ordinary policy");
         assert!(!default_saved.provider_override_enabled);
         assert!(default_saved.selected_mode.is_none());
         assert_eq!(default_saved.cross_policy, None);
@@ -1723,8 +1734,7 @@ END;
         let db = db::init_for_tests(&db_path).expect("init db");
         let source = insert_provider(&db, "Source");
         let mode = create_mode(&db, "Mode").expect("create mode");
-        set_mode_providers_order(&db, mode.id, "claude", vec![source.id])
-            .expect("set mode member");
+        set_mode_providers_order(&db, mode.id, "claude", vec![source.id]).expect("set mode member");
         let conn = db.open_connection().expect("open db");
         conn.execute(
             "UPDATE sort_mode_providers SET cross_provider_model_routing_policy_json = '{bad-json' WHERE mode_id = ?1 AND provider_id = ?2",

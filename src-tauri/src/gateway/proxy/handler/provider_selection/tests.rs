@@ -77,10 +77,7 @@ fn insert_sort_mode_with_providers(db: &crate::db::Db, provider_ids: &[i64]) -> 
     let mode_id = conn.last_insert_rowid();
     conn.execute(
         "INSERT INTO sort_mode_identities(mode_id, mode_uuid) VALUES (?1, ?2)",
-        rusqlite::params![
-            mode_id,
-            format!("00000000-0000-4000-8000-{mode_id:012}")
-        ],
+        rusqlite::params![mode_id, format!("00000000-0000-4000-8000-{mode_id:012}")],
     )
     .expect("insert mode identity");
     for (idx, provider_id) in provider_ids.iter().enumerate() {

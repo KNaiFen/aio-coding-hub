@@ -32,6 +32,8 @@ pub use persistence::{
     request_log_retention_days_fail_open, set_settings_finalize_failpoint_for_tests,
     set_settings_finalize_restore_failpoint_for_tests, update, write,
 };
+#[cfg(test)]
+pub(crate) use types::CrossProviderModelRoutingRule;
 pub use types::{
     AppSettings, CodexHomeMode, CrossProviderModelRoutingPolicy, GatewayListenMode,
     HomeUsagePeriod, ModelRoutingPolicy, ModelRoutingRule, UpstreamErrorMessageBehavior,
@@ -39,5 +41,3 @@ pub use types::{
     UpstreamHttpRetryRule, UpstreamRetryPolicy, UpstreamStreamInternalErrorPolicy,
     UpstreamTransportRetryKind, WslHostAddressMode, WslTargetCli,
 };
-#[cfg(test)]
-pub(crate) use types::CrossProviderModelRoutingRule;

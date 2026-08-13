@@ -27,6 +27,8 @@ pub use queries::{
     get_api_key_plaintext, list_by_cli, names_by_id, reorder, upsert,
 };
 
+#[cfg(test)]
+pub(crate) use queries::list_enabled_for_gateway_in_mode;
 pub(crate) use queries::{
     active_sort_mode_id_for_gateway, clear_oauth, cli_key_by_id,
     get_account_usage_credential_context, get_account_usage_fetch_context, get_by_id,
@@ -40,8 +42,6 @@ pub(crate) use queries::{
     resolve_effective_transport_credential_with_probe_runtime, set_enabled, set_oauth_last_error,
     update_oauth_tokens, update_oauth_tokens_if_last_refreshed_matches,
 };
-#[cfg(test)]
-pub(crate) use queries::list_enabled_for_gateway_in_mode;
 
 pub(crate) use share::{
     export_provider_share_v2, import_provider_share, parse_provider_share, preview_provider_share,

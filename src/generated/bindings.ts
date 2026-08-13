@@ -1369,6 +1369,55 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async providerModelRoutingPolicyGet(
+    providerId: number,
+    providerUuid: string,
+    modeId: number | null,
+    modeUuid: string | null
+  ): Promise<Result<ProviderModelRoutingPolicyView, string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("provider_model_routing_policy_get", {
+          providerId,
+          providerUuid,
+          modeId,
+          modeUuid,
+        }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async providerModelRoutingPolicySave(
+    input: ProviderModelRoutingPolicySaveInput
+  ): Promise<Result<ProviderModelRoutingPolicyView, string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("provider_model_routing_policy_save", { input }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async routingProviderCandidatesList(
+    modeId: number,
+    modeUuid: string,
+    cliKey: string
+  ): Promise<Result<RoutingProviderCandidate[], string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("routing_provider_candidates_list", { modeId, modeUuid, cliKey }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async modelPricesList(cliKey: string): Promise<Result<ModelPriceSummary[], string>> {
     try {
       return { status: "ok", data: await TAURI_INVOKE("model_prices_list", { cliKey }) };
@@ -3106,6 +3155,21 @@ export type ConfigImportResult = {
   installed_skills_imported: number;
   local_skills_imported: number;
 };
+export type CrossProviderModelRoutingPolicy = {
+  enabled: boolean;
+  rules: CrossProviderModelRoutingRule[];
+};
+/**
+ * A named sort-mode member owns cross-provider rules independently of the
+ * provider's ordinary whole-policy override.
+ */
+export type CrossProviderModelRoutingRule = {
+  source_model: string;
+  source_reasoning_effort: string | null;
+  target_provider_uuid: string;
+  target_model: string | null;
+  target_reasoning_effort: string | null;
+};
 export type DailyResetMode = "fixed" | "rolling";
 export type DbCompactResult = { before_bytes: number; after_bytes: number };
 export type DbDiskUsage = {
@@ -4165,6 +4229,30 @@ export type ProviderModelReasoningEffort =
   | "xhigh"
   | "max"
   | "ultra";
+export type ProviderModelRoutingPolicySaveInput = {
+  providerId: number;
+  providerUuid: string;
+  modeId: number | null;
+  modeUuid: string | null;
+  providerOverrideEnabled: boolean;
+  ordinaryPolicy: ModelRoutingPolicy;
+  expectedOrdinaryPolicyRevision: string;
+  crossPolicy: CrossProviderModelRoutingPolicy | null;
+  expectedCrossPolicyRevision: string | null;
+};
+export type ProviderModelRoutingPolicyView = {
+  provider_id: number;
+  provider_uuid: string;
+  cli_key: string;
+  provider_override_enabled: boolean;
+  ordinary_policy: ModelRoutingPolicy;
+  ordinary_policy_revision: string;
+  selected_mode: SortModeRoutingContext | null;
+  cross_policy: CrossProviderModelRoutingPolicy | null;
+  cross_policy_revision: string | null;
+  source_member_enabled: boolean;
+  source_member_present: boolean;
+};
 export type ProviderModelSource = "discovered" | "manual";
 export type ProviderOAuthDeviceCodeCancelResult = { cancelled: boolean };
 export type ProviderOAuthDeviceCodePollInput = { flowId: string };
@@ -4467,6 +4555,16 @@ export type RequestLogSummary = {
   created_at: number;
 };
 export type RiskyIpcConfirm = { confirm: IpcConfirm };
+export type RoutingProviderCandidate = {
+  provider_id: number;
+  provider_uuid: string;
+  cli_key: string;
+  name: string;
+  enabled: boolean;
+  source_provider_id: number | null;
+  bridge_type: string | null;
+  model_catalog_supported: boolean;
+};
 export type SensitiveStringUpdate =
   | { mode: "preserve" }
   | { mode: "clear" }
@@ -4649,10 +4747,19 @@ export type SkillsPaths = { ssot_dir: string; repos_dir: string; cli_dir: string
 export type SortModeActiveRow = { cli_key: string; mode_id: number | null; updated_at: number };
 export type SortModeProviderRow = {
   provider_id: number;
+  provider_uuid: string;
   enabled: boolean;
   session_reuse_priority: number;
+  cross_policy: CrossProviderModelRoutingPolicy | null;
 };
-export type SortModeSummary = { id: number; name: string; created_at: number; updated_at: number };
+export type SortModeRoutingContext = { mode_id: number; mode_uuid: string; name: string };
+export type SortModeSummary = {
+  id: number;
+  mode_uuid: string;
+  name: string;
+  created_at: number;
+  updated_at: number;
+};
 export type StreamInternalErrorEvidence = {
   event_type: string;
   error_type: string | null;
