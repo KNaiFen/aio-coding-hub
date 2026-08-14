@@ -1,10 +1,10 @@
 # 交付报告：跨供应商模型路由
 
-> 本文件记录执行 session 已完成的产品实现、Round 1 基线返工和 Round 2 F-002～F-005 返工结果。main 验收与收尾区仍由 main 填写；任何新 push 都会使旧 head 的 CI 证据不再代表最新 PR head。
+> 本文件记录执行 session 已完成的产品实现、Round 1 基线返工、Round 2 F-002～F-005 和 Round 3 F-006 返工结果。main 验收与收尾区仍由 main 填写；任何新 push 都会使旧 head 的 CI 证据不再代表最新 PR head。
 
 ## 交付状态
 
-- 结果：Round 2 的 `F-002`～`F-005` 已完成；产品候选 `30b43ebdabb865bf36d54336bd8f4f4ea1746a92` 的 frontend、Rust、docs/support、CodeQL、`pr-title` 和 `ci-gate` 全部通过。提交本交付记录后将等待新 head 的自动检查，再把 PR 标记 Ready for review。
+- 结果：Round 3 的 `F-006` 已完成；产品候选 `abd79c7484a51be2bee80787092db847a1466f47` 的 frontend、Rust、docs/support、CodeQL、`pr-title` 和 `ci-gate` 全部通过。提交本交付记录后将等待新 head 的自动检查，再把 PR 标记 Ready for review。
 - PR：[KNaiFen/aio-coding-hub#137](https://github.com/KNaiFen/aio-coding-hub/pull/137)（Draft，等待本交付记录 head 的自动检查）
 - 分支：`feat/cross-provider-model-routing`
 - 初始派生 base：`main` @ `875ff441c5ba9f1a7f235ad95dadb945a41bba61`；同步时实时 PR base：`main` @ `bd2535796fdf847008b7b55789572367d3e615e9`
@@ -15,6 +15,10 @@
 - `ci-gate`：通过，[run 31764918629](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31764918629) / [job 94662402408](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31764918629/job/94662402408)，绑定 Round 2 产品候选 head。
 - 其他检查：change-scope、frontend、Rust、docs-contract、support-contract、pr-title、JS/Rust CodeQL 全部通过；手动 dispatch guard 和候选构建按范围跳过。
 - Round 2 产品候选验证终态：2026-08-14。
+- Round 3 产品候选 head：`abd79c7484a51be2bee80787092db847a1466f47`；base：`bd2535796fdf847008b7b55789572367d3e615e9`。
+- Round 3 `ci-gate`：通过，[run 31769486773](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31769486773) / [job 94675950139](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31769486773/job/94675950139)，绑定 Round 3 产品候选 head。
+- Round 3 其他检查：change-scope、frontend、Rust、docs-contract、support-contract、pr-title、JS/Rust CodeQL 全部通过；手动 dispatch guard 和候选构建按范围跳过。
+- Round 3 产品候选验证终态：2026-08-14。
 - 执行 session：提交并推送本记录后等待最新完整 head 的自动必需检查；全绿后标记 Ready for review 并停止写入。
 
 ## Round 1 返工快照
@@ -33,6 +37,13 @@
 - F-005：v52 -> v53 在同一 transaction 内持久化清洗 provider ordinary JSON；非法 source/target effort、cross-only/未知规则整条删除，malformed/non-text JSON 写为 disabled/empty。迁移 projection 只记录计数和最多 16 个 provider ID，更新失败会回滚 identity、member column、policy 与 `user_version`。
 - 本轮提交：`9621934d`（Rust runtime/写边界/迁移）、`547ae870`（frontend cache/form revision）和 `30b43ebd`（仅应用 CI artifact 证明为本任务造成的 rustfmt 排版）；最终 Rust format/generate 无 drift。
 
+## Round 3 返工快照
+
+- preflight 确认登记路径、分支、`task.json.status=in_progress`、规划提交与唯一写者均符合；工作树干净，本地、远端分支和 PR head 同为 `177ebae034abd0d0bf687c0cef22a596af9a54c7`。
+- F-006：cross draft 使用独立的 adopted revision，并通过统一 helper 同步 policy、baseline 和 revision。dirty 同 scope refetch 同时保留旧 draft、旧 baseline 和旧 revision；clean refetch 原子采纳服务端新三元组。
+- 保存成功和放弃草稿会采纳最新三元组，scope 切换采纳新 scope 三元组，编辑器关闭会清空三者和 revision ref。保存只使用 adopted revision，因此并发 writer 会触发 `PROVIDER_ROUTING_CONCURRENT_UPDATE`，不会被旧 draft 覆盖。
+- `ProviderRoutingEditor.test.tsx` 新增 dirty refetch + CAS conflict、clean refetch 和 scope 切换回归；云端 frontend unit tests 与 build 均通过。本轮产品提交：`abd79c74`。
+
 ## 实现摘要
 
 ### 用户可见结果
@@ -41,6 +52,7 @@
 - 推理请求可按固定优先级匹配来源模型/标准 effort，并最多一次从当前候选 A 临时跳转到同 CLI、当前命名方案中的启用成员 B；B 失败后恢复原始 A -> C 基线。
 - 请求日志/Home/Observer 使用最终成功供应商、模型和费用，并保留有界 cross marker 与 attempts；没有修改 TUI formatter、TTFB 或“切/重”文案。
 - 关闭 provider override 时已保存的跨供应商配置仍可在编辑器中恢复，但运行时不会创建 `CrossTemporary`、cross marker 或 B attempt；再次开启后同一命名方案规则恢复。
+- 跨供应商草稿遇到同 scope 后台刷新时不会借用新 revision 覆盖并发更新；冲突会保留当前草稿并显示保存失败，用户可放弃草稿后采纳服务端新值。
 
 ### 内部实现
 
@@ -49,6 +61,7 @@
 - failover 使用完整 `ProviderForGateway` 快照构造 `CrossTemporary` work item，复用既有 gate、凭据、bridge、retry、circuit 和 Ready 上限；B 禁止 session binding 且不链式匹配。
 - bundle v5 保留方案/provider UUID 与成员策略；v1-v4 兼容导入，provider share 剥离 cross policy，duplicate 仅复制普通策略且不复制方案成员。
 - ordinary policy 是 provider 级共享状态：跨 mode cache 只同步 ordinary 字段与 owner revision，cross policy/revision 继续按 mode 独立。普通写入边界不再静默吞掉跨供应商字段，v53 升级会把历史非法 ordinary JSON 持久化为安全表示。
+- cross editor 把 draft、adopted baseline 和 adopted revision 作为同一 scope 的独立状态；dirty refetch 不更新三者，clean refetch、保存成功、放弃和 scope 切换统一采纳三者，关闭时统一清空。
 
 ## 验收标准对应
 
@@ -56,14 +69,14 @@
 |---|---|---|
 | AC-01 数据模型与向后兼容 | 实现完成，Rust 验证通过 | `settings/types.rs` 保留未识别字段供写边界拒绝；`settings_service.rs`、`domain/sort_modes.rs`、`providers/share.rs` 覆盖 global/provider/share 拒绝与历史 fail-open；Rust job 通过 |
 | AC-02 方案持久化 | 实现完成，Rust 验证通过 | `v52_to_v53.rs`、baseline v25、迁移测试覆盖 UUID 回填/不可变/级联、持久化 effort 清洗、有界 projection、幂等与更新失败回滚 |
-| AC-03 编辑器与候选 | 实现及云端前端验证通过 | `ModelRoutingPolicyFields.tsx`、provider form/query；`ProviderRoutingEditor.test.tsx` 与 `sortModes.test.tsx` 覆盖 Default/非成员/失效目标/dirty draft/目录建议、跨 mode ordinary revision 与延迟旧请求 |
+| AC-03 编辑器与候选 | 实现及云端前端验证通过 | `ModelRoutingPolicyFields.tsx`、provider form/query；`ProviderRoutingEditor.test.tsx` 与 `sortModes.test.tsx` 覆盖 Default/非成员/失效目标/dirty draft/目录建议、跨 mode ordinary revision、延迟旧请求，以及 cross dirty/clean refetch、CAS conflict 和 scope 切换 |
 | AC-04 强度提取与匹配 | Rust 与前端验证通过 | `model_inference.rs` 覆盖五入口与预算排除，`configured_model_route.rs` 覆盖精确/通配/大小写及 Gemini 写入 |
 | AC-05 运行时跳转 | Rust 验证通过 | `failover_loop/mod.rs` 与 `gateway/routes.rs` 覆盖 B 非流/SSE 成功、B 失败 A 基线恢复、bridge prepare 失败恢复、processed 去重及 override 开 -> 关 -> 开的 A/B/A 路由恢复 |
 | AC-06 资格与安全边界 | Rust 验证通过 | effective mode snapshot、inference-only gate、managed alias/非推理排除、bounded marker/candidate DTO 测试 |
 | AC-07 会话与审计 | Rust 验证通过 | attempt 级 `session_binding_allowed=false`；request-end/stream finalize、cost/Observer/Home marker 投影测试通过 |
 | AC-08 导入/分享/复制 | Rust 与前端服务验证通过 | config v5/v1-v4 导入测试、share/duplicate 测试；Rust suite 通过单连接池 duplicate 路径，frontend unit tests 通过 |
-| AC-09 测试与合同 | 通过 | Round 2 产品候选的 frontend unit tests/build、Rust tests/Clippy/audit/generated drift、现行合同和 docs/support contract 全部通过 |
-| AC-10 交付门 | 产品候选通过，等待记录 head 复验 | 产品实现、返工、推送与 delivery 已完成；`30b43ebd...` 的必需 CI 全绿，本记录提交后的最新 head 仍需自动复验后标记 Ready |
+| AC-09 测试与合同 | 通过 | Round 3 产品候选的 frontend unit tests/build、Rust tests/Clippy/audit/generated drift、现行合同和 docs/support contract 全部通过 |
+| AC-10 交付门 | 产品候选通过，等待记录 head 复验 | 产品实现、三轮返工、推送与 delivery 已完成；`abd79c7484a51be2bee80787092db847a1466f47` 的必需 CI 全绿，本记录提交后的最新 head 仍需自动复验后标记 Ready |
 
 ## 主要代码位置
 
@@ -74,7 +87,7 @@
 | `gateway/proxy/handler/failover_loop/mod.rs` | `CrossTemporary` 一次性 B work item | 复用原 failover 基线与公共资格/重试状态机，不创建第二套路由器 |
 | `gateway/routes.rs` | effective mode/member snapshot 和端到端回归 | 请求开始时冻结完整目标快照，避免运行中重读 active 指针 |
 | `domain/providers/queries.rs` | override-gated effective cross policy | 不清空成员配置，但关闭 ordinary override 时不让 runtime 获取 cross policy |
-| `query/sortModes.ts`、`useProviderEditorForm.ts` | cache request 取消、ordinary 广播、revision-aware draft 同步 | 避免 mode B 旧响应回滚 provider 级普通策略，同时保护用户 dirty draft |
+| `query/sortModes.ts`、`useProviderEditorForm.ts` | cache request 取消、ordinary 广播、ordinary/cross revision-aware draft 同步 | 避免 mode B 旧响应回滚 provider 级普通策略，并把 cross dirty draft 固定到 adopted baseline/revision |
 | `settings/types.rs`、`settings/migration.rs`、`app/settings_service.rs` | ordinary rule 未知字段写拒绝与读取 sanitizer | 保持 global/provider/share 范围隔离，又不让历史坏数据阻断启动 |
 | `ModelRoutingPolicyFields.tsx`、`useProviderEditorForm.ts` | 普通/跨规则 UI 与草稿状态 | 在既有供应商编辑器内实现锁定交互，不扩展全局规则 |
 | `infra/config_migrate/*`、`domain/providers/share.rs`、`app/provider_service.rs` | bundle v5、share/duplicate 边界 | 保持旧 bundle 兼容且不把方案成员隐式带入单供应商操作 |
@@ -88,6 +101,7 @@
 - 两轮云端 rustfmt artifact 均先核对文件范围后原样应用；最终 head 的 generated-file drift 检查通过。
 - Round 1 仅用普通 merge 同步 `origin/main` 并更新交付记录；来自 main 的 workspace/lockfile、任务归档和历史记录原样保留，没有修改跨供应商产品语义。
 - Round 2 首个产品 CI head `547ae870...` 只在 cloud rustfmt 检查失败；artifact 明确仅包含本轮 Rust 格式变更，原样应用为 `30b43ebd...`。最终候选的 format/generate 和 generated-file drift 均通过，没有修改 binding、依赖或 allowlist。
+- Round 3 只修改 provider editor form 与对应前端测试；没有改变 F-002～F-005、锁定产品决定、依赖、TUI formatter 或审计 allowlist。
 
 ## 验证结果
 
@@ -98,7 +112,7 @@
 | `node scripts/check-cloud-only-verification.mjs` | 通过 | 仓库云端验证合同通过 |
 | `node scripts/check-cloud-only-verification.selftest.mjs` | 通过 | 全部断言通过 |
 | `python3 ./.trellis/scripts/task.py validate .trellis/tasks/08-13-cross-provider-model-routing` | 通过 | 12 implement / 11 check entries |
-| `git diff --check origin/main...HEAD` | 通过 | Round 2 候选无 whitespace error |
+| `git diff --check origin/main...HEAD` | 通过 | Round 3 产品候选无 whitespace error |
 | `git diff --name-only origin/main...HEAD` | 通过 | 已审查 PR 文件范围；当前 PR diff 不含 `src-tauri/crates/aio-tui/src/format.rs`、依赖版本或审计 allowlist |
 | `node --check <修改的 .mjs>` | 不适用 | 本任务未修改 `.mjs` 文件 |
 
@@ -108,12 +122,12 @@
 
 | Workflow / Job | 结果 | 链接或说明 |
 |---|---|---|
-| `change-scope` | 通过 | [job 94658662246](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31764918629/job/94658662246)，选择 frontend、Rust 与合同检查 |
-| `rust` | 通过 | [job 94658733240](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31764918629/job/94658733240)：格式/绑定无 drift、Clippy、Rust tests、cargo audit 通过 |
-| `frontend` | 通过 | [job 94658733252](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31764918629/job/94658733252)：dependency audit、lint、typecheck、unit tests、build 与 plugin SDK contracts 通过 |
-| `docs-contract` / `support-contract` | 通过 | jobs [94658688314](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31764918629/job/94658688314) / [94658688320](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31764918629/job/94658688320) |
-| `pr-title` / CodeQL | 通过 | [pr-title job 94658662070](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31764918602/job/94658662070)；[CodeQL run 31764918603](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31764918603) 的 JS/TS 与 Rust jobs 通过 |
-| `ci-gate` | 通过 | [job 94662402408](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31764918629/job/94662402408)，绑定 `30b43ebdabb865bf36d54336bd8f4f4ea1746a92` |
+| `change-scope` | 通过 | [job 94672866899](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31769486773/job/94672866899)，选择 frontend、Rust 与合同检查 |
+| `rust` | 通过 | [job 94672930081](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31769486773/job/94672930081)：格式/绑定无 drift、Clippy、Rust tests、cargo audit 通过 |
+| `frontend` | 通过 | [job 94672930047](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31769486773/job/94672930047)：dependency audit、lint、typecheck、unit tests、build 与 plugin SDK contracts 通过 |
+| `docs-contract` / `support-contract` | 通过 | jobs [94672889290](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31769486773/job/94672889290) / [94672889221](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31769486773/job/94672889221) |
+| `pr-title` / CodeQL | 通过 | [pr-title job 94672271723](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31769486784/job/94672271723)；[CodeQL run 31769486775](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31769486775) 的 JS/TS 与 Rust jobs 通过 |
+| `ci-gate` | 通过 | [job 94675950139](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31769486773/job/94675950139)，绑定 `abd79c7484a51be2bee80787092db847a1466f47` |
 
 ### 人工验证
 
@@ -136,7 +150,7 @@
 
 ## 未完成项与剩余风险
 
-- 产品、Round 1 基线和 Round 2 findings 阻塞已解除。delivery 记录提交会生成新的 PR head；执行 session 将等待该 head 的自动检查终态，并在最终报告中提供完整 SHA/链接，不再修改本文件造成自引用循环。
+- 产品、Round 1 基线、Round 2 和 Round 3 findings 阻塞已解除。delivery 记录提交会生成新的 PR head；执行 session 将等待该 head 的自动检查终态，并在最终报告中提供完整 SHA/链接，不再修改本文件造成自引用循环。
 - 未进行桌面 UI/真实上游人工验收，交由 main 在固定候选上完成。
 
 ## 建议 main 重点审查
@@ -146,6 +160,7 @@
 - `config_migrate`：v5 UUID 映射、旧 schema 导入、share/duplicate 不携带 mode-scoped policy。
 - `request_end`/stream finalize：B 终端错误 marker、最终 provider/model/cost 和 session binding 在 SSE/非流路径是否一致。
 - Round 2：关闭 override 的 source 是否只走 baseline 且成员 JSON/revision 保留；ordinary cache/revision 广播是否不触及 mode-local cross policy；v53 清洗与严格写边界是否只影响本任务声明的 ordinary policy 语义。
+- Round 3：dirty 同 scope refetch 是否完整保留旧 draft/baseline/revision，clean refetch、保存、放弃、scope 切换和关闭是否同步采纳或清空三者，以及 CAS conflict 是否保持服务端新值不被覆盖。
 
 ## main 验收记录
 
