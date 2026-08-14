@@ -5,18 +5,24 @@
 
 ## 交付状态
 
-- 结果：实现与现行合同已完成，等待最新 head 的自动 CI。
+- 结果：实现与现行合同已完成；最新功能候选的任务内检查通过，但 Rust job
+  被范围外 Grok SSE route test 的单次 `502 != 200` 阻塞。该失败无法归因到
+  本任务且没有可靠的任务内修法，execution session 已按停止条件暂停写入。
 - PR：[#147](https://github.com/KNaiFen/aio-coding-hub/pull/147)（Draft）
 - 分支：`fix/tui-duration-cli-listen`
 - PR base：`main` @ `1b218897c09894cfb5aff796761eb8004ad6e53f`
 - 功能实现候选 head：`e4e457beea239ee89cb5e2dacafbe38eeab74408`
-- 最近验证记录 head：尚无；本轮 spec/delivery 提交推送后等待其自动检查。
+- 冻结失败候选 head：`125fba0ec5a47c1ecd12c9f32ac80426d627d5bd`
 - 规划提交：`5419ccf64ba73387f999133389ab3d347e63270c`
-- `ci-gate`：等待最新 head 自动检查。
-- 其他必需检查：等待 `pr-title` 与 full-scope frontend/Rust jobs。
+- `ci-gate`：[失败](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31798457041/job/94765660089)；
+  聚合失败来自 Rust job。
+- 其他必需检查：`pr-title`、frontend、change-scope、docs/support contracts 与
+  Rust/JavaScript CodeQL 通过；
+  [Rust job](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31798457041/job/94760734452)
+  因范围外 Grok SSE route test 失败。
 - 手工桌面验证：未执行。
-- 执行 session：当前唯一写者为独立 execution session；完成允许的本地验证、
-  推送记录并等待最新 head 检查后停止写入。
+- 执行 session：独立 execution session 仍是登记的唯一写者，但已停止写入并
+  等待 main 判断失败归属与恢复条件。
 
 ## 实际实现
 
@@ -34,14 +40,14 @@
 
 | 标准 | 当前结果 | 证据 |
 |---|---|---|
-| AC-01 TUI state metric | 实现完成，待 Rust CI | `dfb02db8`；邻近测试覆盖 Active/Terminal/混合字段/缺失 TTFB/输出速率。 |
-| AC-02 No lifecycle self-deadlock | 实现完成，待 Rust CI | `078f2b70`；timeout 行为测试覆盖 localhost 与 LAN 双向切换的持锁分支。 |
-| AC-03 Immediate token presentation | 实现完成，待 frontend CI | `e4e457be`；LAN 成功回调与 page-level dialog 测试。 |
-| AC-04 State rollback | 实现完成，待 frontend CI | `NetworkSettingsCard` tests 覆盖 pending、canonical success、`null`、error 与 LAN -> localhost。 |
-| AC-05 Single reveal owner | 实现完成，待 frontend CI | `CliManagerPage` test 覆盖单次 in-flight reveal、tab 卸载、copy、close、rotate、ack。 |
-| AC-06 Security and compatibility | 实现与审查完成，待 CI | 未改 public IPC、bindings、schema、鉴权、token 算法或持久化；明文只进入短生命周期 controller state。 |
-| AC-07 Contracts and regression tests | 实现完成，待 spec/frontend/Rust CI | 新增 gateway contract，更新 observer contract/index；测试位于相邻模块。 |
-| AC-08 Verification | 本地通过，云端进行中 | 五项允许的本地检查通过；最新 head 自动检查尚待终态。 |
+| AC-01 TUI state metric | 实现完成；任务测试未列为失败 | `dfb02db8`；邻近测试覆盖 Active/Terminal/混合字段/缺失 TTFB/输出速率；Rust job 的唯一失败位于未修改的 `gateway/routes.rs`。 |
+| AC-02 No lifecycle self-deadlock | 实现完成；任务测试未列为失败 | `078f2b70`；timeout 行为测试覆盖 localhost 与 LAN 双向切换的持锁分支；Rust job 的唯一失败位于未修改的 `gateway/routes.rs`。 |
+| AC-03 Immediate token presentation | 通过 frontend CI | `e4e457be`；LAN 成功回调与 page-level dialog 测试。 |
+| AC-04 State rollback | 通过 frontend CI | `NetworkSettingsCard` tests 覆盖 pending、canonical success、`null`、error 与 LAN -> localhost。 |
+| AC-05 Single reveal owner | 通过 frontend CI | `CliManagerPage` test 覆盖单次 in-flight reveal、tab 卸载、copy、close、rotate、ack。 |
+| AC-06 Security and compatibility | 实现与审查完成；相关检查通过 | 未改 public IPC、bindings、schema、鉴权、token 算法或持久化；明文只进入短生命周期 controller state。 |
+| AC-07 Contracts and regression tests | 合同与 frontend 通过；Rust job 被范围外测试阻塞 | 新增 gateway contract，更新 observer contract/index；任务测试位于相邻模块，唯一失败为既有 Grok SSE route test。 |
+| AC-08 Verification | 阻塞 | 五项允许的本地检查通过；`125fba0e` 的 frontend、合同、title、CodeQL 通过，但 Rust/`ci-gate` 未绿。 |
 
 ## 验证
 
@@ -57,10 +63,21 @@
 
 ### GitHub CI 与编译
 
-最新 records head 推送后等待自动 `ci-gate`、`pr-title` 及 full-scope
-frontend/Rust jobs。按仓库合同不在本 worktree 运行 package-manager、Vitest、
-Cargo、rustfmt、Clippy、构建、生成、dev server、Tauri、签名或打包；这些由
-GitHub Actions 验证。
+- 冻结 head：`125fba0ec5a47c1ecd12c9f32ac80426d627d5bd`
+- 自动 run：[ci #31798457041](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31798457041)
+- 通过：change-scope、docs-contract、support-contract、frontend（lint、unit
+  tests、build）、Rust 格式/绑定漂移、Clippy、`pr-title`、Rust/JavaScript
+  CodeQL。
+- 失败：Rust tests 共 `2899 passed, 1 failed, 5 ignored`；唯一失败为
+  `gateway::routes::tests::mock_runtime_router_grok_responses_sse_is_transparent_and_logged`
+  在 `src-tauri/src/gateway/routes.rs:2146` 得到 `502`、预期 `200`。因此
+  `ci-gate` 同步失败。
+- PR diff 不含 `src-tauri/src/gateway/routes.rs`；该测试在 base 已存在，请求链
+  不经过本任务修改的 settings lifecycle 路径。CI 断言在读取错误响应体前终止，
+  没有足够证据安全修改任务内代码或范围外 route test。
+
+按仓库合同未在本 worktree 运行 package-manager、Vitest、Cargo、rustfmt、
+Clippy、构建、生成、dev server、Tauri、签名或打包，也未手动 dispatch 额外 CI。
 
 ## 偏移、风险与回滚
 
@@ -74,7 +91,17 @@ GitHub Actions 验证。
 
 ## 阻塞快照
 
-无。
+- 失败证据绑定 head：`125fba0ec5a47c1ecd12c9f32ac80426d627d5bd`；base
+  仍为 `1b218897c09894cfb5aff796761eb8004ad6e53f`，PR head 未漂移。
+- 最后安全功能提交：`125fba0ec5a47c1ecd12c9f32ac80426d627d5bd`；本阻塞
+  记录写入前，工作树干净且与 `origin/fix/tui-duration-cli-listen` 同步。
+- 受影响 AC：仅 AC-08 无法满足“必需 CI 全绿”；AC-01/02 的任务测试没有在
+  Rust job 中失败，但不能用整体失败的 job 宣称完整云端验证通过。
+- 决定归属：main。execution session 不修改范围外 `gateway/routes.rs`，不削弱
+  测试，也不把缺少响应体证据的 502 猜测为 settings lifecycle 回归。
+- 恢复条件：main 提供可归因到本任务的失败证据和范围内修法，或确认该失败按
+  仓库流程作为既有/基础设施不稳定处理并明确恢复执行。恢复前不再写入、推送、
+  标记 Ready、merge、auto-merge、archive 或清理 worktree。
 
 ## main 验收记录
 
