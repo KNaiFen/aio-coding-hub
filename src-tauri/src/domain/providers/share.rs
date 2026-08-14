@@ -1940,6 +1940,55 @@ mod tests {
     }
 
     #[test]
+    fn provider_share_v2_contains_only_ordinary_routing_policy() {
+        let mut share = minimal_share();
+        share.provider.configuration.model_routing_policy_override =
+            Some(crate::settings::ModelRoutingPolicy {
+                enabled: true,
+                rules: vec![crate::settings::ModelRoutingRule {
+                    source_model: "source-model".to_string(),
+                    source_reasoning_effort: Some("high".to_string()),
+                    target_model: Some("target-model".to_string()),
+                    reasoning_effort: Some("medium".to_string()),
+                    unrecognized_fields: Default::default(),
+                }],
+            });
+
+        let bytes = serialize_provider_share_v2(&share).expect("serialize provider share");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("provider share JSON");
+        let configuration = value["provider"]["configuration"]
+            .as_object()
+            .expect("configuration object");
+        assert!(configuration.contains_key("model_routing_policy_override"));
+        assert!(!configuration.contains_key("cross_provider_model_routing_policy"));
+        assert!(!configuration.contains_key("mode_uuid"));
+        assert!(!configuration.contains_key("sort_mode"));
+        assert!(!String::from_utf8(bytes)
+            .expect("provider share UTF-8")
+            .contains("target_provider_uuid"));
+    }
+
+    #[test]
+    fn provider_share_v2_rejects_cross_fields_inside_ordinary_rules() {
+        let bytes = serialize_provider_share_v2(&minimal_share()).expect("serialize fixture");
+        let mut value: serde_json::Value = serde_json::from_slice(&bytes).expect("fixture JSON");
+        value["provider"]["configuration"]["model_routing_policy_override"] = serde_json::json!({
+            "enabled": true,
+            "rules": [{
+                "source_model": "source-model",
+                "target_model": "ordinary-target",
+                "target_provider_uuid": "11111111-1111-4111-8111-111111111111",
+                "target_reasoning_effort": "high"
+            }]
+        });
+
+        let error = parse_provider_share(value.to_string().as_bytes())
+            .err()
+            .expect("share ordinary policy must reject cross-only fields");
+        assert!(error.to_string().contains("SEC_INVALID_INPUT"));
+    }
+
+    #[test]
     fn provider_share_import_disables_custom_account_usage_configuration() {
         let mut share = minimal_share();
         share.provider.extensions.push(ProviderShareExtensionV1 {

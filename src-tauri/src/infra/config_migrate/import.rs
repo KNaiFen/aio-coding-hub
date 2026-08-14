@@ -46,6 +46,7 @@ pub(super) fn import_into_transaction(
     local_skills: &[LocalSkillExport],
     legacy_skill_state: Option<&LegacySkillState>,
     use_provider_uuid_links: bool,
+    use_sort_mode_uuid_links: bool,
 ) -> AppResult<ImportedConfig> {
     let mut provider_id_by_cli_and_name: HashMap<(String, String), i64> = HashMap::new();
     let mut provider_id_by_source_id: HashMap<i64, i64> = HashMap::new();
@@ -303,9 +304,22 @@ INSERT INTO providers(
         .map_err(|e| db_err!("failed to update provider source_provider_id: {e}"))?;
     }
 
-    let (sort_modes_imported, sort_mode_id_by_name) =
-        import_sort_modes(tx, now, sort_modes, &provider_id_by_cli_and_name)?;
-    import_sort_mode_active(tx, now, sort_mode_active, &sort_mode_id_by_name)?;
+    let (sort_modes_imported, sort_mode_id_by_name, sort_mode_id_by_uuid) = import_sort_modes(
+        tx,
+        now,
+        sort_modes,
+        &provider_id_by_cli_and_name,
+        &provider_id_by_uuid,
+        use_sort_mode_uuid_links,
+    )?;
+    import_sort_mode_active(
+        tx,
+        now,
+        sort_mode_active,
+        &sort_mode_id_by_name,
+        &sort_mode_id_by_uuid,
+        use_sort_mode_uuid_links,
+    )?;
     let (workspaces_imported, prompts_imported, workspace_id_by_cli_and_name) =
         import_workspaces(tx, now, workspaces)?;
     let mcp_servers_imported =
@@ -338,16 +352,27 @@ INSERT INTO providers(
     })
 }
 
+type ImportedSortModes = (u32, HashMap<String, i64>, HashMap<String, i64>);
+
 fn import_sort_modes(
     tx: &Connection,
     now: i64,
     sort_modes: Vec<SortModeExport>,
     provider_id_by_cli_and_name: &HashMap<(String, String), i64>,
-) -> AppResult<(u32, HashMap<String, i64>)> {
+    provider_id_by_uuid: &HashMap<String, i64>,
+    use_sort_mode_uuid_links: bool,
+) -> AppResult<ImportedSortModes> {
     let mut imported = 0_u32;
     let mut sort_mode_id_by_name = HashMap::new();
+    let mut sort_mode_id_by_uuid = HashMap::new();
 
     for sort_mode in sort_modes {
+        let mode_uuid = sort_mode.mode_uuid.ok_or_else(|| {
+            crate::shared::error::AppError::new(
+                "SEC_INVALID_INPUT",
+                "mode_uuid is missing after config import preflight",
+            )
+        })?;
         tx.execute(
             r#"
 INSERT INTO sort_modes(name, created_at, updated_at)
@@ -365,6 +390,12 @@ VALUES (?1, ?2, ?2)
             )
             .map_err(|e| db_err!("failed to read inserted sort_mode name: {e}"))?;
         sort_mode_id_by_name.insert(mode_name, mode_id);
+        tx.execute(
+            "INSERT INTO sort_mode_identities(mode_id, mode_uuid) VALUES (?1, ?2)",
+            params![mode_id, mode_uuid],
+        )
+        .map_err(|e| db_err!("failed to insert sort_mode identity: {e}"))?;
+        sort_mode_id_by_uuid.insert(mode_uuid, mode_id);
 
         for provider in sort_mode.providers {
             if !(0..=crate::providers::MAX_SESSION_REUSE_PRIORITY)
@@ -376,15 +407,29 @@ VALUES (?1, ?2, ?2)
                 )
                 .into());
             }
-            let provider_id = provider_id_by_cli_and_name
-                .get(&(provider.cli_key.clone(), provider.provider_cli_key.clone()))
-                .copied()
-                .ok_or_else(|| {
-                    crate::shared::error::AppError::from(format!(
-                        "DB_NOT_FOUND: provider not found for sort mode: cli_key={}, provider={}",
-                        provider.cli_key, provider.provider_cli_key
-                    ))
-                })?;
+            let provider_id = if use_sort_mode_uuid_links {
+                provider
+                    .provider_uuid
+                    .as_ref()
+                    .and_then(|provider_uuid| provider_id_by_uuid.get(provider_uuid))
+                    .copied()
+            } else {
+                provider_id_by_cli_and_name
+                    .get(&(provider.cli_key.clone(), provider.provider_cli_key.clone()))
+                    .copied()
+            }
+            .ok_or_else(|| {
+                crate::shared::error::AppError::from(format!(
+                    "DB_NOT_FOUND: provider not found for sort mode: cli_key={}, provider={}",
+                    provider.cli_key, provider.provider_cli_key
+                ))
+            })?;
+            let cross_policy_json = provider
+                .cross_provider_model_routing_policy
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()
+                .map_err(|e| format!("SYSTEM_ERROR: failed to serialize cross policy: {e}"))?;
 
             tx.execute(
                 r#"
@@ -395,9 +440,10 @@ INSERT INTO sort_mode_providers(
   sort_order,
   enabled,
   session_reuse_priority,
+  cross_provider_model_routing_policy_json,
   created_at,
   updated_at
-) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
 "#,
                 params![
                     mode_id,
@@ -406,6 +452,7 @@ INSERT INTO sort_mode_providers(
                     provider.sort_order,
                     bool_to_int(provider.enabled),
                     provider.session_reuse_priority,
+                    cross_policy_json,
                     now,
                 ],
             )
@@ -415,7 +462,7 @@ INSERT INTO sort_mode_providers(
         imported += 1;
     }
 
-    Ok((imported, sort_mode_id_by_name))
+    Ok((imported, sort_mode_id_by_name, sort_mode_id_by_uuid))
 }
 
 fn import_sort_mode_active(
@@ -423,16 +470,21 @@ fn import_sort_mode_active(
     now: i64,
     sort_mode_active: HashMap<String, String>,
     sort_mode_id_by_name: &HashMap<String, i64>,
+    sort_mode_id_by_uuid: &HashMap<String, i64>,
+    use_sort_mode_uuid_links: bool,
 ) -> AppResult<()> {
-    for (cli_key, mode_name) in sort_mode_active {
-        let mode_id = sort_mode_id_by_name
-            .get(&mode_name)
-            .copied()
-            .ok_or_else(|| {
-                crate::shared::error::AppError::from(format!(
-                    "DB_NOT_FOUND: active sort mode not found: {mode_name}"
-                ))
-            })?;
+    for (cli_key, mode_reference) in sort_mode_active {
+        let mode_id = if use_sort_mode_uuid_links {
+            sort_mode_id_by_uuid.get(&mode_reference)
+        } else {
+            sort_mode_id_by_name.get(&mode_reference)
+        }
+        .copied()
+        .ok_or_else(|| {
+            crate::shared::error::AppError::from(format!(
+                "DB_NOT_FOUND: active sort mode not found: {mode_reference}"
+            ))
+        })?;
         tx.execute(
             r#"
 INSERT INTO sort_mode_active(cli_key, mode_id, updated_at)

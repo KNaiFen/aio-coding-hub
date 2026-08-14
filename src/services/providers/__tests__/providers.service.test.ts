@@ -378,7 +378,14 @@ describe("services/providers/providers", () => {
   it("marks model routing override as specified only when the caller submits it", async () => {
     const override = {
       enabled: true,
-      rules: [{ source_model: "fable5", target_model: "opus4.8", reasoning_effort: "low" }],
+      rules: [
+        {
+          source_model: "fable5",
+          source_reasoning_effort: null,
+          target_model: "opus4.8",
+          reasoning_effort: "low",
+        },
+      ],
     };
     vi.mocked(commands.providerUpsert).mockResolvedValue({
       status: "ok",

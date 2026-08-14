@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { ChevronDown } from "lucide-react";
 import type {
   CliKey,
@@ -9,6 +10,7 @@ import { Button } from "../../ui/Button";
 import { Dialog } from "../../ui/Dialog";
 import { FormField } from "../../ui/FormField";
 import { Input } from "../../ui/Input";
+import { Select } from "../../ui/Select";
 import { Switch } from "../../ui/Switch";
 import { TabList } from "../../ui/TabList";
 import type { ProviderEditorInitialValues } from "./providerDuplicate";
@@ -21,7 +23,10 @@ import { ProviderAccountUsageSection } from "./ProviderAccountUsageSection";
 import { LimitsSection } from "./LimitsSection";
 import { ClaudeModelSection } from "./ClaudeModelSection";
 import { RetryPolicyFields } from "../../components/gateway/RetryPolicyFields";
-import { ModelRoutingPolicyFields } from "../../components/gateway/ModelRoutingPolicyFields";
+import {
+  CrossProviderModelRoutingPolicyFields,
+  ModelRoutingPolicyFields,
+} from "../../components/gateway/ModelRoutingPolicyFields";
 import { cn } from "../../utils/cn";
 import { ContributionSlot } from "../../plugins/contributions/ContributionSlot";
 
@@ -34,6 +39,12 @@ type ProviderEditorDialogBaseProps = {
   bridgeSourceProviders?: ProviderSummary[];
 };
 
+export type ProviderEditorRouteMode = {
+  modeId: number;
+  modeUuid: string;
+  name: string;
+};
+
 export type ProviderEditorDialogProps =
   | (ProviderEditorDialogBaseProps & {
       mode: "create";
@@ -43,12 +54,16 @@ export type ProviderEditorDialogProps =
   | (ProviderEditorDialogBaseProps & {
       mode: "edit";
       provider: ProviderSummary;
+      routeMode?: ProviderEditorRouteMode | null;
+      routeModes?: ProviderEditorRouteMode[];
+      onRouteModeChange?: (modeId: number | null) => void;
     });
 
 export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
   const f = useProviderEditorForm(props);
   const saveBlocked =
     f.saving ||
+    (f.routingEditorEnabled && (f.routingPolicyLoading || f.routingPolicyError != null)) ||
     f.accountUsageCustomTestInFlight ||
     (f.accountUsageAdapterKind === "custom" && Boolean(f.accountUsageCustomAllowedOriginsError));
 
@@ -249,14 +264,173 @@ function ProviderModelRoutingPolicySection({
       </div>
       {enabled ? (
         <div className="space-y-4 border-t border-border px-4 py-4">
-          <ModelRoutingPolicyFields
-            policy={policy}
-            disabled={form.saving}
-            onChange={updatePolicy}
-          />
+          <div className="space-y-5">
+            <div>
+              <div className="text-sm font-medium text-foreground">普通规则</div>
+              <div className="mt-0.5 text-xs text-muted-foreground">
+                仅改写当前供应商的模型或思考强度，不绑定调用方案。
+              </div>
+              {form.mode === "edit" ? (
+                <div className="mt-2 text-xs text-muted-foreground">
+                  目标供应商：本供应商（{form.editProviderName}）
+                </div>
+              ) : null}
+            </div>
+            <ModelRoutingPolicyFields
+              policy={policy}
+              disabled={form.saving || form.routingPolicyLoading}
+              onChange={updatePolicy}
+            />
+            {form.routingEditorEnabled ? (
+              <ProviderCrossRoutingPolicySection form={form} />
+            ) : null}
+          </div>
         </div>
       ) : null}
     </div>
+  );
+}
+
+function ProviderCrossRoutingPolicySection({
+  form,
+}: {
+  form: ReturnType<typeof useProviderEditorForm>;
+}) {
+  const [pendingModeId, setPendingModeId] = useState<number | null | undefined>(undefined);
+  const routeMode = form.routeMode;
+  const disabled =
+    form.saving ||
+    form.routingPolicyLoading ||
+    form.routingCandidatesLoading ||
+    form.routingCandidatesError != null ||
+    routeMode == null ||
+    !form.routingPolicyView?.source_member_present ||
+    !form.routingPolicyView?.source_member_enabled;
+  const disabledMessage =
+    routeMode == null
+      ? "Default 不支持跨供应商目标，请选择命名调用方案。"
+      : form.routingPolicyLoading
+        ? "正在加载当前方案的跨供应商规则…"
+        : form.routingPolicyError
+          ? "无法读取当前方案的跨供应商规则，请稍后重试。"
+          : !form.routingPolicyView?.source_member_present
+            ? "当前供应商不在该方案中；普通规则仍可编辑，请先加入方案。"
+            : !form.routingPolicyView?.source_member_enabled
+              ? "当前供应商在该方案中已禁用；普通规则仍可编辑，请先启用成员。"
+              : null;
+
+  const requestRouteModeChange = (modeId: number | null) => {
+    if (modeId === routeMode?.modeId || (modeId == null && routeMode == null)) return;
+    if (!form.crossRoutingDirty) {
+      form.onRouteModeChange(modeId);
+      return;
+    }
+    setPendingModeId(modeId);
+  };
+
+  const saveThenSwitch = async () => {
+    if (pendingModeId === undefined) return;
+    const saved = await form.saveRoutingPolicies();
+    if (!saved) return;
+    form.onRouteModeChange(pendingModeId);
+    setPendingModeId(undefined);
+  };
+
+  const discardThenSwitch = () => {
+    if (pendingModeId === undefined) return;
+    form.discardCrossRoutingDraft();
+    form.onRouteModeChange(pendingModeId);
+    setPendingModeId(undefined);
+  };
+
+  return (
+    <>
+      <div className="border-t border-border pt-5">
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <div className="text-sm font-medium text-foreground">方案跨供应商规则</div>
+            <div className="mt-0.5 text-xs text-muted-foreground">
+              仅绑定命名调用方案；目标候选限于该方案中同 CLI 的启用成员。
+            </div>
+          </div>
+          <label className="block space-y-1.5 text-xs font-medium text-muted-foreground">
+            当前方案
+            <Select
+              value={routeMode ? String(routeMode.modeId) : ""}
+              aria-label="跨供应商模型路由方案"
+              disabled={form.saving}
+              onChange={(event) =>
+                requestRouteModeChange(
+                  event.currentTarget.value ? Number(event.currentTarget.value) : null
+                )
+              }
+            >
+              <option value="">Default</option>
+              {form.routeModes.map((mode) => (
+                <option key={mode.modeUuid} value={mode.modeId}>
+                  {mode.name}
+                </option>
+              ))}
+            </Select>
+          </label>
+        </div>
+
+        {disabledMessage ? (
+          <div className="border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+            {disabledMessage}
+          </div>
+        ) : form.crossRoutingPolicy ? (
+          <div className="space-y-3">
+            {form.routingCandidatesLoading ? (
+              <div className="border border-dashed border-border px-3 py-3 text-sm text-muted-foreground">
+                正在加载目标供应商候选；已保存规则暂时只读。
+              </div>
+            ) : null}
+            {form.routingCandidatesError ? (
+              <div className="border border-dashed border-border px-3 py-3 text-sm text-amber-700 dark:text-amber-300">
+                无法读取目标供应商候选；已保存规则仍可见，但当前目标暂不可验证。
+              </div>
+            ) : null}
+            <CrossProviderModelRoutingPolicyFields
+              policy={form.crossRoutingPolicy}
+              candidates={form.routingCandidates}
+              candidateValidationAvailable={
+                !form.routingCandidatesLoading && form.routingCandidatesError == null
+              }
+              sourceProviderUuid={form.editProviderUuid}
+              disabled={disabled}
+              onChange={form.setCrossRoutingPolicy}
+            />
+          </div>
+        ) : null}
+      </div>
+
+      <Dialog
+        open={pendingModeId !== undefined}
+        onOpenChange={(open) => {
+          if (!open) setPendingModeId(undefined);
+        }}
+        title="保存跨供应商规则草稿？"
+        description="切换调用方案前，请保存当前草稿、放弃当前草稿，或取消本次切换。普通规则不会被放弃。"
+        className="max-w-lg"
+      >
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button
+            onClick={() => setPendingModeId(undefined)}
+            variant="secondary"
+            disabled={form.saving}
+          >
+            取消
+          </Button>
+          <Button onClick={discardThenSwitch} variant="secondary" disabled={form.saving}>
+            放弃草稿
+          </Button>
+          <Button onClick={() => void saveThenSwitch()} variant="primary" disabled={form.saving}>
+            保存并切换
+          </Button>
+        </div>
+      </Dialog>
+    </>
   );
 }
 

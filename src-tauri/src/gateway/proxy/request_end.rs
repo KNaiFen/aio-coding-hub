@@ -835,6 +835,12 @@ impl RequestLogEnqueueArgs {
         let excluded_from_stats = excluded_from_stats
             || super::is_claude_count_tokens_request(cli_key, path)
             || status_override::is_client_abort(error_code);
+        let special_settings_json =
+            crate::gateway::configured_model_route::finalize_cross_provider_route_json(
+                special_settings_json,
+                status,
+                error_code,
+            );
 
         build_request_end_payload(RequestEndPayloadParts {
             trace_id: trace_id.to_string(),
@@ -892,6 +898,13 @@ impl RequestLogEnqueueArgs {
         created_at: i64,
         usage: Option<crate::usage::UsageExtract>,
     ) -> (Self, Vec<FailoverAttempt>) {
+        let status = status_override::effective_status(Some(status), error_code);
+        let special_settings_json =
+            crate::gateway::configured_model_route::finalize_cross_provider_route_json(
+                special_settings_json,
+                status,
+                error_code,
+            );
         build_request_end_payload(RequestEndPayloadParts {
             trace_id,
             cli_key,
@@ -902,7 +915,7 @@ impl RequestLogEnqueueArgs {
             excluded_from_stats: excluded_from_stats
                 || status_override::is_client_abort(error_code),
             special_settings_json,
-            status: status_override::effective_status(Some(status), error_code),
+            status,
             error_code,
             duration_ms,
             ttfb_ms,
@@ -1314,6 +1327,75 @@ mod tests {
         assert_eq!(log_args.attempts_json, expected_attempts_json);
         assert_eq!(cloned_attempts.len(), 1);
         assert_eq!(cloned_attempts[0].provider_id, 7);
+    }
+
+    #[test]
+    fn terminal_request_end_parts_finalize_matched_cross_route_as_failed() {
+        let marker = json!([{
+            "type": "cross_provider_model_route",
+            "status": "matched",
+            "reason": null,
+            "singleHop": true,
+        }])
+        .to_string();
+        let (proxy_log, _) = RequestLogEnqueueArgs::from_proxy_request_end_parts(
+            "trace-cross-proxy",
+            "codex",
+            None,
+            "POST",
+            "/v1/responses",
+            None,
+            false,
+            Some(marker.clone()),
+            Some(502),
+            Some(GatewayErrorCode::Upstream5xx.as_str()),
+            10,
+            None,
+            None,
+            &[],
+            Some("gpt-source".to_string()),
+            100,
+            200,
+            None,
+            None,
+        );
+        let (stream_log, _) = RequestLogEnqueueArgs::from_stream_request_end_parts(
+            "trace-cross-stream".to_string(),
+            "codex".to_string(),
+            None,
+            "POST".to_string(),
+            "/v1/responses".to_string(),
+            None,
+            false,
+            Some(marker),
+            200,
+            Some(GatewayErrorCode::StreamError.as_str()),
+            20,
+            Some(5),
+            Some(5),
+            None,
+            0,
+            vec![],
+            "[]".to_string(),
+            Some("gpt-source".to_string()),
+            100,
+            None,
+            None,
+            200,
+            None,
+        );
+
+        for log in [proxy_log, stream_log] {
+            assert_eq!(log.status, Some(502));
+            let settings: Value = serde_json::from_str(
+                log.special_settings_json
+                    .as_deref()
+                    .expect("cross route settings"),
+            )
+            .expect("cross route settings JSON");
+            assert_eq!(settings[0]["status"], "failed");
+            assert_eq!(settings[0]["reason"], "target_terminal_error");
+        }
     }
 
     #[test]

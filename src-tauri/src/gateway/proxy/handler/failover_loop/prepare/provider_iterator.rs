@@ -20,6 +20,7 @@ pub(super) struct PreparedProvider {
     pub(super) provider_index: u32,
     pub(super) provider_bridged: bool,
     pub(super) session_reuse: Option<bool>,
+    pub(super) session_binding_allowed: bool,
     pub(super) effective_credential: String,
     pub(super) provider_base_max_attempts: u32,
     pub(super) provider_max_attempts: u32,
@@ -48,6 +49,16 @@ pub(super) struct PreparedProvider {
     pub(super) stream_idle_timeout_seconds: Option<u32>,
     pub(super) upstream_retry_policy: crate::settings::UpstreamRetryPolicy,
     pub(super) claude_model_mapping: Option<ClaudeModelMapping>,
+}
+
+pub(super) struct RouteExecutionOverride {
+    pub(super) route: crate::gateway::configured_model_route::ConfiguredModelRoute,
+    pub(super) session_binding_allowed: bool,
+}
+
+pub(super) struct ProviderPreparationOptions {
+    pub(super) anthropic_stream_requested: bool,
+    pub(super) route_override: Option<RouteExecutionOverride>,
 }
 
 /// Counters accumulated across all providers in the iteration loop.
@@ -99,8 +110,12 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
     counters: &mut IterationCounters,
     attempts: &mut Vec<FailoverAttempt>,
     failed_provider_ids: &HashSet<i64>,
-    anthropic_stream_requested: bool,
+    options: ProviderPreparationOptions,
 ) -> PreparationOutcome {
+    let ProviderPreparationOptions {
+        anthropic_stream_requested,
+        route_override,
+    } = options;
     let provider_id = provider.id;
     let provider_name_base = if provider.name.trim().is_empty() {
         format!("Provider #{} (auto-fixed)", provider.id)
@@ -353,22 +368,42 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
     }
     counters.providers_tried = counters.providers_tried.saturating_add(1);
     let provider_index = counters.providers_tried as u32;
-    let session_reuse = match input.session_bound_provider_id {
-        Some(id) => (id == provider_id && provider_index == 1).then_some(true),
-        None => None,
-    };
+    let session_binding_allowed = route_override
+        .as_ref()
+        .map(|route_override| route_override.session_binding_allowed)
+        .unwrap_or(true);
+    let session_reuse = session_binding_allowed
+        .then(|| match input.session_bound_provider_id {
+            Some(id) => (id == provider_id && provider_index == 1).then_some(true),
+            None => None,
+        })
+        .flatten();
     crate::gateway::response_fixer::clear_configured_model_route(&input.special_settings);
-    let configured_model_route = crate::gateway::configured_model_route::resolve(
-        &input.cli_key,
-        &input.method_hint,
-        &input.forwarded_path,
-        input.requested_model.as_deref(),
-        input.managed_model_route.is_some(),
-        &input.model_routing_policy,
-        provider.model_routing_policy_override.as_ref(),
-        provider_id,
-        &provider_name_base,
-    );
+    let source_reasoning_effort = input.special_settings.lock().ok().and_then(|settings| {
+        settings.iter().rev().find_map(|setting| {
+            (setting.get("type").and_then(serde_json::Value::as_str)
+                == Some("request_reasoning_effort"))
+            .then(|| setting.get("effort").and_then(serde_json::Value::as_str))
+            .flatten()
+            .map(str::to_string)
+        })
+    });
+    let configured_model_route = route_override
+        .map(|route_override| route_override.route)
+        .or_else(|| {
+            crate::gateway::configured_model_route::resolve(
+                &input.cli_key,
+                &input.method_hint,
+                &input.forwarded_path,
+                input.requested_model.as_deref(),
+                source_reasoning_effort.as_deref(),
+                input.managed_model_route.is_some(),
+                &input.model_routing_policy,
+                provider.model_routing_policy_override.as_ref(),
+                provider_id,
+                &provider_name_base,
+            )
+        });
     if let Some(route) = configured_model_route.as_ref() {
         crate::gateway::configured_model_route::mark_pending(&input.special_settings, route);
     }
@@ -386,6 +421,7 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
         provider_index,
         provider_bridged,
         session_reuse,
+        session_binding_allowed,
         provider_max_attempts,
         stream_idle_timeout_seconds: provider.stream_idle_timeout_seconds,
         upstream_retry_policy: &upstream_retry_policy,
@@ -443,6 +479,7 @@ pub(super) async fn prepare_provider<R: tauri::Runtime>(
         provider_index,
         provider_bridged,
         session_reuse,
+        session_binding_allowed,
         effective_credential,
         provider_base_max_attempts,
         provider_max_attempts,

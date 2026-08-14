@@ -67,7 +67,7 @@ pub(super) fn finalize_circuit_and_session<R: tauri::Runtime>(
         let _ = provider_router::record_success_and_emit_transition(
             provider_router::RecordCircuitArgs::from_stream_ctx(ctx, now_unix),
         );
-        if ctx.enable_session_reuse && !ctx.managed_model_route {
+        if ctx.session_binding_allowed && ctx.enable_session_reuse && !ctx.managed_model_route {
             if let Some(session_id) = ctx.session_id.as_deref() {
                 ctx.session.bind_success(
                     &ctx.cli_key,
@@ -135,6 +135,7 @@ mod tests {
             route_generation,
             session_id: Some("sess-stream-finalize".to_string()),
             enable_session_reuse: true,
+            session_binding_allowed: true,
             sort_mode_id: None,
             trace_id: "trace-stream-finalize".to_string(),
             cli_key: "codex".to_string(),
@@ -295,6 +296,28 @@ mod tests {
                 "enable_session_reuse={enabled}"
             );
         }
+    }
+
+    #[test]
+    fn stream_success_does_not_bind_when_attempt_disallows_binding() {
+        let app = tauri::test::mock_app();
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("stream-binding-guard.sqlite"))
+            .expect("init db");
+        let (log_tx, _log_rx) = tokio::sync::mpsc::channel(4);
+        let mut ctx = test_stream_finalize_ctx(app.handle().clone(), db, log_tx);
+        ctx.session_binding_allowed = false;
+
+        assert_eq!(finalize_circuit_and_session(&ctx, None), None);
+        assert_eq!(
+            ctx.session.get_bound_provider(
+                &ctx.cli_key,
+                ctx.session_id.as_deref().expect("session id"),
+                ctx.route_generation,
+                crate::gateway::util::now_unix_seconds() as i64,
+            ),
+            None
+        );
     }
 
     #[test]

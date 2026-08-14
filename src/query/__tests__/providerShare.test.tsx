@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { providerShareImportConfirm } from "../../services/providers/providerShare";
 import type { ProviderSummary } from "../../services/providers/providers";
 import { createTestQueryClient, createQueryWrapper } from "../../test/utils/reactQuery";
-import { providersKeys } from "../keys";
+import { providersKeys, sortModesKeys } from "../keys";
 import { useProviderShareImportMutation } from "../providerShare";
 
 vi.mock("../../services/providers/providerShare", () => ({
@@ -82,6 +82,12 @@ describe("query/providerShare", () => {
     ]);
     expect(client.getQueryData(providersKeys.list("codex"))).toEqual(existingCodex);
     expect(invalidate).toHaveBeenCalledWith({ queryKey: providersKeys.list("claude") });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: sortModesKeys.routingCandidatesForCli("claude"),
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: sortModesKeys.routingPolicies("claude"),
+    });
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: providersKeys.list("codex") });
   });
 });

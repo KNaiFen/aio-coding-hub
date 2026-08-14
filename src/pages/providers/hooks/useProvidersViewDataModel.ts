@@ -599,9 +599,20 @@ export function useProvidersViewDataModel(activeCli: CliKey, availabilityHours =
   const defaultRouteRows = defaultRouteQuery.data ?? EMPTY_ROUTE_ROWS;
   const activeModeForQuery =
     routeDraftSelection.kind === "mode" ? routeDraftSelection.modeId : null;
+  const activeModeUuidForQuery =
+    selectedSortMode?.id === activeModeForQuery ? selectedSortMode.mode_uuid : null;
   const modeProvidersQuery = useSortModeProvidersListQuery(
-    { modeId: activeModeForQuery, cliKey: activeCli },
-    { enabled: routeDraftSelection.kind === "mode" && activeModeForQuery != null }
+    {
+      modeId: activeModeUuidForQuery == null ? null : activeModeForQuery,
+      modeUuid: activeModeUuidForQuery,
+      cliKey: activeCli,
+    },
+    {
+      enabled:
+        routeDraftSelection.kind === "mode" &&
+        activeModeForQuery != null &&
+        activeModeUuidForQuery != null,
+    }
   );
   const modeProviderRows = modeProvidersQuery.data ?? EMPTY_MODE_PROVIDERS;
   const effectiveModeProvidersResetKey = modeProvidersResetKey(
@@ -1064,8 +1075,11 @@ export function useProvidersViewDataModel(activeCli: CliKey, availabilityHours =
         });
         toast("Default 调用顺序已更新");
       } else {
+        const mode = sortModes.find((candidate) => candidate.id === selection.modeId);
+        if (!mode) return;
         const saved = await sortModeProvidersSetOrderMutation.mutateAsync({
           modeId: selection.modeId,
+          modeUuid: mode.mode_uuid,
           cliKey,
           orderedProviderIds: nextRows.map((row) => row.provider_id),
         });
@@ -1098,6 +1112,8 @@ export function useProvidersViewDataModel(activeCli: CliKey, availabilityHours =
 
     const provider = providersRef.current.find((row) => row.id === providerId);
     if (!provider?.enabled) return;
+    const mode = sortModes.find((candidate) => candidate.id === selection.modeId);
+    if (!mode) return;
 
     const previousRows = modeProvidersRef.current;
     const currentRow = previousRows.find((row) => row.provider_id === providerId);
@@ -1114,6 +1130,7 @@ export function useProvidersViewDataModel(activeCli: CliKey, availabilityHours =
     try {
       const saved = await sortModeProviderSetEnabledMutation.mutateAsync({
         modeId: selection.modeId,
+        modeUuid: mode.mode_uuid,
         cliKey,
         providerId,
         enabled,
@@ -1186,6 +1203,8 @@ export function useProvidersViewDataModel(activeCli: CliKey, availabilityHours =
           sessionReusePriority,
         });
       } else {
+        const mode = sortModes.find((candidate) => candidate.id === selection.modeId);
+        if (!mode) return;
         const previousRows = modeProvidersRef.current;
         const currentRow = previousRows.find((row) => row.provider_id === providerId);
         if (!currentRow || currentRow.session_reuse_priority === sessionReusePriority) return;
@@ -1201,6 +1220,7 @@ export function useProvidersViewDataModel(activeCli: CliKey, availabilityHours =
         try {
           const saved = await sortModeProviderSetSessionReusePriorityMutation.mutateAsync({
             modeId: selection.modeId,
+            modeUuid: mode.mode_uuid,
             cliKey,
             providerId,
             sessionReusePriority,
@@ -1315,7 +1335,10 @@ export function useProvidersViewDataModel(activeCli: CliKey, availabilityHours =
     if (!deleteModeTarget || deleteModeDeleting) return;
     setDeleteModeDeleting(true);
     try {
-      await sortModeDeleteMutation.mutateAsync({ modeId: deleteModeTarget.id });
+      await sortModeDeleteMutation.mutateAsync({
+        modeId: deleteModeTarget.id,
+        modeUuid: deleteModeTarget.mode_uuid,
+      });
       if (
         routeDraftSelectionRef.current.kind === "mode" &&
         routeDraftSelectionRef.current.modeId === deleteModeTarget.id

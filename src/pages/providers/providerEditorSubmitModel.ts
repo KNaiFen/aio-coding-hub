@@ -225,9 +225,13 @@ export function buildProviderEditorUpsertInput(
     upstreamRetryPolicyOverride: ctx.upstreamRetryPolicyOverrideEnabled
       ? ctx.upstreamRetryPolicyDraft
       : null,
-    modelRoutingPolicyOverride: ctx.modelRoutingPolicyOverrideEnabled
-      ? normalizeModelRoutingPolicy(ctx.modelRoutingPolicyDraft)
-      : null,
+    ...(ctx.mode === "create" || !ctx.modelRoutingPolicyManagedSeparately
+      ? {
+          modelRoutingPolicyOverride: ctx.modelRoutingPolicyOverrideEnabled
+            ? normalizeModelRoutingPolicy(ctx.modelRoutingPolicyDraft)
+            : null,
+        }
+      : {}),
     ...(ctx.cliKey === "claude" ? { claudeModels: ctx.claudeModels } : {}),
     ...(ctx.cliKey === "codex" && ctx.authMode === "cx2cc"
       ? { modelMapping: normalizeProviderModelMapping(ctx.modelMapping) }

@@ -26,6 +26,7 @@ const SPECIAL_SETTINGS_JSON_MAX_BYTES: usize = 64 * 1024;
 const CX2CC_COST_BASIS_TYPE: &str = "cx2cc_cost_basis";
 const AIO_MANAGED_MODEL_ROUTE_TYPE: &str = "aio_managed_model_route";
 const CONFIGURED_MODEL_ROUTE_TYPE: &str = "configured_model_route";
+const CROSS_PROVIDER_MODEL_ROUTE_TYPE: &str = "cross_provider_model_route";
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ResponseFixerConfig {
@@ -162,6 +163,23 @@ pub(super) fn upsert_configured_model_route(shared: &Arc<Mutex<Vec<Value>>>, set
     }
 }
 
+pub(super) fn upsert_cross_provider_model_route(shared: &Arc<Mutex<Vec<Value>>>, setting: Value) {
+    if !is_cross_provider_model_route(&setting) {
+        push_special_setting(shared, setting);
+        return;
+    }
+
+    let setting = bound_special_setting(setting);
+    let mut guard = shared.lock_or_recover();
+    guard.retain(|value| !is_cross_provider_model_route(value));
+    guard.insert(0, setting);
+
+    if guard.len() > SPECIAL_SETTINGS_MAX_ENTRIES {
+        guard.truncate(SPECIAL_SETTINGS_MAX_ENTRIES);
+        mark_special_settings_truncated(&mut guard);
+    }
+}
+
 pub(super) fn clear_configured_model_route(shared: &Arc<Mutex<Vec<Value>>>) {
     let mut guard = shared.lock_or_recover();
     guard.retain(|value| !is_configured_model_route(value));
@@ -197,6 +215,10 @@ fn is_aio_managed_model_route(value: &Value) -> bool {
 
 fn is_configured_model_route(value: &Value) -> bool {
     value.get("type").and_then(Value::as_str) == Some(CONFIGURED_MODEL_ROUTE_TYPE)
+}
+
+fn is_cross_provider_model_route(value: &Value) -> bool {
+    value.get("type").and_then(Value::as_str) == Some(CROSS_PROVIDER_MODEL_ROUTE_TYPE)
 }
 
 fn push_special_setting_locked(settings: &mut Vec<Value>, setting: Value) {

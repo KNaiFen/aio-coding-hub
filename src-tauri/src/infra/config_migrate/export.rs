@@ -222,18 +222,31 @@ WHERE provider_id = ?1 AND plugin_id = ?2 AND namespace = ?3
 
 pub(super) fn export_sort_modes(conn: &Connection) -> AppResult<Vec<SortModeExport>> {
     let mut stmt = conn
-        .prepare_cached("SELECT id, name FROM sort_modes ORDER BY id ASC")
+        .prepare_cached(
+            r#"
+SELECT mode.id, identity.mode_uuid, mode.name
+FROM sort_modes mode
+JOIN sort_mode_identities identity ON identity.mode_id = mode.id
+ORDER BY mode.id ASC
+"#,
+        )
         .map_err(|e| db_err!("failed to prepare sort_modes export query: {e}"))?;
     let rows = stmt
         .query_map([], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
         })
         .map_err(|e| db_err!("failed to query sort_modes for export: {e}"))?;
 
     let mut modes = Vec::new();
     for row in rows {
-        let (mode_id, name) = row.map_err(|e| db_err!("failed to read sort_mode row: {e}"))?;
+        let (mode_id, mode_uuid, name) =
+            row.map_err(|e| db_err!("failed to read sort_mode row: {e}"))?;
         modes.push(SortModeExport {
+            mode_uuid: Some(mode_uuid),
             name,
             is_default: false,
             providers: export_sort_mode_providers(conn, mode_id)?,
@@ -251,10 +264,12 @@ fn export_sort_mode_providers(
             r#"
 SELECT
   mp.cli_key,
+  p.provider_uuid,
   p.name,
   mp.sort_order,
   mp.enabled,
-  mp.session_reuse_priority
+  mp.session_reuse_priority,
+  mp.cross_provider_model_routing_policy_json
 FROM sort_mode_providers mp
 JOIN providers p ON p.id = mp.provider_id
 WHERE mp.mode_id = ?1
@@ -266,11 +281,15 @@ ORDER BY mp.sort_order ASC, p.id ASC
         .query_map(params![mode_id], |row| {
             Ok(SortModeProviderExport {
                 cli_key: row.get(0)?,
+                provider_uuid: Some(row.get(1)?),
                 // Historical field name in bundle schema; stores provider name.
-                provider_cli_key: row.get(1)?,
-                sort_order: row.get(2)?,
-                enabled: row.get::<_, i64>(3)? != 0,
-                session_reuse_priority: row.get(4)?,
+                provider_cli_key: row.get(2)?,
+                sort_order: row.get(3)?,
+                enabled: row.get::<_, i64>(4)? != 0,
+                session_reuse_priority: row.get(5)?,
+                cross_provider_model_routing_policy: row
+                    .get::<_, Option<String>>(6)?
+                    .and_then(|raw| serde_json::from_str(&raw).ok()),
             })
         })
         .map_err(|e| db_err!("failed to query sort_mode_providers for export: {e}"))?;
@@ -286,9 +305,9 @@ pub(super) fn export_sort_mode_active(conn: &Connection) -> AppResult<HashMap<St
     let mut stmt = conn
         .prepare_cached(
             r#"
-SELECT a.cli_key, m.name
+SELECT a.cli_key, identity.mode_uuid
 FROM sort_mode_active a
-JOIN sort_modes m ON m.id = a.mode_id
+JOIN sort_mode_identities identity ON identity.mode_id = a.mode_id
 ORDER BY a.cli_key ASC
 "#,
         )
@@ -301,9 +320,9 @@ ORDER BY a.cli_key ASC
 
     let mut items = HashMap::new();
     for row in rows {
-        let (cli_key, mode_name) =
+        let (cli_key, mode_uuid) =
             row.map_err(|e| db_err!("failed to read sort_mode_active row: {e}"))?;
-        items.insert(cli_key, mode_name);
+        items.insert(cli_key, mode_uuid);
     }
     Ok(items)
 }

@@ -2356,6 +2356,72 @@ mod tests {
     }
 
     #[test]
+    fn global_model_routing_write_rejects_cross_fields_without_mutating_settings() {
+        let update: SettingsUpdate = serde_json::from_value(serde_json::json!({
+            "preferredPort": 37123,
+            "logRetentionDays": 30,
+            "failoverMaxAttemptsPerProvider": 5,
+            "failoverMaxProvidersToTry": 3,
+            "modelRoutingPolicy": {
+                "enabled": true,
+                "rules": [{
+                    "source_model": "source",
+                    "target_model": "target",
+                    "target_provider_uuid": "11111111-1111-4111-8111-111111111111"
+                }]
+            }
+        }))
+        .expect("cross-only fields remain visible to the write boundary");
+        let mut current = settings::AppSettings::default();
+        let before = serde_json::to_value(&current).expect("serialize initial settings");
+
+        let error = apply_settings_update_owned_patch(&mut current, &update)
+            .expect_err("global ordinary policy must reject cross-only fields");
+        assert!(error.to_string().contains("SEC_INVALID_INPUT"));
+        assert_eq!(
+            serde_json::to_value(&current).expect("serialize unchanged settings"),
+            before
+        );
+    }
+
+    #[test]
+    fn global_model_routing_write_accepts_legacy_and_source_effort_rules() {
+        let update: SettingsUpdate = serde_json::from_value(serde_json::json!({
+            "preferredPort": 37123,
+            "logRetentionDays": 30,
+            "failoverMaxAttemptsPerProvider": 5,
+            "failoverMaxProvidersToTry": 3,
+            "modelRoutingPolicy": {
+                "enabled": true,
+                "rules": [
+                    {
+                        "source_model": "legacy-source",
+                        "target_model": "legacy-target",
+                        "reasoning_effort": "low"
+                    },
+                    {
+                        "source_model": "effort-source",
+                        "source_reasoning_effort": "high",
+                        "target_model": "effort-target"
+                    }
+                ]
+            }
+        }))
+        .expect("valid ordinary policy input");
+        let mut current = settings::AppSettings::default();
+
+        apply_settings_update_owned_patch(&mut current, &update)
+            .expect("save valid ordinary policy");
+        assert_eq!(current.model_routing_policy.rules.len(), 2);
+        assert_eq!(
+            current.model_routing_policy.rules[1]
+                .source_reasoning_effort
+                .as_deref(),
+            Some("high")
+        );
+    }
+
+    #[test]
     fn retry_policy_save_without_auto_start_intent_skips_owner_and_os_sync() {
         let _serial = crate::app::autostart::auto_start_test_serial_lock()
             .lock()

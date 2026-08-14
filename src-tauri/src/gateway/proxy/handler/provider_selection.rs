@@ -7,7 +7,9 @@ use crate::{circuit_breaker, session_manager};
 pub(super) struct ProviderSelection {
     pub(super) route_generation: session_manager::SessionRouteGeneration,
     pub(super) effective_sort_mode_id: Option<i64>,
+    pub(super) effective_sort_mode_uuid: Option<String>,
     pub(super) providers: Vec<providers::ProviderForGateway>,
+    pub(super) sort_mode_members: Vec<providers::ProviderForGateway>,
     pub(super) bound_provider_order: Option<Vec<i64>>,
     pub(super) active_sort_mode_id: Option<i64>,
     pub(super) session_bound_sort_mode_id: Option<Option<i64>>,
@@ -31,23 +33,30 @@ pub(super) fn select_providers_with_session_binding<R: tauri::Runtime>(
         None
     };
 
-    let (active_sort_mode_id, effective_sort_mode_id, mut providers) = match bound_sort_mode_id {
+    let (active_sort_mode_id, selection) = match bound_sort_mode_id {
         Some(sort_mode_id) => {
             let active_sort_mode_id =
                 providers::active_sort_mode_id_for_gateway(&state.db, cli_key)?;
-            let providers =
-                providers::list_enabled_for_gateway_in_mode(&state.db, cli_key, sort_mode_id)?;
-            (active_sort_mode_id, sort_mode_id, providers)
+            let selection = providers::list_enabled_for_gateway_in_mode_selection(
+                &state.db,
+                cli_key,
+                sort_mode_id,
+            )?;
+            (active_sort_mode_id, selection)
         }
         None => {
             let selection =
                 providers::list_enabled_for_gateway_using_active_mode(&state.db, cli_key)?;
-            (
-                selection.sort_mode_id,
-                selection.sort_mode_id,
-                selection.providers,
-            )
+            (selection.sort_mode_id, selection)
         }
+    };
+    let effective_sort_mode_id = selection.sort_mode_id;
+    let effective_sort_mode_uuid = selection.sort_mode_uuid;
+    let mut providers = selection.providers;
+    let sort_mode_members = if effective_sort_mode_id.is_some() {
+        providers.clone()
+    } else {
+        Vec::new()
     };
 
     let mut bound_provider_order: Option<Vec<i64>> = None;
@@ -77,7 +86,9 @@ pub(super) fn select_providers_with_session_binding<R: tauri::Runtime>(
     Ok(ProviderSelection {
         route_generation,
         effective_sort_mode_id,
+        effective_sort_mode_uuid,
         providers,
+        sort_mode_members,
         bound_provider_order,
         active_sort_mode_id,
         session_bound_sort_mode_id: bound_sort_mode_id,

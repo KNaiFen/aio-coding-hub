@@ -283,6 +283,7 @@ fn build_error_contexts<'a, R: tauri::Runtime>(
         provider_index: prepared.provider_index,
         provider_bridged: prepared.provider_bridged,
         session_reuse: prepared.session_reuse,
+        session_binding_allowed: prepared.session_binding_allowed,
         provider_max_attempts: prepared.provider_max_attempts,
         stream_idle_timeout_seconds: prepared.stream_idle_timeout_seconds,
         upstream_retry_policy: &prepared.upstream_retry_policy,

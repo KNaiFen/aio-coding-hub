@@ -14,6 +14,7 @@ import {
   resolveCodexContextCompactionMarker,
   resolveCodexReasoningEffort,
   resolveConfiguredModelRouteFromSpecialSettings,
+  resolveCrossProviderModelRouteFromSpecialSettings,
   resolveModelRouteMappingFromSpecialSettings,
   resolveUpstreamErrorResponseRuleMarker,
 } from "../requestLogSpecialSettings";
@@ -100,6 +101,68 @@ describe("services/gateway/requestLogSpecialSettings", () => {
 
     for (const value of invalid) {
       expect(resolveConfiguredModelRouteFromSpecialSettings(value)).toBeNull();
+    }
+  });
+
+  it("resolves a matched cross route only for its final target provider", () => {
+    const settings = JSON.stringify([
+      {
+        type: "cross_provider_model_route",
+        modeUuid: "11111111-1111-4111-8111-111111111111",
+        sourceProviderId: 1,
+        sourceProviderUuid: "22222222-2222-4222-8222-222222222222",
+        sourceProviderName: "Source",
+        targetProviderId: 2,
+        targetProviderUuid: "33333333-3333-4333-8333-333333333333",
+        targetProviderName: "Target",
+        sourceModel: "gpt-source",
+        sourceReasoningEffort: "high",
+        targetModel: "gpt-target",
+        targetReasoningEffort: "low",
+        status: "matched",
+        reason: null,
+        singleHop: true,
+      },
+    ]);
+
+    expect(resolveCrossProviderModelRouteFromSpecialSettings(settings, 2)).toEqual(
+      expect.objectContaining({
+        sourceProviderId: 1,
+        targetProviderId: 2,
+        sourceModel: "gpt-source",
+        targetModel: "gpt-target",
+        status: "matched",
+      })
+    );
+    expect(resolveCrossProviderModelRouteFromSpecialSettings(settings, 1)).toBeNull();
+  });
+
+  it("fails open for failed, skipped, malformed, and future cross route markers", () => {
+    const base = {
+      type: "cross_provider_model_route",
+      modeUuid: "11111111-1111-4111-8111-111111111111",
+      sourceProviderId: 1,
+      sourceProviderUuid: "22222222-2222-4222-8222-222222222222",
+      sourceProviderName: "Source",
+      targetProviderId: 2,
+      targetProviderUuid: "33333333-3333-4333-8333-333333333333",
+      targetProviderName: "Target",
+      sourceModel: "gpt-source",
+      targetModel: "gpt-target",
+      reason: null,
+      singleHop: true,
+    };
+
+    for (const marker of [
+      { ...base, status: "failed" },
+      { ...base, status: "skipped" },
+      { ...base, status: "future" },
+      { ...base, status: "matched", targetProviderId: 1 },
+      { ...base, status: "matched", singleHop: false },
+    ]) {
+      expect(resolveCrossProviderModelRouteFromSpecialSettings(JSON.stringify([marker]), 2)).toBe(
+        null
+      );
     }
   });
 

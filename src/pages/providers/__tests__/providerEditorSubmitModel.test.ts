@@ -182,6 +182,7 @@ describe("pages/providers/providerEditorSubmitModel", () => {
           rules: [
             {
               source_model: " fable5 ",
+              source_reasoning_effort: null,
               target_model: " opus4.8 ",
               reasoning_effort: " low ",
             },
@@ -196,6 +197,7 @@ describe("pages/providers/providerEditorSubmitModel", () => {
       rules: [
         {
           source_model: "fable5",
+          source_reasoning_effort: null,
           target_model: "opus4.8",
           reasoning_effort: "low",
         },
@@ -214,7 +216,14 @@ describe("pages/providers/providerEditorSubmitModel", () => {
         modelRoutingPolicyOverrideEnabled: true,
         modelRoutingPolicyDraft: {
           enabled: true,
-          rules: [{ source_model: "fable5", target_model: null, reasoning_effort: null }],
+          rules: [
+            {
+              source_model: "fable5",
+              source_reasoning_effort: null,
+              target_model: null,
+              reasoning_effort: null,
+            },
+          ],
         },
       })
     );

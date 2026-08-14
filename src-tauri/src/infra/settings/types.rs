@@ -252,8 +252,13 @@ impl<'de> Deserialize<'de> for UpstreamRetryPolicy {
 #[serde(default)]
 pub struct ModelRoutingRule {
     pub source_model: String,
+    /// An absent effort preserves the legacy model-only rule semantics.
+    pub source_reasoning_effort: Option<String>,
     pub target_model: Option<String>,
     pub reasoning_effort: Option<String>,
+    #[serde(flatten, default)]
+    #[specta(skip)]
+    pub unrecognized_fields: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type, Default)]
@@ -261,6 +266,25 @@ pub struct ModelRoutingRule {
 pub struct ModelRoutingPolicy {
     pub enabled: bool,
     pub rules: Vec<ModelRoutingRule>,
+}
+
+/// A named sort-mode member owns cross-provider rules independently of the
+/// provider's ordinary whole-policy override.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type, Default)]
+#[serde(default)]
+pub struct CrossProviderModelRoutingRule {
+    pub source_model: String,
+    pub source_reasoning_effort: Option<String>,
+    pub target_provider_uuid: String,
+    pub target_model: Option<String>,
+    pub target_reasoning_effort: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type, Default)]
+#[serde(default)]
+pub struct CrossProviderModelRoutingPolicy {
+    pub enabled: bool,
+    pub rules: Vec<CrossProviderModelRoutingRule>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type, Default)]

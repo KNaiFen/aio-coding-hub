@@ -100,7 +100,9 @@ pub(super) struct ProxyContext<R: tauri::Runtime = tauri::Wry> {
 
     // -- provider resolution --
     pub(super) effective_sort_mode_id: Option<i64>,
+    pub(super) effective_sort_mode_uuid: Option<String>,
     pub(super) providers: Vec<providers::ProviderForGateway>,
+    pub(super) sort_mode_members: Vec<providers::ProviderForGateway>,
     pub(super) session_bound_provider_id: Option<i64>,
 
     // -- request fingerprinting --
@@ -143,7 +145,9 @@ impl<R: tauri::Runtime> ProxyContext<R> {
             requested_model_location: self.requested_model_location,
             managed_model_route: self.managed_model_route,
             effective_sort_mode_id: self.effective_sort_mode_id,
+            effective_sort_mode_uuid: self.effective_sort_mode_uuid,
             providers: self.providers,
+            sort_mode_members: self.sort_mode_members,
             session_bound_provider_id: self.session_bound_provider_id,
             headers: self.headers,
             body_bytes: self.body_bytes,

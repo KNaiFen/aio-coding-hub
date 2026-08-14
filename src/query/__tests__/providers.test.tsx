@@ -1400,12 +1400,36 @@ describe("query/providers", () => {
       { provider_id: 2, session_reuse_priority: 202 },
     ];
     const modeOneRows: SortModeProviderRow[] = [
-      { provider_id: 1, enabled: false, session_reuse_priority: 303 },
-      { provider_id: 2, enabled: true, session_reuse_priority: 404 },
+      {
+        provider_id: 1,
+        provider_uuid: providers[0].provider_uuid,
+        enabled: false,
+        session_reuse_priority: 303,
+        cross_policy: null,
+      },
+      {
+        provider_id: 2,
+        provider_uuid: providers[1].provider_uuid,
+        enabled: true,
+        session_reuse_priority: 404,
+        cross_policy: null,
+      },
     ];
     const modeTwoRows: SortModeProviderRow[] = [
-      { provider_id: 2, enabled: false, session_reuse_priority: 505 },
-      { provider_id: 1, enabled: true, session_reuse_priority: 606 },
+      {
+        provider_id: 2,
+        provider_uuid: providers[1].provider_uuid,
+        enabled: false,
+        session_reuse_priority: 505,
+        cross_policy: null,
+      },
+      {
+        provider_id: 1,
+        provider_uuid: providers[0].provider_uuid,
+        enabled: true,
+        session_reuse_priority: 606,
+        cross_policy: null,
+      },
     ];
     const otherCliProviders = [makeProvider({ id: 3, cli_key: "codex", name: "Codex" })];
     const otherCliDefaultRouteRows: ProviderRouteRow[] = [
@@ -1413,12 +1437,36 @@ describe("query/providers", () => {
       { provider_id: 3, session_reuse_priority: 808 },
     ];
     const otherCliModeRows: SortModeProviderRow[] = [
-      { provider_id: 1, enabled: true, session_reuse_priority: 909 },
-      { provider_id: 3, enabled: false, session_reuse_priority: 1000 },
+      {
+        provider_id: 1,
+        provider_uuid: providers[0].provider_uuid,
+        enabled: true,
+        session_reuse_priority: 909,
+        cross_policy: null,
+      },
+      {
+        provider_id: 3,
+        provider_uuid: otherCliProviders[0].provider_uuid,
+        enabled: false,
+        session_reuse_priority: 1000,
+        cross_policy: null,
+      },
     ];
-    const modeOneKey = sortModeProvidersQueryKey(11, "claude");
-    const modeTwoKey = sortModeProvidersQueryKey(12, "claude");
-    const otherCliModeKey = sortModeProvidersQueryKey(11, "codex");
+    const modeOneKey = sortModeProvidersQueryKey(
+      11,
+      "11111111-1111-4111-8111-111111111111",
+      "claude"
+    );
+    const modeTwoKey = sortModeProvidersQueryKey(
+      12,
+      "22222222-2222-4222-8222-222222222222",
+      "claude"
+    );
+    const otherCliModeKey = sortModeProvidersQueryKey(
+      11,
+      "33333333-3333-4333-8333-333333333333",
+      "codex"
+    );
     const availabilityKey = providerAvailabilityKeys.timelines([1, 2], 24, 12);
     const availabilityCache = { marker: "provider-id-set-cache" };
     const siblingAccountUsage = makeAccountUsage(2);
@@ -1538,17 +1586,49 @@ describe("query/providers", () => {
       { provider_id: 2, session_reuse_priority: 202 },
     ];
     const modeOneRows: SortModeProviderRow[] = [
-      { provider_id: 1, enabled: true, session_reuse_priority: 303 },
-      { provider_id: 2, enabled: false, session_reuse_priority: 404 },
+      {
+        provider_id: 1,
+        provider_uuid: providers[0].provider_uuid,
+        enabled: true,
+        session_reuse_priority: 303,
+        cross_policy: null,
+      },
+      {
+        provider_id: 2,
+        provider_uuid: providers[1].provider_uuid,
+        enabled: false,
+        session_reuse_priority: 404,
+        cross_policy: null,
+      },
     ];
     const modeTwoRows: SortModeProviderRow[] = [
-      { provider_id: 2, enabled: true, session_reuse_priority: 505 },
-      { provider_id: 1, enabled: false, session_reuse_priority: 606 },
+      {
+        provider_id: 2,
+        provider_uuid: providers[1].provider_uuid,
+        enabled: true,
+        session_reuse_priority: 505,
+        cross_policy: null,
+      },
+      {
+        provider_id: 1,
+        provider_uuid: providers[0].provider_uuid,
+        enabled: false,
+        session_reuse_priority: 606,
+        cross_policy: null,
+      },
     ];
     const listKey = providersKeys.list("claude");
     const defaultRouteKey = providersKeys.defaultRoute("claude");
-    const modeOneKey = sortModeProvidersQueryKey(21, "claude");
-    const modeTwoKey = sortModeProvidersQueryKey(22, "claude");
+    const modeOneKey = sortModeProvidersQueryKey(
+      21,
+      "11111111-1111-4111-8111-111111111111",
+      "claude"
+    );
+    const modeTwoKey = sortModeProvidersQueryKey(
+      22,
+      "22222222-2222-4222-8222-222222222222",
+      "claude"
+    );
     const pendingList = deferred<ProviderSummary[]>();
     const pendingDefaultRoute = deferred<ProviderRouteRow[]>();
     const pendingModeOne = deferred<SortModeProviderRow[]>();
@@ -1703,9 +1783,19 @@ describe("query/providers", () => {
     const providers: ProviderSummary[] = [makeProvider({ id: 1, cli_key: "claude", name: "P1" })];
     const defaultRouteRows: ProviderRouteRow[] = [{ provider_id: 1, session_reuse_priority: 101 }];
     const modeRows: SortModeProviderRow[] = [
-      { provider_id: 1, enabled: true, session_reuse_priority: 202 },
+      {
+        provider_id: 1,
+        provider_uuid: providers[0].provider_uuid,
+        enabled: true,
+        session_reuse_priority: 202,
+        cross_policy: null,
+      },
     ];
-    const modeKey = sortModeProvidersQueryKey(31, "claude");
+    const modeKey = sortModeProvidersQueryKey(
+      31,
+      "11111111-1111-4111-8111-111111111111",
+      "claude"
+    );
 
     vi.mocked(providerDelete).mockResolvedValue(false);
 
@@ -1734,9 +1824,19 @@ describe("query/providers", () => {
     const providers: ProviderSummary[] = [makeProvider({ id: 1, cli_key: "claude", name: "P1" })];
     const defaultRouteRows: ProviderRouteRow[] = [{ provider_id: 1, session_reuse_priority: 101 }];
     const modeRows: SortModeProviderRow[] = [
-      { provider_id: 1, enabled: true, session_reuse_priority: 202 },
+      {
+        provider_id: 1,
+        provider_uuid: providers[0].provider_uuid,
+        enabled: true,
+        session_reuse_priority: 202,
+        cross_policy: null,
+      },
     ];
-    const modeKey = sortModeProvidersQueryKey(32, "claude");
+    const modeKey = sortModeProvidersQueryKey(
+      32,
+      "11111111-1111-4111-8111-111111111111",
+      "claude"
+    );
 
     vi.mocked(providerDelete).mockRejectedValueOnce(new Error("delete failed"));
 
@@ -1769,7 +1869,11 @@ describe("query/providers", () => {
     const client = createTestQueryClient();
     client.setQueryData(providersKeys.list("claude"), null);
     const nullModeKey = [...sortModeProvidersQueryPrefix("claude"), null] as const;
-    const missingModeKey = sortModeProvidersQueryKey(33, "claude");
+    const missingModeKey = sortModeProvidersQueryKey(
+      33,
+      "11111111-1111-4111-8111-111111111111",
+      "claude"
+    );
     client.setQueryData(nullModeKey, null);
     const wrapper = createQueryWrapper(client);
 

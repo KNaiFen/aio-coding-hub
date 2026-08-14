@@ -2,9 +2,9 @@
 
 use super::defaults::*;
 use super::types::{
-    AppSettings, CodexHomeMode, ModelRoutingPolicy, ModelRoutingRule, UpstreamErrorMessageBehavior,
-    UpstreamErrorResponseRule, UpstreamErrorStatusBehavior, UpstreamHttpRetryRule,
-    UpstreamRetryPolicy,
+    AppSettings, CodexHomeMode, CrossProviderModelRoutingPolicy, CrossProviderModelRoutingRule,
+    ModelRoutingPolicy, ModelRoutingRule, UpstreamErrorMessageBehavior, UpstreamErrorResponseRule,
+    UpstreamErrorStatusBehavior, UpstreamHttpRetryRule, UpstreamRetryPolicy,
 };
 use crate::shared::error::AppResult;
 use std::collections::HashSet;
@@ -387,10 +387,31 @@ fn normalize_optional_model_routing_text(
         .filter(|value| value.len() <= max_bytes && !value.chars().any(char::is_control))
 }
 
+pub const MODEL_ROUTING_REASONING_EFFORTS: [&str; 8] = [
+    "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
+];
+
+fn normalize_optional_model_routing_effort(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| {
+            !value.is_empty()
+                && value.chars().count() <= MAX_MODEL_ROUTING_EFFORT_CHARS
+                && !value.chars().any(char::is_control)
+                && MODEL_ROUTING_REASONING_EFFORTS.contains(&value.as_str())
+        })
+}
+
 fn normalize_model_routing_rule_for_write(
     rule: &mut ModelRoutingRule,
     index: usize,
 ) -> AppResult<()> {
+    if !rule.unrecognized_fields.is_empty() {
+        return Err(format!(
+            "SEC_INVALID_INPUT: model_routing_policy.rules[{index}] contains unsupported fields"
+        )
+        .into());
+    }
     rule.source_model = rule.source_model.trim().to_string();
     if rule.source_model.is_empty() {
         return Err(format!(
@@ -421,17 +442,21 @@ fn normalize_model_routing_rule_for_write(
         .into());
     }
 
-    rule.reasoning_effort = rule
-        .reasoning_effort
-        .take()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
-    if rule.reasoning_effort.as_ref().is_some_and(|value| {
-        value.chars().count() > MAX_MODEL_ROUTING_EFFORT_CHARS
-            || value.chars().any(char::is_control)
-    }) {
+    let raw_source_effort = rule.source_reasoning_effort.take();
+    rule.source_reasoning_effort =
+        normalize_optional_model_routing_effort(raw_source_effort.clone());
+    if raw_source_effort.is_some() && rule.source_reasoning_effort.is_none() {
         return Err(format!(
-            "SEC_INVALID_INPUT: model_routing_policy.rules[{index}].reasoning_effort must be <= {MAX_MODEL_ROUTING_EFFORT_CHARS} characters and contain no control characters"
+            "SEC_INVALID_INPUT: model_routing_policy.rules[{index}].source_reasoning_effort must be a standard reasoning effort"
+        )
+        .into());
+    }
+
+    let raw_target_effort = rule.reasoning_effort.take();
+    rule.reasoning_effort = normalize_optional_model_routing_effort(raw_target_effort.clone());
+    if raw_target_effort.is_some() && rule.reasoning_effort.is_none() {
+        return Err(format!(
+            "SEC_INVALID_INPUT: model_routing_policy.rules[{index}].reasoning_effort must be a standard reasoning effort"
         )
         .into());
     }
@@ -459,9 +484,12 @@ pub fn normalize_model_routing_policy_for_write(
     let mut seen = HashSet::new();
     for (index, rule) in policy.rules.iter_mut().enumerate() {
         normalize_model_routing_rule_for_write(rule, index)?;
-        if !seen.insert(rule.source_model.clone()) {
+        if !seen.insert((
+            rule.source_model.clone(),
+            rule.source_reasoning_effort.clone(),
+        )) {
             return Err(format!(
-                "SEC_INVALID_INPUT: model_routing_policy.rules[{index}].source_model must be unique"
+                "SEC_INVALID_INPUT: model_routing_policy.rules[{index}].source_model and source_reasoning_effort must be unique"
             )
             .into());
         }
@@ -474,31 +502,38 @@ pub fn sanitize_model_routing_policy(policy: &mut ModelRoutingPolicy) -> bool {
     let mut seen = HashSet::new();
     let mut rules = Vec::new();
     for rule in policy.rules.drain(..).take(MAX_MODEL_ROUTING_RULES) {
+        if !rule.unrecognized_fields.is_empty() {
+            continue;
+        }
         let source_model = rule.source_model.trim().to_string();
         if source_model.is_empty()
             || source_model.len() > MAX_MODEL_ROUTING_MODEL_BYTES
             || source_model.chars().any(char::is_control)
-            || !seen.insert(source_model.clone())
         {
             continue;
         }
         let target_model =
             normalize_optional_model_routing_text(rule.target_model, MAX_MODEL_ROUTING_MODEL_BYTES);
-        let reasoning_effort = rule
-            .reasoning_effort
-            .map(|value| value.trim().to_string())
-            .filter(|value| {
-                !value.is_empty()
-                    && value.chars().count() <= MAX_MODEL_ROUTING_EFFORT_CHARS
-                    && !value.chars().any(char::is_control)
-            });
+        let raw_source_effort = rule.source_reasoning_effort;
+        let source_reasoning_effort =
+            normalize_optional_model_routing_effort(raw_source_effort.clone());
+        let raw_target_effort = rule.reasoning_effort;
+        let reasoning_effort = normalize_optional_model_routing_effort(raw_target_effort.clone());
+        if (raw_source_effort.is_some() && source_reasoning_effort.is_none())
+            || (raw_target_effort.is_some() && reasoning_effort.is_none())
+            || !seen.insert((source_model.clone(), source_reasoning_effort.clone()))
+        {
+            continue;
+        }
         if target_model.is_none() && reasoning_effort.is_none() {
             continue;
         }
         rules.push(ModelRoutingRule {
             source_model,
+            source_reasoning_effort,
             target_model,
             reasoning_effort,
+            unrecognized_fields: Default::default(),
         });
     }
     policy.rules = rules;
@@ -506,6 +541,122 @@ pub fn sanitize_model_routing_policy(policy: &mut ModelRoutingPolicy) -> bool {
         policy.enabled = false;
     }
     *policy != original
+}
+
+pub fn sanitize_cross_provider_model_routing_policy(
+    policy: &mut CrossProviderModelRoutingPolicy,
+) -> bool {
+    let original = policy.clone();
+    let mut seen = HashSet::new();
+    policy.rules = policy
+        .rules
+        .drain(..)
+        .take(MAX_MODEL_ROUTING_RULES)
+        .filter_map(|rule| {
+            let source_model = rule.source_model.trim().to_string();
+            let target_provider_uuid = rule.target_provider_uuid.trim().to_ascii_lowercase();
+            let raw_source_effort = rule.source_reasoning_effort;
+            let source_reasoning_effort =
+                normalize_optional_model_routing_effort(raw_source_effort.clone());
+            let raw_target_effort = rule.target_reasoning_effort;
+            let target_reasoning_effort =
+                normalize_optional_model_routing_effort(raw_target_effort.clone());
+            let target_model = normalize_optional_model_routing_text(
+                rule.target_model,
+                MAX_MODEL_ROUTING_MODEL_BYTES,
+            );
+            if source_model.is_empty()
+                || source_model.len() > MAX_MODEL_ROUTING_MODEL_BYTES
+                || source_model.chars().any(char::is_control)
+                || !is_canonical_uuid_v4(&target_provider_uuid)
+                || (raw_source_effort.is_some() && source_reasoning_effort.is_none())
+                || (raw_target_effort.is_some() && target_reasoning_effort.is_none())
+                || !seen.insert((source_model.clone(), source_reasoning_effort.clone()))
+            {
+                return None;
+            }
+            Some(CrossProviderModelRoutingRule {
+                source_model,
+                source_reasoning_effort,
+                target_provider_uuid,
+                target_model,
+                target_reasoning_effort,
+            })
+        })
+        .collect();
+    if policy.enabled && policy.rules.is_empty() {
+        policy.enabled = false;
+    }
+    *policy != original
+}
+
+pub fn normalize_cross_provider_model_routing_policy_for_write(
+    policy: &mut CrossProviderModelRoutingPolicy,
+) -> AppResult<bool> {
+    let original = policy.clone();
+    if policy.rules.len() > MAX_MODEL_ROUTING_RULES {
+        return Err(format!(
+            "SEC_INVALID_INPUT: cross_provider_model_routing_policy.rules must contain <= {MAX_MODEL_ROUTING_RULES} entries"
+        )
+        .into());
+    }
+
+    let mut seen = HashSet::new();
+    for (index, rule) in policy.rules.iter_mut().enumerate() {
+        rule.source_model = rule.source_model.trim().to_string();
+        if rule.source_model.is_empty()
+            || rule.source_model.len() > MAX_MODEL_ROUTING_MODEL_BYTES
+            || rule.source_model.chars().any(char::is_control)
+        {
+            return Err(format!(
+                "SEC_INVALID_INPUT: cross_provider_model_routing_policy.rules[{index}].source_model is invalid"
+            )
+            .into());
+        }
+
+        let source_effort = rule.source_reasoning_effort.take();
+        rule.source_reasoning_effort =
+            normalize_optional_model_routing_effort(source_effort.clone());
+        if source_effort.is_some() && rule.source_reasoning_effort.is_none() {
+            return Err(format!(
+                "SEC_INVALID_INPUT: cross_provider_model_routing_policy.rules[{index}].source_reasoning_effort must be a standard reasoning effort"
+            )
+            .into());
+        }
+
+        rule.target_provider_uuid = rule.target_provider_uuid.trim().to_ascii_lowercase();
+        if !is_canonical_uuid_v4(&rule.target_provider_uuid) {
+            return Err(format!(
+                "SEC_INVALID_INPUT: cross_provider_model_routing_policy.rules[{index}].target_provider_uuid must be a canonical UUIDv4"
+            )
+            .into());
+        }
+
+        rule.target_model = normalize_optional_model_routing_text(
+            rule.target_model.take(),
+            MAX_MODEL_ROUTING_MODEL_BYTES,
+        );
+        let target_effort = rule.target_reasoning_effort.take();
+        rule.target_reasoning_effort =
+            normalize_optional_model_routing_effort(target_effort.clone());
+        if target_effort.is_some() && rule.target_reasoning_effort.is_none() {
+            return Err(format!(
+                "SEC_INVALID_INPUT: cross_provider_model_routing_policy.rules[{index}].target_reasoning_effort must be a standard reasoning effort"
+            )
+            .into());
+        }
+
+        if !seen.insert((
+            rule.source_model.clone(),
+            rule.source_reasoning_effort.clone(),
+        )) {
+            return Err(format!(
+                "SEC_INVALID_INPUT: cross_provider_model_routing_policy.rules[{index}].source_model and source_reasoning_effort must be unique"
+            )
+            .into());
+        }
+    }
+    Ok(*policy != original)
 }
 
 fn is_canonical_uuid_v4(value: &str) -> bool {
@@ -1725,13 +1876,17 @@ mod tests {
             rules: vec![
                 ModelRoutingRule {
                     source_model: " fable5 ".to_string(),
+                    source_reasoning_effort: None,
                     target_model: Some(" opus4.8 ".to_string()),
                     reasoning_effort: None,
+                    unrecognized_fields: Default::default(),
                 },
                 ModelRoutingRule {
                     source_model: "gpt-expensive".to_string(),
+                    source_reasoning_effort: Some(" HIGH ".to_string()),
                     target_model: None,
                     reasoning_effort: Some(" low ".to_string()),
+                    unrecognized_fields: Default::default(),
                 },
             ],
         };
@@ -1740,6 +1895,10 @@ mod tests {
         assert_eq!(policy.rules[0].source_model, "fable5");
         assert_eq!(policy.rules[0].target_model.as_deref(), Some("opus4.8"));
         assert_eq!(policy.rules[1].reasoning_effort.as_deref(), Some("low"));
+        assert_eq!(
+            policy.rules[1].source_reasoning_effort.as_deref(),
+            Some("high")
+        );
     }
 
     #[test]
@@ -1749,13 +1908,17 @@ mod tests {
             rules: vec![
                 ModelRoutingRule {
                     source_model: "same".to_string(),
+                    source_reasoning_effort: None,
                     target_model: Some("one".to_string()),
                     reasoning_effort: None,
+                    unrecognized_fields: Default::default(),
                 },
                 ModelRoutingRule {
                     source_model: " same ".to_string(),
+                    source_reasoning_effort: None,
                     target_model: Some("two".to_string()),
                     reasoning_effort: None,
+                    unrecognized_fields: Default::default(),
                 },
             ],
         };
@@ -1765,8 +1928,10 @@ mod tests {
             enabled: true,
             rules: vec![ModelRoutingRule {
                 source_model: "fable5".to_string(),
+                source_reasoning_effort: None,
                 target_model: Some("  ".to_string()),
                 reasoning_effort: None,
+                unrecognized_fields: Default::default(),
             }],
         };
         assert!(normalize_model_routing_policy_for_write(&mut empty).is_err());
@@ -1779,13 +1944,17 @@ mod tests {
             rules: vec![
                 ModelRoutingRule {
                     source_model: "".to_string(),
+                    source_reasoning_effort: None,
                     target_model: Some("target".to_string()),
                     reasoning_effort: None,
+                    unrecognized_fields: Default::default(),
                 },
                 ModelRoutingRule {
                     source_model: "future".to_string(),
+                    source_reasoning_effort: None,
                     target_model: None,
                     reasoning_effort: None,
+                    unrecognized_fields: Default::default(),
                 },
             ],
         };

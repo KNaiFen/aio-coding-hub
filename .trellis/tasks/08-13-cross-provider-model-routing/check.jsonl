@@ -1,0 +1,11 @@
+{"file":".trellis/spec/aio-coding-hub/backend/index.md","reason":"验收共享网关后端质量门和回归范围。"}
+{"file":".trellis/spec/aio-coding-hub/backend/gateway-attempt-budget-contract.md","reason":"复核 Ready budget、内部重试与跨供应商失败判定没有被改变。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/configured-model-routing-contract.md","reason":"复核普通规则继承/覆盖、最终 wire model、marker 和计费。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/gateway-failover-route-contract.md","reason":"复核会话绑定、route/attempt 投影和 provider switch 计数。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/codex-managed-model-route-contract.md","reason":"复核 aio/ 别名不能跨供应商。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/provider-share-contract.md","reason":"复核分享边界与 secrets 不泄露。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/config-migration-skill-bundle-contract.md","reason":"复核 bundle schema、UUID 和破坏性导入前置校验。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/request-log-usage-ledger-pagination-contract.md","reason":"复核请求详情、ledger、费用和最终结果投影。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/cloud-only-verification-contract.md","reason":"复核本地/云端验证边界及零产物要求。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/local-observer-tui-contract.md","reason":"复核 cross marker 的 additive/fail-open/脱敏投影，以及详情 attempts 与卡片最终结果边界。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/settings-ownership-rollback-contract.md","reason":"复核组合策略读写的 owner-scoped transaction、CAS 身份校验、并发写和回滚，不允许 whole-snapshot 覆盖。"}

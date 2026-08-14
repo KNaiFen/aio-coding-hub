@@ -116,6 +116,49 @@ describe("query/keys", () => {
     expect(sortModesKeys.all).toEqual(["sortModes"]);
     expect(sortModesKeys.list()).toEqual(["sortModes", "list"]);
     expect(sortModesKeys.activeList()).toEqual(["sortModes", "activeList"]);
+    expect(
+      sortModesKeys.providers(
+        "claude",
+        7,
+        "11111111-1111-4111-8111-111111111111"
+      )
+    ).toEqual([
+      "sortModes",
+      "providers",
+      "claude",
+      7,
+      "11111111-1111-4111-8111-111111111111",
+    ]);
+    expect(
+      sortModesKeys.routingPolicy(
+        "claude",
+        7,
+        "11111111-1111-4111-8111-111111111111",
+        9,
+        "22222222-2222-4222-8222-222222222222"
+      )
+    ).toEqual([
+      "sortModes",
+      "routingPolicy",
+      "claude",
+      7,
+      "11111111-1111-4111-8111-111111111111",
+      9,
+      "22222222-2222-4222-8222-222222222222",
+    ]);
+    expect(
+      sortModesKeys.routingCandidates(
+        "claude",
+        7,
+        "11111111-1111-4111-8111-111111111111"
+      )
+    ).toEqual([
+      "sortModes",
+      "routingCandidates",
+      "claude",
+      7,
+      "11111111-1111-4111-8111-111111111111",
+    ]);
   });
 
   it("builds usage keys", () => {

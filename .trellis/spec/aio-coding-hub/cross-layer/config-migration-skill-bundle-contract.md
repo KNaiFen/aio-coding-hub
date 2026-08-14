@@ -332,7 +332,7 @@ do not bolt marker deletion or case handling onto the write phase.
   single-link checks. The production FIFO replacement regression must use an
   external bounded watchdog so a blocking open cannot make the test hang.
 
-## Scenario: Account-Usage Credentials In Config Bundle V3 And Provider Identity In V4
+## Scenario: Account-Usage Credentials In V3, Provider Identity In V4, And Sort-Mode Identity In V5
 
 ### 1. Scope / Trigger
 
@@ -344,10 +344,11 @@ intentionally differs from single-provider sharing.
 ### 2. Signatures
 
 ```rust
-pub const CONFIG_BUNDLE_SCHEMA_VERSION: u32 = 4;
+pub const CONFIG_BUNDLE_SCHEMA_VERSION: u32 = 5;
 pub(crate) const CONFIG_BUNDLE_FULL_SKILL_PAYLOAD_MIN_VERSION: u32 = 2;
 pub(crate) const CONFIG_BUNDLE_ACCOUNT_USAGE_SNAPSHOT_MIN_VERSION: u32 = 3;
 pub(crate) const CONFIG_BUNDLE_PROVIDER_UUID_MIN_VERSION: u32 = 4;
+pub(crate) const CONFIG_BUNDLE_SORT_MODE_UUID_MIN_VERSION: u32 = 5;
 
 pub struct ProviderExport {
     // Existing provider fields omitted.
@@ -362,6 +363,24 @@ pub struct ProviderAccountUsageCredentialsExport {
     pub newapi_access_token_plaintext: Option<String>,
 }
 
+pub struct SortModeExport {
+    pub mode_uuid: Option<String>,
+    pub name: String,
+    pub is_default: bool,
+    pub providers: Vec<SortModeProviderExport>,
+}
+
+pub struct SortModeProviderExport {
+    pub cli_key: String,
+    pub provider_uuid: Option<String>,
+    pub provider_cli_key: String,
+    pub sort_order: i64,
+    pub enabled: bool,
+    pub session_reuse_priority: i64,
+    pub cross_provider_model_routing_policy:
+        Option<CrossProviderModelRoutingPolicy>,
+}
+
 pub(crate) fn prepare_config_import(
     bundle: ConfigBundle,
 ) -> AppResult<PreparedConfigImport>;
@@ -373,10 +392,10 @@ same SQLite transaction that inserts the provider and canonical extension.
 
 ### 3. Contracts
 
-- Export always writes schema v4. It retains the v3 account-usage snapshot
-  behavior and adds a canonical provider UUID for every provider plus UUID
-  links for bridge sources. A v4 bundle never derives provider identity from
-  numeric IDs, names, or ordering.
+- Export always writes schema v5. It retains v3 account snapshots and v4
+  provider/source UUID identity, then adds a canonical UUID for every named
+  sort mode, provider UUID links for every member, member order/enable/reuse
+  state, optional cross-provider policy, and active-mode references by UUID.
 - Schema v4 provider UUIDs are canonical lowercase UUIDv4 values, are unique
   across the bundle, and source UUID references must resolve to a different
   provider in the same bundle. Validate these facts before any destructive
@@ -384,11 +403,11 @@ same SQLite transaction that inserts the provider and canonical extension.
 - Account config passes through the shared extension sanitizer before leaving
   or entering the database. Private identity/token fields never remain inside
   extension JSON.
-- Schema validation accepts exactly v1, v2, v3, and v4. Capability thresholds
+- Schema validation accepts exactly v1, v2, v3, v4, and v5. Capability thresholds
   are feature-owned constants: complete installed/local Skill payload begins
   at v2, account config/credential snapshots begin at v3, and stable provider
-  UUIDs begin at v4. Do not compare these features to the mutable current
-  version constant.
+  UUIDs begin at v4, while stable sort-mode/member UUID links and cross policy
+  begin at v5. Do not compare these features to the mutable current version.
 - v1 preserves its legacy Skill semantics and imports no account-usage
   snapshot. v2 requires/restores full Skill payloads but still imports no
   account-usage snapshot. Even if an older-version JSON contains those optional
@@ -402,6 +421,20 @@ same SQLite transaction that inserts the provider and canonical extension.
   they are never serialized into the bundle. A legacy v1-v3 import is rejected
   before replacement when local managed profiles exist because it cannot prove
   that identity.
+- v5 retains v4 provider identity and requires canonical unique mode UUIDs,
+  same-CLI member provider UUIDs, unique member identities, and valid active
+  mode UUID references. Validate all of them during pure preparation before
+  acquiring the import lock or clearing current data. Rebuild numeric IDs in
+  one transaction while preserving provider/mode UUIDs.
+- v1-v4 import generates a fresh UUID for every restored named mode, ignores
+  any member provider UUID/cross fields, binds members by the legacy
+  CLI-plus-provider-name relation, and retains legacy active-mode names. A
+  syntactically valid cross target UUID missing from the v5 bundle is kept as
+  an invalid projection; it is not rewritten to the source provider.
+- Cross policy JSON is fail-open per rule: malformed/unknown rule shapes and
+  non-standard effort values are discarded while valid sibling rules and the
+  rest of the bundle remain importable. The same sanitizer bounds model text,
+  rule count, UUID syntax, duplicates, and the eight standard effort values.
 - User ID normalization requires ASCII digits in `1..=i64::MAX`; token
   normalization applies the private credential size/header rules. Any invalid
   v3 snapshot fails before commit.
@@ -428,6 +461,11 @@ same SQLite transaction that inserts the provider and canonical extension.
 | Schema v3 with no credential snapshot | Restore provider/config without a private row |
 | Schema v4 with valid provider/source UUIDs | Restore v3 state and retain exact provider identity links |
 | Schema v4 with missing, invalid, duplicate, or dangling UUID | Reject before destructive import |
+| Schema v5 with valid mode/member UUIDs and cross policy | Preserve identities, membership, active UUID, and sanitized policy |
+| Schema v5 with invalid/duplicate mode UUID, member UUID/CLI mismatch, or invalid active reference | Reject before acquiring the import lock or clearing current data |
+| Schema v1-v4 sort modes | Generate fresh mode UUIDs and import no cross policy |
+| v5 cross rule has numeric/unknown effort or malformed shape | Drop that rule fail-open; retain valid sibling rules and the bundle |
+| v5 cross target UUID is valid but absent | Preserve the target UUID as invalid projection; runtime skips it |
 | Schema v1-v3 while local managed profiles exist | Reject before replacing providers |
 | Schema v3 has invalid/out-of-range User ID | `SEC_INVALID_INPUT`; roll back the whole import |
 | Schema v3 has invalid/oversized token | `SEC_INVALID_INPUT`; roll back the whole import |
@@ -452,12 +490,15 @@ same SQLite transaction that inserts the provider and canonical extension.
 
 ### 6. Tests Required
 
-- Assert export emits schema v4, canonical account config, stable provider
+- Assert export emits schema v5, canonical account config, stable provider
   UUIDs, and synthetic
   credentials only for providers that have private data.
-- Run a v1/v2/v3/v4 matrix proving the independent Skill, account-snapshot,
-  and provider-UUID capability thresholds, including v2's full Skill
-  requirements.
+- Run a v1/v2/v3/v4/v5 matrix proving the independent Skill, account-snapshot,
+  provider-UUID, and sort-mode-UUID/cross-policy capability thresholds.
+- Round-trip v5 mode/provider UUIDs, active mode, order/enable/reuse fields,
+  and cross policy. Prove invalid identities fail before the import lock, old
+  bundles get fresh mode UUIDs/no cross policy, malformed rules fail open, and
+  valid missing targets remain inspectable.
 - Round-trip v3 account mode, User ID, token, and refresh settings; assert the
   extension contains no historical private keys and summary contains no token.
 - Inject out-of-range User ID, invalid token, invalid account config, and a
@@ -485,6 +526,8 @@ let imports_skills =
     schema_version >= CONFIG_BUNDLE_FULL_SKILL_PAYLOAD_MIN_VERSION;
 let imports_account_credentials =
     schema_version >= CONFIG_BUNDLE_ACCOUNT_USAGE_SNAPSHOT_MIN_VERSION;
+let imports_sort_mode_uuid_links =
+    schema_version >= CONFIG_BUNDLE_SORT_MODE_UUID_MIN_VERSION;
 ```
 
 Each feature keeps the version at which it first appeared, so advancing the

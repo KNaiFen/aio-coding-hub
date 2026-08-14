@@ -1,6 +1,15 @@
-import { useCallback, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
+import { toast } from "sonner";
 import type { ActiveUiContribution, JsonValue } from "../../generated/bindings";
 import type {
   ClaudeModels,
@@ -77,7 +86,19 @@ import {
 import { logToConsole } from "../../services/consoleLog";
 import { formatUnknownError } from "../../utils/errors";
 import { DEFAULT_UPSTREAM_RETRY_POLICY } from "../../services/gateway/upstreamRetryPolicy";
-import { DEFAULT_MODEL_ROUTING_POLICY } from "../../services/gateway/modelRoutingPolicy";
+import {
+  cloneModelRoutingPolicy,
+  DEFAULT_MODEL_ROUTING_POLICY,
+} from "../../services/gateway/modelRoutingPolicy";
+import {
+  useProviderRoutingPolicyQuery,
+  useProviderRoutingPolicySaveMutation,
+  useRoutingProviderCandidatesQuery,
+} from "../../query/sortModes";
+import type {
+  CrossProviderModelRoutingPolicy,
+  ProviderModelRoutingPolicyView,
+} from "../../services/providers/sortModes";
 import { useContributionsForSlot } from "../../plugins/contributions/useActiveContributions";
 import { contributionKey, type ContributionValues } from "../../plugins/contributions/types";
 
@@ -197,6 +218,25 @@ type AccountUsageCustomTestState = {
   result: ProviderAccountUsageResult | null;
   error: string | null;
 };
+
+const EMPTY_CROSS_PROVIDER_MODEL_ROUTING_POLICY: CrossProviderModelRoutingPolicy = {
+  enabled: false,
+  rules: [],
+};
+
+function cloneCrossProviderModelRoutingPolicy(
+  policy: CrossProviderModelRoutingPolicy | null | undefined
+): CrossProviderModelRoutingPolicy {
+  const source = policy ?? EMPTY_CROSS_PROVIDER_MODEL_ROUTING_POLICY;
+  return {
+    enabled: source.enabled,
+    rules: source.rules.map((rule) => ({ ...rule })),
+  };
+}
+
+function routingPolicySignature(value: unknown) {
+  return JSON.stringify(value);
+}
 
 function buildExtensionValuesResetKey({
   open,
@@ -326,6 +366,13 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
   const isDuplicating = mode === "create" && createInitialValues != null;
   const editingProviderId = mode === "edit" ? props.provider.id : null;
   const editProvider = mode === "edit" ? props.provider : null;
+  const routingEditorEnabled = mode === "edit" && props.routeModes != null;
+  const editProviderUuid = editProvider?.provider_uuid ?? "";
+  const editProviderName = editProvider?.name ?? "";
+  const routeMode = mode === "edit" ? (props.routeMode ?? null) : null;
+  const routeModes = mode === "edit" ? (props.routeModes ?? []) : [];
+  const onRouteModeChange =
+    mode === "edit" ? (props.onRouteModeChange ?? (() => undefined)) : () => undefined;
 
   const baseUrlRowSeqRef = useRef(1);
   const newBaseUrlRow = useCallback((url = ""): BaseUrlRow => {
@@ -362,6 +409,18 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
   const [modelRoutingPolicyDraft, setModelRoutingPolicyDraft] = useState<ModelRoutingPolicy>(
     DEFAULT_MODEL_ROUTING_POLICY
   );
+  const [ordinaryRoutingBaseline, setOrdinaryRoutingBaseline] = useState<string | null>(null);
+  const [ordinaryRoutingRevision, setOrdinaryRoutingRevision] = useState<string | null>(null);
+  const [crossRoutingPolicy, setCrossRoutingPolicyState] =
+    useState<CrossProviderModelRoutingPolicy | null>(null);
+  const [crossRoutingBaseline, setCrossRoutingBaseline] = useState<string | null>(null);
+  const [crossRoutingRevision, setCrossRoutingRevision] = useState<string | null>(null);
+  const [routingPolicyView, setRoutingPolicyView] =
+    useState<ProviderModelRoutingPolicyView | null>(null);
+  const ordinaryRoutingProviderKeyRef = useRef<string | null>(null);
+  const ordinaryRoutingRevisionRef = useRef<string | null>(null);
+  const crossRoutingScopeKeyRef = useRef<string | null>(null);
+  const crossRoutingRevisionRef = useRef<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [savingWithModelFetch, setSavingWithModelFetch] = useState(false);
   const [copyingApiKey, setCopyingApiKey] = useState(false);
@@ -399,6 +458,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
   const providerUpsertMutation = useProviderUpsertMutation();
   const providerDeleteMutation = useProviderDeleteMutation();
   const providerModelsRefreshMutation = useProviderModelsRefreshMutation();
+  const providerRoutingPolicySaveMutation = useProviderRoutingPolicySaveMutation();
   const { contributions: providerEditorContributions } = useContributionsForSlot(
     "providers.editor.sections"
   );
@@ -408,6 +468,24 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
   const oauthStatusQuery = useProviderOAuthStatusQuery(editingProviderId, {
     enabled: open && editProvider?.auth_mode === "oauth",
   });
+  const routingPolicyQuery = useProviderRoutingPolicyQuery(
+    {
+      cliKey,
+      providerId: editingProviderId,
+      providerUuid: editProvider?.provider_uuid ?? null,
+      modeId: routeMode?.modeId ?? null,
+      modeUuid: routeMode?.modeUuid ?? null,
+    },
+    { enabled: open && routingEditorEnabled }
+  );
+  const routingCandidatesQuery = useRoutingProviderCandidatesQuery(
+    {
+      cliKey,
+      modeId: routeMode?.modeId ?? null,
+      modeUuid: routeMode?.modeUuid ?? null,
+    },
+    { enabled: open && routingEditorEnabled && routeMode != null }
+  );
 
   const form = useForm<ProviderEditorDialogFormInput>({ defaultValues: DEFAULT_FORM_VALUES });
   const editProviderSnapshotRef = useRef<ProviderSummary | null>(null);
@@ -436,6 +514,86 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
   const codexGatewayBaseUrl = codexGatewayBaseOrigin
     ? `${codexGatewayBaseOrigin.replace(/\/$/, "")}/v1`
     : "当前网关 /v1";
+
+  const ordinaryRoutingSignature = routingPolicySignature({
+    enabled: modelRoutingPolicyOverrideEnabled,
+    policy: modelRoutingPolicyDraft,
+  });
+  const crossRoutingSignature = routingPolicySignature(crossRoutingPolicy);
+  const ordinaryRoutingDirty =
+    ordinaryRoutingBaseline != null && ordinaryRoutingSignature !== ordinaryRoutingBaseline;
+  const crossRoutingDirty =
+    crossRoutingBaseline != null && crossRoutingSignature !== crossRoutingBaseline;
+
+  const adoptCrossRoutingView = useCallback((view: ProviderModelRoutingPolicyView) => {
+    const nextCrossPolicy =
+      view.selected_mode == null || !view.source_member_present
+        ? null
+        : cloneCrossProviderModelRoutingPolicy(view.cross_policy);
+    setCrossRoutingPolicyState(nextCrossPolicy);
+    setCrossRoutingBaseline(routingPolicySignature(nextCrossPolicy));
+    setCrossRoutingRevision(view.cross_policy_revision);
+    crossRoutingRevisionRef.current = view.cross_policy_revision;
+  }, []);
+
+  useEffect(() => {
+    const view = routingPolicyQuery.data;
+    if (!open || !routingEditorEnabled || !view) return;
+
+    const providerKey = `${view.cli_key}:${view.provider_id}:${view.provider_uuid}`;
+    const modeKey = view.selected_mode
+      ? `${view.selected_mode.mode_id}:${view.selected_mode.mode_uuid}`
+      : "default";
+
+    const ordinaryProviderChanged = ordinaryRoutingProviderKeyRef.current !== providerKey;
+    const ordinaryRevisionChanged =
+      ordinaryRoutingRevisionRef.current !== view.ordinary_policy_revision;
+    if (ordinaryProviderChanged || (ordinaryRevisionChanged && !ordinaryRoutingDirty)) {
+      const ordinaryPolicy = cloneModelRoutingPolicy(view.ordinary_policy);
+      setModelRoutingPolicyOverrideEnabled(view.provider_override_enabled);
+      setModelRoutingPolicyDraft(ordinaryPolicy);
+      setOrdinaryRoutingBaseline(
+        routingPolicySignature({
+          enabled: view.provider_override_enabled,
+          policy: ordinaryPolicy,
+        })
+      );
+      setOrdinaryRoutingRevision(view.ordinary_policy_revision);
+      ordinaryRoutingProviderKeyRef.current = providerKey;
+      ordinaryRoutingRevisionRef.current = view.ordinary_policy_revision;
+    }
+
+    const crossScopeKey = `${providerKey}:${modeKey}`;
+    const crossScopeChanged = crossRoutingScopeKeyRef.current !== crossScopeKey;
+    const crossRevisionChanged =
+      crossRoutingRevisionRef.current !== view.cross_policy_revision;
+    if (crossScopeChanged || (crossRevisionChanged && !crossRoutingDirty)) {
+      adoptCrossRoutingView(view);
+      crossRoutingScopeKeyRef.current = crossScopeKey;
+    }
+    setRoutingPolicyView(view);
+  }, [
+    adoptCrossRoutingView,
+    crossRoutingDirty,
+    open,
+    ordinaryRoutingDirty,
+    routingEditorEnabled,
+    routingPolicyQuery.data,
+  ]);
+
+  useEffect(() => {
+    if (open) return;
+    ordinaryRoutingProviderKeyRef.current = null;
+    ordinaryRoutingRevisionRef.current = null;
+    crossRoutingScopeKeyRef.current = null;
+    crossRoutingRevisionRef.current = null;
+    setOrdinaryRoutingBaseline(null);
+    setOrdinaryRoutingRevision(null);
+    setCrossRoutingPolicyState(null);
+    setCrossRoutingBaseline(null);
+    setCrossRoutingRevision(null);
+    setRoutingPolicyView(null);
+  }, [open]);
 
   const syncFreeTagForCostMultiplier = useCallback((value: string) => {
     setTags((prev) => normalizeTagsForCostMultiplier(prev, value));
@@ -864,6 +1022,68 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
     [editingProviderId, queryClient]
   );
 
+  const saveRoutingPolicies = useCallback(async (): Promise<boolean> => {
+    if (!routingEditorEnabled) return true;
+    if (!editProvider || !routingPolicyView || !ordinaryRoutingRevision) return false;
+    try {
+      const saved = await providerRoutingPolicySaveMutation.mutateAsync({
+        cliKey,
+        provider_id: editProvider.id,
+        provider_uuid: editProvider.provider_uuid,
+        mode_id: routeMode?.modeId ?? null,
+        mode_uuid: routeMode?.modeUuid ?? null,
+        provider_override_enabled: modelRoutingPolicyOverrideEnabled,
+        ordinary_policy: modelRoutingPolicyDraft,
+        expected_ordinary_policy_revision: ordinaryRoutingRevision,
+        cross_policy:
+          routeMode == null || crossRoutingRevision == null ? null : crossRoutingPolicy,
+        expected_cross_policy_revision: routeMode == null ? null : crossRoutingRevision,
+      });
+      const ordinaryPolicy = cloneModelRoutingPolicy(saved.ordinary_policy);
+      setModelRoutingPolicyOverrideEnabled(saved.provider_override_enabled);
+      setModelRoutingPolicyDraft(ordinaryPolicy);
+      setOrdinaryRoutingBaseline(
+        routingPolicySignature({ enabled: saved.provider_override_enabled, policy: ordinaryPolicy })
+      );
+      setOrdinaryRoutingRevision(saved.ordinary_policy_revision);
+      ordinaryRoutingRevisionRef.current = saved.ordinary_policy_revision;
+      adoptCrossRoutingView(saved);
+      setRoutingPolicyView(saved);
+      return true;
+    } catch (error) {
+      logToConsole("error", "保存供应商模型路由失败", {
+        cli: cliKey,
+        provider_id: editProvider.id,
+        mode_id: routeMode?.modeId ?? null,
+        error: String(error),
+      });
+      toast(`保存供应商模型路由失败：${String(error)}`);
+      return false;
+    }
+  }, [
+    cliKey,
+    adoptCrossRoutingView,
+    crossRoutingPolicy,
+    crossRoutingRevision,
+    editProvider,
+    modelRoutingPolicyDraft,
+    modelRoutingPolicyOverrideEnabled,
+    ordinaryRoutingRevision,
+    providerRoutingPolicySaveMutation,
+    routeMode,
+    routingEditorEnabled,
+    routingPolicyView,
+  ]);
+
+  const discardCrossRoutingDraft = useCallback(() => {
+    if (!routingPolicyView || routeMode == null) return;
+    adoptCrossRoutingView(routingPolicyView);
+  }, [adoptCrossRoutingView, routeMode, routingPolicyView]);
+
+  const setCrossRoutingPolicy = useCallback((policy: CrossProviderModelRoutingPolicy) => {
+    setCrossRoutingPolicyState(cloneCrossProviderModelRoutingPolicy(policy));
+  }, []);
+
   const cancelOAuthDeviceFlow = useCallback((flowId: string) => {
     void providerOAuthCancelDeviceFlow(flowId).catch((err) => {
       logToConsole("warn", "取消设备码登录失败", { error: String(err) });
@@ -956,6 +1176,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
     setUpstreamRetryPolicyDraft,
     setModelRoutingPolicyOverrideEnabled,
     setModelRoutingPolicyDraft,
+    initializeEditModelRoutingPolicy: !routingEditorEnabled,
     setAuthMode,
     setCx2ccSourceValue,
     setCodexBridgeTarget,
@@ -1001,6 +1222,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
       upstreamRetryPolicyDraft,
       modelRoutingPolicyOverrideEnabled,
       modelRoutingPolicyDraft,
+      modelRoutingPolicyManagedSeparately: routingEditorEnabled,
       apiKeyConfigured,
       isCodexGatewaySource,
       sourceProviderId,
@@ -1053,6 +1275,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
       upstreamRetryPolicyDraft,
       modelRoutingPolicyOverrideEnabled,
       modelRoutingPolicyDraft,
+      routingEditorEnabled,
       apiKeyConfigured,
       isCodexGatewaySource,
       sourceProviderId,
@@ -1119,6 +1342,10 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
       refreshOauthStatus,
       clearAccountUsageSecretDraft,
       persistProvider: (input) => providerUpsertMutation.mutateAsync({ input }),
+      persistRoutingPolicies: async () => {
+        if (!routingEditorEnabled) return true;
+        return saveRoutingPolicies();
+      },
       refreshProviderModels: (providerId, providerUuid) =>
         providerModelsRefreshMutation.mutateAsync({ providerId, providerUuid }),
     }),
@@ -1137,6 +1364,8 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
       clearAccountUsageSecretDraft,
       providerUpsertMutation,
       providerModelsRefreshMutation,
+      routingEditorEnabled,
+      saveRoutingPolicies,
     ]
   );
 
@@ -1315,6 +1544,25 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
     setModelRoutingPolicyOverrideEnabled,
     modelRoutingPolicyDraft,
     setModelRoutingPolicyDraft,
+    routingEditorEnabled,
+    ordinaryRoutingDirty,
+    crossRoutingPolicy,
+    crossRoutingDirty,
+    setCrossRoutingPolicy,
+    discardCrossRoutingDraft,
+    saveRoutingPolicies,
+    routingPolicyView,
+    routingPolicyLoading: routingPolicyQuery.isLoading || routingPolicyQuery.isFetching,
+    routingPolicyError: routingPolicyQuery.error,
+    routingCandidates: routingCandidatesQuery.data ?? [],
+    routingCandidatesLoading:
+      routingCandidatesQuery.isLoading || routingCandidatesQuery.isFetching,
+    routingCandidatesError: routingCandidatesQuery.error,
+    editProviderUuid,
+    editProviderName,
+    routeMode,
+    routeModes,
+    onRouteModeChange,
     oauthStatus,
     oauthLoading,
     oauthDeviceFlow,

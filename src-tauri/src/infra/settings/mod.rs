@@ -21,9 +21,10 @@ pub use defaults::{
     SCHEMA_VERSION,
 };
 pub(crate) use migration::{
+    normalize_cross_provider_model_routing_policy_for_write,
     normalize_model_routing_policy_for_write, normalize_upstream_error_response_rules_for_write,
-    normalize_upstream_retry_policy_for_write, sanitize_model_routing_policy,
-    sanitize_upstream_retry_policy,
+    normalize_upstream_retry_policy_for_write, sanitize_cross_provider_model_routing_policy,
+    sanitize_model_routing_policy, sanitize_upstream_retry_policy,
 };
 pub(crate) use persistence::validate_bounds;
 pub use persistence::{
@@ -31,12 +32,11 @@ pub use persistence::{
     request_log_retention_days_fail_open, set_settings_finalize_failpoint_for_tests,
     set_settings_finalize_restore_failpoint_for_tests, update, write,
 };
-#[cfg(test)]
-pub use types::ModelRoutingRule;
+pub(crate) use types::CrossProviderModelRoutingRule;
 pub use types::{
-    AppSettings, CodexHomeMode, GatewayListenMode, HomeUsagePeriod, ModelRoutingPolicy,
-    UpstreamErrorMessageBehavior, UpstreamErrorResponseMatchMode, UpstreamErrorResponseRule,
-    UpstreamErrorStatusBehavior, UpstreamHttpRetryRule, UpstreamRetryPolicy,
-    UpstreamStreamInternalErrorPolicy, UpstreamTransportRetryKind, WslHostAddressMode,
-    WslTargetCli,
+    AppSettings, CodexHomeMode, CrossProviderModelRoutingPolicy, GatewayListenMode,
+    HomeUsagePeriod, ModelRoutingPolicy, ModelRoutingRule, UpstreamErrorMessageBehavior,
+    UpstreamErrorResponseMatchMode, UpstreamErrorResponseRule, UpstreamErrorStatusBehavior,
+    UpstreamHttpRetryRule, UpstreamRetryPolicy, UpstreamStreamInternalErrorPolicy,
+    UpstreamTransportRetryKind, WslHostAddressMode, WslTargetCli,
 };

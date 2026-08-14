@@ -348,12 +348,45 @@ CREATE TABLE IF NOT EXISTS sort_modes (
   UNIQUE(name)
 );
 
+CREATE TABLE IF NOT EXISTS sort_mode_identities (
+  mode_id INTEGER PRIMARY KEY,
+  mode_uuid TEXT NOT NULL UNIQUE,
+  FOREIGN KEY(mode_id) REFERENCES sort_modes(id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sort_mode_identities_mode_uuid ON sort_mode_identities(mode_uuid);
+
+CREATE TRIGGER IF NOT EXISTS sort_mode_identities_uuid_insert_guard
+BEFORE INSERT ON sort_mode_identities
+WHEN NEW.mode_uuid IS NULL
+  OR length(NEW.mode_uuid) <> 36
+  OR lower(NEW.mode_uuid) <> NEW.mode_uuid
+  OR substr(NEW.mode_uuid, 9, 1) <> '-'
+  OR substr(NEW.mode_uuid, 14, 1) <> '-'
+  OR substr(NEW.mode_uuid, 19, 1) <> '-'
+  OR substr(NEW.mode_uuid, 24, 1) <> '-'
+  OR substr(NEW.mode_uuid, 15, 1) <> '4'
+  OR substr(NEW.mode_uuid, 20, 1) NOT IN ('8', '9', 'a', 'b')
+  OR length(replace(NEW.mode_uuid, '-', '')) <> 32
+  OR replace(NEW.mode_uuid, '-', '') GLOB '*[^0-9a-f]*'
+BEGIN
+  SELECT RAISE(ABORT, 'mode_uuid must be a canonical UUID');
+END;
+
+CREATE TRIGGER IF NOT EXISTS sort_mode_identities_uuid_update_guard
+BEFORE UPDATE OF mode_uuid ON sort_mode_identities
+WHEN NEW.mode_uuid IS NULL OR NEW.mode_uuid <> OLD.mode_uuid
+BEGIN
+  SELECT RAISE(ABORT, 'mode_uuid is immutable');
+END;
+
 CREATE TABLE IF NOT EXISTS sort_mode_providers (
   mode_id INTEGER NOT NULL,
   cli_key TEXT NOT NULL,
   provider_id INTEGER NOT NULL,
   sort_order INTEGER NOT NULL,
   session_reuse_priority INTEGER NOT NULL DEFAULT 0 CHECK(session_reuse_priority BETWEEN 0 AND 1000),
+  cross_provider_model_routing_policy_json TEXT DEFAULT NULL,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   PRIMARY KEY(mode_id, cli_key, provider_id),

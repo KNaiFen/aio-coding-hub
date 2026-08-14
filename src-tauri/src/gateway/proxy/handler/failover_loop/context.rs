@@ -217,6 +217,7 @@ pub(super) struct ProviderCtx<'a> {
     pub(super) provider_index: u32,
     pub(super) provider_bridged: bool,
     pub(super) session_reuse: Option<bool>,
+    pub(super) session_binding_allowed: bool,
     pub(super) provider_max_attempts: u32,
     pub(super) stream_idle_timeout_seconds: Option<u32>,
     pub(super) upstream_retry_policy: &'a crate::settings::UpstreamRetryPolicy,
@@ -232,6 +233,7 @@ pub(super) struct ProviderCtxOwned {
     pub(super) provider_index: u32,
     pub(super) provider_bridged: bool,
     pub(super) session_reuse: Option<bool>,
+    pub(super) session_binding_allowed: bool,
     pub(super) provider_max_attempts: u32,
     pub(super) stream_idle_timeout_seconds: Option<u32>,
     pub(super) upstream_retry_policy: crate::settings::UpstreamRetryPolicy,
@@ -248,6 +250,7 @@ impl<'a> From<ProviderCtx<'a>> for ProviderCtxOwned {
             provider_index: ctx.provider_index,
             provider_bridged: ctx.provider_bridged,
             session_reuse: ctx.session_reuse,
+            session_binding_allowed: ctx.session_binding_allowed,
             provider_max_attempts: ctx.provider_max_attempts,
             stream_idle_timeout_seconds: ctx.stream_idle_timeout_seconds,
             upstream_retry_policy: ctx.upstream_retry_policy.clone(),
@@ -275,6 +278,7 @@ pub(super) fn build_stream_finalize_ctx<R: tauri::Runtime>(
         route_generation: ctx.route_generation,
         session_id: ctx.session_id.clone(),
         enable_session_reuse: ctx.enable_session_reuse,
+        session_binding_allowed: provider_ctx.session_binding_allowed,
         sort_mode_id: ctx.effective_sort_mode_id,
         trace_id: ctx.trace_id.clone(),
         cli_key: ctx.cli_key.clone(),
@@ -386,6 +390,8 @@ pub(super) struct FailoverRunState {
     pub(super) failed_provider_ids: HashSet<i64>,
     pub(super) last_outcome: Option<AttemptOutcome>,
     pub(super) active_requested_model: Option<String>,
+    pub(super) cross_jump_used: bool,
+    pub(super) processed_provider_ids: HashSet<i64>,
 }
 
 impl FailoverRunState {
@@ -395,6 +401,8 @@ impl FailoverRunState {
             failed_provider_ids: HashSet::new(),
             last_outcome: None,
             active_requested_model: None,
+            cross_jump_used: false,
+            processed_provider_ids: HashSet::new(),
         }
     }
 }

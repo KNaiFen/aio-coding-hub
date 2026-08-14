@@ -75,6 +75,11 @@ fn insert_sort_mode_with_providers(db: &crate::db::Db, provider_ids: &[i64]) -> 
     )
     .expect("insert mode");
     let mode_id = conn.last_insert_rowid();
+    conn.execute(
+        "INSERT INTO sort_mode_identities(mode_id, mode_uuid) VALUES (?1, ?2)",
+        rusqlite::params![mode_id, format!("00000000-0000-4000-8000-{mode_id:012}")],
+    )
+    .expect("insert mode identity");
     for (idx, provider_id) in provider_ids.iter().enumerate() {
         conn.execute(
             r#"
@@ -170,7 +175,9 @@ fn provider_selection_ignores_bound_sort_mode_and_order_when_globally_disabled()
     .expect("select providers");
 
     assert_eq!(selection.effective_sort_mode_id, None);
+    assert_eq!(selection.effective_sort_mode_uuid, None);
     assert_eq!(ids(&selection.providers), vec![p1.id, p2.id]);
+    assert!(selection.sort_mode_members.is_empty());
     assert_eq!(selection.bound_provider_order, None);
     assert_eq!(selection.session_bound_sort_mode_id, None);
     assert_eq!(
@@ -213,7 +220,12 @@ fn provider_selection_keeps_legacy_bound_sort_mode_when_enabled() {
     .expect("select providers");
 
     assert_eq!(selection.effective_sort_mode_id, Some(bound_mode_id));
+    assert_eq!(
+        selection.effective_sort_mode_uuid.as_deref(),
+        Some(format!("00000000-0000-4000-8000-{bound_mode_id:012}").as_str())
+    );
     assert_eq!(ids(&selection.providers), vec![p2.id, p1.id]);
+    assert_eq!(ids(&selection.sort_mode_members), vec![p2.id, p1.id]);
 }
 
 #[test]

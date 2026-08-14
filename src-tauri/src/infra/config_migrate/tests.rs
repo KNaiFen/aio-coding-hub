@@ -440,13 +440,66 @@ fn config_export_import_round_trips_sort_mode_session_reuse_priority() {
         75,
     )
     .expect("set preferred reuse priority");
+    crate::sort_modes::set_active(&test_app.db, "codex", Some(mode.id))
+        .expect("activate priority route");
+    let mut routing = crate::sort_modes::provider_model_routing_policy_get(
+        &test_app.db,
+        preferred.id,
+        &preferred.provider_uuid,
+        Some(mode.id),
+        Some(&mode.mode_uuid),
+    )
+    .expect("get routing view");
+    routing.cross_policy = Some(settings::CrossProviderModelRoutingPolicy {
+        enabled: true,
+        rules: vec![settings::CrossProviderModelRoutingRule {
+            source_model: "gpt-source".to_string(),
+            source_reasoning_effort: Some("high".to_string()),
+            target_provider_uuid: fallback.provider_uuid.clone(),
+            target_model: Some("gpt-target".to_string()),
+            target_reasoning_effort: Some("medium".to_string()),
+        }],
+    });
+    crate::sort_modes::provider_model_routing_policy_save(
+        &test_app.db,
+        crate::sort_modes::ProviderModelRoutingPolicySaveInput {
+            provider_id: preferred.id,
+            provider_uuid: preferred.provider_uuid.clone(),
+            mode_id: Some(mode.id),
+            mode_uuid: Some(mode.mode_uuid.clone()),
+            provider_override_enabled: routing.provider_override_enabled,
+            ordinary_policy: routing.ordinary_policy,
+            expected_ordinary_policy_revision: routing.ordinary_policy_revision,
+            cross_policy: routing.cross_policy,
+            expected_cross_policy_revision: routing.cross_policy_revision,
+        },
+    )
+    .expect("save cross policy");
 
     let bundle = config_export(&app, &test_app.db).expect("export priority route");
+    assert_eq!(bundle.schema_version, CONFIG_BUNDLE_SCHEMA_VERSION);
     let exported = bundle
         .sort_modes
         .iter()
         .find(|candidate| candidate.name == "Priority Route")
         .expect("exported priority route");
+    assert_eq!(exported.mode_uuid.as_deref(), Some(mode.mode_uuid.as_str()));
+    assert_eq!(
+        bundle.sort_mode_active.get("codex").map(String::as_str),
+        Some(mode.mode_uuid.as_str())
+    );
+    assert_eq!(
+        exported.providers[0].provider_uuid.as_deref(),
+        Some(preferred.provider_uuid.as_str())
+    );
+    assert_eq!(
+        exported.providers[0]
+            .cross_provider_model_routing_policy
+            .as_ref()
+            .and_then(|policy| policy.rules.first())
+            .map(|rule| rule.target_provider_uuid.as_str()),
+        Some(fallback.provider_uuid.as_str())
+    );
     assert_eq!(
         exported
             .providers
@@ -466,28 +519,38 @@ fn config_export_import_round_trips_sort_mode_session_reuse_priority() {
     let mut stmt = conn
         .prepare(
             r#"
-SELECT p.name, mp.session_reuse_priority
+SELECT p.name, mp.session_reuse_priority, identity.mode_uuid,
+       mp.cross_provider_model_routing_policy_json
 FROM sort_mode_providers mp
 JOIN providers p ON p.id = mp.provider_id
 JOIN sort_modes sm ON sm.id = mp.mode_id
+JOIN sort_mode_identities identity ON identity.mode_id = sm.id
 WHERE sm.name = ?1
 ORDER BY mp.sort_order ASC
 "#,
         )
         .expect("prepare restored priority query");
-    let restored: Vec<(String, i64)> = stmt
+    let restored: Vec<(String, i64, String, Option<String>)> = stmt
         .query_map(params!["Priority Route"], |row| {
-            Ok((row.get(0)?, row.get(1)?))
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
         })
         .expect("query restored priority rows")
         .collect::<Result<_, _>>()
         .expect("read restored priority rows");
+    assert_eq!(restored.len(), 2);
+    assert_eq!(restored[0].0, "Priority Preferred");
+    assert_eq!(restored[0].1, 75);
+    assert_eq!(restored[0].2, mode.mode_uuid);
+    assert_eq!(restored[1].0, "Priority Fallback");
+    assert_eq!(restored[1].1, 0);
+    assert_eq!(restored[1].2, mode.mode_uuid);
+    assert!(restored[1].3.is_none());
+    let restored_policy: settings::CrossProviderModelRoutingPolicy =
+        serde_json::from_str(restored[0].3.as_deref().expect("restored cross policy"))
+            .expect("parse restored cross policy");
     assert_eq!(
-        restored,
-        vec![
-            ("Priority Preferred".to_string(), 75),
-            ("Priority Fallback".to_string(), 0)
-        ]
+        restored_policy.rules[0].target_provider_uuid,
+        fallback.provider_uuid
     );
 
     let legacy: SortModeProviderExport = serde_json::from_value(serde_json::json!({
@@ -498,6 +561,8 @@ ORDER BY mp.sort_order ASC
     }))
     .expect("deserialize legacy sort mode provider export");
     assert_eq!(legacy.session_reuse_priority, 0);
+    assert!(legacy.provider_uuid.is_none());
+    assert!(legacy.cross_provider_model_routing_policy.is_none());
 }
 
 fn configure_provider_model_for_profile(
@@ -2131,9 +2196,196 @@ INSERT INTO skills(
 #[test]
 fn validate_bundle_schema_version_accepts_current_version() {
     assert!(super::validate_bundle_schema_version(CONFIG_BUNDLE_SCHEMA_VERSION).is_ok());
+    assert!(super::validate_bundle_schema_version(CONFIG_BUNDLE_SCHEMA_VERSION_V4).is_ok());
     assert!(super::validate_bundle_schema_version(CONFIG_BUNDLE_SCHEMA_VERSION_V3).is_ok());
     assert!(super::validate_bundle_schema_version(CONFIG_BUNDLE_SCHEMA_VERSION_V2).is_ok());
     assert!(super::validate_bundle_schema_version(CONFIG_BUNDLE_SCHEMA_VERSION_V1).is_ok());
+}
+
+#[test]
+fn config_v5_sort_mode_preflight_rejects_invalid_identity_before_import_lock() {
+    let test_app = ConfigMigrateTestApp::new();
+    let app = test_app.handle();
+    let provider = seed_direct_codex_provider(&test_app, "Mode Guard");
+    let mode =
+        crate::sort_modes::create_mode(&test_app.db, "Guard Route").expect("create guard route");
+    crate::sort_modes::set_mode_providers_order(&test_app.db, mode.id, "codex", vec![provider.id])
+        .expect("set guard member");
+
+    let mut invalid_mode = config_export(&app, &test_app.db).expect("export invalid mode probe");
+    invalid_mode.sort_modes[0].mode_uuid = Some("invalid".to_string());
+    reset_config_import_lock_attempts_for_test();
+    let error =
+        config_import(&app, &test_app.db, invalid_mode).expect_err("invalid mode UUID must fail");
+    assert_eq!(error.code(), "SEC_INVALID_INPUT");
+    assert_eq!(config_import_lock_attempts_for_test(), 0);
+
+    let mut invalid_member = config_export(&app, &test_app.db).expect("export member probe");
+    invalid_member.sort_modes[0].providers[0].provider_uuid =
+        Some(crate::shared::uuid::new_uuid_v4());
+    reset_config_import_lock_attempts_for_test();
+    let error = config_import(&app, &test_app.db, invalid_member)
+        .expect_err("missing member provider UUID must fail");
+    assert_eq!(error.code(), "SEC_INVALID_INPUT");
+    assert_eq!(config_import_lock_attempts_for_test(), 0);
+}
+
+#[test]
+fn config_v5_cross_policy_deserialization_drops_malformed_rules_fail_open() {
+    let target_uuid = crate::shared::uuid::new_uuid_v4();
+    let raw = serde_json::json!({
+        "cli_key": "gemini",
+        "provider_uuid": crate::shared::uuid::new_uuid_v4(),
+        "provider_cli_key": "Gemini Source",
+        "sort_order": 0,
+        "enabled": true,
+        "cross_provider_model_routing_policy": {
+            "enabled": true,
+            "rules": [
+                {
+                    "source_model": "gemini-pro",
+                    "target_provider_uuid": target_uuid,
+                    "target_reasoning_effort": 512
+                },
+                {
+                    "source_model": "gemini-flash",
+                    "source_reasoning_effort": "high",
+                    "target_provider_uuid": target_uuid,
+                    "target_reasoning_effort": "low"
+                }
+            ]
+        }
+    });
+
+    let member: SortModeProviderExport =
+        serde_json::from_value(raw).expect("malformed cross rule must not reject member");
+    let policy = member
+        .cross_provider_model_routing_policy
+        .expect("valid cross rules remain");
+    assert!(policy.enabled);
+    assert_eq!(policy.rules.len(), 1);
+    assert_eq!(policy.rules[0].source_model, "gemini-flash");
+    assert_eq!(
+        policy.rules[0].target_reasoning_effort.as_deref(),
+        Some("low")
+    );
+}
+
+#[test]
+fn config_v5_import_preserves_cross_rule_with_missing_target_uuid() {
+    let test_app = ConfigMigrateTestApp::new();
+    let app = test_app.handle();
+    let source = seed_direct_codex_provider(&test_app, "Missing Target Source");
+    let target = seed_direct_codex_provider(&test_app, "Missing Target Fixture");
+    let mode = crate::sort_modes::create_mode(&test_app.db, "Missing Target Route")
+        .expect("create missing target route");
+    crate::sort_modes::set_mode_providers_order(
+        &test_app.db,
+        mode.id,
+        "codex",
+        vec![source.id, target.id],
+    )
+    .expect("set missing target route members");
+
+    let missing_target_uuid = crate::shared::uuid::new_uuid_v4();
+    let mut bundle = config_export(&app, &test_app.db).expect("export v5 fixture");
+    let source_member = bundle
+        .sort_modes
+        .iter_mut()
+        .find(|candidate| candidate.name == "Missing Target Route")
+        .and_then(|candidate| {
+            candidate.providers.iter_mut().find(|member| {
+                member.provider_uuid.as_deref() == Some(source.provider_uuid.as_str())
+            })
+        })
+        .expect("source mode member");
+    source_member.cross_provider_model_routing_policy =
+        Some(settings::CrossProviderModelRoutingPolicy {
+            enabled: true,
+            rules: vec![settings::CrossProviderModelRoutingRule {
+                source_model: "gpt-source".to_string(),
+                source_reasoning_effort: None,
+                target_provider_uuid: missing_target_uuid.clone(),
+                target_model: Some("gpt-target".to_string()),
+                target_reasoning_effort: Some("high".to_string()),
+            }],
+        });
+
+    config_import(&app, &test_app.db, bundle).expect("import v5 missing target fixture");
+    let conn = test_app.db.open_connection().expect("open restored db");
+    let raw: String = conn
+        .query_row(
+            r#"
+SELECT member.cross_provider_model_routing_policy_json
+FROM sort_mode_providers member
+JOIN sort_modes mode ON mode.id = member.mode_id
+JOIN providers provider ON provider.id = member.provider_id
+WHERE mode.name = 'Missing Target Route' AND provider.provider_uuid = ?1
+"#,
+            [source.provider_uuid],
+            |row| row.get(0),
+        )
+        .expect("read missing target cross policy");
+    let restored: settings::CrossProviderModelRoutingPolicy =
+        serde_json::from_str(&raw).expect("parse missing target cross policy");
+    assert_eq!(restored.rules.len(), 1);
+    assert_eq!(restored.rules[0].target_provider_uuid, missing_target_uuid);
+}
+
+#[test]
+fn config_v4_sort_mode_import_generates_identity_and_drops_cross_policy() {
+    let test_app = ConfigMigrateTestApp::new();
+    let app = test_app.handle();
+    let source = seed_direct_codex_provider(&test_app, "Legacy Source");
+    let target = seed_direct_codex_provider(&test_app, "Legacy Target");
+    let mode =
+        crate::sort_modes::create_mode(&test_app.db, "Legacy Route").expect("create legacy route");
+    crate::sort_modes::set_mode_providers_order(
+        &test_app.db,
+        mode.id,
+        "codex",
+        vec![source.id, target.id],
+    )
+    .expect("set legacy members");
+    let mut bundle = config_export(&app, &test_app.db).expect("export v5 fixture");
+    let old_mode_uuid = bundle.sort_modes[0].mode_uuid.clone().expect("mode UUID");
+    bundle.schema_version = CONFIG_BUNDLE_SCHEMA_VERSION_V4;
+    bundle.sort_mode_active.clear();
+    bundle.sort_modes[0].mode_uuid = None;
+    for member in &mut bundle.sort_modes[0].providers {
+        member.provider_uuid = None;
+    }
+    bundle.sort_modes[0].providers[0].cross_provider_model_routing_policy =
+        Some(settings::CrossProviderModelRoutingPolicy {
+            enabled: true,
+            rules: vec![settings::CrossProviderModelRoutingRule {
+                source_model: "gpt-source".to_string(),
+                source_reasoning_effort: None,
+                target_provider_uuid: target.provider_uuid,
+                target_model: None,
+                target_reasoning_effort: None,
+            }],
+        });
+
+    config_import(&app, &test_app.db, bundle).expect("import v4 fixture");
+    let conn = test_app.db.open_connection().expect("open restored db");
+    let (new_mode_uuid, cross_policy): (String, Option<String>) = conn
+        .query_row(
+            r#"
+SELECT identity.mode_uuid, member.cross_provider_model_routing_policy_json
+FROM sort_modes mode
+JOIN sort_mode_identities identity ON identity.mode_id = mode.id
+JOIN sort_mode_providers member ON member.mode_id = mode.id
+JOIN providers provider ON provider.id = member.provider_id
+WHERE mode.name = 'Legacy Route' AND provider.name = 'Legacy Source'
+"#,
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("read restored legacy route");
+    assert!(crate::shared::uuid::is_canonical_uuid_v4(&new_mode_uuid));
+    assert_ne!(new_mode_uuid, old_mode_uuid);
+    assert!(cross_policy.is_none());
 }
 
 #[test]

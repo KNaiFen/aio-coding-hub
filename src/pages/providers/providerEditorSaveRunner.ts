@@ -48,6 +48,10 @@ export async function runProviderEditorSave(
   ctx.setSaving(true);
   try {
     const saved = await ctx.persistProvider(built.value.payload);
+    const routingSaved = ctx.persistRoutingPolicies
+      ? await ctx.persistRoutingPolicies(saved)
+      : true;
+    if (!routingSaved) return;
     ctx.form.setValue("api_key", "", { shouldDirty: false, shouldValidate: false });
     ctx.clearAccountUsageSecretDraft();
     logToConsole("info", ctx.mode === "create" ? "保存 Provider" : "更新 Provider", {

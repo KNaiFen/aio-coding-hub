@@ -208,11 +208,15 @@ fn failover_run_state_owns_attempts_failed_ids_and_last_outcome() {
         "provider_error",
         GatewayErrorCode::Upstream5xx.as_str(),
     ));
+    state.cross_jump_used = true;
+    state.processed_provider_ids.insert(84);
 
     let outcome = state.last_outcome.expect("last outcome");
 
     assert_eq!(state.attempts.len(), 1);
     assert!(state.failed_provider_ids.contains(&42));
+    assert!(state.cross_jump_used);
+    assert!(state.processed_provider_ids.contains(&84));
     assert_eq!(outcome.error_category, "provider_error");
     assert_eq!(outcome.error_code, GatewayErrorCode::Upstream5xx.as_str());
 }

@@ -383,6 +383,7 @@ mod tests {
             route_generation,
             session_id: Some("sess-stream-end".to_string()),
             enable_session_reuse: true,
+            session_binding_allowed: true,
             sort_mode_id: None,
             trace_id: "trace-stream-end".to_string(),
             cli_key: "codex".to_string(),

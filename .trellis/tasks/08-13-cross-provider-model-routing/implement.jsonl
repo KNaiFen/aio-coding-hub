@@ -1,0 +1,12 @@
+{"file":".trellis/spec/aio-coding-hub/backend/index.md","reason":"网关准备、重试、熔断和本地验证的后端入口规范。"}
+{"file":".trellis/spec/aio-coding-hub/backend/gateway-attempt-budget-contract.md","reason":"跨供应商临时 B 必须复用 Ready-provider 和 attempt budget 语义。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/configured-model-routing-contract.md","reason":"普通模型路由、marker、计费和协议改写的现行合同；本任务扩展时须保持兼容边界。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/gateway-failover-route-contract.md","reason":"候选选择、会话绑定、跳过/重试/切换计数和路由投影合同。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/codex-managed-model-route-contract.md","reason":"aio/ 受管 Codex 别名的单供应商固定绑定和排除边界。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/provider-share-contract.md","reason":"单供应商分享导出/导入的 schema、凭据隔离和不加入调用顺序边界。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/settings-ownership-rollback-contract.md","reason":"设置/方案写入应遵守 owner-scoped 更新和回滚原则。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/config-migration-skill-bundle-contract.md","reason":"完整配置 bundle 的有界导入、迁移前置校验和原子恢复边界。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/request-log-usage-ledger-pagination-contract.md","reason":"最终 provider/model 计费、attempts 和请求日志/ledger 投影合同。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/cloud-only-verification-contract.md","reason":"本仓库禁止本地依赖安装、构建和测试，规定允许的直接检查及 CI 责任。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/local-observer-tui-contract.md","reason":"observer/TUI 请求投影的 additive、脱敏和 fail-open 边界；本任务不改 TUI formatter。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/index.md","reason":"确认本任务触发的跨层合同入口、优先级和合同更新范围。"}

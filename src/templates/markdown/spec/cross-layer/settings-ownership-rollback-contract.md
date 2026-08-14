@@ -36,6 +36,14 @@ owns. `settings::write(app, snapshot)` is a whole-snapshot primitive reserved fo
   the 12 rectifier/response-fixer fields, and gateway repair conditionally owns only `preferred_port`.
 - Ordinary `SettingsUpdate` / generated bindings / frontend ordinary payload must not include rectifier
   exclusive fields. Future `AppSettings` fields do not automatically become ordinary-owner fields.
+- Global model routing is an `AppSettings` ordinary-owner field and never owns
+  cross-provider targets. Provider-row ordinary policy and named-mode member
+  cross policy are separate owners shown by one editor; save them in one SQLite
+  transaction with independent revisions and provider/mode UUID validation.
+  Default and non-members have no cross-policy write authority.
+- A stale ordinary or member revision rolls back both policy writes. Advance
+  route generation and invalidate sessions only after durable commit; failed
+  validation/conflict has no runtime side effect.
 - Complete config import may replace the whole snapshot only through `compare_and_swap` (or the shared
   autostart coordinator that wraps it); the canonical snapshot used for preparation is the expected value.
 - A writer with external side effects records the exact owned-field value it committed. Rollback restores
@@ -68,6 +76,7 @@ owns. `settings::write(app, snapshot)` is a whole-snapshot primitive reserved fo
 | External side effect fails and committed token still matches | Restore only owned fields | Report original operation failure |
 | External side effect fails after newer owned-field commit | Skip rollback and old runtime restoration | Preserve newer value; safe warning allowed |
 | Atomic settings persistence fails | Leave last durable snapshot authoritative | Return persistence error without partial file |
+| Combined ordinary/cross save loses either revision CAS | Preserve both current policies | Conflict; no partial write or runtime invalidation |
 
 ### 5. Good / Base / Bad Cases
 
@@ -89,6 +98,9 @@ owns. `settings::write(app, snapshot)` is a whole-snapshot primitive reserved fo
 - Force runtime sync failure, commit a newer owner value before rollback, and prove the service syncs the
   canonical winner rather than previous runtime. Count autostart calls in the real import CAS-loser path.
 - Search production Rust sources for `settings::write(` and allow only test fixtures/seeding.
+- Test combined model-policy CAS with stale ordinary/member revisions,
+  UUID/membership mismatch, transaction rollback, and post-commit-only runtime
+  invalidation.
 - Run settings, gateway, Grok, CLI proxy, config-migration focused suites and the full Rust library suite.
 
 ### 7. Wrong vs Correct

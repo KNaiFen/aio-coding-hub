@@ -126,6 +126,7 @@ use axum::{
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
 };
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -256,6 +257,100 @@ fn sync_codex_prepared_active_requested_model<R: tauri::Runtime>(
     }
 }
 
+enum ProviderWorkItem {
+    Baseline {
+        provider_index: usize,
+    },
+    CrossTemporary {
+        target: Box<crate::providers::ProviderForGateway>,
+        route: crate::gateway::configured_model_route::ConfiguredModelRoute,
+    },
+}
+
+fn request_reasoning_effort<R: tauri::Runtime>(input: &RequestContext<R>) -> Option<String> {
+    input.special_settings.lock().ok().and_then(|settings| {
+        settings.iter().rev().find_map(|setting| {
+            (setting.get("type").and_then(serde_json::Value::as_str)
+                == Some("request_reasoning_effort"))
+            .then(|| setting.get("effort").and_then(serde_json::Value::as_str))
+            .flatten()
+            .map(str::to_string)
+        })
+    })
+}
+
+fn cross_temporary_work_item<R: tauri::Runtime>(
+    input: &RequestContext<R>,
+    source: &crate::providers::ProviderForGateway,
+    source_reasoning_effort: Option<&str>,
+) -> Option<ProviderWorkItem> {
+    let source_model = input.requested_model.as_deref()?;
+    let plan = crate::gateway::configured_model_route::resolve_cross_plan(
+        crate::gateway::configured_model_route::CrossPlanRequest {
+            cli_key: &input.cli_key,
+            method: &input.method_hint,
+            path: &input.forwarded_path,
+            requested_model: Some(source_model),
+            source_reasoning_effort,
+            managed_model_route: input.managed_model_route.is_some(),
+            effective_sort_mode_uuid: input.effective_sort_mode_uuid.as_deref(),
+            policy: source.cross_provider_model_routing_policy.as_ref(),
+        },
+    )?;
+    let mode_uuid = input.effective_sort_mode_uuid.as_deref()?;
+    let target = input.sort_mode_members.iter().find(|candidate| {
+        candidate.provider_uuid == plan.target_provider_uuid
+            && candidate.provider_uuid != source.provider_uuid
+    });
+    let Some(target) = target else {
+        crate::gateway::configured_model_route::mark_cross_provider_route(
+            &input.special_settings,
+            mode_uuid,
+            source.id,
+            &source.provider_uuid,
+            &source.name,
+            None,
+            None,
+            source_model,
+            source_reasoning_effort,
+            &plan,
+            "skipped",
+            Some("target_not_eligible"),
+        );
+        return None;
+    };
+    let target_name = if target.name.trim().is_empty() {
+        format!("Provider #{} (auto-fixed)", target.id)
+    } else {
+        target.name.clone()
+    };
+    let route = crate::gateway::configured_model_route::cross_execution_route(
+        target.id,
+        &target_name,
+        source_model,
+        &plan,
+    );
+    crate::gateway::configured_model_route::mark_cross_provider_route(
+        &input.special_settings,
+        mode_uuid,
+        source.id,
+        &source.provider_uuid,
+        &source.name,
+        Some(target.id),
+        Some(&target_name),
+        source_model,
+        source_reasoning_effort,
+        &plan,
+        "matched",
+        None,
+    );
+
+    Some(ProviderWorkItem::CrossTemporary {
+        target: Box::new(target.clone()),
+        route,
+    })
+}
+
 /// Main failover loop: iterate providers, retry attempts, handle responses.
 ///
 /// This is a thin orchestrator that delegates to:
@@ -318,25 +413,101 @@ where
         original_anthropic_stream_requested(input.introspection_json.as_ref())
             || stream_flag_from_raw_body(&introspection_body);
 
-    let providers: Vec<_> = input.providers.clone();
+    let baseline_providers = input.providers.clone();
+    let source_reasoning_effort = request_reasoning_effort(&input);
+    let mut work_items: VecDeque<_> = (0..baseline_providers.len())
+        .map(|provider_index| ProviderWorkItem::Baseline { provider_index })
+        .collect();
 
-    for provider in providers.iter() {
+    while let Some(work_item) = work_items.pop_front() {
+        let (provider, route_override, cross_temporary) = match work_item {
+            ProviderWorkItem::Baseline { provider_index } => {
+                let Some(provider) = baseline_providers.get(provider_index) else {
+                    continue;
+                };
+                if run_state.processed_provider_ids.contains(&provider.id) {
+                    continue;
+                }
+                if !run_state.cross_jump_used {
+                    if let Some(cross_work_item) = cross_temporary_work_item(
+                        &input,
+                        provider,
+                        source_reasoning_effort.as_deref(),
+                    ) {
+                        let ProviderWorkItem::CrossTemporary { target, .. } = &cross_work_item
+                        else {
+                            unreachable!("cross planner returned a baseline work item")
+                        };
+                        if !run_state.processed_provider_ids.contains(&target.id) {
+                            run_state.cross_jump_used = true;
+                            run_state.processed_provider_ids.insert(target.id);
+                            work_items.push_front(ProviderWorkItem::Baseline { provider_index });
+                            work_items.push_front(cross_work_item);
+                            continue;
+                        }
+                    }
+                }
+                run_state.processed_provider_ids.insert(provider.id);
+                (provider.clone(), None, false)
+            }
+            ProviderWorkItem::CrossTemporary { target, route } => (
+                *target,
+                Some(provider_iterator::RouteExecutionOverride {
+                    route,
+                    session_binding_allowed: false,
+                }),
+                true,
+            ),
+        };
         let preparation = provider_iterator::prepare_provider(
             ctx,
             &input,
-            provider,
+            &provider,
             &mut counters,
             &mut run_state.attempts,
             &run_state.failed_provider_ids,
-            anthropic_stream_requested,
+            provider_iterator::ProviderPreparationOptions {
+                anthropic_stream_requested,
+                route_override,
+            },
         )
         .await;
 
         let mut prepared = match preparation {
             provider_iterator::PreparationOutcome::Ready(p) => *p,
-            provider_iterator::PreparationOutcome::ReadyLimitReached => break,
-            provider_iterator::PreparationOutcome::Skipped => continue,
+            provider_iterator::PreparationOutcome::ReadyLimitReached => {
+                if cross_temporary {
+                    crate::gateway::configured_model_route::update_cross_provider_route_status(
+                        &input.special_settings,
+                        "skipped",
+                        Some("ready_provider_limit"),
+                    );
+                }
+                break;
+            }
+            provider_iterator::PreparationOutcome::Skipped => {
+                if cross_temporary {
+                    crate::gateway::configured_model_route::update_cross_provider_route_status(
+                        &input.special_settings,
+                        "skipped",
+                        Some("target_gate_skipped"),
+                    );
+                }
+                continue;
+            }
             provider_iterator::PreparationOutcome::Terminal(reason) => {
+                if cross_temporary {
+                    crate::gateway::configured_model_route::update_cross_provider_route_status(
+                        &input.special_settings,
+                        "failed",
+                        Some("target_prepare_terminal"),
+                    );
+                    run_state.active_requested_model = input.requested_model.clone();
+                    crate::gateway::response_fixer::clear_configured_model_route(
+                        &input.special_settings,
+                    );
+                    continue;
+                }
                 let owned = finalize_owned_from_input(&input);
                 return finalize::terminal_request_error(finalize::TerminalRequestErrorInput {
                     state: &input.state,
@@ -390,7 +561,23 @@ where
         )
         .await
         {
+            if cross_temporary && !resp.status().is_success() {
+                crate::gateway::configured_model_route::update_cross_provider_route_status(
+                    &input.special_settings,
+                    "failed",
+                    Some("target_terminal_error"),
+                );
+            }
             return resp;
+        }
+        if cross_temporary {
+            crate::gateway::configured_model_route::update_cross_provider_route_status(
+                &input.special_settings,
+                "failed",
+                Some("target_attempt_failed"),
+            );
+            run_state.active_requested_model = input.requested_model.clone();
+            crate::gateway::response_fixer::clear_configured_model_route(&input.special_settings);
         }
     }
 

@@ -1262,6 +1262,106 @@ mod tests {
         mode.id
     }
 
+    fn gateway_provider_uuid(db: &db::Db, provider_id: i64) -> String {
+        let conn = db.open_connection().expect("open provider db");
+        providers::get_by_id(&conn, provider_id)
+            .expect("load provider")
+            .provider_uuid
+    }
+
+    fn set_member_cross_routing_policy(
+        db: &db::Db,
+        mode_id: i64,
+        cli_key: &str,
+        source_provider_id: i64,
+        target_provider_uuid: &str,
+        target_model: &str,
+        target_effort: Option<&str>,
+    ) {
+        set_provider_model_routing_override_enabled(db, source_provider_id, true);
+        let policy = settings::CrossProviderModelRoutingPolicy {
+            enabled: true,
+            rules: vec![settings::CrossProviderModelRoutingRule {
+                source_model: "grok-source".to_string(),
+                source_reasoning_effort: None,
+                target_provider_uuid: target_provider_uuid.to_string(),
+                target_model: Some(target_model.to_string()),
+                target_reasoning_effort: target_effort.map(str::to_string),
+            }],
+        };
+        let conn = db.open_connection().expect("open cross policy db");
+        conn.execute(
+            r#"
+UPDATE sort_mode_providers
+SET cross_provider_model_routing_policy_json = ?1
+WHERE mode_id = ?2 AND cli_key = ?3 AND provider_id = ?4
+"#,
+            rusqlite::params![
+                serde_json::to_string(&policy).expect("serialize cross policy"),
+                mode_id,
+                cli_key,
+                source_provider_id
+            ],
+        )
+        .expect("set cross policy");
+    }
+
+    fn set_provider_model_routing_override_enabled(db: &db::Db, provider_id: i64, enabled: bool) {
+        let policy_json = enabled
+            .then(|| serde_json::to_string(&settings::ModelRoutingPolicy::default()))
+            .transpose()
+            .expect("serialize provider routing override");
+        let conn = db
+            .open_connection()
+            .expect("open provider routing policy db");
+        conn.execute(
+            "UPDATE providers SET model_routing_policy_json = ?1 WHERE id = ?2",
+            rusqlite::params![policy_json, provider_id],
+        )
+        .expect("toggle provider routing override");
+    }
+
+    fn member_cross_routing_policy_json(
+        db: &db::Db,
+        mode_id: i64,
+        cli_key: &str,
+        provider_id: i64,
+    ) -> String {
+        let conn = db.open_connection().expect("open member routing policy db");
+        conn.query_row(
+            r#"
+SELECT cross_provider_model_routing_policy_json
+FROM sort_mode_providers
+WHERE mode_id = ?1 AND cli_key = ?2 AND provider_id = ?3
+"#,
+            rusqlite::params![mode_id, cli_key, provider_id],
+            |row| row.get(0),
+        )
+        .expect("read member cross policy")
+    }
+
+    fn set_ordinary_routing_policy(db: &db::Db, provider_id: i64, target_model: &str) {
+        let policy = settings::ModelRoutingPolicy {
+            enabled: true,
+            rules: vec![settings::ModelRoutingRule {
+                source_model: "grok-source".to_string(),
+                source_reasoning_effort: None,
+                target_model: Some(target_model.to_string()),
+                reasoning_effort: None,
+                unrecognized_fields: Default::default(),
+            }],
+        };
+        let conn = db.open_connection().expect("open ordinary policy db");
+        conn.execute(
+            "UPDATE providers SET model_routing_policy_json = ?1 WHERE id = ?2",
+            rusqlite::params![
+                serde_json::to_string(&policy).expect("serialize ordinary policy"),
+                provider_id
+            ],
+        )
+        .expect("set ordinary policy");
+    }
+
     fn insert_codex_provider_with_priority(
         db: &db::Db,
         name: &str,
@@ -2511,6 +2611,621 @@ INSERT INTO codex_managed_profiles(
         );
         failed_task.abort();
         success_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn cross_provider_non_stream_success_uses_target_and_does_not_bind_session() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.enable_session_reuse = true;
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 1;
+        app_settings.provider_cooldown_seconds = 0;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "grok", true, "http://127.0.0.1:37123")
+            .expect("enable Grok CLI proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("cross-provider-success.sqlite"))
+            .expect("init test db");
+        let (source_url, source_calls, source_task) =
+            spawn_counting_status_upstream(StatusCode::OK, r#"{"id":"source-must-not-run"}"#).await;
+        let target_response = r#"{"id":"cross-target","object":"response","model":"grok-target","output":[],"usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}"#;
+        let (target_url, target_captured_rx, target_task) =
+            spawn_capturing_json_upstream(target_response).await;
+        let source_id = insert_provider_with_priority(&db, "grok", "Cross Source", source_url, 0);
+        let target_id = insert_provider_with_priority(&db, "grok", "Cross Target", target_url, 1);
+        let mode_id = insert_sort_mode_route(
+            &db,
+            "Cross success mode",
+            "grok",
+            vec![source_id, target_id],
+        );
+        crate::sort_modes::set_active(&db, "grok", Some(mode_id)).expect("activate mode");
+        let source_uuid = gateway_provider_uuid(&db, source_id);
+        let target_uuid = gateway_provider_uuid(&db, target_id);
+        set_member_cross_routing_policy(
+            &db,
+            mode_id,
+            "grok",
+            source_id,
+            &target_uuid,
+            "grok-target",
+            Some("low"),
+        );
+
+        let session = Arc::new(session_manager::SessionManager::new());
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(8);
+        let router = build_router(gateway_state_with_parts(
+            app_handle,
+            db,
+            log_tx,
+            Arc::new(circuit_breaker::CircuitBreaker::new(
+                circuit_breaker::CircuitBreakerConfig::default(),
+                HashMap::new(),
+                None,
+            )),
+            Arc::clone(&session),
+        ));
+        let session_id = "cross-success-session";
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/grok/v1/responses")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header("x-grok-session-id", session_id)
+            .body(Body::from(
+                r#"{"model":"grok-source","input":"hello","stream":false}"#,
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let captured = tokio::time::timeout(Duration::from_secs(2), target_captured_rx)
+            .await
+            .expect("captured target request")
+            .expect("target request body");
+        let captured: Value = serde_json::from_str(&captured).expect("target request JSON");
+        assert_eq!(captured["model"], "grok-target");
+        assert_eq!(captured["reasoning"]["effort"], "low");
+        assert_eq!(source_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+        let log = recv_terminal_request_log(&mut log_rx).await;
+        assert_eq!(log.status, Some(200));
+        let attempts: Value = serde_json::from_str(&log.attempts_json).expect("attempts JSON");
+        let attempts = attempts.as_array().expect("attempt array");
+        assert_eq!(attempts.len(), 1);
+        assert_eq!(attempts[0]["provider_id"], target_id);
+        assert_eq!(attempts[0]["requested_upstream_model"], "grok-target");
+        let special_settings: Value = serde_json::from_str(
+            log.special_settings_json
+                .as_deref()
+                .expect("cross route settings"),
+        )
+        .expect("cross route settings JSON");
+        let cross_marker = special_settings
+            .as_array()
+            .expect("special settings array")
+            .iter()
+            .find(|entry| entry["type"] == "cross_provider_model_route")
+            .expect("cross route marker");
+        assert_eq!(cross_marker["sourceProviderId"], source_id);
+        assert_eq!(cross_marker["sourceProviderUuid"], source_uuid);
+        assert_eq!(cross_marker["targetProviderId"], target_id);
+        assert_eq!(cross_marker["targetProviderUuid"], target_uuid);
+        assert_eq!(cross_marker["sourceModel"], "grok-source");
+        assert_eq!(cross_marker["targetModel"], "grok-target");
+        assert_eq!(cross_marker["targetReasoningEffort"], "low");
+        assert_eq!(cross_marker["status"], "matched");
+        assert_eq!(cross_marker["singleHop"], true);
+        assert!(!log
+            .special_settings_json
+            .as_deref()
+            .unwrap_or_default()
+            .contains("hello"));
+        assert_eq!(
+            session.get_bound_provider(
+                "grok",
+                session_id,
+                session.capture_route_generation("grok"),
+                crate::shared::time::now_unix_seconds(),
+            ),
+            None
+        );
+        source_task.abort();
+        target_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn provider_override_toggle_preserves_and_gates_member_cross_policy() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 1;
+        app_settings.provider_cooldown_seconds = 0;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "grok", true, "http://127.0.0.1:37123")
+            .expect("enable Grok CLI proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("cross-provider-toggle.sqlite"))
+            .expect("init test db");
+        let source_response = r#"{"id":"source","object":"response","model":"grok-source","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}"#;
+        let target_response = r#"{"id":"target","object":"response","model":"grok-target","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}"#;
+        let (source_url, source_calls, source_task) =
+            spawn_counting_status_upstream(StatusCode::OK, source_response).await;
+        let (target_url, target_calls, target_task) =
+            spawn_counting_status_upstream(StatusCode::OK, target_response).await;
+        let source_id = insert_provider_with_priority(&db, "grok", "Toggle Source", source_url, 0);
+        let target_id = insert_provider_with_priority(&db, "grok", "Toggle Target", target_url, 1);
+        let mode_id =
+            insert_sort_mode_route(&db, "Cross toggle mode", "grok", vec![source_id, target_id]);
+        crate::sort_modes::set_active(&db, "grok", Some(mode_id)).expect("activate mode");
+        let target_uuid = gateway_provider_uuid(&db, target_id);
+        set_member_cross_routing_policy(
+            &db,
+            mode_id,
+            "grok",
+            source_id,
+            &target_uuid,
+            "grok-target",
+            None,
+        );
+        let stored_cross_policy = member_cross_routing_policy_json(&db, mode_id, "grok", source_id);
+
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(8);
+        let router = build_router(gateway_state(app_handle, db.clone(), log_tx));
+        for (override_enabled, expected_provider_id) in
+            [(true, target_id), (false, source_id), (true, target_id)]
+        {
+            set_provider_model_routing_override_enabled(&db, source_id, override_enabled);
+            let request = Request::builder()
+                .method(Method::POST)
+                .uri("/grok/v1/responses")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{"model":"grok-source","input":"hello","stream":false}"#,
+                ))
+                .expect("request");
+
+            let response = router
+                .clone()
+                .oneshot(request)
+                .await
+                .expect("route response");
+            assert_eq!(response.status(), StatusCode::OK);
+            let log = recv_terminal_request_log(&mut log_rx).await;
+            let attempts: Value = serde_json::from_str(&log.attempts_json).expect("attempts JSON");
+            let attempts = attempts.as_array().expect("attempt array");
+            assert_eq!(attempts.len(), 1);
+            assert_eq!(attempts[0]["provider_id"], expected_provider_id);
+            let special_settings = log
+                .special_settings_json
+                .as_deref()
+                .map(|value| serde_json::from_str::<Value>(value).expect("special settings JSON"));
+            let cross_marker_present = special_settings
+                .as_ref()
+                .and_then(Value::as_array)
+                .is_some_and(|entries| {
+                    entries
+                        .iter()
+                        .any(|entry| entry["type"] == "cross_provider_model_route")
+                });
+            assert_eq!(cross_marker_present, override_enabled);
+            assert_eq!(
+                member_cross_routing_policy_json(&db, mode_id, "grok", source_id),
+                stored_cross_policy
+            );
+        }
+        assert_eq!(source_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(target_calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+        source_task.abort();
+        target_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn cross_provider_sse_success_keeps_target_marker_and_does_not_bind_session() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.enable_session_reuse = true;
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 1;
+        app_settings.provider_cooldown_seconds = 0;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "grok", true, "http://127.0.0.1:37123")
+            .expect("enable Grok CLI proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("cross-provider-sse.sqlite"))
+            .expect("init test db");
+        let (source_url, source_calls, source_task) =
+            spawn_counting_status_upstream(StatusCode::OK, r#"{"id":"source-must-not-run"}"#).await;
+        let sse_body = concat!(
+            "event: response.output_text.delta\n",
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n",
+            "event: response.completed\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"cross-target-sse\",\"status\":\"completed\",\"model\":\"grok-target\",\"output\":[],\"usage\":{\"input_tokens\":3,\"output_tokens\":2,\"total_tokens\":5}}}\n\n"
+        );
+        let (target_url, target_task) = spawn_sse_upstream(sse_body).await;
+        let source_id = insert_provider_with_priority(&db, "grok", "SSE Source", source_url, 0);
+        let target_id = insert_provider_with_priority(&db, "grok", "SSE Target", target_url, 1);
+        let mode_id =
+            insert_sort_mode_route(&db, "Cross SSE mode", "grok", vec![source_id, target_id]);
+        crate::sort_modes::set_active(&db, "grok", Some(mode_id)).expect("activate mode");
+        let source_uuid = gateway_provider_uuid(&db, source_id);
+        let target_uuid = gateway_provider_uuid(&db, target_id);
+        set_member_cross_routing_policy(
+            &db,
+            mode_id,
+            "grok",
+            source_id,
+            &target_uuid,
+            "grok-target",
+            Some("low"),
+        );
+
+        let session = Arc::new(session_manager::SessionManager::new());
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(8);
+        let router = build_router(gateway_state_with_parts(
+            app_handle,
+            db,
+            log_tx,
+            Arc::new(circuit_breaker::CircuitBreaker::new(
+                circuit_breaker::CircuitBreakerConfig::default(),
+                HashMap::new(),
+                None,
+            )),
+            Arc::clone(&session),
+        ));
+        let session_id = "cross-sse-session";
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/grok/v1/responses")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header("x-grok-session-id", session_id)
+            .body(Body::from(
+                r#"{"model":"grok-source","input":"hello","stream":true}"#,
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        assert!(String::from_utf8_lossy(&body).contains("response.completed"));
+        assert_eq!(source_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+        let log = recv_terminal_request_log(&mut log_rx).await;
+        assert_eq!(log.status, Some(200));
+        assert_eq!(log.input_tokens, Some(3));
+        assert_eq!(log.output_tokens, Some(2));
+        let attempts: Value = serde_json::from_str(&log.attempts_json).expect("attempts JSON");
+        assert_eq!(attempts[0]["provider_id"], target_id);
+        assert_eq!(attempts[0]["requested_upstream_model"], "grok-target");
+        let special_settings: Value = serde_json::from_str(
+            log.special_settings_json
+                .as_deref()
+                .expect("cross route settings"),
+        )
+        .expect("cross route settings JSON");
+        let cross_marker = special_settings
+            .as_array()
+            .expect("special settings array")
+            .iter()
+            .find(|entry| entry["type"] == "cross_provider_model_route")
+            .expect("cross route marker");
+        assert_eq!(cross_marker["sourceProviderUuid"], source_uuid);
+        assert_eq!(cross_marker["targetProviderUuid"], target_uuid);
+        assert_eq!(cross_marker["status"], "matched");
+        let configured_marker = special_settings
+            .as_array()
+            .expect("special settings array")
+            .iter()
+            .find(|entry| entry["type"] == "configured_model_route")
+            .expect("configured route marker");
+        assert_eq!(configured_marker["providerId"], target_id);
+        assert_eq!(configured_marker["pricedModel"], "grok-target");
+        assert_eq!(
+            session.get_bound_provider(
+                "grok",
+                session_id,
+                session.capture_route_generation("grok"),
+                crate::shared::time::now_unix_seconds(),
+            ),
+            None
+        );
+        source_task.abort();
+        target_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn failed_cross_target_restores_baseline_ordinary_route_and_binds_source() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.enable_session_reuse = true;
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 2;
+        app_settings.provider_cooldown_seconds = 0;
+        disable_upstream_retry_policy(&mut app_settings);
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "grok", true, "http://127.0.0.1:37123")
+            .expect("enable Grok CLI proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("cross-provider-fallback.sqlite"))
+            .expect("init test db");
+        let source_response = r#"{"id":"source-success","object":"response","model":"grok-ordinary","output":[],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}"#;
+        let (source_url, source_captured_rx, source_task) =
+            spawn_capturing_json_upstream(source_response).await;
+        let (target_url, target_calls, target_task) = spawn_counting_status_upstream(
+            StatusCode::UNAUTHORIZED,
+            r#"{"error":"cross target failed"}"#,
+        )
+        .await;
+        let source_id =
+            insert_provider_with_priority(&db, "grok", "Fallback Source", source_url, 0);
+        let target_id =
+            insert_provider_with_priority(&db, "grok", "Fallback Target", target_url, 1);
+        let mode_id = insert_sort_mode_route(
+            &db,
+            "Cross fallback mode",
+            "grok",
+            vec![source_id, target_id],
+        );
+        crate::sort_modes::set_active(&db, "grok", Some(mode_id)).expect("activate mode");
+        let source_uuid = gateway_provider_uuid(&db, source_id);
+        let target_uuid = gateway_provider_uuid(&db, target_id);
+        set_member_cross_routing_policy(
+            &db,
+            mode_id,
+            "grok",
+            source_id,
+            &target_uuid,
+            "grok-target",
+            None,
+        );
+        set_ordinary_routing_policy(&db, source_id, "grok-ordinary");
+
+        let session = Arc::new(session_manager::SessionManager::new());
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(8);
+        let router = build_router(gateway_state_with_parts(
+            app_handle,
+            db,
+            log_tx,
+            Arc::new(circuit_breaker::CircuitBreaker::new(
+                circuit_breaker::CircuitBreakerConfig::default(),
+                HashMap::new(),
+                None,
+            )),
+            Arc::clone(&session),
+        ));
+        let session_id = "cross-fallback-session";
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/grok/v1/responses")
+            .header(header::CONTENT_TYPE, "application/json")
+            .header("x-grok-session-id", session_id)
+            .body(Body::from(
+                r#"{"model":"grok-source","input":"hello","stream":false}"#,
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let captured = tokio::time::timeout(Duration::from_secs(2), source_captured_rx)
+            .await
+            .expect("captured source request")
+            .expect("source request body");
+        let captured: Value = serde_json::from_str(&captured).expect("source request JSON");
+        assert_eq!(captured["model"], "grok-ordinary");
+        assert_eq!(target_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        let log = recv_terminal_request_log(&mut log_rx).await;
+        let attempts: Value = serde_json::from_str(&log.attempts_json).expect("attempts JSON");
+        let attempts = attempts.as_array().expect("attempt array");
+        assert_eq!(attempts.len(), 2);
+        assert_eq!(attempts[0]["provider_id"], target_id);
+        assert_eq!(attempts[1]["provider_id"], source_id);
+        assert_eq!(attempts[1]["requested_upstream_model"], "grok-ordinary");
+        let special_settings: Value = serde_json::from_str(
+            log.special_settings_json
+                .as_deref()
+                .expect("fallback route settings"),
+        )
+        .expect("fallback route settings JSON");
+        let cross_marker = special_settings
+            .as_array()
+            .expect("special settings array")
+            .iter()
+            .find(|entry| entry["type"] == "cross_provider_model_route")
+            .expect("cross route marker");
+        assert_eq!(cross_marker["sourceProviderId"], source_id);
+        assert_eq!(cross_marker["sourceProviderUuid"], source_uuid);
+        assert_eq!(cross_marker["targetProviderId"], target_id);
+        assert_eq!(cross_marker["targetProviderUuid"], target_uuid);
+        assert_eq!(cross_marker["status"], "failed");
+        assert_eq!(cross_marker["reason"], "target_attempt_failed");
+        assert_eq!(cross_marker["singleHop"], true);
+        let configured_marker = special_settings
+            .as_array()
+            .expect("special settings array")
+            .iter()
+            .find(|entry| entry["type"] == "configured_model_route")
+            .expect("final configured route marker");
+        assert_eq!(configured_marker["providerId"], source_id);
+        assert_eq!(configured_marker["pricedModel"], "grok-ordinary");
+        assert_eq!(
+            session.get_bound_provider(
+                "grok",
+                session_id,
+                session.capture_route_generation("grok"),
+                crate::shared::time::now_unix_seconds(),
+            ),
+            Some(source_id)
+        );
+        source_task.abort();
+        target_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn cross_target_bridge_prepare_failure_restores_source_baseline() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 1;
+        app_settings.provider_cooldown_seconds = 0;
+        disable_upstream_retry_policy(&mut app_settings);
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable Codex CLI proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("cross-bridge-prepare-fallback.sqlite"))
+            .expect("init test db");
+        let source_response = r#"{"id":"source-success","object":"response","model":"grok-ordinary","output":[],"usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}"#;
+        let (source_url, source_captured_rx, source_task) =
+            spawn_capturing_json_upstream(source_response).await;
+        let source_id =
+            insert_provider_with_priority(&db, "codex", "Prepare Fallback Source", source_url, 0);
+        let bridge_source_id = insert_provider_with_priority(
+            &db,
+            "codex",
+            "Disabled Bridge Source",
+            "https://example.invalid/v1".to_string(),
+            2,
+        );
+        let bridge_target_id = providers::upsert(
+            &db,
+            providers::ProviderUpsertParams {
+                provider_id: None,
+                cli_key: "codex".to_string(),
+                name: "Broken Cross Bridge".to_string(),
+                base_urls: vec![],
+                base_url_mode: providers::ProviderBaseUrlMode::Order,
+                auth_mode: None,
+                api_key: None,
+                enabled: true,
+                cost_multiplier: 1.0,
+                priority: Some(1),
+                claude_models: None,
+                model_mapping: None,
+                availability_test_model: None,
+                availability_probe_enabled: false,
+                availability_probe_interval_minutes: 10,
+                limit_5h_usd: None,
+                limit_daily_usd: None,
+                daily_reset_mode: None,
+                daily_reset_time: None,
+                limit_weekly_usd: None,
+                limit_monthly_usd: None,
+                limit_total_usd: None,
+                tags: None,
+                note: None,
+                source_provider_id: Some(bridge_source_id),
+                bridge_type: Some(
+                    crate::providers::CODEX_TO_OPENAI_RESPONSES_BRIDGE_TYPE.to_string(),
+                ),
+                stream_idle_timeout_seconds: None,
+                extension_values: None,
+                account_usage_credentials_patch: None,
+                account_usage_credentials_copy_from_provider_id: None,
+                upstream_retry_policy_override: None,
+                upstream_retry_policy_override_specified: false,
+                model_routing_policy_override: None,
+                model_routing_policy_override_specified: false,
+            },
+        )
+        .expect("insert bridge target")
+        .id;
+        providers::set_enabled(&db, bridge_source_id, false).expect("disable bridge source");
+        let mode_id = insert_sort_mode_route(
+            &db,
+            "Cross bridge fallback mode",
+            "codex",
+            vec![source_id, bridge_target_id],
+        );
+        crate::sort_modes::set_active(&db, "codex", Some(mode_id)).expect("activate mode");
+        let bridge_target_uuid = gateway_provider_uuid(&db, bridge_target_id);
+        set_member_cross_routing_policy(
+            &db,
+            mode_id,
+            "codex",
+            source_id,
+            &bridge_target_uuid,
+            "grok-target",
+            None,
+        );
+        set_ordinary_routing_policy(&db, source_id, "grok-ordinary");
+
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(8);
+        let router = build_router(gateway_state(app_handle, db, log_tx));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/codex/v1/responses")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"model":"grok-source","input":"hello","stream":false}"#,
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let captured = tokio::time::timeout(Duration::from_secs(2), source_captured_rx)
+            .await
+            .expect("captured source request")
+            .expect("source request body");
+        let captured: Value = serde_json::from_str(&captured).expect("source request JSON");
+        assert_eq!(captured["model"], "grok-ordinary");
+
+        let log = recv_terminal_request_log(&mut log_rx).await;
+        let attempts: Value = serde_json::from_str(&log.attempts_json).expect("attempts JSON");
+        let attempts = attempts.as_array().expect("attempt array");
+        assert_eq!(attempts.len(), 2);
+        assert_eq!(attempts[0]["provider_id"], bridge_target_id);
+        assert_eq!(attempts[1]["provider_id"], source_id);
+        let special_settings: Value = serde_json::from_str(
+            log.special_settings_json
+                .as_deref()
+                .expect("fallback route settings"),
+        )
+        .expect("fallback route settings JSON");
+        let cross_marker = special_settings
+            .as_array()
+            .expect("special settings array")
+            .iter()
+            .find(|entry| entry["type"] == "cross_provider_model_route")
+            .expect("cross route marker");
+        assert_eq!(cross_marker["status"], "failed");
+        assert_eq!(cross_marker["reason"], "target_prepare_terminal");
+        let configured_marker = special_settings
+            .as_array()
+            .expect("special settings array")
+            .iter()
+            .find(|entry| entry["type"] == "configured_model_route")
+            .expect("final configured route marker");
+        assert_eq!(configured_marker["providerId"], source_id);
+        assert_eq!(configured_marker["pricedModel"], "grok-ordinary");
+        source_task.abort();
     }
 
     #[tokio::test(flavor = "current_thread")]

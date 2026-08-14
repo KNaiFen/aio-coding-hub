@@ -83,6 +83,17 @@ remote administration API.
   observation only when an applied provider-scoped marker is valid. Unknown,
   malformed, future, or mismatched-provider markers are omitted without making
   the request or snapshot unavailable.
+- `cross_provider_model_route` is additive explanatory metadata in the bounded
+  `special_settings` channel. Desktop projection renders compact
+  `A / source -> B / target` audit text only for an HTTP-success record whose
+  marker is `matched`, `singleHop=true`, and target provider equals the final
+  provider. Failed/skipped, oversized, malformed, future, self-target, or
+  provider-mismatched markers are omitted from summaries while bounded raw
+  metadata and the complete attempts remain available in detail.
+- The configured-route projection accepts `policy_source=provider_cross` only
+  when the applied marker matches the final provider. It remains authoritative
+  for effective model/effort. The cross marker never affects pricing, usage,
+  preferred provider, route hops, retry count, or `provider_switch_count`.
 - Codex request projections may include a bounded optional requested reasoning
   effort parsed from the request-scoped `codex_reasoning_effort` marker. Only
   the fixed supported effort vocabulary is exposed; missing, malformed, or
@@ -157,6 +168,11 @@ remote administration API.
   hyphenated source/effective evidence. Missing optional effort evidence omits
   the suffix. Non-Codex route formatting remains unchanged. Old observers or
   invalid optional route fields continue to render the ordinary model safely.
+- Cross success continues to show final B provider/model through existing
+  fields. Desktop Home adds the bounded cross audit text above; this task does
+  not change the TUI formatter, TTFB, or switch/retry wording. B failure
+  followed by A/C success therefore keeps A/C as the card/TUI terminal provider
+  while detail retains the full chain.
 - Provider availability detail converts bucket timestamps to the host system's
   local timezone at render time and displays `HH:MM-HH:MM` without a hard-coded
   timezone suffix.

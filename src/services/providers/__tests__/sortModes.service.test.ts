@@ -50,7 +50,13 @@ describe("services/sortModes (error semantics)", () => {
   it("keeps argument mapping unchanged", async () => {
     vi.mocked(commands.sortModeCreate).mockResolvedValue({
       status: "ok",
-      data: { id: 1, name: "Mode" } as any,
+      data: {
+        id: 1,
+        mode_uuid: "11111111-1111-4111-8111-111111111111",
+        name: "Mode",
+        created_at: 1,
+        updated_at: 1,
+      },
     });
     vi.mocked(commands.sortModeDelete).mockResolvedValue({
       status: "ok",
