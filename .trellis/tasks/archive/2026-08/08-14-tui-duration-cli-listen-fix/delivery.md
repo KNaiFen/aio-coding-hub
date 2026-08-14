@@ -5,23 +5,22 @@
 
 ## 交付状态
 
-- 结果：Round 1 的 F-001/F-002/F-003 已完成，返工候选 `a91f6633` 的
-  full-scope CI 全绿；本次只含记录的提交推送后等待其自动检查，再转 Ready。
-- PR：[#147](https://github.com/KNaiFen/aio-coding-hub/pull/147)（Draft）
+- 结果：完成并通过 main 验收；Round 1 的 F-001/F-002/F-003 均已关闭。
+- PR：[#147](https://github.com/KNaiFen/aio-coding-hub/pull/147)（已合并）
 - 分支：`fix/tui-duration-cli-listen`
 - PR base：`main` @ `1b218897c09894cfb5aff796761eb8004ad6e53f`
 - 初始功能实现 head：`e4e457beea239ee89cb5e2dacafbe38eeab74408`
 - Round 1 main 集成 merge：`08ac062af5454cf09a811ba71d597430c513c33b`
 - Round 1 返工代码 head：`c7800118876f79412236783c4abe260013d606a3`
 - Round 1 绿色交付候选 head：`a91f663385f310069aa836d1c23b396d7b822fce`
+- 最终接受 head：`a9dd8288285c0149c3cd58315a7ac5c602488755`
+- 功能 merge commit：`da7ec35b31b44019432f6cdb61dee19bf84fc397`
 - 历史失败候选 head：`125fba0ec5a47c1ecd12c9f32ac80426d627d5bd`
 - 规划提交：`5419ccf64ba73387f999133389ab3d347e63270c`
-- `ci-gate`：[通过](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31802412409/job/94778879744)。
-- 其他必需检查：`pr-title`、contracts、frontend、Rust 与两项 CodeQL 全绿；
-  records-only 提交形成的新 head 仍须等待自动检查。
+- 最终 `ci-gate`：[通过](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31804550712/job/94786036687)。
+- 其他必需检查：最终接受 head 的 `pr-title`、contracts、frontend、Rust 与两项 CodeQL 全绿。
 - 手工桌面验证：未执行。
-- 执行 session：独立 execution session 是当前唯一写者；推送最终记录并等待
-  其最新 head 全绿、转 Ready for review 后停止写入。
+- 执行 session：已暂停并关闭；原 worktree、本地任务分支和远端任务分支均已清理。
 
 ## 实际实现
 
@@ -50,7 +49,7 @@
 | AC-05 Single reveal owner | 通过 | `86a48497`；去重、旧 flight 成功不重复消费及既有 tab/copy/close/rotate/ack 流程通过。 |
 | AC-06 Security and compatibility | 通过 | 未改 public IPC、bindings、schema、鉴权、token 算法或持久化；contracts、CodeQL 与 full-scope jobs 全绿。 |
 | AC-07 Contracts and regression tests | 通过 | gateway contract 已补充 queued reveal 和 deferred canonical winner；contracts、frontend、Rust 全绿。 |
-| AC-08 Verification | 候选通过 | 五项允许的本地检查通过；`a91f6633` 的所有必需检查全绿，最终 records head 待自动检查。 |
+| AC-08 Verification | 通过 | 五项允许的本地检查通过；最终接受 head `a9dd8288285c0149c3cd58315a7ac5c602488755` 的所有必需检查全绿。 |
 
 ## 验证
 
@@ -66,6 +65,10 @@
 
 ### GitHub CI 与编译
 
+- 最终接受 head：`a9dd8288285c0149c3cd58315a7ac5c602488755`
+- 自动 run：[ci #31804550712](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31804550712)
+- 通过：change-scope、contracts、frontend、Rust、`ci-gate`、`pr-title`、
+  JavaScript/TypeScript CodeQL、Rust CodeQL 和 CodeQL 汇总；候选构建 jobs 对 PR 按设计跳过。
 - Round 1 绿色交付候选：`a91f663385f310069aa836d1c23b396d7b822fce`
 - 自动 run：[ci #31802412409](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31802412409)
 - 通过：change-scope、contracts、frontend（lint、unit tests、build）、Rust
@@ -129,6 +132,19 @@ Clippy、构建、生成、dev server、Tauri、签名或打包，也未手动 d
 - CI：本轮审查时 [run 31800876521](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31800876521) 仍运行；上一完整候选的 [Rust job](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31798457041/job/94760734452) 和 [ci-gate](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31798457041/job/94765660089) 失败，不能作为交付证据。
 - 返工责任：独立 execution session。main 只写本轮验收和恢复边界，不修改产品代码、测试逻辑、依赖或现行合同。
 
+### Round 2 - 2026-08-14
+
+- 冻结审查 head：`a9dd8288285c0149c3cd58315a7ac5c602488755`；base `0ae7f03abaa37c7021fdf8718373e27fe61f62fd`，PR 为 Ready、`OPEN/CLEAN/MERGEABLE`，工作树干净且本地、远端和 PR head 一致。
+- CI：[ci-gate job 94786036687](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31804550712/job/94786036687)、`pr-title`、contracts、frontend、Rust、JavaScript/TypeScript CodeQL、Rust CodeQL 与 CodeQL 汇总均绑定该 head 且成功。
+- 审查：两路只读复核分别覆盖 TUI/Rust 与前端 token/draft 时序；main 点验 `request_card_lines`、observer 刷新链路、lifecycle locked/unlocked 分层、post-save reveal queue、applying-time canonical settings winner、邻近回归测试及现行合同。
+- 结论：通过。F-001、F-002、F-003 全部关闭；AC-01 至 AC-08 满足，无新阻断 finding。
+- 接受风险：真实桌面 LAN 切换未在本地执行；现有 Rust timeout 测试使用 mock app，未覆盖真实 gateway harness 的完整 rebind 与启动失败 rollback。相关 formatter、frontend、Rust 行为测试和完整 CI 已通过，该缺口不阻断本次交付。
+
 ## main 收尾
 
-尚未进入收尾。
+- 功能 PR #147 于 2026-08-14T14:03:49Z 合并；merge commit 为 `da7ec35b31b44019432f6cdb61dee19bf84fc397`。
+- 本地 `main` 已 fetch 并 fast-forward 到该 merge commit，确认最终接受 head 已进入 `main`。
+- 原 worktree `/Users/knaifen/Documents/Codex/aio-coding-hub/tui-duration-cli-listen-fix` 已删除；远端任务分支由 GitHub 合并策略自动删除，本地任务分支已删除。
+- 长期知识：`gateway-listen-token-contract.md`、`local-observer-tui-contract.md` 与 cross-layer index 已随功能 PR 同步；`docs/README.md` 无需新增重复入口。
+- PENDING：当前无未解决条目，本任务不新增或迁移 PENDING。
+- Trellis 归档与全局校验：`task.py archive --no-commit 08-14-tui-duration-cli-listen-fix`、`task.py validate --all` 和 `git diff --check` 均在 records-only 收尾提交前执行并通过。
