@@ -11,10 +11,10 @@
 - 完整 base SHA：`1b218897c09894cfb5aff796761eb8004ad6e53f`
 - 规划提交：`5419ccf64ba73387f999133389ab3d347e63270c`
 - 实施授权：已确认，2026-08-14；覆盖 PRD locked decisions、范围与 AC。
-- PR：[#147](https://github.com/KNaiFen/aio-coding-hub/pull/147)（Draft；Round 1 验收冻结 head `8e6ca2fbb35e92e3a68544b2b07da6d087d5325f`）。
+- PR：[#147](https://github.com/KNaiFen/aio-coding-hub/pull/147)（Draft；Round 1 返工代码 head `c7800118876f79412236783c4abe260013d606a3`，记录提交后等待固定 head CI）。
 - PENDING：无未解决条目。
-- 当前唯一写者：独立 execution session 待返工。main 已确认原 execution session 暂停、工作树干净且本地/远端/PR head 一致，于 2026-08-14 20:36:12 CST 临时接管任务记录，在本轮 findings/交接提交推送后把唯一写权交回；execution session 必须先 fetch 并确认该交接 head 后才能恢复写入。
-- 当前阶段：Round 1 验收不通过；按 `findings.md` 修复 F-001/F-002，并集成最新 `origin/main` 完成 F-003 后重新交付。
+- 当前唯一写者：独立 execution session。已从 main 的交接 head `52232d72993f83be4ba2bd04b7e11171616a06cf` 完成 preflight 并恢复写入；等待最新固定 head CI 后再次暂停。
+- 当前阶段：Round 1 的 F-001/F-002 已修复，F-003 已通过 merge commit `08ac062af5454cf09a811ba71d597430c513c33b` 集成 `origin/main@0ae7f03abaa37c7021fdf8718373e27fe61f62fd`；正在更新交付记录并等待自动 CI。
 
 ## 阅读顺序
 

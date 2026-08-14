@@ -92,10 +92,12 @@ rollback, and the callbacks that request reveal or rotation from that owner.
   `rotate` creates and reveals a new generation. Closing the dialog without
   acknowledgement clears the frontend plaintext but does not recreate backend
   pending state; the user must rotate to obtain plaintext again.
-- Initial pending-token recovery and post-save presentation call the same
-  page-level serialized/deduplicated reveal operation. While one reveal Promise
-  is in flight, later callers reuse it and cannot concurrently consume the
-  backend one-shot value.
+- Initial pending-token recovery and post-save presentation share one page-level
+  serialized reveal owner. Calls in the same phase reuse one Promise and cannot
+  concurrently consume the backend one-shot value. If a post-save intent arrives
+  behind an older flight, that flight's result decides the queue: a revealed
+  token satisfies the intent, while `null` or failure schedules exactly one
+  follow-up reveal for all queued post-save callers.
 - The controller and dialog remain mounted when General tab unmounts. A reveal
   result that arrives after a tab switch must still be shown, copied,
   acknowledged, or closed from the page owner.
@@ -106,7 +108,10 @@ rollback, and the callbacks that request reveal or rotation from that owner.
   the latest real settings, does not reveal, and always leaves applying state.
 - External settings-to-draft synchronization happens in an effect or an
   equivalent post-render boundary. It must not dispatch during render and must
-  not overwrite a user choice while its save is still applying.
+  not overwrite a user choice while its save is still applying. A canonical
+  source is marked adopted only when its draft reset is dispatched; the latest
+  source received while applying remains pending and wins after the save settles,
+  including success, `null`, error, listen-mode, and custom-address paths.
 
 ### 4. Validation And Transition Matrix
 
@@ -120,10 +125,12 @@ rollback, and the callbacks that request reveal or rotation from that owner.
 | Non-loopback peer lacks one exact valid Bearer header | Empty `401` with the existing Bearer challenge; no proxy dispatch |
 | Loopback peer omits the gateway token | Preserve the existing loopback exception |
 | First pending reveal | Return plaintext once and bind acknowledgement to that generation |
-| Concurrent initial/save reveal calls | Reuse one in-flight operation; at most one backend reveal call for that flight |
+| Save reveal arrives behind an older flight that reveals a token | Reuse that result; do not consume the backend again |
+| Save reveal arrives behind an older flight that returns `null` or fails | Queue exactly one follow-up backend reveal for all save callers |
 | User closes without acknowledgement | Clear frontend plaintext; a later plaintext display requires rotate |
 | Listener save returns canonical non-loopback settings | Reset draft, request reveal immediately, then return controls to idle |
 | Listener save returns `null` or throws | Reset to latest canonical settings, do not reveal, and return controls to idle |
+| External canonical settings arrive while listener save is applying | Preserve them as unadopted; after settlement reset the draft to the latest external source |
 | General tab unmounts while reveal is pending | Page owner receives and presents the eventual result |
 
 ### 5. Good / Base / Bad Cases
@@ -131,8 +138,10 @@ rollback, and the callbacks that request reveal or rotation from that owner.
 - **Good:** a running localhost gateway switches to LAN while one caller-owned
   lifecycle guard covers stop, start, and CLI proxy sync; the canonical response
   triggers the page controller's one-shot reveal before the interaction ends.
-- **Good:** two reveal triggers during the same in-flight request share one
-  Promise. Switching tabs does not unmount the owner or lose the plaintext.
+- **Good:** two post-save triggers share one queued Promise. If an older initial
+  flight returns `null`, they cause one follow-up reveal; if it returns a token,
+  they reuse that result. Switching tabs does not unmount the owner or lose the
+  plaintext.
 - **Base:** a localhost-only listener stays usable without a token for loopback
   peers; a persisted digest may remain private but does not change that peer
   exception.
@@ -155,9 +164,11 @@ rollback, and the callbacks that request reveal or rotation from that owner.
   one-shot reveal, generation-bound acknowledgement, rotation, and secret-free
   diagnostics.
 - Frontend tests must cover applying feedback, canonical success, `null`, error,
-  LAN-to-localhost recovery, effect-based external synchronization, immediate
-  post-save reveal, one in-flight reveal, General-tab unmount, copy,
-  acknowledge, rotate, and close-without-ack.
+  LAN-to-localhost recovery, applying-time external listen-mode/custom-address
+  synchronization, immediate post-save reveal after an empty older flight,
+  no duplicate consumption after a successful older flight, same-phase
+  deduplication, General-tab unmount, copy, acknowledge, rotate, and
+  close-without-ack.
 - GitHub Actions must run full-scope frontend and Rust jobs for listener/token
   changes. Locally use only the cloud-only verification allowlist.
 
@@ -184,7 +195,7 @@ Wrong: General mount reveal ----\
                                  +--> concurrent pending.take() / lost UI owner
        listener-save reveal ----/
 
-Correct: initial recovery ------\
-                                  +--> one page-level in-flight Promise --> dialog
-         listener-save success --/
+Correct: initial recovery ----------------> serialized page-level flight
+         listener-save success --> queue --+--> reuse revealed token
+                                            \--> one follow-up after null/error
 ```

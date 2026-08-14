@@ -5,24 +5,21 @@
 
 ## 交付状态
 
-- 结果：实现与现行合同已完成；最新功能候选的任务内检查通过，但 Rust job
-  被范围外 Grok SSE route test 的单次 `502 != 200` 阻塞。该失败无法归因到
-  本任务且没有可靠的任务内修法，execution session 已按停止条件暂停写入。
+- 结果：Round 1 的 F-001/F-002 已修复，F-003 已集成最新 main；完成允许的
+  本地验证和记录提交后推送，等待最新固定 head 的自动 full-scope CI。
 - PR：[#147](https://github.com/KNaiFen/aio-coding-hub/pull/147)（Draft）
 - 分支：`fix/tui-duration-cli-listen`
 - PR base：`main` @ `1b218897c09894cfb5aff796761eb8004ad6e53f`
-- 功能实现候选 head：`e4e457beea239ee89cb5e2dacafbe38eeab74408`
-- 冻结失败候选 head：`125fba0ec5a47c1ecd12c9f32ac80426d627d5bd`
+- 初始功能实现 head：`e4e457beea239ee89cb5e2dacafbe38eeab74408`
+- Round 1 main 集成 merge：`08ac062af5454cf09a811ba71d597430c513c33b`
+- Round 1 返工代码 head：`c7800118876f79412236783c4abe260013d606a3`
+- 历史失败候选 head：`125fba0ec5a47c1ecd12c9f32ac80426d627d5bd`
 - 规划提交：`5419ccf64ba73387f999133389ab3d347e63270c`
-- `ci-gate`：[失败](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31798457041/job/94765660089)；
-  聚合失败来自 Rust job。
-- 其他必需检查：`pr-title`、frontend、change-scope、docs/support contracts 与
-  Rust/JavaScript CodeQL 通过；
-  [Rust job](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31798457041/job/94760734452)
-  因范围外 Grok SSE route test 失败。
+- `ci-gate`：等待记录提交形成的最新完整 head 自动检查。
+- 其他必需检查：等待 `pr-title`、contracts、frontend、Rust 与两项 CodeQL。
 - 手工桌面验证：未执行。
-- 执行 session：独立 execution session 仍是登记的唯一写者，但已停止写入并
-  等待 main 判断失败归属与恢复条件。
+- 执行 session：独立 execution session 是当前唯一写者；最新完整 head 全绿并
+  转 Ready for review 后停止写入。
 
 ## 实际实现
 
@@ -31,9 +28,13 @@
 - settings runtime transaction 显式区分 lifecycle locked/unlocked CLI proxy
   sync；运行中 gateway 重绑、proxy sync 和允许的 rollback 共用同一 guard。
 - CLI Manager 将一次性 token owner 提升到 `CliManagerPage`，保存成功和
-  初始恢复复用单一 in-flight reveal；tab 卸载不丢失异步结果。
+  初始恢复共用串行 reveal owner；Round 1 增加 post-save queue，旧 flight
+  返回 `null`/error 时所有保存意图共享一次后续 reveal，已取得 token 时不重复消费。
 - 网络设置保存提供“正在应用”状态，成功采用返回的 canonical settings；
-  `null`/error 回滚到最新真实 settings，且不在 render 阶段 dispatch。
+  `null`/error 回滚到最新真实 settings，且不在 render 阶段 dispatch。Round 1
+  进一步保证 applying 期间到达的外部 canonical source 在结束后胜出。
+- 通过 merge commit `08ac062a` 集成 `origin/main@0ae7f03a`，保留 contracts
+  workflow、测试清理结果和归档索引事实。
 - 更新 observer/TUI 现行合同，新增 gateway listen/token 跨层合同并链接索引。
 
 ## Acceptance Criteria
@@ -42,12 +43,12 @@
 |---|---|---|
 | AC-01 TUI state metric | 实现完成；任务测试未列为失败 | `dfb02db8`；邻近测试覆盖 Active/Terminal/混合字段/缺失 TTFB/输出速率；Rust job 的唯一失败位于未修改的 `gateway/routes.rs`。 |
 | AC-02 No lifecycle self-deadlock | 实现完成；任务测试未列为失败 | `078f2b70`；timeout 行为测试覆盖 localhost 与 LAN 双向切换的持锁分支；Rust job 的唯一失败位于未修改的 `gateway/routes.rs`。 |
-| AC-03 Immediate token presentation | 通过 frontend CI | `e4e457be`；LAN 成功回调与 page-level dialog 测试。 |
-| AC-04 State rollback | 通过 frontend CI | `NetworkSettingsCard` tests 覆盖 pending、canonical success、`null`、error 与 LAN -> localhost。 |
-| AC-05 Single reveal owner | 通过 frontend CI | `CliManagerPage` test 覆盖单次 in-flight reveal、tab 卸载、copy、close、rotate、ack。 |
+| AC-03 Immediate token presentation | Round 1 修复完成，待 frontend CI | `86a48497`；deferred 初始 reveal 与 canonical LAN 保存重叠后排队一次后续 reveal。 |
+| AC-04 State rollback | Round 1 修复完成，待 frontend CI | `c7800118`；applying 期间 external mode/address 在 success、`null`、error 后均被采纳。 |
+| AC-05 Single reveal owner | Round 1 修复完成，待 frontend CI | `86a48497`；同阶段保存去重、旧 flight 成功不重复消费、tab 卸载/copy/close/rotate/ack 保持。 |
 | AC-06 Security and compatibility | 实现与审查完成；相关检查通过 | 未改 public IPC、bindings、schema、鉴权、token 算法或持久化；明文只进入短生命周期 controller state。 |
-| AC-07 Contracts and regression tests | 合同与 frontend 通过；Rust job 被范围外测试阻塞 | 新增 gateway contract，更新 observer contract/index；任务测试位于相邻模块，唯一失败为既有 Grok SSE route test。 |
-| AC-08 Verification | 阻塞 | 五项允许的本地检查通过；`125fba0e` 的 frontend、合同、title、CodeQL 通过，但 Rust/`ci-gate` 未绿。 |
+| AC-07 Contracts and regression tests | Round 1 更新完成，待完整 CI | gateway contract 已补充 queued reveal 和 deferred canonical winner；`08ac062a` 保留最新 contracts workflow。 |
+| AC-08 Verification | 进行中 | 允许的本地检查待记录提交前复验；最新固定 head CI 待推送后终态。 |
 
 ## 验证
 
@@ -63,8 +64,10 @@
 
 ### GitHub CI 与编译
 
-- 冻结 head：`125fba0ec5a47c1ecd12c9f32ac80426d627d5bd`
-- 自动 run：[ci #31798457041](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31798457041)
+- Round 1 返工代码 head：`c7800118876f79412236783c4abe260013d606a3`；
+  记录提交形成的最新完整 head 尚未推送，CI 待自动触发。
+- 历史失败 head：`125fba0ec5a47c1ecd12c9f32ac80426d627d5bd`；
+  自动 run：[ci #31798457041](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31798457041)。
 - 通过：change-scope、docs-contract、support-contract、frontend（lint、unit
   tests、build）、Rust 格式/绑定漂移、Clippy、`pr-title`、Rust/JavaScript
   CodeQL。
@@ -81,7 +84,8 @@ Clippy、构建、生成、dev server、Tauri、签名或打包，也未手动 d
 
 ## 偏移、风险与回滚
 
-- 计划偏移：无。
+- 计划偏移：初始交付经 main Round 1 审查新增 F-001/F-002 时序整改，并按
+  F-003 普通 merge 最新 main；未改变用户锁定行为、公共 API 或安全语义。
 - 兼容性：无 public IPC、settings schema、observer protocol 或生成绑定变化。
 - 安全：AIO token sidecar 仍只持久化 digest/metadata；一次 reveal、acknowledge、
   rotate、非回环 Bearer 鉴权和 loopback 例外不变。
@@ -91,17 +95,20 @@ Clippy、构建、生成、dev server、Tauri、签名或打包，也未手动 d
 
 ## 阻塞快照
 
-- 失败证据绑定 head：`125fba0ec5a47c1ecd12c9f32ac80426d627d5bd`；base
-  仍为 `1b218897c09894cfb5aff796761eb8004ad6e53f`，PR head 未漂移。
-- 最后安全功能提交：`125fba0ec5a47c1ecd12c9f32ac80426d627d5bd`；本阻塞
-  记录写入前，工作树干净且与 `origin/fix/tui-duration-cli-listen` 同步。
-- 受影响 AC：仅 AC-08 无法满足“必需 CI 全绿”；AC-01/02 的任务测试没有在
-  Rust job 中失败，但不能用整体失败的 job 宣称完整云端验证通过。
-- 决定归属：main。execution session 不修改范围外 `gateway/routes.rs`，不削弱
-  测试，也不把缺少响应体证据的 502 猜测为 settings lifecycle 回归。
-- 恢复条件：main 提供可归因到本任务的失败证据和范围内修法，或确认该失败按
-  仓库流程作为既有/基础设施不稳定处理并明确恢复执行。恢复前不再写入、推送、
-  标记 Ready、merge、auto-merge、archive 或清理 worktree。
+当前无实现阻塞。历史 `125fba0e` 的范围外 Grok SSE 失败保留为证据；若最新
+完整 head 再次出现同一失败，按 `execution.md` 停止并交 main，不修改
+`gateway/routes.rs` 或削弱测试。
+
+## Round 1 返工
+
+- main 交接 head：`52232d72993f83be4ba2bd04b7e11171616a06cf`；恢复前
+  本地、远端与 PR head 一致，preflight 全部通过。
+- F-001：`86a484973738adcc27e24738ed1019f8dde6cfb6`。
+- F-002：`c7800118876f79412236783c4abe260013d606a3`。
+- F-003：`08ac062af5454cf09a811ba71d597430c513c33b`，父提交包含
+  `origin/main@0ae7f03abaa37c7021fdf8718373e27fe61f62fd`。
+- 本地禁止 Vitest、package-manager、Cargo、rustfmt、Clippy、构建和生成；
+  新增 frontend 行为测试与既有完整套件由自动 CI 执行。
 
 ## main 验收记录
 

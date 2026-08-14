@@ -10,7 +10,7 @@
 
 | 任务目录 | 阶段 | 分支 | base SHA | 规划提交 | Worktree | PR | 当前唯一写者 | 依赖/说明 |
 |---|---|---|---|---|---|---|---|---|
-| [`08-14-tui-duration-cli-listen-fix`](./08-14-tui-duration-cli-listen-fix/) | in_progress（Round 1 待返工） | `fix/tui-duration-cli-listen` | `1b218897c09894cfb5aff796761eb8004ad6e53f` | `5419ccf64ba73387f999133389ab3d347e63270c` | `/Users/knaifen/Documents/Codex/aio-coding-hub/tui-duration-cli-listen-fix` | [#147](https://github.com/KNaiFen/aio-coding-hub/pull/147) | 独立 execution session 待返工 | 冻结审查 head `8e6ca2fbb35e92e3a68544b2b07da6d087d5325f`；按 `findings.md` 修复前端时序并普通 merge `origin/main@0ae7f03abaa37c7021fdf8718373e27fe61f62fd`，保留测试清理归档与 contracts workflow。 |
+| [`08-14-tui-duration-cli-listen-fix`](./08-14-tui-duration-cli-listen-fix/) | in_progress（Round 1 返工完成，待 CI） | `fix/tui-duration-cli-listen` | `1b218897c09894cfb5aff796761eb8004ad6e53f` | `5419ccf64ba73387f999133389ab3d347e63270c` | `/Users/knaifen/Documents/Codex/aio-coding-hub/tui-duration-cli-listen-fix` | [#147](https://github.com/KNaiFen/aio-coding-hub/pull/147) | 独立 execution session | merge `origin/main@0ae7f03abaa37c7021fdf8718373e27fe61f62fd` 为 `08ac062af5454cf09a811ba71d597430c513c33b`；F-001/F-002 代码 head `c7800118876f79412236783c4abe260013d606a3`，记录提交后等待固定 head CI。 |
 | [`08-03-upstream-claude-oauth`](./08-03-upstream-claude-oauth/) | planning（暂停，未委派） | 无（旧分支已删除） | 不适用 | 未登记 | 未创建 | 未创建 | main session | 用户已决定暂不处理；不影响当前工作。恢复前需重新确认方案，并完成真实隔离账号验证。 |
 
 ## 归档
