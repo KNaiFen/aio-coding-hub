@@ -44,7 +44,7 @@ TUI 时间字段和 Rust lifecycle lock 没有发现阻断项，但前端仍有�
 
 - 修改：`86a48497` 将保存后 reveal 意图收敛到独立的 page-level queue；若保存前 flight 已取得 token 则复用结果，若返回 `null`/error 则所有同阶段保存调用共享一次后续 reveal。
 - 代码位置：`src/components/cli-manager/GatewayTokenDialog.tsx:21`、`:52`；`src/pages/CliManagerPage.tsx:76`；`src/pages/__tests__/CliManagerPage.test.tsx:399`。
-- 验证：新增 deferred 初始 reveal 与真实 canonical LAN 保存回调重叠测试，覆盖旧 flight 返回 `null` 后的一次后续 reveal、重复保存去重、tab 卸载后展示，以及旧 flight 已取得 token 时不重复消费。按项目合同未在本地运行 Vitest，等待 frontend CI。
+- 验证：新增 deferred 初始 reveal 与真实 canonical LAN 保存回调重叠测试，覆盖旧 flight 返回 `null` 后的一次后续 reveal、重复保存去重、tab 卸载后展示，以及旧 flight 已取得 token 时不重复消费；`a91f663385f310069aa836d1c23b396d7b822fce` 的 [frontend job](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31802412409/job/94773833165) 通过。
 - 计划偏移：无公共 API 或后端一次性 reveal 语义变化；现行跨层合同补充 phase queue 规则。
 
 **main 复验**
@@ -72,7 +72,7 @@ TUI 时间字段和 Rust lifecycle lock 没有发现阻断项，但前端仍有�
 
 - 修改：`c7800118` 只在 canonical draft reset 实际 dispatch 时推进 adopted source key；applying 期间到达的新 source 保持未消费，结算后覆盖 mutation 返回的临时 draft。
 - 代码位置：`src/components/cli-manager/NetworkSettingsCard.tsx:85`；`src/components/cli-manager/__tests__/NetworkSettingsCard.test.tsx:247`、`:298`。
-- 验证：新增参数化 deferred 测试，分别覆盖 listen mode/custom address 在 success、`null`、error 三种结算下采纳 applying 期间外部 canonical settings。按项目合同未在本地运行 Vitest，等待 frontend CI。
+- 验证：新增参数化 deferred 测试，分别覆盖 listen mode/custom address 在 success、`null`、error 三种结算下采纳 applying 期间外部 canonical settings；`a91f663385f310069aa836d1c23b396d7b822fce` 的 [frontend job](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31802412409/job/94773833165) 通过。
 - 计划偏移：无；未改 settings mutation、schema、listener rebind 或 CLI proxy 语义。
 
 **main 复验**
@@ -100,7 +100,7 @@ TUI 时间字段和 Rust lifecycle lock 没有发现阻断项，但前端仍有�
 
 - 修改：merge commit `08ac062af5454cf09a811ba71d597430c513c33b` 以普通 merge 集成 `origin/main@0ae7f03abaa37c7021fdf8718373e27fe61f62fd`。
 - 代码位置：保留 `.github/workflows/ci.yml` 的 `contracts` job；`.trellis/tasks/README.md` 同时保留本任务活动行和 `08-14-trim-redundant-tests` 归档条目。
-- 验证：`git merge-base --is-ancestor 0ae7f03abaa37c7021fdf8718373e27fe61f62fd HEAD` 通过；merge 无冲突，未恢复已删除测试或旧 docs/support job 拆分。最新固定 head CI 待推送后验证。
+- 验证：`git merge-base --is-ancestor 0ae7f03abaa37c7021fdf8718373e27fe61f62fd HEAD` 通过；merge 无冲突，未恢复已删除测试或旧 docs/support job 拆分。`a91f663385f310069aa836d1c23b396d7b822fce` 的 [ci-gate](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31802412409/job/94778879744)、contracts、frontend、Rust、CodeQL 与 `pr-title` 全绿。
 - 计划偏移：按 main Round 1 findings 执行登记的 F-003，无 rebase、force-push 或 cherry-pick。
 
 **main 复验**

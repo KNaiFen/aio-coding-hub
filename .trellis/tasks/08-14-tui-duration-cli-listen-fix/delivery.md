@@ -5,21 +5,23 @@
 
 ## 交付状态
 
-- 结果：Round 1 的 F-001/F-002 已修复，F-003 已集成最新 main；完成允许的
-  本地验证和记录提交后推送，等待最新固定 head 的自动 full-scope CI。
+- 结果：Round 1 的 F-001/F-002/F-003 已完成，返工候选 `a91f6633` 的
+  full-scope CI 全绿；本次只含记录的提交推送后等待其自动检查，再转 Ready。
 - PR：[#147](https://github.com/KNaiFen/aio-coding-hub/pull/147)（Draft）
 - 分支：`fix/tui-duration-cli-listen`
 - PR base：`main` @ `1b218897c09894cfb5aff796761eb8004ad6e53f`
 - 初始功能实现 head：`e4e457beea239ee89cb5e2dacafbe38eeab74408`
 - Round 1 main 集成 merge：`08ac062af5454cf09a811ba71d597430c513c33b`
 - Round 1 返工代码 head：`c7800118876f79412236783c4abe260013d606a3`
+- Round 1 绿色交付候选 head：`a91f663385f310069aa836d1c23b396d7b822fce`
 - 历史失败候选 head：`125fba0ec5a47c1ecd12c9f32ac80426d627d5bd`
 - 规划提交：`5419ccf64ba73387f999133389ab3d347e63270c`
-- `ci-gate`：等待记录提交形成的最新完整 head 自动检查。
-- 其他必需检查：等待 `pr-title`、contracts、frontend、Rust 与两项 CodeQL。
+- `ci-gate`：[通过](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31802412409/job/94778879744)。
+- 其他必需检查：`pr-title`、contracts、frontend、Rust 与两项 CodeQL 全绿；
+  records-only 提交形成的新 head 仍须等待自动检查。
 - 手工桌面验证：未执行。
-- 执行 session：独立 execution session 是当前唯一写者；最新完整 head 全绿并
-  转 Ready for review 后停止写入。
+- 执行 session：独立 execution session 是当前唯一写者；推送最终记录并等待
+  其最新 head 全绿、转 Ready for review 后停止写入。
 
 ## 实际实现
 
@@ -41,14 +43,14 @@
 
 | 标准 | 当前结果 | 证据 |
 |---|---|---|
-| AC-01 TUI state metric | 实现完成；任务测试未列为失败 | `dfb02db8`；邻近测试覆盖 Active/Terminal/混合字段/缺失 TTFB/输出速率；Rust job 的唯一失败位于未修改的 `gateway/routes.rs`。 |
-| AC-02 No lifecycle self-deadlock | 实现完成；任务测试未列为失败 | `078f2b70`；timeout 行为测试覆盖 localhost 与 LAN 双向切换的持锁分支；Rust job 的唯一失败位于未修改的 `gateway/routes.rs`。 |
-| AC-03 Immediate token presentation | Round 1 修复完成，待 frontend CI | `86a48497`；deferred 初始 reveal 与 canonical LAN 保存重叠后排队一次后续 reveal。 |
-| AC-04 State rollback | Round 1 修复完成，待 frontend CI | `c7800118`；applying 期间 external mode/address 在 success、`null`、error 后均被采纳。 |
-| AC-05 Single reveal owner | Round 1 修复完成，待 frontend CI | `86a48497`；同阶段保存去重、旧 flight 成功不重复消费、tab 卸载/copy/close/rotate/ack 保持。 |
-| AC-06 Security and compatibility | 实现与审查完成；相关检查通过 | 未改 public IPC、bindings、schema、鉴权、token 算法或持久化；明文只进入短生命周期 controller state。 |
-| AC-07 Contracts and regression tests | Round 1 更新完成，待完整 CI | gateway contract 已补充 queued reveal 和 deferred canonical winner；`08ac062a` 保留最新 contracts workflow。 |
-| AC-08 Verification | 进行中 | 允许的本地检查待记录提交前复验；最新固定 head CI 待推送后终态。 |
+| AC-01 TUI state metric | 通过 | `dfb02db8`；邻近行为测试随 [Rust job](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31802412409/job/94773833109) 通过。 |
+| AC-02 No lifecycle self-deadlock | 通过 | `078f2b70`；双向 timeout 行为测试随 Rust job 通过。 |
+| AC-03 Immediate token presentation | 通过 | `86a48497`；deferred LAN 保存队列测试随 [frontend job](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31802412409/job/94773833165) 通过。 |
+| AC-04 State rollback | 通过 | `c7800118`；external mode/address 的 success、`null`、error 参数化测试随 frontend job 通过。 |
+| AC-05 Single reveal owner | 通过 | `86a48497`；去重、旧 flight 成功不重复消费及既有 tab/copy/close/rotate/ack 流程通过。 |
+| AC-06 Security and compatibility | 通过 | 未改 public IPC、bindings、schema、鉴权、token 算法或持久化；contracts、CodeQL 与 full-scope jobs 全绿。 |
+| AC-07 Contracts and regression tests | 通过 | gateway contract 已补充 queued reveal 和 deferred canonical winner；contracts、frontend、Rust 全绿。 |
+| AC-08 Verification | 候选通过 | 五项允许的本地检查通过；`a91f6633` 的所有必需检查全绿，最终 records head 待自动检查。 |
 
 ## 验证
 
@@ -64,14 +66,17 @@
 
 ### GitHub CI 与编译
 
-- Round 1 返工代码 head：`c7800118876f79412236783c4abe260013d606a3`；
-  记录提交形成的最新完整 head 尚未推送，CI 待自动触发。
+- Round 1 绿色交付候选：`a91f663385f310069aa836d1c23b396d7b822fce`
+- 自动 run：[ci #31802412409](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31802412409)
+- 通过：change-scope、contracts、frontend（lint、unit tests、build）、Rust
+  （格式/绑定漂移、Clippy、tests）、`ci-gate`、`pr-title` 与两项 CodeQL。
+- Rust tests 未复现历史 Grok SSE 失败；Rust job 20m48s 后成功。
 - 历史失败 head：`125fba0ec5a47c1ecd12c9f32ac80426d627d5bd`；
   自动 run：[ci #31798457041](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31798457041)。
-- 通过：change-scope、docs-contract、support-contract、frontend（lint、unit
+- 历史 run 中通过：change-scope、docs-contract、support-contract、frontend（lint、unit
   tests、build）、Rust 格式/绑定漂移、Clippy、`pr-title`、Rust/JavaScript
   CodeQL。
-- 失败：Rust tests 共 `2899 passed, 1 failed, 5 ignored`；唯一失败为
+- 历史 run 中失败：Rust tests 共 `2899 passed, 1 failed, 5 ignored`；唯一失败为
   `gateway::routes::tests::mock_runtime_router_grok_responses_sse_is_transparent_and_logged`
   在 `src-tauri/src/gateway/routes.rs:2146` 得到 `502`、预期 `200`。因此
   `ci-gate` 同步失败。
@@ -107,6 +112,9 @@ Clippy、构建、生成、dev server、Tauri、签名或打包，也未手动 d
 - F-002：`c7800118876f79412236783c4abe260013d606a3`。
 - F-003：`08ac062af5454cf09a811ba71d597430c513c33b`，父提交包含
   `origin/main@0ae7f03abaa37c7021fdf8718373e27fe61f62fd`。
+- 绿色交付候选：`a91f663385f310069aa836d1c23b396d7b822fce`；
+  [ci-gate](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31802412409/job/94778879744)
+  及所选完整 jobs 全绿。
 - 本地禁止 Vitest、package-manager、Cargo、rustfmt、Clippy、构建和生成；
   新增 frontend 行为测试与既有完整套件由自动 CI 执行。
 
