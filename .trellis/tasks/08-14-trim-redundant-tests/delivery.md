@@ -9,11 +9,11 @@
 - 分支：`chore/trim-redundant-tests`
 - PR base：`main` @ `1b218897c09894cfb5aff796761eb8004ad6e53f`
 - 交付候选 head：尚未提交。
-- 规划提交：`PLANNING_SHA_PENDING`
+- 规划提交：`cea9dad385e508c716956d644e3ef6021c8d04fe`
 - `ci-gate`：未触发。
 - 其他必需检查：未触发。
 - 交付时间：不适用。
-- 执行 session：尚未启动。
+- 执行 session：已分配，尚未开工；当前唯一写者为独立 execution session。
 
 ## 阻塞快照
 

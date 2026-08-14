@@ -5,7 +5,7 @@
 - Implementation authorization: confirmed
 - Confirmation: 2026-08-14；用户要求按审计结论实施、删除孤立的插件合同 selftest，并使用独立 multi-worktree execution session。
 - Confirmed coverage: 本 PRD 的范围、锁定决定和 AC。
-- Planning revision: `PLANNING_SHA_PENDING`（main 在规划材料提交后回填）。
+- Planning revision: `cea9dad385e508c716956d644e3ef6021c8d04fe`。
 - Execution route: delegated sibling worktree。
 - Migrated from direct-main record: 无。
 

@@ -9,14 +9,14 @@
 - 分支：`chore/trim-redundant-tests`
 - 基线：`origin/main`
 - 完整 base SHA：`1b218897c09894cfb5aff796761eb8004ad6e53f`
-- 规划提交：`PLANNING_SHA_PENDING`（包含本文件与开工前材料；main 回填后方可施工）
+- 规划提交：`cea9dad385e508c716956d644e3ef6021c8d04fe`（包含本文件与开工前材料）
 - 实施授权：已确认，2026-08-14；覆盖本任务 PRD 的 locked decisions、范围与 AC。
 - PR 目标：`main`
 - PR：尚未创建；执行 session preflight 后尽早创建 Draft PR。
 - 关联任务：`08-03-upstream-claude-oauth` 仅在 planning、没有 worktree，认证范围与本任务无文件或语义冲突。
 - PENDING 审阅：无未解决条目。
-- 当前唯一写者：main（规划）；规划提交回填后转交 execution session。
-- 当前阶段：规划交接，禁止施工直到 preflight 全部通过。
+- 当前唯一写者：独立 execution session。
+- 当前阶段：已完成规划交接；execution session 只有在 preflight 全部通过后才可施工。
 
 ## 阅读顺序
 
@@ -42,7 +42,7 @@ test -f .trellis/tasks/08-14-trim-redundant-tests/prd.md
 test -f .trellis/tasks/08-14-trim-redundant-tests/design.md
 test -f .trellis/tasks/08-14-trim-redundant-tests/implement.md
 test -f .trellis/tasks/08-14-trim-redundant-tests/execution.md
-git cat-file -e "PLANNING_SHA_PENDING^{commit}"
+git cat-file -e "cea9dad385e508c716956d644e3ef6021c8d04fe^{commit}"
 ```
 
 然后确认 `task.json.status=in_progress`、`prd.md` 授权为 confirmed、execution.md 已回填非占位规划 SHA、当前 worktree 没有来源不明修改、唯一写者已转为 execution session。任一条件失败：停止写入并报告 main；不要自行 rebase、补写登记或修改任务边界。
@@ -98,6 +98,6 @@ PR CI 监控：只等待自动触发的同一完整 head；正常每 3-5 分钟�
 
 ## 初始交付状态
 
-- 结果：尚未开始（规划交接）。
+- 结果：尚未开始（已交接，等待 execution session 完成 preflight）。
 - PR/head/CI：尚未创建 / 尚未提交 / 未触发。
-- 执行 session 交接后成为唯一写者；完成交付后暂停。
+- execution session 当前是唯一写者；完成交付后暂停。
