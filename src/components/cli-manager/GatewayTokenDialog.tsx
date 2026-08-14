@@ -17,24 +17,27 @@ export function useGatewayTokenController(available: boolean) {
   const [tokenDialogOpen, setTokenDialogOpen] = useState(false);
   const [revealPending, setRevealPending] = useState(false);
   const [actionPending, setActionPending] = useState(false);
-  const revealInFlightRef = useRef<Promise<void> | null>(null);
+  const revealInFlightRef = useRef<Promise<boolean> | null>(null);
+  const postSaveRevealRef = useRef<Promise<void> | null>(null);
   const actionInFlightRef = useRef(false);
 
   const revealPendingGatewayToken = useCallback(() => {
-    if (!available) return Promise.resolve();
+    if (!available) return Promise.resolve(false);
     const existing = revealInFlightRef.current;
     if (existing) return existing;
 
     setRevealPending(true);
     const request = gatewayBearerTokenReveal()
       .then((reveal) => {
-        if (!reveal) return;
+        if (!reveal) return false;
         setTokenDialog(reveal);
         setTokenDialogOpen(true);
+        return true;
       })
       .catch(() => {
         logToConsole("error", "读取网关访问令牌失败");
         toast("读取网关访问令牌失败：请稍后重试");
+        return false;
       })
       .finally(() => {
         if (revealInFlightRef.current === request) {
@@ -46,12 +49,29 @@ export function useGatewayTokenController(available: boolean) {
     return request;
   }, [available]);
 
+  const revealPendingGatewayTokenAfterSave = useCallback(() => {
+    const queued = postSaveRevealRef.current;
+    if (queued) return queued;
+
+    const precedingFlight = revealInFlightRef.current;
+    const request = (async () => {
+      if (precedingFlight && (await precedingFlight)) return;
+      await revealPendingGatewayToken();
+    })().finally(() => {
+      if (postSaveRevealRef.current === request) {
+        postSaveRevealRef.current = null;
+      }
+    });
+    postSaveRevealRef.current = request;
+    return request;
+  }, [revealPendingGatewayToken]);
+
   useEffect(() => {
     void revealPendingGatewayToken();
   }, [revealPendingGatewayToken]);
 
   const rotateGatewayToken = useCallback(async () => {
-    const revealInFlight = revealInFlightRef.current;
+    const revealInFlight = postSaveRevealRef.current ?? revealInFlightRef.current;
     if (revealInFlight) await revealInFlight;
     if (actionInFlightRef.current) return;
     actionInFlightRef.current = true;
@@ -106,7 +126,7 @@ export function useGatewayTokenController(available: boolean) {
     tokenDialog,
     tokenDialogOpen,
     tokenActionPending: revealPending || actionPending,
-    revealPendingGatewayToken,
+    revealPendingGatewayTokenAfterSave,
     rotateGatewayToken,
     copyGatewayToken,
     acknowledgeGatewayToken,

@@ -73,7 +73,7 @@ export function CliManagerPage() {
         {model.tab === "general" ? (
           <CliManagerGeneralTab
             {...model.generalTabProps}
-            onGatewayListenSaved={gatewayTokenController.revealPendingGatewayToken}
+            onGatewayListenSaved={gatewayTokenController.revealPendingGatewayTokenAfterSave}
             onRotateGatewayToken={gatewayTokenController.rotateGatewayToken}
             gatewayTokenActionPending={gatewayTokenController.tokenActionPending}
           />

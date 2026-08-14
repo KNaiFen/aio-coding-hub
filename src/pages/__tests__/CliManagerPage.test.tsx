@@ -108,6 +108,17 @@ vi.mock("../../components/cli-manager/tabs/GeneralTab", () => ({
       <button type="button" onClick={() => void onGatewayListenSaved()}>
         reveal-gateway-token
       </button>
+      <button
+        type="button"
+        onClick={async () => {
+          const updated = await onPersistCommonSettings({ gateway_listen_mode: "lan" });
+          if (updated && updated.gateway_listen_mode !== "localhost") {
+            await onGatewayListenSaved();
+          }
+        }}
+      >
+        save-lan-listener
+      </button>
       <button type="button" onClick={() => void onRotateGatewayToken()}>
         rotate-gateway-token
       </button>
@@ -385,36 +396,53 @@ beforeEach(() => {
 });
 
 describe("pages/CliManagerPage", () => {
-  it("keeps one-shot Gateway token reveal alive across General tab unmount", async () => {
+  it("queues one post-save reveal after an empty initial flight across tab unmount", async () => {
     const firstToken = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
     const rotatedToken = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
-    const deferredReveal = createDeferred<{
+    const initialReveal = createDeferred<{
+      token: string;
+      wsl_sync_error: string | null;
+    } | null>();
+    const savedReveal = createDeferred<{
       token: string;
       wsl_sync_error: string | null;
     } | null>();
     vi.mocked(gatewayBearerTokenReveal)
-      .mockResolvedValueOnce(null)
-      .mockReturnValueOnce(deferredReveal.promise);
+      .mockReturnValueOnce(initialReveal.promise)
+      .mockReturnValueOnce(savedReveal.promise);
     vi.mocked(gatewayBearerTokenRotate).mockResolvedValue({
       token: rotatedToken,
       wsl_sync_error: null,
     });
+    vi.mocked(useSettingsPatchMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi
+        .fn()
+        .mockResolvedValue(createSettingsMutationResult({ gateway_listen_mode: "lan" })),
+    } as any);
 
     renderWithProviders(<CliManagerPage />);
     await waitFor(() => expect(gatewayBearerTokenReveal).toHaveBeenCalledTimes(1));
 
-    fireEvent.click(screen.getByRole("button", { name: "reveal-gateway-token" }));
-    fireEvent.click(screen.getByRole("button", { name: "reveal-gateway-token" }));
-    await waitFor(() => expect(gatewayBearerTokenReveal).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole("button", { name: "save-lan-listener" }));
+    fireEvent.click(screen.getByRole("button", { name: "save-lan-listener" }));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("已保存"));
+    expect(gatewayBearerTokenReveal).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole("tab", { name: "Claude Code" }));
     await screen.findByText("claude-tab");
     await act(async () => {
-      deferredReveal.resolve({
+      initialReveal.resolve(null);
+      await initialReveal.promise;
+    });
+    await waitFor(() => expect(gatewayBearerTokenReveal).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      savedReveal.resolve({
         token: firstToken,
         wsl_sync_error: "WSL_GATEWAY_TOKEN_SYNC_FAILED: review WSL settings",
       });
-      await deferredReveal.promise;
+      await savedReveal.promise;
     });
 
     expect(await screen.findByText(firstToken)).toBeInTheDocument();
@@ -432,6 +460,35 @@ describe("pages/CliManagerPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "已保存" }));
     await waitFor(() => expect(gatewayBearerTokenAcknowledge).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.queryByText(rotatedToken)).not.toBeInTheDocument());
+  });
+
+  it("does not repeat a queued post-save reveal when the preceding flight found a token", async () => {
+    const initialToken = "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC";
+    const initialReveal = createDeferred<{
+      token: string;
+      wsl_sync_error: string | null;
+    } | null>();
+    vi.mocked(gatewayBearerTokenReveal).mockReturnValueOnce(initialReveal.promise);
+    vi.mocked(useSettingsPatchMutation).mockReturnValue({
+      isPending: false,
+      mutateAsync: vi
+        .fn()
+        .mockResolvedValue(createSettingsMutationResult({ gateway_listen_mode: "lan" })),
+    } as any);
+
+    renderWithProviders(<CliManagerPage />);
+    await waitFor(() => expect(gatewayBearerTokenReveal).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole("button", { name: "save-lan-listener" }));
+    fireEvent.click(screen.getByRole("button", { name: "save-lan-listener" }));
+    await waitFor(() => expect(toast).toHaveBeenCalledWith("已保存"));
+    await act(async () => {
+      initialReveal.resolve({ token: initialToken, wsl_sync_error: null });
+      await initialReveal.promise;
+    });
+
+    expect(await screen.findByText(initialToken)).toBeInTheDocument();
+    expect(gatewayBearerTokenReveal).toHaveBeenCalledTimes(1);
   });
 
   it("以独立数据模型延迟编排 Grok Tab", async () => {
