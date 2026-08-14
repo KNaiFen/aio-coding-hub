@@ -26,8 +26,7 @@ export function useGatewayTokenController(available: boolean) {
     if (existing) return existing;
 
     setRevealPending(true);
-    let request: Promise<void>;
-    request = gatewayBearerTokenReveal()
+    const request = gatewayBearerTokenReveal()
       .then((reveal) => {
         if (!reveal) return;
         setTokenDialog(reveal);

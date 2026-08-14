@@ -3082,8 +3082,7 @@ mod tests {
                 let mut next = previous.clone();
                 next.gateway_listen_mode = next_mode;
                 assert!(
-                    SettingsRuntimePlan::from_settings(&previous, &next)
-                        .cli_proxy_sync_required
+                    SettingsRuntimePlan::from_settings(&previous, &next).cli_proxy_sync_required
                 );
 
                 let base_origin = crate::gateway::planned_base_url(&next)

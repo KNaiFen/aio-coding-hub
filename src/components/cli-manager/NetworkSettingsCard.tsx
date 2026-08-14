@@ -75,7 +75,7 @@ export function NetworkSettingsCard({
 
   const nextDraftState = useMemo(
     () => createNetworkDraftState(settings),
-    [settings.gateway_custom_listen_address, settings.gateway_listen_mode]
+    [settings]
   );
   const [draftState, dispatchDraft] = useReducer(networkDraftReducer, nextDraftState);
   const [applyingNetworkSettings, setApplyingNetworkSettings] = useState(false);
