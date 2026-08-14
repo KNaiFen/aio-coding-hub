@@ -132,6 +132,17 @@
 
 ## main 验收记录
 
+### Round 2
+
+- 结论：返工。候选 head `2e7a8e284ff3b3e60678150eec0b07768f4db3a2` 已满足 F-001、Ready 状态和同一 head 必需 CI 全绿，但产品 diff 验收发现四项必须修复的问题，见 `findings.md` 的 `F-002`～`F-005`。
+- 审查范围：完整 PRD/设计/实施/交付材料、实时 PR #137 diff、覆盖开关到 gateway 的数据流、普通策略 query/form 缓存、普通/全局/share 写入边界、v52 -> v53 迁移，以及运行时 failover/session binding 的独立只读复核。
+- 候选 base：`bd2535796fdf847008b7b55789572367d3e615e9`；工作树干净，本地、远端分支和 PR head 一致，PR 可合并且无冲突。
+- CI 证据：[run 31759041962](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31759041962)、[CodeQL run 31759042000](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31759042000)、[`ci-gate` job 94644619335](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31759041962/job/94644619335)；frontend、Rust tests/Clippy/audit/generated drift、docs/support、CodeQL、`pr-title` 和 `ci-gate` 均通过。
+- finding 摘要：关闭 provider override 后 cross policy 仍参与 runtime；普通策略跨 mode cache/延迟请求可回显旧 revision；global/provider/share ordinary 写入静默忽略 cross-only 字段；v53 没有持久化清洗旧非法 effort。
+- 已确认无阻断项：一次性 B 调度、Ready cap/processed 去重、B 失败模型恢复，以及 SSE/非流 `session_binding_allowed=false` 的主路径实现未发现新的 required finding。
+- 接受的偏移或风险：本轮不接受上述 AC 偏差。真实桌面 UI 和真实 bridge/credential 组合仍是已披露人工验证缺口，但不是本轮四项确认缺陷的替代证据。
+- 日期：2026-08-14。
+
 ### Round 1
 
 - 结论：返工。候选 head `bbe3e8bb96ef09cdff6b791b7ee4d1d9c29b9f4d` 的 frontend 与 `ci-gate` 失败，AC-10 未满足；尚未进入产品 diff 的最终验收。
@@ -155,12 +166,12 @@
 
 ## main 收尾
 
-- 最终结果：尚未开始
-- 功能 PR 与验收候选：无
+- 最终结果：Round 2 验收不通过，等待执行 session 按 `findings.md` 的 `F-002`～`F-005` 返工
+- 功能 PR 与验收候选：PR #137，已拒绝候选 `2e7a8e284ff3b3e60678150eec0b07768f4db3a2`
 - main 合并提交：无
 - 收尾记录 PR：无
 - 知识库与合同：待实现并验收
 - PENDING 去向：无未解决条目
 - 归档：保持活动
-- worktree 与分支清理：保持，执行 session 尚未启动
-- 遗留风险：见“未完成项与阻塞”
+- worktree 与分支清理：保持，等待执行 session 完成 Round 2 返工
+- 遗留风险：四项 required finding 与真实桌面 UI/真实 bridge/credential 人工验证缺口，见 Round 2 记录和 `findings.md`

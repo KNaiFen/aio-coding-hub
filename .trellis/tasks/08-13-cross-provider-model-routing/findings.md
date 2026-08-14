@@ -1,5 +1,104 @@
 # 验收返工：跨供应商模型路由
 
+## Round 2
+
+- 验收候选 head：`2e7a8e284ff3b3e60678150eec0b07768f4db3a2`
+- PR：[KNaiFen/aio-coding-hub#137](https://github.com/KNaiFen/aio-coding-hub/pull/137)（Draft；main 已在确认返工结论后从 Ready 改回 Draft）
+- 通过 CI：[run 31759041962](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31759041962)、[CodeQL run 31759042000](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31759042000)、[`ci-gate` job 94644619335](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31759041962/job/94644619335)
+- 验收结论：不通过。F-001 已关闭，固定 head 的必需 CI 和交付前置条件均满足；产品 diff 验收发现 `F-002`～`F-005`，涉及覆盖开关运行时语义、普通策略跨 mode 缓存一致性、普通/全局策略严格写入边界和 v53 迁移持久化清洗，必须修复后重新验收。
+- 返工责任：执行 session。main 仅写本轮验收记录与返工指导，不修改产品代码、测试、依赖或现行合同。
+
+### F-002 [P1] 关闭供应商覆盖后仍会执行已保存的跨供应商规则
+
+**证据**
+
+- `src-tauri/src/domain/sort_modes.rs:1057` 在 `provider_override_enabled=false` 时只把普通策略 JSON 写成 `NULL`，`src-tauri/src/domain/sort_modes.rs:1163` 仍原样保留方案成员的 cross policy，符合“关闭时保留配置”的持久化要求。
+- `src-tauri/src/domain/providers/queries.rs:847` 无条件把成员 cross JSON 映射到 `ProviderForGateway`；`src-tauri/src/gateway/proxy/handler/failover_loop/mod.rs:282` 也没有以普通覆盖开关状态 gate `resolve_cross_plan`。
+- 因此关闭覆盖只停止普通策略，已保存的 A -> B 仍可被调度，与 PRD 3.3.7、AC-02 的“关闭时保留但运行时不生效，重新开启后恢复”相反。
+
+**影响**
+
+- 用户已经明确关闭该供应商的模型路由覆盖，请求仍可能切换供应商，UI 状态与实际流量行为不一致。
+
+**期望结果**
+
+1. 保留数据库中的成员 cross JSON，但 selection/mapper 或 `cross_temporary_work_item` 必须以源供应商普通覆盖启用状态 gate 跨规则；关闭时按原始 baseline 执行，重新开启后恢复原 cross policy。
+2. 不改变 source member disable、target member eligibility、Default 或普通策略的既有语义。
+3. 增加 named-mode 路由回归测试，证明“启用时 A -> B、关闭后只走原 baseline 且 DB cross JSON 不变、重开后 A -> B 恢复”；覆盖至少一个实际 gateway 请求路径。
+
+**复验标准**
+
+- 对关闭覆盖的源 A，运行时不会创建 `CrossTemporary`，marker/attempt/final provider 均保持原 baseline；重开后同一规则恢复。
+- 关闭与重开之间持久化的 cross policy 和 revision 没有被清空或静默改写。
+
+### F-003 [P1] 普通策略更新没有同步同供应商的其他 mode 缓存
+
+**证据**
+
+- 普通策略是 provider 级共享字段，但 `src/query/sortModes.ts:298` 保存组合 DTO 后只 `setQueryData` 当前 `provider + mode` identity，并只失效当前 mode 的 candidates。
+- `src/query/__tests__/sortModes.test.tsx:304` 还明确断言同供应商另一 mode 的 policy cache 保持旧值。
+- provider upsert 会在 `src/query/providers.ts:334` 先失效该供应商的全部 routing editor query；保存流程随后才在 `src/pages/providers/providerEditorSaveRunner.ts:50` 保存组合策略。由 upsert 启动的旧普通策略请求可能在保存后回写。
+- `src/pages/providers/useProviderEditorForm.ts:534` 只在 provider key 改变时应用 ordinary policy；同一 provider 的 mode 切换或旧缓存先显示后再刷新时，新 revision 不会重新同步 ordinary draft。
+
+**影响**
+
+- 在 mode A 保存普通规则后，切到已缓存或仍有旧请求的 mode B、或关闭再打开编辑器，可能显示旧普通规则；继续保存会产生错误草稿或无意义的 CAS 冲突。
+
+**期望结果**
+
+1. 组合策略保存前后取消或隔离该 provider 的旧 routing-policy 请求，避免旧响应覆盖保存结果。
+2. 保存成功后，对同 provider 的所有 mode cache 同步普通策略及其 revision，或移除/失效这些 cache 并保证重新打开时不会先把旧普通策略锁进 form state；cross policy 仍按各 mode 独立保存。
+3. form 同步逻辑要识别普通 policy revision 的真实变化，同时不能覆盖用户尚未保存的 dirty draft。
+4. 增加 mode A 保存、mode B 已缓存，以及 mode B 延迟旧请求在保存后返回的测试；切换和关闭重开都必须看到最新普通规则/revision，B 的 cross policy 仍保持自身值。
+
+**复验标准**
+
+- 保存后的所有同 provider identity 不再暴露旧 ordinary policy/revision；延迟响应不能回滚当前 cache 或 form。
+- 新测试在修复前可稳定复现，修复后通过，且 dirty draft 保护测试继续通过。
+
+### F-004 [P2] 全局和普通策略写入会静默忽略跨供应商字段
+
+**证据**
+
+- `src-tauri/src/infra/settings/types.rs:251` 的 `ModelRoutingRule` 使用 `#[serde(default)]` 且没有严格未知字段校验；包含 `target_provider_uuid`、`target_reasoning_effort` 等 cross-only 字段的普通/全局规则会被 serde 静默丢弃这些字段。
+- 全局写入在 `src-tauri/src/app/settings_service.rs:916`、provider ordinary 写入在 `src-tauri/src/domain/sort_modes.rs:1056` 只对已经反序列化的 `ModelRoutingPolicy` 做 normalize，无法再发现被丢弃的字段。
+- provider share 外层虽然使用 `deny_unknown_fields`，但其嵌套 ordinary policy 仍复用上述宽松类型，因而也不能兑现 v2 的严格未知字段边界。
+
+**影响**
+
+- 错误客户端或导入数据以为保存了跨供应商目标，后端却把它静默降级成普通规则；这违反 AC-01 和设计 1.2/2.1 的范围隔离与“全局策略拒绝跨字段”要求。
+
+**期望结果**
+
+1. 在全局设置、provider ordinary-policy 与 provider-share 导入的写入边界检测并拒绝 cross-only/未知规则字段，返回稳定的 `SEC_INVALID_INPUT`；不要只依赖类型反序列化后再 normalize。
+2. 历史数据库/设置启动读取仍保持 bounded、fail-open sanitizer，不能因为严格写入边界而把坏历史数据升级为启动失败。
+3. 增加原始 JSON/IPC 边界测试，分别证明 global、provider ordinary 和 share v2 对 `target_provider_uuid`/cross-only 字段拒绝，而合法旧三字段与新增 `source_reasoning_effort` 继续接受。
+
+**复验标准**
+
+- 三个写入入口都显式报错且不会部分持久化；历史坏数据读取仍 fail-open。
+
+### F-005 [P2] v52 -> v53 没有持久化清洗旧普通策略中的非法目标强度
+
+**证据**
+
+- `src-tauri/src/infra/db/migrations/v52_to_v53.rs:190` 的事务只创建/校验 mode identity、增加成员 cross 列并推进 `user_version`，没有读取或更新 `providers.model_routing_policy_json`。
+- `src-tauri/src/domain/providers/queries.rs:70` 只在运行时读取时临时 sanitize 普通策略；原始数字预算、非法强度或坏 JSON 仍留在数据库，且没有迁移级 bounded invalid projection。
+
+**影响**
+
+- 升级后非法规则虽然暂时不执行，却会持续存在并在后续导出/写回路径被无证据地静默丢弃，不满足 AC-01 与设计 2.1/2.2 对“迁移/写入清洗、整条删除并记录有界失效投影”的要求。
+
+**期望结果**
+
+1. 在同一 v53 transaction 内 fail-open 解析所有现有 `providers.model_routing_policy_json`，删除目标或来源为非标准 effort 的整条规则，并把规范化结果持久化；坏 JSON 按设计落为安全的 disabled/empty 表示，不能阻断数据库升级。
+2. 记录不含原始敏感内容、数量有界的 migration invalid projection/计数；迁移失败必须整体回滚且不得推进 `user_version`。
+3. 增加 v52 fixture 测试，覆盖旧三字段、八项标准 effort、数字预算文本、非法字符串和 malformed JSON；断言升级后的原始数据库值已清洗、合法规则保留、重复迁移幂等、故障时回滚。
+
+**复验标准**
+
+- v53 完成后直接查询数据库不再包含非法普通规则；合法旧规则语义不变，迁移计数有界且不泄露原始规则内容。
+
 ## Round 1
 
 - 验收候选 head：`bbe3e8bb96ef09cdff6b791b7ee4d1d9c29b9f4d`
