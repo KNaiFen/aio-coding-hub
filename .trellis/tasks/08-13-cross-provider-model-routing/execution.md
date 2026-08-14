@@ -13,11 +13,11 @@
 - 历史 checkpoint `71392b672ee665b6ee96e13bf3871b2816185873` 与其后 `2b8e52e7071fb59cc54a8082bb9bc05f10b8cf1c`、`01915697174eacd623c4e75a03cc10030cde2f9c` 是本次修订之前的计划登记；执行 session 以本 checkpoint 中的 PRD/设计/实施内容为权威，不得把早期“等待 TUI 合并”表述当作现行门禁。
 - 实施授权：已确认（2026-08-13；用户确认本任务全部 PRD 决定、AC 和单 sibling 端到端交付路线）
 - PR 目标：`main`
-- PR：[KNaiFen/aio-coding-hub#137](https://github.com/KNaiFen/aio-coding-hub/pull/137)（Draft；Round 3 已拒绝冻结 head `0280474d747ad9255d9aae6a48cbd02796d3becc`）
+- PR：[KNaiFen/aio-coding-hub#137](https://github.com/KNaiFen/aio-coding-hub/pull/137)（Ready for review；Round 4 验收候选 `74523fe49213f148e4979ce01bc6b1f7d8707368`）
 - 并行 sibling：TUI PR #136 已合并并完成归档；其产品边界仍只包含 TUI formatter。本任务不得修改 `src-tauri/crates/aio-tui/src/format.rs`，同步 `origin/main` 时须保留该 sibling 的归档与索引事实。
 - PENDING 审阅：`PENDING.md` 已审阅，当前无 `pending`/`planned` 条目
-- 当前唯一写者：执行 session 待返工（main 于 2026-08-14 12:00:02 CST 交回）。main 曾于 11:57:35 CST 以 `main-direct-fix` 临时接管记录性文档；Round 3 冻结 head `0280474d747ad9255d9aae6a48cbd02796d3becc`，记录提交 `a9db719a4e4d875531c91861a676061e306905ab` 已推送，交回前工作树干净，本地、远端分支与 PR head 一致，无未提交内容。main 只更新本文件、`delivery.md`、`findings.md` 和活动索引，未修改产品代码、测试、依赖或现行合同。
-- 当前阶段：Round 3 待返工；执行 session 按 `findings.md` 的 `F-006` 恢复，完成后重新取得完整新 head 的 CI、更新交付记录、标记 Ready 并再次暂停通知 main 验收。
+- 当前唯一写者：main（验收记录；于 2026-08-14 13:34:16 CST 接管）。执行 session 已停止写入；冻结 head `74523fe49213f148e4979ce01bc6b1f7d8707368`，接管前工作树干净，本地、远端分支与 PR head 一致，无未提交内容。main 仅接管活动索引、本文件、`delivery.md` 与 `findings.md` 的验收记录，不修改产品代码、测试、依赖或现行合同。
+- 当前阶段：Round 4 main 验收记录；固定候选已完成 `F-006` 复验，main 落盘结论、推送新 head 并重新核验自动检查，随后决定是否合并。
 
 ## 阅读顺序
 

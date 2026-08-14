@@ -1,11 +1,11 @@
 # 交付报告：跨供应商模型路由
 
-> 本文件记录执行 session 已完成的产品实现、Round 1 基线返工、Round 2 F-002～F-005 和 Round 3 F-006 返工结果。main 验收与收尾区仍由 main 填写；任何新 push 都会使旧 head 的 CI 证据不再代表最新 PR head。
+> 本文件记录执行 session 已完成的产品实现、Round 1 基线返工、Round 2 F-002～F-005、Round 3 F-006 返工结果，以及 main 的 Round 4 验收。任何新 push 都会使旧 head 的 CI 证据不再代表最新 PR head。
 
 ## 交付状态
 
-- 结果：Round 3 的 `F-006` 已完成；产品候选 `abd79c7484a51be2bee80787092db847a1466f47` 的 frontend、Rust、docs/support、CodeQL、`pr-title` 和 `ci-gate` 全部通过。提交本交付记录后将等待新 head 的自动检查，再把 PR 标记 Ready for review。
-- PR：[KNaiFen/aio-coding-hub#137](https://github.com/KNaiFen/aio-coding-hub/pull/137)（Draft，等待本交付记录 head 的自动检查）
+- 结果：Round 4 main 验收通过；`F-006` 已在固定候选 `74523fe49213f148e4979ce01bc6b1f7d8707368` 关闭，`F-001`～`F-005` 的关闭结论保持有效，没有新增 required finding。
+- PR：[KNaiFen/aio-coding-hub#137](https://github.com/KNaiFen/aio-coding-hub/pull/137)（Ready for review；`MERGEABLE` / `CLEAN`）
 - 分支：`feat/cross-provider-model-routing`
 - 初始派生 base：`main` @ `875ff441c5ba9f1a7f235ad95dadb945a41bba61`；同步时实时 PR base：`main` @ `bd2535796fdf847008b7b55789572367d3e615e9`
 - Round 1 同步验证 head：`c47f1a30fc538cd89b2dfe48416dacc05df6888e`
@@ -19,7 +19,9 @@
 - Round 3 `ci-gate`：通过，[run 31769486773](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31769486773) / [job 94675950139](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31769486773/job/94675950139)，绑定 Round 3 产品候选 head。
 - Round 3 其他检查：change-scope、frontend、Rust、docs-contract、support-contract、pr-title、JS/Rust CodeQL 全部通过；手动 dispatch guard 和候选构建按范围跳过。
 - Round 3 产品候选验证终态：2026-08-14。
-- 执行 session：提交并推送本记录后等待最新完整 head 的自动必需检查；全绿后标记 Ready for review 并停止写入。
+- Round 4 验收候选 head：`74523fe49213f148e4979ce01bc6b1f7d8707368`；base：`bd2535796fdf847008b7b55789572367d3e615e9`。
+- Round 4 `ci-gate`：通过，[run 31770929381](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31770929381) / [job 94679845780](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31770929381/job/94679845780)；[CodeQL run 31770929314](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31770929314) 与 [`pr-title` run 31770929342](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31770929342) 同一 head 通过。
+- 执行 session：已停止写入；main 于 2026-08-14 13:34:16 CST 接管验收记录。
 
 ## Round 1 返工快照
 
@@ -76,7 +78,7 @@
 | AC-07 会话与审计 | Rust 验证通过 | attempt 级 `session_binding_allowed=false`；request-end/stream finalize、cost/Observer/Home marker 投影测试通过 |
 | AC-08 导入/分享/复制 | Rust 与前端服务验证通过 | config v5/v1-v4 导入测试、share/duplicate 测试；Rust suite 通过单连接池 duplicate 路径，frontend unit tests 通过 |
 | AC-09 测试与合同 | 通过 | Round 3 产品候选的 frontend unit tests/build、Rust tests/Clippy/audit/generated drift、现行合同和 docs/support contract 全部通过 |
-| AC-10 交付门 | 产品候选通过，等待记录 head 复验 | 产品实现、三轮返工、推送与 delivery 已完成；`abd79c7484a51be2bee80787092db847a1466f47` 的必需 CI 全绿，本记录提交后的最新 head 仍需自动复验后标记 Ready |
+| AC-10 交付门 | 通过 | 产品实现、三轮返工、推送与 delivery 已完成；固定候选 `74523fe49213f148e4979ce01bc6b1f7d8707368` 的 required CI、frontend、Rust、docs/support、CodeQL 与 `pr-title` 全绿，PR Ready 且可合并 |
 
 ## 主要代码位置
 
@@ -164,6 +166,17 @@
 
 ## main 验收记录
 
+### Round 4
+
+- 结论：通过。候选 head `74523fe49213f148e4979ce01bc6b1f7d8707368` 已关闭 `F-006`，`F-001`～`F-005` 的关闭结论保持有效；未发现新的 required finding。
+- 审查范围：Round 3 的 3 个变更文件、F-006 实现与新增前端测试、PRD/设计/实施/交付材料、实时 PR #137 head/base/Ready/合并状态，以及同一 head 的全部自动检查。
+- 候选 base：`bd2535796fdf847008b7b55789572367d3e615e9`；接管前工作树干净，本地、远端分支和 PR head 一致，PR 为 `MERGEABLE` / `CLEAN`。
+- CI 证据：[run 31770929381](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31770929381)、[CodeQL run 31770929314](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31770929314)、[`pr-title` run 31770929342](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31770929342)、[`ci-gate` job 94679845780](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31770929381/job/94679845780)；frontend、Rust tests/Clippy/audit/generated drift、docs/support、CodeQL、`pr-title` 与 `ci-gate` 均成功且绑定本候选。
+- F-006 复验：cross draft 使用独立 adopted revision；dirty refetch 保留 draft/baseline/revision，clean refetch、保存成功、放弃、scope 切换和关闭成组采纳或清空；CAS conflict 测试证明旧 draft 不覆盖并发 R2。
+- 本地检查：cloud-only checker、selftest、Trellis task validate、`git diff --check origin/main...HEAD` 与当前记录变更的 `git diff --check` 均通过。
+- 接受的偏移或风险：无产品行为、兼容性或 AC 偏移。接受已披露的剩余验证缺口：未执行真实桌面 UI 与真实 bridge/credential 组合人工验收；自动化已覆盖编辑器状态、运行时 failover、bridge prepare、SSE/非流、CAS 与合同路径。
+- 日期：2026-08-14。
+
 ### Round 3
 
 - 结论：返工。候选 head `0280474d747ad9255d9aae6a48cbd02796d3becc` 已关闭 `F-002`～`F-005`，Ready 状态、固定 head、工作树归属和同一 head 必需 CI 均满足；前端组合编辑器的 cross revision 与 dirty draft 未绑定，新增 required finding `F-006`。
@@ -209,12 +222,12 @@
 
 ## main 收尾
 
-- 最终结果：Round 3 验收不通过，等待执行 session 按 `findings.md` 的 `F-006` 返工
-- 功能 PR 与验收候选：PR #137，已拒绝候选 `0280474d747ad9255d9aae6a48cbd02796d3becc`
+- 最终结果：Round 4 验收通过；等待本验收记录 head 的自动检查后合并功能 PR
+- 功能 PR 与验收候选：PR #137，已接受候选 `74523fe49213f148e4979ce01bc6b1f7d8707368`
 - main 合并提交：无
 - 收尾记录 PR：无
 - 知识库与合同：待实现并验收
 - PENDING 去向：无未解决条目
 - 归档：保持活动
-- worktree 与分支清理：保持，等待执行 session 完成 Round 3 返工
-- 遗留风险：`F-006` 与真实桌面 UI/真实 bridge/credential 人工验证缺口，见 Round 3 记录和 `findings.md`
+- worktree 与分支清理：合并和收尾记录完成前保持
+- 遗留风险：真实桌面 UI 与真实 bridge/credential 组合尚未人工验证；无未关闭 required finding

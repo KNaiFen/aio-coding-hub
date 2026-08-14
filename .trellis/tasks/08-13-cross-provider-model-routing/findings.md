@@ -1,5 +1,21 @@
 # 验收返工：跨供应商模型路由
 
+## Round 4
+
+- 验收候选 head：`74523fe49213f148e4979ce01bc6b1f7d8707368`；base：`bd2535796fdf847008b7b55789572367d3e615e9`。
+- PR：[KNaiFen/aio-coding-hub#137](https://github.com/KNaiFen/aio-coding-hub/pull/137)（Ready for review；`MERGEABLE` / `CLEAN`）。
+- 通过 CI：[run 31770929381](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31770929381)、[CodeQL run 31770929314](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31770929314)、[`pr-title` run 31770929342](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31770929342)、[`ci-gate` job 94679845780](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31770929381/job/94679845780)；均绑定本候选并成功。
+- 验收结论：通过。`F-006` 已解决；`F-001`～`F-005` 的既有关闭结论保持有效，没有新增 required finding。
+- 复验责任：main。执行 session 已暂停；main 只写本轮验收记录，不修改产品代码、测试、依赖或现行合同。
+
+### F-006 [P1] 已解决
+
+- 独立 `crossRoutingRevision` 与已采纳的 cross baseline/draft 同 scope 保存；保存不再从后续 refetch 的 `routingPolicyView` 借用 revision。
+- 同 scope refetch 在 draft dirty 时保留旧 draft、baseline 和 revision，在 clean 时由 `adoptCrossRoutingView` 原子采纳新三元组；保存成功、放弃、scope 切换和关闭也分别成组采纳或清空。
+- 回归测试覆盖 R1 dirty draft 遇到 R2 refetch 后仍以 R1 revision 保存并得到 CAS conflict、草稿不丢失，以及 clean refetch 与 scope 切换采纳新 revision。
+- 关键证据：`src/pages/providers/useProviderEditorForm.ts:414`、`:528`、`:566`、`:584`、`:1025`、`:1078`；`src/pages/providers/__tests__/ProviderRoutingEditor.test.tsx:325`、`:383`、`:425`。
+- 复验结果：并发 R2 不会被旧 draft 静默覆盖；服务端值与本地 dirty draft 均保留，符合 owner-scoped CAS 设计。
+
 ## Round 3
 
 - 验收候选 head：`0280474d747ad9255d9aae6a48cbd02796d3becc`
