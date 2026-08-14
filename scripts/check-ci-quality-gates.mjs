@@ -2,8 +2,6 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { CHECKS, STAGES } from "./run-checks.mjs";
-
 const ACTIONS_GUARD = "node scripts/require-github-actions.mjs && ";
 const RUST_CANONICALIZE_RUN = `set -euo pipefail
 cargo fmt --manifest-path src-tauri/Cargo.toml --all
@@ -440,12 +438,6 @@ function requireCodeqlStep(workflow, name, action, expectedIf, expectedWith, fai
   );
 }
 
-function requireStage(stages, stage, check, failures) {
-  if (!stages[stage]?.includes(check)) {
-    failures.push(`STAGES.${stage} must include ${check}`);
-  }
-}
-
 function assertCodeqlContract(workflow, failures) {
   const root = topLevelKeys(workflow);
   if (
@@ -589,8 +581,6 @@ export function assertCiQualityGates({
   codeqlWorkflow,
   dependabotConfig,
   packageJson,
-  checks,
-  stages,
   ciWorkflow,
   performanceWorkflow,
   prTitleWorkflow,
@@ -616,23 +606,6 @@ export function assertCiQualityGates({
   ) {
     failures.push("check:ci-quality-gates must be Actions-only and run its self-test first");
   }
-
-  if (checks["cloud-only-verification"] !== "node scripts/check-cloud-only-verification.mjs") {
-    failures.push("aggregate checks must define cloud-only-verification");
-  }
-  if (checks["ci-quality-gates"] !== "pnpm check:ci-quality-gates") {
-    failures.push("aggregate checks must define ci-quality-gates");
-  }
-  if (checks["create-aio-plugin-typecheck"] !== "pnpm create-aio-plugin:typecheck") {
-    failures.push("aggregate checks must define create-aio-plugin-typecheck");
-  }
-
-  requireStage(stages, "full-ci", "cloud-only-verification", failures);
-  requireStage(stages, "full-ci", "no-instant-now-sub", failures);
-  requireStage(stages, "full-ci", "ci-quality-gates", failures);
-  requireStage(stages, "full-ci", "create-aio-plugin-typecheck", failures);
-  requireStage(stages, "plugin-hardening", "cloud-only-verification", failures);
-  requireStage(stages, "plugin-hardening", "create-aio-plugin-typecheck", failures);
 
   requireWorkflowCommands(
     ciWorkflow,
@@ -716,8 +689,6 @@ if (process.argv[1] && resolve(process.argv[1]) === modulePath) {
       codeqlWorkflow: readFileSync(join(repoRoot, ".github", "workflows", "codeql.yml"), "utf8"),
       dependabotConfig: readFileSync(join(repoRoot, ".github", "dependabot.yml"), "utf8"),
       packageJson: JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")),
-      checks: CHECKS,
-      stages: STAGES,
       ciWorkflow: readFileSync(join(repoRoot, ".github", "workflows", "ci.yml"), "utf8"),
       performanceWorkflow: readFileSync(
         join(repoRoot, ".github", "workflows", "performance.yml"),

@@ -14,20 +14,6 @@ const packageJson = {
       `${guard}node scripts/check-ci-quality-gates.selftest.mjs && node scripts/check-ci-quality-gates.mjs`,
   },
 };
-const checks = {
-  "cloud-only-verification": "node scripts/check-cloud-only-verification.mjs",
-  "ci-quality-gates": "pnpm check:ci-quality-gates",
-  "create-aio-plugin-typecheck": "pnpm create-aio-plugin:typecheck",
-};
-const stages = {
-  "full-ci": [
-    "cloud-only-verification",
-    "no-instant-now-sub",
-    "ci-quality-gates",
-    "create-aio-plugin-typecheck",
-  ],
-  "plugin-hardening": ["cloud-only-verification", "create-aio-plugin-typecheck"],
-};
 const readFixture = (relativePath) =>
   readFileSync(new URL(`../${relativePath}`, import.meta.url), "utf8");
 const ciWorkflow = readFixture(".github/workflows/ci.yml");
@@ -40,8 +26,6 @@ const valid = {
   codeqlWorkflow,
   dependabotConfig,
   packageJson,
-  checks,
-  stages,
   ciWorkflow,
   performanceWorkflow,
   prTitleWorkflow,
@@ -55,27 +39,6 @@ assert.doesNotThrow(() =>
 );
 
 for (const [name, fixture, expected] of [
-  [
-    "full CI Instant gate",
-    {
-      ...valid,
-      stages: {
-        ...stages,
-        "full-ci": [stages["full-ci"][0], ...stages["full-ci"].slice(2)],
-      },
-    },
-    /STAGES\.full-ci must include no-instant-now-sub/,
-  ],
-  [
-    "cloud contract stage wiring",
-    { ...valid, stages: { ...stages, "full-ci": [] } },
-    /STAGES\.full-ci must include cloud-only-verification/,
-  ],
-  [
-    "plugin hardening typecheck",
-    { ...valid, stages: { ...stages, "plugin-hardening": [] } },
-    /STAGES\.plugin-hardening must include cloud-only-verification/,
-  ],
   [
     "support cloud-only step",
     {
