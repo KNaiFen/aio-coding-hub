@@ -1,31 +1,15 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { useWslHostAddressQuery } from "../../../query/wsl";
-import { copyText } from "../../../services/clipboard";
-import {
-  gatewayBearerTokenAcknowledge,
-  gatewayBearerTokenReveal,
-  gatewayBearerTokenRotate,
-} from "../../../services/gateway/gateway";
-import { NetworkSettingsCard } from "../NetworkSettingsCard";
+import type { AppSettings } from "../../../services/settings/settings";
+import { createTestAppSettings } from "../../../test/fixtures/settings";
+import { createDeferred } from "../../../test/utils/deferred";
+import { NetworkSettingsCard, type NetworkSettingsCardProps } from "../NetworkSettingsCard";
 
 let gatewayMetaMock: any = { gatewayAvailable: "available", gateway: null, preferredPort: 37123 };
 
 vi.mock("sonner", () => ({ toast: vi.fn() }));
-vi.mock("../../../services/clipboard", () => ({ copyText: vi.fn() }));
-
-vi.mock("../../../services/gateway/gateway", async () => {
-  const actual = await vi.importActual<typeof import("../../../services/gateway/gateway")>(
-    "../../../services/gateway/gateway"
-  );
-  return {
-    ...actual,
-    gatewayBearerTokenReveal: vi.fn(),
-    gatewayBearerTokenRotate: vi.fn(),
-    gatewayBearerTokenAcknowledge: vi.fn(),
-  };
-});
 
 vi.mock("../../../hooks/useGatewayMeta", () => ({
   useGatewayMeta: () => gatewayMetaMock,
@@ -37,37 +21,41 @@ vi.mock("../../../query/wsl", async () => {
 });
 
 beforeEach(() => {
-  vi.mocked(gatewayBearerTokenReveal).mockReset().mockResolvedValue(null);
-  vi.mocked(gatewayBearerTokenRotate).mockReset();
-  vi.mocked(gatewayBearerTokenAcknowledge).mockReset().mockResolvedValue(true);
-  vi.mocked(copyText).mockReset().mockResolvedValue(undefined);
+  vi.clearAllMocks();
+  gatewayMetaMock = { gatewayAvailable: "available", gateway: null, preferredPort: 37123 };
 });
 
-describe("components/cli-manager/NetworkSettingsCard", () => {
-  it("reveals, copies, confirms, and rotates the non-loopback Gateway token", async () => {
-    const firstToken = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-    const rotatedToken = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
-    vi.mocked(useWslHostAddressQuery).mockReturnValue({ data: null } as any);
-    vi.mocked(gatewayBearerTokenReveal)
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({
-        token: firstToken,
-        wsl_sync_error: "WSL_GATEWAY_TOKEN_SYNC_FAILED: review WSL settings",
-      });
-    vi.mocked(gatewayBearerTokenRotate).mockResolvedValue({
-      token: rotatedToken,
-      wsl_sync_error: null,
-    });
+function createTokenControllerProps(
+  overrides: Partial<
+    Pick<
+      NetworkSettingsCardProps,
+      "gatewayTokenActionPending" | "onGatewayListenSaved" | "onRotateGatewayToken"
+    >
+  > = {}
+) {
+  return {
+    gatewayTokenActionPending: false,
+    onGatewayListenSaved: vi.fn().mockResolvedValue(undefined),
+    onRotateGatewayToken: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  };
+}
 
-    const settings = {
+describe("components/cli-manager/NetworkSettingsCard", () => {
+  it("shows applying state, commits canonical settings, and can switch LAN back to localhost", async () => {
+    vi.mocked(useWslHostAddressQuery).mockReturnValue({ data: null } as any);
+
+    const settings = createTestAppSettings({
       preferred_port: 37123,
       gateway_listen_mode: "localhost",
       gateway_custom_listen_address: "",
-    } as any;
-    const onPersistSettings = vi.fn(async () => ({
-      ...settings,
-      gateway_listen_mode: "lan",
-    }));
+    });
+    const firstSave = createDeferred<AppSettings | null>();
+    const onPersistSettings = vi
+      .fn()
+      .mockReturnValueOnce(firstSave.promise)
+      .mockResolvedValueOnce({ ...settings, gateway_listen_mode: "localhost" });
+    const onGatewayListenSaved = vi.fn().mockResolvedValue(undefined);
 
     render(
       <NetworkSettingsCard
@@ -75,20 +63,27 @@ describe("components/cli-manager/NetworkSettingsCard", () => {
         saving={false}
         settings={settings}
         onPersistSettings={onPersistSettings}
+        {...createTokenControllerProps({ onGatewayListenSaved })}
       />
     );
 
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "lan" } });
-    expect(await screen.findByText(firstToken)).toBeInTheDocument();
-    expect(screen.getByText(/WSL_GATEWAY_TOKEN_SYNC_FAILED/)).toBeInTheDocument();
+    const modeSelect = screen.getByRole("combobox") as HTMLSelectElement;
+    fireEvent.change(modeSelect, { target: { value: "lan" } });
+    expect(screen.getByRole("status")).toHaveTextContent("正在应用");
+    expect(modeSelect).toBeDisabled();
 
-    fireEvent.click(screen.getByRole("button", { name: "复制" }));
-    await waitFor(() => expect(copyText).toHaveBeenCalledWith(firstToken));
-    fireEvent.click(screen.getByRole("button", { name: "已保存" }));
-    await waitFor(() => expect(gatewayBearerTokenAcknowledge).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      firstSave.resolve({ ...settings, gateway_listen_mode: "lan" });
+      await firstSave.promise;
+    });
+    await waitFor(() => expect(modeSelect.value).toBe("lan"));
+    expect(modeSelect).not.toBeDisabled();
+    expect(onGatewayListenSaved).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "轮换访问令牌" }));
-    expect(await screen.findByText(rotatedToken)).toBeInTheDocument();
+    fireEvent.change(modeSelect, { target: { value: "localhost" } });
+    await waitFor(() => expect(modeSelect.value).toBe("localhost"));
+    expect(onPersistSettings).toHaveBeenLastCalledWith({ gateway_listen_mode: "localhost" });
+    expect(onGatewayListenSaved).toHaveBeenCalledTimes(1);
   });
 
   it("switches listen mode and validates custom address", async () => {
@@ -102,7 +97,7 @@ describe("components/cli-manager/NetworkSettingsCard", () => {
       gateway_custom_listen_address: "0.0.0.0:37123",
     } as any;
 
-    const onPersistSettings = vi.fn(async () => settings);
+    const onPersistSettings = vi.fn(async (patch) => ({ ...settings, ...patch }));
 
     render(
       <NetworkSettingsCard
@@ -110,6 +105,7 @@ describe("components/cli-manager/NetworkSettingsCard", () => {
         saving={false}
         settings={settings}
         onPersistSettings={onPersistSettings}
+        {...createTokenControllerProps()}
       />
     );
 
@@ -154,13 +150,14 @@ describe("components/cli-manager/NetworkSettingsCard", () => {
           } as any
         }
         onPersistSettings={vi.fn(async () => null)}
+        {...createTokenControllerProps()}
       />
     );
 
     expect(screen.getByText("1.2.3.4:9999")).toBeInTheDocument();
   });
 
-  it("persists listen mode changes and reverts local state when save fails", async () => {
+  it("rolls listen mode back to the latest settings on null and error", async () => {
     vi.mocked(useWslHostAddressQuery).mockReturnValue({ data: "172.20.0.1" } as any);
     gatewayMetaMock = {
       gatewayAvailable: "available",
@@ -175,8 +172,9 @@ describe("components/cli-manager/NetworkSettingsCard", () => {
     } as any;
     const onPersistSettings = vi
       .fn()
-      .mockResolvedValueOnce({ ...settings, gateway_listen_mode: "lan" })
+      .mockResolvedValueOnce(null)
       .mockRejectedValueOnce(new Error("save boom"));
+    const onGatewayListenSaved = vi.fn().mockResolvedValue(undefined);
 
     render(
       <NetworkSettingsCard
@@ -184,6 +182,7 @@ describe("components/cli-manager/NetworkSettingsCard", () => {
         saving={false}
         settings={settings}
         onPersistSettings={onPersistSettings}
+        {...createTokenControllerProps({ onGatewayListenSaved })}
       />
     );
 
@@ -191,8 +190,9 @@ describe("components/cli-manager/NetworkSettingsCard", () => {
     await waitFor(() =>
       expect(onPersistSettings).toHaveBeenCalledWith({ gateway_listen_mode: "lan" })
     );
-    expect(toast).toHaveBeenCalledWith("监听模式已保存");
-    expect(screen.getByText("0.0.0.0:40000")).toBeInTheDocument();
+    await waitFor(() =>
+      expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("localhost")
+    );
 
     vi.mocked(toast).mockClear();
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "wsl_auto" } });
@@ -203,6 +203,43 @@ describe("components/cli-manager/NetworkSettingsCard", () => {
     await waitFor(() =>
       expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("localhost")
     );
+    expect(onGatewayListenSaved).not.toHaveBeenCalled();
+  });
+
+  it("syncs external settings in an effect and delegates token rotation", async () => {
+    vi.mocked(useWslHostAddressQuery).mockReturnValue({ data: null } as any);
+    const settings = createTestAppSettings({
+      preferred_port: 37123,
+      gateway_listen_mode: "localhost",
+      gateway_custom_listen_address: "",
+    });
+    const onRotateGatewayToken = vi.fn().mockResolvedValue(undefined);
+    const controllerProps = createTokenControllerProps({ onRotateGatewayToken });
+    const view = render(
+      <NetworkSettingsCard
+        available={true}
+        saving={false}
+        settings={settings}
+        onPersistSettings={vi.fn(async () => null)}
+        {...controllerProps}
+      />
+    );
+
+    view.rerender(
+      <NetworkSettingsCard
+        available={true}
+        saving={false}
+        settings={{ ...settings, gateway_listen_mode: "lan" }}
+        onPersistSettings={vi.fn(async () => null)}
+        {...controllerProps}
+      />
+    );
+
+    await waitFor(() =>
+      expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("lan")
+    );
+    fireEvent.click(screen.getByRole("button", { name: "轮换访问令牌" }));
+    await waitFor(() => expect(onRotateGatewayToken).toHaveBeenCalledTimes(1));
   });
 
   it("validates IPv6 custom address and handles non-tauri persist failure", async () => {
@@ -223,6 +260,7 @@ describe("components/cli-manager/NetworkSettingsCard", () => {
         saving={false}
         settings={settings}
         onPersistSettings={onPersistSettings}
+        {...createTokenControllerProps()}
       />
     );
 

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,6 +10,13 @@ import { createTestAppSettings } from "../../test/fixtures/settings";
 import { createTestQueryClient } from "../../test/utils/reactQuery";
 import { CliManagerPage } from "../CliManagerPage";
 import { logToConsole } from "../../services/consoleLog";
+import { copyText } from "../../services/clipboard";
+import {
+  gatewayBearerTokenAcknowledge,
+  gatewayBearerTokenReveal,
+  gatewayBearerTokenRotate,
+} from "../../services/gateway/gateway";
+import { createDeferred } from "../../test/utils/deferred";
 import {
   useSettingsCircuitBreakerNoticeSetMutation,
   useSettingsCodexSessionIdCompletionSetMutation,
@@ -41,6 +48,18 @@ vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }),
 }));
 vi.mock("../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
+vi.mock("../../services/clipboard", () => ({ copyText: vi.fn() }));
+vi.mock("../../services/gateway/gateway", async () => {
+  const actual = await vi.importActual<typeof import("../../services/gateway/gateway")>(
+    "../../services/gateway/gateway"
+  );
+  return {
+    ...actual,
+    gatewayBearerTokenReveal: vi.fn(),
+    gatewayBearerTokenRotate: vi.fn(),
+    gatewayBearerTokenAcknowledge: vi.fn(),
+  };
+});
 
 vi.mock("../../components/cli-manager/tabs/GeneralTab", () => ({
   CliManagerGeneralTab: ({
@@ -50,6 +69,8 @@ vi.mock("../../components/cli-manager/tabs/GeneralTab", () => ({
     onPersistCodexSessionIdCompletion,
     onPersistCacheAnomalyMonitor,
     onPersistCommonSettings,
+    onGatewayListenSaved,
+    onRotateGatewayToken,
     blurOnEnter,
   }: any) => (
     <div>
@@ -83,6 +104,12 @@ vi.mock("../../components/cli-manager/tabs/GeneralTab", () => ({
         onClick={() => onPersistCommonSettings({ provider_cooldown_seconds: 99 })}
       >
         persist-common
+      </button>
+      <button type="button" onClick={() => void onGatewayListenSaved()}>
+        reveal-gateway-token
+      </button>
+      <button type="button" onClick={() => void onRotateGatewayToken()}>
+        rotate-gateway-token
       </button>
     </div>
   ),
@@ -252,6 +279,10 @@ function createSettingsMutationResult(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(gatewayBearerTokenReveal).mockReset().mockResolvedValue(null);
+  vi.mocked(gatewayBearerTokenRotate).mockReset();
+  vi.mocked(gatewayBearerTokenAcknowledge).mockReset().mockResolvedValue(true);
+  vi.mocked(copyText).mockReset().mockResolvedValue(undefined);
 
   vi.mocked(useGrokTabDataModel).mockReturnValue({} as never);
 
@@ -354,6 +385,55 @@ beforeEach(() => {
 });
 
 describe("pages/CliManagerPage", () => {
+  it("keeps one-shot Gateway token reveal alive across General tab unmount", async () => {
+    const firstToken = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    const rotatedToken = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+    const deferredReveal = createDeferred<{
+      token: string;
+      wsl_sync_error: string | null;
+    } | null>();
+    vi.mocked(gatewayBearerTokenReveal)
+      .mockResolvedValueOnce(null)
+      .mockReturnValueOnce(deferredReveal.promise);
+    vi.mocked(gatewayBearerTokenRotate).mockResolvedValue({
+      token: rotatedToken,
+      wsl_sync_error: null,
+    });
+
+    renderWithProviders(<CliManagerPage />);
+    await waitFor(() => expect(gatewayBearerTokenReveal).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole("button", { name: "reveal-gateway-token" }));
+    fireEvent.click(screen.getByRole("button", { name: "reveal-gateway-token" }));
+    await waitFor(() => expect(gatewayBearerTokenReveal).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(screen.getByRole("tab", { name: "Claude Code" }));
+    await screen.findByText("claude-tab");
+    await act(async () => {
+      deferredReveal.resolve({
+        token: firstToken,
+        wsl_sync_error: "WSL_GATEWAY_TOKEN_SYNC_FAILED: review WSL settings",
+      });
+      await deferredReveal.promise;
+    });
+
+    expect(await screen.findByText(firstToken)).toBeInTheDocument();
+    expect(gatewayBearerTokenReveal).toHaveBeenCalledTimes(2);
+    expect(screen.getByText(/WSL_GATEWAY_TOKEN_SYNC_FAILED/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "复制" }));
+    await waitFor(() => expect(copyText).toHaveBeenCalledWith(firstToken));
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    expect(gatewayBearerTokenAcknowledge).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("tab", { name: "通用" }));
+    fireEvent.click(screen.getByRole("button", { name: "rotate-gateway-token" }));
+    expect(await screen.findByText(rotatedToken)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "已保存" }));
+    await waitFor(() => expect(gatewayBearerTokenAcknowledge).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByText(rotatedToken)).not.toBeInTheDocument());
+  });
+
   it("以独立数据模型延迟编排 Grok Tab", async () => {
     renderWithProviders(<CliManagerPage />);
 
