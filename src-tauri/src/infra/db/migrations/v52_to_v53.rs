@@ -229,13 +229,9 @@ ORDER BY id ASC
             .query_map([], |row| {
                 Ok((row.get::<_, i64>(0)?, row.get::<_, Value>(1)?))
             })
-            .map_err(|error| {
-                format!("failed to query provider model routing policies: {error}")
-            })?
+            .map_err(|error| format!("failed to query provider model routing policies: {error}"))?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| {
-                format!("failed to read provider model routing policy: {error}")
-            })?;
+            .map_err(|error| format!("failed to read provider model routing policy: {error}"))?;
         rows
     };
 
@@ -253,8 +249,7 @@ ORDER BY id ASC
         };
         let original_rule_count = policy.rules.len();
         let sanitized = crate::settings::sanitize_model_routing_policy(&mut policy);
-        projection.invalid_rules_dropped +=
-            original_rule_count.saturating_sub(policy.rules.len());
+        projection.invalid_rules_dropped += original_rule_count.saturating_sub(policy.rules.len());
         if !malformed && !sanitized {
             continue;
         }

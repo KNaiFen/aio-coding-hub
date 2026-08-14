@@ -1306,16 +1306,14 @@ WHERE mode_id = ?2 AND cli_key = ?3 AND provider_id = ?4
         .expect("set cross policy");
     }
 
-    fn set_provider_model_routing_override_enabled(
-        db: &db::Db,
-        provider_id: i64,
-        enabled: bool,
-    ) {
+    fn set_provider_model_routing_override_enabled(db: &db::Db, provider_id: i64, enabled: bool) {
         let policy_json = enabled
             .then(|| serde_json::to_string(&settings::ModelRoutingPolicy::default()))
             .transpose()
             .expect("serialize provider routing override");
-        let conn = db.open_connection().expect("open provider routing policy db");
+        let conn = db
+            .open_connection()
+            .expect("open provider routing policy db");
         conn.execute(
             "UPDATE providers SET model_routing_policy_json = ?1 WHERE id = ?2",
             rusqlite::params![policy_json, provider_id],
@@ -2767,12 +2765,8 @@ INSERT INTO codex_managed_profiles(
             spawn_counting_status_upstream(StatusCode::OK, target_response).await;
         let source_id = insert_provider_with_priority(&db, "grok", "Toggle Source", source_url, 0);
         let target_id = insert_provider_with_priority(&db, "grok", "Toggle Target", target_url, 1);
-        let mode_id = insert_sort_mode_route(
-            &db,
-            "Cross toggle mode",
-            "grok",
-            vec![source_id, target_id],
-        );
+        let mode_id =
+            insert_sort_mode_route(&db, "Cross toggle mode", "grok", vec![source_id, target_id]);
         crate::sort_modes::set_active(&db, "grok", Some(mode_id)).expect("activate mode");
         let target_uuid = gateway_provider_uuid(&db, target_id);
         set_member_cross_routing_policy(
@@ -2784,8 +2778,7 @@ INSERT INTO codex_managed_profiles(
             "grok-target",
             None,
         );
-        let stored_cross_policy =
-            member_cross_routing_policy_json(&db, mode_id, "grok", source_id);
+        let stored_cross_policy = member_cross_routing_policy_json(&db, mode_id, "grok", source_id);
 
         let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(8);
         let router = build_router(gateway_state(app_handle, db.clone(), log_tx));
@@ -2802,7 +2795,11 @@ INSERT INTO codex_managed_profiles(
                 ))
                 .expect("request");
 
-            let response = router.clone().oneshot(request).await.expect("route response");
+            let response = router
+                .clone()
+                .oneshot(request)
+                .await
+                .expect("route response");
             assert_eq!(response.status(), StatusCode::OK);
             let log = recv_terminal_request_log(&mut log_rx).await;
             let attempts: Value = serde_json::from_str(&log.attempts_json).expect("attempts JSON");

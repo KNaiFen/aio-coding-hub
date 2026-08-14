@@ -4052,11 +4052,7 @@ fn migrate_v52_to_v53_persists_sanitized_ordinary_policies_idempotently() {
     .expect("store legacy ordinary policy");
     conn.execute(
         "INSERT INTO providers(id, provider_uuid, model_routing_policy_json) VALUES (?1, ?2, ?3)",
-        rusqlite::params![
-            2_i64,
-            "22222222-2222-4222-8222-222222222222",
-            "{malformed"
-        ],
+        rusqlite::params![2_i64, "22222222-2222-4222-8222-222222222222", "{malformed"],
     )
     .expect("store malformed ordinary policy");
 
@@ -4086,9 +4082,10 @@ fn migrate_v52_to_v53_persists_sanitized_ordinary_policies_idempotently() {
                 .source_reasoning_effort
                 .as_deref()
                 .is_none_or(|effort| STANDARD_EFFORTS.contains(&effort))
-            && rule.reasoning_effort.as_deref().is_none_or(|effort| {
-                STANDARD_EFFORTS.contains(&effort)
-            })
+            && rule
+                .reasoning_effort
+                .as_deref()
+                .is_none_or(|effort| STANDARD_EFFORTS.contains(&effort))
     }));
     let high = sanitized
         .rules
@@ -4110,8 +4107,7 @@ fn migrate_v52_to_v53_persists_sanitized_ordinary_policies_idempotently() {
         crate::settings::ModelRoutingPolicy::default()
     );
 
-    let repeated =
-        v52_to_v53::migrate_v52_to_v53(&mut conn).expect("repeat v52->v53 migration");
+    let repeated = v52_to_v53::migrate_v52_to_v53(&mut conn).expect("repeat v52->v53 migration");
     assert_eq!(repeated.providers_scanned, 2);
     assert_eq!(repeated.policies_repaired, 0);
     assert_eq!(repeated.invalid_rules_dropped, 0);
@@ -4142,8 +4138,8 @@ fn migrate_v52_to_v53_bounds_affected_provider_projection() {
         .expect("insert malformed provider policy");
     }
 
-    let projection = v52_to_v53::migrate_v52_to_v53(&mut conn)
-        .expect("migrate bounded provider projection");
+    let projection =
+        v52_to_v53::migrate_v52_to_v53(&mut conn).expect("migrate bounded provider projection");
     assert_eq!(projection.providers_scanned, 20);
     assert_eq!(projection.policies_repaired, 20);
     assert_eq!(projection.malformed_policies, 20);
