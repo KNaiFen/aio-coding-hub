@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.60.52](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.52) (2026-08-14)
+
+### Highlights
+
+* route compatible model requests across configured providers with guarded fallback behavior
+* refine TUI request timing and route summaries
+* apply the current nanoid security baseline and close delivery records for completed work
+
 ## [0.60.51](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.51) (2026-08-13)
 
 ### Highlights
