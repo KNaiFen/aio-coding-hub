@@ -112,6 +112,7 @@ function policyView(
     memberPresent?: boolean;
     memberEnabled?: boolean;
     sourceModel?: string;
+    ordinaryRevision?: string;
     crossTarget?: string | null;
   } = {}
 ): ProviderModelRoutingPolicyView {
@@ -133,7 +134,7 @@ function policyView(
         },
       ],
     },
-    ordinary_policy_revision: REVISION,
+    ordinary_policy_revision: input.ordinaryRevision ?? REVISION,
     selected_mode:
       mode == null
         ? null
@@ -293,6 +294,28 @@ describe("pages/providers/ProviderRoutingEditor", () => {
     ).toEqual(expected);
   });
 
+  it("syncs a clean ordinary draft when another mode exposes a newer revision", async () => {
+    vi.mocked(providerModelRoutingPolicyGet).mockImplementation(async (input) =>
+      policyView({
+        mode: input.mode_id === MODE_TWO.modeId ? MODE_TWO : MODE_ONE,
+        sourceModel: input.mode_id === MODE_TWO.modeId ? "latest-source" : "grok-source",
+        ordinaryRevision: input.mode_id === MODE_TWO.modeId ? "c".repeat(64) : REVISION,
+      })
+    );
+    const view = renderDialog(editor());
+    expect(await screen.findByDisplayValue("grok-source")).toBeInTheDocument();
+
+    view.rerender(editor({ routeMode: MODE_TWO }));
+    expect(await screen.findByDisplayValue("latest-source")).toBeInTheDocument();
+
+    view.rerender(editor({ open: false, routeMode: MODE_TWO }));
+    await waitFor(() =>
+      expect(screen.queryByDisplayValue("latest-source")).not.toBeInTheDocument()
+    );
+    view.rerender(editor({ open: true, routeMode: MODE_TWO }));
+    expect(await screen.findByDisplayValue("latest-source")).toBeInTheDocument();
+  });
+
   it("disables cross rules for Default and a missing source member", async () => {
     const { rerender } = renderDialog(editor({ routeMode: null }));
     expect(await screen.findByText(/Default 不支持跨供应商目标/)).toBeInTheDocument();
@@ -371,6 +394,13 @@ describe("pages/providers/ProviderRoutingEditor", () => {
   });
 
   it("keeps ordinary edits across a mode change and confirms dirty cross drafts", async () => {
+    vi.mocked(providerModelRoutingPolicyGet).mockImplementation(async (input) =>
+      policyView({
+        mode: input.mode_id === MODE_TWO.modeId ? MODE_TWO : MODE_ONE,
+        sourceModel: input.mode_id === MODE_TWO.modeId ? "new-server-source" : "grok-source",
+        ordinaryRevision: input.mode_id === MODE_TWO.modeId ? "c".repeat(64) : REVISION,
+      })
+    );
     const onRouteModeChange = vi.fn();
     const view = renderDialog(editor({ onRouteModeChange }));
     const ordinaryInput = await screen.findByDisplayValue("grok-source");

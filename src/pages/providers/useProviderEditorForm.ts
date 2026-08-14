@@ -417,6 +417,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
   const [routingPolicyView, setRoutingPolicyView] =
     useState<ProviderModelRoutingPolicyView | null>(null);
   const ordinaryRoutingProviderKeyRef = useRef<string | null>(null);
+  const ordinaryRoutingRevisionRef = useRef<string | null>(null);
   const crossRoutingScopeKeyRef = useRef<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [savingWithModelFetch, setSavingWithModelFetch] = useState(false);
@@ -531,7 +532,10 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
       ? `${view.selected_mode.mode_id}:${view.selected_mode.mode_uuid}`
       : "default";
 
-    if (ordinaryRoutingProviderKeyRef.current !== providerKey) {
+    const ordinaryProviderChanged = ordinaryRoutingProviderKeyRef.current !== providerKey;
+    const ordinaryRevisionChanged =
+      ordinaryRoutingRevisionRef.current !== view.ordinary_policy_revision;
+    if (ordinaryProviderChanged || (ordinaryRevisionChanged && !ordinaryRoutingDirty)) {
       const ordinaryPolicy = cloneModelRoutingPolicy(view.ordinary_policy);
       setModelRoutingPolicyOverrideEnabled(view.provider_override_enabled);
       setModelRoutingPolicyDraft(ordinaryPolicy);
@@ -543,6 +547,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
       );
       setOrdinaryRoutingRevision(view.ordinary_policy_revision);
       ordinaryRoutingProviderKeyRef.current = providerKey;
+      ordinaryRoutingRevisionRef.current = view.ordinary_policy_revision;
     }
 
     if (crossRoutingScopeKeyRef.current !== `${providerKey}:${modeKey}`) {
@@ -555,11 +560,12 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
       crossRoutingScopeKeyRef.current = `${providerKey}:${modeKey}`;
     }
     setRoutingPolicyView(view);
-  }, [open, routingEditorEnabled, routingPolicyQuery.data]);
+  }, [open, ordinaryRoutingDirty, routingEditorEnabled, routingPolicyQuery.data]);
 
   useEffect(() => {
     if (open) return;
     ordinaryRoutingProviderKeyRef.current = null;
+    ordinaryRoutingRevisionRef.current = null;
     crossRoutingScopeKeyRef.current = null;
     setOrdinaryRoutingBaseline(null);
     setOrdinaryRoutingRevision(null);
@@ -1025,6 +1031,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
         routingPolicySignature({ enabled: saved.provider_override_enabled, policy: ordinaryPolicy })
       );
       setOrdinaryRoutingRevision(saved.ordinary_policy_revision);
+      ordinaryRoutingRevisionRef.current = saved.ordinary_policy_revision;
       setCrossRoutingPolicyState(nextCrossPolicy);
       setCrossRoutingBaseline(routingPolicySignature(nextCrossPolicy));
       setRoutingPolicyView(saved);

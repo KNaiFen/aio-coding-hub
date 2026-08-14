@@ -301,19 +301,40 @@ describe("query/sortModes", () => {
     expect(routingProviderCandidatesList).not.toHaveBeenCalled();
   });
 
-  it("stores a saved policy only under its exact identity and invalidates its candidates", async () => {
+  it("broadcasts saved ordinary fields while preserving each mode's cross policy", async () => {
     setTauriRuntime();
-    const saved = makeRoutingPolicyView();
+    const saved = makeRoutingPolicyView({
+      ordinary_policy: {
+        enabled: true,
+        rules: [
+          {
+            source_model: "new-source",
+            source_reasoning_effort: "high",
+            target_model: "new-target",
+            reasoning_effort: "low",
+          },
+        ],
+      },
+      ordinary_policy_revision: "b".repeat(64),
+    });
     vi.mocked(providerModelRoutingPolicySave).mockResolvedValue(saved);
     const client = createTestQueryClient();
     const otherKey = providerRoutingPolicyQueryKey({
       cliKey: "claude",
       providerId: 101,
       providerUuid: PROVIDER_UUID,
-      modeId: 1,
+      modeId: 2,
       modeUuid: OTHER_MODE_UUID,
     });
-    client.setQueryData(otherKey, { marker: "other identity" });
+    const otherMode = makeRoutingPolicyView({
+      ordinary_policy: { enabled: true, rules: [] },
+      ordinary_policy_revision: "c".repeat(64),
+      selected_mode: { mode_id: 2, mode_uuid: OTHER_MODE_UUID, name: "Other" },
+      cross_policy: null,
+      cross_policy_revision: "d".repeat(64),
+      source_member_enabled: false,
+    });
+    client.setQueryData(otherKey, otherMode);
     const invalidate = vi.spyOn(client, "invalidateQueries");
     const wrapper = createQueryWrapper(client);
     const { result } = renderHook(() => useProviderRoutingPolicySaveMutation(), { wrapper });
@@ -341,7 +362,12 @@ describe("query/sortModes", () => {
       modeUuid: MODE_UUID,
     });
     expect(client.getQueryData(exactKey)).toEqual(saved);
-    expect(client.getQueryData(otherKey)).toEqual({ marker: "other identity" });
+    expect(client.getQueryData(otherKey)).toEqual({
+      ...otherMode,
+      provider_override_enabled: saved.provider_override_enabled,
+      ordinary_policy: saved.ordinary_policy,
+      ordinary_policy_revision: saved.ordinary_policy_revision,
+    });
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: routingProviderCandidatesQueryKey({
         cliKey: "claude",
@@ -350,6 +376,92 @@ describe("query/sortModes", () => {
       }),
       exact: true,
     });
+  });
+
+  it("cancels a delayed old mode request before broadcasting a saved ordinary policy", async () => {
+    setTauriRuntime();
+    const delayed = createDeferred<ProviderModelRoutingPolicyView>();
+    const staleOtherMode = makeRoutingPolicyView({
+      ordinary_policy: { enabled: true, rules: [] },
+      ordinary_policy_revision: "c".repeat(64),
+      selected_mode: { mode_id: 2, mode_uuid: OTHER_MODE_UUID, name: "Other" },
+      cross_policy: null,
+      cross_policy_revision: "d".repeat(64),
+    });
+    const saved = makeRoutingPolicyView({
+      ordinary_policy: {
+        enabled: true,
+        rules: [
+          {
+            source_model: "saved-source",
+            source_reasoning_effort: null,
+            target_model: "saved-target",
+            reasoning_effort: null,
+          },
+        ],
+      },
+      ordinary_policy_revision: "e".repeat(64),
+    });
+    vi.mocked(providerModelRoutingPolicyGet).mockReset();
+    vi.mocked(providerModelRoutingPolicyGet).mockReturnValue(delayed.promise);
+    vi.mocked(providerModelRoutingPolicySave).mockResolvedValue(saved);
+    const client = createTestQueryClient();
+    const otherKey = providerRoutingPolicyQueryKey({
+      cliKey: "claude",
+      providerId: 101,
+      providerUuid: PROVIDER_UUID,
+      modeId: 2,
+      modeUuid: OTHER_MODE_UUID,
+    });
+    client.setQueryData(otherKey, staleOtherMode);
+    const wrapper = createQueryWrapper(client);
+    renderHook(
+      () =>
+        useProviderRoutingPolicyQuery({
+          cliKey: "claude",
+          providerId: 101,
+          providerUuid: PROVIDER_UUID,
+          modeId: 2,
+          modeUuid: OTHER_MODE_UUID,
+        }),
+      { wrapper }
+    );
+    await waitFor(() => expect(providerModelRoutingPolicyGet).toHaveBeenCalled());
+    const mutation = renderHook(() => useProviderRoutingPolicySaveMutation(), { wrapper });
+
+    await act(async () => {
+      await mutation.result.current.mutateAsync({
+        cliKey: "claude",
+        provider_id: 101,
+        provider_uuid: PROVIDER_UUID,
+        mode_id: 1,
+        mode_uuid: MODE_UUID,
+        provider_override_enabled: true,
+        ordinary_policy: saved.ordinary_policy,
+        expected_ordinary_policy_revision: REVISION,
+        cross_policy: saved.cross_policy,
+        expected_cross_policy_revision: REVISION,
+      });
+    });
+    expect(client.getQueryData<ProviderModelRoutingPolicyView>(otherKey)).toEqual({
+      ...staleOtherMode,
+      provider_override_enabled: saved.provider_override_enabled,
+      ordinary_policy: saved.ordinary_policy,
+      ordinary_policy_revision: saved.ordinary_policy_revision,
+    });
+
+    await act(async () => {
+      delayed.resolve(staleOtherMode);
+      await delayed.promise;
+    });
+    await waitFor(() =>
+      expect(client.getQueryData<ProviderModelRoutingPolicyView>(otherKey)).toEqual({
+        ...staleOtherMode,
+        provider_override_enabled: saved.provider_override_enabled,
+        ordinary_policy: saved.ordinary_policy,
+        ordinary_policy_revision: saved.ordinary_policy_revision,
+      })
+    );
   });
 
   it("rejects a policy response that belongs to another CLI", async () => {

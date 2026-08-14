@@ -295,23 +295,58 @@ export function useProviderRoutingPolicySaveMutation() {
         }
         return view;
       }),
+    onMutate: async (input) => {
+      const cliKey = validateProviderCliKey(input.cliKey);
+      const providerId = validateProviderId(input.provider_id);
+      const providerUuid = validateSortModeUuid(input.provider_uuid);
+      await queryClient.cancelQueries({
+        predicate: (query) =>
+          keyMatchesRoutingPolicyProvider(
+            query.queryKey,
+            cliKey,
+            providerId,
+            providerUuid
+          ),
+      });
+    },
     onSuccess: async (view, input) => {
+      const cliKey = validateProviderCliKey(input.cliKey);
       const queryKey = providerRoutingPolicyQueryKey({
-        cliKey: input.cliKey,
+        cliKey,
         providerId: view.provider_id,
         providerUuid: view.provider_uuid,
         modeId: view.selected_mode?.mode_id ?? null,
         modeUuid: view.selected_mode?.mode_uuid ?? null,
       });
+      queryClient.setQueriesData<ProviderModelRoutingPolicyView | null>(
+        {
+          predicate: (query) =>
+            keyMatchesRoutingPolicyProvider(
+              query.queryKey,
+              cliKey,
+              view.provider_id,
+              view.provider_uuid
+            ),
+        },
+        (cached) =>
+          cached == null
+            ? cached
+            : {
+                ...cached,
+                provider_override_enabled: view.provider_override_enabled,
+                ordinary_policy: view.ordinary_policy,
+                ordinary_policy_revision: view.ordinary_policy_revision,
+              }
+      );
       queryClient.setQueryData(queryKey, view);
       await queryClient.invalidateQueries({
-        queryKey: providersKeys.list(input.cliKey),
+        queryKey: providersKeys.list(cliKey),
         exact: true,
       });
       if (view.selected_mode != null) {
         await queryClient.invalidateQueries({
           queryKey: routingProviderCandidatesQueryKey({
-            cliKey: input.cliKey,
+            cliKey,
             modeId: view.selected_mode.mode_id,
             modeUuid: view.selected_mode.mode_uuid,
           }),
