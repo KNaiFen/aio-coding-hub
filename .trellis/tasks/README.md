@@ -10,7 +10,7 @@
 
 | 任务目录 | 阶段 | 分支 | base SHA | 规划提交 | Worktree | PR | 当前唯一写者 | 依赖/说明 |
 |---|---|---|---|---|---|---|---|---|
-| [`08-14-tui-duration-cli-listen-fix`](./08-14-tui-duration-cli-listen-fix/) | in_progress（实现已推送，等待 CI） | `fix/tui-duration-cli-listen` | `1b218897c09894cfb5aff796761eb8004ad6e53f` | `5419ccf64ba73387f999133389ab3d347e63270c` | `/Users/knaifen/Documents/Codex/aio-coding-hub/tui-duration-cli-listen-fix` | [#147](https://github.com/KNaiFen/aio-coding-hub/pull/147) | 独立 execution session | TUI duration/TTFB 与 CLI listen/token 修复；功能实现 head `e4e457beea239ee89cb5e2dacafbe38eeab74408`，等待最新 head 自动 CI；和测试清理任务无产品文件重叠，索引合并顺序由 main 处理。 |
+| [`08-14-tui-duration-cli-listen-fix`](./08-14-tui-duration-cli-listen-fix/) | in_progress（Round 1 待返工） | `fix/tui-duration-cli-listen` | `1b218897c09894cfb5aff796761eb8004ad6e53f` | `5419ccf64ba73387f999133389ab3d347e63270c` | `/Users/knaifen/Documents/Codex/aio-coding-hub/tui-duration-cli-listen-fix` | [#147](https://github.com/KNaiFen/aio-coding-hub/pull/147) | 独立 execution session 待返工 | 冻结审查 head `8e6ca2fbb35e92e3a68544b2b07da6d087d5325f`；按 `findings.md` 修复前端时序并普通 merge `origin/main@0ae7f03abaa37c7021fdf8718373e27fe61f62fd`，保留测试清理归档与 contracts workflow。 |
 | [`08-03-upstream-claude-oauth`](./08-03-upstream-claude-oauth/) | planning（暂停，未委派） | 无（旧分支已删除） | 不适用 | 未登记 | 未创建 | 未创建 | main session | 用户已决定暂不处理；不影响当前工作。恢复前需重新确认方案，并完成真实隔离账号验证。 |
 
 ## 归档
@@ -21,6 +21,7 @@
 - 2026-08：[08-12 Upstream Sync PR Resolution](./archive/2026-08/08-12-upstream-sync-pr-resolution/)；功能 PR [#114](https://github.com/KNaiFen/aio-coding-hub/pull/114) 与 records-only closeout PR [#123](https://github.com/KNaiFen/aio-coding-hub/pull/123) 均已合并，最终结果为“完成”。
 - 2026-08：[08-13 TUI 请求卡片改用首字时间与紧凑路由计数](./archive/2026-08/08-13-tui-request-card-ttfb/)；功能 PR [#136](https://github.com/KNaiFen/aio-coding-hub/pull/136) 与 records-only closeout PR [#138](https://github.com/KNaiFen/aio-coding-hub/pull/138) 均已合并，最终结果为“完成”。
 - 2026-08：[08-13 跨供应商模型路由](./archive/2026-08/08-13-cross-provider-model-routing/)；功能 PR [#137](https://github.com/KNaiFen/aio-coding-hub/pull/137) 与 records-only closeout PR [#142](https://github.com/KNaiFen/aio-coding-hub/pull/142) 均已合并，最终结果为“完成”。
+- 2026-08：[08-14 精简冗余测试与流程合同](./archive/2026-08/08-14-trim-redundant-tests/)；功能 PR [#146](https://github.com/KNaiFen/aio-coding-hub/pull/146) 已合并，最终结果为“完成”。
 - 归档任务保留原始 PRD、设计、计划、研究、实施与检查记录，作为交付证据，不作为当前行为规范。
 
 ## 生命周期

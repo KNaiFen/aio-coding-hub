@@ -105,7 +105,14 @@ Clippy、构建、生成、dev server、Tauri、签名或打包，也未手动 d
 
 ## main 验收记录
 
-尚未进入验收。
+### Round 1 - 2026-08-14
+
+- 冻结审查 head：`8e6ca2fbb35e92e3a68544b2b07da6d087d5325f`；PR #147 为 Draft，工作树干净且本地、远端分支与 PR head 一致。
+- 审查范围：完整任务；两路只读审查分别覆盖 TUI/Rust lifecycle 和前端 token/draft 时序，main 按精确 `file:line` 点验关键证据。
+- 结论：不通过，详见 `findings.md` Round 1。TUI Active/Terminal 时间字段和 gateway lifecycle locked/unlocked 分层未发现阻断项；前端存在 F-001/F-002 两个可达时序缺陷，且分支必须完成 F-003 的最新 main 集成和固定 head CI。
+- 旧 AC 结论更正：AC-03、AC-05 当前未满足；AC-04 对 `null`/error 的覆盖成立，但并发 external settings 同步仍未满足；AC-08 仍未满足。
+- CI：本轮审查时 [run 31800876521](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31800876521) 仍运行；上一完整候选的 [Rust job](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31798457041/job/94760734452) 和 [ci-gate](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31798457041/job/94765660089) 失败，不能作为交付证据。
+- 返工责任：独立 execution session。main 只写本轮验收和恢复边界，不修改产品代码、测试逻辑、依赖或现行合同。
 
 ## main 收尾
 

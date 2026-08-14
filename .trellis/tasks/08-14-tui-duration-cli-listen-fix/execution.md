@@ -11,10 +11,10 @@
 - 完整 base SHA：`1b218897c09894cfb5aff796761eb8004ad6e53f`
 - 规划提交：`5419ccf64ba73387f999133389ab3d347e63270c`
 - 实施授权：已确认，2026-08-14；覆盖 PRD locked decisions、范围与 AC。
-- PR：尚未创建；preflight 后尽早创建 Draft PR。
+- PR：[#147](https://github.com/KNaiFen/aio-coding-hub/pull/147)（Draft；Round 1 验收冻结 head `8e6ca2fbb35e92e3a68544b2b07da6d087d5325f`）。
 - PENDING：无未解决条目。
-- 当前唯一写者：独立 execution session。
-- 当前阶段：已完成规划交接；execution session 仅在 preflight 全部通过后施工。
+- 当前唯一写者：独立 execution session 待返工。main 已确认原 execution session 暂停、工作树干净且本地/远端/PR head 一致，于 2026-08-14 20:36:12 CST 临时接管任务记录，在本轮 findings/交接提交推送后把唯一写权交回；execution session 必须先 fetch 并确认该交接 head 后才能恢复写入。
+- 当前阶段：Round 1 验收不通过；按 `findings.md` 修复 F-001/F-002，并集成最新 `origin/main` 完成 F-003 后重新交付。
 
 ## 阅读顺序
 
@@ -23,6 +23,7 @@
 3. `prd.md`、`design.md`、`implement.md`。
 4. `implement.jsonl` 和 `check.jsonl` 中的现行 specs。
 5. 与当前阶段直接相关的 source/tests；`delivery.md` 首次仅作模板。
+6. `findings.md`；返工时保留 main 原始意见，只填写“执行回应”。
 
 材料冲突时依次以 PRD 用户决定/AC、设计、实施计划、本入口为准；不根据聊天记录猜测。
 
@@ -78,6 +79,19 @@ git cat-file -e "5419ccf64ba73387f999133389ab3d347e63270c^{commit}"
 本地只运行计划列出的无依赖 Node 合同、task validate 和 diff check。禁止 package manager、Vitest、Cargo/Rustfmt/Clippy、构建、生成、dev server、Tauri、签名或打包。
 
 PR 只等待自动检查；本任务预期 full scope。CI 监控 3-5 分钟一次、最长 60 分钟，始终绑定同一完整 head。
+
+## Round 1 返工恢复步骤
+
+1. `git fetch origin` 后重新执行开工 preflight，确认绝对路径、分支、`task.json.status=in_progress`、规划提交存在、原登记 base 仍是祖先、工作树干净，并且本地 `HEAD`、远端任务分支和 PR head 都是 main 写入 findings 后的同一完整交接 head。任一不一致即停止报告 main。
+2. 使用普通 merge 同步 `origin/main@0ae7f03abaa37c7021fdf8718373e27fe61f62fd`：`git merge --no-edit origin/main`。禁止 rebase、force-push 或 cherry-pick PR #146/#148。
+3. 解决 `.trellis/tasks/README.md` 集成冲突时，保留 `main` 中 `08-14-trim-redundant-tests` 的归档条目；保留 `08-14-tui-duration-cli-listen-fix` 的活动任务行并更新阶段、PR/head 和唯一写者。不得把已归档测试清理任务恢复为活动状态。
+4. 保留 `main` 已合入的 `contracts` workflow 拓扑和测试清理结果，不恢复旧 `docs-contract`/`support-contract` 拆分，不重新加入已删除的冗余测试或孤立文件。其他非冲突 main 变化全部保留。
+5. 按 `findings.md` 修复 F-001：保存成功的 reveal 意图不得被保存前的旧 flight 吞掉；增加 deferred 初始 reveal 与 LAN 保存重叠的回归测试，同时保持单一 owner、同阶段去重和一次性 token 安全语义。
+6. 按 `findings.md` 修复 F-002：应用期间到达的外部 canonical settings 不得被标记为已同步后丢弃；增加 applying 期间 rerender 的回归测试，同时覆盖 listen mode/custom address 的成功、`null`、error 路径。
+7. 更新 `findings.md` 的执行回应和 `delivery.md` 的实际实现、merge commit、完整 head/base、Round 1、CI 与人工验证；不要改写 main 的 finding 原文或预先填写 main 复验。
+8. 只运行本文件允许的 Node 合同/selftest、spec links、Trellis validate、变更 `.mjs` 的 `node --check`（如有）和 `git diff --check`。不得运行 package-manager、Vitest、Cargo、rustfmt、Clippy、构建、生成、dev server 或 Tauri。
+9. 提交、推送任务分支，等待自动 full-scope CI。若同一个未修改的 Grok SSE test 再次失败，记录完整日志/响应证据并暂停交 main，不修改 `gateway/routes.rs`、不削弱测试。
+10. 只有最新完整 head 的必需检查与所选 frontend、Rust、contracts、CodeQL、`pr-title`、`ci-gate` 全绿后，才把 PR 转为 Ready for review；随后停止写入并报告完整 head、CI URL 和工作树状态。
 
 ## 交付与暂停
 
