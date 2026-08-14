@@ -19,7 +19,7 @@
 - 2026-08：[08-11 Availability Circuit Recovery](./archive/2026-08/08-11-availability-circuit-recovery/)；功能 PR [#109](https://github.com/KNaiFen/aio-coding-hub/pull/109) 与 records-only closeout PR [#117](https://github.com/KNaiFen/aio-coding-hub/pull/117) 均已合并，最终结果为“完成”。
 - 2026-08：[08-12 Upstream Sync PR Resolution](./archive/2026-08/08-12-upstream-sync-pr-resolution/)；功能 PR [#114](https://github.com/KNaiFen/aio-coding-hub/pull/114) 与 records-only closeout PR [#123](https://github.com/KNaiFen/aio-coding-hub/pull/123) 均已合并，最终结果为“完成”。
 - 2026-08：[08-13 TUI 请求卡片改用首字时间与紧凑路由计数](./archive/2026-08/08-13-tui-request-card-ttfb/)；功能 PR [#136](https://github.com/KNaiFen/aio-coding-hub/pull/136) 与 records-only closeout PR [#138](https://github.com/KNaiFen/aio-coding-hub/pull/138) 均已合并，最终结果为“完成”。
-- 2026-08：[08-13 跨供应商模型路由](./archive/2026-08/08-13-cross-provider-model-routing/)；功能 PR [#137](https://github.com/KNaiFen/aio-coding-hub/pull/137) 已合并，records-only closeout PR 待创建，最终产品结果为“完成”。
+- 2026-08：[08-13 跨供应商模型路由](./archive/2026-08/08-13-cross-provider-model-routing/)；功能 PR [#137](https://github.com/KNaiFen/aio-coding-hub/pull/137) 已合并，records-only closeout PR [#142](https://github.com/KNaiFen/aio-coding-hub/pull/142) 待最终复验与合并，最终产品结果为“完成”。
 - 归档任务保留原始 PRD、设计、计划、研究、实施与检查记录，作为交付证据，不作为当前行为规范。
 
 ## 生命周期

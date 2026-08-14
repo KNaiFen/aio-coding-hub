@@ -222,15 +222,15 @@
 
 ## main 收尾
 
-> 功能 PR 已合并，以下记录真实验收、合并、归档和当前清理状态。records-only 收尾 PR 的 URL、最终 head 与 CI 将在该 PR 创建并复验后补齐。
+> 功能 PR 已合并，以下记录真实验收、合并、归档和当前清理状态。records-only 收尾 PR 已创建；写入初始 head 的证据会形成最后一个记录 head，该 head 仍须在合并前重新通过自动检查并冻结复核。
 
 - 最终结果：完成。Round 4 验收通过，`F-001`～`F-006` 全部关闭，无未关闭 required finding。
 - 功能 PR 与最终验收 head：[PR #137](https://github.com/KNaiFen/aio-coding-hub/pull/137)；最终合并的完整 head 为 `d58c768a8b45e7d6b1d3c8e1b1854e9edde81edd`。其中产品修复提交为 `abd79c7484a51be2bee80787092db847a1466f47`，后续仅增加交付与验收记录。
 - main 合并提交：`552d8bf2ee0902aa9fb0ba71886f5abc79031eb1`，2026-08-14 squash merge 到 `main`；本地 `main` 已 fast-forward 到同一提交。
 - 合并前 CI：最终 head 的 [CI run 31773649291](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31773649291)、[CodeQL run 31773649292](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31773649292) 与 [`pr-title` run 31773649360](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31773649360) 均成功；[`ci-gate` job 94687623974](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31773649291/job/94687623974)、frontend、Rust tests/Clippy/audit/generated drift、docs/support 与两项 CodeQL 均通过。
-- 收尾记录 PR：待创建。初始 records-only 归档提交推送后创建 Draft PR，再绑定其完整 head 与同一 head 自动检查。
+- 收尾记录 PR：[PR #142](https://github.com/KNaiFen/aio-coding-hub/pull/142) 承载 records-only closeout；初始归档候选为 `530c348b6ac36bce4b637e2cdb0c68bbf2dab4e5`，其 [CI run 31775007843](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31775007843)、[CodeQL run 31775007840](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31775007840) 与 [`pr-title` run 31775007828](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31775007828) 均成功；[`ci-gate` job 94688566865](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31775007843/job/94688566865) 与 `change-scope` 成功，docs/support、frontend、rust 与候选/发布 jobs 按纯过程记录范围跳过。写入本条证据产生的最终 records-only head 仍须在合并前重新通过自动检查。
 - 知识库与合同：功能 PR 已更新 configured routing、gateway failover、config bundle、provider share、local observer/TUI、settings ownership 六份现行 `.trellis/spec` 合同，并同步 shipped templates 与生成绑定；`docs/README.md` 已提供现行 spec/架构导航，无需新增独立知识条目。
 - 配置、迁移与 PENDING：SQLite schema v53、config bundle v5 和兼容/回滚边界已进入实现及现行合同；`PENDING.md` 无 `pending`/`planned` 条目，本任务不新增或迁移 PENDING 项。
-- 归档：main 已于 2026-08-14 运行 `python3 ./.trellis/scripts/task.py archive --no-commit 08-13-cross-provider-model-routing`，任务已迁入 `.trellis/tasks/archive/2026-08/08-13-cross-provider-model-routing/`，`task.json.status=completed`；活动索引已转为归档条目，全量 Trellis 校验在收尾提交前执行。
+- 归档：main 已于 2026-08-14 运行 `python3 ./.trellis/scripts/task.py archive --no-commit 08-13-cross-provider-model-routing`，任务已迁入 `.trellis/tasks/archive/2026-08/08-13-cross-provider-model-routing/`，`task.json.status=completed`；活动索引已转为归档条目，随后 `python3 ./.trellis/scripts/task.py validate --all` 通过全部 135 个 manifests。
 - worktree 与分支清理：远端功能分支已由 GitHub 在 merge 后删除。原执行 worktree 干净，但 `lsof` 证明执行 session 的 Codex 进程 PID `63220` 及其 shell/工具仍以该目录为 cwd，因此按项目规则保留 `/Users/knaifen/Documents/Codex/aio-coding-hub/08-13-cross-provider-model-routing` 与本地 `feat/cross-provider-model-routing` 分支；用户关闭该 session 后可安全清理。
 - 遗留风险：未执行真实桌面 UI 与真实 bridge/credential 组合人工验收；自动化已覆盖编辑器状态、运行时 failover、bridge prepare、SSE/非流、CAS、迁移与合同路径。另有非产品性清理待办：关闭执行 session 后移除其干净 worktree 和本地功能分支。
