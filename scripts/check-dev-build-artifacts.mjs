@@ -71,7 +71,7 @@ export function validateDevBuildArtifacts({ devBuild, ci }) {
   const linux = executableLines(stepBlock(buildBlock, "Prepare Linux development artifact"));
   const summary = executableLines(stepBlock(buildBlock, "Summarize development artifact"));
   const upload = executableLines(stepBlock(buildBlock, "Upload development artifact"));
-  const supportBlock = jobBlock(ci, "support-contract");
+  const contractsBlock = jobBlock(ci, "contracts");
 
   const targetMappings = {
     "windows-x64": [
@@ -205,11 +205,11 @@ export function validateDevBuildArtifacts({ devBuild, ci }) {
 
   if (
     !hasRunCommand(
-      supportBlock,
+      contractsBlock,
       "node scripts/check-dev-build-artifacts.selftest.mjs && node scripts/check-dev-build-artifacts.mjs"
     )
   ) {
-    failures.push("support-contract must execute the dev-build artifact contract");
+    failures.push("contracts must execute the dev-build artifact contract");
   }
 
   return failures;

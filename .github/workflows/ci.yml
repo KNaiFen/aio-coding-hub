@@ -79,12 +79,14 @@ jobs:
           --head "$CI_HEAD_SHA"
           --before "$CI_BEFORE_SHA"
 
-  docs-contract:
+  contracts:
     needs: change-scope
     if: >-
       always() &&
       needs.change-scope.result == 'success' &&
-      needs.change-scope.outputs.docs_checks == 'true'
+      (needs.change-scope.outputs.docs_checks == 'true' ||
+      needs.change-scope.outputs.frontend_ci == 'true' ||
+      needs.change-scope.outputs.rust_ci == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -98,80 +100,76 @@ jobs:
       - name: Validate cloud-only verification contract
         run: node scripts/check-cloud-only-verification.mjs
 
+      - name: Validate cloud-only verification self-test
+        if: needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true'
+        run: node scripts/check-cloud-only-verification.selftest.mjs
+
+      - name: Validate CI change-scope classifier
+        if: needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true'
+        run: node scripts/ci-change-scope.selftest.mjs
+
+      - name: Validate CI quality gate matrix
+        if: needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true'
+        run: node scripts/check-ci-quality-gates.selftest.mjs && node scripts/check-ci-quality-gates.mjs
+
+      - name: Enforce GitHub Actions pin policy
+        if: needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true'
+        run: node scripts/check-github-actions-pin-policy.selftest.mjs && node scripts/check-github-actions-pin-policy.mjs
+
+      - name: Reject Instant subtraction underflow hazards
+        if: needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true'
+        run: node scripts/check-no-instant-now-sub.selftest.mjs && node scripts/check-no-instant-now-sub.mjs
+
+      - name: Validate dev-build artifact contract
+        if: needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true'
+        run: node scripts/check-dev-build-artifacts.selftest.mjs && node scripts/check-dev-build-artifacts.mjs
+
+      - name: Validate release source resolution
+        if: needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true'
+        run: node scripts/release-source.selftest.mjs
+
+      - name: Validate upstream sync policy self-test
+        if: needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true'
+        run: node scripts/check-sync-upstream-policy.selftest.mjs
+
+      - name: Enforce upstream sync manual-review policy
+        if: needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true'
+        run: node scripts/check-sync-upstream-policy.mjs
+
+      - name: Validate release promotion integrity
+        if: needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true'
+        run: node scripts/release-promotion.selftest.mjs
+
+      - name: Validate Homebrew Cask generator
+        if: needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true'
+        run: node scripts/support-matrix.homebrew-cask.selftest.mjs
+
       - name: Validate plugin documentation
+        if: needs.change-scope.outputs.docs_checks == 'true' || needs.change-scope.outputs.frontend_ci == 'true'
         run: node scripts/check-plugin-system-docs.mjs
 
       - name: Validate plugin API contract
+        if: needs.change-scope.outputs.docs_checks == 'true' || needs.change-scope.outputs.frontend_ci == 'true'
         run: node scripts/check-plugin-api-contract.mjs
 
       - name: Validate Trellis spec links
+        if: needs.change-scope.outputs.docs_checks == 'true'
         run: node scripts/check-spec-links.mjs
 
       - name: Validate standalone TUI release contract
         run: node scripts/check-tui-release-contract.mjs
 
-  support-contract:
-    needs: change-scope
-    if: >-
-      always() &&
-      needs.change-scope.result == 'success' &&
-      (needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true')
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Setup Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22
-
-      - name: Validate cloud-only verification contract
-        run: node scripts/check-cloud-only-verification.selftest.mjs && node scripts/check-cloud-only-verification.mjs
-
-      - name: Validate CI change-scope classifier
-        run: node scripts/ci-change-scope.selftest.mjs
-
-      - name: Validate CI quality gate matrix
-        run: node scripts/check-ci-quality-gates.selftest.mjs && node scripts/check-ci-quality-gates.mjs
-
-      - name: Enforce GitHub Actions pin policy
-        run: node scripts/check-github-actions-pin-policy.selftest.mjs && node scripts/check-github-actions-pin-policy.mjs
-
-      - name: Reject Instant subtraction underflow hazards
-        run: node scripts/check-no-instant-now-sub.selftest.mjs && node scripts/check-no-instant-now-sub.mjs
-
-      - name: Validate dev-build artifact contract
-        run: node scripts/check-dev-build-artifacts.selftest.mjs && node scripts/check-dev-build-artifacts.mjs
-
-      - name: Validate release source resolution
-        run: node scripts/release-source.selftest.mjs
-
-      - name: Validate upstream sync policy self-test
-        run: node scripts/check-sync-upstream-policy.selftest.mjs
-
-      - name: Enforce upstream sync manual-review policy
-        run: node scripts/check-sync-upstream-policy.mjs
-
-      - name: Validate release promotion integrity
-        run: node scripts/release-promotion.selftest.mjs
-
-      - name: Validate Homebrew Cask generator
-        run: node scripts/support-matrix.homebrew-cask.selftest.mjs
-
-      - name: Validate standalone TUI release contract
-        run: node scripts/check-tui-release-contract.mjs
-
       - name: Validate release signing secret scope
+        if: needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true'
         run: node scripts/check-release-signing-secret-scope.selftest.mjs && node scripts/check-release-signing-secret-scope.mjs
 
   frontend:
-    needs: [change-scope, support-contract]
+    needs: [change-scope, contracts]
     if: >-
       always() &&
       needs.change-scope.result == 'success' &&
       needs.change-scope.outputs.frontend_ci == 'true' &&
-      needs.support-contract.result == 'success'
+      needs.contracts.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -198,12 +196,6 @@ jobs:
       - name: Gateway error codes
         run: pnpm check:gateway-error-codes
 
-      - name: Plugin docs contract
-        run: pnpm check:plugin-system-docs
-
-      - name: Plugin API contract
-        run: pnpm check:plugin-api-contract
-
       - name: Plugin TypeScript SDK typecheck
         run: pnpm plugin-sdk:typecheck
 
@@ -214,10 +206,7 @@ jobs:
         run: pnpm plugin-sdk:test
 
       - name: Plugin scaffolder tests
-        run: pnpm --filter create-aio-plugin test
-
-      - name: Plugin GUI E2E smoke
-        run: pnpm test:e2e
+        run: pnpm create-aio-plugin:test
 
       - name: Unit tests
         run: pnpm test:unit:coverage
@@ -226,12 +215,12 @@ jobs:
         run: pnpm build
 
   rust:
-    needs: [change-scope, support-contract]
+    needs: [change-scope, contracts]
     if: >-
       always() &&
       needs.change-scope.result == 'success' &&
       needs.change-scope.outputs.rust_ci == 'true' &&
-      needs.support-contract.result == 'success'
+      needs.contracts.result == 'success'
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
@@ -386,10 +375,10 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
   build-release-candidate:
-    needs: [support-contract, frontend, rust, candidate-plan]
+    needs: [contracts, frontend, rust, candidate-plan]
     if: >-
       always() &&
-      needs.support-contract.result == 'success' &&
+      needs.contracts.result == 'success' &&
       needs.frontend.result == 'success' &&
       needs.rust.result == 'success' &&
       needs.candidate-plan.result == 'success' &&
@@ -548,10 +537,10 @@ jobs:
           retention-days: 1
 
   build-tui-release-candidate:
-    needs: [support-contract, frontend, rust, candidate-plan]
+    needs: [contracts, frontend, rust, candidate-plan]
     if: >-
       always() &&
-      needs.support-contract.result == 'success' &&
+      needs.contracts.result == 'success' &&
       needs.frontend.result == 'success' &&
       needs.rust.result == 'success' &&
       needs.candidate-plan.result == 'success' &&
@@ -699,8 +688,7 @@ jobs:
     needs:
       - manual-dispatch-guard
       - change-scope
-      - docs-contract
-      - support-contract
+      - contracts
       - frontend
       - rust
       - candidate-plan
@@ -723,8 +711,7 @@ jobs:
           RUST_CI: ${{ needs.change-scope.outputs.rust_ci }}
           SHARED_CI: ${{ needs.change-scope.outputs.shared_ci }}
           DOCS_CHECKS: ${{ needs.change-scope.outputs.docs_checks }}
-          DOCS_RESULT: ${{ needs.docs-contract.result }}
-          SUPPORT_RESULT: ${{ needs.support-contract.result }}
+          CONTRACTS_RESULT: ${{ needs.contracts.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           RUST_RESULT: ${{ needs.rust.result }}
           PLAN_RESULT: ${{ needs.candidate-plan.result }}
@@ -747,10 +734,10 @@ jobs:
           [[ "$RUST_CI" == "true" || "$RUST_CI" == "false" ]]
           [[ "$SHARED_CI" == "true" || "$SHARED_CI" == "false" ]]
           [[ "$DOCS_CHECKS" == "true" || "$DOCS_CHECKS" == "false" ]]
-          if [[ "$DOCS_CHECKS" == "true" ]]; then
-            [[ "$DOCS_RESULT" == "success" ]]
+          if [[ "$DOCS_CHECKS" == "true" || "$FRONTEND_CI" == "true" || "$RUST_CI" == "true" ]]; then
+            [[ "$CONTRACTS_RESULT" == "success" ]]
           else
-            [[ "$DOCS_RESULT" == "skipped" ]]
+            [[ "$CONTRACTS_RESULT" == "skipped" ]]
           fi
 
           if [[ "$FULL_CI" == "true" ]]; then
@@ -758,7 +745,6 @@ jobs:
             [[ "$FRONTEND_CI" == "true" ]]
             [[ "$RUST_CI" == "true" ]]
             [[ "$SHARED_CI" == "true" ]]
-            [[ "$SUPPORT_RESULT" == "success" ]]
             [[ "$FRONTEND_RESULT" == "success" ]]
             [[ "$RUST_RESULT" == "success" ]]
             if [[ "$EVENT_REF" == "refs/heads/main" && ( "$EVENT_NAME" == "push" || "$EVENT_NAME" == "workflow_dispatch" ) ]]; then
@@ -783,12 +769,10 @@ jobs:
             if [[ "$FRONTEND_CI" == "true" ]]; then
               [[ "$RUST_CI" == "false" ]]
               [[ "$SCOPE" == "frontend" ]]
-              [[ "$SUPPORT_RESULT" == "success" ]]
               [[ "$FRONTEND_RESULT" == "success" ]]
               [[ "$RUST_RESULT" == "skipped" ]]
             elif [[ "$RUST_CI" == "true" ]]; then
               [[ "$SCOPE" == "rust" ]]
-              [[ "$SUPPORT_RESULT" == "success" ]]
               [[ "$FRONTEND_RESULT" == "skipped" ]]
               [[ "$RUST_RESULT" == "success" ]]
             else
@@ -798,7 +782,6 @@ jobs:
               else
                 [[ "$SCOPE" == "process-docs" ]]
               fi
-              [[ "$SUPPORT_RESULT" == "skipped" ]]
               [[ "$FRONTEND_RESULT" == "skipped" ]]
               [[ "$RUST_RESULT" == "skipped" ]]
             fi

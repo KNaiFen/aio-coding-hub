@@ -12,6 +12,7 @@ const packageJson = {
       `${guard}node scripts/check-create-aio-plugin-typecheck.selftest.mjs && pnpm --filter create-aio-plugin typecheck`,
     "check:ci-quality-gates":
       `${guard}node scripts/check-ci-quality-gates.selftest.mjs && node scripts/check-ci-quality-gates.mjs`,
+    "test:unit:coverage": `${guard}vitest run --coverage`,
   },
 };
 const readFixture = (relativePath) =>
@@ -21,11 +22,13 @@ const prTitleWorkflow = readFixture(".github/workflows/pr-title.yml");
 const performanceWorkflow = readFixture(".github/workflows/performance.yml");
 const codeqlWorkflow = readFixture(".github/workflows/codeql.yml");
 const dependabotConfig = readFixture(".github/dependabot.yml");
+const vitestConfig = readFixture("vitest.config.ts");
 
 const valid = {
   codeqlWorkflow,
   dependabotConfig,
   packageJson,
+  vitestConfig,
   ciWorkflow,
   performanceWorkflow,
   prTitleWorkflow,
@@ -40,20 +43,56 @@ assert.doesNotThrow(() =>
 
 for (const [name, fixture, expected] of [
   [
-    "support cloud-only step",
+    "dedicated E2E package entry",
+    {
+      ...valid,
+      packageJson: {
+        scripts: { ...packageJson.scripts, "test:e2e": `${guard}vitest run src/e2e` },
+      },
+    },
+    /test:e2e must stay absent/,
+  ],
+  [
+    "root coverage package entry",
+    {
+      ...valid,
+      packageJson: {
+        scripts: { ...packageJson.scripts, "test:unit:coverage": `${guard}vitest run` },
+      },
+    },
+    /test:unit:coverage must remain/,
+  ],
+  [
+    "root E2E discovery",
+    { ...valid, vitestConfig: vitestConfig.replace('    include: ["src/**/*.{test,spec}.{ts,tsx}"],\n', "") },
+    /vitest\.config\.ts must discover src\/e2e/,
+  ],
+  [
+    "contracts cloud-only step",
     {
       ...valid,
       ciWorkflow: ciWorkflow.replace(
-        "        run: node scripts/check-cloud-only-verification.selftest.mjs && node scripts/check-cloud-only-verification.mjs\n",
+        "        run: node scripts/check-cloud-only-verification.mjs\n",
         ""
       ),
     },
-    /ci\.yml support-contract must include node scripts\/check-cloud-only-verification/,
+    /ci\.yml contracts must include node scripts\/check-cloud-only-verification/,
   ],
   [
     "frontend build",
     { ...valid, ciWorkflow: ciWorkflow.replace("        run: pnpm build\n", "") },
     /ci\.yml frontend must include pnpm build/,
+  ],
+  [
+    "dedicated frontend E2E step",
+    {
+      ...valid,
+      ciWorkflow: ciWorkflow.replace(
+        "      - name: Unit tests\n",
+        "      - name: Plugin GUI E2E smoke\n        run: pnpm test:e2e\n\n      - name: Unit tests\n"
+      ),
+    },
+    /ci\.yml frontend must not run a dedicated pnpm test:e2e step/,
   ],
   [
     "Actions pin policy step",
@@ -64,7 +103,7 @@ for (const [name, fixture, expected] of [
         ""
       ),
     },
-    /ci\.yml support-contract must include node scripts\/check-github-actions-pin-policy/,
+    /ci\.yml contracts must include node scripts\/check-github-actions-pin-policy/,
   ],
   [
     "Actions pin policy comment is not executable",
@@ -75,7 +114,7 @@ for (const [name, fixture, expected] of [
         "        # run: node scripts/check-github-actions-pin-policy.selftest.mjs && node scripts/check-github-actions-pin-policy.mjs"
       ),
     },
-    /ci\.yml support-contract must include node scripts\/check-github-actions-pin-policy/,
+    /ci\.yml contracts must include node scripts\/check-github-actions-pin-policy/,
   ],
   [
     "frontend env text is not executable",
@@ -179,48 +218,81 @@ for (const [name, fixture, expected] of [
     /ci\.yml ci-gate must use if: always\(\)/,
   ],
   [
-    "docs contract cannot inherit a skipped manual guard",
+    "contracts job cannot inherit a skipped manual guard",
     {
       ...valid,
       ciWorkflow: ciWorkflow.replace(
-        "    if: >-\n      always() &&\n      needs.change-scope.result == 'success' &&\n      needs.change-scope.outputs.docs_checks == 'true'",
+        "    if: >-\n      always() &&\n      needs.change-scope.result == 'success' &&\n      (needs.change-scope.outputs.docs_checks == 'true' ||\n      needs.change-scope.outputs.frontend_ci == 'true' ||\n      needs.change-scope.outputs.rust_ci == 'true')",
         "    if: needs.change-scope.outputs.docs_checks == 'true'"
       ),
     },
-    /ci\.yml docs-contract if must equal/,
+    /ci\.yml contracts if must equal/,
   ],
   [
-    "frontend must require the support contract to succeed",
+    "frontend must require the contracts job to succeed",
     {
       ...valid,
       ciWorkflow: ciWorkflow.replace(
-        "      needs.change-scope.outputs.frontend_ci == 'true' &&\n      needs.support-contract.result == 'success'\n    runs-on: ubuntu-latest",
+        "      needs.change-scope.outputs.frontend_ci == 'true' &&\n      needs.contracts.result == 'success'\n    runs-on: ubuntu-latest",
         "      needs.change-scope.outputs.frontend_ci == 'true'\n    runs-on: ubuntu-latest"
       ),
     },
     /ci\.yml frontend if must equal/,
   ],
   [
-    "support contract must run for either code domain",
+    "contracts must run for checked docs or either code domain",
     {
       ...valid,
       ciWorkflow: ciWorkflow.replace(
-        "      (needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true')",
+        "      (needs.change-scope.outputs.docs_checks == 'true' ||\n      needs.change-scope.outputs.frontend_ci == 'true' ||\n      needs.change-scope.outputs.rust_ci == 'true')",
         "      needs.change-scope.outputs.full_ci == 'true'"
       ),
     },
-    /ci\.yml support-contract if must equal/,
+    /ci\.yml contracts if must equal/,
+  ],
+  [
+    "source contracts step condition",
+    {
+      ...valid,
+      ciWorkflow: ciWorkflow.replace(
+        "      - name: Enforce GitHub Actions pin policy\n        if: needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true'",
+        "      - name: Enforce GitHub Actions pin policy\n        if: false"
+      ),
+    },
+    /ci\.yml contracts must include node scripts\/check-github-actions-pin-policy/,
   ],
   [
     "candidate build cannot inherit a skipped manual guard",
     {
       ...valid,
       ciWorkflow: ciWorkflow.replace(
-        "    if: >-\n      always() &&\n      needs.support-contract.result == 'success' &&\n      needs.frontend.result == 'success' &&\n      needs.rust.result == 'success' &&\n      needs.candidate-plan.result == 'success' &&\n      needs.candidate-plan.outputs.should_build == 'true'",
+        "    if: >-\n      always() &&\n      needs.contracts.result == 'success' &&\n      needs.frontend.result == 'success' &&\n      needs.rust.result == 'success' &&\n      needs.candidate-plan.result == 'success' &&\n      needs.candidate-plan.outputs.should_build == 'true'",
         "    if: needs.candidate-plan.outputs.should_build == 'true'"
       ),
     },
     /ci\.yml build-release-candidate if must equal/,
+  ],
+  [
+    "candidate plan main-only boundary",
+    {
+      ...valid,
+      ciWorkflow: ciWorkflow.replace(
+        "github.ref == 'refs/heads/main' &&\n      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')",
+        "github.ref == 'refs/heads/dev' &&\n      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')"
+      ),
+    },
+    /ci\.yml candidate-plan if must equal/,
+  ],
+  [
+    "candidate plan cannot expand to pull requests",
+    {
+      ...valid,
+      ciWorkflow: ciWorkflow.replace(
+        "(github.event_name == 'push' || github.event_name == 'workflow_dispatch')",
+        "(github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request')"
+      ),
+    },
+    /ci\.yml candidate-plan if must equal/,
   ],
   [
     "candidate assembly must require the plan job to succeed",
@@ -254,6 +326,17 @@ for (const [name, fixture, expected] of [
       ),
     },
     /ci\.yml ci-gate must bind aggregation results directly from needs\.\*/,
+  ],
+  [
+    "aggregate gate script cannot be changed",
+    {
+      ...valid,
+      ciWorkflow: ciWorkflow.replace(
+        "          set -euo pipefail\n\n          if [[ \"$EVENT_NAME\" == \"workflow_dispatch\" ]]; then",
+        "          set -euo pipefail\n\n          if false; then\n            :\n          fi\n\n          if [[ \"$EVENT_NAME\" == \"workflow_dispatch\" ]]; then"
+      ),
+    },
+    /ci\.yml ci-gate must retain the approved fail-closed aggregation script/,
   ],
   [
     "independent PR title",

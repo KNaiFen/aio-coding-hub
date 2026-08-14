@@ -25,7 +25,6 @@
     "plugin-sdk:typecheck": "node scripts/require-github-actions.mjs && pnpm --filter @aio-coding-hub/plugin-sdk typecheck",
     "create-aio-plugin:test": "node scripts/require-github-actions.mjs && pnpm --filter create-aio-plugin test",
     "create-aio-plugin:typecheck": "node scripts/require-github-actions.mjs && node scripts/check-create-aio-plugin-typecheck.selftest.mjs && pnpm --filter create-aio-plugin typecheck",
-    "test:e2e": "node scripts/require-github-actions.mjs && vitest run src/e2e",
     "check:homebrew-cask": "node scripts/require-github-actions.mjs && node scripts/support-matrix.homebrew-cask.selftest.mjs",
     "check:release-promotion": "node scripts/require-github-actions.mjs && node scripts/release-promotion.selftest.mjs",
     "check:release-source": "node scripts/require-github-actions.mjs && node scripts/release-source.selftest.mjs",

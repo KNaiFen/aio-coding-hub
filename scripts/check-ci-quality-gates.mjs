@@ -1,8 +1,15 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ACTIONS_GUARD = "node scripts/require-github-actions.mjs && ";
+const ROOT_TEST_INCLUDE = 'include: ["src/**/*.{test,spec}.{ts,tsx}"],';
+const SOURCE_CONTRACT_STEP_IF =
+  "needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true'";
+const PLUGIN_CONTRACT_STEP_IF =
+  "needs.change-scope.outputs.docs_checks == 'true' || needs.change-scope.outputs.frontend_ci == 'true'";
+const DOCS_CONTRACT_STEP_IF = "needs.change-scope.outputs.docs_checks == 'true'";
 const RUST_CANONICALIZE_RUN = `set -euo pipefail
 cargo fmt --manifest-path src-tauri/Cargo.toml --all
 cargo update --manifest-path src-tauri/Cargo.toml --workspace
@@ -43,8 +50,7 @@ const CI_GATE_RESULT_ENV = new Map([
   ["RUST_CI", "${{ needs.change-scope.outputs.rust_ci }}"],
   ["SHARED_CI", "${{ needs.change-scope.outputs.shared_ci }}"],
   ["DOCS_CHECKS", "${{ needs.change-scope.outputs.docs_checks }}"],
-  ["DOCS_RESULT", "${{ needs.docs-contract.result }}"],
-  ["SUPPORT_RESULT", "${{ needs.support-contract.result }}"],
+  ["CONTRACTS_RESULT", "${{ needs.contracts.result }}"],
   ["FRONTEND_RESULT", "${{ needs.frontend.result }}"],
   ["RUST_RESULT", "${{ needs.rust.result }}"],
   ["PLAN_RESULT", "${{ needs.candidate-plan.result }}"],
@@ -53,6 +59,7 @@ const CI_GATE_RESULT_ENV = new Map([
   ["TUI_BUILD_RESULT", "${{ needs.build-tui-release-candidate.result }}"],
   ["ASSEMBLE_RESULT", "${{ needs.assemble-release-candidate.result }}"],
 ]);
+const CI_GATE_RUN_SHA256 = "e1b5dce438571ce9cf94e818fa1bd62acf70d964c09a78879733f4367dd0e3ca";
 const CODEQL_STRATEGY_BLOCK = `strategy:
   fail-fast: false
   matrix:
@@ -63,20 +70,16 @@ const CODEQL_STRATEGY_BLOCK = `strategy:
         build-mode: none`;
 const CI_JOB_CONDITIONS = new Map([
   [
-    "docs-contract",
-    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.docs_checks == 'true'",
-  ],
-  [
-    "support-contract",
-    "always() && needs.change-scope.result == 'success' && (needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true')",
+    "contracts",
+    "always() && needs.change-scope.result == 'success' && (needs.change-scope.outputs.docs_checks == 'true' || needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true')",
   ],
   [
     "frontend",
-    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.frontend_ci == 'true' && needs.support-contract.result == 'success'",
+    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.frontend_ci == 'true' && needs.contracts.result == 'success'",
   ],
   [
     "rust",
-    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.rust_ci == 'true' && needs.support-contract.result == 'success'",
+    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.rust_ci == 'true' && needs.contracts.result == 'success'",
   ],
   [
     "candidate-plan",
@@ -84,11 +87,11 @@ const CI_JOB_CONDITIONS = new Map([
   ],
   [
     "build-release-candidate",
-    "always() && needs.support-contract.result == 'success' && needs.frontend.result == 'success' && needs.rust.result == 'success' && needs.candidate-plan.result == 'success' && needs.candidate-plan.outputs.should_build == 'true'",
+    "always() && needs.contracts.result == 'success' && needs.frontend.result == 'success' && needs.rust.result == 'success' && needs.candidate-plan.result == 'success' && needs.candidate-plan.outputs.should_build == 'true'",
   ],
   [
     "build-tui-release-candidate",
-    "always() && needs.support-contract.result == 'success' && needs.frontend.result == 'success' && needs.rust.result == 'success' && needs.candidate-plan.result == 'success' && needs.candidate-plan.outputs.should_build == 'true'",
+    "always() && needs.contracts.result == 'success' && needs.frontend.result == 'success' && needs.rust.result == 'success' && needs.candidate-plan.result == 'success' && needs.candidate-plan.outputs.should_build == 'true'",
   ],
   [
     "assemble-release-candidate",
@@ -359,7 +362,7 @@ function stepRunsUnconditionally(step) {
   );
 }
 
-function requireWorkflowCommands(workflow, label, jobName, commands, failures) {
+function requireWorkflowCommands(workflow, label, jobName, commands, failures, expectedIf) {
   const body = workflowJobBody(workflow, jobName);
   if (!body) {
     failures.push(`${label} must define ${jobName}`);
@@ -371,7 +374,11 @@ function requireWorkflowCommands(workflow, label, jobName, commands, failures) {
       !steps.some((step) => {
         const run = workflowStepRun(step);
         return (
-          stepRunsUnconditionally(step) &&
+          step.malformed.length === 0 &&
+          !step.properties.has("continue-on-error") &&
+          (expectedIf === undefined
+            ? !step.properties.has("if")
+            : step.properties.get("if") === expectedIf) &&
           run?.style === "scalar" &&
           run.value === command
         );
@@ -559,11 +566,13 @@ function assertCiGateClosure(workflow, failures) {
   }
   const matches = workflowStepNamed(workflow, "ci-gate", "Require expected jobs");
   const step = matches.length === 1 ? matches[0] : undefined;
+  const run = step ? workflowStepRun(step) : undefined;
   if (
     !step ||
     step.malformed.length > 0 ||
     step.properties.get("shell") !== "bash" ||
-    !stepRunsUnconditionally(step)
+    !stepRunsUnconditionally(step) ||
+    run?.style !== "|"
   ) {
     failures.push("ci.yml ci-gate must retain an unconditional Bash aggregation step");
     return;
@@ -575,12 +584,17 @@ function assertCiGateClosure(workflow, failures) {
     "ci.yml ci-gate must bind aggregation results directly from needs.*",
     failures
   );
+  const digest = createHash("sha256").update(run.value.trimEnd()).digest("hex");
+  if (digest !== CI_GATE_RUN_SHA256) {
+    failures.push("ci.yml ci-gate must retain the approved fail-closed aggregation script");
+  }
 }
 
 export function assertCiQualityGates({
   codeqlWorkflow,
   dependabotConfig,
   packageJson,
+  vitestConfig,
   ciWorkflow,
   performanceWorkflow,
   prTitleWorkflow,
@@ -606,18 +620,67 @@ export function assertCiQualityGates({
   ) {
     failures.push("check:ci-quality-gates must be Actions-only and run its self-test first");
   }
+  if (scripts["test:e2e"] !== undefined) {
+    failures.push("test:e2e must stay absent so root coverage is the only E2E entry point");
+  }
+  if (
+    scripts["test:unit:coverage"] !== `${ACTIONS_GUARD}vitest run --coverage`
+  ) {
+    failures.push("test:unit:coverage must remain the Actions-only root coverage entry point");
+  }
+  if (
+    !vitestConfig.includes(ROOT_TEST_INCLUDE) ||
+    /exclude:\s*\[[^\]]*src\/e2e/s.test(vitestConfig)
+  ) {
+    failures.push("vitest.config.ts must discover src/e2e through the root test include");
+  }
 
   requireWorkflowCommands(
     ciWorkflow,
     "ci.yml",
-    "support-contract",
+    "contracts",
     [
-      "node scripts/check-cloud-only-verification.selftest.mjs && node scripts/check-cloud-only-verification.mjs",
+      "node scripts/check-cloud-only-verification.mjs",
+      "node scripts/check-tui-release-contract.mjs",
+    ],
+    failures
+  );
+  requireWorkflowCommands(
+    ciWorkflow,
+    "ci.yml",
+    "contracts",
+    [
+      "node scripts/check-cloud-only-verification.selftest.mjs",
+      "node scripts/ci-change-scope.selftest.mjs",
       "node scripts/check-ci-quality-gates.selftest.mjs && node scripts/check-ci-quality-gates.mjs",
       "node scripts/check-github-actions-pin-policy.selftest.mjs && node scripts/check-github-actions-pin-policy.mjs",
       "node scripts/check-no-instant-now-sub.selftest.mjs && node scripts/check-no-instant-now-sub.mjs",
+      "node scripts/check-dev-build-artifacts.selftest.mjs && node scripts/check-dev-build-artifacts.mjs",
+      "node scripts/release-source.selftest.mjs",
+      "node scripts/check-sync-upstream-policy.selftest.mjs",
+      "node scripts/check-sync-upstream-policy.mjs",
+      "node scripts/release-promotion.selftest.mjs",
+      "node scripts/support-matrix.homebrew-cask.selftest.mjs",
+      "node scripts/check-release-signing-secret-scope.selftest.mjs && node scripts/check-release-signing-secret-scope.mjs",
     ],
-    failures
+    failures,
+    SOURCE_CONTRACT_STEP_IF
+  );
+  requireWorkflowCommands(
+    ciWorkflow,
+    "ci.yml",
+    "contracts",
+    ["node scripts/check-plugin-system-docs.mjs", "node scripts/check-plugin-api-contract.mjs"],
+    failures,
+    PLUGIN_CONTRACT_STEP_IF
+  );
+  requireWorkflowCommands(
+    ciWorkflow,
+    "ci.yml",
+    "contracts",
+    ["node scripts/check-spec-links.mjs"],
+    failures,
+    DOCS_CONTRACT_STEP_IF
   );
   assertCodeqlContract(codeqlWorkflow, failures);
   assertDependabotContract(dependabotConfig, failures);
@@ -635,13 +698,19 @@ export function assertCiQualityGates({
       "pnpm plugin-sdk:typecheck",
       "pnpm create-aio-plugin:typecheck",
       "pnpm plugin-sdk:test",
-      "pnpm --filter create-aio-plugin test",
-      "pnpm test:e2e",
+      "pnpm create-aio-plugin:test",
       "pnpm test:unit:coverage",
       "pnpm build",
     ],
     failures
   );
+  if (
+    workflowSteps(ciWorkflow, "frontend").some(
+      (step) => workflowStepRun(step)?.value === "pnpm test:e2e"
+    )
+  ) {
+    failures.push("ci.yml frontend must not run a dedicated pnpm test:e2e step");
+  }
   requireWorkflowCommands(
     ciWorkflow,
     "ci.yml",
@@ -659,7 +728,7 @@ export function assertCiQualityGates({
     failures.push(`ci.yml ci-gate must include name: ${ciGateName}`);
   }
   const ciGateNeeds = workflowJobList(ciWorkflow, "ci-gate", "needs");
-  for (const job of ["manual-dispatch-guard", "support-contract", "frontend", "rust"]) {
+  for (const job of ["manual-dispatch-guard", "contracts", "frontend", "rust"]) {
     if (!ciGateNeeds.includes(job)) failures.push(`ci.yml ci-gate must include - ${job}`);
   }
   if (workflowJobBody(ciWorkflow, "pr-title") || ciGateNeeds.includes("pr-title")) {
@@ -689,6 +758,7 @@ if (process.argv[1] && resolve(process.argv[1]) === modulePath) {
       codeqlWorkflow: readFileSync(join(repoRoot, ".github", "workflows", "codeql.yml"), "utf8"),
       dependabotConfig: readFileSync(join(repoRoot, ".github", "dependabot.yml"), "utf8"),
       packageJson: JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")),
+      vitestConfig: readFileSync(join(repoRoot, "vitest.config.ts"), "utf8"),
       ciWorkflow: readFileSync(join(repoRoot, ".github", "workflows", "ci.yml"), "utf8"),
       performanceWorkflow: readFileSync(
         join(repoRoot, ".github", "workflows", "performance.yml"),

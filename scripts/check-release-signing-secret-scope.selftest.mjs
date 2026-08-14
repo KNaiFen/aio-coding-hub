@@ -4,7 +4,7 @@ import { assertReleaseSigningSecretScope } from "./check-release-signing-secret-
 
 const workflow = `
 jobs:
-  support-contract:
+  contracts:
     steps:
       - name: Validate release signing secret scope
         run: node scripts/check-release-signing-secret-scope.selftest.mjs && node scripts/check-release-signing-secret-scope.mjs
@@ -141,12 +141,12 @@ expectRejected(
   /steps after signing key cleanup must not reference/
 );
 expectRejected(
-  "support contract disconnected",
+  "contracts job disconnected",
   workflow.replace(
     "node scripts/check-release-signing-secret-scope.selftest.mjs && node scripts/check-release-signing-secret-scope.mjs",
     "node missing-release-signing-contract.mjs"
   ),
-  /support-contract must execute/
+  /contracts must execute/
 );
 
 console.log("[release-signing-secret-scope:selftest] all assertions passed");
