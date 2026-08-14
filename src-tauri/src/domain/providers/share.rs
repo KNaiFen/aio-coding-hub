@@ -1950,6 +1950,7 @@ mod tests {
                     source_reasoning_effort: Some("high".to_string()),
                     target_model: Some("target-model".to_string()),
                     reasoning_effort: Some("medium".to_string()),
+                    unrecognized_fields: Default::default(),
                 }],
             });
 
@@ -1965,6 +1966,27 @@ mod tests {
         assert!(!String::from_utf8(bytes)
             .expect("provider share UTF-8")
             .contains("target_provider_uuid"));
+    }
+
+    #[test]
+    fn provider_share_v2_rejects_cross_fields_inside_ordinary_rules() {
+        let bytes = serialize_provider_share_v2(&minimal_share()).expect("serialize fixture");
+        let mut value: serde_json::Value = serde_json::from_slice(&bytes).expect("fixture JSON");
+        value["provider"]["configuration"]["model_routing_policy_override"] =
+            serde_json::json!({
+                "enabled": true,
+                "rules": [{
+                    "source_model": "source-model",
+                    "target_model": "ordinary-target",
+                    "target_provider_uuid": "11111111-1111-4111-8111-111111111111",
+                    "target_reasoning_effort": "high"
+                }]
+            });
+
+        let error = parse_provider_share(value.to_string().as_bytes())
+            .err()
+            .expect("share ordinary policy must reject cross-only fields");
+        assert!(error.to_string().contains("SEC_INVALID_INPUT"));
     }
 
     #[test]

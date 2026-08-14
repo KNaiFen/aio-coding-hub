@@ -1305,6 +1305,7 @@ mod tests {
                 source_reasoning_effort: None,
                 target_model: Some(target_model.to_string()),
                 reasoning_effort: None,
+                unrecognized_fields: Default::default(),
             }],
         }
     }
@@ -1555,6 +1556,54 @@ END;
             crate::settings::ModelRoutingPolicy::default()
         );
         assert_eq!(after.cross_policy, None);
+    }
+
+    #[test]
+    fn routing_policy_save_rejects_cross_fields_in_ordinary_policy_without_partial_write() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("routing_policy_ordinary_cross_fields.db");
+        let db = db::init_for_tests(&db_path).expect("init db");
+        let source = insert_provider(&db, "Source");
+        let target = insert_provider(&db, "Target");
+        let mode = create_mode(&db, "Mode").expect("create mode");
+        set_mode_providers_order(&db, mode.id, "claude", vec![source.id, target.id])
+            .expect("set mode members");
+        let initial = routing_view(&db, &source, &mode);
+        let input: ProviderModelRoutingPolicySaveInput = serde_json::from_value(
+            serde_json::json!({
+                "providerId": source.id,
+                "providerUuid": source.provider_uuid.clone(),
+                "modeId": mode.id,
+                "modeUuid": mode.mode_uuid.clone(),
+                "providerOverrideEnabled": true,
+                "ordinaryPolicy": {
+                    "enabled": true,
+                    "rules": [{
+                        "source_model": "source-model",
+                        "target_model": "ordinary-target",
+                        "target_provider_uuid": target.provider_uuid.clone(),
+                        "target_reasoning_effort": "high"
+                    }]
+                },
+                "expectedOrdinaryPolicyRevision": initial.ordinary_policy_revision.clone(),
+                "crossPolicy": null,
+                "expectedCrossPolicyRevision": initial.cross_policy_revision.clone()
+            }),
+        )
+        .expect("cross-only fields remain visible to the provider write boundary");
+
+        let error = provider_model_routing_policy_save(&db, input)
+            .expect_err("provider ordinary policy must reject cross-only fields");
+        assert!(error.to_string().contains("SEC_INVALID_INPUT"));
+        let after = routing_view(&db, &source, &mode);
+        assert_eq!(after.provider_override_enabled, initial.provider_override_enabled);
+        assert_eq!(after.ordinary_policy, initial.ordinary_policy);
+        assert_eq!(
+            after.ordinary_policy_revision,
+            initial.ordinary_policy_revision
+        );
+        assert_eq!(after.cross_policy, initial.cross_policy);
+        assert_eq!(after.cross_policy_revision, initial.cross_policy_revision);
     }
 
     #[test]

@@ -816,6 +816,15 @@ fn map_gateway_provider_row(
     session_reuse_priority: i64,
 ) -> Result<ProviderForGateway, rusqlite::Error> {
     let decoded = decode_provider_row(row, cli_key)?;
+    let cross_provider_model_routing_policy = decoded
+        .model_routing_policy_override
+        .as_ref()
+        .and_then(|_| {
+            cross_provider_model_routing_policy_from_json(
+                row.get::<_, Option<String>>("cross_provider_model_routing_policy_json")
+                    .unwrap_or(None),
+            )
+        });
 
     Ok(ProviderForGateway {
         id: decoded.id,
@@ -844,10 +853,7 @@ fn map_gateway_provider_row(
         extension_values: Vec::new(),
         upstream_retry_policy_override: decoded.upstream_retry_policy_override,
         model_routing_policy_override: decoded.model_routing_policy_override,
-        cross_provider_model_routing_policy: cross_provider_model_routing_policy_from_json(
-            row.get::<_, Option<String>>("cross_provider_model_routing_policy_json")
-                .unwrap_or(None),
-        ),
+        cross_provider_model_routing_policy,
     })
 }
 
@@ -3049,4 +3055,36 @@ pub(crate) fn set_oauth_last_error(
     )
     .map_err(|e| db_err!("failed to set oauth_last_error: {e}"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod model_routing_policy_tests {
+    use super::model_routing_policy_override_from_json;
+
+    #[test]
+    fn historical_ordinary_policy_drops_cross_fields_without_failing_read() {
+        let raw = serde_json::json!({
+            "enabled": true,
+            "rules": [
+                {
+                    "source_model": "invalid-cross-rule",
+                    "target_model": "target",
+                    "target_provider_uuid": "11111111-1111-4111-8111-111111111111"
+                },
+                {
+                    "source_model": "valid-legacy-rule",
+                    "target_model": "target",
+                    "reasoning_effort": "low"
+                }
+            ]
+        })
+        .to_string();
+
+        let policy = model_routing_policy_override_from_json(Some(raw))
+            .expect("historical provider override remains fail-open");
+        assert!(policy.enabled);
+        assert_eq!(policy.rules.len(), 1);
+        assert_eq!(policy.rules[0].source_model, "valid-legacy-rule");
+        assert!(policy.rules[0].unrecognized_fields.is_empty());
+    }
 }

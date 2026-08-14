@@ -94,7 +94,9 @@ pub(super) fn apply_migrations(conn: &mut Connection) -> crate::shared::error::A
             49 => v49_to_v50::migrate_v49_to_v50(conn)?,
             50 => v50_to_v51::migrate_v50_to_v51(conn)?,
             51 => v51_to_v52::migrate_v51_to_v52(conn)?,
-            52 => v52_to_v53::migrate_v52_to_v53(conn)?,
+            52 => {
+                v52_to_v53::migrate_v52_to_v53(conn)?;
+            }
             v => {
                 tracing::error!(
                     version = v,

@@ -406,6 +406,12 @@ fn normalize_model_routing_rule_for_write(
     rule: &mut ModelRoutingRule,
     index: usize,
 ) -> AppResult<()> {
+    if !rule.unrecognized_fields.is_empty() {
+        return Err(format!(
+            "SEC_INVALID_INPUT: model_routing_policy.rules[{index}] contains unsupported fields"
+        )
+        .into());
+    }
     rule.source_model = rule.source_model.trim().to_string();
     if rule.source_model.is_empty() {
         return Err(format!(
@@ -496,6 +502,9 @@ pub fn sanitize_model_routing_policy(policy: &mut ModelRoutingPolicy) -> bool {
     let mut seen = HashSet::new();
     let mut rules = Vec::new();
     for rule in policy.rules.drain(..).take(MAX_MODEL_ROUTING_RULES) {
+        if !rule.unrecognized_fields.is_empty() {
+            continue;
+        }
         let source_model = rule.source_model.trim().to_string();
         if source_model.is_empty()
             || source_model.len() > MAX_MODEL_ROUTING_MODEL_BYTES
@@ -524,6 +533,7 @@ pub fn sanitize_model_routing_policy(policy: &mut ModelRoutingPolicy) -> bool {
             source_reasoning_effort,
             target_model,
             reasoning_effort,
+            unrecognized_fields: Default::default(),
         });
     }
     policy.rules = rules;
@@ -1869,12 +1879,14 @@ mod tests {
                     source_reasoning_effort: None,
                     target_model: Some(" opus4.8 ".to_string()),
                     reasoning_effort: None,
+                    unrecognized_fields: Default::default(),
                 },
                 ModelRoutingRule {
                     source_model: "gpt-expensive".to_string(),
                     source_reasoning_effort: Some(" HIGH ".to_string()),
                     target_model: None,
                     reasoning_effort: Some(" low ".to_string()),
+                    unrecognized_fields: Default::default(),
                 },
             ],
         };
@@ -1899,12 +1911,14 @@ mod tests {
                     source_reasoning_effort: None,
                     target_model: Some("one".to_string()),
                     reasoning_effort: None,
+                    unrecognized_fields: Default::default(),
                 },
                 ModelRoutingRule {
                     source_model: " same ".to_string(),
                     source_reasoning_effort: None,
                     target_model: Some("two".to_string()),
                     reasoning_effort: None,
+                    unrecognized_fields: Default::default(),
                 },
             ],
         };
@@ -1917,6 +1931,7 @@ mod tests {
                 source_reasoning_effort: None,
                 target_model: Some("  ".to_string()),
                 reasoning_effort: None,
+                unrecognized_fields: Default::default(),
             }],
         };
         assert!(normalize_model_routing_policy_for_write(&mut empty).is_err());
@@ -1932,12 +1947,14 @@ mod tests {
                     source_reasoning_effort: None,
                     target_model: Some("target".to_string()),
                     reasoning_effort: None,
+                    unrecognized_fields: Default::default(),
                 },
                 ModelRoutingRule {
                     source_model: "future".to_string(),
                     source_reasoning_effort: None,
                     target_model: None,
                     reasoning_effort: None,
+                    unrecognized_fields: Default::default(),
                 },
             ],
         };

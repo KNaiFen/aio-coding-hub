@@ -256,6 +256,9 @@ pub struct ModelRoutingRule {
     pub source_reasoning_effort: Option<String>,
     pub target_model: Option<String>,
     pub reasoning_effort: Option<String>,
+    #[serde(flatten, default)]
+    #[specta(skip)]
+    pub unrecognized_fields: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type, Default)]

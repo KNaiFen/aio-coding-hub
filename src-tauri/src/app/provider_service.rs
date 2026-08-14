@@ -830,6 +830,7 @@ mod tests {
                 source_reasoning_effort: None,
                 target_model: Some("ordinary-target".to_string()),
                 reasoning_effort: None,
+                unrecognized_fields: Default::default(),
             }],
         };
         let source = insert_duplicate_test_provider(&db, "Source", Some(ordinary_policy.clone()));

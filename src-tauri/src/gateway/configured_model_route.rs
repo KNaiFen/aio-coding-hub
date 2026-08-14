@@ -553,6 +553,7 @@ mod tests {
             source_reasoning_effort: None,
             target_model: Some("opus4.8".to_string()),
             reasoning_effort: None,
+            unrecognized_fields: Default::default(),
         });
         let provider = crate::settings::ModelRoutingPolicy::default();
 
@@ -578,6 +579,7 @@ mod tests {
             source_reasoning_effort: None,
             target_model: Some("opus4.8".to_string()),
             reasoning_effort: None,
+            unrecognized_fields: Default::default(),
         });
 
         assert!(resolve(
@@ -616,12 +618,14 @@ mod tests {
                 source_reasoning_effort: None,
                 target_model: Some("fallback".to_string()),
                 reasoning_effort: None,
+                unrecognized_fields: Default::default(),
             },
             crate::settings::ModelRoutingRule {
                 source_model: "fable5".to_string(),
                 source_reasoning_effort: Some("high".to_string()),
                 target_model: Some("precise".to_string()),
                 reasoning_effort: None,
+                unrecognized_fields: Default::default(),
             },
         ];
 
@@ -931,6 +935,7 @@ mod tests {
             source_reasoning_effort: None,
             target_model: Some("opus4.8".to_string()),
             reasoning_effort: None,
+            unrecognized_fields: Default::default(),
         });
 
         for (method, path) in [

@@ -3904,7 +3904,8 @@ fn create_v52_sort_mode_fixture(conn: &Connection) {
 PRAGMA foreign_keys = ON;
 CREATE TABLE providers (
   id INTEGER PRIMARY KEY,
-  provider_uuid TEXT NOT NULL UNIQUE
+  provider_uuid TEXT NOT NULL UNIQUE,
+  model_routing_policy_json TEXT DEFAULT NULL
 );
 CREATE TABLE sort_modes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3998,6 +3999,206 @@ fn migrate_v52_to_v53_backfills_stable_identities_and_member_policy() {
         )
         .expect("read preserved member policy");
     assert_eq!(policy, r#"{"enabled":true,"rules":[]}"#);
+}
+
+#[test]
+fn migrate_v52_to_v53_persists_sanitized_ordinary_policies_idempotently() {
+    const STANDARD_EFFORTS: [&str; 8] = [
+        "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
+    ];
+    let mut conn = Connection::open_in_memory().expect("open v52 migration db");
+    create_v52_sort_mode_fixture(&conn);
+    let mut rules = vec![serde_json::json!({
+        "source_model": "legacy-source",
+        "target_model": "legacy-target",
+        "reasoning_effort": "low"
+    })];
+    for effort in STANDARD_EFFORTS {
+        let stored_effort = if effort == "high" { " HIGH " } else { effort };
+        rules.push(serde_json::json!({
+            "source_model": format!("source-{effort}"),
+            "source_reasoning_effort": stored_effort,
+            "target_model": format!("target-{effort}"),
+            "reasoning_effort": stored_effort
+        }));
+    }
+    rules.extend([
+        serde_json::json!({
+            "source_model": "numeric-target",
+            "target_model": "target",
+            "reasoning_effort": "1024"
+        }),
+        serde_json::json!({
+            "source_model": "numeric-source",
+            "source_reasoning_effort": "2048",
+            "target_model": "target"
+        }),
+        serde_json::json!({
+            "source_model": "invalid-target",
+            "target_model": "target",
+            "reasoning_effort": "aggressive"
+        }),
+        serde_json::json!({
+            "source_model": "cross-only",
+            "target_model": "target",
+            "target_provider_uuid": "11111111-1111-4111-8111-111111111111"
+        }),
+    ]);
+    let raw_policy = serde_json::json!({ "enabled": true, "rules": rules }).to_string();
+    conn.execute(
+        "UPDATE providers SET model_routing_policy_json = ?1 WHERE id = 1",
+        [raw_policy],
+    )
+    .expect("store legacy ordinary policy");
+    conn.execute(
+        "INSERT INTO providers(id, provider_uuid, model_routing_policy_json) VALUES (?1, ?2, ?3)",
+        rusqlite::params![
+            2_i64,
+            "22222222-2222-4222-8222-222222222222",
+            "{malformed"
+        ],
+    )
+    .expect("store malformed ordinary policy");
+
+    let projection =
+        v52_to_v53::migrate_v52_to_v53(&mut conn).expect("migrate and sanitize v52->v53");
+    assert_eq!(projection.providers_scanned, 2);
+    assert_eq!(projection.policies_repaired, 2);
+    assert_eq!(projection.invalid_rules_dropped, 4);
+    assert_eq!(projection.malformed_policies, 1);
+    assert_eq!(projection.affected_provider_ids, vec![1, 2]);
+    assert!(!projection.truncated);
+
+    let sanitized_raw: String = conn
+        .query_row(
+            "SELECT model_routing_policy_json FROM providers WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read sanitized ordinary policy");
+    let sanitized: crate::settings::ModelRoutingPolicy =
+        serde_json::from_str(&sanitized_raw).expect("parse sanitized ordinary policy");
+    assert!(sanitized.enabled);
+    assert_eq!(sanitized.rules.len(), 9);
+    assert!(sanitized.rules.iter().all(|rule| {
+        rule.unrecognized_fields.is_empty()
+            && rule
+                .source_reasoning_effort
+                .as_deref()
+                .is_none_or(|effort| STANDARD_EFFORTS.contains(&effort))
+            && rule.reasoning_effort.as_deref().is_none_or(|effort| {
+                STANDARD_EFFORTS.contains(&effort)
+            })
+    }));
+    let high = sanitized
+        .rules
+        .iter()
+        .find(|rule| rule.source_model == "source-high")
+        .expect("preserve canonical high rule");
+    assert_eq!(high.source_reasoning_effort.as_deref(), Some("high"));
+    assert_eq!(high.reasoning_effort.as_deref(), Some("high"));
+    let malformed_raw: String = conn
+        .query_row(
+            "SELECT model_routing_policy_json FROM providers WHERE id = 2",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read repaired malformed policy");
+    assert_eq!(
+        serde_json::from_str::<crate::settings::ModelRoutingPolicy>(&malformed_raw)
+            .expect("parse repaired malformed policy"),
+        crate::settings::ModelRoutingPolicy::default()
+    );
+
+    let repeated =
+        v52_to_v53::migrate_v52_to_v53(&mut conn).expect("repeat v52->v53 migration");
+    assert_eq!(repeated.providers_scanned, 2);
+    assert_eq!(repeated.policies_repaired, 0);
+    assert_eq!(repeated.invalid_rules_dropped, 0);
+    assert_eq!(repeated.malformed_policies, 0);
+    let repeated_raw: String = conn
+        .query_row(
+            "SELECT model_routing_policy_json FROM providers WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read repeated ordinary policy");
+    assert_eq!(repeated_raw, sanitized_raw);
+}
+
+#[test]
+fn migrate_v52_to_v53_bounds_affected_provider_projection() {
+    let mut conn = Connection::open_in_memory().expect("open v52 migration db");
+    create_v52_sort_mode_fixture(&conn);
+    for provider_id in 2_i64..=21 {
+        conn.execute(
+            "INSERT INTO providers(id, provider_uuid, model_routing_policy_json) VALUES (?1, ?2, ?3)",
+            rusqlite::params![
+                provider_id,
+                crate::shared::uuid::new_uuid_v4(),
+                "{malformed"
+            ],
+        )
+        .expect("insert malformed provider policy");
+    }
+
+    let projection = v52_to_v53::migrate_v52_to_v53(&mut conn)
+        .expect("migrate bounded provider projection");
+    assert_eq!(projection.providers_scanned, 20);
+    assert_eq!(projection.policies_repaired, 20);
+    assert_eq!(projection.malformed_policies, 20);
+    assert_eq!(projection.affected_provider_ids.len(), 16);
+    assert_eq!(
+        projection.affected_provider_ids,
+        (2_i64..=17).collect::<Vec<_>>()
+    );
+    assert!(projection.truncated);
+}
+
+#[test]
+fn migrate_v52_to_v53_rolls_back_policy_repairs_and_schema_on_update_failure() {
+    let mut conn = Connection::open_in_memory().expect("open v52 migration db");
+    create_v52_sort_mode_fixture(&conn);
+    let malformed = "{must-survive-rollback";
+    conn.execute(
+        "UPDATE providers SET model_routing_policy_json = ?1 WHERE id = 1",
+        [malformed],
+    )
+    .expect("store malformed policy");
+    conn.execute_batch(
+        r#"
+CREATE TRIGGER fail_model_routing_policy_repair
+BEFORE UPDATE OF model_routing_policy_json ON providers
+BEGIN
+  SELECT RAISE(ABORT, 'forced policy repair failure');
+END;
+"#,
+    )
+    .expect("create policy repair failure trigger");
+
+    let error = v52_to_v53::migrate_v52_to_v53(&mut conn)
+        .expect_err("policy repair failure must roll back migration");
+    assert!(error
+        .to_string()
+        .contains("failed to persist sanitized model routing policy"));
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("read rolled-back version");
+    assert_eq!(version, 52);
+    assert!(!test_has_table(&conn, "sort_mode_identities"));
+    assert!(!test_has_column(
+        &conn,
+        "sort_mode_providers",
+        "cross_provider_model_routing_policy_json"
+    ));
+    let raw: String = conn
+        .query_row(
+            "SELECT model_routing_policy_json FROM providers WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("read rolled-back policy");
+    assert_eq!(raw, malformed);
 }
 
 #[test]

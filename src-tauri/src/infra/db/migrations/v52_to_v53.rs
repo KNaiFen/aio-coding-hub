@@ -1,7 +1,29 @@
 //! Usage: SQLite migration v52->v53 - stable sort-mode identities and member routing policy.
 
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use rusqlite::{params, types::Value, Connection, OptionalExtension, Transaction};
 use std::collections::HashSet;
+
+const MAX_MIGRATION_AFFECTED_PROVIDER_IDS: usize = 16;
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct MigrationProjection {
+    pub(super) providers_scanned: usize,
+    pub(super) policies_repaired: usize,
+    pub(super) invalid_rules_dropped: usize,
+    pub(super) malformed_policies: usize,
+    pub(super) affected_provider_ids: Vec<i64>,
+    pub(super) truncated: bool,
+}
+
+impl MigrationProjection {
+    fn record_affected_provider(&mut self, provider_id: i64) {
+        if self.affected_provider_ids.len() < MAX_MIGRATION_AFFECTED_PROVIDER_IDS {
+            self.affected_provider_ids.push(provider_id);
+        } else {
+            self.truncated = true;
+        }
+    }
+}
 
 fn table_exists(conn: &Connection, table: &str) -> Result<bool, String> {
     conn.query_row(
@@ -187,15 +209,88 @@ ORDER BY identity.mode_id ASC
     Ok(())
 }
 
-pub(super) fn migrate_v52_to_v53(conn: &mut Connection) -> crate::shared::error::AppResult<()> {
+fn sanitize_provider_model_routing_policies(
+    tx: &Transaction<'_>,
+) -> Result<MigrationProjection, String> {
+    let rows = {
+        let mut statement = tx
+            .prepare(
+                r#"
+SELECT id, model_routing_policy_json
+FROM providers
+WHERE model_routing_policy_json IS NOT NULL
+ORDER BY id ASC
+"#,
+            )
+            .map_err(|error| {
+                format!("failed to prepare provider model routing policy migration: {error}")
+            })?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, Value>(1)?))
+            })
+            .map_err(|error| {
+                format!("failed to query provider model routing policies: {error}")
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| {
+                format!("failed to read provider model routing policy: {error}")
+            })?;
+        rows
+    };
+
+    let mut projection = MigrationProjection::default();
+    for (provider_id, raw_value) in rows {
+        projection.providers_scanned += 1;
+        let (mut policy, malformed) = match raw_value {
+            Value::Text(raw) => {
+                match serde_json::from_str::<crate::settings::ModelRoutingPolicy>(&raw) {
+                    Ok(policy) => (policy, false),
+                    Err(_) => (crate::settings::ModelRoutingPolicy::default(), true),
+                }
+            }
+            _ => (crate::settings::ModelRoutingPolicy::default(), true),
+        };
+        let original_rule_count = policy.rules.len();
+        let sanitized = crate::settings::sanitize_model_routing_policy(&mut policy);
+        projection.invalid_rules_dropped +=
+            original_rule_count.saturating_sub(policy.rules.len());
+        if !malformed && !sanitized {
+            continue;
+        }
+
+        let policy_json = serde_json::to_string(&policy).map_err(|error| {
+            format!("failed to serialize sanitized model routing policy: {error}")
+        })?;
+        tx.execute(
+            "UPDATE providers SET model_routing_policy_json = ?1 WHERE id = ?2",
+            params![policy_json, provider_id],
+        )
+        .map_err(|error| format!("failed to persist sanitized model routing policy: {error}"))?;
+        projection.policies_repaired += 1;
+        if malformed {
+            projection.malformed_policies += 1;
+        }
+        projection.record_affected_provider(provider_id);
+    }
+    Ok(projection)
+}
+
+pub(super) fn migrate_v52_to_v53(
+    conn: &mut Connection,
+) -> crate::shared::error::AppResult<MigrationProjection> {
     let foreign_keys_enabled: bool = conn
         .pragma_query_value(None, "foreign_keys", |row| row.get(0))
         .map_err(|error| format!("failed to inspect foreign-key enforcement: {error}"))?;
     if !foreign_keys_enabled {
         return Err("foreign-key enforcement is required for v52->v53 migration".into());
     }
-    if !table_exists(conn, "sort_modes")? || !table_exists(conn, "sort_mode_providers")? {
-        return Err("missing sort-mode tables for v52->v53 migration".into());
+    if !table_exists(conn, "sort_modes")?
+        || !table_exists(conn, "sort_mode_providers")?
+        || !table_exists(conn, "providers")?
+        || !column_exists(conn, "providers", "model_routing_policy_json")?
+    {
+        return Err("missing required tables or columns for v52->v53 migration".into());
     }
     let tx = conn
         .transaction()
@@ -213,8 +308,20 @@ pub(super) fn migrate_v52_to_v53(conn: &mut Connection) -> crate::shared::error:
         )
         .map_err(|error| format!("failed to add member cross-provider routing policy: {error}"))?;
     }
+    let projection = sanitize_provider_model_routing_policies(&tx)?;
     super::set_user_version(&tx, 53)?;
     tx.commit()
         .map_err(|error| format!("failed to commit v52->v53 transaction: {error}"))?;
-    Ok(())
+    if projection.policies_repaired > 0 {
+        tracing::warn!(
+            providers_scanned = projection.providers_scanned,
+            policies_repaired = projection.policies_repaired,
+            invalid_rules_dropped = projection.invalid_rules_dropped,
+            malformed_policies = projection.malformed_policies,
+            affected_provider_ids = ?projection.affected_provider_ids,
+            truncated = projection.truncated,
+            "sanitized provider model routing policies during v52->v53 migration"
+        );
+    }
+    Ok(projection)
 }
