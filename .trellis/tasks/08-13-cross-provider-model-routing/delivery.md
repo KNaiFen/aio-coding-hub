@@ -149,6 +149,17 @@
 
 ## main 验收记录
 
+### Round 3
+
+- 结论：返工。候选 head `0280474d747ad9255d9aae6a48cbd02796d3becc` 已关闭 `F-002`～`F-005`，Ready 状态、固定 head、工作树归属和同一 head 必需 CI 均满足；前端组合编辑器的 cross revision 与 dirty draft 未绑定，新增 required finding `F-006`。
+- 审查范围：Round 2 的 17 个变更文件、`F-002`～`F-005` 的实现和新增测试、实时 PR #137 状态、最新 CI，以及 provider editor 保存时序中的 ordinary/cross query cache、baseline、revision 和后端 CAS 交互。
+- 候选 base：`bd2535796fdf847008b7b55789572367d3e615e9`；接管前工作树干净，本地、远端分支和 PR head 一致，PR 可合并且无冲突。
+- CI 证据：[run 31766673811](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31766673811)、[CodeQL run 31766673812](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31766673812)、[`pr-title` run 31766673832](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31766673832)、[`ci-gate` job 94667044227](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31766673811/job/94667044227)；frontend、Rust tests/Clippy/audit/generated drift、docs/support、CodeQL、`pr-title` 和 `ci-gate` 均通过且 `headSha` 均为本候选。
+- 已关闭 finding：override off 不再暴露 runtime cross policy 且开/关/开测试通过；ordinary cache 广播/取消旧请求与 clean revision 同步成立；global/provider/share 写入拒绝 unknown/cross-only 字段且历史读取 fail-open；v53 事务清洗、bounded projection、幂等与更新失败回滚成立。
+- 新 finding：见 `findings.md` 的 `F-006`。dirty cross draft 保留旧内容却从最新 `routingPolicyView` 取 revision，provider upsert 触发的同 scope refetch 可让旧 draft 以新 revision 覆盖并发 writer。
+- 接受的偏移或风险：本轮不接受 CAS 绕过。真实桌面 UI 和真实 bridge/credential 组合仍是已披露人工验证缺口，但不是 `F-006` 的替代证据。
+- 日期：2026-08-14。
+
 ### Round 2
 
 - 结论：返工。候选 head `2e7a8e284ff3b3e60678150eec0b07768f4db3a2` 已满足 F-001、Ready 状态和同一 head 必需 CI 全绿，但产品 diff 验收发现四项必须修复的问题，见 `findings.md` 的 `F-002`～`F-005`。
@@ -183,12 +194,12 @@
 
 ## main 收尾
 
-- 最终结果：Round 2 验收不通过，等待执行 session 按 `findings.md` 的 `F-002`～`F-005` 返工
-- 功能 PR 与验收候选：PR #137，已拒绝候选 `2e7a8e284ff3b3e60678150eec0b07768f4db3a2`
+- 最终结果：Round 3 验收不通过，等待执行 session 按 `findings.md` 的 `F-006` 返工
+- 功能 PR 与验收候选：PR #137，已拒绝候选 `0280474d747ad9255d9aae6a48cbd02796d3becc`
 - main 合并提交：无
 - 收尾记录 PR：无
 - 知识库与合同：待实现并验收
 - PENDING 去向：无未解决条目
 - 归档：保持活动
-- worktree 与分支清理：保持，等待执行 session 完成 Round 2 返工
-- 遗留风险：四项 required finding 与真实桌面 UI/真实 bridge/credential 人工验证缺口，见 Round 2 记录和 `findings.md`
+- worktree 与分支清理：保持，等待执行 session 完成 Round 3 返工
+- 遗留风险：`F-006` 与真实桌面 UI/真实 bridge/credential 人工验证缺口，见 Round 3 记录和 `findings.md`

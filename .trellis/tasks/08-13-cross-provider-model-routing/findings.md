@@ -1,5 +1,37 @@
 # 验收返工：跨供应商模型路由
 
+## Round 3
+
+- 验收候选 head：`0280474d747ad9255d9aae6a48cbd02796d3becc`
+- PR：[KNaiFen/aio-coding-hub#137](https://github.com/KNaiFen/aio-coding-hub/pull/137)（Draft；main 已在确认返工结论后从 Ready 改回 Draft）
+- 通过 CI：[run 31766673811](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31766673811)、[CodeQL run 31766673812](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31766673812)、[`pr-title` run 31766673832](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31766673832)、[`ci-gate` job 94667044227](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31766673811/job/94667044227)
+- 验收结论：不通过。`F-002`～`F-005` 的实现与复验要求已关闭；前端组合编辑器仍存在 `F-006`，dirty cross draft 可借同 scope refetch 得到的新 revision 绕过 CAS 并覆盖并发写入。
+- 返工责任：执行 session。main 仅写本轮验收记录与返工指导，不修改产品代码、测试、依赖或现行合同。
+
+### F-006 [P1] dirty cross draft 使用 refetch 后的新 revision，绕过并发写入 CAS
+
+**证据**
+
+- `src/pages/providers/useProviderEditorForm.ts:553` 只在 `provider + mode` scope 改变时采纳 cross policy/draft/baseline；同 scope refetch 时，即使 cross draft 已 dirty，也不会采纳新的 cross policy。
+- 同一个 effect 在 `src/pages/providers/useProviderEditorForm.ts:562` 无条件把 `routingPolicyView` 更新为 refetch 的新 view；`src/pages/providers/useProviderEditorForm.ts:1017`～`1021` 保存 cross draft 时却从这个最新 view 读取 `cross_policy_revision`，没有保存与当前 cross baseline 绑定的独立 revision。
+- 正常保存路径在 `src/pages/providers/providerEditorSaveRunner.ts:50` 先等待 provider upsert；upsert 的 `src/query/providers.ts:334`～`338` 会等待该 provider 的 routing query invalidation/refetch，随后 `providerEditorSaveRunner.ts:51`～`52` 才保存 routing policy。因此“R1 上编辑 dirty cross draft -> 另一 writer 提交 R2 -> 本次 provider upsert refetch 到 R2 -> 以 R2 revision 提交 R1 派生 draft”是实际可达时序。
+
+**影响**
+
+- 后端收到最新 R2 revision 后会接受旧 draft，原本应成为 CAS loser 的本次保存反而静默覆盖另一 writer 的 R2 cross policy，违反设计的 owner-scoped CAS/并发写入保护并造成配置丢失。
+
+**期望结果**
+
+1. 为 cross draft 保存独立、与当前 adopted baseline 绑定的 revision；保存只能使用该 revision，不能使用任意后续 refetch 的 `routingPolicyView.cross_policy_revision`。
+2. 同 scope refetch 时：cross draft clean 则可以原子采纳新 cross policy、baseline 和 revision；cross draft dirty 则必须同时保留旧 draft、旧 baseline 和旧 revision。此后保存若已有并发 R2，必须由后端返回 `PROVIDER_ROUTING_CONCURRENT_UPDATE`，不得覆盖 R2。
+3. 保存成功、明确放弃草稿、provider/mode scope 切换和关闭编辑器时，cross policy、baseline、revision 必须一起更新或清空；Default/非成员的 `null` revision 语义保持不变。
+4. 增加前端回归测试：R1 上编辑 dirty cross draft，同 scope refetch R2 后断言表单仍保留 draft 且保存发送 R1 revision；模拟后端 CAS conflict 后不出现成功状态且 draft 不丢失。另覆盖 clean draft refetch 会采纳 R2 policy/revision。
+
+**复验标准**
+
+- dirty cross draft 永远使用与其 baseline 对应的 revision；同 scope 延迟/refetch 不能替换该 revision。
+- 并发更新场景稳定产生 CAS conflict，服务端 R2 与本地 dirty draft 均不被静默覆盖；clean draft 和 scope 切换测试继续通过。
+
 ## Round 2
 
 - 验收候选 head：`2e7a8e284ff3b3e60678150eec0b07768f4db3a2`
