@@ -10,7 +10,6 @@
 
 | 任务目录 | 阶段 | 分支 | base SHA | 规划提交 | Worktree | PR | 当前唯一写者 | 依赖/说明 |
 |---|---|---|---|---|---|---|---|---|
-| [`08-14-trim-redundant-tests`](./08-14-trim-redundant-tests/) | in_progress（已交接，待开工） | `chore/trim-redundant-tests` | `1b218897c09894cfb5aff796761eb8004ad6e53f` | `cea9dad385e508c716956d644e3ef6021c8d04fe` | `/Users/knaifen/Documents/Codex/aio-coding-hub/workflow-test-cleanup` | 未创建 | 独立 execution session | 删除重复、过期、孤立测试入口并收敛 CI 合同；与暂停的 OAuth 任务无文件或语义冲突。 |
 | [`08-03-upstream-claude-oauth`](./08-03-upstream-claude-oauth/) | planning（暂停，未委派） | 无（旧分支已删除） | 不适用 | 未登记 | 未创建 | 未创建 | main session | 用户已决定暂不处理；不影响当前工作。恢复前需重新确认方案，并完成真实隔离账号验证。 |
 
 ## 归档
@@ -21,6 +20,7 @@
 - 2026-08：[08-12 Upstream Sync PR Resolution](./archive/2026-08/08-12-upstream-sync-pr-resolution/)；功能 PR [#114](https://github.com/KNaiFen/aio-coding-hub/pull/114) 与 records-only closeout PR [#123](https://github.com/KNaiFen/aio-coding-hub/pull/123) 均已合并，最终结果为“完成”。
 - 2026-08：[08-13 TUI 请求卡片改用首字时间与紧凑路由计数](./archive/2026-08/08-13-tui-request-card-ttfb/)；功能 PR [#136](https://github.com/KNaiFen/aio-coding-hub/pull/136) 与 records-only closeout PR [#138](https://github.com/KNaiFen/aio-coding-hub/pull/138) 均已合并，最终结果为“完成”。
 - 2026-08：[08-13 跨供应商模型路由](./archive/2026-08/08-13-cross-provider-model-routing/)；功能 PR [#137](https://github.com/KNaiFen/aio-coding-hub/pull/137) 与 records-only closeout PR [#142](https://github.com/KNaiFen/aio-coding-hub/pull/142) 均已合并，最终结果为“完成”。
+- 2026-08：[08-14 精简冗余测试与流程合同](./archive/2026-08/08-14-trim-redundant-tests/)；功能 PR [#146](https://github.com/KNaiFen/aio-coding-hub/pull/146) 已合并，最终结果为“完成”。
 - 归档任务保留原始 PRD、设计、计划、研究、实施与检查记录，作为交付证据，不作为当前行为规范。
 
 ## 生命周期
