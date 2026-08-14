@@ -12,10 +12,10 @@ not implicitly grant a cheaper CI route.
 | Tier                  | Required jobs                                                 | Intended content                                                             |
 | --------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | Process documentation | `change-scope`, independent `pr-title`, `ci-gate`             | Task records, pending lists, agent/process notes                             |
-| Checked documentation | Process jobs plus `docs-contract`                             | READMEs, product Markdown, Trellis specs/workflow                            |
-| Frontend CI           | `support-contract`, `frontend`, `ci-gate`                     | Frontend source, assets, and frontend-only workspace packages                |
-| Rust CI               | `support-contract`, `rust`, `ci-gate`                         | Rust source, Cargo manifests, and Cargo lockfiles                            |
-| Complete CI           | Support, frontend, Rust, and eligible candidate jobs          | Shared/generated files, CI control plane, unknown or mixed frontend/Rust changes |
+| Checked documentation | Process jobs plus `contracts`                                 | READMEs, product Markdown, Trellis specs/workflow                            |
+| Frontend CI           | `contracts`, `frontend`, `ci-gate`                            | Frontend source, assets, and frontend-only workspace packages                |
+| Rust CI               | `contracts`, `rust`, `ci-gate`                                | Rust source, Cargo manifests, and Cargo lockfiles                            |
+| Complete CI           | Contracts, frontend, Rust, and eligible candidate jobs        | Shared/generated files, CI control plane, unknown or mixed frontend/Rust changes |
 
 The required workflow must always start. Workflow-level `paths-ignore` is
 forbidden because a skipped required workflow can leave branch protection
@@ -53,13 +53,13 @@ waiting for a check that never reports.
 - `change-scope` is the only owner of `scope`, `full_ci`, `frontend_ci`,
   `rust_ci`, `shared_ci`, and `docs_checks` outputs and must run before
   selectable suites.
-- `docs-contract` uses dependency-free Node.js checks only. It must validate
-  the cloud-only verification boundary, plugin documentation, the plugin API
-  contract, Trellis spec links, and the standalone TUI README/release contract.
-- `support-contract` runs when either source domain is selected. Frontend and
-  Rust consume only their respective selection output. Candidate planning still
-  requires `full_ci=true` and retains all existing main/version-change and
-  signed-build requirements.
+- `contracts` is the only dependency-free static contract job. It runs when
+  checked documentation or either source domain is selected. Step conditions
+  keep docs-only checks on `docs_checks`, source self-tests on frontend/Rust
+  selection, and plugin docs/API checks on checked docs or frontend selection.
+  Frontend and Rust consume only their respective selection output and require
+  `contracts` success. Candidate planning still requires `full_ci=true` and
+  retains all existing main/version-change and signed-build requirements.
 - `ci-gate` uses `always()`, depends on every selectable job, and validates both
   selected successes and unselected `skipped` results. A classifier failure,
   missing output, unexpected skip, cancellation, or selected-suite failure must

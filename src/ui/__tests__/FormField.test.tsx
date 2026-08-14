@@ -13,24 +13,28 @@ describe("ui/FormField", () => {
     );
 
     const input = screen.getByRole("textbox", { name: "Email" });
+    const label = screen.getByText("Email");
+    const hint = screen.getByText("We won't share it");
+    expect(input).toHaveAttribute("id");
+    expect(label.closest("label")).toHaveAttribute("for", input.id);
+    expect(hint).toHaveAttribute("id");
+    expect(input).toHaveAttribute("aria-describedby", hint.id);
     expect(input).toHaveAccessibleDescription("We won't share it");
 
-    await user.click(screen.getByText("Email"));
+    await user.click(label);
     expect(input).toHaveFocus();
   });
 
-  it("renders label and children", () => {
-    render(<FormField label="Username">{(id) => <input id={id} />}</FormField>);
-    expect(screen.getByRole("textbox", { name: "Username" })).toBeInTheDocument();
-  });
-
-  it("renders hint when provided", () => {
+  it("uses an explicit htmlFor for render-prop controls", () => {
     render(
-      <FormField label="Email" hint="We won't share it">
-        {(id, hintId) => <input id={id} aria-describedby={hintId} />}
+      <FormField label="Explicit" htmlFor="my-id">
+        {(id) => <input id={id} data-testid="explicit-input" />}
       </FormField>
     );
-    expect(screen.getByText("We won't share it")).toBeInTheDocument();
+
+    const input = screen.getByTestId("explicit-input");
+    expect(input.id).toBe("my-id");
+    expect(screen.getByText("Explicit").closest("label")).toHaveAttribute("for", "my-id");
   });
 
   it("omits hint when not provided", () => {

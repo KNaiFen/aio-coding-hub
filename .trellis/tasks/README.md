@@ -10,6 +10,7 @@
 
 | 任务目录 | 阶段 | 分支 | base SHA | 规划提交 | Worktree | PR | 当前唯一写者 | 依赖/说明 |
 |---|---|---|---|---|---|---|---|---|
+| [`08-14-trim-redundant-tests`](./08-14-trim-redundant-tests/) | in_progress（已交接，待开工） | `chore/trim-redundant-tests` | `1b218897c09894cfb5aff796761eb8004ad6e53f` | `cea9dad385e508c716956d644e3ef6021c8d04fe` | `/Users/knaifen/Documents/Codex/aio-coding-hub/workflow-test-cleanup` | 未创建 | 独立 execution session | 删除重复、过期、孤立测试入口并收敛 CI 合同；与暂停的 OAuth 任务无文件或语义冲突。 |
 | [`08-03-upstream-claude-oauth`](./08-03-upstream-claude-oauth/) | planning（暂停，未委派） | 无（旧分支已删除） | 不适用 | 未登记 | 未创建 | 未创建 | main session | 用户已决定暂不处理；不影响当前工作。恢复前需重新确认方案，并完成真实隔离账号验证。 |
 
 ## 归档

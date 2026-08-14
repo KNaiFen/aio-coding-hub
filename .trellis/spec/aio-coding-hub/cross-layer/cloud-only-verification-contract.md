@@ -49,12 +49,14 @@ workflow rather than a second manual run. Pull requests select frontend, Rust,
 or both from the changed paths; `dev`/`main` pushes and main manual runs always
 select both domains.
 
-- `docs-contract` and `support-contract` run the cloud-only checker directly;
-  the support job runs its self-test first.
+- `contracts` is the only dependency-free static contract job. It runs the
+  cloud-only checker for checked documentation or either selected source
+  domain, and runs the cloud-only self-test when a source domain is selected.
 - `frontend` installs frozen dependencies, audits them, runs lint, both plugin
-  package type checks and tests, GUI E2E, unit coverage, and the Vite build.
+  package type checks and tests, root unit coverage, and the Vite build. The
+  root coverage run discovers `src/e2e`; there is no separate E2E command.
   It may be skipped only when the classifier proves no frontend/shared path is
-  present.
+  present, and it requires the selected `contracts` job to succeed.
 - `rust` installs the pinned toolchain, runs Rust formatting and lock/binding
   canonicalization, fails with a bounded drift artifact when files change,
   then runs Clippy, Rust tests, and dependency audit. It may be skipped only for
@@ -90,12 +92,14 @@ The checker self-test must fail when:
   run heavy jobs outside `main`, or candidate desktop/TUI jobs stop
   being skipped outside eligible main runs;
 - a protected CI command is moved to a comment or non-`run` field;
-- frontend/Rust selection stops using the classifier outputs, support no longer
-  runs for either selected code domain, or a shared/unknown path becomes cheap;
-- the support/docs contract stops invoking the checker;
+- frontend/Rust selection stops using the classifier outputs, `contracts` no
+  longer runs for checked docs or either selected code domain, or a
+  shared/unknown path becomes cheap;
+- `contracts` stops invoking the production checker, or source-only self-tests
+  become eligible on process-documentation-only changes;
 - frontend install/audit/lint/typecheck/test/build or Rust
   format/bindings/Clippy/tests/audit disappears;
-- the automatic `ci-gate` no longer owns the selectable frontend/Rust/support
+- the automatic `ci-gate` no longer owns the selectable contracts/frontend/Rust
   results, or manual CI can report the same required check name;
 - `pr-title.yml` checks out PR code, misses title edits, or is folded back into
   full CI.

@@ -639,46 +639,4 @@ describe("services/gatewayEvents (coverage)", () => {
     unlisten();
     vi.useRealTimers();
   });
-
-  it("clears circuit dedup map when it grows too large", async () => {
-    setTauriRuntime();
-    vi.resetModules();
-    vi.useFakeTimers();
-    vi.setSystemTime(0);
-
-    shouldLogToConsole.mockReturnValue(true);
-    vi.mocked(tauriListen).mockResolvedValue(tauriUnlisten);
-
-    const { listenGatewayEvents } = await import("../gatewayEvents");
-    const unlisten = await listenGatewayEvents();
-
-    const circuit = vi
-      .mocked(tauriListen)
-      .mock.calls.find((call) => call[0] === "gateway:circuit")?.[1];
-
-    for (let i = 0; i < 501; i += 1) {
-      circuit?.({
-        payload: {
-          trace_id: `t-${i}`,
-          cli_key: "claude",
-          provider_id: i,
-          provider_name: "P",
-          base_url: "https://p",
-          prev_state: "OPEN",
-          next_state: "OPEN",
-          failure_count: 1,
-          failure_threshold: 5,
-          open_until: null,
-          cooldown_until: null,
-          reason: "SKIP_OPEN",
-          ts: 0,
-        },
-      } as any);
-    }
-
-    expect(logToConsole).toHaveBeenCalled();
-
-    unlisten();
-    vi.useRealTimers();
-  });
 });

@@ -3,8 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
-const defaultRepoRoot = dirname(scriptDir);
-const repoRoot = process.env.AIO_PLUGIN_CONTRACT_TEST_ROOT ?? defaultRepoRoot;
+const repoRoot = dirname(scriptDir);
 
 const failures = [];
 

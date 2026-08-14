@@ -1,0 +1,4 @@
+{"file":".trellis/spec/aio-coding-hub/cross-layer/index.md","reason":"先建立根仓库跨层合同与质量门禁总览，再按任务范围定位具体合同。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/cloud-only-verification-contract.md","reason":"约束本地仅允许无依赖合同检查，并指导 cloud-only checker 的职责收敛。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/ci-change-scope-contract.md","reason":"约束 contracts/frontend/rust/ci-gate 的 selected/skipped 和 fail-closed 语义。"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"删除重复脚本和断言前先确认唯一 owner，避免再造等价入口。"}
