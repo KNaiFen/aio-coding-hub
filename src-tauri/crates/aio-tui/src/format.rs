@@ -383,8 +383,11 @@ pub fn request_card_lines(
         .unwrap_or_default();
     let folder = request.folder_name.as_deref().unwrap_or("无目录");
     let provider = request.provider_name.as_deref().unwrap_or("未上游");
-    let ttfb = request
-        .ttfb_ms
+    let card_timing_ms = match request.state {
+        ObserverRequestState::Active => request.duration_ms,
+        ObserverRequestState::Terminal => request.ttfb_ms,
+    };
+    let card_timing = card_timing_ms
         .map(format_duration)
         .unwrap_or_else(|| "—".to_string());
     let (input, output, cache) = request
@@ -415,10 +418,10 @@ pub fn request_card_lines(
         Some(rate) => format!(
             "{}  {}  {}",
             request_card_route_result(request),
-            ttfb,
+            card_timing,
             format_tokens_per_second_short(rate)
         ),
-        None => format!("{}  {}", request_card_route_result(request), ttfb),
+        None => format!("{}  {}", request_card_route_result(request), card_timing),
     };
     let mut lines = vec![RequestCardLine::new(
         truncate_display(
@@ -1200,7 +1203,7 @@ mod tests {
     }
 
     #[test]
-    fn request_card_uses_ttfb_and_keeps_provider_before_folder_and_output_rate() {
+    fn request_card_selects_timing_by_state_and_keeps_output_rate_terminal_only() {
         let mut request = request_with_route_counts(1, 0, 0);
         request.provider_name = Some("INPUT 大春".to_string());
         request.folder_name = Some("aio-coding-hub".to_string());
@@ -1230,6 +1233,18 @@ mod tests {
         assert_eq!(
             request_card_lines(&request, 60_001, 80)[3].text,
             "直连  —  100.0 t/s"
+        );
+
+        request.state = ObserverRequestState::Active;
+        assert_eq!(
+            request_card_lines(&request, 60_001, 80)[3].text,
+            "直连  2.0s"
+        );
+
+        request.ttfb_ms = Some(500);
+        assert_eq!(
+            request_card_lines(&request, 60_001, 80)[3].text,
+            "直连  2.0s"
         );
     }
 

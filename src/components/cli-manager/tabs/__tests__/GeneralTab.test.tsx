@@ -15,6 +15,7 @@ const navigateMock = vi.fn();
 const mockGatewayUpstreamProxyTest = vi.fn();
 const mockGatewayUpstreamProxyDetectIp = vi.fn();
 const mockProvidersList = vi.fn();
+const networkSettingsCardMock = vi.hoisted(() => vi.fn());
 
 vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn() }) }));
 
@@ -29,7 +30,10 @@ vi.mock("../../../../services/providers/providers", () => ({
 }));
 
 vi.mock("../../NetworkSettingsCard", () => ({
-  NetworkSettingsCard: () => <div>network-card</div>,
+  NetworkSettingsCard: (props: unknown) => {
+    networkSettingsCardMock(props);
+    return <div>network-card</div>;
+  },
 }));
 vi.mock("../../WslSettingsCard", () => ({ WslSettingsCard: () => <div>wsl-card</div> }));
 
@@ -69,6 +73,8 @@ function createRectifierPatch(): GatewayRectifierSettingsPatch {
 type DefaultPropsOverrides = {
   appSettings?: ReturnType<typeof createTestAppSettings>;
   onPersistCommonSettings?: CliManagerGeneralTabProps["onPersistCommonSettings"];
+  onGatewayListenSaved?: CliManagerGeneralTabProps["onGatewayListenSaved"];
+  onRotateGatewayToken?: CliManagerGeneralTabProps["onRotateGatewayToken"];
 };
 
 function createDefaultTabProps(overrides: DefaultPropsOverrides = {}) {
@@ -102,6 +108,9 @@ function createDefaultTabProps(overrides: DefaultPropsOverrides = {}) {
       createTestAppSettings({ upstream_proxy_enabled: false, upstream_proxy_url: "" }),
     commonSettingsSaving: false,
     onPersistCommonSettings: overrides.onPersistCommonSettings ?? vi.fn(),
+    onGatewayListenSaved: overrides.onGatewayListenSaved ?? vi.fn(),
+    onRotateGatewayToken: overrides.onRotateGatewayToken ?? vi.fn(),
+    gatewayTokenActionPending: false,
     upstreamFirstByteTimeoutSeconds: 0,
     setUpstreamFirstByteTimeoutSeconds: vi.fn(),
     upstreamStreamIdleTimeoutSeconds: 0,
@@ -127,6 +136,25 @@ function createDefaultTabProps(overrides: DefaultPropsOverrides = {}) {
 }
 
 describe("cli-manager/GeneralTab", () => {
+  it("forwards the page-level Gateway token controller to network settings", () => {
+    const onGatewayListenSaved = vi.fn();
+    const onRotateGatewayToken = vi.fn();
+    renderTab(
+      <CliManagerGeneralTab
+        {...createDefaultTabProps({ onGatewayListenSaved, onRotateGatewayToken })}
+        gatewayTokenActionPending={true}
+      />
+    );
+
+    expect(networkSettingsCardMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        onGatewayListenSaved,
+        onRotateGatewayToken,
+        gatewayTokenActionPending: true,
+      })
+    );
+  });
+
   it("creates an upstream error response rule below circuit and retry settings", async () => {
     const appSettings = createTestAppSettings();
     const onPersistCommonSettings = vi.fn().mockImplementation(async (patch) =>
@@ -222,6 +250,9 @@ describe("cli-manager/GeneralTab", () => {
         appSettings={null}
         commonSettingsSaving={false}
         onPersistCommonSettings={vi.fn()}
+        onGatewayListenSaved={vi.fn()}
+        onRotateGatewayToken={vi.fn()}
+        gatewayTokenActionPending={false}
         upstreamFirstByteTimeoutSeconds={0}
         setUpstreamFirstByteTimeoutSeconds={vi.fn()}
         upstreamStreamIdleTimeoutSeconds={0}
@@ -305,6 +336,9 @@ describe("cli-manager/GeneralTab", () => {
         })}
         commonSettingsSaving={false}
         onPersistCommonSettings={onPersistCommonSettings}
+        onGatewayListenSaved={vi.fn()}
+        onRotateGatewayToken={vi.fn()}
+        gatewayTokenActionPending={false}
         upstreamFirstByteTimeoutSeconds={0}
         setUpstreamFirstByteTimeoutSeconds={setUpstreamFirstByteTimeoutSeconds}
         upstreamStreamIdleTimeoutSeconds={0}
@@ -472,6 +506,9 @@ describe("cli-manager/GeneralTab", () => {
         appSettings={createTestAppSettings()}
         commonSettingsSaving={false}
         onPersistCommonSettings={vi.fn()}
+        onGatewayListenSaved={vi.fn()}
+        onRotateGatewayToken={vi.fn()}
+        gatewayTokenActionPending={false}
         upstreamFirstByteTimeoutSeconds={0}
         setUpstreamFirstByteTimeoutSeconds={vi.fn()}
         upstreamStreamIdleTimeoutSeconds={0}

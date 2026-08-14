@@ -75,6 +75,9 @@ export type CliManagerGeneralTabProps = {
   onPersistCommonSettings: (
     patch: Partial<AppSettings> & { upstream_proxy_password?: SensitiveStringUpdate }
   ) => Promise<AppSettings | null>;
+  onGatewayListenSaved: () => Promise<void>;
+  onRotateGatewayToken: () => Promise<void>;
+  gatewayTokenActionPending: boolean;
 
   upstreamFirstByteTimeoutSeconds: number;
   setUpstreamFirstByteTimeoutSeconds: (value: number) => void;
@@ -130,6 +133,9 @@ export function CliManagerGeneralTab({
   appSettings,
   commonSettingsSaving,
   onPersistCommonSettings,
+  onGatewayListenSaved,
+  onRotateGatewayToken,
+  gatewayTokenActionPending,
   upstreamFirstByteTimeoutSeconds,
   setUpstreamFirstByteTimeoutSeconds,
   upstreamStreamIdleTimeoutSeconds,
@@ -449,6 +455,9 @@ export function CliManagerGeneralTab({
                   saving={commonSettingsDisabled}
                   settings={appSettings}
                   onPersistSettings={onPersistCommonSettings}
+                  onGatewayListenSaved={onGatewayListenSaved}
+                  onRotateGatewayToken={onRotateGatewayToken}
+                  gatewayTokenActionPending={gatewayTokenActionPending}
                 />
                 <WslSettingsCard
                   available={rectifierAvailable === "available"}

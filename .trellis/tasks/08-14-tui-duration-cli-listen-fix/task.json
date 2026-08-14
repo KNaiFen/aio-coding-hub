@@ -1,0 +1,31 @@
+{
+  "id": "tui-duration-cli-listen-fix",
+  "name": "tui-duration-cli-listen-fix",
+  "title": "修复 TUI 请求时间与 CLI 监听切换",
+  "description": "恢复 TUI 活跃请求持续时间显示，并修复 CLI 监听地址重绑死锁、状态回滚和一次性令牌展示流程。",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": "@aio-coding-hub",
+  "package": "aio-coding-hub",
+  "priority": "P1",
+  "creator": "KNaiFen",
+  "assignee": "KNaiFen",
+  "createdAt": "2026-08-14",
+  "completedAt": null,
+  "branch": "fix/tui-duration-cli-listen",
+  "base_branch": "main",
+  "worktree_path": "/Users/knaifen/Documents/Codex/aio-coding-hub/tui-duration-cli-listen-fix",
+  "commit": "5419ccf64ba73387f999133389ab3d347e63270c",
+  "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/147",
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "src-tauri/crates/aio-tui/src/format.rs",
+    "src-tauri/src/app/settings_service.rs",
+    "src/components/cli-manager/NetworkSettingsCard.tsx",
+    "src/pages/cli-manager/useCliManagerPageDataModel.ts"
+  ],
+  "notes": "2026-08-14：main 从 origin/main@1b218897c09894cfb5aff796761eb8004ad6e53f 创建 sibling worktree；规划提交为 5419ccf64ba73387f999133389ab3d347e63270c，当前唯一写者已转交独立 execution session。与 chore/trim-redundant-tests 无产品文件重叠，仅任务索引可能产生合并冲突。",
+  "meta": {}
+}

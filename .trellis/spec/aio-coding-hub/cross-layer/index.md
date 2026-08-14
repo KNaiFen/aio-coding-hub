@@ -37,6 +37,9 @@ TypeScript bindings, frontend adapters, and React UI.
   history paths, DB-reference validation, and asset-scope authority.
 - [Settings ownership and rollback contract](./settings-ownership-rollback-contract.md):
   lock-internal field-owned RMW, whole-snapshot CAS, and safe rollback.
+- [Gateway listen and token contract](./gateway-listen-token-contract.md):
+  lifecycle-serialized listener rebinding and CLI proxy sync, non-loopback
+  Bearer authentication, one-shot plaintext ownership, and frontend rollback.
 - [Trellis task context archive contract](./trellis-task-context-archive-contract.md):
   exact self-reference rewriting and repository-wide context validation before archive commit.
 - [Request-log retention, usage-ledger, and pagination contract](./request-log-usage-ledger-pagination-contract.md):
@@ -178,6 +181,18 @@ When changing a production settings writer:
 3. Keep read, mutation, validation and write under the shared settings lock.
 4. Define a committed-field token and CAS rollback for external side effects.
 
+When changing gateway listen modes, lifecycle rebinding, CLI proxy sync, or
+gateway access-token presentation:
+
+1. Read [Gateway listen and token contract](./gateway-listen-token-contract.md).
+2. Trace the settings transaction through listener planning, the single
+   lifecycle guard, stop/start, CLI proxy sync, rollback, and returned canonical
+   settings; never reacquire the lifecycle lock from a caller-held branch.
+3. Keep non-loopback peer authentication, digest-only AIO persistence, one-shot
+   reveal/acknowledge/rotate semantics, and credential-stripping unchanged.
+4. Keep one page-lifetime reveal owner and test pending, success, `null`, error,
+   tab unmount, close-without-ack, copy, acknowledge, and rotate paths.
+
 When changing Trellis task archive or context validation:
 
 1. Read [Trellis task context archive contract](./trellis-task-context-archive-contract.md).
@@ -240,6 +255,10 @@ When changing release source validation or candidate promotion:
   affected target families. A host-only local check is not equivalent to the
   CI target matrix.
 - Verify unrelated patches preserve fields that they do not own.
+- When changing gateway listener or token flow, verify both listen-direction
+  changes complete within a timeout while the runtime transaction stays under
+  one lifecycle guard; verify non-loopback authentication and one-shot reveal
+  remain unchanged, and frontend failure paths return to canonical settings.
 - GitHub Actions must run a deterministic barrier through a real production
   settings writer; prove unrelated Image Gen/Grok fields survive and CAS
   preserves newer owner values.

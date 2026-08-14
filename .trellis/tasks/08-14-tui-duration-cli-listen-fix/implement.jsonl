@@ -1,0 +1,7 @@
+{"file":".trellis/spec/aio-coding-hub/cross-layer/index.md","reason":"建立 root cross-layer 入口、pre-development 与 quality-check 总边界。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/local-observer-tui-contract.md","reason":"约束 Active/Terminal 请求投影、卡片语义行、列表顺序与窄屏安全。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/request-log-usage-ledger-pagination-contract.md","reason":"保护 TTFB 统计和 output-rate 时序公式不被卡片显示修复误改。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/settings-ownership-rollback-contract.md","reason":"约束 settings owner、gateway 副作用与 CAS rollback。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/codex-managed-model-route-contract.md","reason":"约束 CLI proxy/profile/catalog 生命周期和并发补偿。"}
+{"file":".trellis/spec/aio-coding-hub/backend/index.md","reason":"按 backend pre-development checklist 处理 gateway 生命周期和云端 Rust 验证。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"前端、settings、gateway runtime、CLI proxy 与 TUI 跨层变更需联合追踪。"}

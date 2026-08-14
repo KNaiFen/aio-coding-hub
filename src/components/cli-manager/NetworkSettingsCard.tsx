@@ -1,14 +1,7 @@
-import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { AppSettings, GatewayListenMode } from "../../services/settings/settings";
 import { logToConsole } from "../../services/consoleLog";
-import { copyText } from "../../services/clipboard";
-import {
-  gatewayBearerTokenAcknowledge,
-  gatewayBearerTokenReveal,
-  gatewayBearerTokenRotate,
-  type GatewayBearerTokenReveal,
-} from "../../services/gateway/gateway";
 import {
   formatHostPort,
   parseCustomListenAddress,
@@ -18,12 +11,11 @@ import { useGatewayMeta } from "../../hooks/useGatewayMeta";
 import { useWslHostAddressQuery } from "../../query/wsl";
 import { Card } from "../../ui/Card";
 import { Button } from "../../ui/Button";
-import { Dialog } from "../../ui/Dialog";
 import { Input } from "../../ui/Input";
 import { Select } from "../../ui/Select";
 import { SettingsRow } from "../../ui/SettingsRow";
 import { cn } from "../../utils/cn";
-import { AlertTriangle, Check, Copy, Network, RefreshCw } from "lucide-react";
+import { AlertTriangle, LoaderCircle, Network, RefreshCw } from "lucide-react";
 
 export type NetworkSettingsCardProps = {
   available: boolean;
@@ -32,6 +24,9 @@ export type NetworkSettingsCardProps = {
   onPersistSettings: (
     patch: Partial<AppSettings> & { upstream_proxy_password?: never }
   ) => Promise<AppSettings | null>;
+  onGatewayListenSaved: () => Promise<void>;
+  onRotateGatewayToken: () => Promise<void>;
+  gatewayTokenActionPending: boolean;
 };
 
 type NetworkDraftState = {
@@ -44,8 +39,6 @@ type NetworkDraftAction =
   | { type: "resetFromSettings"; state: NetworkDraftState }
   | { type: "setListenMode"; listenMode: GatewayListenMode }
   | { type: "setCustomAddress"; customAddress: string };
-
-type GatewayTokenDialogState = GatewayBearerTokenReveal;
 
 function createNetworkDraftState(settings: AppSettings): NetworkDraftState {
   return {
@@ -73,28 +66,37 @@ export function NetworkSettingsCard({
   saving,
   settings,
   onPersistSettings,
+  onGatewayListenSaved,
+  onRotateGatewayToken,
+  gatewayTokenActionPending,
 }: NetworkSettingsCardProps) {
   const gatewayMeta = useGatewayMeta();
   const gateway = gatewayMeta.gateway;
 
-  const nextDraftState = createNetworkDraftState(settings);
+  const nextDraftState = useMemo(
+    () => createNetworkDraftState(settings),
+    [settings]
+  );
   const [draftState, dispatchDraft] = useReducer(networkDraftReducer, nextDraftState);
-  const effectiveDraftState =
-    draftState.sourceKey === nextDraftState.sourceKey ? draftState : nextDraftState;
-  if (draftState.sourceKey !== nextDraftState.sourceKey) {
-    dispatchDraft({ type: "resetFromSettings", state: nextDraftState });
-  }
-  const { listenMode, customAddress } = effectiveDraftState;
+  const [applyingNetworkSettings, setApplyingNetworkSettings] = useState(false);
+  const settingsRef = useRef(settings);
+  const lastSettingsSourceKeyRef = useRef(nextDraftState.sourceKey);
+  settingsRef.current = settings;
+
+  useEffect(() => {
+    const sourceChanged = lastSettingsSourceKeyRef.current !== nextDraftState.sourceKey;
+    if (sourceChanged && !applyingNetworkSettings) {
+      lastSettingsSourceKeyRef.current = nextDraftState.sourceKey;
+      dispatchDraft({ type: "resetFromSettings", state: nextDraftState });
+    }
+  }, [applyingNetworkSettings, nextDraftState]);
+
+  const { listenMode, customAddress } = draftState;
+  const networkSettingsPending = saving || applyingNetworkSettings;
   const wslHostQuery = useWslHostAddressQuery({
     enabled: available && listenMode === "wsl_auto",
   });
   const wslHost = wslHostQuery.data ?? null;
-  const [gatewayTokenDialog, setGatewayTokenDialog] = useState<GatewayTokenDialogState | null>(
-    null
-  );
-  const [gatewayTokenDialogOpen, setGatewayTokenDialogOpen] = useState(false);
-  const [gatewayTokenActionPending, setGatewayTokenActionPending] = useState(false);
-
   function setListenMode(listenMode: GatewayListenMode) {
     dispatchDraft({ type: "setListenMode", listenMode });
   }
@@ -136,109 +138,65 @@ export function NetworkSettingsCard({
     );
   }, [customAddress, listenMode]);
 
-  const revealPendingGatewayToken = useCallback(async () => {
-    if (!available) return;
-    try {
-      const reveal = await gatewayBearerTokenReveal();
-      if (reveal) {
-        setGatewayTokenDialog(reveal);
-        setGatewayTokenDialogOpen(true);
-      }
-    } catch {
-      logToConsole("error", "读取网关访问令牌失败");
-      toast("读取网关访问令牌失败：请稍后重试");
-    }
-  }, [available]);
-
-  useEffect(() => {
-    void revealPendingGatewayToken();
-  }, [revealPendingGatewayToken]);
-
-  function closeGatewayTokenDialog(open: boolean) {
-    setGatewayTokenDialogOpen(open);
-    if (!open) setGatewayTokenDialog(null);
-  }
-
-  async function rotateGatewayToken() {
-    if (gatewayTokenActionPending) return;
-    setGatewayTokenActionPending(true);
-    try {
-      const reveal = await gatewayBearerTokenRotate();
-      setGatewayTokenDialog(reveal);
-      setGatewayTokenDialogOpen(true);
-    } catch {
-      logToConsole("error", "轮换网关访问令牌失败");
-      toast("轮换网关访问令牌失败：请稍后重试");
-    } finally {
-      setGatewayTokenActionPending(false);
-    }
-  }
-
-  async function copyGatewayToken() {
-    if (!gatewayTokenDialog) return;
-    try {
-      await copyText(gatewayTokenDialog.token);
-      toast("访问令牌已复制");
-    } catch {
-      toast("复制失败：当前环境不支持剪贴板");
-    }
-  }
-
-  async function acknowledgeGatewayToken() {
-    if (gatewayTokenActionPending) return;
-    setGatewayTokenActionPending(true);
-    try {
-      await gatewayBearerTokenAcknowledge();
-      setGatewayTokenDialog(null);
-      setGatewayTokenDialogOpen(false);
-      toast("网关访问令牌已确认");
-    } catch {
-      logToConsole("error", "确认网关访问令牌失败");
-      toast("确认网关访问令牌失败：请稍后重试");
-    } finally {
-      setGatewayTokenActionPending(false);
-    }
-  }
-
   async function commitListenMode(next: GatewayListenMode) {
-    if (!available) return;
+    if (!available || applyingNetworkSettings) return;
     setListenMode(next);
+    setApplyingNetworkSettings(true);
 
     try {
       const updated = await onPersistSettings({ gateway_listen_mode: next });
       if (!updated) {
+        dispatchDraft({
+          type: "resetFromSettings",
+          state: createNetworkDraftState(settingsRef.current),
+        });
         return;
       }
 
-      await revealPendingGatewayToken();
+      dispatchDraft({ type: "resetFromSettings", state: createNetworkDraftState(updated) });
+      if (updated.gateway_listen_mode !== "localhost") {
+        await onGatewayListenSaved();
+      }
 
       logToConsole("info", "更新监听模式", { next, running: gateway?.running ?? false });
       toast("监听模式已保存");
     } catch (err) {
       logToConsole("error", "更新监听模式失败", { error: String(err), next });
       toast("更新监听模式失败：请稍后重试");
-      setListenMode(settings.gateway_listen_mode);
+      dispatchDraft({
+        type: "resetFromSettings",
+        state: createNetworkDraftState(settingsRef.current),
+      });
+    } finally {
+      setApplyingNetworkSettings(false);
     }
   }
 
   async function commitCustomAddress() {
-    if (!available) return;
+    if (!available || applyingNetworkSettings) return;
     const trimmed = customAddress.trim();
     const err = validateGatewayCustomListenAddress(trimmed);
     if (err) {
       toast(err);
-      setCustomAddress(settings.gateway_custom_listen_address);
+      setCustomAddress(settingsRef.current.gateway_custom_listen_address);
       return;
     }
+    setApplyingNetworkSettings(true);
 
     try {
       const updated = await onPersistSettings({ gateway_custom_listen_address: trimmed });
       if (!updated) {
-        setCustomAddress(settings.gateway_custom_listen_address);
+        dispatchDraft({
+          type: "resetFromSettings",
+          state: createNetworkDraftState(settingsRef.current),
+        });
         return;
       }
 
-      await revealPendingGatewayToken();
+      dispatchDraft({ type: "resetFromSettings", state: createNetworkDraftState(updated) });
+      if (updated.gateway_listen_mode !== "localhost") {
+        await onGatewayListenSaved();
+      }
 
       logToConsole("info", "更新自定义监听地址", {
         address: trimmed,
@@ -251,13 +209,17 @@ export function NetworkSettingsCard({
         address: trimmed,
       });
       toast("更新自定义监听地址失败：请稍后重试");
-      setCustomAddress(settings.gateway_custom_listen_address);
+      dispatchDraft({
+        type: "resetFromSettings",
+        state: createNetworkDraftState(settingsRef.current),
+      });
+    } finally {
+      setApplyingNetworkSettings(false);
     }
   }
 
   return (
-    <>
-      <Card className="md:col-span-2 relative overflow-hidden">
+    <Card className="md:col-span-2 relative overflow-hidden">
       <div className="absolute top-0 right-0 p-4 opacity-5">
         <Network className="h-32 w-32" />
       </div>
@@ -277,17 +239,30 @@ export function NetworkSettingsCard({
         ) : (
           <div className="space-y-1">
             <SettingsRow label="监听模式">
-              <Select
-                value={listenMode}
-                onChange={(e) => void commitListenMode(e.currentTarget.value as GatewayListenMode)}
-                disabled={saving}
-                className="w-56"
-              >
-                <option value="localhost">仅本地 (127.0.0.1)</option>
-                <option value="wsl_auto">WSL 自动检测</option>
-                <option value="lan">局域网 (0.0.0.0)</option>
-                <option value="custom">自定义地址</option>
-              </Select>
+              <div className="flex min-h-10 flex-wrap items-center justify-end gap-2">
+                <Select
+                  value={listenMode}
+                  onChange={(e) =>
+                    void commitListenMode(e.currentTarget.value as GatewayListenMode)
+                  }
+                  disabled={networkSettingsPending}
+                  className="w-56"
+                >
+                  <option value="localhost">仅本地 (127.0.0.1)</option>
+                  <option value="wsl_auto">WSL 自动检测</option>
+                  <option value="lan">局域网 (0.0.0.0)</option>
+                  <option value="custom">自定义地址</option>
+                </Select>
+                {applyingNetworkSettings ? (
+                  <span
+                    role="status"
+                    className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+                  >
+                    <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                    正在应用
+                  </span>
+                ) : null}
+              </div>
             </SettingsRow>
 
             {listenMode === "custom" ? (
@@ -297,7 +272,7 @@ export function NetworkSettingsCard({
                   placeholder="0.0.0.0 或 0.0.0.0:37123"
                   onChange={(e) => setCustomAddress(e.currentTarget.value)}
                   onBlur={() => void commitCustomAddress()}
-                  disabled={saving}
+                  disabled={networkSettingsPending}
                   className="font-mono"
                 />
               </SettingsRow>
@@ -325,8 +300,8 @@ export function NetworkSettingsCard({
                     variant="secondary"
                     size="sm"
                     className="h-8 w-8 p-0"
-                    disabled={saving || gatewayTokenActionPending}
-                    onClick={() => void rotateGatewayToken()}
+                    disabled={networkSettingsPending || gatewayTokenActionPending}
+                    onClick={() => void onRotateGatewayToken()}
                     aria-label="轮换访问令牌"
                     title="轮换访问令牌"
                   >
@@ -350,41 +325,6 @@ export function NetworkSettingsCard({
           </div>
         )}
       </div>
-      </Card>
-
-      <Dialog
-        open={gatewayTokenDialogOpen && gatewayTokenDialog != null}
-        title="网关访问令牌"
-        description="该令牌仅在此处显示一次。关闭而不确认后，需要轮换令牌才能再次获得访问凭据。"
-        onOpenChange={closeGatewayTokenDialog}
-        className="max-w-xl"
-      >
-        <div className="space-y-4">
-          <code className="block break-all border border-border bg-secondary px-3 py-2 font-mono text-xs text-foreground">
-            {gatewayTokenDialog?.token}
-          </code>
-          {gatewayTokenDialog?.wsl_sync_error ? (
-            <div className="flex items-start gap-2 border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>{gatewayTokenDialog.wsl_sync_error}</span>
-            </div>
-          ) : null}
-          <div className="flex flex-wrap justify-end gap-2">
-            <Button type="button" variant="secondary" onClick={() => void copyGatewayToken()}>
-              <Copy className="h-4 w-4" />
-              复制
-            </Button>
-            <Button
-              type="button"
-              onClick={() => void acknowledgeGatewayToken()}
-              disabled={gatewayTokenActionPending}
-            >
-              <Check className="h-4 w-4" />
-              已保存
-            </Button>
-          </div>
-        </div>
-      </Dialog>
-    </>
+    </Card>
   );
 }

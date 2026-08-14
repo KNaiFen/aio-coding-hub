@@ -1,0 +1,7 @@
+{"file":".trellis/spec/aio-coding-hub/cross-layer/index.md","reason":"执行完整 cross-layer Quality Check 并核对活动规范索引。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/local-observer-tui-contract.md","reason":"复核 TUI 卡片字段选择不改变详情、列表、scope 和输出速率。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/request-log-usage-ledger-pagination-contract.md","reason":"复核 TTFB 和 final-attempt output-rate 公式保持不变。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/settings-ownership-rollback-contract.md","reason":"复核 settings CAS owner、失败恢复与 gateway runtime 边界。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/codex-managed-model-route-contract.md","reason":"复核 CLI proxy 同步未破坏 profile/catalog 锁和回滚。"}
+{"file":".trellis/spec/aio-coding-hub/backend/index.md","reason":"复核 lifecycle lock、gateway focused tests 和完整 Rust CI。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"检查 frontend/IPC/runtime/TUI 的错误、状态与生命周期闭环。"}

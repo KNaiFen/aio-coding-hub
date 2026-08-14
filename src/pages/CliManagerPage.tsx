@@ -1,6 +1,10 @@
 // Usage: UI for configuring local CLI integrations and related app settings. Backend commands: `cli_manager_*`, `settings_*`, `cli_proxy_*`, `gateway_*`.
 
 import { lazy, Suspense } from "react";
+import {
+  GatewayTokenDialog,
+  useGatewayTokenController,
+} from "../components/cli-manager/GatewayTokenDialog";
 import { CliManagerGeneralTab } from "../components/cli-manager/tabs/GeneralTab";
 import { PageHeader } from "../ui/PageHeader";
 import { TabList } from "../ui/TabList";
@@ -43,6 +47,9 @@ const TAB_FALLBACK = <div className="p-6 text-sm text-muted-foreground">加载�
 
 export function CliManagerPage() {
   const model = useCliManagerPageDataModel();
+  const gatewayTokenController = useGatewayTokenController(
+    model.generalTabProps.rectifierAvailable === "available"
+  );
 
   return (
     <div className="flex h-full flex-col gap-6 overflow-hidden">
@@ -63,7 +70,14 @@ export function CliManagerPage() {
       />
 
       <div className="min-h-0 flex-1 overflow-y-auto scrollbar-overlay">
-        {model.tab === "general" ? <CliManagerGeneralTab {...model.generalTabProps} /> : null}
+        {model.tab === "general" ? (
+          <CliManagerGeneralTab
+            {...model.generalTabProps}
+            onGatewayListenSaved={gatewayTokenController.revealPendingGatewayTokenAfterSave}
+            onRotateGatewayToken={gatewayTokenController.rotateGatewayToken}
+            gatewayTokenActionPending={gatewayTokenController.tokenActionPending}
+          />
+        ) : null}
 
         {model.tab === "claude" ? (
           <Suspense fallback={TAB_FALLBACK}>
@@ -95,6 +109,8 @@ export function CliManagerPage() {
           </Suspense>
         ) : null}
       </div>
+
+      <GatewayTokenDialog controller={gatewayTokenController} />
     </div>
   );
 }
