@@ -85,8 +85,8 @@ export function NetworkSettingsCard({
 
   useEffect(() => {
     const sourceChanged = lastSettingsSourceKeyRef.current !== nextDraftState.sourceKey;
-    lastSettingsSourceKeyRef.current = nextDraftState.sourceKey;
     if (sourceChanged && !applyingNetworkSettings) {
+      lastSettingsSourceKeyRef.current = nextDraftState.sourceKey;
       dispatchDraft({ type: "resetFromSettings", state: nextDraftState });
     }
   }, [applyingNetworkSettings, nextDraftState]);

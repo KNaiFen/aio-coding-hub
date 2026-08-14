@@ -41,6 +41,8 @@ function createTokenControllerProps(
   };
 }
 
+const persistOutcomes = ["success", "null", "error"] as const;
+
 describe("components/cli-manager/NetworkSettingsCard", () => {
   it("shows applying state, commits canonical settings, and can switch LAN back to localhost", async () => {
     vi.mocked(useWslHostAddressQuery).mockReturnValue({ data: null } as any);
@@ -241,6 +243,116 @@ describe("components/cli-manager/NetworkSettingsCard", () => {
     fireEvent.click(screen.getByRole("button", { name: "轮换访问令牌" }));
     await waitFor(() => expect(onRotateGatewayToken).toHaveBeenCalledTimes(1));
   });
+
+  it.each(persistOutcomes)(
+    "adopts an external listen mode that arrives while a %s save is applying",
+    async (outcome) => {
+      vi.mocked(useWslHostAddressQuery).mockReturnValue({ data: "172.20.0.1" } as any);
+      const settings = createTestAppSettings({
+        gateway_listen_mode: "localhost",
+        gateway_custom_listen_address: "",
+      });
+      const externalSettings = { ...settings, gateway_listen_mode: "wsl_auto" } as AppSettings;
+      const save = createDeferred<AppSettings | null>();
+      const onPersistSettings = vi.fn().mockReturnValue(save.promise);
+      const controllerProps = createTokenControllerProps();
+      const view = render(
+        <NetworkSettingsCard
+          available={true}
+          saving={false}
+          settings={settings}
+          onPersistSettings={onPersistSettings}
+          {...controllerProps}
+        />
+      );
+
+      fireEvent.change(screen.getByRole("combobox"), { target: { value: "lan" } });
+      expect(screen.getByRole("status")).toHaveTextContent("正在应用");
+      view.rerender(
+        <NetworkSettingsCard
+          available={true}
+          saving={false}
+          settings={externalSettings}
+          onPersistSettings={onPersistSettings}
+          {...controllerProps}
+        />
+      );
+      expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("lan");
+
+      await act(async () => {
+        if (outcome === "success") {
+          save.resolve({ ...settings, gateway_listen_mode: "lan" });
+        } else if (outcome === "null") {
+          save.resolve(null);
+        } else {
+          save.reject(new Error("save boom"));
+        }
+      });
+
+      await waitFor(() =>
+        expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("wsl_auto")
+      );
+    }
+  );
+
+  it.each(persistOutcomes)(
+    "adopts an external custom address that arrives while a %s save is applying",
+    async (outcome) => {
+      vi.mocked(useWslHostAddressQuery).mockReturnValue({ data: null } as any);
+      const settings = createTestAppSettings({
+        gateway_listen_mode: "custom",
+        gateway_custom_listen_address: "0.0.0.0:37123",
+      });
+      const externalSettings = {
+        ...settings,
+        gateway_custom_listen_address: "192.168.1.20:37123",
+      };
+      const save = createDeferred<AppSettings | null>();
+      const onPersistSettings = vi.fn().mockReturnValue(save.promise);
+      const controllerProps = createTokenControllerProps();
+      const view = render(
+        <NetworkSettingsCard
+          available={true}
+          saving={false}
+          settings={settings}
+          onPersistSettings={onPersistSettings}
+          {...controllerProps}
+        />
+      );
+
+      const input = screen.getByPlaceholderText("0.0.0.0 或 0.0.0.0:37123");
+      fireEvent.change(input, { target: { value: "10.0.0.2:37123" } });
+      fireEvent.blur(input);
+      expect(screen.getByRole("status")).toHaveTextContent("正在应用");
+      view.rerender(
+        <NetworkSettingsCard
+          available={true}
+          saving={false}
+          settings={externalSettings}
+          onPersistSettings={onPersistSettings}
+          {...controllerProps}
+        />
+      );
+      expect((input as HTMLInputElement).value).toBe("10.0.0.2:37123");
+
+      await act(async () => {
+        if (outcome === "success") {
+          save.resolve({
+            ...settings,
+            gateway_custom_listen_address: "10.0.0.2:37123",
+          });
+        } else if (outcome === "null") {
+          save.resolve(null);
+        } else {
+          save.reject(new Error("save boom"));
+        }
+      });
+
+      await waitFor(() =>
+        expect((input as HTMLInputElement).value).toBe("192.168.1.20:37123")
+      );
+    }
+  );
 
   it("validates IPv6 custom address and handles non-tauri persist failure", async () => {
     vi.mocked(useWslHostAddressQuery).mockReturnValue({ data: null } as any);
