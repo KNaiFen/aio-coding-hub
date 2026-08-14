@@ -16,8 +16,8 @@
 - PR：[KNaiFen/aio-coding-hub#137](https://github.com/KNaiFen/aio-coding-hub/pull/137)（Draft；Round 3 已拒绝冻结 head `0280474d747ad9255d9aae6a48cbd02796d3becc`）
 - 并行 sibling：TUI PR #136 已合并并完成归档；其产品边界仍只包含 TUI formatter。本任务不得修改 `src-tauri/crates/aio-tui/src/format.rs`，同步 `origin/main` 时须保留该 sibling 的归档与索引事实。
 - PENDING 审阅：`PENDING.md` 已审阅，当前无 `pending`/`planned` 条目
-- 当前唯一写者：`main-direct-fix`（main 于 2026-08-14 11:57:35 CST 临时接管记录性文档）。执行 session 已明确暂停；Round 3 冻结 head 为 `0280474d747ad9255d9aae6a48cbd02796d3becc`，接管前工作树干净，本地、远端分支与 PR head 一致，无未提交内容。main 仅写 Round 3 验收记录与返工指导，不修改产品代码、测试、依赖或现行合同。
-- 当前阶段：Round 3 验收不通过，`F-006` 已落盘；记录提交推送后把唯一写权交回执行 session 待返工。
+- 当前唯一写者：执行 session 待返工（main 于 2026-08-14 12:00:02 CST 交回）。main 曾于 11:57:35 CST 以 `main-direct-fix` 临时接管记录性文档；Round 3 冻结 head `0280474d747ad9255d9aae6a48cbd02796d3becc`，记录提交 `a9db719a4e4d875531c91861a676061e306905ab` 已推送，交回前工作树干净，本地、远端分支与 PR head 一致，无未提交内容。main 只更新本文件、`delivery.md`、`findings.md` 和活动索引，未修改产品代码、测试、依赖或现行合同。
+- 当前阶段：Round 3 待返工；执行 session 按 `findings.md` 的 `F-006` 恢复，完成后重新取得完整新 head 的 CI、更新交付记录、标记 Ready 并再次暂停通知 main 验收。
 
 ## 阅读顺序
 
