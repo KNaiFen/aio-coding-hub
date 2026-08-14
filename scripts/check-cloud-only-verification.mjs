@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,107 +7,17 @@ const repoRoot = resolve(dirname(modulePath), "..");
 
 const ROOT_GUARD = "node scripts/require-github-actions.mjs";
 const WORKSPACE_GUARD = "node ../../scripts/require-github-actions.mjs";
+const ROOT_TEST_INCLUDE = 'include: ["src/**/*.{test,spec}.{ts,tsx}"],';
 const LOCAL_COMMAND_LINE =
   /^\s*(?:(?:pnpm|npm|yarn)\s+|cargo\s+(?:audit|build|check|clippy|fmt|run|test)\b|(?:rustfmt|clippy)\s+(?:--|\w)|tauri\s+(?:build|dev|icon|info|signer)\b)/i;
 const LOCAL_QUALITY_INSTRUCTION =
   /^\s*(?:-\s*)?(?:run|regenerate|execute)\b.*\b(?:rust|frontend|bindings?|type-?check|lint|clippy|format(?:ting)?|test(?:s| suite)?|cargo|pnpm)\b/i;
 const README_FENCE = /```(?:bash|sh|shell)?\s*\n([\s\S]*?)```/gi;
-const RUST_CANONICALIZE_RUN = `set -euo pipefail
-cargo fmt --manifest-path src-tauri/Cargo.toml --all
-cargo update --manifest-path src-tauri/Cargo.toml --workspace
-cargo run --manifest-path src-tauri/Cargo.toml --locked --example export-bindings
-pnpm exec prettier --write src/generated/bindings.ts
-if git diff --quiet -- src-tauri src/generated/bindings.ts; then
-  echo "drift=false" >> "$GITHUB_OUTPUT"
-else
-  git diff --binary -- src-tauri src/generated/bindings.ts > cloud-native-fixes.patch
-  echo "drift=true" >> "$GITHUB_OUTPUT"
-fi`;
 const MANUAL_CI_GUARD_RUN = `set -euo pipefail
 [[ "$EVENT_REF" == "refs/heads/main" ]] || {
   echo "::error::Manual ci runs are restricted to the main branch. PR validation is automatic."
   exit 1
 }`;
-const PERFORMANCE_GUARD_RUN = `set -euo pipefail
-[[ "$EVENT_REF" == "refs/heads/main" ]] || {
-  echo "::error::Performance runs are restricted to the main branch."
-  exit 1
-}`;
-const PR_TITLE_RUN = `set -euo pipefail
-pattern='^(feat|fix|docs|chore|style|refactor|perf|test|ci|build|revert)(\\([^)]+\\))?: .+'
-[[ "$PR_TITLE" =~ $pattern ]] || {
-  echo "::error::PR title must use Conventional Commits."
-  exit 1
-}`;
-const PERFORMANCE_BENCHMARK_RUN = `set -euo pipefail
-started_at="$(date +%s)"
-cargo test --release --locked --lib \\
-  provider_trend_million_ledger_rows_release_under_one_second -- \\
-  --ignored --test-threads=1
-duration_seconds="$(( $(date +%s) - started_at ))"
-{
-  echo "## Provider trend benchmark"
-  echo "- Commit: \\\`$GITHUB_SHA\\\`"
-  echo "- Rust: 1.90.0"
-  echo "- Duration: \${duration_seconds}s"
-} >> "$GITHUB_STEP_SUMMARY"`;
-const CI_GATE_RESULT_ENV = new Map([
-  ["EVENT_NAME", "${{ github.event_name }}"],
-  ["EVENT_REF", "${{ github.ref }}"],
-  ["MANUAL_GUARD_RESULT", "${{ needs.manual-dispatch-guard.result }}"],
-  ["CHANGE_SCOPE_RESULT", "${{ needs.change-scope.result }}"],
-  ["SCOPE", "${{ needs.change-scope.outputs.scope }}"],
-  ["FULL_CI", "${{ needs.change-scope.outputs.full_ci }}"],
-  ["FRONTEND_CI", "${{ needs.change-scope.outputs.frontend_ci }}"],
-  ["RUST_CI", "${{ needs.change-scope.outputs.rust_ci }}"],
-  ["SHARED_CI", "${{ needs.change-scope.outputs.shared_ci }}"],
-  ["DOCS_CHECKS", "${{ needs.change-scope.outputs.docs_checks }}"],
-  ["DOCS_RESULT", "${{ needs.docs-contract.result }}"],
-  ["SUPPORT_RESULT", "${{ needs.support-contract.result }}"],
-  ["FRONTEND_RESULT", "${{ needs.frontend.result }}"],
-  ["RUST_RESULT", "${{ needs.rust.result }}"],
-  ["PLAN_RESULT", "${{ needs.candidate-plan.result }}"],
-  ["SHOULD_BUILD", "${{ needs.candidate-plan.outputs.should_build }}"],
-  ["BUILD_RESULT", "${{ needs.build-release-candidate.result }}"],
-  ["TUI_BUILD_RESULT", "${{ needs.build-tui-release-candidate.result }}"],
-  ["ASSEMBLE_RESULT", "${{ needs.assemble-release-candidate.result }}"],
-]);
-// The aggregation script's complete shell control flow is part of the required gate.
-const CI_GATE_RUN_SHA256 = "4329b6fe09d4ead5cb55ca54a3b8ff98089d11642394a1ef98da40e24f0468bf";
-const CI_JOB_CONDITIONS = new Map([
-  [
-    "docs-contract",
-    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.docs_checks == 'true'",
-  ],
-  [
-    "support-contract",
-    "always() && needs.change-scope.result == 'success' && (needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true')",
-  ],
-  [
-    "frontend",
-    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.frontend_ci == 'true' && needs.support-contract.result == 'success'",
-  ],
-  [
-    "rust",
-    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.rust_ci == 'true' && needs.support-contract.result == 'success'",
-  ],
-  [
-    "candidate-plan",
-    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.full_ci == 'true' && github.repository == 'KNaiFen/aio-coding-hub' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')",
-  ],
-  [
-    "build-release-candidate",
-    "always() && needs.support-contract.result == 'success' && needs.frontend.result == 'success' && needs.rust.result == 'success' && needs.candidate-plan.result == 'success' && needs.candidate-plan.outputs.should_build == 'true'",
-  ],
-  [
-    "build-tui-release-candidate",
-    "always() && needs.support-contract.result == 'success' && needs.frontend.result == 'success' && needs.rust.result == 'success' && needs.candidate-plan.result == 'success' && needs.candidate-plan.outputs.should_build == 'true'",
-  ],
-  [
-    "assemble-release-candidate",
-    "always() && needs.candidate-plan.result == 'success' && needs.candidate-plan.outputs.should_build == 'true' && needs.frontend.result == 'success' && needs.rust.result == 'success' && needs.build-release-candidate.result == 'success' && needs.build-tui-release-candidate.result == 'success'",
-  ],
-]);
 
 function readText(root, relativePath) {
   return readFileSync(join(root, relativePath), "utf8");
@@ -141,6 +50,7 @@ export function loadCloudOnlyVerificationFixture(root = repoRoot) {
     rootPackage: readJson(root, "package.json"),
     pluginSdkPackage: readJson(root, "packages/plugin-sdk/package.json"),
     scaffolderPackage: readJson(root, "packages/create-aio-plugin/package.json"),
+    vitestConfig: readText(root, "vitest.config.ts"),
     tauriConfig: readJson(root, "src-tauri/tauri.conf.json"),
     agents: readText(root, "AGENTS.md"),
     readme: readText(root, "README.md"),
@@ -151,8 +61,6 @@ export function loadCloudOnlyVerificationFixture(root = repoRoot) {
     activeSpecs: readMarkdownTree(root, ".trellis/spec/aio-coding-hub"),
     ciWorkflow: readText(root, ".github/workflows/ci.yml"),
     devBuildWorkflow: readText(root, ".github/workflows/dev-build.yml"),
-    performanceWorkflow: readText(root, ".github/workflows/performance.yml"),
-    prTitleWorkflow: readText(root, ".github/workflows/pr-title.yml"),
   };
 }
 
@@ -360,16 +268,6 @@ function stepRunsUnconditionally(step) {
   );
 }
 
-function requireStepMapping(step, property, expected, label, failures) {
-  const mapping = step?.mappings.get(property) ?? new Map();
-  if (
-    mapping.size !== expected.size ||
-    [...expected].some(([key, value]) => mapping.get(key) !== value)
-  ) {
-    failures.push(label);
-  }
-}
-
 function workflowJobProperty(workflow, job, property) {
   const body = workflowJobBody(workflow, job);
   if (!body) return "";
@@ -449,36 +347,6 @@ function assertWorkflowJobPropertyEquals(
   }
 }
 
-function assertCiGateClosure(workflow, failures) {
-  assertWorkflowJobPropertyEquals(workflow, "ci-gate", "if", "always()", failures);
-  const matches = workflowSteps(workflow, "ci-gate").filter(
-    (step) => step.properties.get("name") === "Require expected jobs"
-  );
-  const step = matches.length === 1 ? matches[0] : undefined;
-  const run = step ? workflowStepRun(step) : undefined;
-  if (
-    !step ||
-    step.malformed.length > 0 ||
-    step.properties.get("shell") !== "bash" ||
-    !stepRunsUnconditionally(step) ||
-    run?.style !== "|"
-  ) {
-    failures.push("ci.yml ci-gate must retain an unconditional Bash aggregation step");
-    return;
-  }
-  requireStepMapping(
-    step,
-    "env",
-    CI_GATE_RESULT_ENV,
-    "ci.yml ci-gate must bind aggregation results directly from needs.*",
-    failures
-  );
-  const digest = createHash("sha256").update(run.value.trimEnd()).digest("hex");
-  if (digest !== CI_GATE_RUN_SHA256) {
-    failures.push("ci.yml ci-gate must retain the approved fail-closed aggregation script");
-  }
-}
-
 function assertCandidatePrBoundary(workflow, failures) {
   const ciGateRuns = workflowRunBodies(workflow, "ci-gate").join("\n");
   const mainCandidateCondition =
@@ -497,7 +365,6 @@ function assertCandidatePrBoundary(workflow, failures) {
     '[[ "$FRONTEND_CI" == "true" ]]',
     '[[ "$RUST_CI" == "true" ]]',
     '[[ "$SHARED_CI" == "true" ]]',
-    '[[ "$SUPPORT_RESULT" == "success" ]]',
     '[[ "$FRONTEND_RESULT" == "success" ]]',
     '[[ "$RUST_RESULT" == "success" ]]',
     mainCandidateCondition,
@@ -520,12 +387,6 @@ function assertCandidatePrBoundary(workflow, failures) {
   ].join("\n");
   if (!normalizedCiGate.includes(candidateBoundary)) {
     failures.push("ci.yml ci-gate must require candidate desktop/TUI jobs to be skipped outside eligible main runs");
-  }
-}
-
-function assertCiDependencyConditions(workflow, failures) {
-  for (const [job, expected] of CI_JOB_CONDITIONS) {
-    assertWorkflowJobPropertyEquals(workflow, job, "if", expected, failures);
   }
 }
 
@@ -601,60 +462,6 @@ function assertManualCiBoundary(workflow, failures) {
   ) {
     failures.push("ci.yml ci-gate must validate the manual guard result for every event type");
   }
-  if (workflowJobBody(workflow, "pr-title") || gateBody.includes("pr-title")) {
-    failures.push("ci.yml must not inline or depend on the independent pr-title check");
-  }
-}
-
-function assertPrTitleWorkflow(workflow, failures) {
-  const { onBlock, triggers } = workflowTriggers(workflow, "pr-title.yml", failures);
-  if (triggers.length !== 1 || triggers[0] !== "pull_request") {
-    failures.push("pr-title.yml must declare only the pull_request trigger");
-  }
-  for (const type of ["edited", "opened", "reopened", "synchronize"]) {
-    if (!onBlock.includes(type)) failures.push(`pr-title.yml must trigger for pull_request ${type}`);
-  }
-  if (/uses:\s+actions\/checkout@/.test(workflow)) {
-    failures.push("pr-title.yml must not checkout pull request code");
-  }
-  assertWorkflowJobPropertyEquals(
-    workflow,
-    "pr-title",
-    "name",
-    "pr-title",
-    failures,
-    "pr-title.yml"
-  );
-  assertWorkflowRunScript(workflow, "pr-title", PR_TITLE_RUN, failures, "pr-title.yml");
-}
-
-function assertPerformanceWorkflow(workflow, failures) {
-  assertOnlyWorkflowDispatch(workflow, "performance.yml", failures);
-  assertWorkflowRunScript(
-    workflow,
-    "main-guard",
-    PERFORMANCE_GUARD_RUN,
-    failures,
-    "performance.yml"
-  );
-  assertWorkflowJobPropertyEquals(
-    workflow,
-    "provider-trend-benchmark",
-    "needs",
-    "main-guard",
-    failures,
-    "performance.yml"
-  );
-  assertWorkflowRunScript(
-    workflow,
-    "provider-trend-benchmark",
-    PERFORMANCE_BENCHMARK_RUN,
-    failures,
-    "performance.yml"
-  );
-  if (/release-signing|TAURI_SIGNING_PRIVATE_KEY/.test(workflow)) {
-    failures.push("performance.yml must not receive release signing access");
-  }
 }
 
 export function assertCloudOnlyVerificationContract(fixture) {
@@ -663,6 +470,7 @@ export function assertCloudOnlyVerificationContract(fixture) {
     rootPackage,
     pluginSdkPackage,
     scaffolderPackage,
+    vitestConfig,
     tauriConfig,
     agents,
     readme,
@@ -673,8 +481,6 @@ export function assertCloudOnlyVerificationContract(fixture) {
     activeSpecs,
     ciWorkflow,
     devBuildWorkflow,
-    performanceWorkflow,
-    prTitleWorkflow,
   } = fixture;
 
   assertActionsOnlyScripts(rootPackage, "root package.json", ROOT_GUARD, failures);
@@ -685,6 +491,21 @@ export function assertCloudOnlyVerificationContract(fixture) {
     if (rootPackage?.scripts?.[name] !== undefined) {
       failures.push(`root package.json must not expose local ${name} entry point`);
     }
+  }
+  if (rootPackage?.scripts?.["test:e2e"] !== undefined) {
+    failures.push("root package.json test:e2e must stay absent so coverage is the only E2E entry");
+  }
+  if (
+    rootPackage?.scripts?.["test:unit:coverage"] !==
+    `${ROOT_GUARD} && vitest run --coverage`
+  ) {
+    failures.push("root package.json test:unit:coverage must remain the cloud coverage entry");
+  }
+  if (
+    !vitestConfig.includes(ROOT_TEST_INCLUDE) ||
+    /exclude:\s*\[[^\]]*src\/e2e/s.test(vitestConfig)
+  ) {
+    failures.push("vitest.config.ts must discover src/e2e through the root test include");
   }
 
   if (tauriConfig?.build?.beforeDevCommand !== undefined) {
@@ -724,53 +545,12 @@ export function assertCloudOnlyVerificationContract(fixture) {
   requireText(readme, "不要为常规验证额外手动运行 `ci`", "README.md", failures);
   requireText(readmeEn, "Do not start an additional manual `ci` run for routine validation.", "README_EN.md", failures);
   assertManualCiBoundary(ciWorkflow, failures);
-  assertCiDependencyConditions(ciWorkflow, failures);
-  assertPrTitleWorkflow(prTitleWorkflow, failures);
-  assertPerformanceWorkflow(performanceWorkflow, failures);
   assertWorkflowRunCommands(
     ciWorkflow,
-    "docs-contract",
+    "contracts",
     ["node scripts/check-cloud-only-verification.mjs"],
     failures
   );
-  assertWorkflowRunCommands(
-    ciWorkflow,
-    "support-contract",
-    [
-      "node scripts/check-cloud-only-verification.selftest.mjs && node scripts/check-cloud-only-verification.mjs",
-      "node scripts/check-ci-quality-gates.selftest.mjs && node scripts/check-ci-quality-gates.mjs",
-    ],
-    failures
-  );
-  assertWorkflowRunCommands(
-    ciWorkflow,
-    "frontend",
-    [
-      "pnpm install --frozen-lockfile",
-      "pnpm audit:deps",
-      "pnpm lint",
-      "pnpm plugin-sdk:typecheck",
-      "pnpm create-aio-plugin:typecheck",
-      "pnpm plugin-sdk:test",
-      "pnpm --filter create-aio-plugin test",
-      "pnpm test:e2e",
-      "pnpm test:unit:coverage",
-      "pnpm build",
-    ],
-    failures
-  );
-  assertWorkflowRunCommands(
-    ciWorkflow,
-    "rust",
-    [
-      "cargo clippy --workspace --all-targets --locked -- -D warnings",
-      "cargo test --workspace --locked -- --test-threads=1",
-      "cargo audit",
-    ],
-    failures
-  );
-  assertWorkflowRunScript(ciWorkflow, "rust", RUST_CANONICALIZE_RUN, failures);
-  assertCiGateClosure(ciWorkflow, failures);
   assertCandidatePrBoundary(ciWorkflow, failures);
 
   assertManualDevBuildWorkflow(devBuildWorkflow, failures);

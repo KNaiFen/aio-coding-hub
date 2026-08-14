@@ -66,7 +66,7 @@ jobs:
 
 const ci = `
 jobs:
-  support-contract:
+  contracts:
     steps:
       - run: node scripts/check-dev-build-artifacts.selftest.mjs && node scripts/check-dev-build-artifacts.mjs
   frontend:
@@ -199,15 +199,15 @@ expectRejected(
   /exactly one upload-artifact/
 );
 expectRejected(
-  "missing support contract",
+  "missing contracts command",
   {
     ...valid,
     ci: ci.replace("node scripts/check-dev-build-artifacts.selftest.mjs", "node missing"),
   },
-  /support-contract must execute/
+  /contracts must execute/
 );
 expectRejected(
-  "support command in a comment",
+  "contracts command in a comment",
   {
     ...valid,
     ci: ci.replace(
@@ -215,10 +215,10 @@ expectRejected(
       "# run: node scripts/check-dev-build-artifacts.selftest.mjs"
     ),
   },
-  /support-contract must execute/
+  /contracts must execute/
 );
 expectRejected(
-  "support command only echoed",
+  "contracts command only echoed",
   {
     ...valid,
     ci: ci.replace(
@@ -226,7 +226,7 @@ expectRejected(
       "- run: echo 'node scripts/check-dev-build-artifacts.selftest.mjs && node scripts/check-dev-build-artifacts.mjs'"
     ),
   },
-  /support-contract must execute/
+  /contracts must execute/
 );
 
 function run(command, args) {

@@ -52,18 +52,3 @@ pub fn run_account_usage_script_worker() {
 pub fn export_typescript_bindings(output_path: &str) -> Result<(), String> {
     commands::registry::export_typescript_bindings(output_path)
 }
-
-/// Specta type export smoke test.
-///
-/// 仅用于手动重新导出前端 bindings：
-/// `cargo test export_bindings -- --ignored`
-#[cfg(test)]
-#[test]
-#[ignore = "run manually: cargo test export_bindings -- --ignored"]
-fn export_bindings() {
-    export_typescript_bindings(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../src/generated/bindings.ts"
-    ))
-    .expect("failed to export specta TypeScript bindings");
-}

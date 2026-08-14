@@ -1,0 +1,5 @@
+{"file":".trellis/spec/aio-coding-hub/cross-layer/index.md","reason":"按根仓库 cross-layer Quality Check 核对 workflow、合同、前端和 Rust 影响。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/cloud-only-verification-contract.md","reason":"复核本地/云端执行边界与 cloud-only checker 的保留负例。"}
+{"file":".trellis/spec/aio-coding-hub/cross-layer/ci-change-scope-contract.md","reason":"复核完整 scope matrix、job 依赖和 ci-gate fail-closed 行为。"}
+{"file":".trellis/spec/aio-coding-hub/backend/index.md","reason":"删除 ignored Rust wrapper 时按 backend Quality Check 确认正常 Rust 行为测试与云端门禁未被削弱。"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"核对被删入口确为重复或无调用，并确认保留入口是唯一可执行 owner。"}

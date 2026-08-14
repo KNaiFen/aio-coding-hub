@@ -65,7 +65,7 @@ function hasRunCommand(source, command) {
 export function validateReleaseSigningSecretScope({ ci }) {
   const failures = [];
   const candidateJob = jobBlock(ci, "build-release-candidate");
-  const supportJob = jobBlock(ci, "support-contract");
+  const contractsJob = jobBlock(ci, "contracts");
   if (!candidateJob) failures.push("build-release-candidate job is required");
 
   const steps = stepBlocks(candidateJob);
@@ -164,8 +164,8 @@ export function validateReleaseSigningSecretScope({ ci }) {
     failures.push("steps after signing key cleanup must not reference the private key");
   }
 
-  if (!hasRunCommand(supportJob, contractCommand)) {
-    failures.push("support-contract must execute the release signing secret scope contract");
+  if (!hasRunCommand(contractsJob, contractCommand)) {
+    failures.push("contracts must execute the release signing secret scope contract");
   }
   return failures;
 }
