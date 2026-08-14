@@ -1,21 +1,22 @@
 # 交付报告：精简冗余测试与流程合同
 
-> 本文件描述 PR #146 的实际实现候选。功能实现候选与后续纯记录 head 分层记录；交付记录提交会生成新的 PR head，执行 session 将等待该 head 的自动检查终态，并在最终通知中提供完整 SHA 与链接，不再修改本文件造成自引用循环。
+> 本文件记录 PR #146 的实际交付、main 验收和最终收尾证据。
 
 ## 交付状态
 
-- 结果：实现完成；功能候选的自动检查已全部通过。推送本交付记录后等待最新纯记录 head 的自动检查，全部绿色后将 PR 标记 Ready for review 并暂停。
-- PR：[#146](https://github.com/KNaiFen/aio-coding-hub/pull/146)（当前为 Draft，目标为 `main`）。
+- 结果：完成；范围内实现、测试和现行文档已验收并合并。
+- PR：[#146](https://github.com/KNaiFen/aio-coding-hub/pull/146)（已合并到 `main`）。
 - 分支：`chore/trim-redundant-tests`
 - PR base：`main` @ `1b218897c09894cfb5aff796761eb8004ad6e53f`
 - 功能实现候选 head：`0cc0e515a85b6dc957263078e023eb18cd6bd616`
-- 最近已验证 head：`0cc0e515a85b6dc957263078e023eb18cd6bd616`
+- 最终已验证 head：`ff02909c817f384cf9466fdca231d6ea9df672b9`
+- squash merge commit：`822b4c6d91fd9c74a5a36bfba4a9a10f18575e50`
 - 规划提交：`cea9dad385e508c716956d644e3ef6021c8d04fe`
-- `ci-gate`：通过，[job 94739024014](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31789830142/job/94739024014)。
+- `ci-gate`：通过，[job 94747174997](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31792621572/job/94747174997)，绑定最终已验证 head。
 - 其他必需检查：同一 head 的 `pr-title`、`contracts`、`frontend`、`rust`、JavaScript/TypeScript CodeQL、Rust CodeQL 和 CodeQL 汇总均通过；candidate/release PR jobs 按设计跳过。
 - 实际 scope：`scope=full`，`full_ci=true`、`frontend_ci=true`、`rust_ci=true`、`shared_ci=true`、`docs_checks=true`。
 - 交付时间：2026-08-14T18:29:56+08:00。
-- 执行 session：当前唯一写者；本记录推送后只等待实时最新 head 的自动检查，不再修改功能差分。
+- 执行 session：已暂停并完成交付；功能 PR 合并后已清理原任务 worktree 和本地分支。
 
 ## Preflight
 
@@ -51,13 +52,13 @@
 
 | 标准 | 结果 | 证据 |
 |---|---|---|
-| AC-01 Exactly-once E2E | 通过 | `.github/workflows/ci.yml` 仅运行 `pnpm test:unit:coverage`；`vitest.config.ts` 明确包含 `src/e2e`。frontend [job 94734107279](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31789830142/job/94734107279) 日志仅出现一次 `src/e2e/plugins.e2e.test.tsx`，其中 1 个测试通过。 |
+| AC-01 Exactly-once E2E | 通过 | `.github/workflows/ci.yml` 仅运行 `pnpm test:unit:coverage`；`vitest.config.ts` 明确包含 `src/e2e`。最终 head 的 frontend [job 94742808681](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31792621572/job/94742808681) 日志仅出现一次 `src/e2e/plugins.e2e.test.tsx`，其中 1 个测试通过。 |
 | AC-02 Dead entry removal | 通过 | 已删除 package unit/shard/watch/E2E scripts、`run-coverage-shards.mjs`、`run-checks.mjs`、plugin completion checker 与 plugin API selftest；活动源码、workflow、机器合同和现行文档无残留引用。frontend workflow 调用保留的 `pnpm create-aio-plugin:test`。 |
 | AC-03 Contract consolidation | 通过 | `.github/workflows/ci.yml:contracts` 是静态合同的唯一 job owner；frontend/Rust 依赖其成功，`ci-gate` 对 selected/success 与 unselected/skipped fail-closed。实际 full scope 的 `contracts`、frontend、Rust、`ci-gate` 均成功。 |
-| AC-04 Contract ownership | 通过 | `check-cloud-only-verification` 不再维护 frontend/Rust 命令矩阵或 `ci-gate` 拓扑；`check-ci-quality-gates` 不再导入或验证已删 `run-checks` stages。两个 production checker 与 selftest 均在本地和 [contracts job 94734070719](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31789830142/job/94734070719) 通过。 |
+| AC-04 Contract ownership | 通过 | `check-cloud-only-verification` 不再维护 frontend/Rust 命令矩阵或 `ci-gate` 拓扑；`check-ci-quality-gates` 不再导入或验证已删 `run-checks` stages。两个 production checker 与 selftest 均在本地和最终 head 的 [contracts job 94742756532](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31792621572/job/94742756532) 通过。 |
 | AC-05 Test cleanup | 通过 | `FormField.test.tsx` 保留自动 ID、hint 关联与显式 `htmlFor`；`ui.test.tsx` 仍覆盖 Popover/Dialog；`gatewayEvents.test.ts` 的 500-entry 容量/淘汰断言未修改；`src-tauri/examples/export-bindings.rs` 及 CI 调用保留。frontend 与 Rust jobs 均通过。 |
 | AC-06 Required gates | 通过 | 自动 `ci-gate`、独立 `pr-title`、两种 CodeQL、frontend coverage/build、SDK/脚手架、Rust canonicalization/Clippy/tests/audit 均成功。candidate-plan、release candidate、desktop/TUI candidate jobs 对 PR 按设计跳过；performance、dev-build、release 与签名合同未删除或降级。 |
-| AC-07 Verification | 通过（功能候选） | 允许的 Node 合同/selftest、修改后 `.mjs` 的 `node --check`、Trellis validate 与 `git diff --check` 通过；同一完整 head 的 `ci-gate`、`pr-title`、frontend、Rust、contracts 与 CodeQL 全绿。交付记录产生的新 head 仍须自动复验。 |
+| AC-07 Verification | 通过 | 允许的 Node 合同/selftest、修改后 `.mjs` 的 `node --check`、Trellis validate 与 `git diff --check` 通过；最终完整 head `ff02909c817f384cf9466fdca231d6ea9df672b9` 的 `ci-gate`、`pr-title`、frontend、Rust、contracts 与 CodeQL 全绿。 |
 
 ## 主要代码位置
 
@@ -99,13 +100,13 @@
 
 | Workflow / Job | 结果 | 链接或说明 |
 |---|---|---|
-| `change-scope` | 通过 | [job 94734013701](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31789830142/job/94734013701)：`full`；五个 CI/docs 输出均为 `true`。 |
-| `contracts` | 通过 | [job 94734070719](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31789830142/job/94734070719)。 |
-| `frontend` | 通过 | [job 94734107279](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31789830142/job/94734107279)：audit、lint、typecheck、SDK/脚手架、coverage、build 通过；E2E 文件执行一次。 |
-| `rust` | 通过 | [job 94734107233](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31789830142/job/94734107233)：canonicalization/bindings、Clippy、tests 与 audit 通过。 |
-| `ci-gate` | 通过 | [job 94739024014](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31789830142/job/94739024014)，绑定功能候选完整 head。 |
-| `pr-title` | 通过 | [job 94734014017](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31789830239/job/94734014017)。 |
-| CodeQL | 通过 | [run 31789830164](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31789830164)，JavaScript/TypeScript 与 Rust jobs 成功；汇总检查成功。 |
+| `change-scope` | 通过 | [job 94742715790](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31792621572/job/94742715790)：`full`；五个 CI/docs 输出均为 `true`。 |
+| `contracts` | 通过 | [job 94742756532](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31792621572/job/94742756532)。 |
+| `frontend` | 通过 | [job 94742808681](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31792621572/job/94742808681)：audit、lint、typecheck、SDK/脚手架、coverage、build 通过；E2E 文件执行一次。 |
+| `rust` | 通过 | [job 94742808731](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31792621572/job/94742808731)：canonicalization/bindings、Clippy、tests 与 audit 通过。 |
+| `ci-gate` | 通过 | [job 94747174997](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31792621572/job/94747174997)，绑定最终已验证 head。 |
+| `pr-title` | 通过 | [job 94748135578](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31794385904/job/94748135578)。 |
+| CodeQL | 通过 | [run 31792621546](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31792621546)，JavaScript/TypeScript 与 Rust jobs 成功；汇总检查成功。 |
 | candidate/release jobs | 按设计跳过 | `candidate-plan`、assemble release candidate、desktop/TUI candidate jobs 在 PR 事件跳过；`manual-dispatch-guard` 同样跳过。 |
 
 ### 人工验证
@@ -130,7 +131,7 @@
 ## 未完成项与剩余风险
 
 - 产品、测试、合同与现行文档实现均完成，无已知功能阻塞。
-- 本交付记录提交将产生新的纯记录 PR head；执行 session 只等待该 head 的自动 `ci-gate`、`pr-title`、CodeQL 及按 full scope 选中的 jobs 终态，不再改写本文件。
+- 无剩余实现范围、PENDING 条目或已接受的功能风险。
 
 ## 建议 main 重点审查
 
@@ -141,11 +142,21 @@
 
 ## main 验收记录
 
-尚未进入验收；等待执行 session 将 PR 标记 Ready 并暂停后由 main 填写。
+### Round 1
+
+- 日期：2026-08-14。
+- 冻结 head：`ff02909c817f384cf9466fdca231d6ea9df672b9`；base `1b218897c09894cfb5aff796761eb8004ad6e53f`。
+- CI：[ci-gate job 94747174997](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31792621572/job/94747174997)、`pr-title`、`contracts`、frontend、Rust、JavaScript/TypeScript CodeQL 和 Rust CodeQL 均绑定该 head 且成功；candidate/release jobs 对 PR 按设计跳过。
+- 审查：已核对 PRD/设计/实施边界、PR 实时 diff、`contracts` 依赖和 `ci-gate` fail-closed 聚合、cloud-only/quality 合同 owner 分界、E2E 恰好一次、删除/合并测试的独特覆盖，以及 SDK/脚手架、Popover/Dialog、gateway 500-entry 边界、Rust bindings example、CodeQL 和发布门禁的保留情况。
+- 结论：通过；无阻断 finding，无需返工，计划偏移全部在已授权范围内。
 
 ## main 收尾
 
-尚未进入收尾。
+- 功能 PR #146 于 2026-08-14T12:07:37Z squash 合并；merge commit 为 `822b4c6d91fd9c74a5a36bfba4a9a10f18575e50`。
+- 本地 `main` 已 fetch 并 fast-forward 到该 merge commit，确认最终验收 head 已进入 `main`。
+- 原 worktree `/Users/knaifen/Documents/Codex/aio-coding-hub/workflow-test-cleanup` 已删除；远程任务分支由 GitHub 合并策略自动删除，本地任务分支已删除。
+- 长期知识：CI 合同和插件运行时文档已随功能 PR 同步；无需新增 PENDING 或迁移条目。
+- Trellis 归档与全局校验：`task.py archive --no-commit 08-14-trim-redundant-tests` 成功；`task.py validate --all` 通过 137 个 manifests；`git diff --check` 通过。
 
 ## 返工记录
 
