@@ -9,12 +9,12 @@
 - 分支：`fix/tui-duration-cli-listen`
 - PR base：`main`
 - 完整 base SHA：`1b218897c09894cfb5aff796761eb8004ad6e53f`
-- 规划提交：`PLANNING_SHA_PENDING`（main 回填后方可施工）
+- 规划提交：`5419ccf64ba73387f999133389ab3d347e63270c`
 - 实施授权：已确认，2026-08-14；覆盖 PRD locked decisions、范围与 AC。
 - PR：尚未创建；preflight 后尽早创建 Draft PR。
 - PENDING：无未解决条目。
-- 当前唯一写者：main（规划）；规划提交回填后转交独立 execution session。
-- 当前阶段：规划交接，禁止施工直到 preflight 全部通过。
+- 当前唯一写者：独立 execution session。
+- 当前阶段：已完成规划交接；execution session 仅在 preflight 全部通过后施工。
 
 ## 阅读顺序
 
@@ -38,7 +38,7 @@ test -f .trellis/tasks/08-14-tui-duration-cli-listen-fix/prd.md
 test -f .trellis/tasks/08-14-tui-duration-cli-listen-fix/design.md
 test -f .trellis/tasks/08-14-tui-duration-cli-listen-fix/implement.md
 test -f .trellis/tasks/08-14-tui-duration-cli-listen-fix/execution.md
-git cat-file -e "PLANNING_SHA_PENDING^{commit}"
+git cat-file -e "5419ccf64ba73387f999133389ab3d347e63270c^{commit}"
 ```
 
 再确认 `task.json.status=in_progress`、授权 confirmed、规划 SHA 已回填、工作树无来源不明修改、唯一写者为 execution session。任一失败即停止并报告 main；不得自行 rebase、修改任务边界或接管其他 worktree。
@@ -96,6 +96,6 @@ PR 只等待自动检查；本任务预期 full scope。CI 监控 3-5 分钟一�
 
 ## 初始交付状态
 
-- 结果：尚未开始（规划交接）。
+- 结果：尚未开始（已交接，等待 execution session 完成 preflight）。
 - PR/head/CI：尚未创建 / 尚未提交 / 未触发。
-- 交接后 execution session 成为唯一写者；交付后暂停。
+- execution session 当前为唯一写者；交付后暂停。

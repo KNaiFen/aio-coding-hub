@@ -9,11 +9,11 @@
 - 分支：`fix/tui-duration-cli-listen`
 - PR base：`main` @ `1b218897c09894cfb5aff796761eb8004ad6e53f`
 - 交付候选 head：尚未提交。
-- 规划提交：`PLANNING_SHA_PENDING`
+- 规划提交：`5419ccf64ba73387f999133389ab3d347e63270c`
 - `ci-gate`：未触发。
 - 其他必需检查：未触发。
 - 手工桌面验证：未执行。
-- 执行 session：尚未启动。
+- 执行 session：已分配，尚未开工；当前唯一写者为独立 execution session。
 
 ## 实际实现
 

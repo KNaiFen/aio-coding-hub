@@ -5,7 +5,7 @@
 - Implementation authorization: confirmed
 - Confirmation: 2026-08-14；用户要求把 TUI 请求时间显示和 CLI 监听地址/令牌问题放在同一个任务中继续实施。
 - Confirmed coverage: 本 PRD 的范围、锁定决定、非目标与 AC。
-- Planning revision: `PLANNING_SHA_PENDING`（main 在规划提交后回填）。
+- Planning revision: `5419ccf64ba73387f999133389ab3d347e63270c`。
 - Execution route: delegated sibling worktree。
 - Migrated from direct-main record: 无。
 
