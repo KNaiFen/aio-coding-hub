@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.60.53](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.53) (2026-08-14)
+
+### Highlights
+
+* restore live elapsed time for active TUI requests while preserving terminal TTFB
+* fix CLI gateway listen rebinding and LAN token reveal timing across tabs
+* streamline redundant tests, consolidate CI contracts, and archive completed delivery records
+
 ## [0.60.52](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.52) (2026-08-14)
 
 ### Highlights
