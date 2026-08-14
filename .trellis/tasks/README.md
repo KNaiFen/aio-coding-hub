@@ -10,6 +10,7 @@
 
 | 任务目录 | 阶段 | 分支 | base SHA | 规划提交 | Worktree | PR | 当前唯一写者 | 依赖/说明 |
 |---|---|---|---|---|---|---|---|---|
+| [`08-14-tui-duration-cli-listen-fix`](./08-14-tui-duration-cli-listen-fix/) | planning（待交接） | `fix/tui-duration-cli-listen` | `1b218897c09894cfb5aff796761eb8004ad6e53f` | 待回填 | `/Users/knaifen/Documents/Codex/aio-coding-hub/tui-duration-cli-listen-fix` | 未创建 | main（规划） | TUI duration/TTFB 与 CLI listen/token 修复；和测试清理任务无产品文件重叠，索引合并顺序由 main 处理。 |
 | [`08-03-upstream-claude-oauth`](./08-03-upstream-claude-oauth/) | planning（暂停，未委派） | 无（旧分支已删除） | 不适用 | 未登记 | 未创建 | 未创建 | main session | 用户已决定暂不处理；不影响当前工作。恢复前需重新确认方案，并完成真实隔离账号验证。 |
 
 ## 归档
