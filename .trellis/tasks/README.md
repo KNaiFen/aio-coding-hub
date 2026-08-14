@@ -10,7 +10,7 @@
 
 | 任务目录 | 阶段 | 分支 | base SHA | 规划提交 | Worktree | PR | 当前唯一写者 | 依赖/说明 |
 |---|---|---|---|---|---|---|---|---|
-| [`08-13-cross-provider-model-routing`](./08-13-cross-provider-model-routing/) | in_progress（Round 2 验收不通过，记录中） | `feat/cross-provider-model-routing` | `875ff441c5ba9f1a7f235ad95dadb945a41bba61` | `c6d59507c7a1de46abdb07427aa8bc153c69739c` | `/Users/knaifen/Documents/Codex/aio-coding-hub/08-13-cross-provider-model-routing` | [#137](https://github.com/KNaiFen/aio-coding-hub/pull/137) | `main-direct-fix` 临时唯一写者 | main 于 2026-08-14 09:49:29 CST 接管冻结 head `2e7a8e284ff3b3e60678150eec0b07768f4db3a2` 的记录性文档；工作树干净且本地/远端/PR head 一致。仅落盘 Round 2 `F-002`～`F-005`，随后交回执行 session 返工。 |
+| [`08-13-cross-provider-model-routing`](./08-13-cross-provider-model-routing/) | in_progress（Round 2 待返工） | `feat/cross-provider-model-routing` | `875ff441c5ba9f1a7f235ad95dadb945a41bba61` | `c6d59507c7a1de46abdb07427aa8bc153c69739c` | `/Users/knaifen/Documents/Codex/aio-coding-hub/08-13-cross-provider-model-routing` | [#137](https://github.com/KNaiFen/aio-coding-hub/pull/137) | 执行 session 待返工；main 已交回唯一写权 | main 于 2026-08-14 09:49:29 CST 临时接管冻结 head `2e7a8e284ff3b3e60678150eec0b07768f4db3a2` 的记录性文档，09:53:47 CST 交回；记录提交 `349b224f1c85f3eec1c8327a1f92ca9079767aa8` 已推送，按 `findings.md` F-002～F-005 返工。 |
 | [`08-03-upstream-claude-oauth`](./08-03-upstream-claude-oauth/) | planning（暂停，未委派） | 无（旧分支已删除） | 不适用 | 未登记 | 未创建 | 未创建 | main session | 用户已决定暂不处理；不影响当前工作。恢复前需重新确认方案，并完成真实隔离账号验证。 |
 
 ## 归档
