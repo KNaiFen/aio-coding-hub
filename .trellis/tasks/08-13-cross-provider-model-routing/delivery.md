@@ -1,28 +1,27 @@
 # 交付报告：跨供应商模型路由
 
-> 本文件记录执行 session 已完成的产品实现和当前阻塞状态。main 验收与收尾区仍由 main 填写；任何新 push 都会使旧 head 的 CI 证据不再代表最新 PR head。
+> 本文件记录执行 session 已完成的产品实现和 Round 1 返工结果。main 验收与收尾区仍由 main 填写；任何新 push 都会使旧 head 的 CI 证据不再代表最新 PR head。
 
 ## 交付状态
 
-- 结果：阻塞。范围内实现、Rust/合同验证已完成；必需 frontend job 被 `origin/main` 已存在的 `nanoid 3.3.17` 高危公告阻断，因而 `ci-gate` 未通过，PR 保持 Draft。
-- PR：[KNaiFen/aio-coding-hub#137](https://github.com/KNaiFen/aio-coding-hub/pull/137)（Draft）
+- 结果：Round 1 的 `F-001` 已完成。任务分支已用普通 merge 同步修复后的 `origin/main`；同步验证 head 的 frontend、Rust、docs/support、CodeQL、`pr-title` 和 `ci-gate` 全部通过。提交本交付记录后将等待新 head 的自动检查，再把 PR 标记 Ready for review。
+- PR：[KNaiFen/aio-coding-hub#137](https://github.com/KNaiFen/aio-coding-hub/pull/137)（Draft，等待本交付记录 head 的自动检查）
 - 分支：`feat/cross-provider-model-routing`
-- 初始派生 base：`main` @ `875ff441c5ba9f1a7f235ad95dadb945a41bba61`；实时 PR base：`main` @ `70f103467c5770c7a7a29f564b7a5620409fff5a`
-- 最后安全实现 head：`8365ccad51fdce9faf4fb363dbe275d0c6701561`
+- 初始派生 base：`main` @ `875ff441c5ba9f1a7f235ad95dadb945a41bba61`；同步时实时 PR base：`main` @ `bd2535796fdf847008b7b55789572367d3e615e9`
+- Round 1 同步验证 head：`c47f1a30fc538cd89b2dfe48416dacc05df6888e`
+- 普通 merge：第一父 `1ed9c37832a4a135bbb321dd7f7e244b95245f9b`，第二父 `bd2535796fdf847008b7b55789572367d3e615e9`；包含 main 基线修复 merge `a0f6823be399b2a2a31fb27b9fdfb0b6cb60e885`。
 - 规划提交：`c6d59507c7a1de46abdb07427aa8bc153c69739c`
-- `ci-gate`：未通过，[run 31734427079](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31734427079) / [job 94568983595](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31734427079/job/94568983595)，绑定最后安全实现 head；gate 输入明确为 `FRONTEND_RESULT=failure`、`RUST_RESULT=success`。
-- 其他检查：Rust、change-scope、docs-contract、support-contract、pr-title、JS/Rust CodeQL 通过；frontend 失败；候选构建按 PR 范围跳过。
-- 交付时间：2026-08-14 03:33 CST（实现 head 的 CI 终态时间）
-- 执行 session：本阻塞记录提交并等待其最新 head 检查终态后暂停；不会标记 Ready for review。
+- `ci-gate`：通过，[run 31757397350](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31757397350) / [job 94640213462](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31757397350/job/94640213462)，绑定同步验证 head。
+- 其他检查：change-scope、frontend、Rust、docs-contract、support-contract、pr-title、JS/Rust CodeQL 全部通过；候选构建按 PR 范围跳过。
+- 同步验证终态时间：2026-08-14 16:50 CST。
+- 执行 session：提交并推送本记录后等待最新完整 head 的自动必需检查；全绿后标记 Ready for review 并停止写入。
 
-## 阻塞快照
+## Round 1 返工快照
 
-- 证据：[frontend job 94562654985](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31734427079/job/94562654985) 在 `Dependency audit` 报告 `nanoid / GHSA-2v37-7h3g-55p8` 后失败，lint、typecheck、前端 tests 与 build 均未执行。
-- 最后安全提交：`8365ccad51fdce9faf4fb363dbe275d0c6701561`
-- 工作树状态：实现提交已推送；写入本记录前工作树干净。
-- 受影响的 AC/范围：AC-03、AC-04、AC-08、AC-09 的前端云端测试证据缺失；AC-10 的必需 CI 全绿与 Ready 状态未满足。产品实现和 Rust 验证可保留。
-- 需要的决定：依赖升级不在本任务允许范围内；main 需安排 base 依赖修复或确认其他合规处置，本执行 session 不把锁文件升级混入功能 PR。
-- 恢复条件：`main` 修复 `nanoid` 基线漏洞并使 PR #137 最新 head 的 frontend 与 `ci-gate` 通过；随后执行 session 才能更新最终候选并标记 Ready。
+- preflight 确认登记路径、分支、`task.json.status=in_progress`、规划提交与唯一写者均符合；工作树干净，本地/远端 head 同为 `1ed9c37832a4a135bbb321dd7f7e244b95245f9b`。
+- `git fetch origin` 后执行 `git merge --no-edit origin/main`，自动生成 merge commit `c47f1a30fc538cd89b2dfe48416dacc05df6888e`，没有内容冲突、rebase、force-push 或 cherry-pick。
+- merge 完整保留 main 的 `nanoid 3.3.18` workspace/lockfile 修复、TUI 归档和历史记录；相对第一父未修改跨供应商产品实现、测试逻辑或 `src-tauri/crates/aio-tui/src/format.rs`。
+- F-001 结果：原 frontend 依赖审计阻塞已解除；同一同步验证 head 的 audit、lint、typecheck、frontend tests/build、Rust、合同检查、CodeQL、标题和总门禁全部通过。
 
 ## 实现摘要
 
@@ -45,14 +44,14 @@
 |---|---|---|
 | AC-01 数据模型与向后兼容 | 实现完成，Rust 验证通过 | `settings/types.rs` sanitizer、`domain/sort_modes.rs` fail-open/CAS 测试、生成 TS bindings；Rust job 通过 |
 | AC-02 方案持久化 | 实现完成，Rust 验证通过 | `v52_to_v53.rs`、baseline v25、迁移测试覆盖 UUID 回填/不可变/级联/回滚，方案 CRUD 测试覆盖改名与删除 |
-| AC-03 编辑器与候选 | 实现及前端测试代码完成，云端执行被阻塞 | `ModelRoutingPolicyFields.tsx`、provider form/query；`ProviderRoutingEditor.test.tsx` 覆盖 Default/非成员/失效目标/dirty draft/目录建议 |
-| AC-04 强度提取与匹配 | Rust 验证通过；前端测试未运行 | `model_inference.rs` 覆盖五入口与预算排除，`configured_model_route.rs` 覆盖精确/通配/大小写及 Gemini 写入 |
+| AC-03 编辑器与候选 | 实现及云端前端验证通过 | `ModelRoutingPolicyFields.tsx`、provider form/query；`ProviderRoutingEditor.test.tsx` 覆盖 Default/非成员/失效目标/dirty draft/目录建议；frontend job 通过 |
+| AC-04 强度提取与匹配 | Rust 与前端验证通过 | `model_inference.rs` 覆盖五入口与预算排除，`configured_model_route.rs` 覆盖精确/通配/大小写及 Gemini 写入 |
 | AC-05 运行时跳转 | Rust 验证通过 | `failover_loop/mod.rs` 与 `gateway/routes.rs` 覆盖 B 非流/SSE 成功、B 失败 A 基线恢复、bridge prepare 失败恢复及 processed 去重 |
 | AC-06 资格与安全边界 | Rust 验证通过 | effective mode snapshot、inference-only gate、managed alias/非推理排除、bounded marker/candidate DTO 测试 |
 | AC-07 会话与审计 | Rust 验证通过 | attempt 级 `session_binding_allowed=false`；request-end/stream finalize、cost/Observer/Home marker 投影测试通过 |
-| AC-08 导入/分享/复制 | Rust 验证通过；前端服务测试未运行 | config v5/v1-v4 导入测试、share/duplicate 测试；最新 Rust suite 修复并通过单连接池 duplicate 路径 |
-| AC-09 测试与合同 | 部分通过 | Rust 2895 项中 2890 passed/5 ignored；六份现行合同、三份 shipped template、docs/support contract 通过；frontend tests 被依赖审计前置阻断 |
-| AC-10 交付门 | 未通过 | PR/实现/推送/delivery 已完成，但 frontend 与 `ci-gate` 失败，故保持 Draft、未标记 Ready |
+| AC-08 导入/分享/复制 | Rust 与前端服务验证通过 | config v5/v1-v4 导入测试、share/duplicate 测试；Rust suite 通过单连接池 duplicate 路径，frontend unit tests 通过 |
+| AC-09 测试与合同 | 通过 | frontend unit tests/build、Rust tests/Clippy/audit/generated drift、六份现行合同、三份 shipped template、docs/support contract 全部通过 |
+| AC-10 交付门 | 同步验证通过，等待记录 head 复验 | 产品实现、同步、推送与 delivery 已完成；同步验证 head 的必需 CI 全绿，本记录提交后的最新 head 仍需自动复验后标记 Ready |
 
 ## 主要代码位置
 
@@ -72,6 +71,7 @@
 - CI 首轮发现四条本任务 Clippy 警告，使用参数 DTO、返回类型别名和 boxed 完整 provider 快照消除；没有用 `allow` 掩盖。
 - CI 次轮发现本任务抽取的 duplicate helper 在单连接池内嵌套取连接；缩短 source 读取连接作用域后，最新 Rust suite 通过。该修复不改变复制语义。
 - 两轮云端 rustfmt artifact 均先核对文件范围后原样应用；最终 head 的 generated-file drift 检查通过。
+- Round 1 仅用普通 merge 同步 `origin/main` 并更新交付记录；来自 main 的 workspace/lockfile、任务归档和历史记录原样保留，没有修改跨供应商产品语义。
 
 ## 验证结果
 
@@ -82,7 +82,7 @@
 | `node scripts/check-cloud-only-verification.mjs` | 通过 | 仓库云端验证合同通过 |
 | `node scripts/check-cloud-only-verification.selftest.mjs` | 通过 | 全部断言通过 |
 | `python3 ./.trellis/scripts/task.py validate .trellis/tasks/08-13-cross-provider-model-routing` | 通过 | 12 implement / 11 check entries |
-| `git diff --check` | 通过 | 已提交实现无 whitespace error |
+| `git diff --check` | 通过 | 当前工作树无 whitespace error |
 | `git diff --name-only origin/main...HEAD` | 通过 | 已审查 PR 文件范围；当前 PR diff 不含 `src-tauri/crates/aio-tui/src/format.rs` |
 | `node --check <修改的 .mjs>` | 不适用 | 本任务未修改 `.mjs` 文件 |
 
@@ -92,12 +92,12 @@
 
 | Workflow / Job | 结果 | 链接或说明 |
 |---|---|---|
-| `change-scope` | 通过 | [job 94562524729](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31734427079/job/94562524729)，`scope=full` |
-| `rust` | 通过 | [job 94562654975](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31734427079/job/94562654975)：格式/绑定无 drift、Clippy、Rust tests、cargo audit 通过；主 lib 2890 passed/5 ignored |
-| `frontend` | 失败（base 漂移） | [job 94562654985](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31734427079/job/94562654985)：`nanoid 3.3.17 / GHSA-2v37-7h3g-55p8`；本 PR 未改 package/lock/workspace 文件 |
-| `docs-contract` / `support-contract` | 通过 | jobs [94562581505](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31734427079/job/94562581505) / [94562581449](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31734427079/job/94562581449) |
-| `pr-title` / CodeQL | 通过 | pr-title 与 JS/TS、Rust CodeQL 均绑定实现 head 通过 |
-| `ci-gate` | 失败 | [job 94568983595](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31734427079/job/94568983595)，仅 `FRONTEND_RESULT=failure` 阻止 full gate |
+| `change-scope` | 通过 | [job 94636082698](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31757397350/job/94636082698)，选择完整 frontend、Rust 与合同检查 |
+| `rust` | 通过 | [job 94636148663](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31757397350/job/94636148663)：格式/绑定无 drift、Clippy、Rust tests、cargo audit 通过 |
+| `frontend` | 通过 | [job 94636148629](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31757397350/job/94636148629)：dependency audit、lint、typecheck、unit tests、build 与 plugin SDK contracts 通过 |
+| `docs-contract` / `support-contract` | 通过 | jobs [94636111807](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31757397350/job/94636111807) / [94636111845](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31757397350/job/94636111845) |
+| `pr-title` / CodeQL | 通过 | [pr-title job 94636081904](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31757397341/job/94636081904)；[CodeQL run 31757397340](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31757397340) 的 JS/TS 与 Rust jobs 通过 |
+| `ci-gate` | 通过 | [job 94640213462](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31757397350/job/94640213462)，绑定 `c47f1a30fc538cd89b2dfe48416dacc05df6888e` |
 
 ### 人工验证
 
@@ -116,13 +116,12 @@
 - 数据与配置：v52 -> v53 是事务迁移，新增 identity 表和 nullable member policy；升级后的数据库 schema 不应直接交给只支持 v52 的旧二进制，回滚需先恢复数据库备份或使用兼容迁移版本。
 - 安全与隐私：candidate DTO 与 marker 有界且不包含 body、URL、header 或凭据；B 复用既有 auth/gate/circuit 边界。
 - 回滚方式：代码可回退本 PR；配置 bundle 可用 v5 备份恢复。数据库降级不能只回退二进制，需配套恢复升级前备份。
-- 剩余风险：frontend tests/build 尚未在最新 head 执行；真实 UI、真实跨供应商 bridge/credential 组合未人工验证；PR 当前落后于实时 main，main 验收前需评估同步策略。
+- 剩余风险：真实 UI、真实跨供应商 bridge/credential 组合未人工验证；桌面候选环境中的人工验收仍交由 main。
 
-## 未完成项与阻塞
+## 未完成项与剩余风险
 
-- 必需 frontend 与 `ci-gate` 未通过，不能标记 Ready。阻塞根因是 base 锁定的 `nanoid 3.3.17`，不属于本任务范围；恢复后须在同一最新 head 重跑完整 scope。
-- delivery 记录提交会生成新的 PR head；执行 session 将等待该 head 的自动检查终态并在最终报告中提供其完整 SHA/链接，不再修改本文件造成自引用循环。
-- 未进行桌面 UI/真实上游人工验收，交由 main 在 CI 恢复后的候选上完成。
+- 产品与基线 CI 阻塞已解除。delivery 记录提交会生成新的 PR head；执行 session 将等待该 head 的自动检查终态，并在最终报告中提供完整 SHA/链接，不再修改本文件造成自引用循环。
+- 未进行桌面 UI/真实上游人工验收，交由 main 在固定候选上完成。
 
 ## 建议 main 重点审查
 
