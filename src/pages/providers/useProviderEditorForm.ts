@@ -414,11 +414,13 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
   const [crossRoutingPolicy, setCrossRoutingPolicyState] =
     useState<CrossProviderModelRoutingPolicy | null>(null);
   const [crossRoutingBaseline, setCrossRoutingBaseline] = useState<string | null>(null);
+  const [crossRoutingRevision, setCrossRoutingRevision] = useState<string | null>(null);
   const [routingPolicyView, setRoutingPolicyView] =
     useState<ProviderModelRoutingPolicyView | null>(null);
   const ordinaryRoutingProviderKeyRef = useRef<string | null>(null);
   const ordinaryRoutingRevisionRef = useRef<string | null>(null);
   const crossRoutingScopeKeyRef = useRef<string | null>(null);
+  const crossRoutingRevisionRef = useRef<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [savingWithModelFetch, setSavingWithModelFetch] = useState(false);
   const [copyingApiKey, setCopyingApiKey] = useState(false);
@@ -523,6 +525,17 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
   const crossRoutingDirty =
     crossRoutingBaseline != null && crossRoutingSignature !== crossRoutingBaseline;
 
+  const adoptCrossRoutingView = useCallback((view: ProviderModelRoutingPolicyView) => {
+    const nextCrossPolicy =
+      view.selected_mode == null || !view.source_member_present
+        ? null
+        : cloneCrossProviderModelRoutingPolicy(view.cross_policy);
+    setCrossRoutingPolicyState(nextCrossPolicy);
+    setCrossRoutingBaseline(routingPolicySignature(nextCrossPolicy));
+    setCrossRoutingRevision(view.cross_policy_revision);
+    crossRoutingRevisionRef.current = view.cross_policy_revision;
+  }, []);
+
   useEffect(() => {
     const view = routingPolicyQuery.data;
     if (!open || !routingEditorEnabled || !view) return;
@@ -550,26 +563,35 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
       ordinaryRoutingRevisionRef.current = view.ordinary_policy_revision;
     }
 
-    if (crossRoutingScopeKeyRef.current !== `${providerKey}:${modeKey}`) {
-      const nextCrossPolicy =
-        view.selected_mode == null || !view.source_member_present
-          ? null
-          : cloneCrossProviderModelRoutingPolicy(view.cross_policy);
-      setCrossRoutingPolicyState(nextCrossPolicy);
-      setCrossRoutingBaseline(routingPolicySignature(nextCrossPolicy));
-      crossRoutingScopeKeyRef.current = `${providerKey}:${modeKey}`;
+    const crossScopeKey = `${providerKey}:${modeKey}`;
+    const crossScopeChanged = crossRoutingScopeKeyRef.current !== crossScopeKey;
+    const crossRevisionChanged =
+      crossRoutingRevisionRef.current !== view.cross_policy_revision;
+    if (crossScopeChanged || (crossRevisionChanged && !crossRoutingDirty)) {
+      adoptCrossRoutingView(view);
+      crossRoutingScopeKeyRef.current = crossScopeKey;
     }
     setRoutingPolicyView(view);
-  }, [open, ordinaryRoutingDirty, routingEditorEnabled, routingPolicyQuery.data]);
+  }, [
+    adoptCrossRoutingView,
+    crossRoutingDirty,
+    open,
+    ordinaryRoutingDirty,
+    routingEditorEnabled,
+    routingPolicyQuery.data,
+  ]);
 
   useEffect(() => {
     if (open) return;
     ordinaryRoutingProviderKeyRef.current = null;
     ordinaryRoutingRevisionRef.current = null;
     crossRoutingScopeKeyRef.current = null;
+    crossRoutingRevisionRef.current = null;
     setOrdinaryRoutingBaseline(null);
     setOrdinaryRoutingRevision(null);
+    setCrossRoutingPolicyState(null);
     setCrossRoutingBaseline(null);
+    setCrossRoutingRevision(null);
     setRoutingPolicyView(null);
   }, [open]);
 
@@ -1014,17 +1036,10 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
         ordinary_policy: modelRoutingPolicyDraft,
         expected_ordinary_policy_revision: ordinaryRoutingRevision,
         cross_policy:
-          routeMode == null || routingPolicyView.cross_policy_revision == null
-            ? null
-            : crossRoutingPolicy,
-        expected_cross_policy_revision:
-          routeMode == null ? null : routingPolicyView.cross_policy_revision,
+          routeMode == null || crossRoutingRevision == null ? null : crossRoutingPolicy,
+        expected_cross_policy_revision: routeMode == null ? null : crossRoutingRevision,
       });
       const ordinaryPolicy = cloneModelRoutingPolicy(saved.ordinary_policy);
-      const nextCrossPolicy =
-        saved.selected_mode == null || !saved.source_member_present
-          ? null
-          : cloneCrossProviderModelRoutingPolicy(saved.cross_policy);
       setModelRoutingPolicyOverrideEnabled(saved.provider_override_enabled);
       setModelRoutingPolicyDraft(ordinaryPolicy);
       setOrdinaryRoutingBaseline(
@@ -1032,8 +1047,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
       );
       setOrdinaryRoutingRevision(saved.ordinary_policy_revision);
       ordinaryRoutingRevisionRef.current = saved.ordinary_policy_revision;
-      setCrossRoutingPolicyState(nextCrossPolicy);
-      setCrossRoutingBaseline(routingPolicySignature(nextCrossPolicy));
+      adoptCrossRoutingView(saved);
       setRoutingPolicyView(saved);
       return true;
     } catch (error) {
@@ -1048,7 +1062,9 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
     }
   }, [
     cliKey,
+    adoptCrossRoutingView,
     crossRoutingPolicy,
+    crossRoutingRevision,
     editProvider,
     modelRoutingPolicyDraft,
     modelRoutingPolicyOverrideEnabled,
@@ -1061,10 +1077,8 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
 
   const discardCrossRoutingDraft = useCallback(() => {
     if (!routingPolicyView || routeMode == null) return;
-    const nextCrossPolicy = cloneCrossProviderModelRoutingPolicy(routingPolicyView.cross_policy);
-    setCrossRoutingPolicyState(nextCrossPolicy);
-    setCrossRoutingBaseline(routingPolicySignature(nextCrossPolicy));
-  }, [routeMode, routingPolicyView]);
+    adoptCrossRoutingView(routingPolicyView);
+  }, [adoptCrossRoutingView, routeMode, routingPolicyView]);
 
   const setCrossRoutingPolicy = useCallback((policy: CrossProviderModelRoutingPolicy) => {
     setCrossRoutingPolicyState(cloneCrossProviderModelRoutingPolicy(policy));

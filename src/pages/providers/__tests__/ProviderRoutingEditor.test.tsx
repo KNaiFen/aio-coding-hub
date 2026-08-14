@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ProviderEditorDialog,
@@ -20,6 +21,7 @@ import {
   type ProviderSummary,
 } from "../../../services/providers/providers";
 import { createTestQueryClient } from "../../../test/utils/reactQuery";
+import { providerRoutingPolicyQueryKey } from "../../../query/sortModes";
 
 vi.mock("sonner", () => ({ toast: vi.fn() }));
 vi.mock("../../../services/providers/sortModes", async () => {
@@ -114,6 +116,8 @@ function policyView(
     sourceModel?: string;
     ordinaryRevision?: string;
     crossTarget?: string | null;
+    crossSourceModel?: string;
+    crossRevision?: string;
   } = {}
 ): ProviderModelRoutingPolicyView {
   const mode = input.mode === undefined ? MODE_ONE : input.mode;
@@ -145,7 +149,7 @@ function policyView(
             enabled: true,
             rules: [
               {
-                source_model: "cross-source",
+                source_model: input.crossSourceModel ?? "cross-source",
                 source_reasoning_effort: "high",
                 target_provider_uuid: input.crossTarget,
                 target_model: null,
@@ -154,7 +158,7 @@ function policyView(
             ],
           }
         : null,
-    cross_policy_revision: memberPresent ? "b".repeat(64) : null,
+    cross_policy_revision: memberPresent ? (input.crossRevision ?? "b".repeat(64)) : null,
     source_member_enabled: memberPresent && (input.memberEnabled ?? true),
     source_member_present: memberPresent,
   };
@@ -190,6 +194,7 @@ function renderDialog(ui: ReactElement) {
   const view = render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
   return {
     ...view,
+    client,
     rerender: (nextUi: ReactElement) =>
       view.rerender(<QueryClientProvider client={client}>{nextUi}</QueryClientProvider>),
   };
@@ -215,6 +220,7 @@ function editor(
 
 describe("pages/providers/ProviderRoutingEditor", () => {
   beforeEach(() => {
+    vi.mocked(toast).mockReset();
     vi.mocked(providerModelRoutingPolicyGet).mockReset();
     vi.mocked(providerModelRoutingPolicyGet).mockImplementation(async (input) =>
       policyView({
@@ -314,6 +320,134 @@ describe("pages/providers/ProviderRoutingEditor", () => {
     );
     view.rerender(editor({ open: true, routeMode: MODE_TWO }));
     expect(await screen.findByDisplayValue("latest-source")).toBeInTheDocument();
+  });
+
+  it("keeps a dirty cross draft and its baseline revision across same-scope refetch", async () => {
+    const firstRevision = "b".repeat(64);
+    const secondRevision = "c".repeat(64);
+    let serverView = policyView({
+      crossTarget: TARGET_UUID,
+      crossSourceModel: "server-r1",
+      crossRevision: firstRevision,
+    });
+    vi.mocked(providerModelRoutingPolicyGet).mockImplementation(async () => serverView);
+    const onSaved = vi.fn();
+    const onOpenChange = vi.fn();
+    const view = renderDialog(editor({ onSaved, onOpenChange }));
+
+    const sourceInput = await screen.findByDisplayValue("server-r1");
+    fireEvent.change(sourceInput, { target: { value: "local-draft" } });
+    serverView = policyView({
+      crossTarget: TARGET_UUID,
+      crossSourceModel: "server-r2",
+      crossRevision: secondRevision,
+    });
+    await act(async () => {
+      await view.client.refetchQueries({
+        queryKey: providerRoutingPolicyQueryKey({
+          cliKey: "grok",
+          providerId: 1,
+          providerUuid: SOURCE_UUID,
+          modeId: MODE_ONE.modeId,
+          modeUuid: MODE_ONE.modeUuid,
+        }),
+        exact: true,
+      });
+    });
+
+    expect(screen.getByDisplayValue("local-draft")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("server-r2")).not.toBeInTheDocument();
+
+    vi.mocked(providerModelRoutingPolicySave).mockRejectedValueOnce(
+      new Error("PROVIDER_ROUTING_CONCURRENT_UPDATE")
+    );
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => expect(providerModelRoutingPolicySave).toHaveBeenCalledOnce());
+    expect(providerModelRoutingPolicySave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expected_cross_policy_revision: firstRevision,
+        cross_policy: expect.objectContaining({
+          rules: [expect.objectContaining({ source_model: "local-draft" })],
+        }),
+      })
+    );
+    expect(screen.getByDisplayValue("local-draft")).toBeInTheDocument();
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+    expect(toast).toHaveBeenCalledWith(
+      "保存供应商模型路由失败：Error: PROVIDER_ROUTING_CONCURRENT_UPDATE"
+    );
+  });
+
+  it("atomically adopts a clean cross policy and revision on same-scope refetch", async () => {
+    const secondRevision = "c".repeat(64);
+    let serverView = policyView({
+      crossTarget: TARGET_UUID,
+      crossSourceModel: "server-r1",
+      crossRevision: "b".repeat(64),
+    });
+    vi.mocked(providerModelRoutingPolicyGet).mockImplementation(async () => serverView);
+    const view = renderDialog(editor());
+    expect(await screen.findByDisplayValue("server-r1")).toBeInTheDocument();
+
+    serverView = policyView({
+      crossTarget: TARGET_UUID,
+      crossSourceModel: "server-r2",
+      crossRevision: secondRevision,
+    });
+    await act(async () => {
+      await view.client.refetchQueries({
+        queryKey: providerRoutingPolicyQueryKey({
+          cliKey: "grok",
+          providerId: 1,
+          providerUuid: SOURCE_UUID,
+          modeId: MODE_ONE.modeId,
+          modeUuid: MODE_ONE.modeUuid,
+        }),
+        exact: true,
+      });
+    });
+
+    expect(await screen.findByDisplayValue("server-r2")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(providerModelRoutingPolicySave).toHaveBeenCalledOnce());
+    expect(providerModelRoutingPolicySave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expected_cross_policy_revision: secondRevision,
+        cross_policy: expect.objectContaining({
+          rules: [expect.objectContaining({ source_model: "server-r2" })],
+        }),
+      })
+    );
+  });
+
+  it("adopts the cross baseline revision when the editor scope changes", async () => {
+    const secondRevision = "d".repeat(64);
+    vi.mocked(providerModelRoutingPolicyGet).mockImplementation(async (input) => {
+      const secondMode = input.mode_id === MODE_TWO.modeId;
+      return policyView({
+        mode: secondMode ? MODE_TWO : MODE_ONE,
+        crossTarget: TARGET_UUID,
+        crossSourceModel: secondMode ? "mode-two-source" : "mode-one-source",
+        crossRevision: secondMode ? secondRevision : "b".repeat(64),
+      });
+    });
+    const view = renderDialog(editor());
+    expect(await screen.findByDisplayValue("mode-one-source")).toBeInTheDocument();
+
+    view.rerender(editor({ routeMode: MODE_TWO }));
+    expect(await screen.findByDisplayValue("mode-two-source")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => expect(providerModelRoutingPolicySave).toHaveBeenCalledOnce());
+    expect(providerModelRoutingPolicySave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode_id: MODE_TWO.modeId,
+        mode_uuid: MODE_TWO.modeUuid,
+        expected_cross_policy_revision: secondRevision,
+      })
+    );
   });
 
   it("disables cross rules for Default and a missing source member", async () => {
