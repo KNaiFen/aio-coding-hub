@@ -168,6 +168,13 @@ remote administration API.
   hyphenated source/effective evidence. Missing optional effort evidence omits
   the suffix. Non-Codex route formatting remains unchanged. Old observers or
   invalid optional route fields continue to render the ordinary model safely.
+- Request-card timing is selected by request state. An `Active` card formats
+  the current non-negative `duration_ms`, even if a defensive projection also
+  carries `ttfb_ms`; a `Terminal` card formats `ttfb_ms` and shows `—` when
+  TTFB is absent. Request detail continues to show duration and TTFB as
+  separate fields. Output-rate visibility and its final-upstream-attempt
+  calculation, provider switch counts, retry counts, and route wording do not
+  derive from or change with this card-only timing selection.
 - Cross success continues to show final B provider/model through existing
   fields. Desktop Home adds the bounded cross audit text above; this task does
   not change the TUI formatter, TTFB, or switch/retry wording. B failure

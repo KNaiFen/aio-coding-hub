@@ -16,7 +16,7 @@
   "base_branch": "main",
   "worktree_path": "/Users/knaifen/Documents/Codex/aio-coding-hub/tui-duration-cli-listen-fix",
   "commit": "5419ccf64ba73387f999133389ab3d347e63270c",
-  "pr_url": null,
+  "pr_url": "https://github.com/KNaiFen/aio-coding-hub/pull/147",
   "subtasks": [],
   "children": [],
   "parent": null,
