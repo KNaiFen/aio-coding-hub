@@ -4,22 +4,22 @@
 
 ## 当前结论
 
-- 结论：需要整改，暂不可合并。
-- PR：[#147](https://github.com/KNaiFen/aio-coding-hub/pull/147)（Draft）
-- 审查轮次：Round 1
-- 审查版本：`8e6ca2fbb35e92e3a68544b2b07da6d087d5325f`
-- CI 状态：[run 31800876521](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31800876521) 在本轮验收时仍运行；上一完整功能候选的 [Rust job](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31798457041/job/94760734452) 因未修改的 Grok SSE route test 得到 `502` 而失败。
+- 结论：Round 2 复验通过，全部 finding 已关闭，PR 已合并。
+- PR：[#147](https://github.com/KNaiFen/aio-coding-hub/pull/147)（已合并）
+- 审查轮次：Round 2
+- 审查版本：`a9dd8288285c0149c3cd58315a7ac5c602488755`
+- CI 状态：[ci-gate job 94786036687](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31804550712/job/94786036687) 及最终 head 的 `pr-title`、contracts、frontend、Rust、CodeQL 全绿。
 - 审查范围：完整任务；重点复核 page-level token owner、监听设置 draft、TUI 时间字段、gateway lifecycle lock 和回归测试。
 
 ## 总结
 
-TUI 时间字段和 Rust lifecycle lock 没有发现阻断项，但前端仍有两个可达的异步时序缺陷：保存后的 token reveal 可能复用保存前的旧请求而丢失新令牌，保存期间到达的外部 settings 更新也可能被永久跳过。此外，任务分支仍落后于已完成测试清理和 CI 合同更新的 `main`，返工候选必须先集成最新基线并重新取得固定 head 的完整证据。
+Round 1 发现的两个前端异步时序缺陷已修复，任务分支也已普通 merge 最新 main。Round 2 对同一最终 head 的代码、测试、合同和完整 CI 复验通过。
 
 ## 未解决问题
 
-- [ ] F-001 保存成功可能复用旧 reveal flight，导致 LAN 新令牌不显示
-- [ ] F-002 保存期间的外部 settings 更新可能被永久跳过
-- [ ] F-003 集成最新 main 并重新取得完整交付证据
+- [x] F-001 保存成功可能复用旧 reveal flight，导致 LAN 新令牌不显示
+- [x] F-002 保存期间的外部 settings 更新可能被永久跳过
+- [x] F-003 集成最新 main 并重新取得完整交付证据
 
 ## Round 1
 
@@ -49,11 +49,11 @@ TUI 时间字段和 Rust lifecycle lock 没有发现阻断项，但前端仍有�
 
 **main 复验**
 
-- 状态：待复验
-- 复验候选 head：
-- `ci-gate`：
-- 结论与证据：
-- 日期：
+- 状态：已解决
+- 复验候选 head：`a9dd8288285c0149c3cd58315a7ac5c602488755`
+- `ci-gate`：[job 94786036687](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31804550712/job/94786036687)
+- 结论与证据：`revealPendingGatewayTokenAfterSave` 等待旧 flight；旧 flight 返回 token 时复用结果，返回 `null`/error 时所有保存意图共享一次后续 reveal。deferred 初始 reveal、重复保存、tab 卸载和已取得 token 不重复消费测试随 frontend job 通过。
+- 日期：2026-08-14
 
 ### F-002：保存期间的外部 settings 更新可能被永久跳过
 
@@ -77,11 +77,11 @@ TUI 时间字段和 Rust lifecycle lock 没有发现阻断项，但前端仍有�
 
 **main 复验**
 
-- 状态：待复验
-- 复验候选 head：
-- `ci-gate`：
-- 结论与证据：
-- 日期：
+- 状态：已解决
+- 复验候选 head：`a9dd8288285c0149c3cd58315a7ac5c602488755`
+- `ci-gate`：[job 94786036687](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31804550712/job/94786036687)
+- 结论与证据：adopted source key 只在 draft reset 实际 dispatch 时推进；applying 期间到达的 listen mode/custom address 在 success、`null`、error 后均由最新 canonical settings 胜出。参数化 frontend tests 通过。
+- 日期：2026-08-14
 
 ### F-003：集成最新 main 并重新取得完整交付证据
 
@@ -105,11 +105,11 @@ TUI 时间字段和 Rust lifecycle lock 没有发现阻断项，但前端仍有�
 
 **main 复验**
 
-- 状态：待复验
-- 复验候选 head：
-- `ci-gate`：
-- 结论与证据：
-- 日期：
+- 状态：已解决
+- 复验候选 head：`a9dd8288285c0149c3cd58315a7ac5c602488755`
+- `ci-gate`：[job 94786036687](https://github.com/KNaiFen/aio-coding-hub/actions/runs/31804550712/job/94786036687)
+- 结论与证据：merge commit `08ac062af5454cf09a811ba71d597430c513c33b` 包含 `origin/main@0ae7f03abaa37c7021fdf8718373e27fe61f62fd`；最终 worktree、本地/远端分支与 PR head 一致，最新 workflow 拓扑下的完整检查全绿。
+- 日期：2026-08-14
 
 ## CI、编译或环境问题
 
@@ -120,7 +120,7 @@ TUI 时间字段和 Rust lifecycle lock 没有发现阻断项，但前端仍有�
 ## 计划偏移需要处理
 
 - 无需改变用户锁定行为、公共 API 或安全语义。
-- 当前 delivery 对 AC-03/AC-05 的“通过”结论已被 F-001 推翻；执行 session 再次交付时必须按真实结果更新。
+- Round 2 已确认 AC-03、AC-04、AC-05 与 AC-08 恢复为通过；无需改变用户锁定行为、公共 API 或安全语义。
 
 ## 本轮返工边界
 
@@ -144,11 +144,11 @@ TUI 时间字段和 Rust lifecycle lock 没有发现阻断项，但前端仍有�
 
 ## 再次交付要求
 
-- [ ] F-001 至 F-003 都有执行回应和代码/合并证据。
-- [ ] `delivery.md` 已更新实现、偏移、验证、main 集成和 Round 1 返工记录。
-- [ ] 新提交已推送，PR 最新 head 的必需 CI 和相关编译为绿色。
-- [ ] 完整 PR head SHA 和对应 `ci-gate` 已写入 `delivery.md` 与本文件。
-- [ ] PR 已转为 Ready for review，execution session 已暂停并通知 main 复验。
+- [x] F-001 至 F-003 都有执行回应和代码/合并证据。
+- [x] `delivery.md` 已更新实现、偏移、验证、main 集成和 Round 1 返工记录。
+- [x] 新提交已推送，PR 最新 head 的必需 CI 和相关编译为绿色。
+- [x] 完整 PR head SHA 和对应 `ci-gate` 已写入 `delivery.md` 与本文件。
+- [x] PR 已转为 Ready for review，execution session 已暂停并通知 main 复验。
 
 ## 建议项
 
