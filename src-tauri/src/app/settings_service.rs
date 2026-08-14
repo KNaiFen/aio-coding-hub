@@ -1102,7 +1102,8 @@ async fn rollback_after_runtime_sync_failure<R: tauri::Runtime>(
     }
 }
 
-async fn restore_previous_runtime(
+/// The caller holds the gateway lifecycle guard whenever the previous gateway was running.
+async fn restore_previous_runtime_unlocked(
     app: &tauri::AppHandle,
     db_state: &DbInitState,
     previous_settings: &settings::AppSettings,
@@ -1125,7 +1126,6 @@ async fn restore_previous_runtime(
         };
     }
 
-    let _gateway_lifecycle = crate::app::gateway_lifecycle_lock::lock().await;
     crate::app::cleanup::stop_gateway_best_effort_unlocked(app).await;
     match start_gateway_with_settings_unlocked(app, db_state, previous_settings).await {
         Ok(_) => {}
@@ -1163,8 +1163,13 @@ async fn rollback_settings_transaction(
     .await
     {
         OwnedSettingsRollback::Restored => {
-            restore_previous_runtime(app, db_state, previous_settings, previous_gateway_status)
-                .await
+            restore_previous_runtime_unlocked(
+                app,
+                db_state,
+                previous_settings,
+                previous_gateway_status,
+            )
+            .await
         }
         OwnedSettingsRollback::ConcurrentWinner(winner) => {
             tracing::warn!(
@@ -1194,6 +1199,14 @@ async fn sync_cli_proxy_for_settings<R: tauri::Runtime>(
     apply_live: bool,
 ) -> bool {
     let _gateway_lifecycle = crate::app::gateway_lifecycle_lock::lock().await;
+    sync_cli_proxy_for_settings_unlocked(app, base_origin, apply_live).await
+}
+
+async fn sync_cli_proxy_for_settings_unlocked<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    base_origin: String,
+    apply_live: bool,
+) -> bool {
     let status = crate::gateway_runtime_access::try_app_gateway_status(app).unwrap_or(
         crate::gateway::GatewayStatus {
             running: false,
@@ -1242,6 +1255,19 @@ async fn sync_cli_proxy_for_settings<R: tauri::Runtime>(
             );
             false
         }
+    }
+}
+
+async fn sync_cli_proxy_for_settings_with_lifecycle_guard<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    base_origin: String,
+    apply_live: bool,
+    lifecycle_guard: Option<&crate::app::gateway_lifecycle_lock::GatewayLifecycleGuard>,
+) -> bool {
+    if lifecycle_guard.is_some() {
+        sync_cli_proxy_for_settings_unlocked(app, base_origin, apply_live).await
+    } else {
+        sync_cli_proxy_for_settings(app, base_origin, apply_live).await
     }
 }
 
@@ -1506,7 +1532,7 @@ pub(crate) async fn settings_set_impl_generic<R: tauri::Runtime>(
 
     let cli_proxy_synced = if runtime_plan.cli_proxy_sync_required {
         let base_origin = crate::gateway::planned_base_url(&canonical_settings)?;
-        sync_cli_proxy_for_settings(&app, base_origin, false).await
+        sync_cli_proxy_for_settings_with_lifecycle_guard(&app, base_origin, false, None).await
     } else {
         false
     };
@@ -1563,7 +1589,7 @@ async fn settings_set_impl_with_gateway(
         starts: 0,
         rebound: false,
     };
-    let _gateway_lifecycle = if previous_gateway_status.running {
+    let gateway_lifecycle = if previous_gateway_status.running {
         Some(crate::app::gateway_lifecycle_lock::lock().await)
     } else {
         None
@@ -1756,7 +1782,13 @@ async fn settings_set_impl_with_gateway(
         } else {
             crate::gateway::planned_base_url(&final_settings)?
         };
-        sync_cli_proxy_for_settings(&app, base_origin, gateway_status.running).await
+        sync_cli_proxy_for_settings_with_lifecycle_guard(
+            &app,
+            base_origin,
+            gateway_status.running,
+            gateway_lifecycle.as_ref(),
+        )
+        .await
     } else {
         false
     };
@@ -3024,6 +3056,53 @@ mod tests {
         assert!(state.rebound);
 
         clear_after_settings_gateway_start_test_hook();
+    }
+
+    #[test]
+    fn listener_changes_sync_cli_proxy_with_held_lifecycle_lock_within_timeout() {
+        let _env = SettingsTestEnv::new();
+        let app = tauri::test::mock_app();
+        let handle = app.handle().clone();
+
+        tauri::async_runtime::block_on(async {
+            for (previous_mode, next_mode) in [
+                (
+                    settings::GatewayListenMode::Localhost,
+                    settings::GatewayListenMode::Lan,
+                ),
+                (
+                    settings::GatewayListenMode::Lan,
+                    settings::GatewayListenMode::Localhost,
+                ),
+            ] {
+                let previous = settings::AppSettings {
+                    gateway_listen_mode: previous_mode,
+                    ..settings::AppSettings::default()
+                };
+                let mut next = previous.clone();
+                next.gateway_listen_mode = next_mode;
+                assert!(
+                    SettingsRuntimePlan::from_settings(&previous, &next)
+                        .cli_proxy_sync_required
+                );
+
+                let base_origin = crate::gateway::planned_base_url(&next)
+                    .expect("listen mode should produce a CLI proxy origin");
+                let gateway_lifecycle = crate::app::gateway_lifecycle_lock::lock().await;
+                let synced = tokio::time::timeout(
+                    std::time::Duration::from_secs(1),
+                    sync_cli_proxy_for_settings_with_lifecycle_guard(
+                        &handle,
+                        base_origin,
+                        true,
+                        Some(&gateway_lifecycle),
+                    ),
+                )
+                .await
+                .expect("caller-held lifecycle sync must not reacquire the same lock");
+                assert!(synced);
+            }
+        });
     }
 
     #[test]
