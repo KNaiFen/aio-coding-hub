@@ -2364,6 +2364,29 @@ describe("pages/providers/ProvidersView", () => {
     expect(toast).toHaveBeenCalledWith("P1: 不可用 — 未知错误");
     expect(toast).toHaveBeenCalledWith("测试失败：Error: probe down");
     expect(testMutation.mutateAsync).toHaveBeenCalledTimes(4);
+
+    // The test dialog holds its target in the view model and forwards its overrides to the probe.
+    act(() => {
+      result.current.setTestTarget(provider);
+    });
+    expect(result.current.testTarget).toBe(provider);
+
+    await act(async () => {
+      await result.current.testProviderAvailability(provider, {
+        model: "grok-4.6",
+        prompt: "你好",
+      });
+    });
+    expect(testMutation.mutateAsync).toHaveBeenLastCalledWith({
+      providerId: 1,
+      model: "grok-4.6",
+      prompt: "你好",
+    });
+
+    act(() => {
+      result.current.setTestTarget(null);
+    });
+    expect(result.current.testTarget).toBeNull();
   });
 
   it("persists default route add, remove, drag, and error branches", async () => {

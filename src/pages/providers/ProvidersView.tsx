@@ -14,6 +14,7 @@ import { Select } from "../../ui/Select";
 import { Spinner } from "../../ui/Spinner";
 import { Switch } from "../../ui/Switch";
 import { ProviderEditorDialog } from "./ProviderEditorDialog";
+import { ProviderTestDialog } from "./ProviderTestDialog";
 import { SortableProviderCard } from "./SortableProviderCard";
 import { SortableProviderOrderItem } from "./SortableProviderOrderItem";
 import { useProvidersViewDataModel } from "./hooks/useProvidersViewDataModel";
@@ -279,7 +280,7 @@ function ProvidersPool({
     resetCircuit,
     copyTerminalLaunchCommand,
     terminalCopyingByProviderId,
-    testProviderAvailability,
+    setTestTarget,
     testingByProviderId,
     duplicateProvider,
     duplicatingByProviderId,
@@ -341,7 +342,7 @@ function ProvidersPool({
                       provider.cli_key === "claude" ? copyTerminalLaunchCommand : undefined
                     }
                     terminalLaunchCopying={Boolean(terminalCopyingByProviderId[provider.id])}
-                    onTestAvailability={testProviderAvailability}
+                    onTestAvailability={setTestTarget}
                     testAvailabilityLoading={Boolean(testingByProviderId[provider.id])}
                     onDuplicate={duplicateProvider}
                     duplicateLoading={Boolean(duplicatingByProviderId[provider.id])}
@@ -579,6 +580,25 @@ function ProvidersEditorDialogs({
         />
       ) : null}
     </>
+  );
+}
+
+function ProviderAvailabilityTestDialog({ model }: { model: ProvidersViewModel }) {
+  const { testTarget, setTestTarget, testingByProviderId, testProviderAvailability } = model;
+  const testing = Boolean(testTarget && testingByProviderId[testTarget.id]);
+
+  return (
+    <ProviderTestDialog
+      provider={testTarget}
+      testing={testing}
+      onClose={() => setTestTarget(null)}
+      onConfirm={({ model: probeModel, prompt }) => {
+        if (!testTarget) return;
+        const provider = testTarget;
+        setTestTarget(null);
+        void testProviderAvailability(provider, { model: probeModel, prompt });
+      }}
+    />
   );
 }
 
@@ -921,6 +941,7 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
         setClearUsageStatsOnDelete={setClearUsageStatsOnDelete}
         onClose={closeDeleteDialog}
       />
+      <ProviderAvailabilityTestDialog model={model} />
       <SortModeDialogs selectedCliName={selectedCliName} model={model} />
       <PendingRouteActivationDialog selectedCliName={selectedCliName} model={model} />
     </>
