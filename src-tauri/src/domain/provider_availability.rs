@@ -3,6 +3,7 @@
 //! Sends a minimal API request to verify that a provider's base URL + credentials
 //! are reachable and functional. Supports all recognized provider CLI types.
 
+use crate::providers::{ProviderModelEligibility, ProviderModelPolicyV1};
 use crate::shared::error::AppResult;
 use crate::{blocking, db};
 use reqwest::header::{HeaderMap, HeaderValue};
@@ -36,6 +37,7 @@ struct LoadedProvider {
     auth_mode: String,
     source_provider_id: Option<i64>,
     bridge_type: Option<String>,
+    model_policy: Option<ProviderModelPolicyV1>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -113,10 +115,10 @@ async fn load_provider_for_test(db: db::Db, provider_id: i64) -> AppResult<Loade
 
         let conn = db.open_connection()?;
         #[allow(clippy::type_complexity)]
-        let row: Option<(i64, String, String, String, String, String, String, Option<i64>, Option<String>)> = conn
+        let row: Option<(i64, String, String, String, String, String, String, Option<i64>, Option<String>, Option<String>)> = conn
             .query_row(
                 r#"
-SELECT id, cli_key, name, base_url, base_urls_json, api_key_plaintext, auth_mode, source_provider_id, bridge_type
+SELECT id, cli_key, name, base_url, base_urls_json, api_key_plaintext, auth_mode, source_provider_id, bridge_type, model_policy_json
 FROM providers
 WHERE id = ?1
 "#,
@@ -132,15 +134,21 @@ WHERE id = ?1
                         row.get(6)?,
                         row.get(7)?,
                         row.get(8)?,
+                        row.get(9)?,
                     ))
                 },
             )
             .optional()
             .map_err(|e| format!("DB_ERROR: {e}"))?;
 
-        let Some((id, cli_key, name, base_url_fallback, base_urls_json, api_key_plaintext, auth_mode, source_provider_id, bridge_type)) = row else {
+        let Some((id, cli_key, name, base_url_fallback, base_urls_json, api_key_plaintext, auth_mode, source_provider_id, bridge_type, model_policy_json)) = row else {
             return Err("DB_NOT_FOUND: provider not found".into());
         };
+
+        // An invalid policy only costs the probe its configured model: the probe does not route
+        // traffic, so falling back to the default model keeps base-URL/credential testing usable.
+        let (model_policy, _status) =
+            ProviderModelPolicyV1::decode(model_policy_json.as_deref(), &cli_key);
 
         let mut base_urls: Vec<String> = serde_json::from_str::<Vec<String>>(&base_urls_json)
             .ok()
@@ -166,9 +174,33 @@ WHERE id = ?1
             auth_mode,
             source_provider_id,
             bridge_type,
+            model_policy,
         })
     })
     .await
+}
+
+/// Picks the upstream model to probe with from the provider's own model policy.
+///
+/// The probe talks to `base_url` directly, so the model must already be the upstream-side name.
+/// `None` means "no concrete model configured" and leaves the per-CLI default in place.
+fn probe_model_from_policy(policy: Option<&ProviderModelPolicyV1>) -> Option<String> {
+    let policy = policy?;
+    let usable = |model: &str| policy.eligibility(model) == ProviderModelEligibility::Explicit;
+
+    policy
+        .model_patterns
+        .iter()
+        .filter(|pattern| !pattern.contains('*') && usable(pattern))
+        .map(|pattern| policy.resolve_mapping(pattern))
+        .next()
+        .or_else(|| {
+            policy
+                .mappings
+                .iter()
+                .find(|mapping| !mapping.target.contains('*') && usable(&mapping.source))
+                .map(|mapping| mapping.target.clone())
+        })
 }
 
 fn build_probe_request(
@@ -176,6 +208,7 @@ fn build_probe_request(
     base_url: &str,
     api_key: &str,
     grok_preferences: Option<&crate::grok_config::GrokProxyPreferences>,
+    probe_model: Option<&str>,
 ) -> AppResult<(String, HeaderMap, serde_json::Value)> {
     match cli_key {
         "claude" => {
@@ -187,7 +220,7 @@ fn build_probe_request(
             headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
             headers.insert("content-type", HeaderValue::from_static("application/json"));
             let body = serde_json::json!({
-                "model": "claude-sonnet-4-6",
+                "model": probe_model.unwrap_or("claude-sonnet-4-6"),
                 "max_tokens": 1,
                 "messages": [{"role": "user", "content": "ping"}]
             });
@@ -202,7 +235,7 @@ fn build_probe_request(
             }
             headers.insert("content-type", HeaderValue::from_static("application/json"));
             let body = serde_json::json!({
-                "model": "gpt-4o-mini",
+                "model": probe_model.unwrap_or("gpt-4o-mini"),
                 "max_tokens": 1,
                 "messages": [{"role": "user", "content": "ping"}]
             });
@@ -360,11 +393,13 @@ pub async fn test_provider_availability<R: tauri::Runtime>(
     } else {
         None
     };
+    let probe_model = probe_model_from_policy(provider.model_policy.as_ref());
     let (url, headers, body) = build_probe_request(
         &provider.cli_key,
         &base_url,
         &provider.api_key_plaintext,
         grok_preferences.as_ref(),
+        probe_model.as_deref(),
     )?;
 
     let client = reqwest::Client::builder()
@@ -464,9 +499,14 @@ mod tests {
 
     #[test]
     fn build_probe_request_for_claude_uses_messages_endpoint_and_x_api_key() {
-        let (url, headers, body) =
-            build_probe_request("claude", "https://api.example.com/", "sk-claude", None)
-                .expect("claude request");
+        let (url, headers, body) = build_probe_request(
+            "claude",
+            "https://api.example.com/",
+            "sk-claude",
+            None,
+            None,
+        )
+        .expect("claude request");
 
         assert_eq!(url, "https://api.example.com/v1/messages");
         assert_eq!(header_value(&headers, "x-api-key"), "sk-claude");
@@ -477,12 +517,115 @@ mod tests {
     #[test]
     fn build_probe_request_for_codex_uses_chat_completions_and_bearer_auth() {
         let (url, headers, body) =
-            build_probe_request("codex", "https://api.example.com", "sk-openai", None)
+            build_probe_request("codex", "https://api.example.com", "sk-openai", None, None)
                 .expect("codex request");
 
         assert_eq!(url, "https://api.example.com/v1/chat/completions");
         assert_eq!(header_value(&headers, "authorization"), "Bearer sk-openai");
         assert_eq!(body["messages"][0]["content"], "ping");
+    }
+
+    fn policy(
+        mode: crate::providers::ProviderModelMode,
+        model_patterns: &[&str],
+        mappings: &[(&str, &str)],
+    ) -> ProviderModelPolicyV1 {
+        ProviderModelPolicyV1 {
+            version: 1,
+            mode,
+            model_patterns: model_patterns.iter().map(|v| v.to_string()).collect(),
+            mappings: mappings
+                .iter()
+                .map(|(source, target)| crate::providers::ProviderModelMapping {
+                    source: source.to_string(),
+                    target: target.to_string(),
+                })
+                .collect(),
+        }
+        .normalized()
+        .expect("valid policy fixture")
+    }
+
+    #[test]
+    fn probe_uses_first_concrete_model_from_provider_policy() {
+        let policy = policy(
+            crate::providers::ProviderModelMode::Selected,
+            &["deepseek-v4-flash"],
+            &[],
+        );
+
+        assert_eq!(
+            probe_model_from_policy(Some(&policy)).as_deref(),
+            Some("deepseek-v4-flash")
+        );
+
+        let (_, _, body) = build_probe_request(
+            "codex",
+            "https://api.example.com",
+            "sk-openai",
+            None,
+            probe_model_from_policy(Some(&policy)).as_deref(),
+        )
+        .expect("codex request");
+        assert_eq!(body["model"], "deepseek-v4-flash");
+    }
+
+    #[test]
+    fn probe_model_is_translated_to_the_upstream_side_of_a_mapping() {
+        let mapped = policy(
+            crate::providers::ProviderModelMode::Selected,
+            &["gpt-5.4"],
+            &[("gpt-5.4", "deepseek-v4-flash")],
+        );
+        assert_eq!(
+            probe_model_from_policy(Some(&mapped)).as_deref(),
+            Some("deepseek-v4-flash")
+        );
+
+        // No concrete pattern: fall back to the first mapping target that is a real model id.
+        let mapping_only = policy(
+            crate::providers::ProviderModelMode::Selected,
+            &[],
+            &[("gpt-*", "upstream-*"), ("gpt-5.4", "grok-4.6")],
+        );
+        assert_eq!(
+            probe_model_from_policy(Some(&mapping_only)).as_deref(),
+            Some("grok-4.6")
+        );
+    }
+
+    #[test]
+    fn probe_model_falls_back_to_cli_defaults_without_a_usable_policy_model() {
+        let wildcard_only = policy(
+            crate::providers::ProviderModelMode::Selected,
+            &["gpt-*"],
+            &[],
+        );
+        assert_eq!(probe_model_from_policy(Some(&wildcard_only)), None);
+
+        // `excluded` model patterns are a blocklist and must never be probed.
+        let excluded = policy(
+            crate::providers::ProviderModelMode::Excluded,
+            &["gpt-4o-mini", "grok-4.6"],
+            &[],
+        );
+        assert_eq!(probe_model_from_policy(Some(&excluded)), None);
+
+        assert_eq!(
+            probe_model_from_policy(Some(&ProviderModelPolicyV1::all())),
+            None
+        );
+        assert_eq!(probe_model_from_policy(None), None);
+
+        let (_, _, codex_body) =
+            build_probe_request("codex", "https://api.example.com", "sk-openai", None, None)
+                .expect("codex request");
+        assert_eq!(codex_body["model"], "gpt-4o-mini");
+
+        let (_, _, claude_body) =
+            build_probe_request("claude", "https://api.example.com", "sk-claude", None, None)
+                .expect("claude request");
+        assert_eq!(claude_body["model"], "claude-sonnet-4-6");
     }
 
     #[test]
@@ -497,6 +640,7 @@ mod tests {
             "https://api.example.com/",
             "test-grok-key",
             Some(&preferences),
+            None,
         )
         .expect("Grok request");
 
@@ -524,6 +668,7 @@ mod tests {
             "https://api.example.com/v1",
             "test-grok-key",
             Some(&preferences),
+            None,
         )
         .expect("Grok Chat request");
 
@@ -564,7 +709,7 @@ mod tests {
         ];
 
         for (cli_key, base_url, expected_url) in cases {
-            let (url, _, _) = build_probe_request(cli_key, base_url, "test-key", None)
+            let (url, _, _) = build_probe_request(cli_key, base_url, "test-key", None, None)
                 .unwrap_or_else(|err| panic!("{cli_key} probe request failed: {err}"));
 
             assert_eq!(url, expected_url, "unexpected {cli_key} probe URL");
@@ -577,6 +722,7 @@ mod tests {
             "gemini",
             "https://generativelanguage.googleapis.com/",
             "sk-google",
+            None,
             None,
         )
         .expect("gemini request");
@@ -591,7 +737,7 @@ mod tests {
 
     #[test]
     fn build_probe_request_rejects_unsupported_cli_key() {
-        let err = build_probe_request("unknown", "https://api.example.com", "secret", None)
+        let err = build_probe_request("unknown", "https://api.example.com", "secret", None, None)
             .unwrap_err()
             .to_string();
 
