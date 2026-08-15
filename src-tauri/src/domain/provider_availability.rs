@@ -15,6 +15,9 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const PROBE_RESPONSE_BODY_LIMIT: usize = 64 * 1024;
 const PROBE_RESPONSE_PREVIEW_LIMIT: usize = 500;
+const DEFAULT_PROBE_PROMPT: &str = "hi";
+const MAX_PROBE_PROMPT_CHARS: usize = 4096;
+const DEFAULT_GEMINI_PROBE_MODEL: &str = "gemini-2.0-flash";
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
 pub struct ProviderAvailabilityResult {
@@ -203,12 +206,61 @@ fn probe_model_from_policy(policy: Option<&ProviderModelPolicyV1>) -> Option<Str
         })
 }
 
+/// Validates a caller-supplied probe prompt. Empty input falls back to the default prompt.
+fn normalize_probe_prompt(raw: Option<String>) -> AppResult<String> {
+    let Some(raw) = raw else {
+        return Ok(DEFAULT_PROBE_PROMPT.to_string());
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(DEFAULT_PROBE_PROMPT.to_string());
+    }
+    if trimmed.chars().count() > MAX_PROBE_PROMPT_CHARS {
+        return Err(format!(
+            "SEC_INVALID_INPUT: probe prompt must be at most {MAX_PROBE_PROMPT_CHARS} characters"
+        )
+        .into());
+    }
+    Ok(trimmed.to_string())
+}
+
+/// Validates a caller-supplied probe model. Empty input means "keep the resolved default".
+///
+/// The model reaches the upstream verbatim, so it must not carry a policy wildcard or control
+/// characters. Gemini additionally puts the model inside the URL path, where separators would
+/// create extra path segments (and `..` would be normalized away by `Url::set_path`).
+fn normalize_probe_model(cli_key: &str, raw: Option<String>) -> AppResult<Option<String>> {
+    let Some(raw) = raw else { return Ok(None) };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    if trimmed.contains('*') || trimmed.chars().any(char::is_control) {
+        return Err(
+            "SEC_INVALID_INPUT: probe model must not contain wildcards or control characters"
+                .into(),
+        );
+    }
+    if cli_key == "gemini"
+        && trimmed
+            .chars()
+            .any(|c| c.is_whitespace() || matches!(c, '/' | '\\' | '?' | '#'))
+    {
+        return Err(
+            "SEC_INVALID_INPUT: gemini probe model must not contain path separators or whitespace"
+                .into(),
+        );
+    }
+    Ok(Some(trimmed.to_string()))
+}
+
 fn build_probe_request(
     cli_key: &str,
     base_url: &str,
     api_key: &str,
     grok_preferences: Option<&crate::grok_config::GrokProxyPreferences>,
     probe_model: Option<&str>,
+    prompt: &str,
 ) -> AppResult<(String, HeaderMap, serde_json::Value)> {
     match cli_key {
         "claude" => {
@@ -222,7 +274,7 @@ fn build_probe_request(
             let body = serde_json::json!({
                 "model": probe_model.unwrap_or("claude-sonnet-4-6"),
                 "max_tokens": 1,
-                "messages": [{"role": "user", "content": "ping"}]
+                "messages": [{"role": "user", "content": prompt}]
             });
             Ok((url, headers, body))
         }
@@ -237,7 +289,7 @@ fn build_probe_request(
             let body = serde_json::json!({
                 "model": probe_model.unwrap_or("gpt-4o-mini"),
                 "max_tokens": 1,
-                "messages": [{"role": "user", "content": "ping"}]
+                "messages": [{"role": "user", "content": prompt}]
             });
             Ok((url, headers, body))
         }
@@ -255,8 +307,8 @@ fn build_probe_request(
                 crate::grok_config::GrokApiBackend::Responses => (
                     build_probe_url(base_url, "/v1/responses", None)?,
                     serde_json::json!({
-                        "model": preferences.model_id,
-                        "input": "ping",
+                        "model": probe_model.unwrap_or(&preferences.model_id),
+                        "input": prompt,
                         "max_output_tokens": 1,
                         "store": false,
                         "stream": false
@@ -265,8 +317,8 @@ fn build_probe_request(
                 crate::grok_config::GrokApiBackend::ChatCompletions => (
                     build_probe_url(base_url, "/v1/chat/completions", None)?,
                     serde_json::json!({
-                        "model": preferences.model_id,
-                        "messages": [{"role": "user", "content": "ping"}],
+                        "model": probe_model.unwrap_or(&preferences.model_id),
+                        "messages": [{"role": "user", "content": prompt}],
                         "max_tokens": 1,
                         "stream": false
                     }),
@@ -276,15 +328,16 @@ fn build_probe_request(
         }
         "gemini" => {
             let query = format!("key={api_key}");
+            let model = probe_model.unwrap_or(DEFAULT_GEMINI_PROBE_MODEL);
             let url = build_probe_url(
                 base_url,
-                "/v1beta/models/gemini-2.0-flash:generateContent",
+                &format!("/v1beta/models/{model}:generateContent"),
                 Some(&query),
             )?;
             let mut headers = HeaderMap::new();
             headers.insert("content-type", HeaderValue::from_static("application/json"));
             let body = serde_json::json!({
-                "contents": [{"parts": [{"text": "ping"}]}],
+                "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {"maxOutputTokens": 1}
             });
             Ok((url, headers, body))
@@ -330,8 +383,12 @@ pub async fn test_provider_availability<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     db: db::Db,
     provider_id: i64,
+    model: Option<String>,
+    prompt: Option<String>,
 ) -> AppResult<ProviderAvailabilityResult> {
+    let prompt = normalize_probe_prompt(prompt)?;
     let provider = load_provider_for_test(db, provider_id).await?;
+    let model_override = normalize_probe_model(&provider.cli_key, model)?;
 
     if provider.auth_mode == "oauth" {
         return Ok(ProviderAvailabilityResult {
@@ -393,13 +450,15 @@ pub async fn test_provider_availability<R: tauri::Runtime>(
     } else {
         None
     };
-    let probe_model = probe_model_from_policy(provider.model_policy.as_ref());
+    let probe_model =
+        model_override.or_else(|| probe_model_from_policy(provider.model_policy.as_ref()));
     let (url, headers, body) = build_probe_request(
         &provider.cli_key,
         &base_url,
         &provider.api_key_plaintext,
         grok_preferences.as_ref(),
         probe_model.as_deref(),
+        &prompt,
     )?;
 
     let client = reqwest::Client::builder()
@@ -505,24 +564,31 @@ mod tests {
             "sk-claude",
             None,
             None,
+            "hi",
         )
         .expect("claude request");
 
         assert_eq!(url, "https://api.example.com/v1/messages");
         assert_eq!(header_value(&headers, "x-api-key"), "sk-claude");
         assert_eq!(header_value(&headers, "anthropic-version"), "2023-06-01");
-        assert_eq!(body["messages"][0]["content"], "ping");
+        assert_eq!(body["messages"][0]["content"], "hi");
     }
 
     #[test]
     fn build_probe_request_for_codex_uses_chat_completions_and_bearer_auth() {
-        let (url, headers, body) =
-            build_probe_request("codex", "https://api.example.com", "sk-openai", None, None)
-                .expect("codex request");
+        let (url, headers, body) = build_probe_request(
+            "codex",
+            "https://api.example.com",
+            "sk-openai",
+            None,
+            None,
+            "hi",
+        )
+        .expect("codex request");
 
         assert_eq!(url, "https://api.example.com/v1/chat/completions");
         assert_eq!(header_value(&headers, "authorization"), "Bearer sk-openai");
-        assert_eq!(body["messages"][0]["content"], "ping");
+        assert_eq!(body["messages"][0]["content"], "hi");
     }
 
     fn policy(
@@ -565,6 +631,7 @@ mod tests {
             "sk-openai",
             None,
             probe_model_from_policy(Some(&policy)).as_deref(),
+            "hi",
         )
         .expect("codex request");
         assert_eq!(body["model"], "deepseek-v4-flash");
@@ -617,15 +684,149 @@ mod tests {
         );
         assert_eq!(probe_model_from_policy(None), None);
 
-        let (_, _, codex_body) =
-            build_probe_request("codex", "https://api.example.com", "sk-openai", None, None)
-                .expect("codex request");
+        let (_, _, codex_body) = build_probe_request(
+            "codex",
+            "https://api.example.com",
+            "sk-openai",
+            None,
+            None,
+            "hi",
+        )
+        .expect("codex request");
         assert_eq!(codex_body["model"], "gpt-4o-mini");
 
-        let (_, _, claude_body) =
-            build_probe_request("claude", "https://api.example.com", "sk-claude", None, None)
-                .expect("claude request");
+        let (_, _, claude_body) = build_probe_request(
+            "claude",
+            "https://api.example.com",
+            "sk-claude",
+            None,
+            None,
+            "hi",
+        )
+        .expect("claude request");
         assert_eq!(claude_body["model"], "claude-sonnet-4-6");
+    }
+
+    #[test]
+    fn probe_overrides_win_over_policy_and_cli_defaults() {
+        let policy = policy(
+            crate::providers::ProviderModelMode::Selected,
+            &["deepseek-v4-flash"],
+            &[],
+        );
+        let model = normalize_probe_model("codex", Some("  grok-4.6  ".to_string()))
+            .expect("valid model")
+            .or_else(|| probe_model_from_policy(Some(&policy)));
+        let prompt = normalize_probe_prompt(Some("  你好  ".to_string())).expect("valid prompt");
+
+        let (_, _, body) = build_probe_request(
+            "codex",
+            "https://api.example.com",
+            "sk-openai",
+            None,
+            model.as_deref(),
+            &prompt,
+        )
+        .expect("codex request");
+
+        assert_eq!(body["model"], "grok-4.6");
+        assert_eq!(body["messages"][0]["content"], "你好");
+
+        // Without an override the policy model still wins over the CLI default.
+        let fallback = normalize_probe_model("codex", None)
+            .expect("no model")
+            .or_else(|| probe_model_from_policy(Some(&policy)));
+        assert_eq!(fallback.as_deref(), Some("deepseek-v4-flash"));
+    }
+
+    #[test]
+    fn probe_model_override_applies_to_grok_and_gemini() {
+        let preferences = crate::grok_config::GrokProxyPreferences {
+            model_id: "grok-preference".to_string(),
+            api_backend: crate::grok_config::GrokApiBackend::ChatCompletions,
+            ..Default::default()
+        };
+
+        let (_, _, grok_body) = build_probe_request(
+            "grok",
+            "https://api.example.com",
+            "sk-grok",
+            Some(&preferences),
+            Some("grok-4.6"),
+            "hi",
+        )
+        .expect("grok request");
+        assert_eq!(grok_body["model"], "grok-4.6");
+
+        let (grok_default_url, _, grok_default_body) = build_probe_request(
+            "grok",
+            "https://api.example.com",
+            "sk-grok",
+            Some(&preferences),
+            None,
+            "hi",
+        )
+        .expect("grok request");
+        assert_eq!(grok_default_body["model"], "grok-preference");
+        assert_eq!(
+            grok_default_url,
+            "https://api.example.com/v1/chat/completions"
+        );
+
+        let (gemini_url, _, _) = build_probe_request(
+            "gemini",
+            "https://generativelanguage.googleapis.com/",
+            "sk-google",
+            None,
+            Some("gemini-2.5-pro"),
+            "hi",
+        )
+        .expect("gemini request");
+        assert_eq!(
+            gemini_url,
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=sk-google"
+        );
+    }
+
+    #[test]
+    fn probe_overrides_reject_unsafe_input() {
+        for model in ["gpt-*", "gpt\n4o"] {
+            let err = normalize_probe_model("codex", Some(model.to_string()))
+                .expect_err("model must be rejected")
+                .to_string();
+            assert!(err.starts_with("SEC_INVALID_INPUT:"), "unexpected: {err}");
+        }
+
+        // A slash is legal in a chat-completions body model, but not in the Gemini URL path.
+        assert_eq!(
+            normalize_probe_model("codex", Some("qwen/qwen3-coder".to_string()))
+                .expect("codex allows vendor-prefixed ids")
+                .as_deref(),
+            Some("qwen/qwen3-coder")
+        );
+        let err = normalize_probe_model("gemini", Some("../models/other".to_string()))
+            .expect_err("gemini path model must be rejected")
+            .to_string();
+        assert!(err.starts_with("SEC_INVALID_INPUT:"), "unexpected: {err}");
+
+        let too_long = "x".repeat(MAX_PROBE_PROMPT_CHARS + 1);
+        let err = normalize_probe_prompt(Some(too_long))
+            .expect_err("prompt must be rejected")
+            .to_string();
+        assert!(err.starts_with("SEC_INVALID_INPUT:"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn probe_prompt_defaults_to_hi_for_blank_input() {
+        assert_eq!(normalize_probe_prompt(None).expect("default"), "hi");
+        assert_eq!(
+            normalize_probe_prompt(Some("   ".to_string())).expect("blank"),
+            "hi"
+        );
+        assert_eq!(
+            normalize_probe_model("codex", Some("   ".to_string())).expect("blank"),
+            None
+        );
     }
 
     #[test]
@@ -641,6 +842,7 @@ mod tests {
             "test-grok-key",
             Some(&preferences),
             None,
+            "hi",
         )
         .expect("Grok request");
 
@@ -650,7 +852,7 @@ mod tests {
             "Bearer test-grok-key"
         );
         assert_eq!(body["model"], preferences.model_id);
-        assert_eq!(body["input"], "ping");
+        assert_eq!(body["input"], "hi");
         assert_eq!(body["store"], false);
         assert_eq!(body["stream"], false);
     }
@@ -669,6 +871,7 @@ mod tests {
             "test-grok-key",
             Some(&preferences),
             None,
+            "hi",
         )
         .expect("Grok Chat request");
 
@@ -679,7 +882,7 @@ mod tests {
         );
         assert_eq!(body["model"], preferences.model_id);
         assert_eq!(body["messages"][0]["role"], "user");
-        assert_eq!(body["messages"][0]["content"], "ping");
+        assert_eq!(body["messages"][0]["content"], "hi");
         assert_eq!(body["stream"], false);
     }
 
@@ -709,7 +912,7 @@ mod tests {
         ];
 
         for (cli_key, base_url, expected_url) in cases {
-            let (url, _, _) = build_probe_request(cli_key, base_url, "test-key", None, None)
+            let (url, _, _) = build_probe_request(cli_key, base_url, "test-key", None, None, "hi")
                 .unwrap_or_else(|err| panic!("{cli_key} probe request failed: {err}"));
 
             assert_eq!(url, expected_url, "unexpected {cli_key} probe URL");
@@ -724,6 +927,7 @@ mod tests {
             "sk-google",
             None,
             None,
+            "hi",
         )
         .expect("gemini request");
 
@@ -732,14 +936,21 @@ mod tests {
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=sk-google"
         );
         assert_eq!(header_value(&headers, "content-type"), "application/json");
-        assert_eq!(body["contents"][0]["parts"][0]["text"], "ping");
+        assert_eq!(body["contents"][0]["parts"][0]["text"], "hi");
     }
 
     #[test]
     fn build_probe_request_rejects_unsupported_cli_key() {
-        let err = build_probe_request("unknown", "https://api.example.com", "secret", None, None)
-            .unwrap_err()
-            .to_string();
+        let err = build_probe_request(
+            "unknown",
+            "https://api.example.com",
+            "secret",
+            None,
+            None,
+            "hi",
+        )
+        .unwrap_err()
+        .to_string();
 
         assert_eq!(err, "UNSUPPORTED_CLI_KEY: unknown");
     }
