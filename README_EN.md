@@ -199,12 +199,10 @@ sudo xattr -cr /Applications/"AIO Coding Hub.app"
 Do not install repository dependencies, start a development server, or run formatting, type checking, linting, tests, or builds locally. The allowed local checks do not need `node_modules` and do not create Node or Rust artifacts:
 
 ```bash
-node scripts/check-cloud-only-verification.selftest.mjs
-node scripts/check-cloud-only-verification.mjs
-git diff --check
+node scripts/check-local-verification.mjs --base <full-task-base-sha>
 ```
 
-For a changed `.mjs` file, `node --check <changed-file.mjs>` is also allowed directly. Regular pull requests and protected-branch pushes trigger `ci` automatically; use the commit's `ci-gate` and `pr-title` results. Do not start an additional manual `ci` run for routine validation. `workflow_dispatch` is reserved for `main` recovery or candidate builds, while the Provider trend release benchmark runs on relevant automatic CI paths or the standalone `performance` workflow. Run `dev-build` from Actions only when a desktop integration artifact is needed.
+The fixed runner owns the allowed contract/self-tests, committed and worktree diff checks, and syntax checks for every changed `.js`, `.cjs`, and `.mjs` file; do not append or substitute another local command. Regular pull requests and protected-branch pushes trigger `ci` automatically; use the commit's `ci-gate` and `pr-title` results. Do not start an additional manual `ci` run for routine validation. `workflow_dispatch` is reserved for `main` recovery or candidate builds, while the Provider trend release benchmark runs on relevant automatic CI paths or the standalone `performance` workflow. Run `dev-build` from Actions only when a desktop integration artifact is needed.
 
 <!-- SUPPORT_MATRIX_SOURCE_BUILD:START -->
 | Scope | Cloud workflow target | Notes |

@@ -11,16 +11,18 @@ evidence and are not rewritten.
 
 ## 2. Local Allowlist
 
-Local execution is limited to direct, dependency-free, non-writing checks:
+Local execution uses one dependency-free, non-writing entry point with the task's recorded full base SHA:
 
 ```bash
-node scripts/check-cloud-only-verification.selftest.mjs
-node scripts/check-cloud-only-verification.mjs
-node --check <changed-file.mjs>
-git diff --check
+node scripts/check-local-verification.mjs --base <full-task-base-sha>
 ```
 
-Do not invoke those checks through a package manager. Repository dependency
+The runner has a fixed subprocess allowlist: its own self-test, the cloud-only
+contract and self-test, committed/index/worktree diff checks, untracked text
+whitespace checks, and `node --check` for changed `.js`, `.cjs`, and `.mjs`
+files. It rejects command passthrough, unknown options, non-full SHAs, and a base
+that is not an ancestor of `HEAD`. Do not invoke it through a package manager or
+replace it with hand-selected commands. Repository dependency
 installation, development servers, formatting, type checking, linting, tests,
 coverage, builds, generators, Cargo, Tauri, signing, and packaging are all
 cloud-owned, even if a previous checkout already contains dependencies or
@@ -51,7 +53,8 @@ select both domains.
 
 - `contracts` is the only dependency-free static contract job. It runs the
   cloud-only checker for checked documentation or either selected source
-  domain, and runs the cloud-only self-test when a source domain is selected.
+  domain, and runs the cloud-only and local-runner self-tests when a source
+  domain is selected.
 - `frontend` installs frozen dependencies, audits them, runs lint, both plugin
   package type checks and tests, root unit coverage, and the Vite build. The
   root coverage run discovers `src/e2e`; there is no separate E2E command.
@@ -87,6 +90,8 @@ The checker self-test must fail when:
 - a root/workspace script lacks the Actions guard or a local dev/precommit
   entry reappears;
 - README or active Trellis guidance recommends a prohibited local command;
+- AGENTS/README stop routing local verification through the fixed runner, or
+  the runner loses its fixed contract/self-test and diff/syntax command set;
 - Tauri regains a local dev hook;
 - `dev-build.yml` or `performance.yml` gains a non-manual trigger, manual CI can
   run heavy jobs outside `main`, or candidate desktop/TUI jobs stop

@@ -7,6 +7,7 @@
 - **main session**：使用 `$gkd-main`。负责需求与方案、任务路由、worktree 生命周期、验收协调、知识库/PENDING 和清理。
 - **独立执行 session**：使用 `$gkd-execute`。只在登记 worktree 施工，维护任务分支、PR、CI 和 `delivery.md`，交付后暂停。
 - **验收 session/agent**：使用 `$gkd-accept`。只读审查固定 PR head；无阻塞 finding 且机器门通过后可同步合并该 head，但不写文件或任务状态，不归档或清理。
+- **本地验证**：修改仓库文件后使用 `$gkd-local-verify`；长时等待固定 PR head 的 CI 使用 `$gkd-ci-monitor`。
 - `.trellis/agents/*.md` 只属于 `trellis channel`，不得作为独立执行 session 或 main 验收角色使用。
 
 角色说明不构成授权。新窗口默认是顶层 session，不会因 `.codex/agents` 自动变成执行者；以 handoff、当前唯一写者和对应 skill 为准。
@@ -25,12 +26,7 @@
 - 仓库和 PR 默认使用 `origin`；`upstream` 只读抓取。GitHub 操作显式使用 `-R KNaiFen/aio-coding-hub`。
 - 不推送远端 `main`。执行 session 只推任务分支；PR 仅由 main 或获授权的 `$gkd-accept` 通过固定 head 验收命令合并。
 - 常规 checkout 不安装依赖，不运行 package-manager、开发服务器、格式化器、lint、类型检查、测试、构建、Cargo、rustfmt、Clippy、Specta、Tauri、签名或打包。
-- 本地只运行依赖无关 Node source contract、对应 selftest、变更 Node 文件的 `node --check` 和 `git diff --check`：
-
-  ```bash
-  node scripts/check-cloud-only-verification.mjs
-  node scripts/check-cloud-only-verification.selftest.mjs
-  ```
+- 本地验证只使用 `$gkd-local-verify` 调用 `node scripts/check-local-verification.mjs --base <登记的完整 SHA>`；runner 固定执行依赖无关合同/selftest、变更 Node 文件语法和 diff 检查，不接受命令透传。
 
 - GitHub Actions 承担依赖安装、前端/Rust 检查、audit、签名和桌面打包。普通 PR 等自动 `ci-gate` 与 `pr-title`，不额外手动启动常规 `ci`。
 - upstream merge/drift repair 只做最小集成；若上游与 fork 产品行为冲突，停止并把证据和选项交给 main/用户。
@@ -64,7 +60,7 @@ This project is managed by Trellis. The working knowledge you need lives under `
 - `.trellis/workspace/` — per-developer journals and session traces
 - `.trellis/tasks/` — active and archived tasks (PRDs, research, jsonl context)
 
-Use the `gkd-*` user skills and repository `task.py` commands for role routing and durable state. Independent execution sessions stop after `deliver`、最终 head CI 和暂停；`$gkd-accept` 可在固定 head 验收通过后同步合并，main 继续负责记录、归档和清理。
+Use the `gkd-*` user skills and repository `task.py` commands for role routing and durable state. `$gkd-local-verify` owns the fixed local runner and `$gkd-ci-monitor` owns frozen-head waiting. Independent execution sessions stop after `deliver`、最终 head CI 和暂停；`$gkd-accept` 可在固定 head 验收通过后同步合并，main 继续负责记录、归档和清理。
 
 Codex role workflows are installed as user skills under `~/.codex/skills/gkd-*`; the repository keeps role names and machine contracts, not a second copy of the skill bodies. Optional project custom subagents may live in `.codex/agents/`.
 

@@ -248,8 +248,8 @@ When changing release source validation or candidate promotion:
 ## Quality Check
 
 - Read [Cloud-only verification contract](./cloud-only-verification-contract.md)
-  before choosing any command. Locally, run only its dependency-free checker,
-  relevant `node --check` parsing, and `git diff --check`.
+  and use its fixed local verification runner with the recorded full base SHA.
+  Do not select or append individual checker, syntax, or diff commands.
 - GitHub Actions regenerates and verifies `src/generated/bindings.ts`, tests
   Rust parsing/write safety and frontend behavior, and runs Clippy for all
   affected target families. A host-only local check is not equivalent to the
