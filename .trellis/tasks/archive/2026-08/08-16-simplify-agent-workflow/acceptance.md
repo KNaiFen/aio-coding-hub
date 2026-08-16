@@ -30,6 +30,6 @@
 - 归档路径：`.trellis/tasks/archive/2026-08/08-16-simplify-agent-workflow`
 - `archive --no-commit`：通过；任务状态已更新为 `completed`，目录和 JSONL 引用已迁移。
 - `validate --all`：通过，共验证 139 份已有 manifest；该结果只代表 JSONL 及引用路径。
-- records-only PR：待创建。
+- records-only PR：https://github.com/KNaiFen/aio-coding-hub/pull/153；归档提交 `756404e514633d49d244388a862285d84c852456`。
 - worktree：`/Users/knaifen/Documents/Codex/aio-coding-hub/08-16-simplify-agent-workflow`，待 records-only PR 合并后清理。
 - 本地/远端分支：本地 `task/08-16-simplify-agent-workflow` 待 records-only PR 合并后清理；远端同名分支已由 GitHub 自动删除。
