@@ -29,9 +29,9 @@
 ```
 
 - `route`: `main` 或 `delegated`。
-- `phase`: `planning`、`ready`、`implementing`、`blocked`、`delivered`、`completed`；首轮 CLI 只写其实际拥有的阶段。
+- `phase`: `planning`、`ready`、`implementing`、`blocked`、`delivered`、`completed`。
 - `writer`: 协调身份字符串，不承担认证功能。
-- `block`: `null` 或 `{reason, resume_condition, owner, blocked_at}`。
+- `block`: `null` 或 `{reason, resume_condition, owner, blocked_at, previous_phase, previous_writer}`；阻塞时 writer 转给 owner，恢复时显式交给新 writer。
 - 旧任务没有 `coordination` 时只读兼容，不做批量迁移；只有新命令修改活动任务时才升级。
 
 所有写入保留未知字段、使用原子替换并在失败时返回非零。`doctor` 只严格校验 v1 delegated 任务，不追溯拒绝历史短 SHA 或相对路径。
@@ -42,6 +42,7 @@
 - `doctor [task]`：检查 manifest、canonical cwd、branch、worktree、完整 SHA、planning commit 和 merge-base；不查询 GitHub。
 - `delegate <task> ...`：登记已由 main 创建的 worktree/branch/base/planning commit/writer，校验后写入。
 - `handoff [task]`：先 doctor，再从 canonical state 生成固定交接清单和可粘贴 Prompt；不写第二份状态文件。
+- `deliver`：只允许干净的 delegated implementing worktree 在 `delivery.md` 已提交后转为 `delivered`，并把 writer 交给 reviewer。
 - `block/resume`：显式记录或清除阻塞，拒绝非法转换。
 
 worktree 创建和删除仍由生命周期所有者显式执行 Git 命令，本轮不封装自动清理，避免把高风险操作藏入一个新命令。
@@ -57,11 +58,11 @@ AGENTS.md
 
 三个 skills 是独立新窗口和 main subagent 的角色入口，不是安全边界。硬约束仍由 Git、sandbox、CLI 和可机械判断的脚本承担。
 
-多 worktree 文档保持一层直链：主入口直接链接 planning、execution、acceptance、cleanup 四份专题和三个模板。模板只存实例数据；通用说明回到对应专题。
+多 worktree 文档保持一层直链：主入口直接链接 planning、execution、acceptance、cleanup 四份专题和 execution、delivery、findings、acceptance 四个模板。模板只存实例数据；通用说明回到对应专题。
 
 ## 兼容性与迁移
 
 - 保留现有 `status=planning/in_progress/completed` 顶层语义，breadcrumb 继续兼容。
-- `start` 在 v1 存在时同步 `ready -> implementing`；archive 同步 `completed`。
+- `start` 在 v1 存在时同步 `ready -> implementing`；返工以 `--writer` 同步 `delivered -> implementing`；archive 同步 `completed`。
 - 旧 `implement.jsonl/check.jsonl` 暂不迁移；workflow 不再把 seed-only validate 描述为 ready gate。
 - 归档历史保持只读；新模板只影响新任务和后续轮次。

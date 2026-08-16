@@ -21,7 +21,7 @@
 1. `task.json` 是活动任务协调状态的唯一持久化结构化事实源；不新增第二套状态 JSON。
 2. 根 `AGENTS.md` 只保留角色权限、唯一写者、Git/CI/安全硬边界和 skills 路由。
 3. 仓库只提供带项目命名空间的 `aio-trellis-main`、`aio-trellis-execute`、`aio-trellis-accept` 三个角色 skill；不补齐不存在的旧微型 skills。
-4. `task.py` 负责状态读取、确定性 preflight、委派登记、交接文本生成、阻塞和恢复；Markdown 不再手写可由 Git 或 `task.json` 得出的状态副本。
+4. `task.py` 负责状态读取、确定性 preflight、委派登记、交接文本生成、交付、阻塞和恢复；Markdown 不再手写可由 Git 或 `task.json` 得出的状态副本。
 5. 多 worktree 规范拆为一个主入口和四份单层链接专题；执行模板只保存任务特有差量。
 6. 保留一任务一 worktree、一任务一 PR、执行 session 不合并、main 验收固定 head 和唯一写者边界。
 7. 只对本地可确定事实 fail closed；不新增自动合并、复杂审批、模型手填 checklist 或 GitHub CI 状态缓存。
@@ -45,7 +45,7 @@
 ## 验收标准
 
 - AC-01：新窗口仅凭根规则、对应 role skill、任务入口和 `task.py status/doctor` 即可判断角色、路径、分支、writer、base 和下一步。
-- AC-02：`task.py delegate/handoff/block/resume` 只通过代码写入或读取 `task.json.coordination.version=1`，保留未知字段并对无效转换返回非零。
+- AC-02：`task.py delegate/handoff/deliver/block/resume` 只通过代码写入或读取 `task.json.coordination.version=1`，保留未知字段并对无效转换返回非零。
 - AC-03：失效 session pointer 不再作为当前任务返回；多个有效 session 时仍拒绝猜测。
 - AC-04：三个 repo skills 可被 Git 跟踪，`SKILL.md` 简短并只按需链接阶段专题或脚本。
 - AC-05：`AGENTS.md` 不再承载完整生命周期教程；通用文档总量显著下降，执行 session 固定入口目标不超过 `AGENTS + skill + execution` 约 3,000 tokens。

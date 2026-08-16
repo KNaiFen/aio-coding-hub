@@ -37,7 +37,7 @@
 - [Homebrew 发布指南](./release-homebrew.md)
 - [GitHub Actions 治理与远端配置](./operations/github-actions-governance.md)
 - [任务方案与实施结果留痕规范](./operations/task-documentation-records.md)
-- [多 Worktree 任务交付规范](./operations/multi-worktree-delivery.md)
+- [多 Worktree 任务交付入口](./operations/multi-worktree-delivery.md)：按 planning、execution、acceptance、cleanup 阶段加载专题。
 - [仓库执行规则](../AGENTS.md)
 - [Trellis 工作流](../.trellis/workflow.md)
 - [Trellis 规范目录](../.trellis/spec/)
@@ -67,7 +67,7 @@
 
 1. 新增长期文档时放入稳定分类目录，并在本页或对应子索引中添加入口；不要恢复根目录散落文档。
 2. 实现、公共 API、发布流程或验证边界变化时，同一变更内更新相关现行文档和机器合同。
-3. Trellis 任务由 main 在终态收尾中记录验收版本、最终结果、实际存在或不存在的 merge commit、知识库/PENDING 结论和清理事实；有功能 PR 时在其合并后收尾，没有功能 PR 的失败、放弃或部分完成通过只包含记录的 PR 收尾，阻塞任务保持活动。允许归档的终态再使用 `task.py archive --no-commit`；不要手工复制任务目录或把其他 worktree 的旧状态回灌到 `main`。
+3. Trellis 活动状态由 `task.py` 写入 `task.json`；main 在终态 `acceptance.md` 记录验收版本、结果、merge、知识库/PENDING 和清理事实。有功能 PR 时在其合并后收尾；无功能 PR 的失败、放弃或部分完成通过 records-only PR 收尾；阻塞任务保持活动。
 4. 历史文件只修正状态说明、有效入口或明确的链接损坏，不把旧结论改写成今天的结论。
-5. 使用相对链接；提交前检查 Markdown 链接、文档合同、Trellis manifests 和 `git diff --check`。
+5. 使用相对链接；提交前运行仓库允许的文档合同、适用的 Trellis 检查和 `git diff --check`。没有覆盖某类链接时如实说明，不把 `validate --all` 当 Markdown 校验。
 6. `.local/` 外部参考 checkout、`.playwright-cli/`、`.impeccable/`、`.trellis/.runtime/`、`.codegraph/` 等本地产物不进入知识库。
