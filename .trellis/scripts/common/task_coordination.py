@@ -101,7 +101,7 @@ def mutate_task_manifest(
     return data
 
 
-def mark_started(data: dict[str, Any]) -> bool:
+def mark_started(data: dict[str, Any], *, writer: str | None = None) -> bool:
     """Apply the task start transition in one manifest write."""
     changed = False
     if data.get("status") == "planning":
@@ -110,8 +110,13 @@ def mark_started(data: dict[str, Any]) -> bool:
 
     coordination = data.get("coordination")
     if isinstance(coordination, dict) and coordination.get("version") == COORDINATION_VERSION:
-        if coordination.get("phase") == "ready":
+        phase = coordination.get("phase")
+        if phase == "delivered" and not (writer and writer.strip()):
+            raise TaskCoordinationError("restarting a delivered task requires --writer")
+        if phase in {"ready", "delivered"}:
             coordination["phase"] = "implementing"
+            if writer and writer.strip():
+                coordination["writer"] = writer.strip()
             changed = True
         if changed:
             coordination["updated_at"] = utc_now()
@@ -491,6 +496,7 @@ def cmd_deliver(args: argparse.Namespace) -> int:
         def apply_delivery(manifest: dict[str, Any]) -> None:
             state = _coordination(manifest, required=True)
             state["phase"] = "delivered"
+            state["writer"] = getattr(args, "reviewer", "main")
             state["updated_at"] = utc_now()
 
         mutate_task_manifest(task_dir, apply_delivery)

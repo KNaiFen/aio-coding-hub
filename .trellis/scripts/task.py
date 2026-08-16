@@ -9,7 +9,7 @@ Usage:
     python3 task.py validate <dir>              # Validate jsonl files
     python3 task.py validate --all              # Validate all active/archive jsonl files
     python3 task.py list-context <dir>          # List jsonl entries
-    python3 task.py start <dir>                 # Set active task
+    python3 task.py start <dir> [--writer <id>] # Set active task or resume rework
     python3 task.py current [--source]          # Show active task
     python3 task.py finish                      # Clear active task
     python3 task.py status [dir] [--json]       # Show persistent coordination state
@@ -97,7 +97,12 @@ def _read_task_state(task_json_path: Path) -> dict | None:
     return data
 
 
-def _mark_task_in_progress(task_json_path: Path, *, degraded: bool) -> bool:
+def _mark_task_in_progress(
+    task_json_path: Path,
+    *,
+    degraded: bool,
+    writer: str | None = None,
+) -> bool:
     """Persist planning -> in_progress before a session starts work."""
     data = _read_task_state(task_json_path)
     if data is None:
@@ -109,8 +114,12 @@ def _mark_task_in_progress(task_json_path: Path, *, degraded: bool) -> bool:
         if isinstance(data.get("coordination"), dict)
         else None
     )
-    if not mark_started(data):
-        return True
+    try:
+        if not mark_started(data, writer=writer):
+            return True
+    except ValueError as error:
+        print(colored(f"Error: {error}", Colors.RED))
+        return False
 
     if not write_task_manifest_path(task_json_path, data):
         print(colored(f"Error: failed to update task status: {task_json_path}", Colors.RED))
@@ -169,7 +178,11 @@ def cmd_start(args: argparse.Namespace) -> int:
 
         # A degraded session still needs durable task state. Never report success
         # or run lifecycle hooks when that state cannot be read or written.
-        if not _mark_task_in_progress(task_json_path, degraded=True):
+        if not _mark_task_in_progress(
+            task_json_path,
+            degraded=True,
+            writer=getattr(args, "writer", None),
+        ):
             return 1
 
         run_task_hooks("after_start", task_json_path, repo_root)
@@ -180,7 +193,11 @@ def cmd_start(args: argparse.Namespace) -> int:
 
     active = set_active_task(task_dir, repo_root)
     if active:
-        if not _mark_task_in_progress(task_json_path, degraded=False):
+        if not _mark_task_in_progress(
+            task_json_path,
+            degraded=False,
+            writer=getattr(args, "writer", None),
+        ):
             clear_active_task(repo_root)
             return 1
 
@@ -370,7 +387,7 @@ Usage:
   python3 task.py validate <dir>                     Validate jsonl files
   python3 task.py validate --all                     Validate all active/archive jsonl files
   python3 task.py list-context <dir>                 List jsonl entries
-  python3 task.py start <dir>                        Set active task
+  python3 task.py start <dir> [--writer <id>]        Set active task or resume rework
   python3 task.py current [--source]                 Show active task
   python3 task.py finish                             Clear active task
   python3 task.py status [dir] [--json]              Show persistent coordination state
@@ -495,6 +512,7 @@ def main() -> int:
     # start
     p_start = subparsers.add_parser("start", help="Set active task")
     p_start.add_argument("dir", help="Task directory")
+    p_start.add_argument("--writer", help="Unique writer when resuming a delivered task")
 
     # current
     p_current = subparsers.add_parser("current", help="Show active task")
@@ -526,6 +544,7 @@ def main() -> int:
 
     p_deliver = subparsers.add_parser("deliver", help="Mark a clean implementation delivered")
     p_deliver.add_argument("dir", nargs="?", help="Task directory (defaults to current live task)")
+    p_deliver.add_argument("--reviewer", default="main", help="Unique writer during review (default: main)")
 
     p_block = subparsers.add_parser("block", help="Persist a task blocker")
     p_block.add_argument("dir", help="Task directory")

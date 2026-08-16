@@ -180,10 +180,17 @@ class TaskCoordinationTests(unittest.TestCase):
             self._git(repo, "commit", "-m", "implementation")
 
             with patch("common.task_coordination.get_repo_root", return_value=repo):
-                self.assertEqual(cmd_deliver(Namespace(dir="08-16-example")), 0)
+                self.assertEqual(
+                    cmd_deliver(Namespace(dir="08-16-example", reviewer="main")),
+                    0,
+                )
 
             delivered = load_task_manifest(task_dir)
             self.assertEqual(delivered["coordination"]["phase"], "delivered")
+            self.assertEqual(delivered["coordination"]["writer"], "main")
+            self.assertTrue(mark_started(delivered, writer="execution-session"))
+            self.assertEqual(delivered["coordination"]["phase"], "implementing")
+            self.assertEqual(delivered["coordination"]["writer"], "execution-session")
 
     def test_deliver_rejects_dirty_worktree(self) -> None:
         with tempfile.TemporaryDirectory() as raw_root:
@@ -208,7 +215,10 @@ class TaskCoordinationTests(unittest.TestCase):
                 patch("common.task_coordination.get_repo_root", return_value=repo),
                 redirect_stderr(errors),
             ):
-                self.assertEqual(cmd_deliver(Namespace(dir="08-16-example")), 1)
+                self.assertEqual(
+                    cmd_deliver(Namespace(dir="08-16-example", reviewer="main")),
+                    1,
+                )
             self.assertIn("clean worktree", errors.getvalue())
             self.assertEqual(
                 load_task_manifest(task_dir)["coordination"]["phase"],
