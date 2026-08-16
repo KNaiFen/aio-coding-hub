@@ -16,8 +16,8 @@
 ## 允许修改
 
 - `AGENTS.md`、`.gitignore`
-- `.agents/skills/**`
-- `.trellis/workflow.md`、`.trellis/scripts/**`、本任务目录
+- 用户级 `~/.codex/skills/gkd-*`
+- `.trellis/config.yaml`、`.trellis/workflow.md`、`.trellis/scripts/**`、本任务目录
 - `docs/README.md`、`docs/operations/**`、`.trellis/tasks/README.md`
 - 为本任务必要的无依赖合同或 CI 调用点
 

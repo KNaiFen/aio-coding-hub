@@ -40,9 +40,7 @@ AGENTS.md
 coverage*/
 .vitest-reports/
 .cursor/
-.agents/*
-!.agents/skills/
-!.agents/skills/**
+.agents/
 .serena/
 .superpowers/
 src/templates/

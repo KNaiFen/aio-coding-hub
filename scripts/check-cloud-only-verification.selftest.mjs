@@ -106,14 +106,11 @@ for (const [name, mutate, expected] of [
     /\.trellis\/workflow\.md contains a prohibited local instruction/,
   ],
   [
-    "GKD role skill prefix",
+    "GKD role routing",
     (fixture) => {
-      fixture.roleSkills[0].instructions = fixture.roleSkills[0].instructions.replace(
-        "name: gkd-main",
-        "name: main"
-      );
+      fixture.agents = fixture.agents.replaceAll("$gkd-main", "$main");
     },
-    /gkd-main\/SKILL\.md must include "name: gkd-main"/,
+    /AGENTS\.md must include "\$gkd-main"/,
   ],
   [
     "active spec bare cargo command",

@@ -88,7 +88,7 @@
 - **文档与合同**：同步更新的位置，或明确不适用。
 - **遗留事项**：风险、阻塞、未完成内容和后续决定。
 
-委派任务的 `delivery.md` 只保存执行者的实际实现和证据。main 活动期在 GitHub 上绑定被审查 head 留下 review/comment；合并或确定其他终态后，在 `acceptance.md` 汇总最终 head、CI、结论、实际存在或不存在的 merge commit、归档、知识库、PENDING 和清理事实。阻塞任务保持活动，不伪造合并或归档证据。
+委派任务的 `delivery.md` 只保存执行者的实际实现和证据。`$gkd-accept` 或 main 在 GitHub 上绑定被审查 head 留下 review/comment，并只从可信 main checkout 通过 `task.py accept` 同步合并已通过验收的固定 head；main 随后在 `acceptance.md` 汇总最终 head、CI、结论、实际存在或不存在的 merge commit、归档、知识库、PENDING 和清理事实。阻塞任务保持活动，不伪造合并或归档证据。
 
 不得把当前范围内未完成的内容隐藏为“以后优化”，也不得编造未执行的测试或 CI 结果。
 

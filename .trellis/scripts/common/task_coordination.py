@@ -542,7 +542,6 @@ def cmd_deliver(args: argparse.Namespace) -> int:
         coordination = _coordination(data, required=True)
         if coordination.get("route") != "delegated" or coordination.get("phase") != "implementing":
             raise TaskCoordinationError("deliver requires delegated phase=implementing")
-        reviewer = _required_text(getattr(args, "reviewer", "main"), "reviewer")
         if not (task_dir / "delivery.md").is_file():
             raise TaskCoordinationError("deliver requires delivery.md")
         dirty = _git_value(repo_root, ["status", "--porcelain"], "read worktree status")
@@ -554,7 +553,7 @@ def cmd_deliver(args: argparse.Namespace) -> int:
         def apply_delivery(manifest: dict[str, Any]) -> None:
             state = _coordination(manifest, required=True)
             state["phase"] = "delivered"
-            state["writer"] = reviewer
+            state["writer"] = "main"
             state["updated_at"] = utc_now()
 
         mutate_task_manifest(task_dir, apply_delivery)
@@ -562,7 +561,7 @@ def cmd_deliver(args: argparse.Namespace) -> int:
         print(colored(f"Error: {error}", Colors.RED), file=sys.stderr)
         return 1
     print(colored("✓ Task marked delivered", Colors.GREEN))
-    print("Next: commit and push task.json, wait for required CI on that head, then pause for main review.")
+    print("Next: commit and push task.json, wait for required CI on that head, then pause for fixed-head acceptance.")
     return 0
 
 

@@ -17,6 +17,7 @@ Usage:
     python3 task.py delegate <dir> ...          # Register an existing worktree
     python3 task.py handoff [dir] [--json]      # Render an execution handoff
     python3 task.py deliver [dir]               # Mark a clean implementation delivered
+    python3 task.py accept <dir> --worktree PATH --pr N --head SHA  # Merge a fixed PR head
     python3 task.py block <dir> ...             # Persist a blocker
     python3 task.py resume <dir> ...            # Resume a blocked task
     python3 task.py set-branch <dir> <branch>   # Set git branch
@@ -81,6 +82,7 @@ from common.task_coordination import (
     mark_started,
     write_task_manifest_path,
 )
+from common.task_acceptance import cmd_accept
 
 
 # =============================================================================
@@ -395,6 +397,7 @@ Usage:
   python3 task.py delegate <dir> <registration...>   Register a delegated worktree
   python3 task.py handoff [dir] [--json]             Render a deterministic handoff
   python3 task.py deliver [dir]                      Mark a clean implementation delivered
+  python3 task.py accept <dir> --worktree PATH --pr N --head SHA  Accept and merge a fixed PR head
   python3 task.py block <dir> <blocker...>           Persist a blocker
   python3 task.py resume <dir> --writer <writer>     Resume a blocked task
   python3 task.py set-branch <dir> <branch>          Set git branch
@@ -544,7 +547,19 @@ def main() -> int:
 
     p_deliver = subparsers.add_parser("deliver", help="Mark a clean implementation delivered")
     p_deliver.add_argument("dir", nargs="?", help="Task directory (defaults to current live task)")
-    p_deliver.add_argument("--reviewer", default="main", help="Unique writer during review (default: main)")
+
+    p_accept = subparsers.add_parser(
+        "accept",
+        help="Validate and synchronously merge one accepted fixed PR head",
+    )
+    p_accept.add_argument("dir", help="Repo-relative active task path in the candidate worktree")
+    p_accept.add_argument(
+        "--worktree",
+        required=True,
+        help="Absolute candidate worktree path; run the command from synchronized main",
+    )
+    p_accept.add_argument("--pr", required=True, type=int, help="GitHub pull request number")
+    p_accept.add_argument("--head", required=True, help="Accepted full PR head SHA")
 
     p_block = subparsers.add_parser("block", help="Persist a task blocker")
     p_block.add_argument("dir", help="Task directory")
@@ -614,6 +629,7 @@ def main() -> int:
         "delegate": cmd_delegate,
         "handoff": cmd_handoff,
         "deliver": cmd_deliver,
+        "accept": cmd_accept,
         "block": cmd_block,
         "resume": cmd_resume,
         "set-branch": cmd_set_branch,

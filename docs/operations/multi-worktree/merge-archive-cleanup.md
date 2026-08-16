@@ -1,12 +1,12 @@
 # 合并、归档与清理
 
-本页只供 main 在验收通过或用户确定其他终态后读取。
+本页只供 main 在 PR 已由固定 head 验收命令合并，或用户确定其他终态后读取。
 
 ## 合并
 
-1. 再次确认 GitHub 当前完整 head、CI 和验收看到的版本一致。
-2. 只有 main 合并 PR；执行 session 不自动合并。
-3. `fetch origin` 并快进本地 `main`，确认验收 head 已进入 `main`，记录真实 merge commit。
+1. `$gkd-accept` 或 main 只从干净、已同步的可信 main checkout 运行 `task.py accept .trellis/tasks/<task> --worktree <absolute-candidate-worktree> --pr <number> --head <sha>`，同步合并已经验收的固定 head。
+2. 不启用 deferred auto-merge，不使用管理员绕过，也不在合并命令中删除分支；执行 session 永远不合并。
+3. main `fetch origin` 并快进本地 `main`，确认验收 head 已进入 `main`，记录真实 merge commit。
 4. 长期有效的产品、架构、API、迁移和运维文档优先随功能 PR 合并；合并后才发现的事实走短小 records-only PR。
 
 ## 终态记录

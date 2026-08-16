@@ -1,4 +1,0 @@
-interface:
-  display_name: "GKD 主会话"
-  short_description: "Plan, route, accept, merge, and close AIO tasks"
-  default_prompt: "Use $gkd-main to plan and coordinate this repository task."

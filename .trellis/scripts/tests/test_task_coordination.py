@@ -272,7 +272,7 @@ class TaskCoordinationTests(unittest.TestCase):
 
             with patch("common.task_coordination.get_repo_root", return_value=repo):
                 self.assertEqual(
-                    cmd_deliver(Namespace(dir="08-16-example", reviewer="main")),
+                    cmd_deliver(Namespace(dir="08-16-example")),
                     0,
                 )
 
@@ -309,7 +309,7 @@ class TaskCoordinationTests(unittest.TestCase):
                 redirect_stderr(errors),
             ):
                 self.assertEqual(
-                    cmd_deliver(Namespace(dir="08-16-example", reviewer="main")),
+                    cmd_deliver(Namespace(dir="08-16-example")),
                     1,
                 )
             self.assertIn("clean worktree", errors.getvalue())

@@ -56,7 +56,8 @@ python3 .trellis/scripts/task.py status [task] [--json]
 python3 .trellis/scripts/task.py doctor [task]
 python3 .trellis/scripts/task.py delegate <task> --worktree <path> --branch <branch> --base-sha <sha> --planning-commit <sha> --writer <id>
 python3 .trellis/scripts/task.py handoff [task] [--json]
-python3 .trellis/scripts/task.py deliver [task] [--reviewer <id>]
+python3 .trellis/scripts/task.py deliver [task]
+python3 .trellis/scripts/task.py accept .trellis/tasks/<task> --worktree <absolute-candidate-worktree> --pr <number> --head <full-pr-head-sha>
 python3 .trellis/scripts/task.py block <task> --reason <text> --resume-condition <text> --owner <id>
 python3 .trellis/scripts/task.py resume <task> --writer <id>
 
@@ -96,7 +97,7 @@ planning -> ready -> implementing -> delivered -> completed
 
 `create/start` 在能识别 session 时写 `.trellis/.runtime/sessions/` 指针；没有 session identity 时，`start` 仍持久化任务状态但不创建指针。可读且明确指向已删除或已完成任务的 stale pointer 会被清理；损坏 JSON 和多个有效 session 不会被猜测处理。无法可靠解析当前任务时显式传 `<task>`。
 
-`start` 把顶层 `planning` 改为 `in_progress`；委派任务还会把 `ready` 改为 `implementing`。返工从 `delivered` 启动时必须传 `--writer`。`deliver` 要求实现和 `delivery.md` 已先提交、worktree 干净，然后把 phase 改为 `delivered` 并把 writer 交给 reviewer。
+`start` 把顶层 `planning` 改为 `in_progress`；委派任务还会把 `ready` 改为 `implementing`。返工从 `delivered` 启动时必须传 `--writer`。`deliver` 要求实现和 `delivery.md` 已先提交、worktree 干净，然后把 phase 改为 `delivered` 并把 writer 固定交给 `main`。
 
 `archive` 会写 `completed`、移动目录、重写上下文路径并清理 session pointer。它不是事务性的；失败后先检查实际目录、manifest 和 Git 状态，不盲目重跑。业务终态以 `acceptance.md` 为准。
 
@@ -105,7 +106,7 @@ planning -> ready -> implementing -> delivered -> completed
 ```text
 Phase 1: Plan    -> 记录决定、研究、任务材料和实施授权
 Phase 2: Execute -> main 直接施工，或按 execution.md 在独立 worktree 施工
-Phase 3: Finish  -> 验证、沉淀知识、提交；委派任务随后由 main 验收和收尾
+Phase 3: Finish  -> 验证、沉淀知识、提交；委派任务随后固定 head 验收并由 main 收尾
 ```
 
 ### 请求路由
@@ -113,7 +114,7 @@ Phase 3: Finish  -> 验证、沉淀知识、提交；委派任务随后由 main 
 - 简单、低风险且由 main 连续完成：使用 `$gkd-main` 和月度 change record；无需为形式创建 Trellis task。
 - 复杂、委派、并行、长流程或高风险：使用 `$gkd-main` 创建任务和规划；创建任务不等于授权实施。
 - 独立执行窗口：只使用 `$gkd-execute`，以 `execution.md` 和登记 writer 为授权。
-- 只读验收 subagent：使用 `$gkd-accept`；新开顶层窗口不会因自定义 agent 配置自动获得执行角色。
+- 固定 head 验收与同步合并：使用 `$gkd-accept`；普通探索 subagent 仍只读，新开顶层窗口不会因自定义 agent 配置自动获得执行角色。
 
 [workflow-state:no_task]
 没有活动任务。先判断是直接 main 小任务还是需要 Trellis 的复杂/委派任务；实施前把确认的方案写入对应仓库记录。使用 `$gkd-main` 获取当前角色流程。
@@ -128,7 +129,7 @@ Phase 3: Finish  -> 验证、沉淀知识、提交；委派任务随后由 main 
 [/workflow-state:planning-inline]
 
 [workflow-state:in_progress]
-先运行 task.py status 查看 coordination.phase 和 writer。main 使用 `$gkd-main`；登记的独立执行 writer 使用 `$gkd-execute`；验收 subagent 使用 `$gkd-accept`。不要从顶层 in_progress 猜测当前是施工、阻塞还是验收。
+先运行 task.py status 查看 coordination.phase 和 writer。main 使用 `$gkd-main`；登记的独立执行 writer 使用 `$gkd-execute`；固定 head 验收使用 `$gkd-accept`。不要从顶层 in_progress 猜测当前是施工、阻塞还是验收。
 [/workflow-state:in_progress]
 
 [workflow-state:in_progress-inline]
@@ -192,7 +193,7 @@ main 连续施工遵循当前任务记录和适用 spec。独立执行 session �
 
 检查完整任务范围、AC、适用 spec、回归风险、测试、文档和 `git diff --check`。只运行 `AGENTS.md` 明确允许的本地命令；依赖和原生检查由 GitHub Actions 承担。
 
-执行 session 在实现和 `delivery.md` 先提交后运行 `task.py deliver`，提交状态转换，推送并等待最终 head 的适用 CI，然后暂停。main 验收是独立步骤，不由执行者自审代替。
+执行 session 在实现和 `delivery.md` 先提交后运行 `task.py deliver`，提交状态转换，推送并等待最终 head 的适用 CI，然后暂停。`$gkd-accept` 的固定 head 验收是独立步骤，不由执行者自审代替；通过后从干净且已同步的可信 main checkout 调用 `task.py accept` 同步合并。
 
 #### 2.3 Rollback `[on demand]`
 
@@ -214,7 +215,7 @@ main 连续施工遵循当前任务记录和适用 spec。独立执行 session �
 
 #### 3.5 Wrap-up reminder
 
-main 连续任务在同一 change record 补实际结果。委派任务由执行 session 在 `delivered` 后暂停；main 按 acceptance 专题验收，按 cleanup 专题合并、写 `acceptance.md`、archive 和清理。`task.py validate --all` 只验证已有 JSONL，不能替代这些判断。
+main 连续任务在同一 change record 补实际结果。委派任务由执行 session 在 `delivered` 后暂停；`$gkd-accept` 或 main 按 acceptance 专题验收，并从可信 main checkout 通过 `task.py accept` 同步合并。main 随后写 `acceptance.md`、archive 和清理。`task.py validate --all` 只验证已有 JSONL，不能替代这些判断。
 
 ## 解析合同
 
@@ -225,5 +226,6 @@ main 连续任务在同一 change record 补实际结果。委派任务由执行
 - `.trellis/scripts/common/workflow_phase.py`：Phase Index 与 step 解析。
 - `.trellis/scripts/task.py`：命令路由和 start/finish。
 - `.trellis/scripts/common/task_coordination.py`：协调状态、校验和交接输出。
+- `.trellis/scripts/common/task_acceptance.py`：固定 head 验收后的 PR 重验与同步合并。
 - `.trellis/scripts/common/task_store.py`：create/archive。
 - `.trellis/spec/aio-coding-hub/cross-layer/trellis-task-context-archive-contract.md`：JSONL 归档路径合同。

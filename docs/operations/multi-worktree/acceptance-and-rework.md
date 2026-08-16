@@ -1,6 +1,6 @@
 # 验收与返工
 
-本页只供 main 和它派出的只读验收 subagent 使用。执行 session 不需要在正常施工时读取。
+本页只供 main 和 `$gkd-accept` 使用。普通探索 subagent 仍只读取证，执行 session 不需要在正常施工时读取。
 
 ## 固定候选
 
@@ -8,9 +8,20 @@
 2. 读取 `prd.md`、必要设计、`execution.md`、`delivery.md` 和实时 PR diff。
 3. 从 GitHub 读取完整 head/base、必需 CI、相关编译、合并状态和变更范围；不信任 Markdown 缓存。
 4. 按 AC 检查成功路径、错误路径、兼容性、回归风险、测试、文档和偏移。
-5. 可派只读 subagent 提供特定风险线索；main 抽查关键出处并给最终结论。
+5. 可派普通只读 subagent 提供特定风险线索；`$gkd-accept` 或 main 抽查出处并给最终结论。
 
 通过结论必须绑定 GitHub 上的具体 head，可使用 PR review/comment 留证。不要在候选分支内提交一个声称自己是“当前 head”的文件。任何新 push 都使旧结论失效。
+
+验收输入必须显式给出活动任务的仓库相对路径、候选 worktree 绝对路径、PR 编号和完整 head SHA。没有阻塞 finding 时，切到干净且与最新 `origin/main` 一致的可信 main checkout 执行：
+
+```bash
+python3 .trellis/scripts/task.py accept .trellis/tasks/<task> \
+  --worktree <absolute-candidate-worktree> \
+  --pr <number> \
+  --head <full-pr-head-sha>
+```
+
+命令自行 `fetch origin main`，拒绝过期或脏的 main、路径逃逸、归档或 symlink 任务、不同 Git 仓库、跨仓 PR、候选漂移和任何非绿色 required check。候选分支的 Python 或脚本不会被导入或执行；manifest 和必需任务文件直接从固定 `HEAD` Git tree 读取，required contexts 从实时 GitHub ruleset 读取。合并前再次 fetch 并重验本地 Git、PR、rules 和 checks，最后通过带精确 `sha` 的 GitHub REST endpoint 同步 squash merge。超时或非零后进行有限确认轮询，只有 GitHub 确认“该精确 head 已合并”才幂等成功；同样的命令可安全确认一次已完成但响应丢失的合并。不得使用 deferred auto-merge、管理员绕过或分支删除。
 
 ## 验收不通过
 
@@ -36,7 +47,7 @@ main 从[整改模板](../templates/findings.md)创建或更新 `findings.md`。
 
 ## 终态
 
-- 通过：确认 head 与验收和绿色 CI 一致后，由 main 合并。
+- 通过：确认无阻塞 finding 后，由 `$gkd-accept` 或 main 从可信 main checkout 调用 `task.py accept` 同步合并固定 head。
 - 需要整改：保持任务活动，恢复为 `implementing`，不得合并。
 - 阻塞：执行 `block`，保留任务和需要恢复的 worktree。
 - 失败、放弃或无功能 PR 的部分完成：如实记录，不伪造功能 PR、merge 或验证。

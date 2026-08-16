@@ -46,7 +46,7 @@ planning -> ready -> implementing -> delivered -> completed
 - `planning`：main 明确需求与方案。
 - `ready`：worktree 和任务已登记，尚未启动执行。
 - `implementing`：执行 session 是唯一写者，包含首次施工和返工。
-- `delivered`：执行 session 已提交并暂停，main 按冻结的 GitHub head 验收。
+- `delivered`：执行 session 已提交并暂停，`$gkd-accept` 或 main 按冻结的 GitHub head 验收。
 - `blocked`：写权交给阻塞负责人，恢复条件已持久化。
 - `completed`：main 已决定终态并执行归档；它不等于功能成功。
 
@@ -56,8 +56,8 @@ planning -> ready -> implementing -> delivered -> completed
 
 - main 规划、建 worktree、登记与交接：[规划与交接](./multi-worktree/planning-and-handoff.md)
 - 执行 session 开工、施工、阻塞与交付：[执行与交付](./multi-worktree/execution-and-delivery.md)
-- main 验收、findings、返工和 `main-direct-fix`：[验收与返工](./multi-worktree/acceptance-and-rework.md)
-- main 合并、记录、归档与清理：[合并、归档与清理](./multi-worktree/merge-archive-cleanup.md)
+- `$gkd-accept`/main 验收、同步合并、findings 和返工：[验收与返工](./multi-worktree/acceptance-and-rework.md)
+- main 终态记录、归档与清理：[合并、归档与清理](./multi-worktree/merge-archive-cleanup.md)
 
 ## 不记录
 

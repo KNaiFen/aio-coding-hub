@@ -42,8 +42,10 @@
 - `doctor [task]`：检查 manifest、canonical cwd、branch、worktree、完整 SHA、planning commit 和 merge-base；不查询 GitHub。
 - `delegate <task> ...`：登记已由 main 创建的 worktree/branch/base/planning commit/writer，校验后写入。
 - `handoff [task]`：先 doctor，再从 canonical state 生成固定交接清单和可粘贴 Prompt；不写第二份状态文件。
-- `deliver`：只允许干净的 delegated implementing worktree 在 `delivery.md` 已提交后转为 `delivered`，并把 writer 交给 reviewer。
+- `deliver`：只允许干净的 delegated implementing worktree 在 `delivery.md` 已提交后转为 `delivered`，并把 writer 固定交给 `main`。
 - `block/resume`：显式记录或清除阻塞，拒绝非法转换。
+
+`accept` 只能从干净且已同步的可信 main checkout 运行。它读取显式候选 worktree 中的活动任务 manifest，但不导入或执行候选分支代码；两次核对本地与 GitHub 实况后，通过带固定 head `sha` 的 REST merge endpoint 同步 squash merge。合并请求结果不确定时，只有 GitHub 确认同一 head 已合并才幂等成功。
 
 worktree 创建和删除仍由生命周期所有者显式执行 Git 命令，本轮不封装自动清理，避免把高风险操作藏入一个新命令。
 

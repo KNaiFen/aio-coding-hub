@@ -60,4 +60,4 @@ git push
 
 等待这个最终 head 的必需 CI 和相关编译终态；按范围跳过的 job 在 `delivery.md` 解释。CI 绿色、需要的人工验证完成或明确交由 main 后，把 PR 标为可评审并暂停。通知 main 时只发送任务路径和 PR URL；main 从 GitHub 读取当前完整 head、base 和检查。
 
-任何新 push 都会使先前的验收结论失效。main 验收期间不得继续写入，只有 main 明确恢复任务后才能返工。
+任何新 push 都会使先前的验收结论失效。`$gkd-accept`/main 验收期间不得继续写入，只有 main 明确恢复任务后才能返工。
