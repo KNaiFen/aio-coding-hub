@@ -1052,6 +1052,7 @@ mod tests {
             let app = tauri::test::mock_app();
             app.manage(crate::resident::ResidentState::default());
             let db = crate::db::init(app.handle()).expect("init db");
+            crate::test_support::install_codex_user_catalog(app.handle());
             Self {
                 _lock: lock,
                 previous_home,

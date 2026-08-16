@@ -14,6 +14,29 @@ pub fn clear_settings_cache() {
     crate::settings::clear_cache();
 }
 
+#[cfg(test)]
+pub(crate) fn install_codex_user_catalog<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) {
+    let codex_home = crate::codex_paths::codex_home_dir(app).expect("Codex home");
+    std::fs::create_dir_all(&codex_home).expect("create Codex home");
+    let catalog_path = codex_home.join("user-model-catalog.json");
+    std::fs::write(
+        &catalog_path,
+        br#"{"models":[{"slug":"gpt-test","visibility":"list","context_window":128000,"max_context_window":128000}]}"#,
+    )
+    .expect("write user model catalog");
+
+    let config_path = crate::codex_paths::codex_config_toml_path(app).expect("Codex config path");
+    let mut config = std::fs::read_to_string(&config_path)
+        .ok()
+        .and_then(|value| value.parse::<toml_edit::DocumentMut>().ok())
+        .unwrap_or_default();
+    config["model_catalog_json"] =
+        toml_edit::value(catalog_path.to_string_lossy().into_owned());
+    std::fs::write(config_path, config.to_string()).expect("write Codex config");
+}
+
 pub fn set_settings_finalize_restore_failpoint_for_tests(enabled: bool) {
     crate::settings::set_settings_finalize_restore_failpoint_for_tests(enabled);
 }

@@ -699,6 +699,42 @@ pub(crate) fn apply_canonical_bytes_with_completion_locked<R: tauri::Runtime>(
     operation: &str,
     mcp_manifest_after: Option<serde_json::Value>,
 ) -> crate::shared::error::AppResult<CanonicalConfigTransaction> {
+    apply_canonical_bytes_with_completion_inner_locked(
+        app,
+        canonical,
+        requires_provider_sync,
+        operation,
+        mcp_manifest_after,
+        None,
+    )
+}
+
+pub(crate) fn apply_canonical_bytes_with_completion_for_profiles_locked<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    canonical: Vec<u8>,
+    requires_provider_sync: bool,
+    operation: &str,
+    mcp_manifest_after: Option<serde_json::Value>,
+    profiles: &[crate::codex_model_catalog::managed::ManagedCatalogProfile],
+) -> crate::shared::error::AppResult<CanonicalConfigTransaction> {
+    apply_canonical_bytes_with_completion_inner_locked(
+        app,
+        canonical,
+        requires_provider_sync,
+        operation,
+        mcp_manifest_after,
+        Some(profiles),
+    )
+}
+
+fn apply_canonical_bytes_with_completion_inner_locked<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    canonical: Vec<u8>,
+    requires_provider_sync: bool,
+    operation: &str,
+    mcp_manifest_after: Option<serde_json::Value>,
+    profiles: Option<&[crate::codex_model_catalog::managed::ManagedCatalogProfile]>,
+) -> crate::shared::error::AppResult<CanonicalConfigTransaction> {
     ensure_codex_config_len(&canonical, "canonical Codex config.toml")?;
     if let Some(baseline) = super::cli_proxy::codex_enabled_proxy_baseline(app)? {
         if !super::cli_proxy::codex_proxy_config_is_applied(app, &baseline.base_origin) {
@@ -708,7 +744,11 @@ pub(crate) fn apply_canonical_bytes_with_completion_locked<R: tauri::Runtime>(
             ));
         }
     }
-    let _preflight = crate::codex_model_catalog::managed::prepare_current_locked(app)?;
+    let prepare_catalog = || match profiles {
+        Some(profiles) => crate::codex_model_catalog::managed::prepare_for_profiles(app, profiles),
+        None => crate::codex_model_catalog::managed::prepare_current_locked(app),
+    };
+    let _preflight = prepare_catalog()?;
     let config_path = codex_paths::codex_config_toml_path(app)?;
     let live_before = snapshot_optional_file(&config_path)?;
     let live_written = super::cli_proxy::project_codex_config_if_enabled(app, canonical.clone())?;
@@ -771,7 +811,7 @@ pub(crate) fn apply_canonical_bytes_with_completion_locked<R: tauri::Runtime>(
     }
     interrupt_lifecycle_for_tests("live_written")?;
 
-    let plan = match crate::codex_model_catalog::managed::prepare_current_locked(app) {
+    let plan = match prepare_catalog() {
         Ok(plan) => plan,
         Err(error) => {
             rollback_canonical_files(&config_path, &live_before, &live_written, backup.as_ref())?;

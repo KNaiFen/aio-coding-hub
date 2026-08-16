@@ -814,7 +814,7 @@ fn build_codex_config_toml_with_auth_strategy(
         input.lines().map(|l| l.to_string()).collect()
     };
 
-    let provider_key = if codex_remote_compaction_enabled(&input)? {
+    let provider_key = if codex_remote_compaction_enabled(&lines)? {
         CODEX_REMOTE_COMPACTION_PROVIDER_KEY
     } else {
         CODEX_PROVIDER_KEY
@@ -835,7 +835,14 @@ fn build_codex_config_toml_with_auth_strategy(
     Ok(out.into_bytes())
 }
 
-fn codex_remote_compaction_enabled(input: &str) -> AppResult<bool> {
+fn codex_remote_compaction_enabled(lines: &[String]) -> AppResult<bool> {
+    let mut parse_lines = lines.to_vec();
+    remove_model_provider_base_tables(&mut parse_lines, CODEX_PROVIDER_KEY);
+    remove_model_provider_base_tables(
+        &mut parse_lines,
+        CODEX_REMOTE_COMPACTION_PROVIDER_KEY,
+    );
+    let input = parse_lines.join("\n");
     if input.trim().is_empty() {
         return Ok(false);
     }

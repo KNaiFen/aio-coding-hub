@@ -198,6 +198,7 @@ fn rebind_grok_mcp<R: tauri::Runtime>(
 fn sync_codex_cli_locked<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     servers: &[McpServerForSync],
+    profiles: Option<&[crate::codex_model_catalog::managed::ManagedCatalogProfile]>,
 ) -> Result<(), String> {
     let snapshots = CodexMcpMetadataSnapshots::capture(app)?;
     let target_path = mcp_target_path(app, "codex")?;
@@ -230,16 +231,26 @@ fn sync_codex_cli_locked<R: tauri::Runtime>(
         manifest.updated_at = now_unix_seconds();
         let manifest_after = serde_json::to_value(&manifest)
             .map_err(|error| format!("MCP_SYNC_MANIFEST_INVALID: {error}"))?;
-        transaction = Some(
-            crate::codex_config::apply_canonical_bytes_with_completion_locked(
+        let catalog_transaction = match profiles {
+            Some(profiles) => {
+                crate::codex_config::apply_canonical_bytes_with_completion_for_profiles_locked(
+                    app,
+                    next,
+                    false,
+                    "codex_mcp_sync",
+                    Some(manifest_after),
+                    profiles,
+                )
+            }
+            None => crate::codex_config::apply_canonical_bytes_with_completion_locked(
                 app,
                 next,
                 false,
                 "codex_mcp_sync",
                 Some(manifest_after),
-            )
-            .map_err(String::from)?,
-        );
+            ),
+        };
+        transaction = Some(catalog_transaction.map_err(String::from)?);
 
         write_manifest(app, "codex", &manifest)?;
         transaction
@@ -281,21 +292,9 @@ pub fn sync_cli<R: tauri::Runtime>(
         validate_cli_key(cli_key)?;
         let _guard = crate::codex_managed_profiles::lock_profile_lifecycle();
         crate::codex_managed_profiles::ensure_lifecycle_open().map_err(String::from)?;
-        return sync_codex_cli_locked(app, servers);
+        return sync_codex_cli_locked(app, servers, None);
     }
-    sync_cli_with_codex_lifecycle_locked(app, cli_key, servers)
-}
-
-/// Caller must hold the shared Codex lifecycle lock when `cli_key` is `codex`.
-pub(crate) fn sync_cli_with_codex_lifecycle_locked<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-    cli_key: &str,
-    servers: &[McpServerForSync],
-) -> Result<(), String> {
     validate_cli_key(cli_key)?;
-    if cli_key == "codex" {
-        return sync_codex_cli_locked(app, servers);
-    }
 
     let _grok_guard = if cli_key == "grok" {
         Some(grok_mcp_sync_lock()?)
@@ -359,6 +358,15 @@ pub(crate) fn sync_cli_with_codex_lifecycle_locked<R: tauri::Runtime>(
     }
 
     Ok(())
+}
+
+/// Caller must hold the shared Codex lifecycle lock and provide its transaction snapshot.
+pub(crate) fn sync_codex_cli_with_lifecycle_locked<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    servers: &[McpServerForSync],
+    profiles: &[crate::codex_model_catalog::managed::ManagedCatalogProfile],
+) -> Result<(), String> {
+    sync_codex_cli_locked(app, servers, Some(profiles))
 }
 
 pub(crate) fn capture_grok_local_servers_for_workspace<R: tauri::Runtime>(

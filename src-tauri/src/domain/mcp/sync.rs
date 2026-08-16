@@ -158,6 +158,11 @@ pub(crate) fn sync_one_cli_with_codex_lifecycle_locked<R: tauri::Runtime>(
     cli_key: &str,
 ) -> crate::shared::error::AppResult<()> {
     let servers = list_enabled_for_cli(conn, cli_key)?;
-    mcp_sync::sync_cli_with_codex_lifecycle_locked(app, cli_key, &servers)?;
+    if cli_key == "codex" {
+        let profiles = crate::codex_model_catalog::managed::load_profiles(conn)?;
+        mcp_sync::sync_codex_cli_with_lifecycle_locked(app, &servers, &profiles)?;
+        return Ok(());
+    }
+    mcp_sync::sync_cli(app, cli_key, &servers)?;
     Ok(())
 }

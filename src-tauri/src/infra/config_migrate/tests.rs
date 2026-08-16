@@ -1029,6 +1029,7 @@ fn config_import_serializes_profile_create_until_runtime_failure_rollback_finish
     previous.codex_home_mode = settings::CodexHomeMode::Custom;
     previous.codex_home_override = old_codex_home.to_string_lossy().into_owned();
     settings::write(&app, &previous).expect("set original Codex home");
+    crate::test_support::install_codex_user_catalog(&app);
 
     let provider = seed_direct_codex_provider(&test_app, "Concurrent Profile");
     let model_uuid = crate::provider_models::manual_upsert(
@@ -4214,6 +4215,7 @@ fn config_v4_provider_uuid_preflight_rejects_invalid_duplicate_and_broken_source
 fn config_v4_rebinds_local_models_and_profiles_by_provider_uuid() {
     let test_app = ConfigMigrateTestApp::new();
     let app = test_app.handle();
+    crate::test_support::install_codex_user_catalog(&app);
     let provider = seed_direct_codex_provider(&test_app, "Managed Rebind");
     let catalog = crate::provider_models::manual_upsert(
         &test_app.db,
@@ -4325,6 +4327,7 @@ INSERT INTO provider_model_catalogs(
 fn config_import_with_local_profile_fails_before_clear_when_rebind_is_unprovable() {
     let test_app = ConfigMigrateTestApp::new();
     let app = test_app.handle();
+    crate::test_support::install_codex_user_catalog(&app);
     let provider = seed_direct_codex_provider(&test_app, "Managed Guard");
     let model_uuid = crate::provider_models::manual_upsert(
         &test_app.db,
