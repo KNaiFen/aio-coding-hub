@@ -12,6 +12,12 @@ Usage:
     python3 task.py start <dir>                 # Set active task
     python3 task.py current [--source]          # Show active task
     python3 task.py finish                      # Clear active task
+    python3 task.py status [dir] [--json]       # Show persistent coordination state
+    python3 task.py doctor [dir]                # Validate task and local Git facts
+    python3 task.py delegate <dir> ...          # Register an existing worktree
+    python3 task.py handoff [dir] [--json]      # Render an execution handoff
+    python3 task.py block <dir> ...             # Persist a blocker
+    python3 task.py resume <dir> ...            # Resume a blocked task
     python3 task.py set-branch <dir> <branch>   # Set git branch
     python3 task.py set-base-branch <dir> <branch>  # Set PR target branch
     python3 task.py set-scope <dir> <scope>     # Set scope for PR title
@@ -44,7 +50,7 @@ from common.active_task import (
     resolve_context_key,
     set_active_task,
 )
-from common.io import read_json, write_json
+from common.io import read_json
 from common.task_utils import resolve_task_dir, run_task_hooks
 from common.tasks import iter_active_tasks, children_progress
 
@@ -62,6 +68,16 @@ from common.task_context import (
     cmd_add_context,
     cmd_validate,
     cmd_list_context,
+)
+from common.task_coordination import (
+    cmd_block,
+    cmd_delegate,
+    cmd_doctor,
+    cmd_handoff,
+    cmd_resume,
+    cmd_status,
+    mark_started,
+    write_task_manifest_path,
 )
 
 
@@ -85,16 +101,26 @@ def _mark_task_in_progress(task_json_path: Path, *, degraded: bool) -> bool:
     if data is None:
         return False
 
-    if data.get("status") != "planning":
+    previous_status = data.get("status")
+    previous_phase = (
+        data.get("coordination", {}).get("phase")
+        if isinstance(data.get("coordination"), dict)
+        else None
+    )
+    if not mark_started(data):
         return True
 
-    data["status"] = "in_progress"
-    if not write_json(task_json_path, data):
+    if not write_task_manifest_path(task_json_path, data):
         print(colored(f"Error: failed to update task status: {task_json_path}", Colors.RED))
         return False
 
     suffix = " (degraded)" if degraded else ""
-    print(colored(f"✓ Status: planning → in_progress{suffix}", Colors.GREEN))
+    changes: list[str] = []
+    if previous_status == "planning":
+        changes.append("status planning → in_progress")
+    if previous_phase == "ready":
+        changes.append("phase ready → implementing")
+    print(colored(f"✓ {', '.join(changes)}{suffix}", Colors.GREEN))
     return True
 
 
@@ -345,6 +371,12 @@ Usage:
   python3 task.py start <dir>                        Set active task
   python3 task.py current [--source]                 Show active task
   python3 task.py finish                             Clear active task
+  python3 task.py status [dir] [--json]              Show persistent coordination state
+  python3 task.py doctor [dir]                       Validate task and local Git facts
+  python3 task.py delegate <dir> <registration...>   Register a delegated worktree
+  python3 task.py handoff [dir] [--json]             Render a deterministic handoff
+  python3 task.py block <dir> <blocker...>           Persist a blocker
+  python3 task.py resume <dir> --writer <writer>     Resume a blocked task
   python3 task.py set-branch <dir> <branch>          Set git branch
   python3 task.py set-base-branch <dir> <branch>     Set PR target branch
   python3 task.py set-scope <dir> <scope>            Set scope for PR title
@@ -469,6 +501,36 @@ def main() -> int:
     # finish
     subparsers.add_parser("finish", help="Clear active task")
 
+    # coordination state
+    p_status = subparsers.add_parser("status", help="Show persistent task coordination state")
+    p_status.add_argument("dir", nargs="?", help="Task directory (defaults to current live task)")
+    p_status.add_argument("--json", action="store_true", help="Output stable JSON")
+
+    p_doctor = subparsers.add_parser("doctor", help="Validate task coordination and local Git facts")
+    p_doctor.add_argument("dir", nargs="?", help="Task directory (defaults to current live task)")
+
+    p_delegate = subparsers.add_parser("delegate", help="Register an existing delegated worktree")
+    p_delegate.add_argument("dir", help="Task directory")
+    p_delegate.add_argument("--worktree", required=True, help="Canonical absolute worktree path")
+    p_delegate.add_argument("--branch", required=True, help="Task branch")
+    p_delegate.add_argument("--base-sha", required=True, help="Full base commit SHA")
+    p_delegate.add_argument("--planning-commit", required=True, help="Full planning commit SHA")
+    p_delegate.add_argument("--writer", required=True, help="Unique writer identity")
+
+    p_handoff = subparsers.add_parser("handoff", help="Render a deterministic execution handoff")
+    p_handoff.add_argument("dir", nargs="?", help="Task directory (defaults to current live task)")
+    p_handoff.add_argument("--json", action="store_true", help="Output stable JSON")
+
+    p_block = subparsers.add_parser("block", help="Persist a task blocker")
+    p_block.add_argument("dir", help="Task directory")
+    p_block.add_argument("--reason", required=True, help="Current blocking reason")
+    p_block.add_argument("--resume-condition", required=True, help="Condition required to resume")
+    p_block.add_argument("--owner", required=True, help="Decision or recovery owner")
+
+    p_resume = subparsers.add_parser("resume", help="Clear a persisted blocker")
+    p_resume.add_argument("dir", help="Task directory")
+    p_resume.add_argument("--writer", required=True, help="Unique writer after resume")
+
     # set-branch
     p_branch = subparsers.add_parser("set-branch", help="Set git branch")
     p_branch.add_argument("dir", help="Task directory")
@@ -522,6 +584,12 @@ def main() -> int:
         "start": cmd_start,
         "current": cmd_current,
         "finish": cmd_finish,
+        "status": cmd_status,
+        "doctor": cmd_doctor,
+        "delegate": cmd_delegate,
+        "handoff": cmd_handoff,
+        "block": cmd_block,
+        "resume": cmd_resume,
         "set-branch": cmd_set_branch,
         "set-base-branch": cmd_set_base_branch,
         "set-scope": cmd_set_scope,

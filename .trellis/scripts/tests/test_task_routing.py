@@ -48,6 +48,9 @@ class TaskRoutingTests(unittest.TestCase):
                     )
                     data = json.loads(task_json.read_text(encoding="utf-8"))
                     self.assertEqual(data["base_branch"], expected_base)
+                    self.assertEqual(data["coordination"]["version"], 1)
+                    self.assertEqual(data["coordination"]["route"], "main")
+                    self.assertEqual(data["coordination"]["phase"], "planning")
 
     def test_start_without_session_identity_updates_status_without_pointer(self) -> None:
         with tempfile.TemporaryDirectory() as raw_root:
@@ -80,7 +83,23 @@ class TaskRoutingTests(unittest.TestCase):
             task_dir.mkdir(parents=True)
             task_json = task_dir / "task.json"
             task_json.write_text(
-                json.dumps({"name": "normal-start", "status": "planning"}) + "\n",
+                json.dumps(
+                    {
+                        "name": "normal-start",
+                        "status": "planning",
+                        "coordination": {
+                            "version": 1,
+                            "route": "delegated",
+                            "phase": "ready",
+                            "writer": "executor",
+                            "base_sha": None,
+                            "planning_commit": None,
+                            "block": None,
+                            "updated_at": "old",
+                        },
+                    }
+                )
+                + "\n",
                 encoding="utf-8",
             )
             active = SimpleNamespace(task_path=".trellis/tasks/08-10-normal-start", source="test")
@@ -97,6 +116,8 @@ class TaskRoutingTests(unittest.TestCase):
             set_active.assert_called_once_with(".trellis/tasks/08-10-normal-start", repo_root)
             data = json.loads(task_json.read_text(encoding="utf-8"))
             self.assertEqual(data["status"], "in_progress")
+            self.assertEqual(data["coordination"]["phase"], "implementing")
+            self.assertNotEqual(data["coordination"]["updated_at"], "old")
             run_hooks.assert_called_once_with("after_start", task_json, repo_root)
 
     def test_start_without_session_identity_rejects_invalid_manifest(self) -> None:
@@ -110,13 +131,13 @@ class TaskRoutingTests(unittest.TestCase):
                 patch("task.get_repo_root", return_value=repo_root),
                 patch("task.resolve_context_key", return_value=None),
                 patch("task.run_task_hooks") as run_hooks,
-                patch("task.write_json") as write_json,
+                patch("task.write_task_manifest_path") as write_manifest,
             ):
                 result = cmd_start(Namespace(dir="08-10-invalid-start"))
 
             self.assertEqual(result, 1)
             run_hooks.assert_not_called()
-            write_json.assert_not_called()
+            write_manifest.assert_not_called()
 
     def test_start_without_session_identity_rejects_status_write_failure(self) -> None:
         with tempfile.TemporaryDirectory() as raw_root:
@@ -133,7 +154,7 @@ class TaskRoutingTests(unittest.TestCase):
                 patch("task.get_repo_root", return_value=repo_root),
                 patch("task.resolve_context_key", return_value=None),
                 patch("task.run_task_hooks") as run_hooks,
-                patch("task.write_json", return_value=False),
+                patch("task.write_task_manifest_path", return_value=False),
             ):
                 result = cmd_start(Namespace(dir="08-10-write-failure"))
 
@@ -159,7 +180,7 @@ class TaskRoutingTests(unittest.TestCase):
                     "task.set_active_task",
                     return_value=SimpleNamespace(task_path=".trellis/tasks/08-10-pointer-cleanup", source="test"),
                 ),
-                patch("task.write_json", return_value=False),
+                patch("task.write_task_manifest_path", return_value=False),
                 patch("task.clear_active_task") as clear_active,
                 patch("task.run_task_hooks") as run_hooks,
             ):

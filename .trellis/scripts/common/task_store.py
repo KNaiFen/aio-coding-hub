@@ -54,6 +54,7 @@ from .task_utils import (
     resolve_task_dir,
     run_task_hooks,
 )
+from .task_coordination import mark_completed, new_coordination
 
 
 # =============================================================================
@@ -359,9 +360,12 @@ def cmd_create(args: argparse.Namespace) -> int:
         "relatedFiles": [],
         "notes": "",
         "meta": {},
+        "coordination": new_coordination(),
     }
 
-    write_json(task_json_path, task_data)
+    if not write_json(task_json_path, task_data):
+        print(colored(f"Error: failed to write task manifest: {task_json_path}", Colors.RED), file=sys.stderr)
+        return 1
 
     prd_path = task_dir / "prd.md"
     if not prd_path.exists():
@@ -498,7 +502,10 @@ def cmd_archive(args: argparse.Namespace) -> int:
         if data:
             data["status"] = "completed"
             data["completedAt"] = today
-            write_json(task_json_path, data)
+            mark_completed(data)
+            if not write_json(task_json_path, data):
+                print(colored(f"Error: failed to update task manifest: {task_json_path}", Colors.RED), file=sys.stderr)
+                return 1
 
             # Handle subtask relationships on archive.
             # Keep this task in its parent's children list so progress
