@@ -1524,9 +1524,7 @@ mod tests {
         let base = context_window_catalog();
         let mut expected: Value = serde_json::from_slice(&base).expect("base json");
         for model in expected["models"].as_array_mut().expect("models") {
-            if CONTEXT_WINDOW_372K_SLUGS.contains(
-                &model["slug"].as_str().expect("slug"),
-            ) {
+            if CONTEXT_WINDOW_372K_SLUGS.contains(&model["slug"].as_str().expect("slug")) {
                 model["context_window"] = json!(CONTEXT_WINDOW_372K);
                 model["max_context_window"] = json!(CONTEXT_WINDOW_372K);
             }
@@ -1552,8 +1550,7 @@ mod tests {
 
     #[test]
     fn context_window_372k_fails_closed_when_a_target_is_missing() {
-        let mut base: Value =
-            serde_json::from_slice(&context_window_catalog()).expect("base json");
+        let mut base: Value = serde_json::from_slice(&context_window_catalog()).expect("base json");
         base["models"]
             .as_array_mut()
             .expect("models")
@@ -1573,8 +1570,7 @@ mod tests {
 
     #[test]
     fn context_window_372k_fails_closed_on_duplicate_target_slug() {
-        let mut base: Value =
-            serde_json::from_slice(&context_window_catalog()).expect("base json");
+        let mut base: Value = serde_json::from_slice(&context_window_catalog()).expect("base json");
         let duplicate = base["models"][0].clone();
         base["models"]
             .as_array_mut()

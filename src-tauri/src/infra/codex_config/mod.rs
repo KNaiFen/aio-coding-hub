@@ -56,7 +56,9 @@ pub(crate) fn set_lifecycle_failpoint_for_tests(
     Ok(())
 }
 
-pub(crate) fn interrupt_lifecycle_for_tests(failpoint: &str) -> crate::shared::error::AppResult<()> {
+pub(crate) fn interrupt_lifecycle_for_tests(
+    failpoint: &str,
+) -> crate::shared::error::AppResult<()> {
     let expected = match failpoint {
         "planned" => LIFECYCLE_FAILPOINT_PLANNED,
         "canonical_written" => LIFECYCLE_FAILPOINT_CANONICAL_WRITTEN,
@@ -767,12 +769,7 @@ pub(crate) fn apply_canonical_bytes_with_completion_locked<R: tauri::Runtime>(
         &mut journal,
         CodexLifecycleJournalPhase::LiveWritten,
     ) {
-        rollback_canonical_files(
-            &config_path,
-            &live_before,
-            &live_written,
-            backup.as_ref(),
-        )?;
+        rollback_canonical_files(&config_path, &live_before, &live_written, backup.as_ref())?;
         clear_lifecycle_journal(&journal_path)?;
         return Err(error);
     }
@@ -781,12 +778,7 @@ pub(crate) fn apply_canonical_bytes_with_completion_locked<R: tauri::Runtime>(
     let plan = match crate::codex_model_catalog::managed::prepare_current_locked(app) {
         Ok(plan) => plan,
         Err(error) => {
-            rollback_canonical_files(
-                &config_path,
-                &live_before,
-                &live_written,
-                backup.as_ref(),
-            )?;
+            rollback_canonical_files(&config_path, &live_before, &live_written, backup.as_ref())?;
             clear_lifecycle_journal(&journal_path)?;
             return Err(error);
         }
@@ -794,12 +786,7 @@ pub(crate) fn apply_canonical_bytes_with_completion_locked<R: tauri::Runtime>(
     let catalog = match plan.apply(app) {
         Ok(catalog) => catalog,
         Err(error) => {
-            rollback_canonical_files(
-                &config_path,
-                &live_before,
-                &live_written,
-                backup.as_ref(),
-            )?;
+            rollback_canonical_files(&config_path, &live_before, &live_written, backup.as_ref())?;
             clear_lifecycle_journal(&journal_path)?;
             return Err(error);
         }
@@ -808,12 +795,7 @@ pub(crate) fn apply_canonical_bytes_with_completion_locked<R: tauri::Runtime>(
         Ok(live_after) => live_after,
         Err(error) => {
             catalog.rollback()?;
-            rollback_canonical_files(
-                &config_path,
-                &live_before,
-                &live_written,
-                backup.as_ref(),
-            )?;
+            rollback_canonical_files(&config_path, &live_before, &live_written, backup.as_ref())?;
             clear_lifecycle_journal(&journal_path)?;
             return Err(error);
         }
@@ -825,12 +807,7 @@ pub(crate) fn apply_canonical_bytes_with_completion_locked<R: tauri::Runtime>(
         CodexLifecycleJournalPhase::CatalogWritten,
     ) {
         catalog.rollback()?;
-        rollback_canonical_files(
-            &config_path,
-            &live_before,
-            &live_written,
-            backup.as_ref(),
-        )?;
+        rollback_canonical_files(&config_path, &live_before, &live_written, backup.as_ref())?;
         clear_lifecycle_journal(&journal_path)?;
         return Err(error);
     }

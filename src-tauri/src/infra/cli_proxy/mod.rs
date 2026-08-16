@@ -723,10 +723,8 @@ fn backup_for_enable<R: tauri::Runtime>(
     for t in targets {
         let mut read_bytes = read_optional_cli_proxy_file(&t.path)?;
         if cli_key == "codex" && t.kind == "codex_config_toml" {
-            read_bytes = crate::codex_model_catalog::managed::canonicalize_config_bytes(
-                app,
-                read_bytes,
-            )?;
+            read_bytes =
+                crate::codex_model_catalog::managed::canonicalize_config_bytes(app, read_bytes)?;
         }
         let existed = read_bytes.is_some();
         let backup_rel = if let Some(bytes) = read_bytes {
@@ -784,10 +782,8 @@ fn ensure_manifest_has_current_targets<R: tauri::Runtime>(
 
         let mut read_bytes = read_optional_cli_proxy_file(&target.path)?;
         if cli_key == "codex" && target.kind == "codex_config_toml" {
-            read_bytes = crate::codex_model_catalog::managed::canonicalize_config_bytes(
-                app,
-                read_bytes,
-            )?;
+            read_bytes =
+                crate::codex_model_catalog::managed::canonicalize_config_bytes(app, read_bytes)?;
         }
         let existed = read_bytes.is_some();
         let backup_rel = if let Some(bytes) = read_bytes {

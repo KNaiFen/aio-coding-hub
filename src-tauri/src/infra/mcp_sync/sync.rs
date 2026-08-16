@@ -208,7 +208,10 @@ fn sync_codex_cli<R: tauri::Runtime>(
     let result = (|| -> Result<(), String> {
         let existing = read_manifest(app, "codex")?;
         let desired_keys = normalized_keys(servers);
-        let should_backup = existing.as_ref().map(|manifest| !manifest.enabled).unwrap_or(true);
+        let should_backup = existing
+            .as_ref()
+            .map(|manifest| !manifest.enabled)
+            .unwrap_or(true);
         let mut manifest = if should_backup {
             backup_for_enable(app, "codex", existing)?
         } else {
@@ -221,8 +224,8 @@ fn sync_codex_cli<R: tauri::Runtime>(
             manifest.managed_keys.clone()
         };
 
-        let current = crate::codex_config::canonical_config_bytes_locked(app)
-            .map_err(String::from)?;
+        let current =
+            crate::codex_config::canonical_config_bytes_locked(app).map_err(String::from)?;
         let next = build_next_bytes("codex", current, &managed_keys, servers)?;
         manifest.enabled = true;
         manifest.managed_keys = desired_keys;

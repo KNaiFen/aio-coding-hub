@@ -3103,7 +3103,6 @@ export type CodexConfigState = {
   features_responses_websockets_v2: boolean | null;
   features_multi_agent: boolean | null;
 };
-export type CodexContextWindow372kState = { enabled: boolean };
 export type CodexConfigTomlState = { config_path: string; exists: boolean; toml: string };
 export type CodexConfigTomlValidationError = {
   message: string;
@@ -3114,6 +3113,7 @@ export type CodexConfigTomlValidationResult = {
   ok: boolean;
   error: CodexConfigTomlValidationError | null;
 };
+export type CodexContextWindow372kState = { enabled: boolean };
 export type CodexHomeMode = "user_home_default" | "follow_codex_home" | "custom";
 export type CodexManagedProfile = {
   profileUuid: string;
@@ -4715,7 +4715,6 @@ export type SettingsView = {
   enable_billing_header_rectifier: boolean;
   enable_session_reuse: boolean;
   enable_codex_session_id_completion: boolean;
-  enable_codex_context_window_372k: boolean;
   enable_claude_metadata_user_id_injection: boolean;
   enable_cache_anomaly_monitor: boolean;
   enable_debug_log: boolean;

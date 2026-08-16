@@ -251,7 +251,10 @@ fn codex_config_updates_are_preserved_when_cli_proxy_enabled() {
         after_restore.contains(&format!("model_catalog_json = {quoted_user_catalog}")),
         "{after_restore}"
     );
-    assert!(after_restore.contains("[model_providers.direct]"), "{after_restore}");
+    assert!(
+        after_restore.contains("[model_providers.direct]"),
+        "{after_restore}"
+    );
     assert!(after_restore.contains("[user_section]"), "{after_restore}");
     assert!(!after_restore.contains("[model_providers.OpenAI]"));
     assert!(!after_restore.contains("[model_providers.aio]"));

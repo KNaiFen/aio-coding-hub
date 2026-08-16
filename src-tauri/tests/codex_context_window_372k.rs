@@ -63,8 +63,8 @@ fn canonical_config_journal_recovers_each_persisted_phase() {
         let app = support::TestApp::new();
         let handle = app.handle();
         aio_coding_hub_lib::test_support::init_db(&handle).expect("init db");
-        let config_path = aio_coding_hub_lib::test_support::codex_config_toml_path(&handle)
-            .expect("config path");
+        let config_path =
+            aio_coding_hub_lib::test_support::codex_config_toml_path(&handle).expect("config path");
         std::fs::create_dir_all(config_path.parent().expect("config parent"))
             .expect("create config parent");
         std::fs::write(&config_path, "model = \"old\"\n").expect("write old config");
@@ -130,10 +130,9 @@ fn context_window_372k_is_idempotent_and_composes_with_proxy_startup_and_exit() 
         "catalog_policy_written",
     ))
     .expect("set catalog policy failpoint");
-    let interrupted = aio_coding_hub_lib::test_support::codex_context_window_372k_set_json(
-        &handle, true,
-    )
-    .expect_err("catalog policy failpoint must interrupt enable");
+    let interrupted =
+        aio_coding_hub_lib::test_support::codex_context_window_372k_set_json(&handle, true)
+            .expect_err("catalog policy failpoint must interrupt enable");
     assert_eq!(interrupted.code(), "CODEX_LIFECYCLE_TEST_INTERRUPTED");
     aio_coding_hub_lib::test_support::recover_codex_lifecycle(&handle)
         .expect("recover catalog policy");
@@ -141,15 +140,16 @@ fn context_window_372k_is_idempotent_and_composes_with_proxy_startup_and_exit() 
         config_catalog_path(&std::fs::read_to_string(&config_path).expect("recovered config")),
         user_catalog_path_text
     );
-    assert!(!aio_coding_hub_lib::test_support::settings_get_json(&handle)
-        .expect("settings after recovery")["enable_codex_context_window_372k"]
-        .as_bool()
-        .expect("372K setting"));
+    assert!(
+        !aio_coding_hub_lib::test_support::settings_get_json(&handle)
+            .expect("settings after recovery")["enable_codex_context_window_372k"]
+            .as_bool()
+            .expect("372K setting")
+    );
 
-    let enabled = aio_coding_hub_lib::test_support::codex_context_window_372k_set_json(
-        &handle, true,
-    )
-    .expect("enable 372K");
+    let enabled =
+        aio_coding_hub_lib::test_support::codex_context_window_372k_set_json(&handle, true)
+            .expect("enable 372K");
     assert_eq!(enabled["enabled"], json!(true));
     let app_data = aio_coding_hub_lib::test_support::app_data_dir(&handle).expect("app data");
     let generated_path = app_data
@@ -162,7 +162,10 @@ fn context_window_372k_is_idempotent_and_composes_with_proxy_startup_and_exit() 
         config_catalog_path(&std::fs::read_to_string(&config_path).expect("live config")),
         generated_path_text
     );
-    assert_eq!(std::fs::read(&cache_path).expect("cache sentinel"), cache_sentinel);
+    assert_eq!(
+        std::fs::read(&cache_path).expect("cache sentinel"),
+        cache_sentinel
+    );
 
     aio_coding_hub_lib::test_support::codex_context_window_372k_set_json(&handle, true)
         .expect("repeat enable");
@@ -198,7 +201,10 @@ fn context_window_372k_is_idempotent_and_composes_with_proxy_startup_and_exit() 
     .expect("enable proxy");
     assert_eq!(proxy_enabled["ok"], json!(true));
     let projected = std::fs::read_to_string(&config_path).expect("projected config");
-    assert!(projected.contains("model_provider = \"aio\""), "{projected}");
+    assert!(
+        projected.contains("model_provider = \"aio\""),
+        "{projected}"
+    );
     assert_eq!(config_catalog_path(&projected), generated_path_text);
 
     let proxy_disabled = aio_coding_hub_lib::test_support::cli_proxy_set_enabled_json(
@@ -219,16 +225,18 @@ fn context_window_372k_is_idempotent_and_composes_with_proxy_startup_and_exit() 
         generated_path_text
     );
 
-    let disabled = aio_coding_hub_lib::test_support::codex_context_window_372k_set_json(
-        &handle, false,
-    )
-    .expect("disable 372K");
+    let disabled =
+        aio_coding_hub_lib::test_support::codex_context_window_372k_set_json(&handle, false)
+            .expect("disable 372K");
     assert_eq!(disabled["enabled"], json!(false));
     let restored = std::fs::read_to_string(&config_path).expect("restored config");
     assert_eq!(config_catalog_path(&restored), user_catalog_path_text);
     assert!(restored.contains("[user_section]"), "{restored}");
     assert!(!generated_path.exists());
-    assert_eq!(std::fs::read(&cache_path).expect("cache sentinel"), cache_sentinel);
+    assert_eq!(
+        std::fs::read(&cache_path).expect("cache sentinel"),
+        cache_sentinel
+    );
 
     let before_repeat_disable = std::fs::read(&config_path).expect("config before disable");
     aio_coding_hub_lib::test_support::codex_context_window_372k_set_json(&handle, false)

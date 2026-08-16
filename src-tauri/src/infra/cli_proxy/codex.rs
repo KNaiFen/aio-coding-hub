@@ -407,12 +407,8 @@ pub(super) fn remove_model_provider_section(lines: &mut Vec<String>, provider_ke
     }
 }
 
-const CODEX_MANAGED_PROVIDER_FIELDS: [&str; 4] = [
-    "name",
-    "base_url",
-    "wire_api",
-    "requires_openai_auth",
-];
+const CODEX_MANAGED_PROVIDER_FIELDS: [&str; 4] =
+    ["name", "base_url", "wire_api", "requires_openai_auth"];
 
 fn table_assignment_key(line: &str) -> Option<&str> {
     let trimmed = line.trim_start();
@@ -461,8 +457,8 @@ fn restore_model_provider_base_table(
         .into_iter()
         .next()
     else {
-        let insert_at = find_model_provider_nested_table_index(lines, provider_key)
-            .unwrap_or(lines.len());
+        let insert_at =
+            find_model_provider_nested_table_index(lines, provider_key).unwrap_or(lines.len());
         lines.splice(
             insert_at..insert_at,
             backup_lines[backup_start..backup_end].iter().cloned(),

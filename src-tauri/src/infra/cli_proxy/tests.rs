@@ -2442,14 +2442,20 @@ keep = true
     let restored = merge_restore_codex_config_bytes(Some(current), backup).expect("restore");
     let restored = String::from_utf8(restored).expect("utf8");
 
-    assert!(restored.contains("preferred_auth_method = \"chatgpt\""), "{restored}");
+    assert!(
+        restored.contains("preferred_auth_method = \"chatgpt\""),
+        "{restored}"
+    );
     assert!(restored.contains("name = \"User OpenAI\""), "{restored}");
     assert!(
         restored.contains("base_url = \"https://api.openai.com/v1\""),
         "{restored}"
     );
     assert!(restored.contains("wire_api = \"chat\""), "{restored}");
-    assert!(restored.contains("requires_openai_auth = false"), "{restored}");
+    assert!(
+        restored.contains("requires_openai_auth = false"),
+        "{restored}"
+    );
     assert!(restored.contains("custom = \"preserve\""), "{restored}");
     assert!(
         restored.contains("external_during_proxy = \"keep\""),
