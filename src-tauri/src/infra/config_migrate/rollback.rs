@@ -319,7 +319,7 @@ pub(super) fn sync_all_cli_runtime<R: tauri::Runtime>(
         crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::Workspaces)
     {
         crate::prompts::sync_one_cli(app, conn, cli_key)?;
-        crate::mcp::sync_one_cli(app, conn, cli_key)?;
+        crate::mcp::sync_one_cli_with_codex_lifecycle_locked(app, conn, cli_key)?;
         crate::skills::sync_one_cli(app, conn, cli_key)?;
     }
     Ok(())

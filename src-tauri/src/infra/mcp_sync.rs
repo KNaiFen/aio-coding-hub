@@ -26,5 +26,5 @@ pub use manifest::{read_manifest_bytes, restore_manifest_bytes};
 pub use sync::sync_cli;
 pub(crate) use sync::{
     build_next_bytes, capture_grok_local_servers_for_workspace,
-    restore_grok_local_servers_for_workspace,
+    restore_grok_local_servers_for_workspace, sync_cli_with_codex_lifecycle_locked,
 };

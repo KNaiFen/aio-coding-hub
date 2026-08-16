@@ -195,12 +195,10 @@ fn rebind_grok_mcp<R: tauri::Runtime>(
     }
 }
 
-fn sync_codex_cli<R: tauri::Runtime>(
+fn sync_codex_cli_locked<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     servers: &[McpServerForSync],
 ) -> Result<(), String> {
-    let _guard = crate::codex_managed_profiles::lock_profile_lifecycle();
-    crate::codex_managed_profiles::ensure_lifecycle_open().map_err(String::from)?;
     let snapshots = CodexMcpMetadataSnapshots::capture(app)?;
     let target_path = mcp_target_path(app, "codex")?;
     let mut transaction: Option<crate::codex_config::CanonicalConfigTransaction> = None;
@@ -279,9 +277,24 @@ pub fn sync_cli<R: tauri::Runtime>(
     cli_key: &str,
     servers: &[McpServerForSync],
 ) -> Result<(), String> {
+    if cli_key == "codex" {
+        validate_cli_key(cli_key)?;
+        let _guard = crate::codex_managed_profiles::lock_profile_lifecycle();
+        crate::codex_managed_profiles::ensure_lifecycle_open().map_err(String::from)?;
+        return sync_codex_cli_locked(app, servers);
+    }
+    sync_cli_with_codex_lifecycle_locked(app, cli_key, servers)
+}
+
+/// Caller must hold the shared Codex lifecycle lock when `cli_key` is `codex`.
+pub(crate) fn sync_cli_with_codex_lifecycle_locked<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    cli_key: &str,
+    servers: &[McpServerForSync],
+) -> Result<(), String> {
     validate_cli_key(cli_key)?;
     if cli_key == "codex" {
-        return sync_codex_cli(app, servers);
+        return sync_codex_cli_locked(app, servers);
     }
 
     let _grok_guard = if cli_key == "grok" {

@@ -151,3 +151,13 @@ pub(crate) fn sync_one_cli<R: tauri::Runtime>(
     mcp_sync::sync_cli(app, cli_key, &servers)?;
     Ok(())
 }
+
+pub(crate) fn sync_one_cli_with_codex_lifecycle_locked<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    conn: &Connection,
+    cli_key: &str,
+) -> crate::shared::error::AppResult<()> {
+    let servers = list_enabled_for_cli(conn, cli_key)?;
+    mcp_sync::sync_cli_with_codex_lifecycle_locked(app, cli_key, &servers)?;
+    Ok(())
+}
