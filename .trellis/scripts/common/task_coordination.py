@@ -251,7 +251,14 @@ def validate_task_manifest(task_dir: Path, repo_root: Path) -> list[str]:
         if not isinstance(block, dict):
             errors.append("blocked phase requires coordination.block")
         else:
-            for field in ("reason", "resume_condition", "owner", "blocked_at", "previous_phase"):
+            for field in (
+                "reason",
+                "resume_condition",
+                "owner",
+                "blocked_at",
+                "previous_phase",
+                "previous_writer",
+            ):
                 if not isinstance(block.get(field), str) or not block[field].strip():
                     errors.append(f"coordination.block.{field} must be a non-empty string")
     elif block is not None:
@@ -462,6 +469,39 @@ def cmd_handoff(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_deliver(args: argparse.Namespace) -> int:
+    repo_root = get_repo_root()
+    try:
+        task_dir = _resolve_task(getattr(args, "dir", None), repo_root)
+        data = load_task_manifest(task_dir)
+        errors = validate_task_manifest(task_dir, repo_root)
+        if errors:
+            raise TaskCoordinationError("; ".join(errors))
+        coordination = _coordination(data, required=True)
+        if coordination.get("route") != "delegated" or coordination.get("phase") != "implementing":
+            raise TaskCoordinationError("deliver requires delegated phase=implementing")
+        if not (task_dir / "delivery.md").is_file():
+            raise TaskCoordinationError("deliver requires delivery.md")
+        dirty = _git_value(repo_root, ["status", "--porcelain"], "read worktree status")
+        if dirty:
+            raise TaskCoordinationError(
+                "deliver requires a clean worktree; commit the implementation and delivery report first"
+            )
+
+        def apply_delivery(manifest: dict[str, Any]) -> None:
+            state = _coordination(manifest, required=True)
+            state["phase"] = "delivered"
+            state["updated_at"] = utc_now()
+
+        mutate_task_manifest(task_dir, apply_delivery)
+    except TaskCoordinationError as error:
+        print(colored(f"Error: {error}", Colors.RED), file=sys.stderr)
+        return 1
+    print(colored("✓ Task marked delivered", Colors.GREEN))
+    print("Next: commit and push task.json, wait for required CI on that head, then pause for main review.")
+    return 0
+
+
 def cmd_block(args: argparse.Namespace) -> int:
     repo_root = get_repo_root()
     try:
@@ -475,13 +515,16 @@ def cmd_block(args: argparse.Namespace) -> int:
             if phase not in {"ready", "implementing", "delivered"}:
                 raise TaskCoordinationError(f"cannot block task from phase={phase}")
             coordination["phase"] = "blocked"
+            previous_writer = coordination.get("writer")
             coordination["block"] = {
                 "reason": args.reason,
                 "resume_condition": args.resume_condition,
                 "owner": args.owner,
                 "blocked_at": utc_now(),
                 "previous_phase": phase,
+                "previous_writer": previous_writer,
             }
+            coordination["writer"] = args.owner
             coordination["updated_at"] = utc_now()
 
         mutate_task_manifest(task_dir, apply_block)

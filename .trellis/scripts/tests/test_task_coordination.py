@@ -13,6 +13,7 @@ from unittest.mock import patch
 from common.task_coordination import (
     cmd_block,
     cmd_delegate,
+    cmd_deliver,
     cmd_doctor,
     cmd_handoff,
     cmd_resume,
@@ -154,7 +155,65 @@ class TaskCoordinationTests(unittest.TestCase):
 
             resumed = load_task_manifest(task_dir)
             self.assertEqual(resumed["coordination"]["phase"], "implementing")
+            self.assertEqual(resumed["coordination"]["writer"], "execution-session")
             self.assertIsNone(resumed["coordination"]["block"])
+
+    def test_deliver_requires_clean_worktree_and_delivery_report(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_root:
+            repo, task_dir, base_sha, planning_commit = self._make_repo(raw_root)
+            data = load_task_manifest(task_dir)
+            data["status"] = "in_progress"
+            data["branch"] = "main"
+            data["worktree_path"] = str(repo.resolve())
+            data["coordination"].update(
+                {
+                    "route": "delegated",
+                    "phase": "implementing",
+                    "writer": "execution-session",
+                    "base_sha": base_sha,
+                    "planning_commit": planning_commit,
+                }
+            )
+            self.assertTrue(write_task_manifest_path(task_dir / "task.json", data))
+            (task_dir / "delivery.md").write_text("# Delivery\n", encoding="utf-8")
+            self._git(repo, "add", ".trellis/tasks/08-16-example")
+            self._git(repo, "commit", "-m", "implementation")
+
+            with patch("common.task_coordination.get_repo_root", return_value=repo):
+                self.assertEqual(cmd_deliver(Namespace(dir="08-16-example")), 0)
+
+            delivered = load_task_manifest(task_dir)
+            self.assertEqual(delivered["coordination"]["phase"], "delivered")
+
+    def test_deliver_rejects_dirty_worktree(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_root:
+            repo, task_dir, base_sha, planning_commit = self._make_repo(raw_root)
+            data = load_task_manifest(task_dir)
+            data["status"] = "in_progress"
+            data["branch"] = "main"
+            data["worktree_path"] = str(repo.resolve())
+            data["coordination"].update(
+                {
+                    "route": "delegated",
+                    "phase": "implementing",
+                    "writer": "execution-session",
+                    "base_sha": base_sha,
+                    "planning_commit": planning_commit,
+                }
+            )
+            self.assertTrue(write_task_manifest_path(task_dir / "task.json", data))
+            (task_dir / "delivery.md").write_text("# Delivery\n", encoding="utf-8")
+            errors = io.StringIO()
+            with (
+                patch("common.task_coordination.get_repo_root", return_value=repo),
+                redirect_stderr(errors),
+            ):
+                self.assertEqual(cmd_deliver(Namespace(dir="08-16-example")), 1)
+            self.assertIn("clean worktree", errors.getvalue())
+            self.assertEqual(
+                load_task_manifest(task_dir)["coordination"]["phase"],
+                "implementing",
+            )
 
     def test_legacy_manifest_accepts_custom_status_without_git_checks(self) -> None:
         with tempfile.TemporaryDirectory() as raw_root:

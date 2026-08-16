@@ -16,6 +16,7 @@ Usage:
     python3 task.py doctor [dir]                # Validate task and local Git facts
     python3 task.py delegate <dir> ...          # Register an existing worktree
     python3 task.py handoff [dir] [--json]      # Render an execution handoff
+    python3 task.py deliver [dir]               # Mark a clean implementation delivered
     python3 task.py block <dir> ...             # Persist a blocker
     python3 task.py resume <dir> ...            # Resume a blocked task
     python3 task.py set-branch <dir> <branch>   # Set git branch
@@ -72,6 +73,7 @@ from common.task_context import (
 from common.task_coordination import (
     cmd_block,
     cmd_delegate,
+    cmd_deliver,
     cmd_doctor,
     cmd_handoff,
     cmd_resume,
@@ -375,6 +377,7 @@ Usage:
   python3 task.py doctor [dir]                       Validate task and local Git facts
   python3 task.py delegate <dir> <registration...>   Register a delegated worktree
   python3 task.py handoff [dir] [--json]             Render a deterministic handoff
+  python3 task.py deliver [dir]                      Mark a clean implementation delivered
   python3 task.py block <dir> <blocker...>           Persist a blocker
   python3 task.py resume <dir> --writer <writer>     Resume a blocked task
   python3 task.py set-branch <dir> <branch>          Set git branch
@@ -521,6 +524,9 @@ def main() -> int:
     p_handoff.add_argument("dir", nargs="?", help="Task directory (defaults to current live task)")
     p_handoff.add_argument("--json", action="store_true", help="Output stable JSON")
 
+    p_deliver = subparsers.add_parser("deliver", help="Mark a clean implementation delivered")
+    p_deliver.add_argument("dir", nargs="?", help="Task directory (defaults to current live task)")
+
     p_block = subparsers.add_parser("block", help="Persist a task blocker")
     p_block.add_argument("dir", help="Task directory")
     p_block.add_argument("--reason", required=True, help="Current blocking reason")
@@ -588,6 +594,7 @@ def main() -> int:
         "doctor": cmd_doctor,
         "delegate": cmd_delegate,
         "handoff": cmd_handoff,
+        "deliver": cmd_deliver,
         "block": cmd_block,
         "resume": cmd_resume,
         "set-branch": cmd_set_branch,
