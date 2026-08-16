@@ -106,6 +106,16 @@ for (const [name, mutate, expected] of [
     /\.trellis\/workflow\.md contains a prohibited local instruction/,
   ],
   [
+    "AIO role skill prefix",
+    (fixture) => {
+      fixture.roleSkills[0].instructions = fixture.roleSkills[0].instructions.replace(
+        "name: aio-trellis-main",
+        "name: trellis-main"
+      );
+    },
+    /aio-trellis-main\/SKILL\.md must include "name: aio-trellis-main"/,
+  ],
+  [
     "active spec bare cargo command",
     (fixture) => {
       fixture.activeSpecs.set("cross-layer/example.md", "cargo test --locked\n");

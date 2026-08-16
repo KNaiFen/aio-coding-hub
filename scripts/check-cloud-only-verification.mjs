@@ -46,6 +46,7 @@ function readMarkdownTree(root, relativeDir) {
 }
 
 export function loadCloudOnlyVerificationFixture(root = repoRoot) {
+  const roleSkillNames = ["aio-trellis-main", "aio-trellis-execute", "aio-trellis-accept"];
   return {
     rootPackage: readJson(root, "package.json"),
     pluginSdkPackage: readJson(root, "packages/plugin-sdk/package.json"),
@@ -58,6 +59,11 @@ export function loadCloudOnlyVerificationFixture(root = repoRoot) {
     trellisWorkflow: readText(root, ".trellis/workflow.md"),
     implementAgent: readText(root, ".trellis/agents/implement.md"),
     checkAgent: readText(root, ".trellis/agents/check.md"),
+    roleSkills: roleSkillNames.map((name) => ({
+      name,
+      instructions: readText(root, `.agents/skills/${name}/SKILL.md`),
+      metadata: readText(root, `.agents/skills/${name}/agents/openai.yaml`),
+    })),
     activeSpecs: readMarkdownTree(root, ".trellis/spec/aio-coding-hub"),
     ciWorkflow: readText(root, ".github/workflows/ci.yml"),
     devBuildWorkflow: readText(root, ".github/workflows/dev-build.yml"),
@@ -478,6 +484,7 @@ export function assertCloudOnlyVerificationContract(fixture) {
     trellisWorkflow,
     implementAgent,
     checkAgent,
+    roleSkills,
     activeSpecs,
     ciWorkflow,
     devBuildWorkflow,
@@ -540,6 +547,20 @@ export function assertCloudOnlyVerificationContract(fixture) {
   ]) {
     requireText(text, "repository-authorized", label, failures);
     requireAbsent(text, /Run the project'?s lint and typecheck|Run lint and typecheck/i, label, failures);
+  }
+  for (const roleSkill of roleSkills) {
+    requireText(
+      roleSkill.instructions,
+      `name: ${roleSkill.name}`,
+      `${roleSkill.name}/SKILL.md`,
+      failures
+    );
+    requireText(
+      roleSkill.metadata,
+      `$${roleSkill.name}`,
+      `${roleSkill.name}/agents/openai.yaml`,
+      failures
+    );
   }
   assertActiveSpecs(activeSpecs, failures);
 
