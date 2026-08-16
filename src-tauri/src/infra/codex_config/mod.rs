@@ -732,7 +732,7 @@ pub(crate) fn apply_canonical_bytes_with_completion_locked<R: tauri::Runtime>(
     )?;
     interrupt_lifecycle_for_tests("planned")?;
     let backup_snapshot = sync_codex_cli_proxy_backup_if_enabled(app, &canonical)?;
-    let backup = match backup_snapshot
+    let backup = backup_snapshot
         .map(|snapshot| {
             Ok(CodexBackupRollbackState {
                 expected_manifest: snapshot_optional_file(&snapshot.manifest_path)?,
@@ -740,11 +740,7 @@ pub(crate) fn apply_canonical_bytes_with_completion_locked<R: tauri::Runtime>(
                 snapshot,
             })
         })
-        .transpose()
-    {
-        Ok(backup) => backup,
-        Err(error) => return Err(error),
-    };
+        .transpose()?;
     if let Err(error) = update_lifecycle_journal_phase(
         &journal_path,
         &mut journal,

@@ -1,3 +1,4 @@
+use super::codex::merge_restore_codex_config_bytes;
 use super::*;
 use crate::infra::settings::{self, AppSettings, CodexHomeMode};
 use std::ffi::OsString;

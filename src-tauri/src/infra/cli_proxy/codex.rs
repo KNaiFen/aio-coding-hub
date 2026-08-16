@@ -387,26 +387,6 @@ pub(super) fn revert_root_key(lines: &mut Vec<String>, key: &str, backup_value: 
     }
 }
 
-/// Remove `[model_providers.<provider_key>]` section and its nested tables.
-pub(super) fn remove_model_provider_section(lines: &mut Vec<String>, provider_key: &str) {
-    // Remove base tables
-    loop {
-        let indices = find_model_provider_base_table_indices(lines, provider_key);
-        if indices.is_empty() {
-            break;
-        }
-        let start = indices[0];
-        let end = find_next_table_header(lines, start.saturating_add(1));
-        lines.drain(start..end);
-    }
-
-    // Remove nested tables
-    while let Some(start) = find_model_provider_nested_table_index(lines, provider_key) {
-        let end = find_next_table_header(lines, start.saturating_add(1));
-        lines.drain(start..end);
-    }
-}
-
 const CODEX_MANAGED_PROVIDER_FIELDS: [&str; 4] =
     ["name", "base_url", "wire_api", "requires_openai_auth"];
 
@@ -478,17 +458,6 @@ fn restore_model_provider_base_table(
     let mut restored = backup_managed_lines;
     restored.extend(retained);
     lines.splice(current_start + 1..current_end, restored);
-}
-
-/// Check if backup lines contain a `[windows]` section with `sandbox` key.
-pub(super) fn has_windows_sandbox(lines: &[String]) -> bool {
-    let Some(start) = lines.iter().position(|l| l.trim() == "[windows]") else {
-        return false;
-    };
-    let end = find_next_table_header(lines, start.saturating_add(1));
-    lines[start + 1..end]
-        .iter()
-        .any(|l| l.trim_start().starts_with("sandbox"))
 }
 
 fn windows_sandbox_line(lines: &[String]) -> Option<String> {

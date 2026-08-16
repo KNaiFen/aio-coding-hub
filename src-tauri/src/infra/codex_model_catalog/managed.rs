@@ -560,7 +560,7 @@ pub(crate) fn canonicalize_config_bytes<R: tauri::Runtime>(
     }
     let generated = snapshot_generated_file(&generated_path)?
         .bytes
-        .ok_or_else(|| modified_catalog_error())?;
+        .ok_or_else(modified_catalog_error)?;
     let metadata = validate_owned_catalog(&generated)?;
     canonicalize_config_bytes_with_metadata(config, &generated_path, Some(&metadata))
 }
