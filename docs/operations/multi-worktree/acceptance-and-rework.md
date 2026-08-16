@@ -40,4 +40,3 @@ main 从[整改模板](../templates/findings.md)创建或更新 `findings.md`。
 - 需要整改：保持任务活动，恢复为 `implementing`，不得合并。
 - 阻塞：执行 `block`，保留任务和需要恢复的 worktree。
 - 失败、放弃或无功能 PR 的部分完成：如实记录，不伪造功能 PR、merge 或验证。
-
