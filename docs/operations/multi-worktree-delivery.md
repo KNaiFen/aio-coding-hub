@@ -1,205 +1,64 @@
-# 多 Worktree 任务交付规范
+# 多 Worktree 任务交付
 
-本规范用于 main session 把一个已经完成需求细化和技术设计的任务交给独立执行 session，并在 PR 通过 CI 后完成验收、返工、合并和清理。
+本页是独立执行 session 的唯一流程入口。它只负责解释事实源、文件角色和阶段路由；进入某个阶段时，只读对应的一份专题，不要预加载整套流程。
 
-它追求的是信息充分和职责清楚，不是增加审批系统。任务文档使用 Markdown；GitHub PR 是代码、提交和 CI 状态的实时事实源，不新增自定义 JSON 门禁。
+简单、低风险且由 main 连续完成的任务使用[任务方案与实施结果留痕规范](./task-documentation-records.md)。独立执行、并行、长流程或高风险任务使用本流程和同级 worktree。
 
-并非所有任务都需要 worktree。由 main session 自己完成的简单、低风险任务按 [任务方案与实施结果留痕规范](./task-documentation-records.md) 直接在 `main/` 检出施工；独立执行、并行、长流程或高风险任务才使用本规范和同级 worktree。
+## 事实源
 
-## 核心原则
+| 事实 | 权威来源 | 写入方式 |
+|---|---|---|
+| 活动阶段、唯一写者、worktree、分支、base、规划提交、阻塞 | `task.json` | `task.py status/doctor/delegate/deliver/block/resume` |
+| 用户决定、范围、AC | `prd.md` | main 规划 |
+| 技术设计与实施顺序 | `design.md`、`implement.md` | main 规划；复杂任务才需要 |
+| 执行入口和任务特有边界 | `execution.md` | main 交接 |
+| 实际实现、AC 证据、偏移、风险 | `delivery.md` | 执行 session |
+| 当前整改问题 | `findings.md` | main；仅验收不通过时创建 |
+| 实时 PR head、base、检查和合并状态 | GitHub PR / Checks | GitHub |
+| 最终验收、merge、归档和清理证据 | `acceptance.md` | main；合并或终态后汇总 |
 
-1. **一个详细事实源**：活动期的完整任务方案只保存在任务 worktree 的 Trellis 任务目录中。main 的索引只保存定位和协调信息；功能或只含记录的终态 PR 合并并完成归档后，main 中的归档副本才成为历史事实源。
-2. **把决定和自由度分开**：main 写清已经锁定的用户决定、不可越过的边界和验收标准；未锁定的实现细节由执行 session 根据代码现状判断。
-3. **交付针对 PR 最新版本**：执行 session 负责把最新 PR 提交的必需 CI 和相关编译跑通。main 验收时重新读取实时 PR 状态，不依赖交付文档中的过期状态。
-4. **main 对是否可合并负责**：main 可以自己验收，也可以让只读 subagent 提供线索；最终判断和合并权限始终属于 main。
-5. **记录有用信息**：文档解释目标、约束、取舍、偏移、证据和风险，不粘贴完整 diff，不逐行复述代码，也不维护没有决策价值的流程字段。
+不要在 Markdown 中维护 `task.json` 已有的活动状态，也不要在候选分支中手写“当前 head SHA”。提交该文本本身会产生新 head。main 在活动验收时以 GitHub 上绑定具体提交的 review/comment 留证，终态再写入 `acceptance.md`。
 
-## 标准文件
+## 文件最小集
 
-| 文件 | 作者 | 何时需要 | 作用 |
-|---|---|---|---|
-| `prd.md` | main | 正式任务 | 用户需求、确认状态、范围和验收标准 |
-| `design.md` | main | 复杂任务 | 技术边界、数据流、接口和取舍 |
-| `implement.md` | main | 复杂任务 | 有顺序的实施步骤和验证方案 |
-| `execution.md` | main | 所有独立执行 session | 唯一施工入口，告诉执行 session 读什么、做什么、不能做什么 |
-| `delivery.md` | 执行 session，main 追加验收/收尾 | 每次声明可验收前，合并后收尾 | 说明交付候选、实际完成、计划偏移、验证、main 验收与最终收尾 |
-| `findings.md` | main | 验收不通过时 | 给出可定位、可整改、可复验的问题和修改目标 |
-
-委派给独立执行 session 的轻量任务在开工前可以只由 main 准备 `prd.md` 和 `execution.md`，执行 session 在声明可验收前仍必须补齐 `delivery.md`。复杂任务额外使用 `design.md` 和 `implement.md` 分离技术设计与实施步骤。`execution.md` 只做施工导航和任务边界摘要，不复制整份设计。
-
-main 的活动任务索引必须至少记录：任务目录、分支、完整 base SHA、规划提交、worktree、PR、当前阶段、当前唯一写者，以及依赖/冲突摘要。它不复制 `prd.md`、设计或交付正文；活动期需要详细事实时，main 进入任务 worktree 阅读对应文件。
-
-活动索引是协调记录，不是第二份方案或额外门禁。移交前，它必须已进入任务分支的规划提交，或已进入 main 的短期协调 PR；不必为了等待纯登记 PR 的 CI 而阻塞已具备施工材料的执行 session。功能合并后，main 在功能或收尾 PR 中把索引同步为 main 的当前事实。
+- 轻量委派任务：`task.json`、`prd.md`、`execution.md`；交付前补 `delivery.md`。
+- 复杂任务：再加 `design.md`、`implement.md`。
+- 验收不通过：main 创建 `findings.md`。
+- 合并、失败或放弃后的持久记录：main 创建 `acceptance.md`。
 
 模板：
 
-- [施工入口模板](./templates/execution.md)
-- [交付报告模板](./templates/delivery.md)
-- [验收整改模板](./templates/findings.md)
+- [施工入口](./templates/execution.md)
+- [交付报告](./templates/delivery.md)
+- [验收整改](./templates/findings.md)
+- [验收与收尾](./templates/acceptance.md)
 
-## main 交付前
+## 生命周期
 
-main 在创建 worktree 和移交任务前应完成以下工作：
+```text
+planning -> ready -> implementing -> delivered -> completed
+                          |              |
+                          +-> blocked <-+
+                          ^              |
+                          +--- rework ---+
+```
 
-1. `fetch origin` 后记录完整 `origin/main` base SHA，从该 SHA 创建独立分支和同级 worktree，确认 main 与任务 worktree 都没有来源不明的修改。
-2. 检查其他活动任务，明确文件范围、共享接口、依赖关系和预期合并顺序。不同文件不代表没有语义冲突。
-3. 阅读相关代码、现行规范和 `PENDING.md`，把用户已锁定的决定落入任务文档，不要求执行 session 从聊天记录猜测。
-4. 为每项验收标准写出可观察结果。避免“完善功能”“处理边界情况”“保证质量”这类无法判定的描述。
-5. 明确本地允许执行的验证、必须由 GitHub Actions 执行的检查，以及是否需要人工或真实环境验证。
-6. 在任务 worktree 填好并提交规划材料；显式把 Trellis 任务的 `branch` 设为任务分支、`base_branch` 设为 `main`，避免 `task.py create` 依据当前 feature 分支误记 PR 目标。
-7. 填好 `execution.md`，记录 base SHA、规划提交、当前唯一写者和 PENDING 审阅结论，确保只给这一个入口路径，执行 session 按其中的阅读顺序即可开工。
+- `planning`：main 明确需求与方案。
+- `ready`：worktree 和任务已登记，尚未启动执行。
+- `implementing`：执行 session 是唯一写者，包含首次施工和返工。
+- `delivered`：执行 session 已提交并暂停，main 按冻结的 GitHub head 验收。
+- `blocked`：写权交给阻塞负责人，恢复条件已持久化。
+- `completed`：main 已决定终态并执行归档；它不等于功能成功。
 
-### execution.md 必须回答或指向
+状态以 `python3 .trellis/scripts/task.py status <task>` 为准。`task.py validate` 只校验已有 JSONL 上下文文件，不证明交付、CI、Markdown 或归档资格。
 
-- 权威 `prd.md`、`design.md`、`implement.md` 的路径和规划提交；不要把完整方案复制成第二份事实源。
-- 哪些用户决定已经锁定，哪些实现细节允许执行 session 自主选择；只重复执行者不能漏看的边界。
-- 必须完成、允许修改和明确禁止触碰的范围；详细需求和 AC 以 `prd.md` 为准。
-- 预计涉及的模块、接口、数据、配置、兼容性和文档；复杂技术设计以 `design.md` 为准。
-- 推荐实施顺序和每一步的完成信号；复杂任务的完整步骤以 `implement.md` 为准。
-- 每条验收标准在哪里验证，哪些检查必须在 PR 上通过；可引用 AC ID，不必复制整段 Given/When/Then。
-- 与其他 worktree 的依赖、冲突边界和合并顺序。
-- 什么情况必须停止并询问 main，而不是自行扩大范围。
-- 交付报告应写到哪里、PR 由谁创建、何时暂停等待验收。
-- 当前方案是否已获实施授权，哪些材料性事实、假设或未决问题仍会阻止施工。
-- 若任务从直接 main 路线迁移而来，原月度记录、迁移原因、冻结提交/未提交修改处置和迁移后的唯一事实源。
-- 中途阻塞、范围变化或写权转移时由谁更新哪份文档，以及如何恢复施工。
+## 按阶段读取
 
-### 方案精度
+- main 规划、建 worktree、登记与交接：[规划与交接](./multi-worktree/planning-and-handoff.md)
+- 执行 session 开工、施工、阻塞与交付：[执行与交付](./multi-worktree/execution-and-delivery.md)
+- main 验收、findings、返工和 `main-direct-fix`：[验收与返工](./multi-worktree/acceptance-and-rework.md)
+- main 合并、记录、归档与清理：[合并、归档与清理](./multi-worktree/merge-archive-cleanup.md)
 
-main 应尽量提供文件、模块、类型或符号级定位；不要依赖容易漂移的行号。对于会影响多层合同的任务，要写清调用方向、数据转换、错误语义和兼容策略。若存在多个可行方案，应在交付前完成关键取舍，或明确授权执行 session 在列出的范围内选择并在交付报告中解释。
+## 不记录
 
-## 执行 session 工作方式
-
-执行 session 收到的提示应直接指向 `execution.md`，例如：
-
-> 按照 `.trellis/tasks/<task>/execution.md` 执行。完成实现、PR、CI 和交付文档后暂停，等待 main 验收。
-
-执行 session 应：
-
-1. 先确认当前目录、分支和任务路径与 `execution.md` 一致，再按规定顺序阅读任务材料和相关规范。
-2. 尽早创建 Draft PR，使 CI 在开发过程中持续提供反馈。
-3. 按任务范围实现和提交；发现方案缺陷、范围冲突或需要产品判断时暂停询问，不静默改变锁定决定。
-4. 同步更新任务要求的现行文档、合同、测试和迁移材料。
-5. 修复最新 PR 提交的 CI 和相关编译错误。失败与本任务无关时也要提供证据并交由 main 判断，不能自行宣布忽略。
-6. 填写 `delivery.md`，把 PR 标记为可评审，然后停止继续写入该 worktree；不要运行 `/trellis:finish-work` 或归档任务，这些是 main 的验收后收尾职责。
-
-首次开工前，执行 session 还应核对：当前目录等于登记 worktree、当前分支等于登记分支、`BASE_SHA="<登记的完整 SHA>"; test "$(git merge-base "$BASE_SHA" HEAD)" = "$BASE_SHA"` 返回成功，以及 `execution.md` 指向的规划提交存在。该检查要求登记 base SHA 确实是当前 HEAD 的 merge base；若任务有意 rebase 或更换基线，main 先更新计划和登记信息。任何一项不一致都暂停并报告 main。
-
-### 暂停、变更与恢复
-
-- 正常施工期间，执行 session 是任务 worktree 的唯一写者。
-- 发生范围外修改、锁定决定冲突、依赖变化、CI/环境阻塞或无法满足 AC 时，执行 session 即使尚不可验收也应更新 `delivery.md` 为“阻塞”，记录证据、最后安全提交、工作树状态、受影响 AC、待决定事项、决策归属和恢复条件，然后暂停。
-- 早期阻塞可能尚未创建 PR、没有可提交改动或尚未触发 CI；此时交付记录明确写“尚未提交/未触发及原因”，不制造空提交或虚构运行证据。只有等待验收或返工候选才要求完整 head SHA 与 `ci-gate` 链接。
-- main 只有在确认执行 session 已暂停后，才成为临时唯一写者。main 在 `prd.md`、`design.md`、`implement.md` 或 `execution.md` 追加被批准的决定、受影响 AC/验证和新的规划提交；执行 session 不改写 main 的原始计划。
-- 影响用户行为、兼容性、范围或 AC 的变化必须先取得用户确认。恢复时，执行 session 先阅读更新后的计划和 `delivery.md`，再继续写入。
-
-## 实施完成的定义
-
-同时满足以下条件，执行 session 才能报告“实施完成，等待验收”：
-
-- 任务范围内的代码、测试、文档和迁移内容已经提交并推送到任务分支。
-- PR 指向 `main`，没有执行 session 已知但未披露的阻塞问题。
-- PR 最新提交的必需检查为绿色；相关构建因变更范围按设计跳过时，应在交付报告中说明。
-- 需要的人工验证已经完成，或者明确列为只能由 main/用户执行的验收项。
-- `delivery.md` 已更新，包含实际实现、关键代码位置、验收标准对应关系、计划偏移和剩余风险。
-- `delivery.md` 记录完整 PR head SHA、base SHA 和对应的 `ci-gate` 运行；这些证据必须属于本次交付候选。
-- 执行 session 已暂停，等待 main 验收。
-
-CI 绿色只能证明自动检查通过，不能替代 main 对需求、设计、回归风险和文档准确性的判断。
-
-## 交付报告质量
-
-`delivery.md` 必须基于实际代码和 PR 编写，不复制 `implement.md` 的计划语句。它至少要让 main 无需重新探索就能回答：
-
-- 实际实现了什么，用户可见和内部行为分别如何变化。
-- 关键实现位于哪些文件、模块和符号，为什么放在那里。
-- 每条验收标准是否满足，证据在哪里。
-- 与原计划是否有偏移；偏移原因、影响和替代方案是什么。
-- 执行过哪些本地检查、GitHub 检查和人工验证，哪些没有执行以及原因。
-- 是否改变配置、数据、API、兼容性、安全边界、发布或回滚方式。
-- 是否存在已知限制、后续事项或需要 main 特别查看的高风险区域。
-
-“CI 已通过”“代码已完成”“无问题”不能单独构成交付报告。GitHub 检查状态可能变化，main 仍应在验收时读取 PR 当前状态。
-
-## main 验收
-
-main 收到交付通知后：
-
-1. 确认执行 session 已暂停，并读取 `execution.md`、`delivery.md`、任务设计和当前 PR diff。
-2. 检查 PR 当前 head 的必需 CI、相关编译、合并状态和变更范围。
-3. 按验收标准核对功能、错误路径、兼容性、回归风险、测试和文档，而不只检查“是否按计划改了文件”。
-4. 对执行 session 声明的偏移重新做技术判断；合理偏移可以接受，但必须与用户锁定决定和现行合同一致。
-5. main 可以派只读 subagent 审查特定模块或风险，但应核对其关键证据并自行给出最终结论。
-
-验收通过时不要求额外的 `acceptance.json` 或审批表。main 在 `delivery.md` 的“main 验收记录”填写轮次、审查范围、PR head SHA、`ci-gate` 证据、结论、接受的偏移/风险和日期；确认该 head 仍为绿色后即可合并。任何新提交都会使先前交付和验收结论失效。
-
-## 验收不通过
-
-main 创建或更新 `findings.md`。整改意见必须是可执行的工程信息，而不是泛泛评价。
-
-默认由执行 session 返工；但 main 可以按下方规则判断是否采用 `main-direct-fix`。这是为了收敛交付记录等低风险小错误的受控例外，不是把 main 变成第二个长期施工者。
-
-每项问题至少包含：
-
-- 稳定编号和严重程度。
-- 对应的需求、设计决定、现行合同或质量风险。
-- 具体证据：`file:line`、符号、失败测试、CI 日志或可复现行为。
-- 当前行为及其影响，说明为什么不能合并。
-- 期望达到的结果和复验标准。
-- 允许修改的范围、必须保持不变的行为，以及是否需要新增测试或文档。
-
-### 验收返工分流
-
-只有以下条件全部满足时，main 才能在执行 session 已暂停后，先在活动索引和 `execution.md`（或同等权威交接记录）登记 `main-direct-fix`、接管时间、冻结 head、工作树状态和未提交内容归属，再接管原任务 worktree、原任务分支和原 PR 的临时唯一写权，直接处理该项。接管记录未落盘前不得编辑：
-
-- 问题单一、明确、局部，修复方案确定或属于机械性修正，不需要重新设计、追加用户决定或扩大已批准范围。
-- 只修正记录性文档事实或表达：例如 `delivery.md`/`findings.md` 缺字段，head、CI、路径、状态、日期、链接、拼写或格式过期；`prd.md`/`design.md` 只允许不改变决定的事实性澄清。
-- 不改变产品行为、测试逻辑、API、兼容性、安全边界、迁移、架构、接口/数据流或验收标准。
-- 预计并经实际 scope 证实只进入 process/checked documentation 短合同检查；未知、未分类、控制面或 `shared` 路径一律不适用。推送后必须记录实时 `change-scope` 的 `scope`、`full_ci`、`frontend_ci`、`rust_ci`、`shared_ci`、`docs_checks`，并以 `ci-gate` 的选中/跳过结果证实不选中 `frontend_ci`、`rust_ci`、`full_ci`，不触发编译、依赖安装、生成、构建、签名、打包、候选发布或性能基准。
-- main 能在当前任务范围内独立完成和证明修复，且工作树中所有未提交内容归属清楚。
-
-`main-direct-fix` 的判断不能只看改动行数、文件后缀或“文档”名称。只要语义、范围、原因或验证成本不明确，或实际触发了长任务，就停止例外路径，把后续返工交回执行 session。CodeQL 的 `build-mode: none` 不属于编译门槛，但仍须等待它和其他适用检查终态。
-
-main 采用该例外时，必须在 `findings.md` 写明 `返工责任：main-direct-fix`、接管时间、原因、范围、预期与实际 CI 分类字段、选中/跳过的 jobs、保持不变的行为和复验标准；在 `delivery.md` 追加修改、完整新 head、对应 `ci-gate` 和新的验收轮次。新 head 会使旧交付/验收失效；main 必须提交推送后重新读取实时 CI 并验收。若实际 scope 选中长任务，main 立即停止继续修改，在交回执行 session 前把活动索引和 `execution.md` 的当前唯一写者改回“执行 session 待返工”，记录交回时间、原因、最后安全 head、工作树状态和恢复条件，并明确通知后才允许恢复。main 不得借此运行执行 session 专属施工、合并、归档或清理命令。
-
-出现以下任一情况必须交回执行 session：产品代码或测试逻辑；workflow/policy/selftest、依赖/锁文件、生成文件、公共 API、迁移或架构；跨模块或原因不明；需要用户重新确认；worktree/分支/写权/未提交内容归属不清；或预计/实际触发任何编译、构建、生成、打包、发布候选、性能基准或长时监控 job。
-
-main 应描述必须实现的结果。只有在方案已经由用户锁定、兼容性要求唯一，或错误修法非常明确时，才要求执行 session 采用某个具体实现。
-
-### 返工轮次
-
-- `findings.md` 是当前可执行整改清单，同一文件按 `Round 1`、`Round 2` 追加记录，不删除旧问题。
-- 每轮问题和每次 main 复验都记录对应的 PR head SHA 与 `ci-gate` 证据；finding ID 永不复用，顶部未解决清单以各项最新复验状态为准。
-- main 编写问题和复验要求；执行 session 不改写原始问题，可在每项下面填写“执行回应”和证据。
-- 执行 session 完成整改后更新 `delivery.md` 的返工记录，推送新提交并再次把 CI 跑绿，然后暂停；若 main 使用 `main-direct-fix`，由 main 追加同样的返工记录、推送原任务 PR 并重新验收。
-- main 在下一轮把问题标记为“已解决”“未解决”“重新打开”或“接受风险”，并把复验结论写回 `findings.md` 和 `delivery.md` 的 main 验收记录。任何新提交都需要重新查看相关 diff 和实时 CI。
-- 纯建议但不阻止合并的内容必须标为“建议项”，不得与必须整改的问题混在一起。
-
-## 合并与收尾
-
-验收通过且存在功能 PR 时，main：
-
-1. 再次确认 PR 最新提交、CI 和本次验收看到的版本一致。
-2. 合并功能 PR；执行 session 不开启自动合并。
-3. fetch 并快进本地 `main`，确认功能 PR 的验收 head 已进入 `main`，并记录实际 merge commit。
-4. 确认任务 worktree 干净、没有 session 使用后，移除 worktree 和已合并的本地任务分支；远端分支是否自动删除也记录事实，不靠猜测。
-5. 让长期有效的知识库更新优先随功能 PR 进入 main；合并后才发现的新事实通过小型后续文档 PR 更新。收尾时判断用户可见行为、公共合同、架构、迁移/配置、运维和可复发陷阱；未完成的剩余范围按 PENDING 规则保留或拆分。
-6. 在收尾 PR 中更新 `delivery.md` 的“main 收尾”并运行 `task.py archive --no-commit`，再执行 `task.py validate --all`。归档命令成功、验证通过且收尾 PR 合并前，任务都不能视为完成归档。
-7. `task.json.status=completed` 仅表示 Trellis 目录已归档，不得替代 Markdown 中的最终结果。阻塞任务保持活动；失败或放弃可以归档，但必须说明结果、可保留成果和未完成范围。
-
-### 没有功能 PR 的终态
-
-- **阻塞**：main 在 `delivery.md` 的验收/收尾区记录阻塞结论、当前安全成果、恢复条件和责任人；任务保持活动，不归档，也不清理仍需恢复的 worktree。需要把记录持久化时，使用只包含任务记录的文档 PR，不虚构功能 PR 或 merge commit。
-- **失败、放弃或无功能 PR 的部分完成**：main 如实把功能 PR、验收 head 和功能 merge commit 写为“无”并说明原因，在只包含任务记录的收尾 PR 中保存最终结果、PENDING/知识库结论和清理计划。该收尾 PR 合并后，main 可在新的收尾分支执行 `archive --no-commit`、`validate --all` 并合并归档 PR；不得把文档 PR 伪装成功能交付。
-- 无论哪条路径，只有 main 能决定终态、归档和清理。存在来源不明的未提交内容或仍有 session 使用 worktree 时，停止清理并报告。
-
-## 不应写进文档的内容
-
-- 完整聊天记录、完整 diff 或大量没有解释的日志。
-- 从代码即可直接读出的逐行叙述。
-- 没有证据的“应该没问题”“理论上通过”。
-- 已被新一轮结论取代但仍伪装成当前指令的旧意见。
-- 密钥、令牌、真实账号凭据或未脱敏的用户数据。
-- 为了填模板而编造的命令、测试或验证结果。
-
-不适用的章节写“无”或“不适用”即可；不要为了形式制造无价值内容。
+不粘贴完整聊天、diff 或无解释日志；不逐行复述代码；不保留被新结论取代却仍伪装成当前指令的旧意见；不记录密钥、真实凭据或未脱敏用户数据；不为填模板编造 SHA、命令、CI 或人工验证。
