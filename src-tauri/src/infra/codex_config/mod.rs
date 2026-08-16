@@ -733,7 +733,7 @@ pub(crate) fn apply_canonical_bytes_with_completion_locked<R: tauri::Runtime>(
     interrupt_lifecycle_for_tests("planned")?;
     let backup_snapshot = sync_codex_cli_proxy_backup_if_enabled(app, &canonical)?;
     let backup = backup_snapshot
-        .map(|snapshot| {
+        .map(|snapshot| -> crate::shared::error::AppResult<_> {
             Ok(CodexBackupRollbackState {
                 expected_manifest: snapshot_optional_file(&snapshot.manifest_path)?,
                 expected_backup: snapshot_optional_file(&snapshot.backup_path)?,
