@@ -31,7 +31,7 @@
 - `archive --no-commit`：通过；任务状态已更新为 `completed`，目录和 JSONL 引用已迁移。
 - `validate --all`：通过，共验证 139 份已有 manifest；该结果只代表 JSONL 与引用路径校验。
 - records-only PR：https://github.com/KNaiFen/aio-coding-hub/pull/159；归档提交 `59ee043c527221ad4bb394c5c4e4d68fe5505f0a`。
-- worktree：`/Users/knaifen/Documents/Codex/aio-coding-hub/08-17-tui-observability-consistency`；待归档记录合并且确认 session 不再占用后清理。
-- 本地/远端分支：`task/tui-observability-consistency`；待 records-only PR 合并后按实时状态清理。
+- worktree：`/Users/knaifen/Documents/Codex/aio-coding-hub/08-17-tui-observability-consistency` 已在 records-only PR 合并后删除；删除前确认干净、session 已完成且内容已归档。
+- 本地/远端分支：本地 `task/tui-observability-consistency` 和 `records/08-17-tui-observability-consistency-closeout` 已删除；对应远端分支均由 GitHub 自动删除。
 
 阻塞任务保持活动。archive 非事务性；失败时记录实际目录、状态和恢复动作，不把 `status=completed` 当成功证据。

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.60.54](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.54) (2026-08-17)
+
+### Highlights
+
+* preserve local and remote compaction modes across narrow TUI request cards
+* align cross-provider model routing, route outcomes, and request metrics in the TUI
+* split provider availability time and results while tightening multi-worktree verification workflows
+
 ## [0.60.53](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.53) (2026-08-14)
 
 ### Highlights
