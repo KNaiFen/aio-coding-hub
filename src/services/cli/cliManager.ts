@@ -12,6 +12,7 @@ import {
   type CodexConfigTomlState as GeneratedCodexConfigTomlState,
   type CodexConfigTomlValidationError as GeneratedCodexConfigTomlValidationError,
   type CodexConfigTomlValidationResult as GeneratedCodexConfigTomlValidationResult,
+  type CodexContextWindow372kState as GeneratedCodexContextWindow372kState,
   type CodexModelCatalogState as GeneratedCodexModelCatalogState,
   type CodexModelCapability as GeneratedCodexModelCapability,
   type CodexReasoningEffortOption as GeneratedCodexReasoningEffortOption,
@@ -38,6 +39,7 @@ export type CodexConfigPatch = Partial<GeneratedCodexConfigPatch>;
 export type CodexConfigTomlState = GeneratedCodexConfigTomlState;
 export type CodexConfigTomlValidationError = GeneratedCodexConfigTomlValidationError;
 export type CodexConfigTomlValidationResult = GeneratedCodexConfigTomlValidationResult;
+export type CodexContextWindow372kState = GeneratedCodexContextWindow372kState;
 export type CodexModelCatalogState = GeneratedCodexModelCatalogState;
 export type CodexModelCapability = GeneratedCodexModelCapability;
 export type CodexReasoningEffortOption = GeneratedCodexReasoningEffortOption;
@@ -178,6 +180,29 @@ export async function cliManagerCodexModelCatalogGet() {
     invoke: () =>
       commands.cliManagerCodexModelCatalogGet() as Promise<
         GeneratedCommandResult<CodexModelCatalogState>
+      >,
+  });
+}
+
+export async function cliManagerCodexContextWindow372kGet() {
+  return invokeGeneratedIpc<CodexContextWindow372kState>({
+    title: "读取 Codex 372K 设置失败",
+    cmd: "cli_manager_codex_context_window_372k_get",
+    invoke: () =>
+      commands.cliManagerCodexContextWindow372kGet() as Promise<
+        GeneratedCommandResult<CodexContextWindow372kState>
+      >,
+  });
+}
+
+export async function cliManagerCodexContextWindow372kSet(enabled: boolean) {
+  return invokeGeneratedIpc<CodexContextWindow372kState>({
+    title: "保存 Codex 372K 设置失败",
+    cmd: "cli_manager_codex_context_window_372k_set",
+    args: { enabled },
+    invoke: () =>
+      commands.cliManagerCodexContextWindow372kSet(enabled) as Promise<
+        GeneratedCommandResult<CodexContextWindow372kState>
       >,
   });
 }

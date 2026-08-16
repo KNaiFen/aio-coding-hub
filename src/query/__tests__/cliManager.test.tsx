@@ -7,6 +7,7 @@ import {
   type ClaudeSettingsState,
   type CodexConfigState,
   type CodexConfigTomlState,
+  type CodexContextWindow372kState,
   type CodexModelCatalogState,
   type GeminiConfigState,
   type SimpleCliInfo,
@@ -20,6 +21,8 @@ import {
   cliManagerCodexConfigSet,
   cliManagerCodexConfigTomlGet,
   cliManagerCodexConfigTomlSet,
+  cliManagerCodexContextWindow372kGet,
+  cliManagerCodexContextWindow372kSet,
   cliManagerCodexInfoGet,
   cliManagerCodexModelCatalogGet,
   cliManagerCodexProviderSync,
@@ -44,6 +47,8 @@ import {
   useCliManagerCodexConfigSetMutation,
   useCliManagerCodexConfigTomlQuery,
   useCliManagerCodexConfigTomlSetMutation,
+  useCliManagerCodexContextWindow372kQuery,
+  useCliManagerCodexContextWindow372kSetMutation,
   useCliManagerCodexInfoQuery,
   useCliManagerCodexModelCatalogQuery,
   useCliManagerCodexModelCatalogRefresh,
@@ -72,6 +77,8 @@ vi.mock("../../services/cli/cliManager", async () => {
     cliManagerCodexConfigSet: vi.fn(),
     cliManagerCodexConfigTomlGet: vi.fn(),
     cliManagerCodexConfigTomlSet: vi.fn(),
+    cliManagerCodexContextWindow372kGet: vi.fn(),
+    cliManagerCodexContextWindow372kSet: vi.fn(),
     cliManagerCodexModelCatalogGet: vi.fn(),
     cliManagerCodexProviderSync: vi.fn(),
     cliManagerGeminiConfigGet: vi.fn(),
@@ -200,6 +207,12 @@ function makeCodexConfigTomlState(
   };
 }
 
+function makeCodexContextWindow372kState(
+  overrides: Partial<CodexContextWindow372kState> = {}
+): CodexContextWindow372kState {
+  return { enabled: false, ...overrides };
+}
+
 function makeGeminiConfigState(overrides: Partial<GeminiConfigState> = {}): GeminiConfigState {
   return {
     configDir: "/tmp/.gemini",
@@ -284,6 +297,9 @@ describe("query/cliManager", () => {
     vi.mocked(cliManagerCodexModelCatalogGet).mockResolvedValue(makeCodexModelCatalogState());
     vi.mocked(cliManagerCodexConfigGet).mockResolvedValue(makeCodexConfigState());
     vi.mocked(cliManagerCodexConfigTomlGet).mockResolvedValue(makeCodexConfigTomlState());
+    vi.mocked(cliManagerCodexContextWindow372kGet).mockResolvedValue(
+      makeCodexContextWindow372kState()
+    );
     vi.mocked(cliManagerCodexProviderSync).mockResolvedValue({
       status: "ok",
       target_provider: "aio",
@@ -323,6 +339,7 @@ describe("query/cliManager", () => {
     );
     renderHook(() => useCliManagerCodexConfigQuery(), { wrapper });
     renderHook(() => useCliManagerCodexConfigTomlQuery(), { wrapper });
+    renderHook(() => useCliManagerCodexContextWindow372kQuery(), { wrapper });
     renderHook(() => useCliManagerCodexProviderSyncMutation(), { wrapper });
     renderHook(() => useCliManagerGeminiConfigQuery(), { wrapper });
     renderHook(() => useCliManagerGeminiInfoQuery(), { wrapper });
@@ -337,6 +354,7 @@ describe("query/cliManager", () => {
       expect(cliManagerCodexModelCatalogGet).toHaveBeenCalled();
       expect(cliManagerCodexConfigGet).toHaveBeenCalled();
       expect(cliManagerCodexConfigTomlGet).toHaveBeenCalled();
+      expect(cliManagerCodexContextWindow372kGet).toHaveBeenCalled();
       expect(cliManagerCodexProviderSync).not.toHaveBeenCalled();
       expect(cliManagerGeminiConfigGet).toHaveBeenCalled();
       expect(cliManagerGeminiInfoGet).toHaveBeenCalled();
@@ -856,24 +874,35 @@ describe("query/cliManager", () => {
     );
   });
 
-  it("serializes ordinary Codex config and TOML writes in one mutation scope", async () => {
+  it("serializes ordinary Codex config, TOML, and 372K writes in one mutation scope", async () => {
     setTauriRuntime();
 
     let resolveConfig!: (value: CodexConfigState) => void;
     let resolveToml!: (value: CodexConfigState) => void;
+    let resolveContextWindow!: (value: CodexContextWindow372kState) => void;
     const configPromise = new Promise<CodexConfigState>((resolve) => {
       resolveConfig = resolve;
     });
     const tomlPromise = new Promise<CodexConfigState>((resolve) => {
       resolveToml = resolve;
     });
+    const contextWindowPromise = new Promise<CodexContextWindow372kState>((resolve) => {
+      resolveContextWindow = resolve;
+    });
     vi.mocked(cliManagerCodexConfigSet).mockReset().mockReturnValueOnce(configPromise);
     vi.mocked(cliManagerCodexConfigTomlSet).mockReset().mockReturnValueOnce(tomlPromise);
+    vi.mocked(cliManagerCodexContextWindow372kSet)
+      .mockReset()
+      .mockReturnValueOnce(contextWindowPromise);
 
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);
     const configMutation = renderHook(() => useCliManagerCodexConfigSetMutation(), { wrapper });
     const tomlMutation = renderHook(() => useCliManagerCodexConfigTomlSetMutation(), { wrapper });
+    const contextWindowMutation = renderHook(
+      () => useCliManagerCodexContextWindow372kSetMutation(),
+      { wrapper }
+    );
 
     let configCall!: Promise<CodexConfigState>;
     await act(async () => {
@@ -889,17 +918,31 @@ describe("query/cliManager", () => {
     });
     expect(cliManagerCodexConfigTomlSet).not.toHaveBeenCalled();
 
+    let contextWindowCall!: Promise<CodexContextWindow372kState>;
+    await act(async () => {
+      contextWindowCall = contextWindowMutation.result.current.mutateAsync(true);
+      await Promise.resolve();
+    });
+    expect(cliManagerCodexContextWindow372kSet).not.toHaveBeenCalled();
+
     await act(async () => {
       resolveConfig(makeCodexConfigState({ model: "first" }));
       await configCall;
     });
     await waitFor(() => expect(cliManagerCodexConfigTomlSet).toHaveBeenCalledTimes(1));
+    expect(cliManagerCodexContextWindow372kSet).not.toHaveBeenCalled();
 
     await act(async () => {
       resolveToml(makeCodexConfigState({ model: "second" }));
       await tomlCall;
     });
     expect(cliManagerCodexConfigTomlSet).toHaveBeenCalledWith('model = "second"');
+    await waitFor(() => expect(cliManagerCodexContextWindow372kSet).toHaveBeenCalledWith(true));
+
+    await act(async () => {
+      resolveContextWindow(makeCodexContextWindow372kState({ enabled: true }));
+      await contextWindowCall;
+    });
   });
 
   it("mutation hooks keep cache unchanged when service returns null", async () => {

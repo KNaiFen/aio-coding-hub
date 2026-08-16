@@ -131,6 +131,8 @@ pub(super) fn backup_for_enable<R: tauri::Runtime>(
 
     let current = if cli_key == "grok" {
         crate::grok_config::read_bytes_path(&target_path)?
+    } else if cli_key == "codex" {
+        crate::codex_config::canonical_config_bytes_locked(app)?
     } else if target_path.exists() {
         Some(read_file_with_max_len(
             &target_path,

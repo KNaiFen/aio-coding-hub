@@ -1668,6 +1668,17 @@ fn migrate_set_request_log_retention_default(
     changed
 }
 
+fn migrate_add_codex_context_window_372k(
+    settings: &mut AppSettings,
+    schema_version_present: bool,
+) -> bool {
+    migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_ADD_CODEX_CONTEXT_WINDOW_372K,
+    )
+}
+
 type SettingsMigration = fn(&mut AppSettings, bool) -> bool;
 
 const SETTINGS_MIGRATIONS: &[SettingsMigration] = &[
@@ -1713,6 +1724,7 @@ const SETTINGS_MIGRATIONS: &[SettingsMigration] = &[
     migrate_add_provider_availability_hours,
     migrate_add_stream_internal_error_retry,
     migrate_set_request_log_retention_default,
+    migrate_add_codex_context_window_372k,
 ];
 
 fn apply_settings_migrations(settings: &mut AppSettings, schema_version_present: bool) -> bool {
@@ -3007,5 +3019,21 @@ mod tests {
             true
         ));
         assert_eq!(settings.request_log_retention_days, 0);
+    }
+
+    #[test]
+    fn codex_context_window_372k_migration_defaults_disabled() {
+        let mut settings = AppSettings {
+            schema_version: SCHEMA_VERSION_SET_REQUEST_LOG_RETENTION_DEFAULT,
+            ..Default::default()
+        };
+        settings.enable_codex_context_window_372k = false;
+
+        assert!(migrate_add_codex_context_window_372k(&mut settings, true));
+        assert_eq!(
+            settings.schema_version,
+            SCHEMA_VERSION_ADD_CODEX_CONTEXT_WINDOW_372K
+        );
+        assert!(!settings.enable_codex_context_window_372k);
     }
 }

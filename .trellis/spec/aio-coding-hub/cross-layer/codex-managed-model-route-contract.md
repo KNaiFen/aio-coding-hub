@@ -107,11 +107,14 @@ pub struct ManagedModelRoute {
 ```
 
 The picker integration resolves and runs the installed Codex executable with
-structured arguments:
+structured arguments. The same owner also exposes the backend-owned 372K
+preference:
 
 ```rust
 fetch_bundled_catalog(launch, codex_home) // debug models --bundled
 sync_current_locked(app)                  // rebuild/apply/restore catalog
+context_window_372k_get(app)
+context_window_372k_set(app, enabled)
 ```
 
 Frontend catalog keys include both identities:
@@ -201,9 +204,12 @@ codexManagedProfilesKeys.list()
 #### Codex picker catalog lifecycle
 
 - Profile files do not populate `/model` by themselves. While the Codex CLI
-  proxy is enabled, AIO owns one complete merged `model_catalog_json` containing
-  the current Codex base catalog plus one visible `aio/<profile_name_key>` entry
-  per managed profile.
+  catalog policy is active, AIO owns one complete merged `model_catalog_json`.
+  Policy activation is `372K enabled OR one-or-more managed profiles`; it is not
+  conditional on the CLI proxy being enabled.
+- Catalog composition has one owner and one order: complete user/installed
+  base -> optional 372K transform -> optional managed-profile rows -> ownership
+  metadata/hash. No feature may write a second partial catalog.
 - Managed picker entries project the bound provider-model's configured effort
   set and default. A non-empty set enables `supports_reasoning_summaries`; an
   empty set writes no default and disables that flag. Known context is written
@@ -219,18 +225,42 @@ codexManagedProfilesKeys.list()
   Otherwise run the currently installed Codex executable with
   `debug models --bundled`; never substitute an AIO compile-time snapshot.
 - Generated catalog bytes carry owner, payload/profile/base hashes. Every
-  update verifies those hashes and the root-config snapshot; external edits or
-  concurrent drift fail closed instead of being overwritten.
+  update verifies those hashes, active policy state, original catalog pointer,
+  and the root-config snapshot; external edits or concurrent drift fail closed
+  instead of being overwritten.
 - Profile create/delete, DB mutation, profile file activation, generated
   catalog activation, and root config patching share the managed-profile
   lifecycle lock and compensate only bytes still owned by that operation.
-- Enabling/syncing the CLI proxy rebuilds the catalog. Disabling/restoring the
-  proxy restores the original `model_catalog_json` value or its absence. With
-  zero managed profiles, no generated picker catalog remains active.
+- Enabling/syncing/disabling the CLI proxy rebuilds the same policy-owned
+  catalog on top of the canonical direct config. Disabling 372K with profiles
+  rebuilds without the transform; disabling it with no profiles restores the
+  original `model_catalog_json` value or its absence and removes only an
+  ownership-verified generated file.
+- Startup re-applies active catalog policy after proxy repair. Exit temporarily
+  restores the direct catalog pointer while preserving the preference and
+  profile records for the next startup.
 - On Windows, pass the resolved `.cmd` / `.bat` executable and each fixed
   argument separately to `std::process::Command`. Do not rebuild the command as
   a quoted `cmd.exe /S /C` string: Rust's quote escaping becomes literal to
   `cmd.exe` and can turn `\"codex.cmd\"` into an unknown command.
+
+#### 372K context policy
+
+- The frontend submits one boolean and renders only the authoritative backend
+  state. The backend exclusively owns the target slugs `gpt-5.6-sol`,
+  `gpt-5.6-terra`, and `gpt-5.6-luna`, plus the value `372000`.
+- Enabling requires exactly one entry for every target in a complete catalog.
+  It changes only `context_window` and `max_context_window` on those entries,
+  producing exactly six changed leaves. Percent, auto-compaction, non-target
+  models, ordering, and unknown fields remain unchanged.
+- Missing, duplicate, invalid, oversized, unsafe, or ownership-drifted input
+  fails before preference or file state partially commits.
+- The toggle shares the Codex lifecycle mutation scope in the backend and the
+  Codex config mutation scope in TanStack Query. Pending state disables the UI.
+- Toggling does not refresh the model list, restart Codex, execute a model
+  request, scan for proof, or expose a runtime-effectiveness state. Verification
+  is limited to AIO-owned artifacts and persisted state; actual Codex adoption
+  is explicitly outside this contract.
 
 #### Exact managed routing
 
@@ -305,6 +335,9 @@ codexManagedProfilesKeys.list()
 | Bundled Codex command times out | `CODEX_MANAGED_MODEL_BUNDLED_TIMEOUT`; terminate the process tree and leave state unchanged |
 | Bundled Codex output is empty, invalid, or oversized | `CODEX_MANAGED_MODEL_BUNDLED_INVALID`; no partial state |
 | Generated catalog owner/hash or root-config snapshot changed externally | Fail closed; preserve external bytes and roll back this lifecycle action |
+| 372K target missing, duplicated, or fields are not unsigned integers | Fail closed; preference and files remain unchanged |
+| Disable 372K while profiles remain | Rebuild the same owned catalog without the six-value transform |
+| Disable the last active catalog policy | Restore the original pointer/absence; delete only ownership-verified generated bytes |
 | Bound provider disabled, replaced, bridged, or UUID-mismatched | Fail closed; zero calls to another provider |
 | Forced provider differs from binding | `GW_MANAGED_MODEL_INVALID` |
 | Request plugin changes bound model/provider | `GW_MANAGED_MODEL_INVALID`; zero upstream calls |
@@ -323,6 +356,8 @@ codexManagedProfilesKeys.list()
 - Good: an installed Windows Codex resolved as `C:\Program Files\...\codex.cmd`
   is launched with separate `debug`, `models`, and `--bundled` arguments and its
   complete bundled catalog becomes the merge base.
+- Good: enabling 372K changes exactly two numeric leaves on each of the three
+  exact target models and leaves percent and auto-compaction values untouched.
 - Good: a failed refresh leaves the previous discovered models visible as
   stale and leaves manual models unchanged.
 - Good: a model is explicitly configured with no reasoning and unknown context;
@@ -351,6 +386,8 @@ codexManagedProfilesKeys.list()
   database without verifying the generated content hash.
 - Bad: infer effort or context from provider/model names, copy capability values
   into each Profile, or reset them during a later refresh/manual upsert.
+- Bad: implement 372K with root `model_context_window`, edit
+  `models_cache.json`, refresh/restart Codex, or claim runtime effectiveness.
 
 ### 6. Tests Required
 
@@ -375,6 +412,10 @@ codexManagedProfilesKeys.list()
   Assert configured efforts/default/context, explicit no-reasoning/unknown
   context, Profile-set hash invalidation, drift-before-write failure, and exact
   catalog/config/DB restoration after a forced commit failure.
+- 372K tests: exactly six changed leaves, all target/error shapes, user and
+  bundled bases, cache sentinel, enable/disable idempotence, profile
+  composition, proxy on/off, restart/exit, and negative assertions for refresh,
+  request, restart, rescan, auto-compaction, and runtime status.
 - Gateway route tests: exact alias validation, disabled/replaced provider,
   forced-provider conflict, one-candidate routing, no cross-provider failover,
   same-provider retry, plugin mutation fail-closed, and ordinary-route

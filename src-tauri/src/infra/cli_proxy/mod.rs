@@ -308,6 +308,45 @@ pub(crate) fn codex_enabled_proxy_baseline<R: tauri::Runtime>(
     }))
 }
 
+pub(crate) fn project_codex_config_if_enabled<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    canonical: Vec<u8>,
+) -> crate::shared::error::AppResult<Vec<u8>> {
+    let Some(baseline) = codex_enabled_proxy_baseline(app)? else {
+        return Ok(canonical);
+    };
+    let base_url = format!("{}/v1", baseline.base_origin);
+    if codex_oauth_compatible_proxy_mode(app) {
+        codex::build_codex_config_toml_oauth_compatible(
+            Some(canonical),
+            &base_url,
+            codex::CodexConfigPlatform::current(),
+        )
+    } else {
+        codex::build_codex_config_toml(
+            Some(canonical),
+            &base_url,
+            codex::CodexConfigPlatform::current(),
+        )
+    }
+}
+
+pub(crate) fn canonical_codex_config_from_live(
+    live: Option<&[u8]>,
+    baseline: Option<&[u8]>,
+) -> crate::shared::error::AppResult<Option<Vec<u8>>> {
+    let candidate = codex::merge_restore_codex_config_bytes(live, baseline.unwrap_or_default())?;
+    if baseline.is_none()
+        && std::str::from_utf8(&candidate)
+            .map(|text| text.trim().is_empty())
+            .unwrap_or(false)
+    {
+        Ok(None)
+    } else {
+        Ok(Some(candidate))
+    }
+}
+
 pub(crate) fn codex_proxy_config_is_applied<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     base_origin: &str,
@@ -387,7 +426,11 @@ fn apply_proxy_config<R: tauri::Runtime>(
     let mut prepared_writes: Vec<(PathBuf, Vec<u8>)> = Vec::with_capacity(targets.len());
 
     for t in targets {
-        let current = read_optional_cli_proxy_file(&t.path)?;
+        let current = if cli_key == "codex" && t.kind == "codex_config_toml" {
+            crate::codex_config::canonical_config_bytes_locked(app)?
+        } else {
+            read_optional_cli_proxy_file(&t.path)?
+        };
 
         let bytes = match cli_key {
             "claude" => {
@@ -678,7 +721,13 @@ fn backup_for_enable<R: tauri::Runtime>(
 
     let mut entries = Vec::with_capacity(targets.len());
     for t in targets {
-        let read_bytes = read_optional_cli_proxy_file(&t.path)?;
+        let mut read_bytes = read_optional_cli_proxy_file(&t.path)?;
+        if cli_key == "codex" && t.kind == "codex_config_toml" {
+            read_bytes = crate::codex_model_catalog::managed::canonicalize_config_bytes(
+                app,
+                read_bytes,
+            )?;
+        }
         let existed = read_bytes.is_some();
         let backup_rel = if let Some(bytes) = read_bytes {
             let backup_path = files_dir.join(t.backup_name);
@@ -733,7 +782,13 @@ fn ensure_manifest_has_current_targets<R: tauri::Runtime>(
             continue;
         }
 
-        let read_bytes = read_optional_cli_proxy_file(&target.path)?;
+        let mut read_bytes = read_optional_cli_proxy_file(&target.path)?;
+        if cli_key == "codex" && target.kind == "codex_config_toml" {
+            read_bytes = crate::codex_model_catalog::managed::canonicalize_config_bytes(
+                app,
+                read_bytes,
+            )?;
+        }
         let existed = read_bytes.is_some();
         let backup_rel = if let Some(bytes) = read_bytes {
             let backup_path = files_dir.join(target.backup_name);
@@ -815,7 +870,16 @@ fn write_captured_backups<R: tauri::Runtime>(
     for entry in captured {
         if let Some(bytes) = entry.backup_bytes.as_ref() {
             let backup_path = files_dir.join(entry.backup_name);
-            write_cli_proxy_file_atomic(&backup_path, bytes)?;
+            let backup_bytes = if cli_key == "codex" && entry.kind == "codex_config_toml" {
+                crate::codex_model_catalog::managed::canonicalize_config_bytes(
+                    app,
+                    Some(bytes.clone()),
+                )?
+                .unwrap_or_default()
+            } else {
+                bytes.clone()
+            };
+            write_cli_proxy_file_atomic(&backup_path, &backup_bytes)?;
         }
     }
 
@@ -1077,6 +1141,9 @@ pub fn set_enabled<R: tauri::Runtime>(
     } else {
         None
     };
+    if cli_key == "codex" {
+        crate::codex_managed_profiles::ensure_lifecycle_open()?;
+    }
 
     let trace_id = new_trace_id("cli-proxy");
     let existing = read_manifest(app, cli_key)?;
@@ -1254,7 +1321,28 @@ pub fn set_enabled<R: tauri::Runtime>(
         Ok(()) => {
             manifest.enabled = false;
             manifest.updated_at = now_unix_seconds();
-            let _ = write_manifest(app, cli_key, &manifest);
+            if let Err(err) = write_manifest(app, cli_key, &manifest) {
+                return Ok(CliProxyResult::failure(
+                    trace_id,
+                    cli_key,
+                    true,
+                    "CLI_PROXY_MANIFEST_WRITE_FAILED",
+                    err.to_string(),
+                    manifest.base_origin.clone(),
+                ));
+            }
+            if cli_key == "codex" {
+                if let Err(err) = crate::codex_model_catalog::managed::sync_current_locked(app) {
+                    return Ok(CliProxyResult::failure(
+                        trace_id,
+                        cli_key,
+                        false,
+                        "CLI_PROXY_MANAGED_MODEL_SYNC_FAILED",
+                        err.to_string(),
+                        manifest.base_origin.clone(),
+                    ));
+                }
+            }
 
             Ok(CliProxyResult::success(
                 trace_id,
@@ -1283,6 +1371,14 @@ pub fn startup_repair_incomplete_enable<R: tauri::Runtime>(
     for cli_key in
         crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::CliProxy)
     {
+        let _codex_profile_lifecycle = if cli_key == "codex" {
+            Some(crate::codex_managed_profiles::lock_profile_lifecycle())
+        } else {
+            None
+        };
+        if cli_key == "codex" {
+            crate::codex_managed_profiles::ensure_lifecycle_open()?;
+        }
         let Some(mut manifest) = read_manifest(app, cli_key)? else {
             continue;
         };
@@ -1354,6 +1450,9 @@ pub fn sync_enabled<R: tauri::Runtime>(
         } else {
             None
         };
+        if cli_key == "codex" {
+            crate::codex_managed_profiles::ensure_lifecycle_open()?;
+        }
 
         let trace_id = new_trace_id("cli-proxy-sync");
         let needs_target_rebind =
@@ -1541,6 +1640,7 @@ pub fn rebind_codex_home_after_change<R: tauri::Runtime>(
     apply_live: bool,
 ) -> crate::shared::error::AppResult<CliProxyResult> {
     let _profile_lifecycle = crate::codex_managed_profiles::lock_profile_lifecycle();
+    crate::codex_managed_profiles::ensure_lifecycle_open()?;
     codex::rebind_codex_home_after_change(app, base_origin, apply_live)
 }
 

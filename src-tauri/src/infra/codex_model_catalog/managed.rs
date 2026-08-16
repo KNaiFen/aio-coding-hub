@@ -15,8 +15,15 @@ const USER_CATALOG_MAX_BYTES: usize = 4 * 1024 * 1024;
 const MAX_BASE_MODEL_COUNT: usize = 1_000;
 const MAX_MANAGED_PROFILE_COUNT: usize = 256;
 const OWNER_METADATA_KEY: &str = "_aio_managed_model_catalog";
-const OWNER_SCHEMA_VERSION: u64 = 1;
+const OWNER_SCHEMA_VERSION: u64 = 2;
 const MANAGED_BY: &str = "aio-coding-hub";
+const CONTEXT_WINDOW_372K: u64 = 372_000;
+const CONTEXT_WINDOW_372K_SLUGS: [&str; 3] = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
+
+#[derive(Debug, Clone, Copy, serde::Serialize, specta::Type, PartialEq, Eq)]
+pub struct CodexContextWindow372kState {
+    pub enabled: bool,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ManagedCatalogProfile {
@@ -84,7 +91,7 @@ struct FileSnapshot {
 
 #[derive(Debug)]
 struct PreparedCatalogChange {
-    baseline: crate::cli_proxy::CodexProxyBaseline,
+    proxy_baseline: Option<crate::cli_proxy::CodexProxyBaseline>,
     config_before: FileSnapshot,
     config_after: Vec<u8>,
     generated_before: FileSnapshot,
@@ -109,10 +116,6 @@ pub(crate) struct AppliedManagedCatalog {
 }
 
 impl ManagedCatalogPlan {
-    fn inactive() -> Self {
-        Self { change: None }
-    }
-
     pub(crate) fn apply<R: tauri::Runtime>(
         self,
         app: &tauri::AppHandle<R>,
@@ -124,19 +127,11 @@ impl ManagedCatalogPlan {
             });
         };
 
-        let current_baseline = match crate::cli_proxy::codex_enabled_proxy_baseline(app)? {
-            Some(result) => result,
-            None => {
-                return Err(AppError::new(
-                    "CODEX_MANAGED_MODEL_PROXY_DISABLED",
-                    "Codex CLI proxy was disabled while applying the managed model catalog",
-                ))
-            }
-        };
-        if current_baseline != change.baseline {
+        let current_baseline = crate::cli_proxy::codex_enabled_proxy_baseline(app)?;
+        if current_baseline != change.proxy_baseline {
             return Err(AppError::new(
                 "CODEX_MANAGED_MODEL_CONFIG_DRIFT",
-                "Codex CLI proxy baseline changed while preparing the managed model catalog",
+                "the Codex canonical config source changed while preparing the managed model catalog",
             ));
         }
 
@@ -165,7 +160,16 @@ impl ManagedCatalogPlan {
                 &change.config_after,
             ) {
                 if let Some(applied) = generated_change.take() {
-                    let _ = rollback_file_change(&applied, GENERATED_CATALOG_MAX_BYTES);
+                    if let Err(rollback_error) =
+                        rollback_file_change(&applied, GENERATED_CATALOG_MAX_BYTES)
+                    {
+                        return Err(AppError::new(
+                            "CODEX_MANAGED_MODEL_RECOVERY_REQUIRED",
+                            format!(
+                                "failed to update Codex config.toml ({error}); catalog rollback also failed: {rollback_error}"
+                            ),
+                        ));
+                    }
                 }
                 return Err(AppError::new(
                     "CODEX_MANAGED_MODEL_CONFIG_WRITE_FAILED",
@@ -246,6 +250,8 @@ impl BaseCatalogSource {
 struct OwnedCatalogMetadata {
     profile_set_sha256: String,
     base_source_fingerprint: String,
+    context_window_372k: bool,
+    original_catalog_path: Option<PathBuf>,
 }
 
 pub(crate) fn load_profiles(conn: &Connection) -> AppResult<Vec<ManagedCatalogProfile>> {
@@ -309,16 +315,17 @@ pub(crate) fn prepare_for_profiles<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     profiles: &[ManagedCatalogProfile],
 ) -> AppResult<ManagedCatalogPlan> {
+    let enabled = crate::settings::read(app)?.enable_codex_context_window_372k;
+    prepare_for_profiles_with_policy(app, profiles, enabled)
+}
+
+fn prepare_for_profiles_with_policy<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    profiles: &[ManagedCatalogProfile],
+    context_window_372k: bool,
+) -> AppResult<ManagedCatalogPlan> {
     validate_profiles(profiles)?;
-    let Some(baseline) = crate::cli_proxy::codex_enabled_proxy_baseline(app)? else {
-        return Ok(ManagedCatalogPlan::inactive());
-    };
-    if !crate::cli_proxy::codex_proxy_config_is_applied(app, &baseline.base_origin) {
-        return Err(AppError::new(
-            "CODEX_MANAGED_MODEL_PROXY_DRIFT",
-            "Codex CLI proxy configuration is not currently applied",
-        ));
-    }
+    let proxy_baseline = crate::cli_proxy::codex_enabled_proxy_baseline(app)?;
 
     let generated_path = managed_catalog_path(app)?;
     let generated_before = snapshot_generated_file(&generated_path)?;
@@ -328,25 +335,39 @@ pub(crate) fn prepare_for_profiles<R: tauri::Runtime>(
         .map(validate_owned_catalog)
         .transpose()?;
 
-    let original_catalog_path = parse_original_catalog_path(baseline.config_bytes.as_deref())?;
+    let config_path = crate::codex_paths::codex_config_toml_path(app)?;
+    if proxy_baseline
+        .as_ref()
+        .is_some_and(|baseline| baseline.config_path != config_path)
+    {
+        return Err(AppError::new(
+            "CODEX_MANAGED_MODEL_PROXY_REBIND_REQUIRED",
+            "the Codex proxy target changed while preparing the managed catalog",
+        ));
+    }
+    let config_before = snapshot_cli_proxy_file(&config_path)?;
+    let canonical_config = canonicalize_config_bytes_with_metadata(
+        proxy_baseline
+            .as_ref()
+            .and_then(|baseline| baseline.config_bytes.clone())
+            .or_else(|| config_before.bytes.clone()),
+        &generated_path,
+        existing_metadata.as_ref(),
+    )?;
+    let original_catalog_path = parse_original_catalog_path(canonical_config.as_deref())?;
     if let Some(path) = original_catalog_path.as_deref() {
         reject_generated_path_as_base(path, &generated_path)?;
     }
 
-    let config_before = snapshot_cli_proxy_file(&baseline.config_path)?;
-    let current_config = config_before.bytes.as_deref().ok_or_else(|| {
-        AppError::new(
-            "CODEX_MANAGED_MODEL_CONFIG_MISSING",
-            "Codex config.toml disappeared while the CLI proxy was enabled",
-        )
-    })?;
+    let current_config = config_before.bytes.as_deref().unwrap_or_default();
     validate_current_catalog_binding(
         current_config,
         original_catalog_path.as_deref(),
         &generated_path,
     )?;
 
-    let generated_after = if profiles.is_empty() {
+    let policy_active = context_window_372k || !profiles.is_empty();
+    let generated_after = if !policy_active {
         None
     } else {
         let profile_set_sha256 = profile_set_sha256(profiles)?;
@@ -354,6 +375,8 @@ pub(crate) fn prepare_for_profiles<R: tauri::Runtime>(
         if existing_metadata.as_ref().is_some_and(|metadata| {
             metadata.profile_set_sha256 == profile_set_sha256
                 && metadata.base_source_fingerprint == source.fingerprint()
+                && metadata.context_window_372k == context_window_372k
+                && metadata.original_catalog_path == original_catalog_path
         }) {
             generated_before.bytes.clone()
         } else {
@@ -364,20 +387,22 @@ pub(crate) fn prepare_for_profiles<R: tauri::Runtime>(
                 profiles,
                 &profile_set_sha256,
                 &source_fingerprint,
+                context_window_372k,
+                original_catalog_path.as_deref(),
             )?)
         }
     };
 
-    let desired_catalog_path = (!profiles.is_empty()).then_some(generated_path.as_path());
+    let desired_catalog_path = policy_active.then_some(generated_path.as_path());
     let config_after = patch_model_catalog_config(
         current_config,
-        baseline.config_bytes.as_deref(),
+        canonical_config.as_deref(),
         desired_catalog_path,
     )?;
 
     Ok(ManagedCatalogPlan {
         change: Some(PreparedCatalogChange {
-            baseline,
+            proxy_baseline,
             config_before,
             config_after,
             generated_before,
@@ -387,11 +412,122 @@ pub(crate) fn prepare_for_profiles<R: tauri::Runtime>(
 }
 
 pub(crate) fn sync_current_locked<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult<()> {
+    let _applied = prepare_current_locked(app)?.apply(app)?;
+    Ok(())
+}
+
+pub(crate) fn prepare_current_locked<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> AppResult<ManagedCatalogPlan> {
     let db = crate::db::init(app)?;
     let conn = db.open_connection()?;
     let profiles = load_profiles(&conn)?;
-    let _applied = prepare_for_profiles(app, &profiles)?.apply(app)?;
-    Ok(())
+    prepare_for_profiles(app, &profiles)
+}
+
+pub(crate) fn sync_current<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult<()> {
+    let _guard = crate::codex_managed_profiles::lock_profile_lifecycle();
+    crate::codex_managed_profiles::ensure_lifecycle_open()?;
+    sync_current_locked(app)
+}
+
+pub fn context_window_372k_get<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> AppResult<CodexContextWindow372kState> {
+    Ok(CodexContextWindow372kState {
+        enabled: crate::settings::read(app)?.enable_codex_context_window_372k,
+    })
+}
+
+pub fn context_window_372k_set<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    enabled: bool,
+) -> AppResult<CodexContextWindow372kState> {
+    let _guard = crate::codex_managed_profiles::lock_profile_lifecycle();
+    crate::codex_managed_profiles::ensure_lifecycle_open()?;
+
+    let db = crate::db::init(app)?;
+    let conn = db.open_connection()?;
+    let profiles = load_profiles(&conn)?;
+    let mut journal =
+        crate::codex_config::begin_catalog_policy_journal_locked(app, "context_window_372k_set")?;
+    let plan = match prepare_for_profiles_with_policy(app, &profiles, enabled) {
+        Ok(plan) => plan,
+        Err(error) => {
+            journal.clear()?;
+            return Err(error);
+        }
+    };
+    let applied = match plan.apply(app) {
+        Ok(applied) => applied,
+        Err(error) => {
+            if !error.code().ends_with("RECOVERY_REQUIRED") {
+                journal.clear()?;
+            }
+            return Err(error);
+        }
+    };
+    if let Err(error) = journal.mark_catalog_written() {
+        if let Err(rollback_error) = applied.rollback() {
+            return Err(AppError::new(
+                "CODEX_CONTEXT_WINDOW_372K_RECOVERY_REQUIRED",
+                format!(
+                    "failed to advance the 372K lifecycle journal ({error}); rollback also failed: {rollback_error}"
+                ),
+            ));
+        }
+        journal.clear()?;
+        return Err(error);
+    }
+    crate::codex_config::interrupt_lifecycle_for_tests("catalog_policy_written")?;
+    let update = crate::settings::update(app, |settings| {
+        settings.enable_codex_context_window_372k = enabled;
+        settings.schema_version = crate::settings::SCHEMA_VERSION;
+        Ok(())
+    });
+    if let Err(error) = update {
+        if let Err(rollback_error) = applied.rollback() {
+            return Err(AppError::new(
+                "CODEX_CONTEXT_WINDOW_372K_RECOVERY_REQUIRED",
+                format!(
+                    "failed to persist the 372K preference ({error}); rollback also failed: {rollback_error}"
+                ),
+            ));
+        }
+        journal.clear()?;
+        return Err(error);
+    }
+    journal.clear()?;
+    Ok(CodexContextWindow372kState { enabled })
+}
+
+pub(crate) fn restore_direct_on_exit<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> AppResult<()> {
+    let _guard = crate::codex_managed_profiles::lock_profile_lifecycle();
+    let path = crate::codex_paths::codex_config_toml_path(app)?;
+    let current = crate::cli_proxy::read_optional_cli_proxy_file(&path)?;
+    let canonical = canonicalize_config_bytes(app, current.clone())?;
+    if canonical == current {
+        return Ok(());
+    }
+    if crate::cli_proxy::read_optional_cli_proxy_file(&path)? != current {
+        return Err(AppError::new(
+            "CODEX_CONTEXT_WINDOW_372K_RECOVERY_REQUIRED",
+            "Codex config changed while restoring direct catalog state",
+        ));
+    }
+    match canonical {
+        Some(bytes) => crate::cli_proxy::write_cli_proxy_file_atomic(&path, &bytes),
+        None => match std::fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(AppError::new(
+                "CODEX_CONTEXT_WINDOW_372K_RECOVERY_REQUIRED",
+                format!("failed to restore direct Codex config: {error}"),
+            )),
+        },
+    }
 }
 
 fn managed_catalog_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult<PathBuf> {
@@ -411,6 +547,40 @@ fn managed_catalog_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResu
         )
     })?;
     Ok(root.join(GENERATED_CATALOG_FILE_NAME))
+}
+
+pub(crate) fn canonicalize_config_bytes<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    config: Option<Vec<u8>>,
+) -> AppResult<Option<Vec<u8>>> {
+    let generated_path = managed_catalog_path(app)?;
+    let current_path = parse_catalog_path(config.as_deref(), "current")?;
+    if current_path.as_deref() != Some(generated_path.as_path()) {
+        return Ok(config);
+    }
+    let generated = snapshot_generated_file(&generated_path)?
+        .bytes
+        .ok_or_else(|| modified_catalog_error())?;
+    let metadata = validate_owned_catalog(&generated)?;
+    canonicalize_config_bytes_with_metadata(config, &generated_path, Some(&metadata))
+}
+
+fn canonicalize_config_bytes_with_metadata(
+    config: Option<Vec<u8>>,
+    generated_path: &Path,
+    metadata: Option<&OwnedCatalogMetadata>,
+) -> AppResult<Option<Vec<u8>>> {
+    let Some(bytes) = config else {
+        return Ok(None);
+    };
+    if parse_catalog_path(Some(&bytes), "current")?.as_deref() != Some(generated_path) {
+        return Ok(Some(bytes));
+    }
+    let metadata = metadata.ok_or_else(modified_catalog_error)?;
+    Ok(Some(patch_model_catalog_config_to_path(
+        &bytes,
+        metadata.original_catalog_path.as_deref(),
+    )?))
 }
 
 fn validate_profile(profile: &ManagedCatalogProfile) -> AppResult<()> {
@@ -613,6 +783,17 @@ fn patch_model_catalog_config(
     original: Option<&[u8]>,
     generated_path: Option<&Path>,
 ) -> AppResult<Vec<u8>> {
+    let desired = match generated_path {
+        Some(path) => Some(path.to_path_buf()),
+        None => parse_original_catalog_path(original)?,
+    };
+    patch_model_catalog_config_to_path(current, desired.as_deref())
+}
+
+fn patch_model_catalog_config_to_path(
+    current: &[u8],
+    desired_path: Option<&Path>,
+) -> AppResult<Vec<u8>> {
     let current = std::str::from_utf8(current).map_err(|_| {
         AppError::new(
             "CODEX_MANAGED_MODEL_CONFIG_INVALID",
@@ -635,20 +816,18 @@ fn patch_model_catalog_config(
         ));
     }
 
-    let desired = match generated_path {
-        Some(path) => Some(
+    let desired = desired_path
+        .map(|path| {
             path.to_str()
                 .ok_or_else(|| {
                     AppError::new(
                         "CODEX_MANAGED_MODEL_CONFIG_INVALID",
                         "managed model catalog path must be valid UTF-8",
                     )
-                })?
-                .to_string(),
-        ),
-        None => parse_original_catalog_path(original)?
-            .and_then(|path| path.to_str().map(str::to_string)),
-    };
+                })
+                .map(str::to_string)
+        })
+        .transpose()?;
     match desired.as_deref() {
         Some(path) => document["model_catalog_json"] = toml_edit::value(path),
         None => {
@@ -787,6 +966,8 @@ fn generate_catalog(
     profiles: &[ManagedCatalogProfile],
     profile_set_sha256: &str,
     base_source_fingerprint: &str,
+    context_window_372k: bool,
+    original_catalog_path: Option<&Path>,
 ) -> AppResult<Vec<u8>> {
     let mut root: Value = serde_json::from_slice(base_bytes).map_err(|_| {
         AppError::new(
@@ -860,6 +1041,10 @@ fn generate_catalog(
         )
     })?;
 
+    if context_window_372k {
+        apply_context_window_372k(models)?;
+    }
+
     for (index, profile) in profiles.iter().enumerate() {
         let alias = profile.alias();
         if !slugs.insert(alias.clone()) {
@@ -878,6 +1063,18 @@ fn generate_catalog(
         .iter()
         .map(ManagedCatalogProfile::alias)
         .collect::<Vec<_>>();
+    let original_catalog_path = original_catalog_path
+        .map(|path| {
+            path.to_str()
+                .ok_or_else(|| {
+                    AppError::new(
+                        "CODEX_MANAGED_MODEL_CONFIG_INVALID",
+                        "original model catalog path must be valid UTF-8",
+                    )
+                })
+                .map(str::to_string)
+        })
+        .transpose()?;
     let mut payload_root = root.clone();
     payload_root
         .as_object_mut()
@@ -890,6 +1087,8 @@ fn generate_catalog(
             "base_catalog_sha256": base_catalog_sha256,
             "base_source_fingerprint": base_source_fingerprint,
             "managed_aliases": aliases,
+            "context_window_372k": context_window_372k,
+            "original_catalog_path": original_catalog_path.as_deref(),
         }))
         .map_err(|_| {
             AppError::new(
@@ -910,6 +1109,11 @@ fn generate_catalog(
                 "base_catalog_sha256": base_catalog_sha256,
                 "base_source_fingerprint": base_source_fingerprint,
                 "managed_aliases": aliases,
+                "active_policies": {
+                    "context_window_372k": context_window_372k,
+                    "managed_profiles": !profiles.is_empty(),
+                },
+                "original_catalog_path": original_catalog_path.as_deref(),
             }),
         );
     let mut output = serde_json::to_vec_pretty(&root).map_err(|_| {
@@ -926,6 +1130,31 @@ fn generate_catalog(
         ));
     }
     Ok(output)
+}
+
+fn apply_context_window_372k(models: &mut [Value]) -> AppResult<()> {
+    for target in CONTEXT_WINDOW_372K_SLUGS {
+        let model = models
+            .iter_mut()
+            .find(|model| model.get("slug").and_then(Value::as_str) == Some(target))
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| {
+                AppError::new(
+                    "CODEX_CONTEXT_WINDOW_372K_TARGET_MISSING",
+                    format!("the complete Codex catalog is missing {target}"),
+                )
+            })?;
+        for field in ["context_window", "max_context_window"] {
+            if model.get(field).and_then(Value::as_u64).is_none() {
+                return Err(AppError::new(
+                    "CODEX_CONTEXT_WINDOW_372K_TARGET_INVALID",
+                    format!("{target}.{field} must be an unsigned integer"),
+                ));
+            }
+            model.insert(field.to_string(), json!(CONTEXT_WINDOW_372K));
+        }
+    }
+    Ok(())
 }
 
 fn build_managed_model(
@@ -1045,9 +1274,17 @@ fn validate_owned_catalog(bytes: &[u8]) -> AppResult<OwnedCatalogMetadata> {
         .get(OWNER_METADATA_KEY)
         .and_then(Value::as_object)
         .ok_or_else(modified_catalog_error)?;
-    if metadata.get("schema_version").and_then(Value::as_u64) != Some(OWNER_SCHEMA_VERSION)
-        || metadata.get("managed_by").and_then(Value::as_str) != Some(MANAGED_BY)
-    {
+    let schema_version = metadata
+        .get("schema_version")
+        .and_then(Value::as_u64)
+        .ok_or_else(modified_catalog_error)?;
+    if metadata.get("managed_by").and_then(Value::as_str) != Some(MANAGED_BY) {
+        return Err(modified_catalog_error());
+    }
+    if schema_version == 1 {
+        return validate_owned_catalog_v1(&root, metadata);
+    }
+    if schema_version != OWNER_SCHEMA_VERSION {
         return Err(modified_catalog_error());
     }
     let payload_sha256 = required_metadata_string(metadata, "payload_sha256")?;
@@ -1061,7 +1298,76 @@ fn validate_owned_catalog(bytes: &[u8]) -> AppResult<OwnedCatalogMetadata> {
     if aliases.iter().any(|alias| alias.as_str().is_none()) {
         return Err(modified_catalog_error());
     }
+    let active_policies = metadata
+        .get("active_policies")
+        .and_then(Value::as_object)
+        .ok_or_else(modified_catalog_error)?;
+    let context_window_372k = active_policies
+        .get("context_window_372k")
+        .and_then(Value::as_bool)
+        .ok_or_else(modified_catalog_error)?;
+    if active_policies
+        .get("managed_profiles")
+        .and_then(Value::as_bool)
+        .is_none()
+    {
+        return Err(modified_catalog_error());
+    }
+    let original_catalog_path = match metadata.get("original_catalog_path") {
+        Some(Value::Null) => None,
+        Some(Value::String(value)) => {
+            let path = PathBuf::from(value);
+            if value.is_empty() || !path.is_absolute() {
+                return Err(modified_catalog_error());
+            }
+            Some(path)
+        }
+        _ => return Err(modified_catalog_error()),
+    };
 
+    let mut payload_root = root.clone();
+    payload_root
+        .as_object_mut()
+        .ok_or_else(modified_catalog_error)?
+        .remove(OWNER_METADATA_KEY);
+    let expected = sha256_hex(
+        &serde_json::to_vec(&json!({
+            "catalog": payload_root,
+            "profile_set_sha256": profile_set_sha256,
+            "base_catalog_sha256": base_catalog_sha256,
+            "base_source_fingerprint": base_source_fingerprint,
+            "managed_aliases": aliases,
+            "context_window_372k": context_window_372k,
+            "original_catalog_path": original_catalog_path.as_deref().and_then(Path::to_str),
+        }))
+        .map_err(|_| modified_catalog_error())?,
+    );
+    if payload_sha256 != expected {
+        return Err(modified_catalog_error());
+    }
+    Ok(OwnedCatalogMetadata {
+        profile_set_sha256: profile_set_sha256.to_string(),
+        base_source_fingerprint: base_source_fingerprint.to_string(),
+        context_window_372k,
+        original_catalog_path,
+    })
+}
+
+fn validate_owned_catalog_v1(
+    root: &Value,
+    metadata: &Map<String, Value>,
+) -> AppResult<OwnedCatalogMetadata> {
+    let payload_sha256 = required_metadata_string(metadata, "payload_sha256")?;
+    let profile_set_sha256 = required_metadata_string(metadata, "profile_set_sha256")?;
+    let base_catalog_sha256 = required_metadata_string(metadata, "base_catalog_sha256")?;
+    let base_source_fingerprint = required_metadata_string(metadata, "base_source_fingerprint")?;
+    let aliases = metadata
+        .get("managed_aliases")
+        .and_then(Value::as_array)
+        .ok_or_else(modified_catalog_error)?;
+    if aliases.iter().any(|alias| alias.as_str().is_none()) {
+        return Err(modified_catalog_error());
+    }
     let mut payload_root = root.clone();
     payload_root
         .as_object_mut()
@@ -1083,6 +1389,8 @@ fn validate_owned_catalog(bytes: &[u8]) -> AppResult<OwnedCatalogMetadata> {
     Ok(OwnedCatalogMetadata {
         profile_set_sha256: profile_set_sha256.to_string(),
         base_source_fingerprint: base_source_fingerprint.to_string(),
+        context_window_372k: false,
+        original_catalog_path: None,
     })
 }
 
@@ -1179,6 +1487,112 @@ mod tests {
         .expect("profile")
     }
 
+    fn context_window_catalog() -> Vec<u8> {
+        let models = CONTEXT_WINDOW_372K_SLUGS
+            .iter()
+            .enumerate()
+            .map(|(index, slug)| {
+                json!({
+                    "slug": slug,
+                    "visibility": "list",
+                    "context_window": 272_000 + index as u64,
+                    "max_context_window": 273_000 + index as u64,
+                    "effective_context_window_percent": 95,
+                    "auto_compact_token_limit": 250_000 + index as u64,
+                    "unknown": {"index": index},
+                })
+            })
+            .chain(std::iter::once(json!({
+                "slug": "gpt-other",
+                "visibility": "list",
+                "context_window": 128_000,
+                "max_context_window": 128_000,
+                "effective_context_window_percent": 87,
+                "auto_compact_token_limit": 100_000,
+            })))
+            .collect::<Vec<_>>();
+        serde_json::to_vec(&json!({
+            "model_auto_compact_token_limit": 999_999,
+            "unknown_root": [1, 2, 3],
+            "models": models,
+        }))
+        .expect("context catalog")
+    }
+
+    #[test]
+    fn context_window_372k_changes_exactly_six_target_values() {
+        let base = context_window_catalog();
+        let mut expected: Value = serde_json::from_slice(&base).expect("base json");
+        for model in expected["models"].as_array_mut().expect("models") {
+            if CONTEXT_WINDOW_372K_SLUGS.contains(
+                &model["slug"].as_str().expect("slug"),
+            ) {
+                model["context_window"] = json!(CONTEXT_WINDOW_372K);
+                model["max_context_window"] = json!(CONTEXT_WINDOW_372K);
+            }
+        }
+
+        let output = generate_catalog(
+            &base,
+            &[],
+            "a".repeat(64).as_str(),
+            "b".repeat(64).as_str(),
+            true,
+            None,
+        )
+        .expect("generate 372K catalog");
+        validate_owned_catalog(&output).expect("owned catalog");
+        let mut actual: Value = serde_json::from_slice(&output).expect("output json");
+        actual
+            .as_object_mut()
+            .expect("object")
+            .remove(OWNER_METADATA_KEY);
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn context_window_372k_fails_closed_when_a_target_is_missing() {
+        let mut base: Value =
+            serde_json::from_slice(&context_window_catalog()).expect("base json");
+        base["models"]
+            .as_array_mut()
+            .expect("models")
+            .retain(|model| model["slug"] != json!("gpt-5.6-luna"));
+
+        let error = generate_catalog(
+            &serde_json::to_vec(&base).expect("serialize"),
+            &[],
+            "a".repeat(64).as_str(),
+            "b".repeat(64).as_str(),
+            true,
+            None,
+        )
+        .expect_err("missing target must fail");
+        assert_eq!(error.code(), "CODEX_CONTEXT_WINDOW_372K_TARGET_MISSING");
+    }
+
+    #[test]
+    fn context_window_372k_fails_closed_on_duplicate_target_slug() {
+        let mut base: Value =
+            serde_json::from_slice(&context_window_catalog()).expect("base json");
+        let duplicate = base["models"][0].clone();
+        base["models"]
+            .as_array_mut()
+            .expect("models")
+            .push(duplicate);
+
+        let error = generate_catalog(
+            &serde_json::to_vec(&base).expect("serialize"),
+            &[],
+            "a".repeat(64).as_str(),
+            "b".repeat(64).as_str(),
+            true,
+            None,
+        )
+        .expect_err("duplicate target must fail");
+        assert_eq!(error.code(), "CODEX_MANAGED_MODEL_BASE_CATALOG_INVALID");
+    }
+
     #[test]
     fn generated_catalog_preserves_base_and_sets_managed_reasoning_capabilities() {
         let output = generate_catalog(
@@ -1186,6 +1600,8 @@ mod tests {
             &[profile()],
             "a".repeat(64).as_str(),
             "b".repeat(64).as_str(),
+            false,
+            None,
         )
         .expect("generate");
         let root: Value = serde_json::from_slice(&output).expect("json");
@@ -1243,6 +1659,8 @@ mod tests {
             &[profile],
             "a".repeat(64).as_str(),
             "b".repeat(64).as_str(),
+            false,
+            None,
         )
         .expect("generate");
         let root: Value = serde_json::from_slice(&output).expect("json");
@@ -1261,6 +1679,8 @@ mod tests {
             &[profile()],
             "a".repeat(64).as_str(),
             "b".repeat(64).as_str(),
+            false,
+            None,
         )
         .expect("generate");
         let mut root: Value = serde_json::from_slice(&output).expect("json");
@@ -1283,6 +1703,8 @@ mod tests {
             &[profile()],
             "a".repeat(64).as_str(),
             "b".repeat(64).as_str(),
+            false,
+            None,
         )
         .expect_err("conflict");
         assert_eq!(error.code(), "CODEX_MANAGED_MODEL_ALIAS_CONFLICT");

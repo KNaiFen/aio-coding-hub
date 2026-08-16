@@ -3,6 +3,8 @@
 pub(crate) mod managed;
 mod protocol;
 
+pub use managed::CodexContextWindow372kState;
+
 use crate::{cli_manager, codex_paths};
 use serde::Serialize;
 

@@ -1,5 +1,55 @@
 # Codex Config Contract
 
+## Scenario: Mutate Codex Configuration While AIO Projections Are Active
+
+### Canonical And Live Layers
+
+The direct Codex configuration is the canonical semantic document. The file at
+`$CODEX_HOME/config.toml` is the live document and may additionally contain two
+AIO-owned projections:
+
+```text
+canonical direct config
+  -> optional CLI-proxy provider/auth projection
+  -> optional managed model_catalog_json pointer
+  -> live config.toml
+```
+
+Reads, structured saves, raw TOML saves, and Codex MCP sync operate on the
+canonical document. When the proxy is enabled, its manifest backup stores that
+canonical document and the live file is rebuilt from it. A managed catalog
+pointer is then composed onto the live projection. Proxy-only provider/auth
+keys and the AIO-generated catalog path must never become canonical bytes.
+
+### Lifecycle Coordinator
+
+- Structured/raw config writes, Codex MCP sync, proxy enable/sync/disable,
+  managed profile/catalog changes, the 372K preference, startup repair, and
+  exit restoration share `lock_profile_lifecycle` as their outer Codex lock.
+- A mutation checks the shutdown admission gate after acquiring that lock.
+  Exit closes admission before restoring proxy and catalog projections.
+- The fixed order is lifecycle lock -> proxy/MCP metadata -> canonical bytes ->
+  live projection -> managed catalog. Code inside this sequence must not
+  reacquire the lifecycle lock.
+- Before writing, validate proxy/catalog ownership and snapshot every affected
+  file. On failure, compensate only a file whose current bytes still equal the
+  bytes written by that transaction. External drift is preserved and reported
+  as recovery required.
+- Startup repairs proxy manifest state first and then re-applies the catalog
+  policy. Exit restores direct bytes without changing the persisted policies.
+
+### Required Regression Evidence
+
+- Proxy enable -> structured/raw/MCP save -> proxy disable or exit preserves
+  the semantic edit while restoring direct provider, auth, provider-table, and
+  catalog-pointer semantics.
+- Repeated projection/sync is idempotent, preserves comments and unknown keys,
+  and leaves direct backups free of AIO projection-only values.
+- Failure and drift tests cover live config, proxy backup/manifest, MCP
+  backup/manifest, generated catalog, and preference persistence.
+- Concurrent config/MCP/proxy/catalog/exit operations serialize without lost
+  updates or competing lock order.
+
 ## Scenario: Add Or Change A Structured Codex Config Field
 
 ### 1. Scope / Trigger

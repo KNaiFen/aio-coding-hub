@@ -693,6 +693,7 @@ pub fn config_import<R: tauri::Runtime>(
     // Global lock order is config import -> managed Profile lifecycle. Profile
     // operations never acquire the import lock in the opposite direction.
     let _profile_lifecycle_guard = crate::codex_managed_profiles::lock_profile_lifecycle();
+    crate::codex_managed_profiles::ensure_lifecycle_open()?;
     #[cfg(test)]
     run_after_config_import_lock_acquired_test_hook();
 

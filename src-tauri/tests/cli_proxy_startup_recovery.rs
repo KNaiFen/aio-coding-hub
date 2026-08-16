@@ -122,9 +122,18 @@ fn codex_config_updates_are_preserved_when_cli_proxy_enabled() {
         aio_coding_hub_lib::test_support::codex_config_toml_path(&handle).expect("codex path");
     std::fs::create_dir_all(config_path.parent().expect("codex config parent"))
         .expect("create codex config parent");
+    let user_catalog_path = config_path
+        .parent()
+        .expect("codex config parent")
+        .join("user-catalog.json")
+        .to_string_lossy()
+        .to_string();
+    let quoted_user_catalog = serde_json::to_string(&user_catalog_path).expect("quote path");
     std::fs::write(
         &config_path,
-        "model_provider = \"aio\"\n\n[model_providers.aio]\nname = \"aio\"\n",
+        format!(
+            "model_provider = \"direct\"\npreferred_auth_method = \"chatgpt\"\nmodel_catalog_json = {quoted_user_catalog}\n\n[model_providers.direct]\nname = \"direct\"\nbase_url = \"https://api.openai.com/v1\"\n\n[user_section]\nkeep = true\n"
+        ),
     )
     .expect("write original codex config");
 
@@ -156,6 +165,10 @@ fn codex_config_updates_are_preserved_when_cli_proxy_enabled() {
         before_restore.contains("remote_compaction = true"),
         "{before_restore}"
     );
+    assert!(
+        before_restore.contains("model_provider = \"OpenAI\""),
+        "{before_restore}"
+    );
 
     let app_data_dir = aio_coding_hub_lib::test_support::app_data_dir(&handle).expect("app_data");
     let manifest_path = app_data_dir
@@ -166,6 +179,42 @@ fn codex_config_updates_are_preserved_when_cli_proxy_enabled() {
         serde_json::from_slice(&std::fs::read(&manifest_path).expect("read manifest"))
             .expect("parse manifest");
     assert!(json_bool(&manifest, "enabled"));
+    let backup_rel = manifest
+        .get("files")
+        .and_then(Value::as_array)
+        .and_then(|files| {
+            files.iter().find_map(|entry| {
+                (entry.get("kind").and_then(Value::as_str) == Some("codex_config_toml"))
+                    .then(|| entry.get("backup_rel").and_then(Value::as_str))
+                    .flatten()
+            })
+        })
+        .expect("codex config backup rel");
+    let canonical_backup = read_text(
+        &app_data_dir
+            .join("cli-proxy")
+            .join("codex")
+            .join("files")
+            .join(backup_rel),
+    );
+    assert!(
+        canonical_backup.contains("model_provider = \"direct\""),
+        "{canonical_backup}"
+    );
+    assert!(
+        canonical_backup.contains("preferred_auth_method = \"chatgpt\""),
+        "{canonical_backup}"
+    );
+    assert!(
+        canonical_backup.contains(&format!("model_catalog_json = {quoted_user_catalog}")),
+        "{canonical_backup}"
+    );
+    assert!(
+        canonical_backup.contains("remote_compaction = true"),
+        "{canonical_backup}"
+    );
+    assert!(!canonical_backup.contains("[model_providers.OpenAI]"));
+    assert!(!canonical_backup.contains("[model_providers.aio]"));
 
     // Simulate app exit cleanup path: restore direct config while keeping enabled state.
     let restored =
@@ -190,6 +239,22 @@ fn codex_config_updates_are_preserved_when_cli_proxy_enabled() {
         after_restore.contains("remote_compaction = true"),
         "{after_restore}"
     );
+    assert!(
+        after_restore.contains("model_provider = \"direct\""),
+        "{after_restore}"
+    );
+    assert!(
+        after_restore.contains("preferred_auth_method = \"chatgpt\""),
+        "{after_restore}"
+    );
+    assert!(
+        after_restore.contains(&format!("model_catalog_json = {quoted_user_catalog}")),
+        "{after_restore}"
+    );
+    assert!(after_restore.contains("[model_providers.direct]"), "{after_restore}");
+    assert!(after_restore.contains("[user_section]"), "{after_restore}");
+    assert!(!after_restore.contains("[model_providers.OpenAI]"));
+    assert!(!after_restore.contains("[model_providers.aio]"));
 }
 
 #[test]

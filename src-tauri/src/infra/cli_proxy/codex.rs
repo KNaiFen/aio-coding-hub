@@ -278,11 +278,19 @@ pub(super) fn merge_restore_codex_config_toml(
     let current_bytes = read_optional_cli_proxy_file(target_path)?;
     let backup_bytes = read_cli_proxy_file(backup_path)?;
 
+    let out = merge_restore_codex_config_bytes(current_bytes.as_deref(), &backup_bytes)?;
+    write_cli_proxy_file_atomic(target_path, &out)?;
+    Ok(())
+}
+
+pub(super) fn merge_restore_codex_config_bytes(
+    current_bytes: Option<&[u8]>,
+    backup_bytes: &[u8],
+) -> AppResult<Vec<u8>> {
     let current_str = current_bytes
-        .as_deref()
         .map(|b| String::from_utf8_lossy(b).to_string())
         .unwrap_or_default();
-    let backup_str = String::from_utf8_lossy(&backup_bytes).to_string();
+    let backup_str = String::from_utf8_lossy(backup_bytes).to_string();
 
     let mut lines: Vec<String> = if current_str.is_empty() {
         Vec::new()
@@ -320,25 +328,18 @@ pub(super) fn merge_restore_codex_config_toml(
         backup_model_catalog.as_deref(),
     );
 
-    // --- Remove the proxy-injected `[model_providers.aio]` section ---
-    // If the backup had this section, we leave it; otherwise remove it.
-    let backup_had_aio =
-        !find_model_provider_base_table_indices(&backup_lines, CODEX_PROVIDER_KEY).is_empty();
-    if !backup_had_aio {
-        remove_model_provider_section(&mut lines, CODEX_PROVIDER_KEY);
+    // Restore both provider keys that AIO may project. Only the four fields
+    // owned by the projection are reverted when the user already had the table.
+    for provider_key in [CODEX_PROVIDER_KEY, CODEX_REMOTE_COMPACTION_PROVIDER_KEY] {
+        restore_model_provider_base_table(&mut lines, &backup_lines, provider_key);
     }
 
     // --- Revert `[windows] sandbox` ---
-    // If the backup did not have `[windows]` sandbox, remove the one the proxy added.
-    let backup_had_windows_sandbox = has_windows_sandbox(&backup_lines);
-    if !backup_had_windows_sandbox {
-        remove_windows_sandbox(&mut lines);
-    }
+    restore_windows_sandbox(&mut lines, &backup_lines);
 
     let mut out = lines.join("\n");
     out.push('\n');
-    write_cli_proxy_file_atomic(target_path, out.as_bytes())?;
-    Ok(())
+    Ok(out.into_bytes())
 }
 
 // -- TOML helpers for merge-restore -----------------------------------------
@@ -406,6 +407,83 @@ pub(super) fn remove_model_provider_section(lines: &mut Vec<String>, provider_ke
     }
 }
 
+const CODEX_MANAGED_PROVIDER_FIELDS: [&str; 4] = [
+    "name",
+    "base_url",
+    "wire_api",
+    "requires_openai_auth",
+];
+
+fn table_assignment_key(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    if trimmed.starts_with('#') {
+        return None;
+    }
+    trimmed.split_once('=').map(|(key, _)| key.trim())
+}
+
+fn remove_model_provider_base_tables(lines: &mut Vec<String>, provider_key: &str) {
+    loop {
+        let Some(start) = find_model_provider_base_table_indices(lines, provider_key)
+            .into_iter()
+            .next()
+        else {
+            return;
+        };
+        let end = find_next_table_header(lines, start.saturating_add(1));
+        lines.drain(start..end);
+    }
+}
+
+fn restore_model_provider_base_table(
+    lines: &mut Vec<String>,
+    backup_lines: &[String],
+    provider_key: &str,
+) {
+    let Some(backup_start) = find_model_provider_base_table_indices(backup_lines, provider_key)
+        .into_iter()
+        .next()
+    else {
+        remove_model_provider_base_tables(lines, provider_key);
+        return;
+    };
+    let backup_end = find_next_table_header(backup_lines, backup_start.saturating_add(1));
+    let backup_managed_lines = backup_lines[backup_start + 1..backup_end]
+        .iter()
+        .filter(|line| {
+            table_assignment_key(line)
+                .is_some_and(|key| CODEX_MANAGED_PROVIDER_FIELDS.contains(&key))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let Some(current_start) = find_model_provider_base_table_indices(lines, provider_key)
+        .into_iter()
+        .next()
+    else {
+        let insert_at = find_model_provider_nested_table_index(lines, provider_key)
+            .unwrap_or(lines.len());
+        lines.splice(
+            insert_at..insert_at,
+            backup_lines[backup_start..backup_end].iter().cloned(),
+        );
+        return;
+    };
+
+    let current_end = find_next_table_header(lines, current_start.saturating_add(1));
+    let retained = lines[current_start + 1..current_end]
+        .iter()
+        .filter(|line| {
+            !table_assignment_key(line)
+                .is_some_and(|key| CODEX_MANAGED_PROVIDER_FIELDS.contains(&key))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut restored = backup_managed_lines;
+    restored.extend(retained);
+    lines.splice(current_start + 1..current_end, restored);
+}
+
 /// Check if backup lines contain a `[windows]` section with `sandbox` key.
 pub(super) fn has_windows_sandbox(lines: &[String]) -> bool {
     let Some(start) = lines.iter().position(|l| l.trim() == "[windows]") else {
@@ -415,6 +493,38 @@ pub(super) fn has_windows_sandbox(lines: &[String]) -> bool {
     lines[start + 1..end]
         .iter()
         .any(|l| l.trim_start().starts_with("sandbox"))
+}
+
+fn windows_sandbox_line(lines: &[String]) -> Option<String> {
+    let start = lines.iter().position(|line| line.trim() == "[windows]")?;
+    let end = find_next_table_header(lines, start.saturating_add(1));
+    lines[start + 1..end]
+        .iter()
+        .find(|line| table_assignment_key(line) == Some("sandbox"))
+        .cloned()
+}
+
+fn restore_windows_sandbox(lines: &mut Vec<String>, backup_lines: &[String]) {
+    let Some(backup_sandbox) = windows_sandbox_line(backup_lines) else {
+        remove_windows_sandbox(lines);
+        return;
+    };
+    let Some(start) = lines.iter().position(|line| line.trim() == "[windows]") else {
+        if lines.last().is_some_and(|line| !line.trim().is_empty()) {
+            lines.push(String::new());
+        }
+        lines.extend(["[windows]".to_string(), backup_sandbox]);
+        return;
+    };
+    let end = find_next_table_header(lines, start.saturating_add(1));
+    let retained = lines[start + 1..end]
+        .iter()
+        .filter(|line| table_assignment_key(line) != Some("sandbox"))
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut restored = vec![backup_sandbox];
+    restored.extend(retained);
+    lines.splice(start + 1..end, restored);
 }
 
 /// Remove the `sandbox` key from the `[windows]` section; remove the section if empty.
@@ -739,13 +849,18 @@ fn build_codex_config_toml_with_auth_strategy(
         input.lines().map(|l| l.to_string()).collect()
     };
 
-    upsert_root_model_provider(&mut lines, CODEX_PROVIDER_KEY);
+    let provider_key = if codex_remote_compaction_enabled(&input)? {
+        CODEX_REMOTE_COMPACTION_PROVIDER_KEY
+    } else {
+        CODEX_PROVIDER_KEY
+    };
+    upsert_root_model_provider(&mut lines, provider_key);
     if oauth_compatible {
         remove_root_preferred_auth_method_if_api_key(&mut lines);
     } else {
         upsert_root_preferred_auth_method(&mut lines, "apikey");
     }
-    upsert_model_provider_base_table(&mut lines, CODEX_PROVIDER_KEY, base_url);
+    upsert_model_provider_base_table(&mut lines, provider_key, base_url);
     if platform == CodexConfigPlatform::Windows {
         upsert_windows_sandbox(&mut lines);
     }
@@ -753,6 +868,23 @@ fn build_codex_config_toml_with_auth_strategy(
     let mut out = lines.join("\n");
     out.push('\n');
     Ok(out.into_bytes())
+}
+
+fn codex_remote_compaction_enabled(input: &str) -> AppResult<bool> {
+    if input.trim().is_empty() {
+        return Ok(false);
+    }
+    let document = input.parse::<toml_edit::DocumentMut>().map_err(|error| {
+        crate::shared::error::AppError::from(format!(
+            "CLI_PROXY_INVALID_CODEX_TOML: failed to parse config.toml: {error}"
+        ))
+    })?;
+    Ok(document
+        .get("features")
+        .and_then(toml_edit::Item::as_table_like)
+        .and_then(|features| features.get("remote_compaction"))
+        .and_then(toml_edit::Item::as_bool)
+        .unwrap_or(false))
 }
 
 pub(super) fn build_codex_auth_json(current: Option<Vec<u8>>) -> AppResult<Vec<u8>> {

@@ -33,6 +33,8 @@ import {
   useCliManagerCodexConfigSetMutation,
   useCliManagerCodexConfigTomlQuery,
   useCliManagerCodexConfigTomlSetMutation,
+  useCliManagerCodexContextWindow372kQuery,
+  useCliManagerCodexContextWindow372kSetMutation,
   useCliManagerCodexInfoQuery,
   useCliManagerCodexModelCatalogQuery,
   useCliManagerCodexModelCatalogRefresh,
@@ -232,6 +234,8 @@ vi.mock("../../query/cliManager", async () => {
     useCliManagerCodexConfigSetMutation: vi.fn(),
     useCliManagerCodexConfigTomlQuery: vi.fn(),
     useCliManagerCodexConfigTomlSetMutation: vi.fn(),
+    useCliManagerCodexContextWindow372kQuery: vi.fn(),
+    useCliManagerCodexContextWindow372kSetMutation: vi.fn(),
     useCliManagerCodexModelCatalogQuery: vi.fn(),
     useCliManagerCodexModelCatalogRefresh: vi.fn(),
     useCliManagerCodexProviderSyncMutation: vi.fn(),
@@ -356,6 +360,15 @@ beforeEach(() => {
     refetch: vi.fn(),
   } as any);
   vi.mocked(useCliManagerCodexConfigTomlSetMutation).mockReturnValue({
+    isPending: false,
+    mutateAsync: vi.fn(),
+  } as any);
+  vi.mocked(useCliManagerCodexContextWindow372kQuery).mockReturnValue({
+    data: { enabled: false },
+    isFetching: false,
+    refetch: vi.fn(),
+  } as any);
+  vi.mocked(useCliManagerCodexContextWindow372kSetMutation).mockReturnValue({
     isPending: false,
     mutateAsync: vi.fn(),
   } as any);

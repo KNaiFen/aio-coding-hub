@@ -451,6 +451,8 @@ pub struct AppSettings {
     pub enable_session_reuse: bool,
     // Codex Session ID completion (default enabled).
     pub enable_codex_session_id_completion: bool,
+    // AIO-owned complete catalog policy for the three supported 372K models.
+    pub enable_codex_context_window_372k: bool,
     // Claude metadata.user_id injection (default enabled).
     pub enable_claude_metadata_user_id_injection: bool,
     // Cache anomaly monitor (default disabled).
@@ -540,6 +542,7 @@ impl Default for AppSettings {
             enable_billing_header_rectifier: DEFAULT_ENABLE_BILLING_HEADER_RECTIFIER,
             enable_session_reuse: DEFAULT_ENABLE_SESSION_REUSE,
             enable_codex_session_id_completion: DEFAULT_ENABLE_CODEX_SESSION_ID_COMPLETION,
+            enable_codex_context_window_372k: DEFAULT_ENABLE_CODEX_CONTEXT_WINDOW_372K,
             enable_claude_metadata_user_id_injection:
                 DEFAULT_ENABLE_CLAUDE_METADATA_USER_ID_INJECTION,
             enable_cache_anomaly_monitor: DEFAULT_ENABLE_CACHE_ANOMALY_MONITOR,

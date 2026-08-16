@@ -302,6 +302,8 @@ export type CliManagerCodexTabProps = {
   codexConfigSaving: boolean;
   codexConfigTomlLoading: boolean;
   codexConfigTomlSaving: boolean;
+  codexContextWindow372kEnabled: boolean | null;
+  codexContextWindow372kSaving: boolean;
   codexProviderSyncing?: boolean;
   codexModelCatalogLoading?: boolean;
   codexModelCatalogError?: boolean;
@@ -316,6 +318,7 @@ export type CliManagerCodexTabProps = {
   openCodexConfigDir: () => Promise<void> | void;
   persistCodexConfig: (patch: CodexConfigPatch) => Promise<CodexConfigState | null>;
   persistCodexConfigToml: (toml: string) => Promise<boolean> | boolean;
+  persistCodexContextWindow372k: (enabled: boolean) => Promise<boolean> | boolean;
   syncCodexProvider?: () => Promise<void> | void;
   persistCommonSettings?: (
     patch: Partial<AppSettings>
@@ -1312,13 +1315,19 @@ function CodexSandboxSection({
 function CodexFeaturesSection({
   codexConfig,
   saving,
+  contextWindow372kEnabled,
+  contextWindow372kSaving,
   effectiveFastModeEnabled,
   persistCodexConfig,
+  persistCodexContextWindow372k,
 }: {
   codexConfig: CodexConfigState;
   saving: boolean;
+  contextWindow372kEnabled: boolean | null;
+  contextWindow372kSaving: boolean;
   effectiveFastModeEnabled: boolean;
   persistCodexConfig: CliManagerCodexTabProps["persistCodexConfig"];
+  persistCodexContextWindow372k: CliManagerCodexTabProps["persistCodexContextWindow372k"];
 }) {
   return (
     <div className="rounded-lg border border-border bg-white p-5 dark:bg-secondary">
@@ -1327,6 +1336,17 @@ function CodexFeaturesSection({
         Features（实验 / 可选能力）
       </h3>
       <div className="divide-y divide-border">
+        <SettingItem
+          label="开启上下文 372K"
+          subtitle="gpt-5.6-sol、gpt-5.6-terra、gpt-5.6-luna"
+        >
+          <Switch
+            checked={contextWindow372kEnabled ?? false}
+            onCheckedChange={(checked) => void persistCodexContextWindow372k(checked)}
+            disabled={saving || contextWindow372kSaving || contextWindow372kEnabled == null}
+          />
+        </SettingItem>
+
         <SettingItem
           label="remote_compaction"
           subtitle="实验性：启用 remote compaction（需要 ChatGPT 身份验证）。"
@@ -2080,8 +2100,11 @@ export function CliManagerCodexTab(props: CliManagerCodexTabProps) {
     appSettings,
     openCodexConfigDir,
     persistCodexConfig,
+    persistCodexContextWindow372k,
     syncCodexProvider,
     codexProviderSyncing = false,
+    codexContextWindow372kEnabled,
+    codexContextWindow372kSaving,
   } = props;
 
   return (
@@ -2193,8 +2216,11 @@ export function CliManagerCodexTab(props: CliManagerCodexTabProps) {
           <CodexFeaturesSection
             codexConfig={codexConfig}
             saving={controller.saving}
+            contextWindow372kEnabled={codexContextWindow372kEnabled}
+            contextWindow372kSaving={codexContextWindow372kSaving}
             effectiveFastModeEnabled={controller.effectiveFastModeEnabled}
             persistCodexConfig={persistCodexConfig}
+            persistCodexContextWindow372k={persistCodexContextWindow372k}
           />
 
           <CodexTomlAdvancedSection

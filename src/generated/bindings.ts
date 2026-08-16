@@ -297,6 +297,32 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async cliManagerCodexContextWindow372kGet(): Promise<
+    Result<CodexContextWindow372kState, string>
+  > {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("cli_manager_codex_context_window_372k_get"),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async cliManagerCodexContextWindow372kSet(
+    enabled: boolean
+  ): Promise<Result<CodexContextWindow372kState, string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("cli_manager_codex_context_window_372k_set", { enabled }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async cliManagerCodexConfigGet(): Promise<Result<CodexConfigState, string>> {
     try {
       return { status: "ok", data: await TAURI_INVOKE("cli_manager_codex_config_get") };
@@ -3077,6 +3103,7 @@ export type CodexConfigState = {
   features_responses_websockets_v2: boolean | null;
   features_multi_agent: boolean | null;
 };
+export type CodexContextWindow372kState = { enabled: boolean };
 export type CodexConfigTomlState = { config_path: string; exists: boolean; toml: string };
 export type CodexConfigTomlValidationError = {
   message: string;
@@ -4688,6 +4715,7 @@ export type SettingsView = {
   enable_billing_header_rectifier: boolean;
   enable_session_reuse: boolean;
   enable_codex_session_id_completion: boolean;
+  enable_codex_context_window_372k: boolean;
   enable_claude_metadata_user_id_injection: boolean;
   enable_cache_anomaly_monitor: boolean;
   enable_debug_log: boolean;

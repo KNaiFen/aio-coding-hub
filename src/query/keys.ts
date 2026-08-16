@@ -427,6 +427,7 @@ export const cliManagerKeys = {
   codexInfo: () => [...cliManagerAllKey, "codex", "info"] as const,
   codexConfig: () => [...cliManagerAllKey, "codex", "config"] as const,
   codexConfigToml: () => [...cliManagerAllKey, "codex", "configToml"] as const,
+  codexContextWindow372k: () => [...cliManagerAllKey, "codex", "contextWindow372k"] as const,
   codexModelCatalog: (snapshot?: {
     configPath?: string | null;
     executablePath?: string | null;

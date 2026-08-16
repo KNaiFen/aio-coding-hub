@@ -140,6 +140,8 @@ function renderTab(overrides: Partial<ComponentProps<typeof CliManagerCodexTab>>
       codexConfigSaving={false}
       codexConfigTomlLoading={false}
       codexConfigTomlSaving={false}
+      codexContextWindow372kEnabled={false}
+      codexContextWindow372kSaving={false}
       codexInfo={createCodexInfo()}
       codexConfig={createCodexConfig()}
       codexConfigToml={null}
@@ -147,6 +149,7 @@ function renderTab(overrides: Partial<ComponentProps<typeof CliManagerCodexTab>>
       openCodexConfigDir={vi.fn()}
       persistCodexConfig={vi.fn()}
       persistCodexConfigToml={vi.fn().mockResolvedValue(true)}
+      persistCodexContextWindow372k={vi.fn().mockResolvedValue(true)}
       {...overrides}
     />
   );
@@ -194,6 +197,57 @@ describe("components/cli-manager/tabs/CodexTab", () => {
     expect(screen.queryByRole("radio", { name: "最低 (minimal)" })).not.toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "最大深度 (max)" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "自动委派 (ultra)" })).toBeChecked();
+  });
+
+  it("renders authoritative 372K state and persists switch changes", () => {
+    const persistCodexContextWindow372k = vi.fn().mockResolvedValue(true);
+    const refreshCodex = vi.fn();
+
+    renderTab({
+      codexContextWindow372kEnabled: true,
+      persistCodexContextWindow372k,
+      refreshCodex,
+    });
+
+    const setting = screen.getByText("开启上下文 372K").parentElement?.parentElement;
+    expect(setting).toBeTruthy();
+    const toggle = within(setting as HTMLElement).getByRole("switch");
+    expect(toggle).toBeChecked();
+
+    fireEvent.click(toggle);
+    expect(persistCodexContextWindow372k).toHaveBeenCalledWith(false);
+    expect(refreshCodex).not.toHaveBeenCalled();
+  });
+
+  it("disables the 372K switch while authoritative state is loading or saving", () => {
+    const { rerender } = renderTab({
+      codexContextWindow372kEnabled: null,
+    });
+    const setting = screen.getByText("开启上下文 372K").parentElement?.parentElement;
+    expect(within(setting as HTMLElement).getByRole("switch")).toBeDisabled();
+
+    rerender(
+      <CliManagerCodexTab
+        codexAvailable="available"
+        codexLoading={false}
+        codexConfigLoading={false}
+        codexConfigSaving={false}
+        codexConfigTomlLoading={false}
+        codexConfigTomlSaving={false}
+        codexContextWindow372kEnabled={true}
+        codexContextWindow372kSaving={true}
+        codexInfo={createCodexInfo()}
+        codexConfig={createCodexConfig()}
+        codexConfigToml={null}
+        refreshCodex={vi.fn()}
+        openCodexConfigDir={vi.fn()}
+        persistCodexConfig={vi.fn()}
+        persistCodexConfigToml={vi.fn().mockResolvedValue(true)}
+        persistCodexContextWindow372k={vi.fn().mockResolvedValue(true)}
+      />
+    );
+    const savingSetting = screen.getByText("开启上下文 372K").parentElement?.parentElement;
+    expect(within(savingSetting as HTMLElement).getByRole("switch")).toBeDisabled();
   });
 
   it("handles sandbox confirm flow and persists related config controls", async () => {

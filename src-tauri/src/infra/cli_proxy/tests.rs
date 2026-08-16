@@ -1106,6 +1106,32 @@ trusted_roots = ["C:\\work"]
 }
 
 #[test]
+fn codex_proxy_uses_openai_provider_for_remote_compaction() {
+    let input = r#"model_provider = "direct"
+
+[features]
+remote_compaction = true
+
+[model_providers.direct]
+base_url = "https://api.openai.com/v1"
+"#;
+
+    let out = build_codex_config_toml(
+        Some(input.as_bytes().to_vec()),
+        "http://new/v1",
+        CodexConfigPlatform::Other,
+    )
+    .expect("build remote-compaction projection");
+    let s = String::from_utf8(out).expect("utf8");
+
+    assert!(s.contains("model_provider = \"OpenAI\""), "{s}");
+    assert!(s.contains("[model_providers.OpenAI]"), "{s}");
+    assert!(s.contains("remote_compaction = true"), "{s}");
+    assert!(!s.contains("[model_providers.aio]"), "{s}");
+    assert!(s.contains("[model_providers.direct]"), "{s}");
+}
+
+#[test]
 fn codex_proxy_dedupes_multiple_base_tables() {
     let input = r#"
 [model_providers."aio"]
@@ -2347,11 +2373,11 @@ fn merge_restore_codex_config_preserves_user_changes() {
         b"model_catalog_json = \"C:\\\\Catalogs\\\\user.json\"\n\n[model_providers.openai]\nname = \"openai\"\nbase_url = \"https://api.openai.com/v1\"\n",
     );
 
-    // Current: proxy added its config, user added a new section
+    // Current: remote-compaction proxy added its config, user added a new section
     let target = write_temp(
         tmp.path(),
         "config.toml",
-        b"model_provider = \"aio\"\npreferred_auth_method = \"apikey\"\nmodel_catalog_json = \"C:\\\\AIO\\\\managed-model-catalog.json\"\n\n[model_providers.openai]\nname = \"openai\"\nbase_url = \"https://api.openai.com/v1\"\n\n[model_providers.aio]\nname = \"aio\"\nbase_url = \"http://127.0.0.1:37123/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\n\n[user_section]\nfoo = \"bar\"\n\n[windows]\nsandbox = \"elevated\"\n",
+        b"model_provider = \"OpenAI\"\npreferred_auth_method = \"apikey\"\nmodel_catalog_json = \"C:\\\\AIO\\\\managed-model-catalog.json\"\n\n[model_providers.openai]\nname = \"openai\"\nbase_url = \"https://api.openai.com/v1\"\n\n[model_providers.OpenAI]\nname = \"OpenAI\"\nbase_url = \"http://127.0.0.1:37123/v1\"\nwire_api = \"responses\"\nrequires_openai_auth = true\n\n[user_section]\nfoo = \"bar\"\n\n[windows]\nsandbox = \"elevated\"\n",
     );
 
     merge_restore_codex_config_toml(&target, &backup).unwrap();
@@ -2359,7 +2385,7 @@ fn merge_restore_codex_config_preserves_user_changes() {
     let result = std::fs::read_to_string(&target).unwrap();
     // Proxy root keys removed (check for the root-level assignment, not table names)
     assert!(
-        !result.contains("model_provider = \"aio\""),
+        !result.contains("model_provider = \"OpenAI\""),
         "model_provider root key should be removed: {result}"
     );
     assert!(
@@ -2369,7 +2395,7 @@ fn merge_restore_codex_config_preserves_user_changes() {
     assert!(result.contains("model_catalog_json = \"C:\\\\Catalogs\\\\user.json\""));
     assert!(!result.contains("managed-model-catalog.json"));
     // Proxy provider section removed
-    assert!(!result.contains("[model_providers.aio]"));
+    assert!(!result.contains("[model_providers.OpenAI]"));
     // Proxy windows sandbox removed
     assert!(!result.contains("[windows]"));
     assert!(!result.contains("sandbox"));
@@ -2379,6 +2405,58 @@ fn merge_restore_codex_config_preserves_user_changes() {
     // User's custom section preserved
     assert!(result.contains("[user_section]"));
     assert!(result.contains("foo = \"bar\""));
+}
+
+#[test]
+fn merge_restore_codex_config_restores_user_owned_openai_table_and_windows_sandbox() {
+    let backup = br#"model_provider = "OpenAI"
+preferred_auth_method = "chatgpt"
+
+[model_providers.OpenAI]
+name = "User OpenAI"
+base_url = "https://api.openai.com/v1"
+wire_api = "chat"
+requires_openai_auth = false
+custom = "preserve"
+
+[windows]
+sandbox = "restricted"
+keep = true
+"#;
+    let current = br#"model_provider = "OpenAI"
+preferred_auth_method = "apikey"
+
+[model_providers.OpenAI]
+name = "OpenAI"
+base_url = "http://127.0.0.1:37123/v1"
+wire_api = "responses"
+requires_openai_auth = true
+custom = "preserve"
+external_during_proxy = "keep"
+
+[windows]
+sandbox = "elevated"
+keep = true
+"#;
+
+    let restored = merge_restore_codex_config_bytes(Some(current), backup).expect("restore");
+    let restored = String::from_utf8(restored).expect("utf8");
+
+    assert!(restored.contains("preferred_auth_method = \"chatgpt\""), "{restored}");
+    assert!(restored.contains("name = \"User OpenAI\""), "{restored}");
+    assert!(
+        restored.contains("base_url = \"https://api.openai.com/v1\""),
+        "{restored}"
+    );
+    assert!(restored.contains("wire_api = \"chat\""), "{restored}");
+    assert!(restored.contains("requires_openai_auth = false"), "{restored}");
+    assert!(restored.contains("custom = \"preserve\""), "{restored}");
+    assert!(
+        restored.contains("external_during_proxy = \"keep\""),
+        "{restored}"
+    );
+    assert!(restored.contains("sandbox = \"restricted\""), "{restored}");
+    assert!(restored.contains("keep = true"), "{restored}");
 }
 
 /// Simulates the app lifecycle that causes the "修复" button to appear:

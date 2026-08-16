@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-pub const SCHEMA_VERSION: u32 = 60;
+pub const SCHEMA_VERSION: u32 = 61;
 pub const DEFAULT_GATEWAY_PORT: u16 = 37123;
 pub const MAX_GATEWAY_PORT: u16 = 37199;
 pub const DEFAULT_PROVIDER_COOLDOWN_SECONDS: u32 = 30;
@@ -58,6 +58,7 @@ pub(super) const SCHEMA_VERSION_ADD_UPSTREAM_ERROR_RESPONSE_RULES: u32 = 57;
 pub(super) const SCHEMA_VERSION_ADD_PROVIDER_AVAILABILITY_HOURS: u32 = 58;
 pub(super) const SCHEMA_VERSION_ADD_STREAM_INTERNAL_ERROR_RETRY: u32 = 59;
 pub(super) const SCHEMA_VERSION_SET_REQUEST_LOG_RETENTION_DEFAULT: u32 = 60;
+pub(super) const SCHEMA_VERSION_ADD_CODEX_CONTEXT_WINDOW_372K: u32 = 61;
 
 pub const MAX_MODEL_ROUTING_RULES: usize = 128;
 pub const MAX_MODEL_ROUTING_MODEL_BYTES: usize = 256;
@@ -79,6 +80,7 @@ pub(super) const DEFAULT_ENABLE_THINKING_BUDGET_RECTIFIER: bool = true;
 pub(super) const DEFAULT_ENABLE_BILLING_HEADER_RECTIFIER: bool = false;
 pub(super) const DEFAULT_ENABLE_SESSION_REUSE: bool = true;
 pub(super) const DEFAULT_ENABLE_CODEX_SESSION_ID_COMPLETION: bool = true;
+pub(super) const DEFAULT_ENABLE_CODEX_CONTEXT_WINDOW_372K: bool = false;
 pub(super) const DEFAULT_ENABLE_CLAUDE_METADATA_USER_ID_INJECTION: bool = true;
 pub(super) const DEFAULT_ENABLE_CACHE_ANOMALY_MONITOR: bool = false;
 pub(super) const DEFAULT_ENABLE_DEBUG_LOG: bool = false;

@@ -8,6 +8,7 @@ import {
   type CodexConfigState,
   type CodexConfigTomlState,
   type CodexConfigTomlValidationResult,
+  type CodexContextWindow372kState,
   type CodexModelCatalogState,
   type SimpleCliInfo,
   type GrokConfigState,
@@ -21,6 +22,8 @@ import {
   cliManagerCodexConfigTomlGet,
   cliManagerCodexConfigTomlSet,
   cliManagerCodexConfigTomlValidate,
+  cliManagerCodexContextWindow372kGet,
+  cliManagerCodexContextWindow372kSet,
   cliManagerCodexInfoGet,
   cliManagerCodexModelCatalogGet,
   cliManagerCodexProviderSync,
@@ -40,6 +43,8 @@ vi.mock("../../../generated/bindings", async () => {
       cliManagerClaudeInfoGet: vi.fn(),
       cliManagerCodexInfoGet: vi.fn(),
       cliManagerCodexModelCatalogGet: vi.fn(),
+      cliManagerCodexContextWindow372kGet: vi.fn(),
+      cliManagerCodexContextWindow372kSet: vi.fn(),
       cliManagerCodexConfigSet: vi.fn(),
       cliManagerCodexConfigTomlGet: vi.fn(),
       cliManagerCodexConfigTomlValidate: vi.fn(),
@@ -126,6 +131,12 @@ function makeCodexModelCatalogState(
     models: [],
     ...overrides,
   };
+}
+
+function makeCodexContextWindow372kState(
+  overrides: Partial<CodexContextWindow372kState> = {}
+): CodexContextWindow372kState {
+  return { enabled: false, ...overrides };
 }
 
 function makeCodexConfigTomlState(
@@ -270,6 +281,14 @@ describe("services/cli/cliManager", () => {
       status: "ok",
       data: makeCodexModelCatalogState(),
     });
+    vi.mocked(commands.cliManagerCodexContextWindow372kGet).mockResolvedValue({
+      status: "ok",
+      data: makeCodexContextWindow372kState(),
+    });
+    vi.mocked(commands.cliManagerCodexContextWindow372kSet).mockResolvedValue({
+      status: "ok",
+      data: makeCodexContextWindow372kState({ enabled: true }),
+    });
     vi.mocked(commands.cliManagerCodexConfigSet).mockResolvedValue({
       status: "ok",
       data: makeCodexConfigState(),
@@ -347,6 +366,12 @@ describe("services/cli/cliManager", () => {
 
     await cliManagerCodexModelCatalogGet();
     expect(commands.cliManagerCodexModelCatalogGet).toHaveBeenCalledWith();
+
+    await cliManagerCodexContextWindow372kGet();
+    expect(commands.cliManagerCodexContextWindow372kGet).toHaveBeenCalledWith();
+
+    await cliManagerCodexContextWindow372kSet(true);
+    expect(commands.cliManagerCodexContextWindow372kSet).toHaveBeenCalledWith(true);
 
     await cliManagerCodexConfigSet({ model: "gpt-5" });
     expect(commands.cliManagerCodexConfigSet).toHaveBeenCalledWith(

@@ -9,6 +9,8 @@ import {
   cliManagerCodexConfigSet,
   cliManagerCodexConfigTomlGet,
   cliManagerCodexConfigTomlSet,
+  cliManagerCodexContextWindow372kGet,
+  cliManagerCodexContextWindow372kSet,
   cliManagerCodexProviderSync,
   cliManagerCodexInfoGet,
   cliManagerCodexModelCatalogGet,
@@ -25,6 +27,7 @@ import {
   type ClaudeSettingsState,
   type CodexConfigPatch,
   type CodexConfigState,
+  type CodexContextWindow372kState,
   type CodexModelCatalogState,
   type GeminiConfigPatch,
   type GeminiConfigState,
@@ -131,6 +134,15 @@ export function useCliManagerCodexConfigTomlQuery(options?: { enabled?: boolean 
   });
 }
 
+export function useCliManagerCodexContextWindow372kQuery(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: cliManagerKeys.codexContextWindow372k(),
+    queryFn: () => cliManagerCodexContextWindow372kGet(),
+    enabled: options?.enabled ?? true,
+    placeholderData: keepPreviousData,
+  });
+}
+
 export function useCliManagerGeminiInfoQuery(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: cliManagerKeys.geminiInfo(),
@@ -225,6 +237,27 @@ export function useCliManagerCodexConfigTomlSetMutation() {
       queryClient.setQueryData<CodexConfigState | null>(cliManagerKeys.codexConfig(), next);
     },
     onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: cliManagerKeys.codexConfig() });
+      queryClient.invalidateQueries({ queryKey: cliManagerKeys.codexConfigToml() });
+    },
+  });
+}
+
+export function useCliManagerCodexContextWindow372kSetMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    scope: { id: CODEX_CONFIG_MUTATION_SCOPE },
+    mutationFn: (enabled: boolean) => cliManagerCodexContextWindow372kSet(enabled),
+    onSuccess: (next) => {
+      if (!next) return;
+      queryClient.setQueryData<CodexContextWindow372kState | null>(
+        cliManagerKeys.codexContextWindow372k(),
+        next
+      );
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: cliManagerKeys.codexContextWindow372k() });
       queryClient.invalidateQueries({ queryKey: cliManagerKeys.codexConfig() });
       queryClient.invalidateQueries({ queryKey: cliManagerKeys.codexConfigToml() });
     },

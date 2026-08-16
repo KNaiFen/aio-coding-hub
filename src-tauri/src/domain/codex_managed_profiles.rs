@@ -6,6 +6,7 @@ use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
 use sha2::{Digest as _, Sha256};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 #[cfg(test)]
@@ -105,6 +106,31 @@ struct ProfileCaptureTestHook {
 fn profile_lifecycle_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
+}
+
+static CODEX_LIFECYCLE_SHUTDOWN_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+pub(crate) struct CodexLifecycleShutdownGuard;
+
+impl Drop for CodexLifecycleShutdownGuard {
+    fn drop(&mut self) {
+        CODEX_LIFECYCLE_SHUTDOWN_COUNT.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+pub(crate) fn begin_lifecycle_shutdown() -> CodexLifecycleShutdownGuard {
+    CODEX_LIFECYCLE_SHUTDOWN_COUNT.fetch_add(1, Ordering::SeqCst);
+    CodexLifecycleShutdownGuard
+}
+
+pub(crate) fn ensure_lifecycle_open() -> AppResult<()> {
+    if CODEX_LIFECYCLE_SHUTDOWN_COUNT.load(Ordering::SeqCst) != 0 {
+        return Err(AppError::new(
+            "CODEX_LIFECYCLE_SHUTTING_DOWN",
+            "Codex configuration changes are unavailable while the application is exiting",
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn lock_profile_lifecycle() -> MutexGuard<'static, ()> {
@@ -661,6 +687,7 @@ pub fn create<R: tauri::Runtime>(
     model_uuid: &str,
 ) -> AppResult<CodexManagedProfile> {
     let _guard = lock_profile_lifecycle();
+    ensure_lifecycle_open()?;
     let profile_name_key = validate_profile_name(profile_name)?;
     validate_uuid(model_uuid, "model_uuid")?;
 
@@ -853,6 +880,7 @@ pub fn delete<R: tauri::Runtime>(
     profile_uuid: &str,
 ) -> AppResult<CodexManagedProfileDeleteResult> {
     let _guard = lock_profile_lifecycle();
+    ensure_lifecycle_open()?;
     validate_uuid(profile_uuid, "profile_uuid")?;
     let row = read_profiles(db, Some(profile_uuid))?
         .into_iter()
@@ -963,8 +991,42 @@ pub fn delete<R: tauri::Runtime>(
 mod tests {
     use super::*;
     use std::ffi::OsString;
-    use std::sync::MutexGuard;
+    use std::sync::{mpsc, Arc, Barrier, MutexGuard};
     use tauri::Manager as _;
+
+    #[test]
+    fn lifecycle_coordinator_serializes_writers_without_timing_assumptions() {
+        let first_acquired = Arc::new(Barrier::new(2));
+        let release_first = Arc::new(Barrier::new(2));
+        let first = {
+            let first_acquired = Arc::clone(&first_acquired);
+            let release_first = Arc::clone(&release_first);
+            std::thread::spawn(move || {
+                let _guard = lock_profile_lifecycle();
+                first_acquired.wait();
+                release_first.wait();
+            })
+        };
+        first_acquired.wait();
+
+        let (attempted_tx, attempted_rx) = mpsc::channel();
+        let (acquired_tx, acquired_rx) = mpsc::channel();
+        let second = std::thread::spawn(move || {
+            attempted_tx.send(()).expect("report lock attempt");
+            let _guard = lock_profile_lifecycle();
+            acquired_tx.send(()).expect("report lock acquisition");
+        });
+        attempted_rx.recv().expect("second writer attempted lock");
+        assert!(matches!(
+            acquired_rx.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+
+        release_first.wait();
+        acquired_rx.recv().expect("second writer acquired lock");
+        first.join().expect("first writer");
+        second.join().expect("second writer");
+    }
 
     struct ProfileTestApp {
         _lock: MutexGuard<'static, ()>,

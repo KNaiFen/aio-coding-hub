@@ -64,6 +64,7 @@ pub(crate) async fn cleanup_before_exit(app: &tauri::AppHandle) {
         Ordering::Acquire,
     ) {
         Ok(_) => {
+            let _codex_shutdown = crate::codex_managed_profiles::begin_lifecycle_shutdown();
             crate::app::observer::stop_best_effort(app).await;
             dispose_extension_hosts_best_effort(app).await;
             stop_gateway_best_effort(app).await;
@@ -153,7 +154,9 @@ pub(crate) async fn restore_cli_proxy_keep_state_best_effort(
 ) {
     let app_for_restore = app.clone();
     let fut = blocking::run(label, move || {
-        cli_proxy::restore_enabled_keep_state(&app_for_restore)
+        let results = cli_proxy::restore_enabled_keep_state(&app_for_restore)?;
+        crate::codex_model_catalog::managed::restore_direct_on_exit(&app_for_restore)?;
+        Ok::<_, crate::shared::error::AppError>(results)
     });
 
     match tokio::time::timeout(CLI_PROXY_RESTORE_TIMEOUT, fut).await {

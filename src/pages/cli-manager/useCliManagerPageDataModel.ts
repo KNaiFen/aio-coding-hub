@@ -46,6 +46,8 @@ import {
   useCliManagerCodexConfigSetMutation,
   useCliManagerCodexConfigTomlQuery,
   useCliManagerCodexConfigTomlSetMutation,
+  useCliManagerCodexContextWindow372kQuery,
+  useCliManagerCodexContextWindow372kSetMutation,
   useCliManagerCodexInfoQuery,
   useCliManagerCodexModelCatalogQuery,
   useCliManagerCodexModelCatalogRefresh,
@@ -167,8 +169,12 @@ export function useCliManagerPageDataModel() {
   const codexInfoQuery = useCliManagerCodexInfoQuery({ enabled: tab === "codex" });
   const codexConfigQuery = useCliManagerCodexConfigQuery({ enabled: tab === "codex" });
   const codexConfigTomlQuery = useCliManagerCodexConfigTomlQuery({ enabled: tab === "codex" });
+  const codexContextWindow372kQuery = useCliManagerCodexContextWindow372kQuery({
+    enabled: tab === "codex",
+  });
   const codexConfigSetMutation = useCliManagerCodexConfigSetMutation();
   const codexConfigTomlSetMutation = useCliManagerCodexConfigTomlSetMutation();
+  const codexContextWindow372kSetMutation = useCliManagerCodexContextWindow372kSetMutation();
   const codexProviderSyncMutation = useCliManagerCodexProviderSyncMutation();
   const refreshCodexModelCatalog = useCliManagerCodexModelCatalogRefresh();
   const codexModelCatalogQuery = useCliManagerCodexModelCatalogQuery({
@@ -184,6 +190,7 @@ export function useCliManagerPageDataModel() {
   const codexInfo = codexInfoQuery.data ?? null;
   const codexConfig = codexConfigQuery.data ?? null;
   const codexConfigToml = codexConfigTomlQuery.data ?? null;
+  const codexContextWindow372kEnabled = codexContextWindow372kQuery.data?.enabled ?? null;
   const codexModelCatalog = codexModelCatalogQuery.isError
     ? null
     : (codexModelCatalogQuery.data ?? null);
@@ -198,7 +205,9 @@ export function useCliManagerPageDataModel() {
   const codexConfigTomlLoading = codexConfigTomlQuery.isFetching;
   const codexConfigTomlSaving = codexConfigTomlSetMutation.isPending;
   const codexProviderSyncing = codexProviderSyncMutation.isPending;
-  const codexConfigWriting = codexConfigSetMutation.isPending || codexConfigTomlSaving;
+  const codexContextWindow372kSaving = codexContextWindow372kSetMutation.isPending;
+  const codexConfigWriting =
+    codexConfigSetMutation.isPending || codexConfigTomlSaving || codexContextWindow372kSaving;
   const codexConfigSaving = codexConfigWriting;
   const codexModelCatalogLoading = codexModelCatalogQuery.isFetching;
   const codexModelCatalogError = codexModelCatalogQuery.isError;
@@ -625,6 +634,28 @@ export function useCliManagerPageDataModel() {
     }
   }
 
+  async function persistCodexContextWindow372k(enabled: boolean): Promise<boolean> {
+    if (codexConfigWriting || codexContextWindow372kEnabled == null) return false;
+
+    try {
+      const updated = await codexContextWindow372kSetMutation.mutateAsync(enabled);
+      if (!updated) {
+        toast("更新 Codex 372K 设置失败：未返回权威状态");
+        return false;
+      }
+      toast(updated.enabled ? "已开启上下文 372K" : "已关闭上下文 372K");
+      return true;
+    } catch (err) {
+      const formatted = formatActionFailureToast("更新 Codex 372K 设置", err);
+      logToConsole("error", "更新 Codex 372K 设置失败", {
+        error: formatted.raw,
+        error_code: formatted.error_code ?? undefined,
+      });
+      toast(formatted.toast);
+      return false;
+    }
+  }
+
   async function syncCodexProvider() {
     if (codexConfigSaving || codexConfigTomlSaving || codexProviderSyncing) return;
     if (codexAvailable !== "available") return;
@@ -767,6 +798,8 @@ export function useCliManagerPageDataModel() {
       codexConfigSaving,
       codexConfigTomlLoading,
       codexConfigTomlSaving,
+      codexContextWindow372kEnabled,
+      codexContextWindow372kSaving,
       codexProviderSyncing,
       codexModelCatalogLoading,
       codexModelCatalogError,
@@ -781,6 +814,7 @@ export function useCliManagerPageDataModel() {
       openCodexConfigDir,
       persistCodexConfig,
       persistCodexConfigToml,
+      persistCodexContextWindow372k,
       syncCodexProvider,
       persistCommonSettings,
       persistCodexHomeSettings,

@@ -50,6 +50,38 @@ struct GrokMcpRebindSnapshots {
     manifest_bytes: Option<Vec<u8>>,
 }
 
+struct CodexMcpMetadataSnapshots {
+    backup_path: PathBuf,
+    backup_bytes: Option<Vec<u8>>,
+    manifest_path: PathBuf,
+    manifest_bytes: Option<Vec<u8>>,
+}
+
+impl CodexMcpMetadataSnapshots {
+    fn capture<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<Self, String> {
+        let root = mcp_sync_root_dir(app, "codex")?;
+        let backup_path = mcp_sync_files_dir(&root).join(backup_file_name("codex"));
+        let manifest_path = mcp_sync_manifest_path(&root);
+        Ok(Self {
+            backup_bytes: read_optional_file_with_max_len(
+                &backup_path,
+                super::MCP_SYNC_TARGET_MAX_BYTES,
+            )?,
+            manifest_bytes: read_optional_file_with_max_len(
+                &manifest_path,
+                super::MCP_SYNC_MANIFEST_MAX_BYTES,
+            )?,
+            backup_path,
+            manifest_path,
+        })
+    }
+
+    fn restore(&self) -> Result<(), String> {
+        restore_optional_file(&self.backup_path, self.backup_bytes.as_deref())?;
+        restore_optional_file(&self.manifest_path, self.manifest_bytes.as_deref())
+    }
+}
+
 impl GrokMcpRebindSnapshots {
     fn capture<R: tauri::Runtime>(
         app: &tauri::AppHandle<R>,
@@ -163,12 +195,91 @@ fn rebind_grok_mcp<R: tauri::Runtime>(
     }
 }
 
+fn sync_codex_cli<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    servers: &[McpServerForSync],
+) -> Result<(), String> {
+    let _guard = crate::codex_managed_profiles::lock_profile_lifecycle();
+    crate::codex_managed_profiles::ensure_lifecycle_open().map_err(String::from)?;
+    let snapshots = CodexMcpMetadataSnapshots::capture(app)?;
+    let target_path = mcp_target_path(app, "codex")?;
+    let mut transaction: Option<crate::codex_config::CanonicalConfigTransaction> = None;
+
+    let result = (|| -> Result<(), String> {
+        let existing = read_manifest(app, "codex")?;
+        let desired_keys = normalized_keys(servers);
+        let should_backup = existing.as_ref().map(|manifest| !manifest.enabled).unwrap_or(true);
+        let mut manifest = if should_backup {
+            backup_for_enable(app, "codex", existing)?
+        } else {
+            existing.expect("enabled Codex MCP manifest")
+        };
+        manifest.file.path = target_path.to_string_lossy().to_string();
+        let managed_keys = if should_backup {
+            Vec::new()
+        } else {
+            manifest.managed_keys.clone()
+        };
+
+        let current = crate::codex_config::canonical_config_bytes_locked(app)
+            .map_err(String::from)?;
+        let next = build_next_bytes("codex", current, &managed_keys, servers)?;
+        manifest.enabled = true;
+        manifest.managed_keys = desired_keys;
+        manifest.updated_at = now_unix_seconds();
+        let manifest_after = serde_json::to_value(&manifest)
+            .map_err(|error| format!("MCP_SYNC_MANIFEST_INVALID: {error}"))?;
+        transaction = Some(
+            crate::codex_config::apply_canonical_bytes_with_completion_locked(
+                app,
+                next,
+                false,
+                "codex_mcp_sync",
+                Some(manifest_after),
+            )
+            .map_err(String::from)?,
+        );
+
+        write_manifest(app, "codex", &manifest)?;
+        transaction
+            .as_ref()
+            .expect("Codex config transaction")
+            .commit()
+            .map_err(String::from)?;
+        transaction = None;
+        Ok(())
+    })();
+
+    if let Err(error) = result {
+        let mut rollback_errors = Vec::new();
+        if let Some(transaction) = transaction {
+            if let Err(rollback) = transaction.rollback() {
+                rollback_errors.push(rollback.to_string());
+            }
+        }
+        if let Err(rollback) = snapshots.restore() {
+            rollback_errors.push(rollback);
+        }
+        if rollback_errors.is_empty() {
+            return Err(error);
+        }
+        return Err(format!(
+            "MCP_SYNC_CODEX_RECOVERY_REQUIRED: {error}; {}",
+            rollback_errors.join("; ")
+        ));
+    }
+    Ok(())
+}
+
 pub fn sync_cli<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     cli_key: &str,
     servers: &[McpServerForSync],
 ) -> Result<(), String> {
     validate_cli_key(cli_key)?;
+    if cli_key == "codex" {
+        return sync_codex_cli(app, servers);
+    }
 
     let _grok_guard = if cli_key == "grok" {
         Some(grok_mcp_sync_lock()?)

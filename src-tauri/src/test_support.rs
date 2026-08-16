@@ -335,6 +335,18 @@ pub fn codex_config_toml_raw_set<R: tauri::Runtime>(
     crate::infra::codex_config::codex_config_toml_set_raw(app, toml).map(|_| ())
 }
 
+pub fn set_codex_lifecycle_failpoint_for_tests(
+    failpoint: Option<&str>,
+) -> crate::shared::error::AppResult<()> {
+    crate::infra::codex_config::set_lifecycle_failpoint_for_tests(failpoint)
+}
+
+pub fn recover_codex_lifecycle<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> crate::shared::error::AppResult<()> {
+    crate::infra::codex_config::recover_interrupted_lifecycle(app)
+}
+
 pub fn codex_provider_sync_current_json<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> crate::shared::error::AppResult<serde_json::Value> {
@@ -364,6 +376,26 @@ pub fn codex_config_get_json<R: tauri::Runtime>(
 ) -> crate::shared::error::AppResult<serde_json::Value> {
     let state = crate::infra::codex_config::codex_config_get(app)?;
     serialize_json(state)
+}
+
+pub fn codex_context_window_372k_set_json<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    enabled: bool,
+) -> crate::shared::error::AppResult<serde_json::Value> {
+    let state = crate::infra::codex_model_catalog::managed::context_window_372k_set(app, enabled)?;
+    serialize_json(state)
+}
+
+pub fn codex_catalog_sync_current<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> crate::shared::error::AppResult<()> {
+    crate::infra::codex_model_catalog::managed::sync_current(app)
+}
+
+pub fn codex_catalog_restore_direct_on_exit<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> crate::shared::error::AppResult<()> {
+    crate::infra::codex_model_catalog::managed::restore_direct_on_exit(app)
 }
 
 pub fn skills_swap_local_for_workspace_switch<R: tauri::Runtime>(

@@ -34,8 +34,18 @@ pub(crate) async fn read(
     if settings.enable_cli_proxy_startup_recovery {
         repair_cli_proxy_enable_state(app_handle).await;
     }
+    recover_codex_lifecycle(app_handle).await?;
 
     Ok(settings)
+}
+
+async fn recover_codex_lifecycle(app_handle: &tauri::AppHandle) -> Result<(), String> {
+    blocking::run("startup_codex_lifecycle_recovery", {
+        let app_handle = app_handle.clone();
+        move || crate::codex_config::recover_interrupted_lifecycle(&app_handle)
+    })
+    .await
+    .map_err(|error| format!("Codex 目录策略恢复失败：{error}"))
 }
 
 pub(crate) fn apply_window_state(

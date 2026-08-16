@@ -43,6 +43,31 @@ pub(crate) async fn cli_manager_codex_model_catalog_get(
 
 #[tauri::command]
 #[specta::specta]
+pub(crate) async fn cli_manager_codex_context_window_372k_get(
+    app: tauri::AppHandle,
+) -> Result<codex_model_catalog::CodexContextWindow372kState, String> {
+    blocking::run("cli_manager_codex_context_window_372k_get", move || {
+        codex_model_catalog::managed::context_window_372k_get(&app)
+    })
+    .await
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn cli_manager_codex_context_window_372k_set(
+    app: tauri::AppHandle,
+    enabled: bool,
+) -> Result<codex_model_catalog::CodexContextWindow372kState, String> {
+    blocking::run("cli_manager_codex_context_window_372k_set", move || {
+        codex_model_catalog::managed::context_window_372k_set(&app, enabled)
+    })
+    .await
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
 pub(crate) async fn cli_manager_codex_config_get(
     app: tauri::AppHandle,
 ) -> Result<codex_config::CodexConfigState, String> {

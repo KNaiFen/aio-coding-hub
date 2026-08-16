@@ -877,6 +877,7 @@ pub fn update_capabilities<R: tauri::Runtime>(
     input: &ProviderModelCapabilitiesInput,
 ) -> AppResult<ProviderModelCatalog> {
     let _guard = crate::codex_managed_profiles::lock_profile_lifecycle();
+    crate::codex_managed_profiles::ensure_lifecycle_open()?;
     let expected_provider_uuid = validate_expected_provider_uuid(expected_provider_uuid)?;
     if !crate::shared::uuid::is_canonical_uuid_v4(model_uuid) {
         return Err(AppError::new(
