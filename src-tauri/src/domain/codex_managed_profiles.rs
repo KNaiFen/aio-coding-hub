@@ -1772,6 +1772,7 @@ DROP TABLE provider_model_capability_commit_probe;
         let model_uuid = test_app.seed_model();
         let codex_home = crate::codex_paths::codex_home_dir(&app).expect("Codex home");
         let outside_home = tempfile::tempdir().expect("outside home");
+        std::fs::remove_dir_all(&codex_home).expect("remove fixture Codex home");
         symlink(outside_home.path(), &codex_home).expect("symlink Codex home");
 
         let error = create(&app, &test_app.db, "unsafe-home", &model_uuid)
