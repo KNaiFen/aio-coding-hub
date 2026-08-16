@@ -33,6 +33,7 @@ Keep decisions in task Markdown and machine facts in `task.json`. Do not maintai
 - Run `task.py start`; commit the `ready -> implementing` transition.
 - Generate the user-facing launch package with `task.py handoff`; do not handwrite branch, worktree, writer, base, or planning SHA.
 - Use `task.py block/resume` for persistent blockers and writer recovery.
+- A delivered task is main-owned for review. For rework, commit `findings.md`, then run `task.py start <task> --writer <execution-session>` before returning the worktree.
 - Re-read live PR head and CI for acceptance. Do not cache them as canonical task state.
 
-Only main merges, archives, updates long-term knowledge, resolves PENDING, or removes a worktree. Stop if user decisions are unresolved, writer ownership is unclear, or local state differs from the registered task.
+Only main merges, writes terminal `acceptance.md`, archives, updates long-term knowledge, resolves PENDING, or removes a worktree. Stop if user decisions are unresolved, writer ownership is unclear, or local state differs from the registered task.

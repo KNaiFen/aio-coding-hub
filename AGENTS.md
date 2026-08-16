@@ -64,7 +64,7 @@ This project is managed by Trellis. The working knowledge you need lives under `
 - `.trellis/workspace/` — per-developer journals and session traces
 - `.trellis/tasks/` — active and archived tasks (PRDs, research, jsonl context)
 
-If a Trellis command is available on your platform (e.g. `/trellis:finish-work`, `/trellis:continue`), prefer it over manual steps. The independent execution-session boundary above still applies: delegated writers stop at `delivery.md` and do not run main-only finish/archive commands.
+Use the repository's `aio-trellis-*` skills and `task.py` commands for role routing and durable state. Independent execution sessions stop after `deliver`、最终 head CI 和暂停；只有 main 执行验收、合并、归档和清理。
 
 If you're using Codex or another agent-capable tool, additional project-scoped helpers may live in:
 - `.agents/skills/` — reusable Trellis skills
