@@ -463,6 +463,53 @@ def _active_from_ref(
     return ActiveTask(task_ref, source_type, context_key, stale)
 
 
+def _task_ref_liveness(task_ref: str | None, repo_root: Path) -> bool | None:
+    """Classify a task ref as live, stale, or indeterminate."""
+    if not task_ref:
+        return False
+    resolved = resolve_task_ref(task_ref, repo_root)
+    if resolved is None or not resolved.is_dir():
+        return False
+    try:
+        relative = resolved.resolve().relative_to(
+            (repo_root / DIR_WORKFLOW / DIR_TASKS).resolve()
+        )
+    except (OSError, ValueError):
+        return False
+    if relative.parts and relative.parts[0] == "archive":
+        return False
+    task_json = resolved / "task.json"
+    if not task_json.is_file():
+        return False
+    task_data = _read_json(resolved / "task.json")
+    if task_data is None:
+        return None
+    return task_data.get("status") != "completed"
+
+
+def prune_stale_task_sessions(repo_root: Path) -> int:
+    """Delete readable session pointers whose active task is no longer live.
+
+    Corrupt files and contexts without a current task are left untouched so a
+    cleanup pass never destroys state it cannot classify.
+    """
+    sessions_dir = _runtime_sessions_dir(repo_root)
+    if not sessions_dir.is_dir():
+        return 0
+    removed = 0
+    for session_path in sessions_dir.glob("*.json"):
+        context = _read_json(session_path)
+        if context is None:
+            continue
+        task_ref = _string_value(context.get("current_task"))
+        liveness = _task_ref_liveness(task_ref, repo_root)
+        if not task_ref or liveness is not False:
+            continue
+        if _remove_file(session_path):
+            removed += 1
+    return removed
+
+
 def _context_path(repo_root: Path, context_key: str) -> Path:
     return _runtime_sessions_dir(repo_root) / f"{context_key}.json"
 
@@ -474,8 +521,8 @@ def resolve_active_task(
 ) -> ActiveTask:
     """Resolve the active task from session runtime state only.
 
-    A stale session task is returned as stale. Missing context identity or a
-    missing/empty session context falls back to single-session inference: if
+    Readable stale pointers are removed and never returned. Missing context
+    identity or a missing/empty session context falls back to inference: if
     exactly one session file exists in the runtime, return its task with
     source_type="session-fallback" — covers class-2 platform sub-agents (codex,
     copilot, gemini, qoder) that don't inherit the parent's session id. ≥2
@@ -483,11 +530,21 @@ def resolve_active_task(
     """
     context_key = resolve_context_key(platform_input, platform)
     if context_key:
-        context = _read_json(_context_path(repo_root, context_key)) or {}
+        context_path = _context_path(repo_root, context_key)
+        context = _read_json(context_path)
+        if context is None and context_path.is_file():
+            return ActiveTask(None, "none", context_key)
+        context = context or {}
         task_ref = _string_value(context.get("current_task"))
-        active = _active_from_ref(task_ref, repo_root, "session", context_key)
-        if active:
-            return active
+        if task_ref:
+            liveness = _task_ref_liveness(task_ref, repo_root)
+            if liveness is True:
+                return ActiveTask(task_ref, "session", context_key)
+            if liveness is False:
+                _remove_file(context_path)
+            return ActiveTask(None, "none", context_key)
+
+    prune_stale_task_sessions(repo_root)
 
     fallback = _resolve_single_session_fallback(repo_root)
     if fallback is not None:
@@ -507,18 +564,21 @@ def _resolve_single_session_fallback(repo_root: Path) -> ActiveTask | None:
     if not sessions_dir.is_dir():
         return None
 
-    session_files = sorted(sessions_dir.glob("*.json"))
-    if len(session_files) != 1:
+    live: list[tuple[Path, str]] = []
+    for session_file in sorted(sessions_dir.glob("*.json")):
+        context = _read_json(session_file)
+        if context is None:
+            return None
+        task_ref = _string_value(context.get("current_task"))
+        if not task_ref:
+            continue
+        if _task_ref_liveness(task_ref, repo_root) is not True:
+            return None
+        live.append((session_file, task_ref))
+    if len(live) != 1:
         return None
-
-    session_file = session_files[0]
-    context = _read_json(session_file) or {}
-    task_ref = _string_value(context.get("current_task"))
-    if not task_ref:
-        return None
-
-    fallback_key = session_file.stem
-    return _active_from_ref(task_ref, repo_root, "session-fallback", fallback_key)
+    session_file, task_ref = live[0]
+    return ActiveTask(task_ref, "session-fallback", session_file.stem)
 
 
 def _utc_now() -> str:
