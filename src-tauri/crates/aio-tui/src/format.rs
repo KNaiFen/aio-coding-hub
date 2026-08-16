@@ -263,9 +263,9 @@ pub fn request_tone(request: &ObserverRequest) -> StatusTone {
     let route = route_presentation(request);
     if request.state == ObserverRequestState::Active {
         StatusTone::Activity
-    } else if request.interrupted {
-        StatusTone::Warning
-    } else if route.has_hop_evidence && route.skipped_count > 0 && !route.has_sent_attempt {
+    } else if request.interrupted
+        || (route.has_hop_evidence && route.skipped_count > 0 && !route.has_sent_attempt)
+    {
         StatusTone::Warning
     } else if request
         .status
