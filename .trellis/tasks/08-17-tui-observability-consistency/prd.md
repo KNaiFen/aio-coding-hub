@@ -2,11 +2,11 @@
 
 ## Plan Status
 
-- Implementation authorization: pending explicit user confirmation
-- Confirmation date and summary: 2026-08-17 confirmed the TUI requirement set and requested an implementation-ready plan; the later Codex requirement was split into separate ordered tasks
+- Implementation authorization: confirmed
+- Confirmation date and summary: 2026-08-17; the user confirmed there are no further requirements and authorized worktree creation, handoff, execution documentation, and implementation for this task
 - Confirmed coverage: the requirements, locked decisions, non-goals, acceptance criteria, and stop conditions recorded below
-- Planning revision: pending final scope freeze and planning commit
-- Execution route: delegated worktree after the complete scope is confirmed
+- Planning revision: scope frozen by the authorization commit; the full planning SHA is recorded by `task.py delegate`
+- Execution route: delegated worktree
 - Migrated from direct-main record: none; this is a new complex Trellis task
 
 ## Material Facts, Assumptions, and Open Questions
@@ -18,7 +18,7 @@
 | `policy_source=provider_cross` reaches the Observer projection but is rejected by the TUI validator | Observer contract and `aio-tui/src/format.rs` | Confirmed; fix the TUI validator and labels without reparsing raw markers |
 | Provider availability bucket time, state, success, and failure are emitted on one logical line | `aio-tui/src/ui.rs` | Confirmed; split every bucket into a time line and a result line |
 | Route hops already expose `skipped` and `ok`, while the TUI summary and detail omit those semantics | Observer protocol, desktop presentation, `aio-tui/src/format.rs` | Confirmed; derive bounded TUI presentation from the projected route |
-| The added Codex 372K requirement affects settings, configuration transactions, and model-catalog ownership rather than TUI observation | User requirement and code audit, 2026-08-17 | Closed; split into `08-17-codex-config-transaction-hardening` and dependent `08-17-codex-372k-context-window` |
+| The added Codex 372K requirement affects settings, configuration transactions, and model-catalog ownership rather than TUI observation | User requirement and code audit, 2026-08-17 | Closed; all Codex transaction and feature work is consolidated in `08-17-codex-372k-context-window` |
 
 No material product question remains open. Do not start implementation without explicit user authorization.
 
@@ -107,6 +107,8 @@ Make the standalone TUI faithfully expose model routing, context compaction, rou
 |---|---|---|---|
 | 2026-08-17 | Initial scope includes the three reported TUI defects plus confirmed adjacent route/metric inconsistencies | AC1-AC12 | User confirmed planning; implementation remains unauthorized |
 | 2026-08-17 | The added Codex 372K requirement is a separate subsystem with a configuration-safety prerequisite; keep this TUI task independent | All | Scope split completed; each task still requires separate implementation authorization |
+| 2026-08-17 | Freeze this TUI scope and authorize worktree creation, handoff, execution documentation, and implementation | AC1-AC12 | User confirmed no further requirements |
+| 2026-08-17 | Consolidate Codex transaction hardening and the 372K switch into one separate Codex task | All | User decision; TUI remains one independent worktree |
 
 ## PENDING Review
 

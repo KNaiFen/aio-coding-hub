@@ -1,75 +1,82 @@
-# Codex 372K 上下文开关实施计划
+# Codex 配置生命周期与 372K 开关实施计划
 
 ## Preconditions
 
-1. `08-17-codex-config-transaction-hardening` is accepted, merged, archived, and reflected in current specifications.
-2. Obtain explicit user authorization for this feature task.
-3. Re-read current Codex settings, managed-catalog, proxy, and transaction contracts for drift.
-4. Commit the complete planning materials and record the full planning commit SHA.
-5. Fetch `origin`, confirm a clean synchronized main checkout, create a dedicated task worktree from the full `origin/main` SHA, and register it through `task.py delegate`.
-6. Add `execution.md`, run `task.py start`, commit the coordination transition, verify `task.py doctor`, and generate the handoff.
+1. Record the user-approved consolidation, complete scope, and implementation authorization.
+2. Commit the complete planning and execution materials and record the full planning SHA.
+3. Fetch `origin`, confirm a clean main checkout with current `origin/main`, create one dedicated Codex task worktree from the full base SHA, and register it through `task.py delegate`.
+4. Run `task.py start`, commit the coordination transition, verify `task.py doctor`, and generate the handoff.
 
-Do not perform implementation before all preconditions pass.
+Do not implement before these preconditions pass.
 
-## Work Package 1: Freeze Contracts And Fixtures
+## Work Package 1: Freeze Contracts And Reproduce Safety Defects
 
-- Extend the managed-catalog contract from profile-only activation to shared catalog policies.
-- Define the dedicated boolean preference/command, ownership metadata, enable/disable semantics, and no-runtime-verification boundary.
-- Add complete-catalog fixtures containing all three exact targets, non-target models, unknown fields, ordering, percent `95`, and auto-compaction fields.
-- Add failing deep-diff expectations for exactly six transformed values and zero cache-file writes.
+- Update both Codex cross-layer contracts with canonical/live lifecycle, shared catalog policies, exact transform, restore, and no-runtime-verification semantics.
+- Add temp-home fixtures reproducing live-projection contamination of the direct backup for structured save, raw save, and MCP sync.
+- Add complete catalog fixtures with three targets, non-target models, unknown fields, percent `95`, and auto-compaction fields.
+- Add deterministic failpoint/barrier infrastructure before production refactoring.
 
-Exit condition: AC2-AC6 and the runtime-claim boundary are represented by precise fixtures before production behavior changes.
+Exit condition: the existing defect and all intended file/state semantics have precise failing tests.
 
-## Work Package 2: Extend The Catalog Composer
+## Work Package 2: Implement The Lifecycle Coordinator
 
-- Add the pure exact-slug 372K transform.
-- Preserve all unknown and non-target values, including percent and auto-compaction fields.
-- Generalize catalog activation from “profiles exist” to “one or more managed policies are active”.
-- Extend owner generation/hash metadata to include base identity, 372K preference, and profile policy.
-- Cover missing, duplicate, invalid, oversized, unsafe, and drifted inputs.
+- Add canonical reader/mutator, deterministic live projection, outer lock, exit gate, journal generation/phases, bounded error taxonomy, and ownership-aware compensation.
+- Preserve current atomic writes and strengthen missing path/symlink/reparse checks.
+- Route structured/raw config save and Codex MCP sync through canonical-then-project transactions.
+- Add pure, drift, rollback, and idempotence tests.
 
-Exit condition: a deterministic complete catalog can be planned for every zero/one/multiple-profile and switch-state combination without writing files.
+Exit condition: no ordinary config writer refreshes canonical state from projected live bytes.
 
-## Work Package 3: Add Transactional Preference And Lifecycle
+## Work Package 3: Add The Catalog Policy And Preference
 
-- Persist the backend-owned boolean preference and expose a dedicated query/mutation contract.
-- Apply preference, generated catalog, config pointer, and owner manifest through the shared prerequisite transaction.
-- Implement exact prior-pointer/absence restoration and shared-catalog rebuild on disable.
-- Cover idempotence, restart, proxy on/off, write failpoints, external drift, and ownership-safe compensation.
+- Add the pure exact-slug transform and exactly-six-difference tests.
+- Generalize one managed catalog owner/activation predicate to 372K and profile policies.
+- Persist the backend-owned boolean and expose dedicated authoritative query/mutation contracts.
+- Include base identity, active policies, output hash, original pointer, and transaction generation in ownership state.
+- Cover user/bundled bases, invalid input, cache sentinel, pointer restore, profiles, proxy states, restart, and repeated transitions.
 
-Exit condition: AC5-AC9 have temp-home integration evidence and no path touches a real Codex home or `models_cache.json`.
+Exit condition: catalog/preference/config/manifest can be planned and applied as one transaction for every supported combination.
 
-## Work Package 4: Add The Codex Settings Switch
+## Work Package 4: Convert Remaining Lifecycle Writers And Recovery
+
+- Route proxy enable/re-sync/disable, managed-profile catalog rebuilds, startup repair, and exit restore through the coordinator and fixed lock order.
+- Implement every journal recovery phase and reject new mutation after exit starts.
+- Add barrier/failpoint coverage for config vs MCP/proxy/catalog/372K/exit and external edits before write/rollback.
+- Remove or encapsulate direct file writes that bypass ownership checks.
+
+Exit condition: AC1-AC5 and AC10-AC12 have deterministic temp-home evidence.
+
+## Work Package 5: Add The Codex Settings Switch
 
 - Add `开启上下文 372K` to the existing Codex settings/features area.
-- Bind it to authoritative backend state and the dedicated boolean mutation.
-- Reuse saving disablement, serialization, toast, and bounded error presentation.
-- Do not add a runtime-effectiveness notice or automatic restart.
-- Assert that toggling does not call `refreshCodex` or a model request.
+- Bind authoritative state and boolean mutation through service/query/page layers and generated bindings.
+- Reuse pending disablement, serialization, toast, and bounded error behavior.
+- Do not add refresh, restart, validation request, rescan, effectiveness notice, or runtime status.
+- Cover AC6 and AC13 with focused frontend/service/query tests.
 
-Exit condition: AC1 and AC10 are covered by focused frontend/service/query tests.
+Exit condition: UI and backend state agree without claiming runtime adoption.
 
-## Work Package 5: Regression And Claim Review
+## Work Package 6: Full Regression And Safety Review
 
-- Run the full planned matrix in CI: both base sources, switch cycles, profile counts, proxy states, restart, drift, platform paths, and failure injection.
-- Deep-compare non-target JSON and assert the cache sentinel and all compaction settings are unchanged.
-- Review UI copy, tests, specs, and delivery evidence for any wording that falsely claims Codex runtime adoption.
-- Confirm ordinary model refresh, profile management, proxy enable/disable, and other Codex settings retain existing behavior.
+- Execute the planned CI matrix across base sources, switch cycles, profile counts, proxy states, config writers, restart, drift, failure phases, and platform paths.
+- Deep-compare non-target catalog values and assert percent/cache/auto-compaction preservation.
+- Review lock order, compare-before-rollback, startup/exit, path safety, and logging for every caller.
+- Review UI/spec/tests/delivery wording for any false runtime-effectiveness claim.
 
-Exit condition: AC2-AC11 have artifact/state evidence with no runtime-effectiveness claim.
+Exit condition: AC1-AC15 have file/state evidence and no scope or security regression.
 
-## Work Package 6: Delivery
+## Work Package 7: Delivery
 
-- Review the final diff against every requirement, non-goal, stop condition, and updated specification.
+- Review the final diff against every requirement, non-goal, stop condition, and updated contract.
 - Run `$gkd-local-verify` with the registered full base SHA only; do not run ad hoc dependency, Cargo, frontend, test, build, or binding-generation commands locally.
 - Write `delivery.md` with AC-by-AC evidence and explicitly state that actual Codex use of 372K was not verified.
-- Commit, deliver, push the task branch, and open or update the PR.
+- Commit implementation/evidence, run `task.py deliver`, push the task branch, and open or update the PR.
 - Wait for required checks on the exact final head through `$gkd-ci-monitor`, then pause for `$gkd-accept`/main fixed-head acceptance.
 
-Exit condition: delivery evidence and required CI bind to the same clean full PR head SHA, with runtime behavior left to user real-use feedback.
+Exit condition: one clean final head contains the safety foundation and feature, and all required CI/evidence bind to that exact SHA.
 
 ## Dependency And Merge Notes
 
-- This task must start only after the config-transaction prerequisite is accepted; do not develop the two tasks concurrently in separate writers.
-- It has no primary file overlap with `08-17-tui-observability-consistency`; the TUI task remains an independently authorizable delivery.
-- Use one execution writer across settings, catalog, config, and frontend surfaces because the feature's rollback and generated bindings cross those boundaries.
+- This single task owns all Codex config/catalog/372K changes; there is no separate transaction worktree to merge or synchronize.
+- `08-17-tui-observability-consistency` has no primary file or semantic overlap and may run in parallel.
+- Keep one unique writer for all backend/frontend/spec changes in this task because transaction ownership and generated bindings cross module boundaries.

@@ -12,7 +12,7 @@ The affected data already reaches `ObserverRequest` or `ObserverProviderStatus`.
 
 The implementation should therefore remain inside the TUI formatter/layout layer plus its specifications and tests. It must not reparse raw request-log markers or create a second source of routing truth.
 
-The later Codex 372K settings requirement is intentionally excluded. It is planned in `08-17-codex-config-transaction-hardening` and `08-17-codex-372k-context-window`, which own settings/config/catalog lifecycle and have no TUI presentation dependency.
+The later Codex 372K settings requirement is intentionally excluded. It is consolidated in `08-17-codex-372k-context-window`, which owns its configuration transaction and catalog lifecycle and has no TUI presentation dependency.
 
 ## Design Principles
 
