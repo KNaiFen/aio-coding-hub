@@ -69,5 +69,5 @@
 2. 实现、公共 API、发布流程或验证边界变化时，同一变更内更新相关现行文档和机器合同。
 3. Trellis 活动状态由 `task.py` 写入 `task.json`；main 在终态 `acceptance.md` 记录验收版本、结果、merge、知识库/PENDING 和清理事实。有功能 PR 时在其合并后收尾；无功能 PR 的失败、放弃或部分完成通过 records-only PR 收尾；阻塞任务保持活动。
 4. 历史文件只修正状态说明、有效入口或明确的链接损坏，不把旧结论改写成今天的结论。
-5. 使用相对链接；提交前运行仓库允许的文档合同、适用的 Trellis 检查和 `git diff --check`。没有覆盖某类链接时如实说明，不把 `validate --all` 当 Markdown 校验。
+5. 使用相对链接；提交前通过 `$gkd-local-verify` 的固定 runner 运行仓库允许的合同、Node 语法和 diff 检查，并按需运行适用的 Trellis 检查。没有覆盖某类链接时如实说明，不把 `validate --all` 当 Markdown 校验。
 6. `.local/` 外部参考 checkout、`.playwright-cli/`、`.impeccable/`、`.trellis/.runtime/`、`.codegraph/` 等本地产物不进入知识库。

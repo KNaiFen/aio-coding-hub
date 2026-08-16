@@ -651,6 +651,7 @@ export function assertCiQualityGates({
     "contracts",
     [
       "node scripts/check-cloud-only-verification.selftest.mjs",
+      "node scripts/check-local-verification.selftest.mjs",
       "node scripts/ci-change-scope.selftest.mjs",
       "node scripts/check-ci-quality-gates.selftest.mjs && node scripts/check-ci-quality-gates.mjs",
       "node scripts/check-github-actions-pin-policy.selftest.mjs && node scripts/check-github-actions-pin-policy.mjs",

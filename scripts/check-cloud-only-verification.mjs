@@ -46,7 +46,13 @@ function readMarkdownTree(root, relativeDir) {
 }
 
 export function loadCloudOnlyVerificationFixture(root = repoRoot) {
-  const roleSkillNames = ["gkd-main", "gkd-execute", "gkd-accept"];
+  const roleSkillNames = [
+    "gkd-main",
+    "gkd-execute",
+    "gkd-accept",
+    "gkd-local-verify",
+    "gkd-ci-monitor",
+  ];
   return {
     rootPackage: readJson(root, "package.json"),
     pluginSdkPackage: readJson(root, "packages/plugin-sdk/package.json"),
@@ -59,6 +65,7 @@ export function loadCloudOnlyVerificationFixture(root = repoRoot) {
     trellisWorkflow: readText(root, ".trellis/workflow.md"),
     implementAgent: readText(root, ".trellis/agents/implement.md"),
     checkAgent: readText(root, ".trellis/agents/check.md"),
+    localVerificationRunner: readText(root, "scripts/check-local-verification.mjs"),
     roleSkillNames,
     activeSpecs: readMarkdownTree(root, ".trellis/spec/aio-coding-hub"),
     ciWorkflow: readText(root, ".github/workflows/ci.yml"),
@@ -480,6 +487,7 @@ export function assertCloudOnlyVerificationContract(fixture) {
     trellisWorkflow,
     implementAgent,
     checkAgent,
+    localVerificationRunner,
     roleSkillNames,
     activeSpecs,
     ciWorkflow,
@@ -519,20 +527,20 @@ export function assertCloudOnlyVerificationContract(fixture) {
   }
 
   requireText(agents, "Keep the local checkout zero-artifact.", "AGENTS.md", failures);
-  requireText(agents, "check-cloud-only-verification.mjs", "AGENTS.md", failures);
+  requireText(agents, "check-local-verification.mjs", "AGENTS.md", failures);
   requireAbsent(agents, /Use `pnpm dev`/i, "AGENTS.md", failures);
   for (const [label, text] of [
     ["README.md", readme],
     ["README_EN.md", readmeEn],
   ]) {
-    requireText(text, "check-cloud-only-verification.mjs", label, failures);
+    requireText(text, "check-local-verification.mjs", label, failures);
     requireText(text, "workflow_dispatch", label, failures);
     assertNoForbiddenReadmeCommand(text, label, failures);
   }
 
   requireText(
     trellisWorkflow,
-    "只运行 `AGENTS.md` 明确允许的本地命令",
+    "通过 `$gkd-local-verify` 的固定 runner 执行 `AGENTS.md` 允许的本地检查",
     ".trellis/workflow.md",
     failures
   );
@@ -550,6 +558,15 @@ export function assertCloudOnlyVerificationContract(fixture) {
   }
   requireText(agents, "task.py accept", "AGENTS.md", failures);
   requireText(trellisWorkflow, "task.py accept", ".trellis/workflow.md", failures);
+  for (const command of [
+    'runNodeScript("scripts/check-local-verification.selftest.mjs")',
+    'runNodeScript("scripts/check-cloud-only-verification.selftest.mjs")',
+    'runNodeScript("scripts/check-cloud-only-verification.mjs")',
+    '["diff", "--check", base, "HEAD", "--"]',
+    '["--check", assertSafeFile(repoRoot, path)]',
+  ]) {
+    requireText(localVerificationRunner, command, "local verification runner", failures);
+  }
   assertActiveSpecs(activeSpecs, failures);
 
   if (!/^\s*workflow_dispatch:\s*$/m.test(ciWorkflow)) {

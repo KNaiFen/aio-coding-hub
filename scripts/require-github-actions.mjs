@@ -8,7 +8,7 @@ export function assertGithubActionsEnvironment(env = process.env) {
 
   throw new Error(
     "This repository package script is GitHub Actions-only. " +
-      "Run node scripts/check-cloud-only-verification.mjs and git diff --check locally instead."
+      "Run node scripts/check-local-verification.mjs --base <full-task-base-sha> locally instead."
   );
 }
 

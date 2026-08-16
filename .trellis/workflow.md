@@ -1,6 +1,6 @@
 # Development Workflow
 
-本文件是 Trellis 的精简状态与 CLI 参考。角色权限和本地执行边界以根 `AGENTS.md` 为准；多 worktree 的具体阶段流程由 `$gkd-main`、`$gkd-execute`、`$gkd-accept` 按需加载。
+本文件是 Trellis 的精简状态与 CLI 参考。角色权限和本地执行边界以根 `AGENTS.md` 为准；多 worktree 的具体阶段流程由 `$gkd-main`、`$gkd-execute`、`$gkd-accept` 按需加载，本地检查和长时 CI 分别路由到 `$gkd-local-verify`、`$gkd-ci-monitor`。
 
 ## 核心原则
 
@@ -115,6 +115,8 @@ Phase 3: Finish  -> 验证、沉淀知识、提交；委派任务随后固定 he
 - 复杂、委派、并行、长流程或高风险：使用 `$gkd-main` 创建任务和规划；创建任务不等于授权实施。
 - 独立执行窗口：只使用 `$gkd-execute`，以 `execution.md` 和登记 writer 为授权。
 - 固定 head 验收与同步合并：使用 `$gkd-accept`；普通探索 subagent 仍只读，新开顶层窗口不会因自定义 agent 配置自动获得执行角色。
+- 修改仓库文件后的本地检查：使用 `$gkd-local-verify` 和登记的完整 base SHA，不自行选择 build/lint/test。
+- 长时等待 PR CI：使用 `$gkd-ci-monitor` 和明确的 PR/full head，不手写轮询或状态 JSON。
 
 [workflow-state:no_task]
 没有活动任务。先判断是直接 main 小任务还是需要 Trellis 的复杂/委派任务；实施前把确认的方案写入对应仓库记录。使用 `$gkd-main` 获取当前角色流程。
@@ -191,7 +193,7 @@ main 连续施工遵循当前任务记录和适用 spec。独立执行 session �
 
 #### 2.2 Quality check `[required · repeatable]`
 
-检查完整任务范围、AC、适用 spec、回归风险、测试、文档和 `git diff --check`。只运行 `AGENTS.md` 明确允许的本地命令；依赖和原生检查由 GitHub Actions 承担。
+检查完整任务范围、AC、适用 spec、回归风险、测试和文档。通过 `$gkd-local-verify` 的固定 runner 执行 `AGENTS.md` 允许的本地检查；依赖和原生检查由 GitHub Actions 承担。
 
 执行 session 在实现和 `delivery.md` 先提交后运行 `task.py deliver`，提交状态转换，推送并等待最终 head 的适用 CI，然后暂停。`$gkd-accept` 的固定 head 验收是独立步骤，不由执行者自审代替；通过后从干净且已同步的可信 main checkout 调用 `task.py accept` 同步合并。
 

@@ -116,8 +116,7 @@ format, lint, type-check, run Clippy, and complete the affected Rust suite.
 Locally, use only the dependency-free repository contract and diff check:
 
 ```bash
-node scripts/check-cloud-only-verification.mjs
-git diff --check
+node scripts/check-local-verification.mjs --base <full-task-base-sha>
 ```
 
 ### 7. Wrong vs Correct
