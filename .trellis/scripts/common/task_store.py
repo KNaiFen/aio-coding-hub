@@ -54,6 +54,7 @@ from .task_utils import (
     resolve_task_dir,
     run_task_hooks,
 )
+from .task_coordination import mark_completed, new_coordination
 
 
 # =============================================================================
@@ -359,9 +360,12 @@ def cmd_create(args: argparse.Namespace) -> int:
         "relatedFiles": [],
         "notes": "",
         "meta": {},
+        "coordination": new_coordination(),
     }
 
-    write_json(task_json_path, task_data)
+    if not write_json(task_json_path, task_data):
+        print(colored(f"Error: failed to write task manifest: {task_json_path}", Colors.RED), file=sys.stderr)
+        return 1
 
     prd_path = task_dir / "prd.md"
     if not prd_path.exists():
@@ -372,8 +376,8 @@ def cmd_create(args: argparse.Namespace) -> int:
 
     # Seed implement.jsonl / check.jsonl for sub-agent-capable platforms.
     # Agent curates real entries during planning when the task needs them.
-    # Agent-less platforms (Kilo / Antigravity / Devin) skip this — they
-    # load specs via the trellis-before-dev skill instead of JSONL.
+    # Platforms without an in-process implementation-agent chain skip this;
+    # their active role skill loads specs directly when needed.
     seeded_jsonl = False
     if _has_subagent_platform(repo_root):
         for jsonl_name in ("implement.jsonl", "check.jsonl"):
@@ -448,7 +452,7 @@ def cmd_create(args: argparse.Namespace) -> int:
             "  - Curate implement.jsonl / check.jsonl as spec/research manifests when sub-agents need context",
             file=sys.stderr,
         )
-    print("  - Use /trellis:continue or phase context to decide the next step", file=sys.stderr)
+    print("  - Use $gkd-main and task.py status to decide the next step", file=sys.stderr)
     print("", file=sys.stderr)
 
     # Output relative path for script chaining
@@ -498,7 +502,10 @@ def cmd_archive(args: argparse.Namespace) -> int:
         if data:
             data["status"] = "completed"
             data["completedAt"] = today
-            write_json(task_json_path, data)
+            mark_completed(data)
+            if not write_json(task_json_path, data):
+                print(colored(f"Error: failed to update task manifest: {task_json_path}", Colors.RED), file=sys.stderr)
+                return 1
 
             # Handle subtask relationships on archive.
             # Keep this task in its parent's children list so progress

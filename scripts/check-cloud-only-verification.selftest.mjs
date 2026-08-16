@@ -106,6 +106,13 @@ for (const [name, mutate, expected] of [
     /\.trellis\/workflow\.md contains a prohibited local instruction/,
   ],
   [
+    "GKD role routing",
+    (fixture) => {
+      fixture.agents = fixture.agents.replaceAll("$gkd-main", "$main");
+    },
+    /AGENTS\.md must include "\$gkd-main"/,
+  ],
+  [
     "active spec bare cargo command",
     (fixture) => {
       fixture.activeSpecs.set("cross-layer/example.md", "cargo test --locked\n");

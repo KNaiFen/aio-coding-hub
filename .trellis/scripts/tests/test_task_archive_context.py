@@ -12,6 +12,43 @@ from common.task_store import _rewrite_archived_context_paths, cmd_archive
 
 
 class ArchiveContextRewriteTests(unittest.TestCase):
+    def test_archive_marks_coordination_completed(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_root:
+            repo_root = Path(raw_root)
+            task = repo_root / ".trellis" / "tasks" / "08-16-stateful"
+            task.mkdir(parents=True)
+            (task / "task.json").write_text(
+                json.dumps(
+                    {
+                        "name": "stateful",
+                        "status": "in_progress",
+                        "coordination": {
+                            "version": 1,
+                            "route": "delegated",
+                            "phase": "delivered",
+                            "writer": "main",
+                            "base_sha": None,
+                            "planning_commit": None,
+                            "block": None,
+                            "updated_at": "old",
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with patch("common.task_store.get_repo_root", return_value=repo_root):
+                result = cmd_archive(Namespace(name="08-16-stateful", no_commit=True))
+
+            self.assertEqual(result, 0)
+            archived = next((repo_root / ".trellis" / "tasks" / "archive").glob("*/08-16-stateful"))
+            data = json.loads((archived / "task.json").read_text(encoding="utf-8"))
+            self.assertEqual(data["status"], "completed")
+            self.assertEqual(data["coordination"]["phase"], "completed")
+            self.assertIsNone(data["coordination"]["block"])
+            self.assertNotEqual(data["coordination"]["updated_at"], "old")
+
     def test_archive_rewrites_only_self_references_and_full_validation_passes(self) -> None:
         with tempfile.TemporaryDirectory() as raw_root:
             repo_root = Path(raw_root)

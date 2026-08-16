@@ -46,6 +46,7 @@ function readMarkdownTree(root, relativeDir) {
 }
 
 export function loadCloudOnlyVerificationFixture(root = repoRoot) {
+  const roleSkillNames = ["gkd-main", "gkd-execute", "gkd-accept"];
   return {
     rootPackage: readJson(root, "package.json"),
     pluginSdkPackage: readJson(root, "packages/plugin-sdk/package.json"),
@@ -58,6 +59,7 @@ export function loadCloudOnlyVerificationFixture(root = repoRoot) {
     trellisWorkflow: readText(root, ".trellis/workflow.md"),
     implementAgent: readText(root, ".trellis/agents/implement.md"),
     checkAgent: readText(root, ".trellis/agents/check.md"),
+    roleSkillNames,
     activeSpecs: readMarkdownTree(root, ".trellis/spec/aio-coding-hub"),
     ciWorkflow: readText(root, ".github/workflows/ci.yml"),
     devBuildWorkflow: readText(root, ".github/workflows/dev-build.yml"),
@@ -478,6 +480,7 @@ export function assertCloudOnlyVerificationContract(fixture) {
     trellisWorkflow,
     implementAgent,
     checkAgent,
+    roleSkillNames,
     activeSpecs,
     ciWorkflow,
     devBuildWorkflow,
@@ -527,7 +530,12 @@ export function assertCloudOnlyVerificationContract(fixture) {
     assertNoForbiddenReadmeCommand(text, label, failures);
   }
 
-  requireText(trellisWorkflow, "repository-authorized verification", ".trellis/workflow.md", failures);
+  requireText(
+    trellisWorkflow,
+    "只运行 `AGENTS.md` 明确允许的本地命令",
+    ".trellis/workflow.md",
+    failures
+  );
   requireAbsent(trellisWorkflow, /run project lint and type-check|ensure lint and type-check pass|lint \/ type-check \/ tests/i, ".trellis/workflow.md", failures);
   for (const [label, text] of [
     [".trellis/agents/implement.md", implementAgent],
@@ -536,12 +544,23 @@ export function assertCloudOnlyVerificationContract(fixture) {
     requireText(text, "repository-authorized", label, failures);
     requireAbsent(text, /Run the project'?s lint and typecheck|Run lint and typecheck/i, label, failures);
   }
+  for (const roleSkillName of roleSkillNames) {
+    requireText(agents, `$${roleSkillName}`, "AGENTS.md", failures);
+    requireText(trellisWorkflow, `$${roleSkillName}`, ".trellis/workflow.md", failures);
+  }
+  requireText(agents, "task.py accept", "AGENTS.md", failures);
+  requireText(trellisWorkflow, "task.py accept", ".trellis/workflow.md", failures);
   assertActiveSpecs(activeSpecs, failures);
 
   if (!/^\s*workflow_dispatch:\s*$/m.test(ciWorkflow)) {
     failures.push("ci.yml must retain workflow_dispatch");
   }
-  requireText(agents, "Do not start an additional manual `ci` run for routine PR validation.", "AGENTS.md", failures);
+  requireText(
+    agents,
+    "普通 PR 等自动 `ci-gate` 与 `pr-title`，不额外手动启动常规 `ci`。",
+    "AGENTS.md",
+    failures
+  );
   requireText(readme, "不要为常规验证额外手动运行 `ci`", "README.md", failures);
   requireText(readmeEn, "Do not start an additional manual `ci` run for routine validation.", "README_EN.md", failures);
   assertManualCiBoundary(ciWorkflow, failures);
