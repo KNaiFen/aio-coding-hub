@@ -265,8 +265,7 @@ pub fn request_tone(request: &ObserverRequest) -> StatusTone {
         StatusTone::Activity
     } else if request.interrupted {
         StatusTone::Warning
-    } else if route.has_hop_evidence && route.skipped_count > 0 && !route.has_sent_attempt
-    {
+    } else if route.has_hop_evidence && route.skipped_count > 0 && !route.has_sent_attempt {
         StatusTone::Warning
     } else if request
         .status
@@ -401,10 +400,9 @@ pub fn request_card_lines(
         .map(|usage| {
             let cache = match (usage.cache_read_tokens, usage.cache_creation_tokens) {
                 (None, None) => "—".to_string(),
-                (read, creation) => format_tokens(
-                    read.unwrap_or(0)
-                        .saturating_add(creation.unwrap_or(0)),
-                ),
+                (read, creation) => {
+                    format_tokens(read.unwrap_or(0).saturating_add(creation.unwrap_or(0)))
+                }
             };
             (
                 usage
@@ -455,13 +453,7 @@ pub fn request_card_lines(
         ),
         RequestCardLine::new(
             truncate_display(
-                &format!(
-                    "I {} O {} C {} {}",
-                    input,
-                    output,
-                    cache,
-                    cost
-                ),
+                &format!("I {} O {} C {} {}", input, output, cache, cost),
                 width,
             ),
             RequestCardLineKind::Metrics,
@@ -949,15 +941,16 @@ fn route_presentation(request: &ObserverRequest) -> RoutePresentation {
         .count()
         .try_into()
         .unwrap_or(COUNT_LIMIT);
-    let sent_attempt_count = request
-        .route
-        .iter()
-        .filter(|hop| !hop.skipped)
-        .fold(0_u32, |total, hop| {
-            total
-                .saturating_add(normalize_hop_attempts(hop.attempts))
-                .min(COUNT_LIMIT)
-        });
+    let sent_attempt_count =
+        request
+            .route
+            .iter()
+            .filter(|hop| !hop.skipped)
+            .fold(0_u32, |total, hop| {
+                total
+                    .saturating_add(normalize_hop_attempts(hop.attempts))
+                    .min(COUNT_LIMIT)
+            });
     RoutePresentation {
         has_hop_evidence: true,
         skipped_count,
@@ -996,9 +989,7 @@ fn route_count_tokens(route: &RoutePresentation, compact: bool) -> Vec<String> {
         });
     }
     let has_route_signal = !tokens.is_empty();
-    if route.sent_attempt_count > 0
-        && (has_route_signal || route.sent_attempt_count > 1)
-    {
+    if route.sent_attempt_count > 0 && (has_route_signal || route.sent_attempt_count > 1) {
         tokens.push(if compact {
             format!("请{}", route.sent_attempt_count)
         } else {
@@ -1170,8 +1161,8 @@ mod tests {
     use super::*;
     use aio_observer_protocol::{
         ObserverConfiguredModelRoute, ObserverContextCompaction, ObserverDominantProvider,
-        ObserverGatewayStatus, ObserverPreferredProvider, ObserverRequestUsage, ObserverSection,
-        ObserverRouteHop, ObserverTodayUsage, OBSERVER_PROTOCOL_VERSION,
+        ObserverGatewayStatus, ObserverPreferredProvider, ObserverRequestUsage, ObserverRouteHop,
+        ObserverSection, ObserverTodayUsage, OBSERVER_PROTOCOL_VERSION,
     };
 
     fn request_with_route_counts(
@@ -1549,23 +1540,24 @@ mod tests {
             cache_creation_tokens: None,
         });
 
-        assert_eq!(request_card_lines(&request, 10, 80)[4].text, "I — O 200 C — —");
+        assert_eq!(
+            request_card_lines(&request, 10, 80)[4].text,
+            "I — O 200 C — —"
+        );
         let details = detail_lines(&request, 10);
         assert!(details.iter().any(|line| line == "Session复用  是"));
         assert!(details.iter().any(|line| line == "输出速率  100.0 t/s"));
 
-        request
-            .usage
-            .as_mut()
-            .expect("usage")
-            .cache_read_tokens = Some(7);
-        assert_eq!(request_card_lines(&request, 10, 80)[4].text, "I — O 200 C 7 —");
-        request
-            .usage
-            .as_mut()
-            .expect("usage")
-            .cache_creation_tokens = Some(2);
-        assert_eq!(request_card_lines(&request, 10, 80)[4].text, "I — O 200 C 9 —");
+        request.usage.as_mut().expect("usage").cache_read_tokens = Some(7);
+        assert_eq!(
+            request_card_lines(&request, 10, 80)[4].text,
+            "I — O 200 C 7 —"
+        );
+        request.usage.as_mut().expect("usage").cache_creation_tokens = Some(2);
+        assert_eq!(
+            request_card_lines(&request, 10, 80)[4].text,
+            "I — O 200 C 9 —"
+        );
     }
 
     #[test]
@@ -1699,9 +1691,7 @@ mod tests {
             for request in [&unrouted, &unchanged, &changed] {
                 for width in [0, 1, 24, 31, 32, 80] {
                     let lines = request_card_lines(request, 10, width);
-                    assert!(lines
-                        .iter()
-                        .all(|line| display_width(&line.text) <= width));
+                    assert!(lines.iter().all(|line| display_width(&line.text) <= width));
                     if width >= 24 {
                         assert!(lines.iter().any(|line| line.text.contains(label)));
                     }
@@ -1723,7 +1713,10 @@ mod tests {
             reasoning_effort_applied: true,
         });
 
-        assert_eq!(request_model(&request), "gpt-5.6-sol-high→gpt-5.6-terra-max");
+        assert_eq!(
+            request_model(&request),
+            "gpt-5.6-sol-high→gpt-5.6-terra-max"
+        );
         assert_eq!(request_card_lines(&request, 10, 80).len(), 6);
         assert!(detail_lines(&request, 10)
             .iter()
@@ -1731,7 +1724,10 @@ mod tests {
 
         request.state = ObserverRequestState::Active;
         request.status = None;
-        assert_eq!(request_model(&request), "gpt-5.6-sol-high→gpt-5.6-terra-max");
+        assert_eq!(
+            request_model(&request),
+            "gpt-5.6-sol-high→gpt-5.6-terra-max"
+        );
         assert_eq!(request_card_lines(&request, 10, 80).len(), 6);
     }
 

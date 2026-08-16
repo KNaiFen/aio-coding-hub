@@ -2,8 +2,8 @@ use crate::client::OfflineReason;
 use crate::config::{colors_enabled, StatusItem, TuiConfig};
 use crate::format::{
     cli_label, format_cost, format_duration, format_tokens, now_millis, request_card_lines,
-    request_tone, route_tone, scope_label, status_segments, truncate_display,
-    truncate_status_line, wrap_status_segments, RequestCardLineKind, StatusSegment, StatusTone,
+    request_tone, route_tone, scope_label, status_segments, truncate_display, truncate_status_line,
+    wrap_status_segments, RequestCardLineKind, StatusSegment, StatusTone,
 };
 use crate::palette::{Palette, Tone};
 use aio_observer_protocol::{
@@ -1145,7 +1145,10 @@ fn provider_availability_detail_lines(
                 format_local_minute(bucket.start_at_ms),
                 format_local_minute(bucket.end_at_ms),
             ),
-            format!("  {state}  成{} 败{}", bucket.success_count, bucket.failure_count),
+            format!(
+                "  {state}  成{} 败{}",
+                bucket.success_count, bucket.failure_count
+            ),
         ]
     }));
     lines
@@ -1933,7 +1936,9 @@ mod tests {
             assert!(pair[1].contains("成"));
             assert!(pair[1].contains("败"));
         }
-        assert!(bucket_lines.iter().any(|line| line.contains("可用  成1 败0")));
+        assert!(bucket_lines
+            .iter()
+            .any(|line| line.contains("可用  成1 败0")));
         assert!(bucket_lines.iter().any(|line| line.contains("降级")));
         assert!(bucket_lines.iter().any(|line| line.contains("不可用")));
         assert!(bucket_lines.iter().any(|line| line.contains("无数据")));
