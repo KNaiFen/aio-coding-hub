@@ -1,0 +1,4 @@
+interface:
+  display_name: "AIO Trellis 主会话"
+  short_description: "Plan, route, accept, merge, and close AIO tasks"
+  default_prompt: "Use $aio-trellis-main to plan and coordinate this repository task."

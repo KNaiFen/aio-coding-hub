@@ -20,7 +20,7 @@
 
 1. `task.json` 是活动任务协调状态的唯一持久化结构化事实源；不新增第二套状态 JSON。
 2. 根 `AGENTS.md` 只保留角色权限、唯一写者、Git/CI/安全硬边界和 skills 路由。
-3. 仓库只提供 `trellis-main-session`、`trellis-execution-session`、`trellis-acceptance-review` 三个角色 skill；不补齐不存在的旧微型 skills。
+3. 仓库只提供带项目命名空间的 `aio-trellis-main`、`aio-trellis-execute`、`aio-trellis-accept` 三个角色 skill；不补齐不存在的旧微型 skills。
 4. `task.py` 负责状态读取、确定性 preflight、委派登记、交接文本生成、阻塞和恢复；Markdown 不再手写可由 Git 或 `task.json` 得出的状态副本。
 5. 多 worktree 规范拆为一个主入口和四份单层链接专题；执行模板只保存任务特有差量。
 6. 保留一任务一 worktree、一任务一 PR、执行 session 不合并、main 验收固定 head 和唯一写者边界。

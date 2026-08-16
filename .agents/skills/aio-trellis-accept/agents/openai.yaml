@@ -1,0 +1,4 @@
+interface:
+  display_name: "AIO Trellis 验收审查"
+  short_description: "Review one frozen AIO task candidate without writing files"
+  default_prompt: "Use $aio-trellis-accept to review this frozen task candidate."
