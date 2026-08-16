@@ -376,8 +376,8 @@ def cmd_create(args: argparse.Namespace) -> int:
 
     # Seed implement.jsonl / check.jsonl for sub-agent-capable platforms.
     # Agent curates real entries during planning when the task needs them.
-    # Agent-less platforms (Kilo / Antigravity / Devin) skip this — they
-    # load specs via the trellis-before-dev skill instead of JSONL.
+    # Platforms without an in-process implementation-agent chain skip this;
+    # their active role skill loads specs directly when needed.
     seeded_jsonl = False
     if _has_subagent_platform(repo_root):
         for jsonl_name in ("implement.jsonl", "check.jsonl"):
@@ -452,7 +452,7 @@ def cmd_create(args: argparse.Namespace) -> int:
             "  - Curate implement.jsonl / check.jsonl as spec/research manifests when sub-agents need context",
             file=sys.stderr,
         )
-    print("  - Use /trellis:continue or phase context to decide the next step", file=sys.stderr)
+    print("  - Use $aio-trellis-main and task.py status to decide the next step", file=sys.stderr)
     print("", file=sys.stderr)
 
     # Output relative path for script chaining

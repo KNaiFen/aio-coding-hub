@@ -76,6 +76,44 @@ class TaskRoutingTests(unittest.TestCase):
             self.assertFalse((repo_root / ".trellis" / ".runtime" / "sessions").exists())
             run_hooks.assert_called_once_with("after_start", task_json, repo_root)
 
+    def test_start_updates_main_coordination_phase(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_root:
+            repo_root = Path(raw_root)
+            task_dir = repo_root / ".trellis" / "tasks" / "08-10-main-start"
+            task_dir.mkdir(parents=True)
+            task_json = task_dir / "task.json"
+            task_json.write_text(
+                json.dumps(
+                    {
+                        "name": "main-start",
+                        "status": "planning",
+                        "coordination": {
+                            "version": 1,
+                            "route": "main",
+                            "phase": "planning",
+                            "writer": "main",
+                            "base_sha": None,
+                            "planning_commit": None,
+                            "block": None,
+                            "updated_at": "old",
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with (
+                patch("task.get_repo_root", return_value=repo_root),
+                patch("task.resolve_context_key", return_value=None),
+                patch("task.run_task_hooks"),
+            ):
+                self.assertEqual(cmd_start(Namespace(dir="08-10-main-start")), 0)
+
+            data = json.loads(task_json.read_text(encoding="utf-8"))
+            self.assertEqual(data["status"], "in_progress")
+            self.assertEqual(data["coordination"]["phase"], "implementing")
+
     def test_start_with_session_identity_sets_pointer_state_and_hook(self) -> None:
         with tempfile.TemporaryDirectory() as raw_root:
             repo_root = Path(raw_root)
@@ -119,6 +157,54 @@ class TaskRoutingTests(unittest.TestCase):
             self.assertEqual(data["coordination"]["phase"], "implementing")
             self.assertNotEqual(data["coordination"]["updated_at"], "old")
             run_hooks.assert_called_once_with("after_start", task_json, repo_root)
+
+    def test_start_rejects_blocked_v1_state_before_hooks(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_root:
+            repo_root = Path(raw_root)
+            task_dir = repo_root / ".trellis" / "tasks" / "08-10-blocked-start"
+            task_dir.mkdir(parents=True)
+            task_json = task_dir / "task.json"
+            task_json.write_text(
+                json.dumps(
+                    {
+                        "name": "blocked-start",
+                        "status": "in_progress",
+                        "coordination": {
+                            "version": 1,
+                            "route": "delegated",
+                            "phase": "blocked",
+                            "writer": "main",
+                            "base_sha": None,
+                            "planning_commit": None,
+                            "block": {
+                                "reason": "blocked",
+                                "resume_condition": "decision",
+                                "owner": "main",
+                                "blocked_at": "now",
+                                "previous_phase": "implementing",
+                                "previous_writer": "executor",
+                            },
+                            "updated_at": "old",
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with (
+                patch("task.get_repo_root", return_value=repo_root),
+                patch("task.resolve_context_key", return_value=None),
+                patch("task.run_task_hooks") as run_hooks,
+            ):
+                result = cmd_start(Namespace(dir="08-10-blocked-start"))
+
+            self.assertEqual(result, 1)
+            run_hooks.assert_not_called()
+            self.assertEqual(
+                json.loads(task_json.read_text(encoding="utf-8"))["coordination"]["phase"],
+                "blocked",
+            )
 
     def test_start_without_session_identity_rejects_invalid_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as raw_root:

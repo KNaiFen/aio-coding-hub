@@ -86,7 +86,7 @@ python3 .trellis/scripts/task.py archive --no-commit <task>
 planning -> in_progress -> completed
 ```
 
-委派任务的 `coordination.phase` 记录细分状态：
+带 `coordination.version=1` 的任务用 `coordination.phase` 记录细分状态；委派路线会经过 `ready/delivered`，main 连续路线从 `planning` 直接进入 `implementing`：
 
 ```text
 planning -> ready -> implementing -> delivered -> completed

@@ -411,7 +411,7 @@ Monorepo options:
 
 List options:
   --mine, -m           Show only tasks assigned to current developer
-  --status, -s <s>     Filter by status (planning, in_progress, review, completed)
+  --status, -s <s>     Filter by top-level status (planning, in_progress, completed)
 
 Examples:
   python3 task.py create "Add login feature" --slug add-login --base-branch main

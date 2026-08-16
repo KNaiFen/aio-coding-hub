@@ -101,31 +101,60 @@ def mutate_task_manifest(
     return data
 
 
+def _is_coordination_v1(value: Any) -> bool:
+    return isinstance(value, dict) and type(value.get("version")) is int and value["version"] == 1
+
+
 def mark_started(data: dict[str, Any], *, writer: str | None = None) -> bool:
     """Apply the task start transition in one manifest write."""
-    changed = False
-    if data.get("status") == "planning":
-        data["status"] = "in_progress"
-        changed = True
-
     coordination = data.get("coordination")
-    if isinstance(coordination, dict) and coordination.get("version") == COORDINATION_VERSION:
+    if coordination is not None:
+        if not _is_coordination_v1(coordination):
+            raise TaskCoordinationError("start requires coordination.version to be integer 1")
         phase = coordination.get("phase")
-        if phase == "delivered" and not (writer and writer.strip()):
-            raise TaskCoordinationError("restarting a delivered task requires --writer")
-        if phase in {"ready", "delivered"}:
+        status = data.get("status")
+        if phase in {"blocked", "completed"}:
+            raise TaskCoordinationError(f"cannot start task from phase={phase}")
+        if phase in {"planning", "ready"}:
+            if status != "planning":
+                raise TaskCoordinationError(f"phase={phase} requires status=planning before start")
+            if writer:
+                raise TaskCoordinationError("--writer is only valid when restarting a delivered task")
+            data["status"] = "in_progress"
             coordination["phase"] = "implementing"
-            if writer and writer.strip():
-                coordination["writer"] = writer.strip()
-            changed = True
-        if changed:
             coordination["updated_at"] = utc_now()
-    return changed
+            return True
+        if phase == "delivered":
+            if status != "in_progress":
+                raise TaskCoordinationError("phase=delivered requires status=in_progress before start")
+            if not (writer and writer.strip()):
+                raise TaskCoordinationError("restarting a delivered task requires --writer")
+            coordination["phase"] = "implementing"
+            coordination["writer"] = writer.strip()
+            coordination["updated_at"] = utc_now()
+            return True
+        if phase == "implementing":
+            if status != "in_progress":
+                raise TaskCoordinationError("phase=implementing requires status=in_progress")
+            if writer:
+                raise TaskCoordinationError("--writer is only valid when restarting a delivered task")
+            return False
+        raise TaskCoordinationError(f"cannot start task from phase={phase}")
+
+    status = data.get("status")
+    if status == "planning":
+        data["status"] = "in_progress"
+        return True
+    if status == "in_progress":
+        if writer:
+            raise TaskCoordinationError("legacy in-progress tasks do not support --writer")
+        return False
+    raise TaskCoordinationError(f"cannot start legacy task from status={status}")
 
 
 def mark_completed(data: dict[str, Any]) -> None:
     coordination = data.get("coordination")
-    if isinstance(coordination, dict) and coordination.get("version") == COORDINATION_VERSION:
+    if _is_coordination_v1(coordination):
         coordination["phase"] = "completed"
         coordination["block"] = None
         coordination["updated_at"] = utc_now()
@@ -245,7 +274,7 @@ def validate_task_manifest(task_dir: Path, repo_root: Path) -> list[str]:
     if coordination is None:
         return errors
 
-    if coordination.get("version") != COORDINATION_VERSION:
+    if not _is_coordination_v1(coordination):
         errors.append(f"coordination.version must be {COORDINATION_VERSION}")
     route = coordination.get("route")
     phase = coordination.get("phase")
@@ -272,8 +301,25 @@ def validate_task_manifest(task_dir: Path, repo_root: Path) -> list[str]:
             ):
                 if not isinstance(block.get(field), str) or not block[field].strip():
                     errors.append(f"coordination.block.{field} must be a non-empty string")
+            if block.get("previous_phase") not in {"ready", "implementing", "delivered"}:
+                errors.append(
+                    "coordination.block.previous_phase must be ready, implementing, or delivered"
+                )
     elif block is not None:
         errors.append("coordination.block must be null outside the blocked phase")
+
+    if phase in {"planning", "ready"} and status != "planning":
+        errors.append(f"{phase} phase requires top-level status=planning")
+    if phase in {"implementing", "delivered"} and status != "in_progress":
+        errors.append(f"{phase} phase requires top-level status=in_progress")
+    if phase == "blocked" and isinstance(block, dict):
+        expected_status = "planning" if block.get("previous_phase") == "ready" else "in_progress"
+        if status != expected_status:
+            errors.append(
+                f"blocked phase from {block.get('previous_phase')} requires top-level status={expected_status}"
+            )
+    if phase == "completed" and status != "completed":
+        errors.append("completed phase requires top-level status=completed")
 
     if route != "delegated":
         return errors
@@ -297,12 +343,6 @@ def validate_task_manifest(task_dir: Path, repo_root: Path) -> list[str]:
             )
         )
 
-    if phase == "ready" and status != "planning":
-        errors.append("ready phase requires top-level status=planning")
-    if phase in {"implementing", "blocked", "delivered"} and status != "in_progress":
-        errors.append(f"{phase} phase requires top-level status=in_progress")
-    if phase == "completed" and status != "completed":
-        errors.append("completed phase requires top-level status=completed")
     return errors
 
 
@@ -320,8 +360,6 @@ def _state_view(task_dir: Path, repo_root: Path, data: dict[str, Any]) -> dict[s
         "worktree_path": data.get("worktree_path"),
         "base_sha": coordination.get("base_sha"),
         "planning_commit": coordination.get("planning_commit"),
-        "candidate_commit": data.get("commit"),
-        "pr_url": data.get("pr_url"),
         "block": coordination.get("block"),
         "updated_at": coordination.get("updated_at"),
     }
@@ -350,14 +388,18 @@ def cmd_status(args: argparse.Namespace) -> int:
         ("Worktree", "worktree_path"),
         ("Base SHA", "base_sha"),
         ("Planning commit", "planning_commit"),
-        ("Candidate", "candidate_commit"),
-        ("PR", "pr_url"),
     )
     for label, key in labels:
         print(f"{label}: {view[key] if view[key] is not None else '(none)'}")
-    if view["block"]:
-        print(f"Block: {view['block']['reason']}")
-        print(f"Resume condition: {view['block']['resume_condition']}")
+    if view["block"] is not None:
+        if isinstance(view["block"], dict):
+            print(f"Block: {view['block'].get('reason', '(invalid; run doctor)')}")
+            print(
+                "Resume condition: "
+                f"{view['block'].get('resume_condition', '(invalid; run doctor)')}"
+            )
+        else:
+            print("Block: (invalid coordination.block; run doctor)")
     return 0
 
 
@@ -400,16 +442,22 @@ def cmd_delegate(args: argparse.Namespace) -> int:
         def apply_delegate(manifest: dict[str, Any]) -> None:
             manifest["branch"] = args.branch
             manifest["worktree_path"] = str(Path(args.worktree).resolve())
-            manifest["coordination"] = {
-                "version": COORDINATION_VERSION,
-                "route": "delegated",
-                "phase": "ready",
-                "writer": writer,
-                "base_sha": args.base_sha.lower(),
-                "planning_commit": args.planning_commit.lower(),
-                "block": None,
-                "updated_at": utc_now(),
-            }
+            coordination = manifest.get("coordination")
+            if not isinstance(coordination, dict):
+                coordination = {}
+            coordination.update(
+                {
+                    "version": COORDINATION_VERSION,
+                    "route": "delegated",
+                    "phase": "ready",
+                    "writer": writer,
+                    "base_sha": args.base_sha.lower(),
+                    "planning_commit": args.planning_commit.lower(),
+                    "block": None,
+                    "updated_at": utc_now(),
+                }
+            )
+            manifest["coordination"] = coordination
 
         mutate_task_manifest(task_dir, apply_delegate)
     except TaskCoordinationError as error:
@@ -429,7 +477,8 @@ def _handoff_view(task_dir: Path, repo_root: Path, data: dict[str, Any]) -> dict
         f"python3 .trellis/scripts/task.py doctor {view['task']}",
     ]
     view["prompt"] = (
-        f"在 {view['worktree_path']} 开始独立执行 session。先运行 `python3 "
+        f"以 {view['worktree_path']} 为 primary folder 新开独立执行 session，先调用 "
+        f"`$aio-trellis-execute`，再运行 `python3 "
         f".trellis/scripts/task.py status {view['task']}` 和 `python3 .trellis/scripts/task.py "
         f"doctor {view['task']}`，然后按 `{view['execution']}` 施工。提交并推送任务分支、"
         f"维护 PR/CI、填写并提交 delivery.md，再运行 `python3 .trellis/scripts/task.py deliver "
@@ -528,7 +577,7 @@ def cmd_block(args: argparse.Namespace) -> int:
         def apply_block(data: dict[str, Any]) -> None:
             coordination = _coordination(data, required=True)
             phase = coordination.get("phase")
-            if coordination.get("version") != COORDINATION_VERSION:
+            if not _is_coordination_v1(coordination):
                 raise TaskCoordinationError("block requires coordination.version=1")
             if phase not in {"ready", "implementing", "delivered"}:
                 raise TaskCoordinationError(f"cannot block task from phase={phase}")
@@ -562,7 +611,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
         def apply_resume(data: dict[str, Any]) -> None:
             coordination = _coordination(data, required=True)
             block = coordination.get("block")
-            if coordination.get("version") != COORDINATION_VERSION:
+            if not _is_coordination_v1(coordination):
                 raise TaskCoordinationError("resume requires coordination.version=1")
             if coordination.get("phase") != "blocked" or not isinstance(block, dict):
                 raise TaskCoordinationError("resume requires phase=blocked with blocker details")
