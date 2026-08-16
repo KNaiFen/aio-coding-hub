@@ -555,6 +555,8 @@ describe("components/cli-manager/tabs/CodexTab", () => {
         codexConfigSaving={false}
         codexConfigTomlLoading={false}
         codexConfigTomlSaving={false}
+        codexContextWindow372kEnabled={false}
+        codexContextWindow372kSaving={false}
         codexInfo={createCodexInfo()}
         codexConfig={createCodexConfig({
           follow_codex_home_dir: "D:\\Workspace\\.codex",
@@ -566,6 +568,7 @@ describe("components/cli-manager/tabs/CodexTab", () => {
         openCodexConfigDir={vi.fn()}
         persistCodexConfig={vi.fn()}
         persistCodexConfigToml={vi.fn().mockResolvedValue(false)}
+        persistCodexContextWindow372k={vi.fn().mockResolvedValue(true)}
         persistCodexHomeSettings={persistCodexHomeSettings}
         pickCodexHomeDirectory={vi.fn()}
       />
@@ -728,6 +731,8 @@ describe("components/cli-manager/tabs/CodexTab", () => {
         codexConfigSaving={false}
         codexConfigTomlLoading={false}
         codexConfigTomlSaving={false}
+        codexContextWindow372kEnabled={false}
+        codexContextWindow372kSaving={false}
         codexInfo={createCodexInfo()}
         codexConfig={createCodexConfig({
           config_dir: "C:\\Users\\MyPC\\.codex",
@@ -742,6 +747,7 @@ describe("components/cli-manager/tabs/CodexTab", () => {
         openCodexConfigDir={vi.fn()}
         persistCodexConfig={vi.fn()}
         persistCodexConfigToml={persistCodexConfigToml}
+        persistCodexContextWindow372k={vi.fn().mockResolvedValue(true)}
       />
     );
 
@@ -759,6 +765,8 @@ describe("components/cli-manager/tabs/CodexTab", () => {
         codexConfigSaving={false}
         codexConfigTomlLoading={false}
         codexConfigTomlSaving={false}
+        codexContextWindow372kEnabled={false}
+        codexContextWindow372kSaving={false}
         codexInfo={createCodexInfo()}
         codexConfig={createCodexConfig({
           config_dir: "D:\\Work\\.codex",
@@ -773,6 +781,7 @@ describe("components/cli-manager/tabs/CodexTab", () => {
         openCodexConfigDir={vi.fn()}
         persistCodexConfig={vi.fn()}
         persistCodexConfigToml={persistCodexConfigToml}
+        persistCodexContextWindow372k={vi.fn().mockResolvedValue(true)}
       />
     );
 
@@ -813,6 +822,8 @@ describe("components/cli-manager/tabs/CodexTab", () => {
         codexConfigSaving={false}
         codexConfigTomlLoading={false}
         codexConfigTomlSaving={false}
+        codexContextWindow372kEnabled={null}
+        codexContextWindow372kSaving={false}
         codexInfo={null}
         codexConfig={null}
         codexConfigToml={null}
@@ -820,6 +831,7 @@ describe("components/cli-manager/tabs/CodexTab", () => {
         openCodexConfigDir={vi.fn()}
         persistCodexConfig={vi.fn()}
         persistCodexConfigToml={vi.fn().mockResolvedValue(false)}
+        persistCodexContextWindow372k={vi.fn().mockResolvedValue(true)}
       />
     );
 
@@ -835,6 +847,8 @@ describe("components/cli-manager/tabs/CodexTab", () => {
         codexConfigSaving={false}
         codexConfigTomlLoading={false}
         codexConfigTomlSaving={false}
+        codexContextWindow372kEnabled={false}
+        codexContextWindow372kSaving={false}
         codexInfo={createCodexInfo({
           found: false,
           version: null,
@@ -864,6 +878,7 @@ describe("components/cli-manager/tabs/CodexTab", () => {
         openCodexConfigDir={vi.fn()}
         persistCodexConfig={vi.fn()}
         persistCodexConfigToml={vi.fn().mockResolvedValue(false)}
+        persistCodexContextWindow372k={vi.fn().mockResolvedValue(true)}
       />
     );
 

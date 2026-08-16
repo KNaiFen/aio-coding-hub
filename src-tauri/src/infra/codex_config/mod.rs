@@ -618,7 +618,7 @@ pub(crate) fn recover_interrupted_lifecycle<R: tauri::Runtime>(
         }
         canonical
     } else {
-        let canonical = current_without_catalog.ok_or_else(|| {
+        let canonical = current_without_catalog.clone().ok_or_else(|| {
             crate::shared::error::AppError::new(
                 "CODEX_LIFECYCLE_RECOVERY_REQUIRED",
                 "the interrupted Codex canonical config is unavailable",

@@ -150,6 +150,7 @@ type SettingsViewKeysHandledOutsideCreateInput =
   | "enable_circuit_breaker_notice"
   | "enable_session_reuse"
   | "enable_codex_session_id_completion"
+  | "enable_codex_context_window_372k"
   | "verbose_provider_error"
   | "intercept_anthropic_warmup_requests"
   | "enable_thinking_signature_rectifier"

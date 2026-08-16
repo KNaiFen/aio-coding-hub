@@ -117,6 +117,8 @@ describe("cli-manager tabs (coverage)", () => {
           codexConfigSaving={false}
           codexConfigTomlLoading={false}
           codexConfigTomlSaving={false}
+          codexContextWindow372kEnabled={false}
+          codexContextWindow372kSaving={false}
           codexInfo={{
             found: true,
             executable_path: "/usr/bin/codex",
@@ -165,6 +167,7 @@ describe("cli-manager tabs (coverage)", () => {
           openCodexConfigDir={vi.fn()}
           persistCodexConfig={vi.fn()}
           persistCodexConfigToml={vi.fn().mockResolvedValue(true)}
+          persistCodexContextWindow372k={vi.fn().mockResolvedValue(true)}
         />
       </QueryClientProvider>
     );
