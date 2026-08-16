@@ -2,8 +2,8 @@
 
 ## Plan Status
 
-- Implementation authorization: pending confirmation after the user adds another requirement area
-- Confirmation date and summary: 2026-08-17 confirmed the current TUI requirement set and requested an implementation-ready plan; implementation was not authorized
+- Implementation authorization: pending explicit user confirmation
+- Confirmation date and summary: 2026-08-17 confirmed the TUI requirement set and requested an implementation-ready plan; the later Codex requirement was split into separate ordered tasks
 - Confirmed coverage: the requirements, locked decisions, non-goals, acceptance criteria, and stop conditions recorded below
 - Planning revision: pending final scope freeze and planning commit
 - Execution route: delegated worktree after the complete scope is confirmed
@@ -18,9 +18,9 @@
 | `policy_source=provider_cross` reaches the Observer projection but is rejected by the TUI validator | Observer contract and `aio-tui/src/format.rs` | Confirmed; fix the TUI validator and labels without reparsing raw markers |
 | Provider availability bucket time, state, success, and failure are emitted on one logical line | `aio-tui/src/ui.rs` | Confirmed; split every bucket into a time line and a result line |
 | Route hops already expose `skipped` and `ok`, while the TUI summary and detail omit those semantics | Observer protocol, desktop presentation, `aio-tui/src/format.rs` | Confirmed; derive bounded TUI presentation from the projected route |
-| The user will add another requirement area before implementation | User decision, 2026-08-17 | Open and material; update this task or split a dependent task after the requirement is supplied, then reconfirm the complete scope |
+| The added Codex 372K requirement affects settings, configuration transactions, and model-catalog ownership rather than TUI observation | User requirement and code audit, 2026-08-17 | Closed; split into `08-17-codex-config-transaction-hardening` and dependent `08-17-codex-372k-context-window` |
 
-Do not start implementation while the additional requirement is unknown or the complete scope lacks explicit authorization.
+No material product question remains open. Do not start implementation without explicit user authorization.
 
 ## Goal
 
@@ -95,7 +95,7 @@ Make the standalone TUI faithfully expose model routing, context compaction, rou
 
 ## Stop Conditions
 
-- The additional user requirement changes the task boundary, data contract, ownership, or suitable execution order; revise planning and reconfirm before starting.
+- A future scope change affects the task boundary, data contract, ownership, or suitable execution order; revise planning and reconfirm before starting.
 - A required display value is not present in the current bounded Observer projection and would require a protocol or persistence change.
 - Implementation would change gateway routing, pricing, retry behavior, security boundaries, migration behavior, or release configuration.
 - The active OAuth planning task begins modifying the same contracts or other newly active work creates a semantic conflict.
@@ -106,7 +106,7 @@ Make the standalone TUI faithfully expose model routing, context compaction, rou
 | Date | Old / new decision | Affected acceptance criteria | Decision owner / resume condition |
 |---|---|---|---|
 | 2026-08-17 | Initial scope includes the three reported TUI defects plus confirmed adjacent route/metric inconsistencies | AC1-AC12 | User confirmed planning; implementation remains unauthorized |
-| 2026-08-17 | Keep the task in planning because another requirement area will be added | All | User supplies the requirement and confirms the final combined or split scope |
+| 2026-08-17 | The added Codex 372K requirement is a separate subsystem with a configuration-safety prerequisite; keep this TUI task independent | All | Scope split completed; each task still requires separate implementation authorization |
 
 ## PENDING Review
 

@@ -12,6 +12,8 @@ The affected data already reaches `ObserverRequest` or `ObserverProviderStatus`.
 
 The implementation should therefore remain inside the TUI formatter/layout layer plus its specifications and tests. It must not reparse raw request-log markers or create a second source of routing truth.
 
+The later Codex 372K settings requirement is intentionally excluded. It is planned in `08-17-codex-config-transaction-hardening` and `08-17-codex-372k-context-window`, which own settings/config/catalog lifecycle and have no TUI presentation dependency.
+
 ## Design Principles
 
 1. Semantic evidence outranks variable identifiers at narrow widths. A bounded state label such as `压缩·远程` is more important than the tail of a long model name.

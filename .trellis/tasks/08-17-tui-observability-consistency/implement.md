@@ -2,12 +2,11 @@
 
 ## Preconditions
 
-1. Receive the additional user requirement and decide whether it belongs in this task or a separately ordered task.
-2. Update `prd.md`, `design.md`, and this plan for the final scope; close every material question.
-3. Obtain explicit implementation authorization.
-4. Commit the complete planning materials and record the full planning commit SHA.
-5. Fetch `origin`, confirm a clean synchronized main checkout, create a task worktree from the full `origin/main` SHA, and register it through `task.py delegate`.
-6. Add the task-specific `execution.md`, run `task.py start`, commit the coordination transition, verify `task.py doctor`, and generate the handoff.
+1. Keep the added Codex requirements in their separate config-hardening and 372K tasks; recheck that no upstream change creates an unexpected contract conflict.
+2. Obtain explicit implementation authorization for this TUI task.
+3. Commit the complete planning materials and record the full planning commit SHA.
+4. Fetch `origin`, confirm a clean synchronized main checkout, create a task worktree from the full `origin/main` SHA, and register it through `task.py delegate`.
+5. Add the task-specific `execution.md`, run `task.py start`, commit the coordination transition, verify `task.py doctor`, and generate the handoff.
 
 Do not perform any implementation step before all preconditions pass.
 
@@ -69,5 +68,6 @@ Exit condition: the worktree is clean, delivery evidence and required CI bind to
 ## Dependency And Merge Notes
 
 - The existing `08-03-upstream-claude-oauth` task has no current file or semantic overlap. Recheck before worktree creation because both tasks are still planning.
+- `08-17-codex-config-transaction-hardening` and `08-17-codex-372k-context-window` are intentionally separate; they may be scheduled independently from this TUI task after separate authorization.
 - All primary changes converge on `aio-tui/src/format.rs` and `ui.rs`; use one execution writer rather than parallel implementation worktrees.
-- Any newly added requirement that touches a separate subsystem should be split if combining it would broaden ownership, validation, or rollback beyond this TUI task.
+- Any future requirement that touches a separate subsystem should be split if combining it would broaden ownership, validation, or rollback beyond this TUI task.
