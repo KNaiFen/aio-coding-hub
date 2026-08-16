@@ -100,6 +100,9 @@ jobs:
       - name: Validate cloud-only verification contract
         run: node scripts/check-cloud-only-verification.mjs
 
+      - name: Validate Trellis task coordination
+        run: PYTHONPATH=.trellis/scripts python3 -m unittest discover -s .trellis/scripts/tests -p 'test_*.py'
+
       - name: Validate cloud-only verification self-test
         if: needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true'
         run: node scripts/check-cloud-only-verification.selftest.mjs
@@ -152,7 +155,7 @@ jobs:
         if: needs.change-scope.outputs.docs_checks == 'true' || needs.change-scope.outputs.frontend_ci == 'true'
         run: node scripts/check-plugin-api-contract.mjs
 
-      - name: Validate Trellis spec links
+      - name: Validate documentation links
         if: needs.change-scope.outputs.docs_checks == 'true'
         run: node scripts/check-spec-links.mjs
 

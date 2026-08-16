@@ -527,7 +527,12 @@ export function assertCloudOnlyVerificationContract(fixture) {
     assertNoForbiddenReadmeCommand(text, label, failures);
   }
 
-  requireText(trellisWorkflow, "repository-authorized verification", ".trellis/workflow.md", failures);
+  requireText(
+    trellisWorkflow,
+    "只运行 `AGENTS.md` 明确允许的本地命令",
+    ".trellis/workflow.md",
+    failures
+  );
   requireAbsent(trellisWorkflow, /run project lint and type-check|ensure lint and type-check pass|lint \/ type-check \/ tests/i, ".trellis/workflow.md", failures);
   for (const [label, text] of [
     [".trellis/agents/implement.md", implementAgent],
@@ -541,7 +546,12 @@ export function assertCloudOnlyVerificationContract(fixture) {
   if (!/^\s*workflow_dispatch:\s*$/m.test(ciWorkflow)) {
     failures.push("ci.yml must retain workflow_dispatch");
   }
-  requireText(agents, "Do not start an additional manual `ci` run for routine PR validation.", "AGENTS.md", failures);
+  requireText(
+    agents,
+    "普通 PR 等自动 `ci-gate` 与 `pr-title`，不额外手动启动常规 `ci`。",
+    "AGENTS.md",
+    failures
+  );
   requireText(readme, "不要为常规验证额外手动运行 `ci`", "README.md", failures);
   requireText(readmeEn, "Do not start an additional manual `ci` run for routine validation.", "README_EN.md", failures);
   assertManualCiBoundary(ciWorkflow, failures);

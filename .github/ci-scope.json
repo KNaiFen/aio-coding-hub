@@ -31,6 +31,10 @@
       {
         "prefix": "docs/",
         "extensions": [".md"]
+      },
+      {
+        "prefix": ".agents/skills/",
+        "extensions": [".md", ".yaml"]
       }
     ]
   },
