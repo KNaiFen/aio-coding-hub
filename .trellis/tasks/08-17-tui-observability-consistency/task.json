@@ -26,11 +26,11 @@
   "coordination": {
     "version": 1,
     "route": "delegated",
-    "phase": "implementing",
-    "writer": "tui-observability-executor",
+    "phase": "delivered",
+    "writer": "main",
     "base_sha": "d33acc7aea5d13e4cdb85490c89f0564061ed614",
     "planning_commit": "2bdbd4becc397f09d52a84e914d7ee9bfa431379",
     "block": null,
-    "updated_at": "2026-08-16T18:13:03Z"
+    "updated_at": "2026-08-16T19:16:22Z"
   }
 }
