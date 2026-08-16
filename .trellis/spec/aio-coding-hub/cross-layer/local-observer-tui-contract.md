@@ -168,6 +168,25 @@ remote administration API.
   hyphenated source/effective evidence. Missing optional effort evidence omits
   the suffix. Non-Codex route formatting remains unchanged. Old observers or
   invalid optional route fields continue to render the ordinary model safely.
+- Request-card compaction labels are semantic suffixes: `压缩·本地`,
+  `压缩·远程`, or bounded `压缩·未知`. At narrow widths the suffix is reserved
+  before variable model/effort text is truncated; the same priority applies to
+  unrouted, unchanged-route, and changed-route target lines. Truncation is
+  grapheme-safe and non-panicking at zero and sub-label widths.
+- A valid configured route may use `policy_source=provider_cross` in addition
+  to `global` and `provider`. Its TUI card and detail use the existing
+  source-to-effective model presentation, and detail labels the rule
+  `跨供应商`. Unknown, malformed, future, or incomplete route values fail open
+  to the ordinary model line and never create a target line.
+- Route summaries derive bounded presentation from projected hops. They expose
+  provider switches, skipped candidates, retries, and sent request counts in a
+  stable order; skipped-only routes use a warning/default tone and say
+  `未发出上游请求` in detail rather than `直连`. Each detail hop explicitly
+  shows `已跳过/未发送`, `成功`, `失败`, or an active `进行中` outcome. When
+  hops are absent, the existing aggregate-counter fallback remains in use.
+- Request cards show `C —` when both cache buckets are absent and otherwise sum
+  only known buckets. Request detail additionally shows Session reuse and the
+  existing valid output-rate calculation without changing the five-line card.
 - Request-card timing is selected by request state. An `Active` card formats
   the current non-negative `duration_ms`, even if a defensive projection also
   carries `ttfb_ms`; a `Terminal` card formats `ttfb_ms` and shows `—` when
@@ -176,13 +195,16 @@ remote administration API.
   calculation, provider switch counts, retry counts, and route wording do not
   derive from or change with this card-only timing selection.
 - Cross success continues to show final B provider/model through existing
-  fields. Desktop Home adds the bounded cross audit text above; this task does
-  not change the TUI formatter, TTFB, or switch/retry wording. B failure
-  followed by A/C success therefore keeps A/C as the card/TUI terminal provider
+  fields. Desktop Home adds the bounded cross audit text above; TUI uses the
+  same final-provider projection and exposes the valid cross-provider policy
+  alongside its bounded route wording. TTFB calculation remains unchanged. B
+  failure followed by A/C success therefore keeps A/C as the card/TUI terminal provider
   while detail retains the full chain.
 - Provider availability detail converts bucket timestamps to the host system's
   local timezone at render time and displays `HH:MM-HH:MM` without a hard-coded
-  timezone suffix.
+  timezone suffix. Every bucket is two logical lines: the time range alone,
+  followed by state and `成N 败N`; the twelve-bucket cap, ordering, aggregate,
+  and vertical scrolling remain unchanged.
 
 ## Release boundary
 

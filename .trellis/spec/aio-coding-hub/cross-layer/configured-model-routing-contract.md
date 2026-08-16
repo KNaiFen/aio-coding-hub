@@ -91,7 +91,11 @@ bounded, final-provider-scoped configured-route projection. Desktop may show a
 compact `A / source -> B / target` audit label only when the request succeeded
 and the final provider equals the marker target. Failed, skipped, malformed,
 oversized, mismatched-provider, and future markers stay non-authoritative and
-fail open. TUI formatting and its TTFB / switch / retry wording are unchanged.
+fail open. The TUI accepts the same valid `provider_cross` projection, labels
+the policy `跨供应商`, and renders source/effective model evidence with its
+existing two-line card and detail helpers. Invalid or future values continue
+to fail open without a target line; TTFB and route-count calculation remain
+unchanged.
 
 ## Verification
 

@@ -259,10 +259,13 @@ fn last_request_field(
     StatusSegment::new(format!("{label} {value}"), tone)
 }
 
-fn request_tone(request: &ObserverRequest) -> StatusTone {
+pub fn request_tone(request: &ObserverRequest) -> StatusTone {
+    let route = route_presentation(request);
     if request.state == ObserverRequestState::Active {
         StatusTone::Activity
-    } else if request.interrupted {
+    } else if request.interrupted
+        || (route.has_hop_evidence && route.skipped_count > 0 && !route.has_sent_attempt)
+    {
         StatusTone::Warning
     } else if request
         .status
@@ -274,10 +277,11 @@ fn request_tone(request: &ObserverRequest) -> StatusTone {
     }
 }
 
-fn route_tone(request: &ObserverRequest) -> StatusTone {
-    if request.provider_switch_count > 0 || request.retry_count > 0 {
+pub fn route_tone(request: &ObserverRequest) -> StatusTone {
+    let route = route_presentation(request);
+    if route.provider_switch_count > 0 || route.retry_count > 0 || route.skipped_count > 0 {
         StatusTone::Warning
-    } else if request.attempt_count > 0 {
+    } else if route.has_sent_attempt {
         StatusTone::Success
     } else {
         StatusTone::Default
@@ -394,6 +398,12 @@ pub fn request_card_lines(
         .usage
         .as_ref()
         .map(|usage| {
+            let cache = match (usage.cache_read_tokens, usage.cache_creation_tokens) {
+                (None, None) => "—".to_string(),
+                (read, creation) => {
+                    format_tokens(read.unwrap_or(0).saturating_add(creation.unwrap_or(0)))
+                }
+            };
             (
                 usage
                     .input_tokens
@@ -403,13 +413,10 @@ pub fn request_card_lines(
                     .output_tokens
                     .map(format_tokens)
                     .unwrap_or_else(|| "—".to_string()),
-                usage
-                    .cache_read_tokens
-                    .unwrap_or(0)
-                    .saturating_add(usage.cache_creation_tokens.unwrap_or(0)),
+                cache,
             )
         })
-        .unwrap_or_else(|| ("—".to_string(), "—".to_string(), 0));
+        .unwrap_or_else(|| ("—".to_string(), "—".to_string(), "—".to_string()));
     let cost = request
         .cost_usd
         .map(format_cost)
@@ -446,13 +453,7 @@ pub fn request_card_lines(
         ),
         RequestCardLine::new(
             truncate_display(
-                &format!(
-                    "I {} O {} C {} {}",
-                    input,
-                    output,
-                    format_tokens(cache),
-                    cost
-                ),
+                &format!("I {} O {} C {} {}", input, output, cache, cost),
                 width,
             ),
             RequestCardLineKind::Metrics,
@@ -473,8 +474,9 @@ fn request_card_model_lines(
     else {
         let model = request_model_with_requested_effort(request);
         return vec![RequestCardLine::new(
-            truncate_display(
-                &format!("{} / {}{}", cli_label(&request.cli_key), model, compaction),
+            truncate_display_with_suffix(
+                &format!("{} / {}", cli_label(&request.cli_key), model),
+                compaction,
                 width,
             ),
             RequestCardLineKind::Model,
@@ -508,8 +510,9 @@ fn request_card_model_lines(
             route.source_model.clone()
         };
         return vec![RequestCardLine::new(
-            truncate_display(
-                &format!("{} / {}{}", cli_label(&request.cli_key), model, compaction),
+            truncate_display_with_suffix(
+                &format!("{} / {}", cli_label(&request.cli_key), model),
+                compaction,
                 width,
             ),
             RequestCardLineKind::Model,
@@ -536,7 +539,10 @@ fn request_card_model_lines(
     } else {
         route.effective_model.clone()
     };
-    let target = right_align_display(&format!("{}{}", target_model, compaction), width);
+    let target = right_align_display(
+        &truncate_display_with_suffix(&target_model, compaction, width),
+        width,
+    );
     vec![
         RequestCardLine::new(source, RequestCardLineKind::Model),
         RequestCardLine::new(target, RequestCardLineKind::ModelTarget),
@@ -553,7 +559,29 @@ fn configured_model_route_is_valid(
                 .reasoning_effort
                 .as_deref()
                 .is_some_and(|effort| display_width(effort.trim()) > 0))
-        && matches!(route.policy_source.as_str(), "global" | "provider")
+        && matches!(
+            route.policy_source.as_str(),
+            "global" | "provider" | "provider_cross"
+        )
+}
+
+fn truncate_display_with_suffix(lead: &str, suffix: &str, max_width: usize) -> String {
+    if suffix.is_empty() {
+        return truncate_display(lead, max_width);
+    }
+    let full = format!("{lead}{suffix}");
+    if display_width(&full) <= max_width {
+        return full;
+    }
+    let suffix_width = display_width(suffix);
+    if suffix_width > max_width {
+        return truncate_display(suffix.trim_start(), max_width);
+    }
+    format!(
+        "{}{}",
+        truncate_display(lead, max_width.saturating_sub(suffix_width)),
+        suffix
+    )
 }
 
 fn truncate_with_trailing_arrow(lead: &str, width: usize) -> String {
@@ -623,11 +651,26 @@ pub fn detail_lines(request: &ObserverRequest, now_ms: i64) -> Vec<String> {
         ),
         format!("错误码  {}", request.error_code.as_deref().unwrap_or("—")),
         format!("Session  {}", request.session_id.as_deref().unwrap_or("—")),
+        format!(
+            "Session复用  {}",
+            if request.session_reuse { "是" } else { "否" }
+        ),
+        format!(
+            "输出速率  {}",
+            output_tokens_per_second(request)
+                .map(format_tokens_per_second_short)
+                .unwrap_or_else(|| "—".to_string())
+        ),
     ];
-    if let Some(route) = request.configured_model_route.as_ref() {
+    if let Some(route) = request
+        .configured_model_route
+        .as_ref()
+        .filter(|route| configured_model_route_is_valid(route))
+    {
         let source = match route.policy_source.as_str() {
             "provider" => "供应商覆盖",
             "global" => "全局",
+            "provider_cross" => "跨供应商",
             _ => "未知",
         };
         lines.insert(4, format!("路由规则  {source}"));
@@ -687,16 +730,32 @@ pub fn detail_lines(request: &ObserverRequest, now_ms: i64) -> Vec<String> {
         lines.push(String::new());
         lines.push("路由链".to_string());
         for (index, hop) in request.route.iter().enumerate() {
-            lines.push(format!(
-                "{}. {} ×{} {} {}",
+            let outcome = if hop.skipped {
+                "已跳过/未发送"
+            } else if hop.ok {
+                "成功"
+            } else if request.state == ObserverRequestState::Active
+                && hop.status.is_none()
+                && hop.error_code.is_none()
+            {
+                "进行中"
+            } else {
+                "失败"
+            };
+            let mut line = format!(
+                "{}. {} ×{} {}",
                 index + 1,
                 hop.provider_name,
-                hop.attempts,
-                hop.status
-                    .map(|status| status.to_string())
-                    .unwrap_or_else(|| "—".to_string()),
-                hop.error_code.as_deref().unwrap_or("")
-            ));
+                normalize_hop_attempts(hop.attempts),
+                outcome
+            );
+            if let Some(status) = hop.status {
+                line.push_str(&format!(" HTTP {status}"));
+            }
+            if let Some(error_code) = hop.error_code.as_deref() {
+                line.push_str(&format!(" {error_code}"));
+            }
+            lines.push(line);
         }
     }
     lines
@@ -789,6 +848,21 @@ pub fn request_status_label(request: &ObserverRequest) -> String {
 }
 
 pub fn route_result(request: &ObserverRequest) -> String {
+    let route = route_presentation(request);
+    if route.has_hop_evidence {
+        let mut tokens = route_count_tokens(&route, false);
+        if tokens.is_empty() {
+            return if route.has_sent_attempt {
+                "直连".to_string()
+            } else {
+                "未上游".to_string()
+            };
+        }
+        if !route.has_sent_attempt {
+            tokens.push("未发出上游请求".to_string());
+        }
+        return tokens.join("/");
+    }
     if request.provider_switch_count > 0 {
         if request.retry_count > 0 {
             return format!(
@@ -808,6 +882,18 @@ pub fn route_result(request: &ObserverRequest) -> String {
 }
 
 fn request_card_route_result(request: &ObserverRequest) -> String {
+    let route = route_presentation(request);
+    if route.has_hop_evidence {
+        let tokens = route_count_tokens(&route, true);
+        if !tokens.is_empty() {
+            return tokens.join("·");
+        }
+        return if route.has_sent_attempt {
+            "直连".to_string()
+        } else {
+            "未上游".to_string()
+        };
+    }
     if request.provider_switch_count > 0 {
         if request.retry_count > 0 {
             return format!(
@@ -824,6 +910,93 @@ fn request_card_route_result(request: &ObserverRequest) -> String {
         return "直连".to_string();
     }
     "未上游".to_string()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RoutePresentation {
+    has_hop_evidence: bool,
+    skipped_count: u32,
+    sent_attempt_count: u32,
+    retry_count: u32,
+    provider_switch_count: u32,
+    has_sent_attempt: bool,
+}
+
+fn route_presentation(request: &ObserverRequest) -> RoutePresentation {
+    const COUNT_LIMIT: u32 = 9_999;
+    if request.route.is_empty() {
+        return RoutePresentation {
+            has_hop_evidence: false,
+            skipped_count: 0,
+            sent_attempt_count: request.attempt_count.min(COUNT_LIMIT),
+            retry_count: request.retry_count.min(COUNT_LIMIT),
+            provider_switch_count: request.provider_switch_count.min(COUNT_LIMIT),
+            has_sent_attempt: request.attempt_count > 0,
+        };
+    }
+    let skipped_count = request
+        .route
+        .iter()
+        .filter(|hop| hop.skipped)
+        .count()
+        .try_into()
+        .unwrap_or(COUNT_LIMIT);
+    let sent_attempt_count =
+        request
+            .route
+            .iter()
+            .filter(|hop| !hop.skipped)
+            .fold(0_u32, |total, hop| {
+                total
+                    .saturating_add(normalize_hop_attempts(hop.attempts))
+                    .min(COUNT_LIMIT)
+            });
+    RoutePresentation {
+        has_hop_evidence: true,
+        skipped_count,
+        sent_attempt_count,
+        retry_count: request.retry_count.min(COUNT_LIMIT),
+        provider_switch_count: request.provider_switch_count.min(COUNT_LIMIT),
+        has_sent_attempt: sent_attempt_count > 0,
+    }
+}
+
+fn normalize_hop_attempts(attempts: u32) -> u32 {
+    attempts.clamp(1, 9_999)
+}
+
+fn route_count_tokens(route: &RoutePresentation, compact: bool) -> Vec<String> {
+    let mut tokens = Vec::new();
+    if route.provider_switch_count > 0 {
+        tokens.push(if compact {
+            format!("切{}", route.provider_switch_count)
+        } else {
+            format!("切换{}", route.provider_switch_count)
+        });
+    }
+    if route.skipped_count > 0 {
+        tokens.push(if compact {
+            format!("跳{}", route.skipped_count)
+        } else {
+            format!("跳过{}", route.skipped_count)
+        });
+    }
+    if route.retry_count > 0 {
+        tokens.push(if compact {
+            format!("重{}", route.retry_count)
+        } else {
+            format!("重试{}", route.retry_count)
+        });
+    }
+    let has_route_signal = !tokens.is_empty();
+    if route.sent_attempt_count > 0 && (has_route_signal || route.sent_attempt_count > 1) {
+        tokens.push(if compact {
+            format!("请{}", route.sent_attempt_count)
+        } else {
+            format!("请求{}", route.sent_attempt_count)
+        });
+    }
+    tokens
 }
 
 pub fn terminal_status(request: &ObserverRequest) -> String {
@@ -988,8 +1161,8 @@ mod tests {
     use super::*;
     use aio_observer_protocol::{
         ObserverConfiguredModelRoute, ObserverContextCompaction, ObserverDominantProvider,
-        ObserverGatewayStatus, ObserverPreferredProvider, ObserverRequestUsage, ObserverSection,
-        ObserverTodayUsage, OBSERVER_PROTOCOL_VERSION,
+        ObserverGatewayStatus, ObserverPreferredProvider, ObserverRequestUsage, ObserverRouteHop,
+        ObserverSection, ObserverTodayUsage, OBSERVER_PROTOCOL_VERSION,
     };
 
     fn request_with_route_counts(
@@ -1030,6 +1203,35 @@ mod tests {
             context_compaction: None,
             requested_reasoning_effort: None,
             configured_model_route: None,
+        }
+    }
+
+    fn route_hop(
+        provider_name: &str,
+        attempts: u32,
+        skipped: bool,
+        ok: bool,
+        status: Option<i64>,
+        error_code: Option<&str>,
+    ) -> ObserverRouteHop {
+        ObserverRouteHop {
+            provider_name: provider_name.to_string(),
+            attempts,
+            skipped,
+            ok,
+            status,
+            error_code: error_code.map(str::to_string),
+        }
+    }
+
+    fn compaction(mode: &str) -> ObserverContextCompaction {
+        ObserverContextCompaction {
+            mode: mode.to_string(),
+            implementation: "test".to_string(),
+            trigger: "test".to_string(),
+            reason: "test".to_string(),
+            phase: "test".to_string(),
+            strategy: "test".to_string(),
         }
     }
 
@@ -1285,6 +1487,80 @@ mod tests {
     }
 
     #[test]
+    fn structured_route_summaries_keep_skip_retry_switch_and_sent_counts() {
+        let mut skipped_only = request_with_route_counts(1, 0, 0);
+        skipped_only.route = vec![route_hop("候选 A", 0, true, false, None, None)];
+
+        assert_eq!(request_card_route_result(&skipped_only), "跳1");
+        assert_eq!(route_result(&skipped_only), "跳过1/未发出上游请求");
+        assert_eq!(route_tone(&skipped_only), StatusTone::Warning);
+        assert_eq!(request_tone(&skipped_only), StatusTone::Warning);
+        let skipped_detail = detail_lines(&skipped_only, 10);
+        assert!(skipped_detail
+            .iter()
+            .any(|line| line == "1. 候选 A ×1 已跳过/未发送"));
+        assert!(!skipped_detail.iter().any(|line| line.contains("直连")));
+
+        let mut mixed = request_with_route_counts(3, 1, 1);
+        mixed.route = vec![
+            route_hop("候选 A", 1, true, false, None, None),
+            route_hop("供应商 B", 2, false, false, Some(500), Some("UPSTREAM")),
+            route_hop("供应商 C", 1, false, true, Some(200), None),
+        ];
+        assert_eq!(request_card_route_result(&mixed), "切1·跳1·重1·请3");
+        assert_eq!(route_result(&mixed), "切换1/跳过1/重试1/请求3");
+        let mixed_detail = detail_lines(&mixed, 10);
+        assert!(mixed_detail
+            .iter()
+            .any(|line| line == "2. 供应商 B ×2 失败 HTTP 500 UPSTREAM"));
+        assert!(mixed_detail
+            .iter()
+            .any(|line| line == "3. 供应商 C ×1 成功 HTTP 200"));
+
+        let mut active = request_with_route_counts(1, 0, 0);
+        active.state = ObserverRequestState::Active;
+        active.status = None;
+        active.route = vec![route_hop("进行中供应商", 1, false, false, None, None)];
+        assert!(detail_lines(&active, 10)
+            .iter()
+            .any(|line| line == "1. 进行中供应商 ×1 进行中"));
+    }
+
+    #[test]
+    fn request_card_cache_keeps_unknown_distinct_from_zero_and_detail_keeps_evidence() {
+        let mut request = request_with_route_counts(1, 0, 0);
+        request.session_reuse = true;
+        request.final_upstream_attempt_duration_ms = Some(2_000);
+        request.final_upstream_attempt_timing_version = 1;
+        request.usage = Some(ObserverRequestUsage {
+            input_tokens: None,
+            output_tokens: Some(200),
+            total_tokens: None,
+            cache_read_tokens: None,
+            cache_creation_tokens: None,
+        });
+
+        assert_eq!(
+            request_card_lines(&request, 10, 80)[4].text,
+            "I — O 200 C — —"
+        );
+        let details = detail_lines(&request, 10);
+        assert!(details.iter().any(|line| line == "Session复用  是"));
+        assert!(details.iter().any(|line| line == "输出速率  100.0 t/s"));
+
+        request.usage.as_mut().expect("usage").cache_read_tokens = Some(7);
+        assert_eq!(
+            request_card_lines(&request, 10, 80)[4].text,
+            "I — O 200 C 7 —"
+        );
+        request.usage.as_mut().expect("usage").cache_creation_tokens = Some(2);
+        assert_eq!(
+            request_card_lines(&request, 10, 80)[4].text,
+            "I — O 200 C 9 —"
+        );
+    }
+
+    #[test]
     fn output_rate_uses_final_upstream_attempt_and_visibility_rules() {
         let mut request = request_with_route_counts(1, 0, 0);
         request.duration_ms = Some(20_000);
@@ -1382,6 +1658,77 @@ mod tests {
         assert!(detail_lines(&request, 10)
             .iter()
             .any(|line| line == "路由规则  供应商覆盖"));
+    }
+
+    #[test]
+    fn compaction_suffix_remains_visible_across_all_model_card_paths() {
+        for (mode, label) in [("local", "压缩·本地"), ("remote", "压缩·远程")] {
+            let mut unrouted = request_with_route_counts(1, 0, 0);
+            unrouted.model = Some("gpt-5.6-ultra-long-model-name".to_string());
+            unrouted.requested_reasoning_effort = Some("ultra".to_string());
+            unrouted.context_compaction = Some(compaction(mode));
+
+            let mut unchanged = unrouted.clone();
+            unchanged.configured_model_route = Some(ObserverConfiguredModelRoute {
+                source_model: "gpt-5.6-ultra-long-model-name".to_string(),
+                effective_model: "gpt-5.6-ultra-long-model-name".to_string(),
+                reasoning_effort: Some("max".to_string()),
+                policy_source: "global".to_string(),
+                model_applied: false,
+                reasoning_effort_applied: true,
+            });
+
+            let mut changed = unrouted.clone();
+            changed.configured_model_route = Some(ObserverConfiguredModelRoute {
+                source_model: "gpt-5.6-ultra-long-source".to_string(),
+                effective_model: "gpt-5.6-ultra-long-target".to_string(),
+                reasoning_effort: Some("max".to_string()),
+                policy_source: "provider".to_string(),
+                model_applied: true,
+                reasoning_effort_applied: true,
+            });
+
+            for request in [&unrouted, &unchanged, &changed] {
+                for width in [0, 1, 24, 31, 32, 80] {
+                    let lines = request_card_lines(request, 10, width);
+                    assert!(lines.iter().all(|line| display_width(&line.text) <= width));
+                    if width >= 24 {
+                        assert!(lines.iter().any(|line| line.text.contains(label)));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn provider_cross_route_uses_shared_model_and_policy_presentation() {
+        let mut request = request_with_route_counts(1, 0, 0);
+        request.requested_reasoning_effort = Some("high".to_string());
+        request.configured_model_route = Some(ObserverConfiguredModelRoute {
+            source_model: "gpt-5.6-sol".to_string(),
+            effective_model: "gpt-5.6-terra".to_string(),
+            reasoning_effort: Some("max".to_string()),
+            policy_source: "provider_cross".to_string(),
+            model_applied: true,
+            reasoning_effort_applied: true,
+        });
+
+        assert_eq!(
+            request_model(&request),
+            "gpt-5.6-sol-high→gpt-5.6-terra-max"
+        );
+        assert_eq!(request_card_lines(&request, 10, 80).len(), 6);
+        assert!(detail_lines(&request, 10)
+            .iter()
+            .any(|line| line == "路由规则  跨供应商"));
+
+        request.state = ObserverRequestState::Active;
+        request.status = None;
+        assert_eq!(
+            request_model(&request),
+            "gpt-5.6-sol-high→gpt-5.6-terra-max"
+        );
+        assert_eq!(request_card_lines(&request, 10, 80).len(), 6);
     }
 
     #[test]
@@ -1510,5 +1857,26 @@ mod tests {
         assert_eq!(lines.len(), 5);
         assert_eq!(lines[1].text, "Codex / 原始模型");
         assert_eq!(request_model(&request), "原始模型");
+    }
+
+    #[test]
+    fn future_route_policy_falls_open_without_a_target_or_policy_label() {
+        let mut request = request_with_route_counts(1, 0, 0);
+        request.model = Some("原始模型".to_string());
+        request.configured_model_route = Some(ObserverConfiguredModelRoute {
+            source_model: "原始模型".to_string(),
+            effective_model: "未来目标".to_string(),
+            reasoning_effort: None,
+            policy_source: "provider_future".to_string(),
+            model_applied: true,
+            reasoning_effort_applied: false,
+        });
+
+        let lines = request_card_lines(&request, 10, 80);
+        assert_eq!(lines.len(), 5);
+        assert_eq!(lines[1].text, "Codex / 原始模型");
+        assert!(!detail_lines(&request, 10)
+            .iter()
+            .any(|line| line.starts_with("路由规则")));
     }
 }
