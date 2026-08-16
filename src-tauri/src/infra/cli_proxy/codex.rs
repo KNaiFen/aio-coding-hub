@@ -838,10 +838,7 @@ fn build_codex_config_toml_with_auth_strategy(
 fn codex_remote_compaction_enabled(lines: &[String]) -> AppResult<bool> {
     let mut parse_lines = lines.to_vec();
     remove_model_provider_base_tables(&mut parse_lines, CODEX_PROVIDER_KEY);
-    remove_model_provider_base_tables(
-        &mut parse_lines,
-        CODEX_REMOTE_COMPACTION_PROVIDER_KEY,
-    );
+    remove_model_provider_base_tables(&mut parse_lines, CODEX_REMOTE_COMPACTION_PROVIDER_KEY);
     let input = parse_lines.join("\n");
     if input.trim().is_empty() {
         return Ok(false);

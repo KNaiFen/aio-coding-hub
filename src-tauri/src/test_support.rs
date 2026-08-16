@@ -15,9 +15,7 @@ pub fn clear_settings_cache() {
 }
 
 #[cfg(test)]
-pub(crate) fn install_codex_user_catalog<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-) {
+pub(crate) fn install_codex_user_catalog<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let codex_home = crate::codex_paths::codex_home_dir(app).expect("Codex home");
     std::fs::create_dir_all(&codex_home).expect("create Codex home");
     let catalog_path = codex_home.join("user-model-catalog.json");
@@ -32,8 +30,7 @@ pub(crate) fn install_codex_user_catalog<R: tauri::Runtime>(
         .ok()
         .and_then(|value| value.parse::<toml_edit::DocumentMut>().ok())
         .unwrap_or_default();
-    config["model_catalog_json"] =
-        toml_edit::value(catalog_path.to_string_lossy().into_owned());
+    config["model_catalog_json"] = toml_edit::value(catalog_path.to_string_lossy().into_owned());
     std::fs::write(config_path, config.to_string()).expect("write Codex config");
 }
 
