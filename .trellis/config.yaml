@@ -100,7 +100,7 @@ channel:
 # Codex (dispatch behavior)
 #-------------------------------------------------------------------------------
 # Codex-only knob; other platforms ignore it. Independent execution windows
-# are top-level sessions routed by handoff plus the repo's `aio-trellis-*`
+# are top-level sessions routed by handoff plus the repo's `gkd-*`
 # skills, not by custom sub-agent definitions. Keep inline unless this repo
 # later adds and deliberately adopts an in-process implementation-agent chain.
 #

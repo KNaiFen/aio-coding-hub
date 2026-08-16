@@ -1,4 +1,4 @@
 interface:
-  display_name: "AIO Trellis 执行会话"
+  display_name: "GKD 执行会话"
   short_description: "Execute one registered AIO task worktree and hand it off"
-  default_prompt: "Use $aio-trellis-execute to execute the registered task worktree."
+  default_prompt: "Use $gkd-execute to execute the registered task worktree."

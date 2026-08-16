@@ -1,6 +1,6 @@
 # 执行与交付
 
-本页供独立执行 session 使用。先调用 `$aio-trellis-execute`，再按 `execution.md` 给出的顺序读取任务材料；不要预加载 main 的验收和收尾流程。
+本页供独立执行 session 使用。先调用 `$gkd-execute`，再按 `execution.md` 给出的顺序读取任务材料；不要预加载 main 的验收和收尾流程。
 
 ## 开工核验
 

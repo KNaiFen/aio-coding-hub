@@ -122,7 +122,7 @@ class TaskCoordinationTests(unittest.TestCase):
             self.assertIn(str(repo.resolve()), handoff)
             self.assertIn(planning_commit, handoff)
             self.assertIn("task.py deliver", handoff)
-            self.assertIn("$aio-trellis-execute", handoff)
+            self.assertIn("$gkd-execute", handoff)
 
     def test_ready_block_and_resume_remain_valid(self) -> None:
         with tempfile.TemporaryDirectory() as raw_root:

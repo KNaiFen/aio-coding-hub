@@ -54,6 +54,6 @@ python3 .trellis/scripts/task.py doctor <task>
 python3 .trellis/scripts/task.py handoff <task>
 ```
 
-`handoff` 输出可直接发送的新窗口 Prompt。新窗口必须以登记 worktree 为 primary folder，显式调用 `$aio-trellis-execute`，才能稳定发现仓库级 skill。
+`handoff` 输出可直接发送的新窗口 Prompt。新窗口必须以登记 worktree 为 primary folder，显式调用 `$gkd-execute`，才能稳定发现仓库级 skill。
 
 交接前最后确认：任务处于 `implementing`、唯一写者正确、执行入口存在、依赖和冲突已说明。执行 session 开始后，main 不写该 worktree，直到它明确暂停。

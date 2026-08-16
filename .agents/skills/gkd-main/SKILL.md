@@ -1,9 +1,9 @@
 ---
-name: aio-trellis-main
+name: gkd-main
 description: Coordinate AIO Coding Hub tasks as the primary session. Use for requirement planning, task routing, worktree handoff, fixed-head acceptance, merge decisions, archival, and cleanup; do not use inside an assigned execution worktree session.
 ---
 
-# AIO Trellis Main
+# GKD Main
 
 Keep decisions in task Markdown and machine facts in `task.json`. Do not maintain a second handwritten status table.
 

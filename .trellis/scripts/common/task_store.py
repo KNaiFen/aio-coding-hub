@@ -452,7 +452,7 @@ def cmd_create(args: argparse.Namespace) -> int:
             "  - Curate implement.jsonl / check.jsonl as spec/research manifests when sub-agents need context",
             file=sys.stderr,
         )
-    print("  - Use $aio-trellis-main and task.py status to decide the next step", file=sys.stderr)
+    print("  - Use $gkd-main and task.py status to decide the next step", file=sys.stderr)
     print("", file=sys.stderr)
 
     # Output relative path for script chaining

@@ -1,9 +1,9 @@
 ---
-name: aio-trellis-accept
+name: gkd-accept
 description: Perform read-only acceptance review for one frozen AIO Coding Hub task candidate. Use when main requests independent evidence about PR diff, requirements, regressions, tests, documentation, or CI before main decides acceptance.
 ---
 
-# AIO Trellis Acceptance Review
+# GKD Acceptance Review
 
 Return evidence to main. Never modify files, task state, PR state, branches, or worktrees.
 

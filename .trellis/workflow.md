@@ -1,6 +1,6 @@
 # Development Workflow
 
-本文件是 Trellis 的精简状态与 CLI 参考。角色权限和本地执行边界以根 `AGENTS.md` 为准；多 worktree 的具体阶段流程由 `$aio-trellis-main`、`$aio-trellis-execute`、`$aio-trellis-accept` 按需加载。
+本文件是 Trellis 的精简状态与 CLI 参考。角色权限和本地执行边界以根 `AGENTS.md` 为准；多 worktree 的具体阶段流程由 `$gkd-main`、`$gkd-execute`、`$gkd-accept` 按需加载。
 
 ## 核心原则
 
@@ -110,29 +110,29 @@ Phase 3: Finish  -> 验证、沉淀知识、提交；委派任务随后由 main 
 
 ### 请求路由
 
-- 简单、低风险且由 main 连续完成：使用 `$aio-trellis-main` 和月度 change record；无需为形式创建 Trellis task。
-- 复杂、委派、并行、长流程或高风险：使用 `$aio-trellis-main` 创建任务和规划；创建任务不等于授权实施。
-- 独立执行窗口：只使用 `$aio-trellis-execute`，以 `execution.md` 和登记 writer 为授权。
-- 只读验收 subagent：使用 `$aio-trellis-accept`；新开顶层窗口不会因自定义 agent 配置自动获得执行角色。
+- 简单、低风险且由 main 连续完成：使用 `$gkd-main` 和月度 change record；无需为形式创建 Trellis task。
+- 复杂、委派、并行、长流程或高风险：使用 `$gkd-main` 创建任务和规划；创建任务不等于授权实施。
+- 独立执行窗口：只使用 `$gkd-execute`，以 `execution.md` 和登记 writer 为授权。
+- 只读验收 subagent：使用 `$gkd-accept`；新开顶层窗口不会因自定义 agent 配置自动获得执行角色。
 
 [workflow-state:no_task]
-没有活动任务。先判断是直接 main 小任务还是需要 Trellis 的复杂/委派任务；实施前把确认的方案写入对应仓库记录。使用 `$aio-trellis-main` 获取当前角色流程。
+没有活动任务。先判断是直接 main 小任务还是需要 Trellis 的复杂/委派任务；实施前把确认的方案写入对应仓库记录。使用 `$gkd-main` 获取当前角色流程。
 [/workflow-state:no_task]
 
 [workflow-state:planning]
-任务仍在规划。完成 prd.md 的授权、范围和 AC；委派任务再完成 execution.md，复杂任务再完成 design.md/implement.md。材料性问题未关闭时不要 start。使用 `$aio-trellis-main`。
+任务仍在规划。完成 prd.md 的授权、范围和 AC；委派任务再完成 execution.md，复杂任务再完成 design.md/implement.md。材料性问题未关闭时不要 start。使用 `$gkd-main`。
 [/workflow-state:planning]
 
 [workflow-state:planning-inline]
-任务仍在规划。完成 prd.md 的授权、范围和 AC；复杂任务补 design.md/implement.md。材料性问题未关闭时不要 start。使用 `$aio-trellis-main`。
+任务仍在规划。完成 prd.md 的授权、范围和 AC；复杂任务补 design.md/implement.md。材料性问题未关闭时不要 start。使用 `$gkd-main`。
 [/workflow-state:planning-inline]
 
 [workflow-state:in_progress]
-先运行 task.py status 查看 coordination.phase 和 writer。main 使用 `$aio-trellis-main`；登记的独立执行 writer 使用 `$aio-trellis-execute`；验收 subagent 使用 `$aio-trellis-accept`。不要从顶层 in_progress 猜测当前是施工、阻塞还是验收。
+先运行 task.py status 查看 coordination.phase 和 writer。main 使用 `$gkd-main`；登记的独立执行 writer 使用 `$gkd-execute`；验收 subagent 使用 `$gkd-accept`。不要从顶层 in_progress 猜测当前是施工、阻塞还是验收。
 [/workflow-state:in_progress]
 
 [workflow-state:in_progress-inline]
-先运行 task.py status 查看 coordination.phase 和 writer。main 使用 `$aio-trellis-main`；登记的独立执行 writer 使用 `$aio-trellis-execute`。不要从顶层 in_progress 猜测当前阶段。
+先运行 task.py status 查看 coordination.phase 和 writer。main 使用 `$gkd-main`；登记的独立执行 writer 使用 `$gkd-execute`。不要从顶层 in_progress 猜测当前阶段。
 [/workflow-state:in_progress-inline]
 
 ## Phase 1: Plan
@@ -210,7 +210,7 @@ main 连续施工遵循当前任务记录和适用 spec。独立执行 session �
 
 #### 3.4 Commit changes `[required · once]`
 
-检查 dirty state，只提交本任务且归属明确的文件；按仓库历史拆分语义提交，不 amend，不混入未知修改。独立执行 session 可推送任务分支但不推 `main`；main 是否推送、建 PR 或合并按 `$aio-trellis-main` 和用户授权执行。
+检查 dirty state，只提交本任务且归属明确的文件；按仓库历史拆分语义提交，不 amend，不混入未知修改。独立执行 session 可推送任务分支但不推 `main`；main 是否推送、建 PR 或合并按 `$gkd-main` 和用户授权执行。
 
 #### 3.5 Wrap-up reminder
 

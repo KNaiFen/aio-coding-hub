@@ -1,9 +1,9 @@
 ---
-name: aio-trellis-execute
+name: gkd-execute
 description: Execute one registered AIO Coding Hub task in an independent worktree session. Use when a handoff points to execution.md and this session owns implementation, commits, the task PR, CI repair, delivery.md, and the final pause before main acceptance.
 ---
 
-# AIO Trellis Execute
+# GKD Execute
 
 Work only in the registered task worktree. This skill does not grant merge, archive, acceptance, or cleanup authority.
 

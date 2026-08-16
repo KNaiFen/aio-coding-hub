@@ -478,7 +478,7 @@ def _handoff_view(task_dir: Path, repo_root: Path, data: dict[str, Any]) -> dict
     ]
     view["prompt"] = (
         f"以 {view['worktree_path']} 为 primary folder 新开独立执行 session，先调用 "
-        f"`$aio-trellis-execute`，再运行 `python3 "
+        f"`$gkd-execute`，再运行 `python3 "
         f".trellis/scripts/task.py status {view['task']}` 和 `python3 .trellis/scripts/task.py "
         f"doctor {view['task']}`，然后按 `{view['execution']}` 施工。提交并推送任务分支、"
         f"维护 PR/CI、填写并提交 delivery.md，再运行 `python3 .trellis/scripts/task.py deliver "

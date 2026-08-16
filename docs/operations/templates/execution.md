@@ -1,6 +1,6 @@
 # 施工入口：{{任务名称}}
 
-> 先调用 `$aio-trellis-execute`。活动状态以 `python3 .trellis/scripts/task.py status {{task}}` 为准；本文件只保存任务特有边界。
+> 先调用 `$gkd-execute`。活动状态以 `python3 .trellis/scripts/task.py status {{task}}` 为准；本文件只保存任务特有边界。
 
 ## 权威材料
 

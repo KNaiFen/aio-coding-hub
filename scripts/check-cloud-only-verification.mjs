@@ -46,7 +46,7 @@ function readMarkdownTree(root, relativeDir) {
 }
 
 export function loadCloudOnlyVerificationFixture(root = repoRoot) {
-  const roleSkillNames = ["aio-trellis-main", "aio-trellis-execute", "aio-trellis-accept"];
+  const roleSkillNames = ["gkd-main", "gkd-execute", "gkd-accept"];
   return {
     rootPackage: readJson(root, "package.json"),
     pluginSdkPackage: readJson(root, "packages/plugin-sdk/package.json"),
