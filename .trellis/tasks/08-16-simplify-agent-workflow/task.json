@@ -3,7 +3,7 @@
   "name": "simplify-agent-workflow",
   "title": "精简多 worktree 多 session 工作流",
   "description": "以短 AGENTS.md、按角色 skills、脚本化持久状态与交接、分阶段 Markdown 为核心，修复当前文档与实现偏移并降低跨 session 出错概率。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": "workflow",
   "package": "aio-coding-hub",
@@ -12,9 +12,9 @@
   "assignee": "KNaiFen",
   "createdAt": "2026-08-16",
   "completedAt": null,
-  "branch": null,
+  "branch": "task/08-16-simplify-agent-workflow",
   "base_branch": "main",
-  "worktree_path": null,
+  "worktree_path": "/Users/knaifen/Documents/Codex/aio-coding-hub/08-16-simplify-agent-workflow",
   "commit": null,
   "pr_url": null,
   "subtasks": [],
@@ -22,5 +22,15 @@
   "parent": null,
   "relatedFiles": [],
   "notes": "",
-  "meta": {}
+  "meta": {},
+  "coordination": {
+    "version": 1,
+    "route": "delegated",
+    "phase": "implementing",
+    "writer": "current-codex-session",
+    "base_sha": "6d7ea7ef83a5d408a07bef945edb347b960d1d16",
+    "planning_commit": "0eb89d056a1c94772d1252ef9202fab94f5c27f3",
+    "block": null,
+    "updated_at": "2026-08-16T08:43:53Z"
+  }
 }
