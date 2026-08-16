@@ -162,6 +162,12 @@ def _coordination(data: dict[str, Any], *, required: bool) -> dict[str, Any] | N
     return value
 
 
+def _required_text(value: Any, label: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise TaskCoordinationError(f"{label} must be a non-empty string")
+    return value.strip()
+
+
 def _git_value(cwd: Path, args: list[str], label: str) -> str:
     code, stdout, stderr = run_git(args, cwd=cwd)
     if code != 0:
@@ -380,6 +386,7 @@ def cmd_delegate(args: argparse.Namespace) -> int:
             raise TaskCoordinationError("delegate requires top-level status=planning")
         if not (task_dir / "execution.md").is_file():
             raise TaskCoordinationError("delegate requires execution.md")
+        writer = _required_text(args.writer, "writer")
         registration_errors = _validate_git_registration(
             repo_root,
             worktree=args.worktree,
@@ -397,7 +404,7 @@ def cmd_delegate(args: argparse.Namespace) -> int:
                 "version": COORDINATION_VERSION,
                 "route": "delegated",
                 "phase": "ready",
-                "writer": args.writer,
+                "writer": writer,
                 "base_sha": args.base_sha.lower(),
                 "planning_commit": args.planning_commit.lower(),
                 "block": None,
@@ -425,7 +432,8 @@ def _handoff_view(task_dir: Path, repo_root: Path, data: dict[str, Any]) -> dict
         f"在 {view['worktree_path']} 开始独立执行 session。先运行 `python3 "
         f".trellis/scripts/task.py status {view['task']}` 和 `python3 .trellis/scripts/task.py "
         f"doctor {view['task']}`，然后按 `{view['execution']}` 施工。提交并推送任务分支、"
-        "维护 PR/CI、填写 delivery.md 后暂停；不要合并、归档或清理 worktree。"
+        f"维护 PR/CI、填写并提交 delivery.md，再运行 `python3 .trellis/scripts/task.py deliver "
+        f"{view['task']}`、提交状态转换并等待最终 head CI 后暂停；不要合并、归档或清理 worktree。"
     )
     return view
 
@@ -485,6 +493,7 @@ def cmd_deliver(args: argparse.Namespace) -> int:
         coordination = _coordination(data, required=True)
         if coordination.get("route") != "delegated" or coordination.get("phase") != "implementing":
             raise TaskCoordinationError("deliver requires delegated phase=implementing")
+        reviewer = _required_text(getattr(args, "reviewer", "main"), "reviewer")
         if not (task_dir / "delivery.md").is_file():
             raise TaskCoordinationError("deliver requires delivery.md")
         dirty = _git_value(repo_root, ["status", "--porcelain"], "read worktree status")
@@ -496,7 +505,7 @@ def cmd_deliver(args: argparse.Namespace) -> int:
         def apply_delivery(manifest: dict[str, Any]) -> None:
             state = _coordination(manifest, required=True)
             state["phase"] = "delivered"
-            state["writer"] = getattr(args, "reviewer", "main")
+            state["writer"] = reviewer
             state["updated_at"] = utc_now()
 
         mutate_task_manifest(task_dir, apply_delivery)
@@ -512,6 +521,9 @@ def cmd_block(args: argparse.Namespace) -> int:
     repo_root = get_repo_root()
     try:
         task_dir = _resolve_task(args.dir, repo_root)
+        reason = _required_text(args.reason, "reason")
+        resume_condition = _required_text(args.resume_condition, "resume_condition")
+        owner = _required_text(args.owner, "owner")
 
         def apply_block(data: dict[str, Any]) -> None:
             coordination = _coordination(data, required=True)
@@ -521,16 +533,16 @@ def cmd_block(args: argparse.Namespace) -> int:
             if phase not in {"ready", "implementing", "delivered"}:
                 raise TaskCoordinationError(f"cannot block task from phase={phase}")
             coordination["phase"] = "blocked"
-            previous_writer = coordination.get("writer")
+            previous_writer = _required_text(coordination.get("writer"), "current writer")
             coordination["block"] = {
-                "reason": args.reason,
-                "resume_condition": args.resume_condition,
-                "owner": args.owner,
+                "reason": reason,
+                "resume_condition": resume_condition,
+                "owner": owner,
                 "blocked_at": utc_now(),
                 "previous_phase": phase,
                 "previous_writer": previous_writer,
             }
-            coordination["writer"] = args.owner
+            coordination["writer"] = owner
             coordination["updated_at"] = utc_now()
 
         mutate_task_manifest(task_dir, apply_block)
@@ -545,6 +557,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
     repo_root = get_repo_root()
     try:
         task_dir = _resolve_task(args.dir, repo_root)
+        writer = _required_text(args.writer, "writer")
 
         def apply_resume(data: dict[str, Any]) -> None:
             coordination = _coordination(data, required=True)
@@ -557,7 +570,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
             if previous_phase not in {"ready", "implementing", "delivered"}:
                 raise TaskCoordinationError("blocked state has an invalid previous_phase")
             coordination["phase"] = previous_phase
-            coordination["writer"] = args.writer
+            coordination["writer"] = writer
             coordination["block"] = None
             coordination["updated_at"] = utc_now()
 

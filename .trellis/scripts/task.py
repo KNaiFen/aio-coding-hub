@@ -129,8 +129,8 @@ def _mark_task_in_progress(
     changes: list[str] = []
     if previous_status == "planning":
         changes.append("status planning → in_progress")
-    if previous_phase == "ready":
-        changes.append("phase ready → implementing")
+    if previous_phase in {"ready", "delivered"}:
+        changes.append(f"phase {previous_phase} → implementing")
     print(colored(f"✓ {', '.join(changes)}{suffix}", Colors.GREEN))
     return True
 

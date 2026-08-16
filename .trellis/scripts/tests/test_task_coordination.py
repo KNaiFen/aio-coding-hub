@@ -21,6 +21,7 @@ from common.task_coordination import (
     mark_started,
     validate_task_manifest,
     write_task_manifest_path,
+    TaskCoordinationError,
 )
 
 
@@ -117,6 +118,7 @@ class TaskCoordinationTests(unittest.TestCase):
             self.assertIn("# Execution handoff", handoff)
             self.assertIn(str(repo.resolve()), handoff)
             self.assertIn(planning_commit, handoff)
+            self.assertIn("task.py deliver", handoff)
 
     def test_block_and_resume_restore_previous_phase(self) -> None:
         with tempfile.TemporaryDirectory() as raw_root:
@@ -147,6 +149,12 @@ class TaskCoordinationTests(unittest.TestCase):
                         )
                     ),
                     0,
+                )
+                blocked = load_task_manifest(task_dir)
+                self.assertEqual(blocked["coordination"]["writer"], "main")
+                self.assertEqual(
+                    blocked["coordination"]["block"]["previous_writer"],
+                    "execution-session",
                 )
                 self.assertEqual(
                     cmd_resume(Namespace(dir="08-16-example", writer="execution-session")),
@@ -188,6 +196,8 @@ class TaskCoordinationTests(unittest.TestCase):
             delivered = load_task_manifest(task_dir)
             self.assertEqual(delivered["coordination"]["phase"], "delivered")
             self.assertEqual(delivered["coordination"]["writer"], "main")
+            with self.assertRaisesRegex(TaskCoordinationError, "requires --writer"):
+                mark_started(delivered)
             self.assertTrue(mark_started(delivered, writer="execution-session"))
             self.assertEqual(delivered["coordination"]["phase"], "implementing")
             self.assertEqual(delivered["coordination"]["writer"], "execution-session")
