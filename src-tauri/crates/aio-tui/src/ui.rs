@@ -2,8 +2,8 @@ use crate::client::OfflineReason;
 use crate::config::{colors_enabled, StatusItem, TuiConfig};
 use crate::format::{
     cli_label, format_cost, format_duration, format_tokens, now_millis, request_card_lines,
-    scope_label, status_segments, truncate_display, truncate_status_line, wrap_status_segments,
-    RequestCardLineKind, StatusSegment, StatusTone,
+    request_tone, route_tone, scope_label, status_segments, truncate_display,
+    truncate_status_line, wrap_status_segments, RequestCardLineKind, StatusSegment, StatusTone,
 };
 use crate::palette::{Palette, Tone};
 use aio_observer_protocol::{
@@ -1132,20 +1132,21 @@ fn provider_availability_detail_lines(
             availability.success_count, availability.failure_count
         ),
     ];
-    lines.extend(availability.buckets.iter().take(12).map(|bucket| {
+    lines.extend(availability.buckets.iter().take(12).flat_map(|bucket| {
         let state = match bucket.state {
             aio_observer_protocol::ObserverProviderAvailabilityState::Healthy => "可用",
             aio_observer_protocol::ObserverProviderAvailabilityState::Degraded => "降级",
             aio_observer_protocol::ObserverProviderAvailabilityState::Unhealthy => "不可用",
             aio_observer_protocol::ObserverProviderAvailabilityState::NoData => "无数据",
         };
-        format!(
-            "  {}-{}  {state}  成{} 败{}",
-            format_local_minute(bucket.start_at_ms),
-            format_local_minute(bucket.end_at_ms),
-            bucket.success_count,
-            bucket.failure_count
-        )
+        [
+            format!(
+                "  {}-{}",
+                format_local_minute(bucket.start_at_ms),
+                format_local_minute(bucket.end_at_ms),
+            ),
+            format!("  {state}  成{} 败{}", bucket.success_count, bucket.failure_count),
+        ]
     }));
     lines
 }
@@ -1213,28 +1214,20 @@ fn request_line_style(
     selected: bool,
 ) -> Style {
     let tone = match kind {
-        RequestCardLineKind::Status
-            if request.state == aio_observer_protocol::ObserverRequestState::Active =>
-        {
-            Tone::Accent
-        }
-        RequestCardLineKind::Status if request.interrupted => Tone::Warning,
-        RequestCardLineKind::Status
-            if request
-                .status
-                .is_some_and(|status| (200..300).contains(&status)) =>
-        {
-            Tone::Success
-        }
-        RequestCardLineKind::Status => Tone::Error,
+        RequestCardLineKind::Status => match request_tone(request) {
+            StatusTone::Activity => Tone::Accent,
+            StatusTone::Warning => Tone::Warning,
+            StatusTone::Success => Tone::Success,
+            StatusTone::Error => Tone::Error,
+            _ => Tone::Default,
+        },
         RequestCardLineKind::Model | RequestCardLineKind::ModelTarget => Tone::Info,
         RequestCardLineKind::Provider => Tone::Provider,
-        RequestCardLineKind::Route
-            if request.provider_switch_count > 0 || request.retry_count > 0 =>
-        {
-            Tone::Warning
-        }
-        RequestCardLineKind::Route => Tone::Success,
+        RequestCardLineKind::Route => match route_tone(request) {
+            StatusTone::Warning => Tone::Warning,
+            StatusTone::Success => Tone::Success,
+            _ => Tone::Default,
+        },
         RequestCardLineKind::Metrics => Tone::Accent,
     };
     let mut style = Palette::detected(color).style(tone);
@@ -1684,7 +1677,8 @@ mod tests {
         ObserverProviderAccountUsage, ObserverProviderAvailabilityBucket,
         ObserverProviderAvailabilityState, ObserverProviderAvailabilityTimeline,
         ObserverProviderCollection, ObserverProviderOAuthQuota, ObserverProviderSpendWindow,
-        ObserverRequestState, ObserverSection, ObserverTodayUsage, OBSERVER_PROTOCOL_VERSION,
+        ObserverRequestState, ObserverRouteHop, ObserverSection, ObserverTodayUsage,
+        OBSERVER_PROTOCOL_VERSION,
     };
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
@@ -1694,6 +1688,15 @@ mod tests {
             .backend()
             .buffer()
             .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .filter(|symbol| !symbol.trim().is_empty())
+            .collect()
+    }
+
+    fn rendered_row_symbols(terminal: &Terminal<TestBackend>, row: usize) -> String {
+        let width = usize::from(terminal.backend().buffer().area.width);
+        terminal.backend().buffer().content()[row * width..(row + 1) * width]
             .iter()
             .map(|cell| cell.symbol())
             .filter(|symbol| !symbol.trim().is_empty())
@@ -1831,6 +1834,15 @@ mod tests {
         }
     }
 
+    fn detail_availability_timeline() -> ObserverProviderAvailabilityTimeline {
+        let mut timeline = availability_timeline();
+        timeline.buckets[0].success_count = 12;
+        timeline.buckets[0].failure_count = 34;
+        timeline.buckets[1].success_count = 56;
+        timeline.buckets[1].failure_count = 78;
+        timeline
+    }
+
     #[test]
     fn narrow_logs_layout_renders_without_overflow() {
         let backend = TestBackend::new(32, 12);
@@ -1911,8 +1923,66 @@ mod tests {
         );
 
         let lines = provider_availability_detail_lines(&availability_timeline());
-        assert!(lines.iter().any(|line| line.contains("成1 败0")));
+        let bucket_lines = &lines[4..];
+        assert_eq!(bucket_lines.len(), 24);
+        for pair in bucket_lines.chunks_exact(2) {
+            assert!(pair[0].contains('-'));
+            assert!(!pair[0].contains("成"));
+            assert!(!pair[0].contains("可用"));
+            assert!(!pair[1].contains('-'));
+            assert!(pair[1].contains("成"));
+            assert!(pair[1].contains("败"));
+        }
+        assert!(bucket_lines.iter().any(|line| line.contains("可用  成1 败0")));
+        assert!(bucket_lines.iter().any(|line| line.contains("降级")));
+        assert!(bucket_lines.iter().any(|line| line.contains("不可用")));
+        assert!(bucket_lines.iter().any(|line| line.contains("无数据")));
         assert!(lines.iter().all(|line| !line.contains("UTC")));
+    }
+
+    #[test]
+    fn provider_availability_detail_keeps_result_lines_intact_at_narrow_widths_and_scrolls() {
+        for width in [24_u16, 32_u16] {
+            let mut provider = provider_status(1, "可用性供应商", true);
+            provider.spend_windows.clear();
+            provider.oauth_quota = None;
+            provider.availability = Some(detail_availability_timeline());
+
+            let mut snapshot = empty_snapshot(CliScope::Codex);
+            snapshot.providers = Some(ObserverSection::ready(ObserverProviderCollection {
+                items: vec![provider],
+                truncated: false,
+            }));
+            let mut state = LogsState::new(CliScope::Codex);
+            state.switch_view(DashboardView::Providers);
+            state.apply_snapshot(snapshot);
+            state.select_current(0, Instant::now());
+            state.detail = true;
+            state.detail_scroll = 11;
+
+            let backend = TestBackend::new(width, 10);
+            let mut terminal = Terminal::new(backend).expect("terminal");
+            terminal
+                .draw(|frame| draw_logs(frame, &mut state))
+                .expect("draw first bucket");
+            let first_rows = (0..10)
+                .map(|row| rendered_row_symbols(&terminal, row))
+                .collect::<Vec<_>>();
+            let result_row = first_rows
+                .iter()
+                .position(|row| row.contains("可用成12败34"))
+                .expect("first result line");
+            assert!(result_row > 0);
+            assert!(first_rows[result_row - 1].contains('-'));
+            assert!(!first_rows[result_row - 1].contains("成"));
+
+            state.detail_scroll = 13;
+            terminal
+                .draw(|frame| draw_logs(frame, &mut state))
+                .expect("draw scrolled bucket");
+            let scrolled = rendered_non_space_symbols(&terminal);
+            assert!(scrolled.contains("降级成56败78"));
+        }
     }
 
     #[test]
@@ -1984,6 +2054,23 @@ mod tests {
         assert_eq!(
             request_line_style(&request, RequestCardLineKind::Route, true, false).fg,
             Some(Color::Green)
+        );
+        let mut skipped = request.clone();
+        skipped.route = vec![ObserverRouteHop {
+            provider_name: "候选".to_string(),
+            attempts: 1,
+            skipped: true,
+            ok: false,
+            status: None,
+            error_code: None,
+        }];
+        assert_eq!(
+            request_line_style(&skipped, RequestCardLineKind::Route, true, false).fg,
+            Some(Color::Yellow)
+        );
+        assert_eq!(
+            request_line_style(&skipped, RequestCardLineKind::Status, true, false).fg,
+            Some(Color::Yellow)
         );
         assert_eq!(
             request_line_style(&request, RequestCardLineKind::Metrics, true, false).fg,
