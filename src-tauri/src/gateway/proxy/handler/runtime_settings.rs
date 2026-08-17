@@ -176,8 +176,10 @@ mod tests {
 
     #[test]
     fn codex_responses_overload_rewrite_uses_request_snapshot() {
-        let mut settings = crate::settings::AppSettings::default();
-        settings.enable_codex_responses_overload_error_rewrite = true;
+        let settings = crate::settings::AppSettings {
+            enable_codex_responses_overload_error_rewrite: true,
+            ..Default::default()
+        };
 
         assert!(
             handler_runtime_settings(Some(&settings), false, false)
