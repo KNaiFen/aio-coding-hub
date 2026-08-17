@@ -1020,11 +1020,8 @@ pub fn codex_config_set<R: tauri::Runtime>(
     let next = if requires_provider_sync
         && super::cli_proxy::codex_enabled_proxy_baseline(app)?.is_some()
     {
-        super::cli_proxy::canonical_codex_config_from_live(
-            Some(&next),
-            current.as_deref(),
-        )?
-        .unwrap_or_default()
+        super::cli_proxy::canonical_codex_config_from_live(Some(&next), current.as_deref())?
+            .unwrap_or_default()
     } else {
         next
     };
