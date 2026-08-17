@@ -73,6 +73,7 @@ pub(crate) struct SettingsUpdate {
     pub codex_home_override: Option<String>,
     pub codex_oauth_compatible_proxy_mode: Option<bool>,
     pub codex_provider_test_model: Option<String>,
+    pub enable_codex_responses_overload_error_rewrite: Option<bool>,
     #[serde(rename = "cx2CcFallbackModelOpus")]
     #[specta(rename = "cx2CcFallbackModelOpus")]
     pub cx2cc_fallback_model_opus: Option<String>,
@@ -154,6 +155,7 @@ struct SettingsServiceOwnedToken {
     codex_home_override: String,
     codex_oauth_compatible_proxy_mode: bool,
     codex_provider_test_model: String,
+    enable_codex_responses_overload_error_rewrite: bool,
     cx2cc_fallback_model_opus: String,
     cx2cc_fallback_model_sonnet: String,
     cx2cc_fallback_model_haiku: String,
@@ -215,6 +217,8 @@ impl SettingsServiceOwnedToken {
             codex_home_override: settings.codex_home_override.clone(),
             codex_oauth_compatible_proxy_mode: settings.codex_oauth_compatible_proxy_mode,
             codex_provider_test_model: settings.codex_provider_test_model.clone(),
+            enable_codex_responses_overload_error_rewrite: settings
+                .enable_codex_responses_overload_error_rewrite,
             cx2cc_fallback_model_opus: settings.cx2cc_fallback_model_opus.clone(),
             cx2cc_fallback_model_sonnet: settings.cx2cc_fallback_model_sonnet.clone(),
             cx2cc_fallback_model_haiku: settings.cx2cc_fallback_model_haiku.clone(),
@@ -282,6 +286,8 @@ impl SettingsServiceOwnedToken {
         settings.codex_home_override = self.codex_home_override.clone();
         settings.codex_oauth_compatible_proxy_mode = self.codex_oauth_compatible_proxy_mode;
         settings.codex_provider_test_model = self.codex_provider_test_model.clone();
+        settings.enable_codex_responses_overload_error_rewrite =
+            self.enable_codex_responses_overload_error_rewrite;
         settings.cx2cc_fallback_model_opus = self.cx2cc_fallback_model_opus.clone();
         settings.cx2cc_fallback_model_sonnet = self.cx2cc_fallback_model_sonnet.clone();
         settings.cx2cc_fallback_model_haiku = self.cx2cc_fallback_model_haiku.clone();
@@ -355,6 +361,7 @@ pub(crate) struct SettingsView {
     pub enable_billing_header_rectifier: bool,
     pub enable_session_reuse: bool,
     pub enable_codex_session_id_completion: bool,
+    pub enable_codex_responses_overload_error_rewrite: bool,
     pub enable_claude_metadata_user_id_injection: bool,
     pub enable_cache_anomaly_monitor: bool,
     pub enable_debug_log: bool,
@@ -489,6 +496,8 @@ impl From<&settings::AppSettings> for SettingsView {
             enable_billing_header_rectifier: value.enable_billing_header_rectifier,
             enable_session_reuse: value.enable_session_reuse,
             enable_codex_session_id_completion: value.enable_codex_session_id_completion,
+            enable_codex_responses_overload_error_rewrite: value
+                .enable_codex_responses_overload_error_rewrite,
             enable_claude_metadata_user_id_injection: value
                 .enable_claude_metadata_user_id_injection,
             enable_cache_anomaly_monitor: value.enable_cache_anomaly_monitor,
@@ -799,6 +808,9 @@ fn apply_settings_update_owned_patch(
     if codex_provider_test_model.is_empty() {
         codex_provider_test_model = settings::DEFAULT_CODEX_PROVIDER_TEST_MODEL.to_string();
     }
+    let enable_codex_responses_overload_error_rewrite = update
+        .enable_codex_responses_overload_error_rewrite
+        .unwrap_or(previous_token.enable_codex_responses_overload_error_rewrite);
 
     let cx2cc_fallback_model_opus = update
         .cx2cc_fallback_model_opus
@@ -972,6 +984,7 @@ fn apply_settings_update_owned_patch(
         codex_home_override,
         codex_oauth_compatible_proxy_mode,
         codex_provider_test_model,
+        enable_codex_responses_overload_error_rewrite,
         cx2cc_fallback_model_opus,
         cx2cc_fallback_model_sonnet,
         cx2cc_fallback_model_haiku,
@@ -2355,6 +2368,9 @@ mod tests {
             codex_home_override: Some(settings.codex_home_override.clone()),
             codex_oauth_compatible_proxy_mode: Some(settings.codex_oauth_compatible_proxy_mode),
             codex_provider_test_model: Some(settings.codex_provider_test_model.clone()),
+            enable_codex_responses_overload_error_rewrite: Some(
+                settings.enable_codex_responses_overload_error_rewrite,
+            ),
             cx2cc_fallback_model_opus: Some(settings.cx2cc_fallback_model_opus.clone()),
             cx2cc_fallback_model_sonnet: Some(settings.cx2cc_fallback_model_sonnet.clone()),
             cx2cc_fallback_model_haiku: Some(settings.cx2cc_fallback_model_haiku.clone()),
@@ -2490,6 +2506,35 @@ mod tests {
             0
         );
         assert_eq!(crate::app::autostart::auto_start_sync_test_calls(), 0);
+    }
+
+    #[test]
+    fn codex_responses_overload_rewrite_patch_participates_in_owned_rollback() {
+        let _env = SettingsTestEnv::new();
+        let app = tauri::test::mock_app();
+        let handle = app.handle().clone();
+        let previous = settings::read(&handle).expect("previous");
+        assert!(!previous.enable_codex_responses_overload_error_rewrite);
+
+        let mut update = ordinary_update_from_settings(&previous, previous.auto_start, None);
+        update.auto_start = None;
+        update.enable_codex_responses_overload_error_rewrite = Some(true);
+        let (_, committed, previous_token, committed_token, auto_start_token) =
+            commit_settings_update_owned(&handle, update).expect("ordinary settings commit");
+        assert!(committed.enable_codex_responses_overload_error_rewrite);
+        assert!(auto_start_token.is_none());
+
+        let rollback = tauri::async_runtime::block_on(rollback_settings_service_owned_fields(
+            &handle,
+            &previous_token,
+            &committed_token,
+            None,
+        ));
+
+        assert!(matches!(rollback, OwnedSettingsRollback::Restored));
+        assert!(!settings::read(&handle)
+            .expect("rolled back settings")
+            .enable_codex_responses_overload_error_rewrite);
     }
 
     #[test]

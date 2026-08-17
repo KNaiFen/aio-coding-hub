@@ -20,7 +20,10 @@ use super::super::util::{
 };
 use super::plugin_chunk::PLUGIN_STREAM_ERROR_MARKER;
 use super::request_end::{emit_request_event_and_spawn_request_log, StreamRequestCompletion};
-use super::{RelayBodyStream, StreamFinalizeCtx, UpstreamOutputTiming};
+use super::{
+    CodexResponsesOverloadErrorRewriter, RelayBodyStream, StreamFinalizeCtx,
+    UpstreamOutputTiming,
+};
 
 pub(in crate::gateway) struct UpstreamModelObserverStream<S, B>
 where
@@ -811,11 +814,30 @@ where
 
 const SSE_RELAY_BUFFER_CAPACITY: usize = 32;
 
+async fn send_sse_relay_chunk(
+    tx: &tokio::sync::mpsc::Sender<Result<Bytes, reqwest::Error>>,
+    timing: &UpstreamOutputTiming,
+    chunk: Bytes,
+) -> bool {
+    match tx.try_send(Ok(chunk)) {
+        Ok(()) => true,
+        Err(tokio::sync::mpsc::error::TrySendError::Full(item)) => {
+            invalidate_for_downstream_backpressure(timing);
+            tx.send(item).await.is_ok()
+        }
+        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+            timing.invalidate_output();
+            false
+        }
+    }
+}
+
 pub(in crate::gateway) fn spawn_usage_sse_relay_body<S, R>(
     upstream: S,
     ctx: StreamFinalizeCtx<R>,
     idle_timeout: Option<Duration>,
     initial_first_byte_ms: Option<u128>,
+    rewrite_codex_responses_overload_errors: bool,
 ) -> Body
 where
     S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin + Send + 'static,
@@ -837,6 +859,8 @@ where
         let mut downstream_closed = false;
         let mut upstream_ended_normally = false;
         let mut upstream_transport_error_seen = false;
+        let mut overload_rewriter = rewrite_codex_responses_overload_errors
+            .then(CodexResponsesOverloadErrorRewriter::new);
 
         let is_codex_responses = is_codex_responses_path(&tee.ctx.cli_key, &tee.ctx.path);
         let mut drain_deadline: Option<tokio::time::Instant> = None;
@@ -921,47 +945,79 @@ where
                 }
                 item = next_item(&mut tee) => {
                     let Some(item) = item else {
+                        if let Some(tail) = overload_rewriter
+                            .as_mut()
+                            .and_then(CodexResponsesOverloadErrorRewriter::finish)
+                        {
+                            let tail_len = tail.len().min(i64::MAX as usize) as i64;
+                            if !send_sse_relay_chunk(
+                                &tx,
+                                &tee.ctx.upstream_output_timing,
+                                tail,
+                            )
+                            .await
+                            {
+                                client_abort_detected_by = Some("send_failed");
+                                downstream_closed = true;
+                            } else {
+                                forwarded_chunks = forwarded_chunks.saturating_add(1);
+                                forwarded_bytes = forwarded_bytes.saturating_add(tail_len);
+                            }
+                        }
                         upstream_ended_normally = true;
                         break;
                     };
 
                     match item {
                         Ok(chunk) => {
-                            let chunk_len = chunk.len().min(i64::MAX as usize) as i64;
-
-                            match tx.try_send(Ok(chunk)) {
-                                Ok(()) => {}
-                                Err(tokio::sync::mpsc::error::TrySendError::Full(item)) => {
-                                    invalidate_for_downstream_backpressure(
-                                        &tee.ctx.upstream_output_timing,
-                                    );
-                                    if tx.send(item).await.is_err() {
-                                        client_abort_detected_by = Some("send_failed");
-                                        downstream_closed = true;
-                                        if is_codex_responses {
-                                            drain_deadline = Some(tokio::time::Instant::now() + drain_grace);
-                                            continue;
-                                        }
-                                        break;
-                                    }
-                                }
-                                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                                    tee.ctx.upstream_output_timing.invalidate_output();
+                            let chunks = match overload_rewriter.as_mut() {
+                                Some(rewriter) => rewriter.ingest(chunk),
+                                None => vec![chunk],
+                            };
+                            let mut send_failed = false;
+                            for chunk in chunks {
+                                let chunk_len = chunk.len().min(i64::MAX as usize) as i64;
+                                if !send_sse_relay_chunk(
+                                    &tx,
+                                    &tee.ctx.upstream_output_timing,
+                                    chunk,
+                                )
+                                .await
+                                {
                                     client_abort_detected_by = Some("send_failed");
                                     downstream_closed = true;
-                                    if is_codex_responses {
-                                        drain_deadline = Some(tokio::time::Instant::now() + drain_grace);
-                                        continue;
-                                    }
+                                    send_failed = true;
                                     break;
                                 }
+                                forwarded_chunks = forwarded_chunks.saturating_add(1);
+                                forwarded_bytes = forwarded_bytes.saturating_add(chunk_len);
                             }
-
-                            forwarded_chunks = forwarded_chunks.saturating_add(1);
-                            forwarded_bytes = forwarded_bytes.saturating_add(chunk_len);
+                            if send_failed {
+                                if is_codex_responses {
+                                    drain_deadline = Some(tokio::time::Instant::now() + drain_grace);
+                                    continue;
+                                }
+                                break;
+                            }
                         }
                         Err(err) => {
                             tee.ctx.upstream_output_timing.invalidate_final_attempt();
+                            if let Some(tail) = overload_rewriter
+                                .as_mut()
+                                .and_then(CodexResponsesOverloadErrorRewriter::finish)
+                            {
+                                let tail_len = tail.len().min(i64::MAX as usize) as i64;
+                                if send_sse_relay_chunk(
+                                    &tx,
+                                    &tee.ctx.upstream_output_timing,
+                                    tail,
+                                )
+                                .await
+                                {
+                                    forwarded_chunks = forwarded_chunks.saturating_add(1);
+                                    forwarded_bytes = forwarded_bytes.saturating_add(tail_len);
+                                }
+                            }
                             // 尽力把流错误透传给客户端
                             let _ = tx.send(Err(err)).await;
                             break;
@@ -2134,8 +2190,13 @@ mod tests {
             0,
         );
 
-        let body =
-            spawn_usage_sse_relay_body(timed_upstream, ctx, Some(Duration::from_millis(10)), None);
+        let body = spawn_usage_sse_relay_body(
+            timed_upstream,
+            ctx,
+            Some(Duration::from_millis(10)),
+            None,
+            false,
+        );
 
         upstream_tx
             .send(Ok(Bytes::from_static(
@@ -2205,8 +2266,13 @@ mod tests {
             attempt_started,
             0,
         );
-        let body =
-            spawn_usage_sse_relay_body(timed_upstream, ctx, Some(Duration::from_millis(500)), None);
+        let body = spawn_usage_sse_relay_body(
+            timed_upstream,
+            ctx,
+            Some(Duration::from_millis(500)),
+            None,
+            false,
+        );
 
         upstream_tx
             .send(Ok(Bytes::from_static(
@@ -2271,8 +2337,13 @@ mod tests {
             attempt_started,
             0,
         );
-        let body =
-            spawn_usage_sse_relay_body(timed_upstream, ctx, Some(Duration::from_millis(500)), None);
+        let body = spawn_usage_sse_relay_body(
+            timed_upstream,
+            ctx,
+            Some(Duration::from_millis(500)),
+            None,
+            false,
+        );
 
         upstream_tx
             .send(Ok(Bytes::from_static(
@@ -2339,6 +2410,7 @@ mod tests {
             ctx,
             Some(Duration::from_millis(500)),
             None,
+            false,
         );
         let mut body_stream = body.into_data_stream();
 
@@ -2403,7 +2475,7 @@ mod tests {
             attempt_started,
             0,
         );
-        let body = spawn_usage_sse_relay_body(timed_upstream, ctx, None, None);
+        let body = spawn_usage_sse_relay_body(timed_upstream, ctx, None, None, false);
         let mut body_stream = body.into_data_stream();
 
         upstream_tx

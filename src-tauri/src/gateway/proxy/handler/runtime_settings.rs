@@ -20,6 +20,7 @@ pub(super) struct HandlerRuntimeSettings {
     pub(super) response_fixer_non_stream_config: response_fixer::ResponseFixerConfig,
     pub(super) provider_base_url_ping_cache_ttl_seconds: u32,
     pub(super) enable_codex_session_id_completion: bool,
+    pub(super) enable_codex_responses_overload_error_rewrite: bool,
     pub(super) enable_claude_metadata_user_id_injection: bool,
     pub(super) max_attempts_per_provider: u32,
     pub(super) max_providers_to_try: u32,
@@ -125,6 +126,9 @@ pub(super) fn handler_runtime_settings(
         enable_codex_session_id_completion: settings_cfg
             .map(|cfg| cfg.enable_codex_session_id_completion)
             .unwrap_or(true),
+        enable_codex_responses_overload_error_rewrite: settings_cfg
+            .map(|cfg| cfg.enable_codex_responses_overload_error_rewrite)
+            .unwrap_or(false),
         enable_claude_metadata_user_id_injection: settings_cfg
             .map(|cfg| cfg.enable_claude_metadata_user_id_injection)
             .unwrap_or(true)
@@ -155,5 +159,25 @@ pub(super) fn handler_runtime_settings(
         upstream_request_timeout_non_streaming_secs: settings_cfg
             .map(|cfg| cfg.upstream_request_timeout_non_streaming_seconds)
             .unwrap_or(settings::DEFAULT_UPSTREAM_REQUEST_TIMEOUT_NON_STREAMING_SECONDS),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::handler_runtime_settings;
+
+    #[test]
+    fn codex_responses_overload_rewrite_is_fail_closed_without_settings() {
+        assert!(!handler_runtime_settings(None, false, false)
+            .enable_codex_responses_overload_error_rewrite);
+    }
+
+    #[test]
+    fn codex_responses_overload_rewrite_uses_request_snapshot() {
+        let mut settings = crate::settings::AppSettings::default();
+        settings.enable_codex_responses_overload_error_rewrite = true;
+
+        assert!(handler_runtime_settings(Some(&settings), false, false)
+            .enable_codex_responses_overload_error_rewrite);
     }
 }

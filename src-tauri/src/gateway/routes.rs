@@ -10851,6 +10851,119 @@ INSERT INTO codex_managed_profiles(
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn codex_responses_overload_rewrite_changes_client_view_but_keeps_log_evidence() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 1;
+        app_settings.enable_response_fixer = false;
+        app_settings.enable_codex_responses_overload_error_rewrite = true;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
+
+        let upstream_body = concat!(
+            "event: response.failed\n",
+            "data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp-overloaded\",\"status\":\"failed\",\"error\":{\"type\":\"server_error\",\"code\":\"server_is_overloaded\",\"message\":\"compatible relay busy\"}}}\n\n"
+        );
+        let (base_url, upstream_task) = spawn_sse_upstream(upstream_body).await;
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("codex-overload-rewrite.sqlite"))
+            .expect("init test db");
+        insert_codex_provider_with_priority(&db, "Overload Rewrite Stub", base_url, 0);
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(8);
+        let router = build_router(gateway_state(app_handle, db, log_tx));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/v1/responses")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"model":"gpt-overload-rewrite","stream":true,"input":"hello"}"#,
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(response.headers().get(header::CONTENT_LENGTH).is_none());
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        let body = String::from_utf8_lossy(&body);
+        assert!(body.contains("\"code\":\"server_error\""));
+        assert!(!body.contains("server_is_overloaded"));
+
+        let log = recv_terminal_request_log(&mut log_rx).await;
+        let attempts: Value = serde_json::from_str(&log.attempts_json).expect("attempts json");
+        assert_eq!(
+            attempts[0]["stream_internal_error"]["error_code"].as_str(),
+            Some("server_is_overloaded")
+        );
+        assert_eq!(
+            attempts[0]["stream_internal_error"]["message"].as_str(),
+            Some("compatible relay busy")
+        );
+
+        upstream_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn disabled_codex_responses_overload_rewrite_preserves_body_and_content_length() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.failover_max_attempts_per_provider = 1;
+        app_settings.failover_max_providers_to_try = 1;
+        app_settings.enable_response_fixer = false;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
+
+        let upstream_body = concat!(
+            "event: response.failed\n",
+            "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"slow_down\",\"message\":\"busy\"}}}\n\n"
+        );
+        let (base_url, upstream_task) = spawn_sse_upstream(upstream_body).await;
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("codex-overload-rewrite-off.sqlite"))
+            .expect("init test db");
+        insert_codex_provider_with_priority(&db, "Overload Rewrite Off Stub", base_url, 0);
+        let (log_tx, _log_rx) = tokio::sync::mpsc::channel(8);
+        let router = build_router(gateway_state(app_handle, db, log_tx));
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/v1/responses")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"model":"gpt-overload-rewrite-off","stream":true,"input":"hello"}"#,
+            ))
+            .expect("request");
+
+        let response = router.oneshot(request).await.expect("route response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let content_length = response
+            .headers()
+            .get(header::CONTENT_LENGTH)
+            .and_then(|value| value.to_str().ok())
+            .expect("upstream content length");
+        assert_eq!(content_length, upstream_body.len().to_string());
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        assert_eq!(body.as_ref(), upstream_body.as_bytes());
+
+        upstream_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn codex_responses_sse_fake_200_keeps_fake_200_error_code() {
         let _env_lock = crate::test_support::test_env_lock();
         let home = tempfile::tempdir().expect("home dir");

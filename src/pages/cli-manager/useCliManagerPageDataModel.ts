@@ -558,6 +558,21 @@ export function useCliManagerPageDataModel() {
     return true;
   }
 
+  async function persistCodexResponsesOverloadErrorRewrite(enabled: boolean) {
+    const updated = await persistCommonSettings({
+      enable_codex_responses_overload_error_rewrite: enabled,
+    });
+    if (!updated) {
+      return false;
+    }
+
+    const persisted = updated.enable_codex_responses_overload_error_rewrite;
+    toast(
+      persisted ? "已开启 Responses 过载错误自动重试" : "已关闭 Responses 过载错误自动重试"
+    );
+    return true;
+  }
+
   async function pickCodexHomeDirectory(initialPath?: string): Promise<string | null> {
     try {
       return await openDesktopSinglePath({
@@ -785,6 +800,7 @@ export function useCliManagerPageDataModel() {
       persistCommonSettings,
       persistCodexHomeSettings,
       persistCodexOauthCompatibleProxyMode,
+      persistCodexResponsesOverloadErrorRewrite,
       pickCodexHomeDirectory,
     },
     cx2ccTabProps: {

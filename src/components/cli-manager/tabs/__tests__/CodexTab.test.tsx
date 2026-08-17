@@ -345,6 +345,42 @@ describe("components/cli-manager/tabs/CodexTab", () => {
     expect(persistCodexOauthCompatibleProxyMode).toHaveBeenCalledWith(true);
   });
 
+  it("persists Responses overload retry through its AIO settings callback", async () => {
+    const persistCodexResponsesOverloadErrorRewrite = vi.fn().mockResolvedValue(false);
+
+    renderTab({
+      appSettings: createAppSettings({
+        enable_codex_responses_overload_error_rewrite: false,
+      }),
+      persistCodexResponsesOverloadErrorRewrite,
+    });
+
+    const toggle = screen.getByRole("switch", {
+      name: "切换 Responses 过载错误自动重试",
+    });
+    expect(toggle).not.toBeChecked();
+    fireEvent.click(toggle);
+
+    expect(persistCodexResponsesOverloadErrorRewrite).toHaveBeenCalledWith(true);
+    await waitFor(() => expect(toggle).not.toBeChecked());
+    expect(screen.getByText(/第三方兼容中转站返回/)).toBeInTheDocument();
+  });
+
+  it("disables Responses overload retry while common settings are unavailable", () => {
+    renderTab({
+      appSettings: createAppSettings({
+        enable_codex_responses_overload_error_rewrite: true,
+      }),
+      commonSettingsSaving: true,
+      codexHomeSettingsSaving: true,
+      persistCodexResponsesOverloadErrorRewrite: vi.fn(),
+    });
+
+    expect(
+      screen.getByRole("switch", { name: "切换 Responses 过载错误自动重试" })
+    ).toBeDisabled();
+  });
+
   it("persists the global provider test model and supports manual Provider Sync", async () => {
     const persistCommonSettings = vi
       .fn()
