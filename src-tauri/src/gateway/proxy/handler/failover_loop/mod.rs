@@ -399,6 +399,8 @@ where
         upstream_request_timeout_non_streaming: input.upstream_request_timeout_non_streaming,
         verbose_provider_error: input.verbose_provider_error,
         enable_response_fixer: input.enable_response_fixer,
+        enable_codex_responses_overload_error_rewrite: input
+            .enable_codex_responses_overload_error_rewrite,
         response_fixer_stream_config: input.response_fixer_stream_config,
         response_fixer_non_stream_config: input.response_fixer_non_stream_config,
         introspection_body: introspection_body.as_ref(),

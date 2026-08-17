@@ -325,6 +325,7 @@ export type CliManagerCodexTabProps = {
     codexHomeOverride: string
   ) => Promise<boolean> | boolean;
   persistCodexOauthCompatibleProxyMode?: (enabled: boolean) => Promise<boolean> | boolean;
+  persistCodexResponsesOverloadErrorRewrite?: (enabled: boolean) => Promise<boolean> | boolean;
   pickCodexHomeDirectory?: (initialPath?: string) => Promise<string | null> | string | null;
 };
 
@@ -783,19 +784,23 @@ function CodexConfigLocationSection({
   );
 }
 
-function CodexOauthProxySection({
+function CodexGatewayCompatibilitySection({
   appSettings,
   proxyModeControlsDisabled,
+  overloadRewriteControlsDisabled,
   persistCodexOauthCompatibleProxyMode,
+  persistCodexResponsesOverloadErrorRewrite,
 }: {
   appSettings: AppSettings;
   proxyModeControlsDisabled: boolean;
+  overloadRewriteControlsDisabled: boolean;
   persistCodexOauthCompatibleProxyMode?: (enabled: boolean) => Promise<boolean> | boolean;
+  persistCodexResponsesOverloadErrorRewrite?: (enabled: boolean) => Promise<boolean> | boolean;
 }) {
   return (
-    <div className="rounded-xl border border-border/80 bg-white/80 p-4 dark:border-border dark:bg-card/20">
+    <div className="divide-y divide-border/80 rounded-xl border border-border/80 bg-white/80 px-4 dark:border-border dark:bg-card/20">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div className="min-w-0">
+        <div className="min-w-0 py-4">
           <div className="text-sm font-semibold text-foreground">OAuth 兼容代理模式</div>
           <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
             开启后，AIO 接管 Codex 代理时只写入 <span className="font-mono">config.toml</span> 的
@@ -806,12 +811,35 @@ function CodexOauthProxySection({
             ，会保留 <span className="font-mono">requires_openai_auth = true</span>。
           </div>
         </div>
-        <Switch
-          aria-label="切换 Codex OAuth 兼容代理模式"
-          checked={appSettings.codex_oauth_compatible_proxy_mode}
-          onCheckedChange={(checked) => void persistCodexOauthCompatibleProxyMode?.(checked)}
-          disabled={proxyModeControlsDisabled}
-        />
+        <div className="py-4">
+          <Switch
+            aria-label="切换 Codex OAuth 兼容代理模式"
+            checked={appSettings.codex_oauth_compatible_proxy_mode}
+            onCheckedChange={(checked) => void persistCodexOauthCompatibleProxyMode?.(checked)}
+            disabled={proxyModeControlsDisabled}
+          />
+        </div>
+      </div>
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0 py-4">
+          <div className="text-sm font-semibold text-foreground">Responses 过载错误自动重试</div>
+          <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            仅在 AIO 网关转发原生 Codex Responses 事件流时，将第三方兼容中转站返回的
+            <span className="font-mono"> server_is_overloaded </span>或
+            <span className="font-mono"> slow_down </span>改写为
+            <span className="font-mono"> server_error</span>，由 Codex 客户端自行决定重试。
+          </div>
+        </div>
+        <div className="py-4">
+          <Switch
+            aria-label="切换 Responses 过载错误自动重试"
+            checked={appSettings.enable_codex_responses_overload_error_rewrite}
+            onCheckedChange={(checked) =>
+              void persistCodexResponsesOverloadErrorRewrite?.(checked)
+            }
+            disabled={overloadRewriteControlsDisabled}
+          />
+        </div>
       </div>
     </div>
   );
@@ -1591,6 +1619,7 @@ function useCodexTabController({
   persistCommonSettings,
   persistCodexHomeSettings,
   persistCodexOauthCompatibleProxyMode,
+  persistCodexResponsesOverloadErrorRewrite,
   pickCodexHomeDirectory,
 }: CliManagerCodexTabProps) {
   const customHomeInputId = useId();
@@ -1752,6 +1781,10 @@ function useCodexTabController({
     commonSettingsSaving || !appSettings || !persistCommonSettings;
   const proxyModeControlsDisabled =
     commonSettingsControlsDisabled || !persistCodexOauthCompatibleProxyMode;
+  const overloadRewriteControlsDisabled =
+    commonSettingsSaving ||
+    commonSettingsControlsDisabled ||
+    !persistCodexResponsesOverloadErrorRewrite;
 
   async function refreshCodexStatus() {
     if (saving) return;
@@ -2033,6 +2066,7 @@ function useCodexTabController({
     providerTestModelControlsDisabled,
     configLocationControlsDisabled,
     proxyModeControlsDisabled,
+    overloadRewriteControlsDisabled,
     effectiveSandboxMode,
     effectiveFastModeEnabled,
     modelSuggestions,
@@ -2142,10 +2176,14 @@ export function CliManagerCodexTab(props: CliManagerCodexTabProps) {
           />
 
           {appSettings ? (
-            <CodexOauthProxySection
+            <CodexGatewayCompatibilitySection
               appSettings={appSettings}
               proxyModeControlsDisabled={controller.proxyModeControlsDisabled}
+              overloadRewriteControlsDisabled={controller.overloadRewriteControlsDisabled}
               persistCodexOauthCompatibleProxyMode={props.persistCodexOauthCompatibleProxyMode}
+              persistCodexResponsesOverloadErrorRewrite={
+                props.persistCodexResponsesOverloadErrorRewrite
+              }
             />
           ) : null}
 

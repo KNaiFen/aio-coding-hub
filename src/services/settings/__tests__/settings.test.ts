@@ -97,6 +97,7 @@ describe("services/settings/settings", () => {
 
     const input = createSettingsSetInput(createTestAppSettings(), {
       codex_oauth_compatible_proxy_mode: true,
+      enable_codex_responses_overload_error_rewrite: true,
       upstream_error_response_rules: [
         {
           id: "8ca12e7b-4f19-45f7-9185-cc6fbd951c51",
@@ -121,6 +122,7 @@ describe("services/settings/settings", () => {
       gatewayListenMode: "localhost",
       wslTargetCli: { claude: true, codex: true, gemini: true },
       codexOauthCompatibleProxyMode: true,
+      enableCodexResponsesOverloadErrorRewrite: true,
       cx2CcFallbackModelMain: "gpt-5.4",
       upstreamProxyPassword: { mode: "clear" },
       upstreamErrorResponseRules: [expect.objectContaining({ name: "限额响应" })],

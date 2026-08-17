@@ -23,6 +23,7 @@ mod request_body;
 mod request_context;
 mod request_end;
 mod sse;
+pub(in crate::gateway) use sse::{find_sse_event_end, parse_sse_frame};
 pub(in crate::gateway) mod status_override;
 mod types;
 pub(in crate::gateway) mod upstream_client_error_rules;

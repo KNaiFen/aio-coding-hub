@@ -4626,6 +4626,7 @@ export type SettingsUpdate = {
   codexHomeOverride: string | null;
   codexOauthCompatibleProxyMode: boolean | null;
   codexProviderTestModel: string | null;
+  enableCodexResponsesOverloadErrorRewrite: boolean | null;
   cx2CcFallbackModelOpus: string | null;
   cx2CcFallbackModelSonnet: string | null;
   cx2CcFallbackModelHaiku: string | null;
@@ -4688,6 +4689,7 @@ export type SettingsView = {
   enable_billing_header_rectifier: boolean;
   enable_session_reuse: boolean;
   enable_codex_session_id_completion: boolean;
+  enable_codex_responses_overload_error_rewrite: boolean;
   enable_claude_metadata_user_id_injection: boolean;
   enable_cache_anomaly_monitor: boolean;
   enable_debug_log: boolean;
