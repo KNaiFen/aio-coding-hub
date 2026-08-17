@@ -30,6 +30,6 @@
 - 归档路径：`.trellis/tasks/archive/2026-08/08-17-codex-sse-overload-retry-rewrite`。
 - `archive --no-commit`：成功，任务状态已写为 `completed` 并移入 2026-08 归档目录。
 - `validate --all`：成功，共校验 139 个 manifests；该结果仅证明已有 JSONL 与引用路径有效。
-- records-only PR：https://github.com/KNaiFen/aio-coding-hub/pull/165；初始归档提交 `eb27b3b2`。
-- worktree：`/Users/knaifen/Documents/Codex/aio-coding-hub/08-17-codex-sse-overload-retry-rewrite` 干净；在 records-only PR 合并前保留。
-- 本地/远端分支：远端 `task/08-17-codex-sse-overload-retry-rewrite` 已自动删除；本地任务分支与规划恢复分支在 records-only PR 合并前保留。
+- records-only PR：https://github.com/KNaiFen/aio-coding-hub/pull/165；最终 head `f2e817a73ec46b41725b8aa5301436fdd8b4a25c` 已通过必需检查，并以 `f558c5db6ec8adb508c22766c5f7a5a59f332baf` 合入。
+- worktree：`/Users/knaifen/Documents/Codex/aio-coding-hub/08-17-codex-sse-overload-retry-rewrite` 已在 records-only PR 合并后删除；删除前确认干净、执行与验收 session 已结束且内容已归档。
+- 本地/远端分支：本地任务分支、规划恢复分支和 records 分支均已删除；任务与 records 远端分支由 GitHub 自动删除，规划恢复分支从未推送。
