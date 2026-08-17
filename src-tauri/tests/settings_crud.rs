@@ -66,7 +66,7 @@ fn settings_migrates_legacy_permanent_request_log_retention() {
     let migrated =
         aio_coding_hub_lib::test_support::settings_get_json(&handle).expect("read migrated");
 
-    assert_eq!(json_i64(&migrated, "schema_version"), 60);
+    assert_eq!(json_i64(&migrated, "schema_version"), 61);
     assert_eq!(json_i64(&migrated, "request_log_retention_days"), 7);
 
     aio_coding_hub_lib::test_support::clear_settings_cache();
