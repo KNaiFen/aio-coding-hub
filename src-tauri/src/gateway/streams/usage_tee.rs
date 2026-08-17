@@ -958,7 +958,6 @@ where
                             .await
                             {
                                 client_abort_detected_by = Some("send_failed");
-                                downstream_closed = true;
                             } else {
                                 forwarded_chunks = forwarded_chunks.saturating_add(1);
                                 forwarded_bytes = forwarded_bytes.saturating_add(tail_len);

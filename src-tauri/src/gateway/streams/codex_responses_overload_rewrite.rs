@@ -6,7 +6,7 @@ const MAX_PENDING_FRAME_BYTES: usize = 1024 * 1024;
 const TARGET_ERROR_CODES: [&str; 2] = ["server_is_overloaded", "slow_down"];
 const REWRITTEN_ERROR_CODE: &str = "server_error";
 
-pub(super) struct CodexResponsesOverloadErrorRewriter {
+pub(in crate::gateway) struct CodexResponsesOverloadErrorRewriter {
     pending: Vec<u8>,
     bypass: bool,
 }
@@ -32,7 +32,7 @@ impl CodexResponsesOverloadErrorRewriter {
 
         loop {
             if let Some(event_end) =
-                crate::gateway::proxy::sse::find_sse_event_end(self.pending.as_slice())
+                crate::gateway::proxy::find_sse_event_end(self.pending.as_slice())
             {
                 let mut buffered = std::mem::take(&mut self.pending);
                 let tail = buffered.split_off(event_end);
@@ -46,7 +46,7 @@ impl CodexResponsesOverloadErrorRewriter {
             }
 
             if self.pending.is_empty() {
-                if let Some(event_end) = crate::gateway::proxy::sse::find_sse_event_end(input) {
+                if let Some(event_end) = crate::gateway::proxy::find_sse_event_end(input) {
                     if event_end > MAX_PENDING_FRAME_BYTES {
                         output.push(Bytes::copy_from_slice(input));
                         self.bypass = true;
@@ -75,7 +75,7 @@ impl CodexResponsesOverloadErrorRewriter {
             self.pending.extend_from_slice(&input[..take]);
             input = &input[take..];
 
-            if crate::gateway::proxy::sse::find_sse_event_end(self.pending.as_slice()).is_none()
+            if crate::gateway::proxy::find_sse_event_end(self.pending.as_slice()).is_none()
                 && self.pending.len() == MAX_PENDING_FRAME_BYTES
             {
                 self.fail_open(&mut output, input);
@@ -105,7 +105,7 @@ fn rewrite_frame(frame: &[u8]) -> Bytes {
     let Ok(text) = std::str::from_utf8(frame) else {
         return Bytes::copy_from_slice(frame);
     };
-    let Some((event_name, mut data)) = crate::gateway::proxy::sse::parse_sse_frame(text) else {
+    let Some((event_name, mut data)) = crate::gateway::proxy::parse_sse_frame(text) else {
         return Bytes::copy_from_slice(frame);
     };
     if event_name != "response.failed" {
