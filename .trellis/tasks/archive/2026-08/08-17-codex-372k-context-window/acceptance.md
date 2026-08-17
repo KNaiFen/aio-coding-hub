@@ -30,6 +30,6 @@
 - 归档路径：`.trellis/tasks/archive/2026-08/08-17-codex-372k-context-window`
 - `archive --no-commit`：成功；任务状态已转为 `completed` 并移入 2026-08 归档
 - `validate --all`：通过；139 份已有 manifest 的 JSON 与引用路径有效
-- records-only PR：待创建
-- worktree：`/Users/knaifen/Documents/Codex/aio-coding-hub/08-17-codex-372k-context-window`，待 records-only PR 合并后删除
-- 本地/远端分支：`task/codex-372k-context-window`，待 records-only PR 合并后按实际状态清理
+- records-only PR：[PR #162](https://github.com/KNaiFen/aio-coding-hub/pull/162) 的固定 head `3302ebb0ddb96eaad4db1b0f539934d30eca92ac` 已通过必需检查和 CodeQL，并以 `dd2cd66e6c3448a89837c5c5fe78400535742db7` 合入；清理事实 follow-up PR 待创建
+- worktree：`/Users/knaifen/Documents/Codex/aio-coding-hub/08-17-codex-372k-context-window` 已在确认干净、PR 关闭且归档进入 main 后删除
+- 本地/远端分支：`task/codex-372k-context-window` 的本地与远端引用均已删除；`records/08-17-codex-372k-context-window-abandoned` 的远端引用由 GitHub 自动删除，本地引用已按固定旧 SHA 删除
