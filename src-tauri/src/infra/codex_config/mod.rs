@@ -755,7 +755,7 @@ fn apply_canonical_bytes_with_completion_inner_locked<R: tauri::Runtime>(
     ensure_codex_config_len(&live_written, "projected Codex config.toml")?;
     let provider_sync_target = if requires_provider_sync {
         Some(codex_config_patch_target_provider(
-            std::str::from_utf8(&canonical)
+            std::str::from_utf8(&live_written)
                 .map_err(|_| "SEC_INVALID_INPUT: codex config.toml must be valid UTF-8")?,
         )?)
     } else {
@@ -1016,7 +1016,18 @@ pub fn codex_config_set<R: tauri::Runtime>(
 
     let current = canonical_config_bytes_locked(app)?;
     let requires_provider_sync = patch_requires_provider_sync(&patch);
-    let next = codex_config_next_bytes(current, patch)?;
+    let next = codex_config_next_bytes(current.clone(), patch)?;
+    let next = if requires_provider_sync
+        && super::cli_proxy::codex_enabled_proxy_baseline(app)?.is_some()
+    {
+        super::cli_proxy::canonical_codex_config_from_live(
+            Some(&next),
+            current.as_deref(),
+        )?
+        .unwrap_or_default()
+    } else {
+        next
+    };
     ensure_codex_config_len(&next, "codex config.toml")?;
     let transaction = apply_canonical_bytes_locked(app, next, requires_provider_sync)?;
     if let Err(error) = transaction.commit() {

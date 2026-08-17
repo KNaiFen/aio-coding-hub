@@ -293,7 +293,14 @@ pub(crate) fn codex_enabled_proxy_baseline<R: tauri::Runtime>(
         })?;
         let root = cli_proxy_root_dir(app, "codex")?;
         let files_dir = cli_proxy_files_dir(&root);
-        Some(read_cli_proxy_file(&safe_backup_path(&files_dir, rel)?)?)
+        let backup_path = safe_backup_path(&files_dir, rel)?;
+        if std::fs::symlink_metadata(&backup_path).is_ok_and(|metadata| !metadata.is_file()) {
+            return Err(crate::shared::error::AppError::new(
+                "CODEX_CONFIG_BACKUP_REFRESH_FAILED",
+                "the Codex canonical config backup is not a regular file",
+            ));
+        }
+        Some(read_cli_proxy_file(&backup_path)?)
     } else {
         None
     };
