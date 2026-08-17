@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.60.55](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.55) (2026-08-17)
+
+### Highlights
+
+* add opt-in Codex Responses overload retry compatibility for third-party relays
+* preserve original upstream error evidence while rewriting only the client SSE view
+* bound streaming rewrite memory and fail open on oversized or incomplete frames
+
 ## [0.60.54](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.54) (2026-08-17)
 
 ### Highlights
