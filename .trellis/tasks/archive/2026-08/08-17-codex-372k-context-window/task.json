@@ -3,7 +3,7 @@
   "name": "codex-372k-context-window",
   "title": "增加 Codex 372K 上下文开关",
   "description": "在 CLI 设置的 Codex 页增加 372K 开关，通过受管完整模型目录仅覆盖三个 GPT-5.6 模型。",
-  "status": "planning",
+  "status": "completed",
   "dev_type": null,
   "scope": null,
   "package": "aio-coding-hub",
@@ -11,7 +11,7 @@
   "creator": "KNaiFen",
   "assignee": "KNaiFen",
   "createdAt": "2026-08-17",
-  "completedAt": null,
+  "completedAt": "2026-08-17",
   "branch": null,
   "base_branch": "main",
   "worktree_path": null,
@@ -26,11 +26,11 @@
   "coordination": {
     "version": 1,
     "route": "main",
-    "phase": "planning",
+    "phase": "completed",
     "writer": "main",
     "base_sha": null,
     "planning_commit": null,
     "block": null,
-    "updated_at": "2026-08-16T17:47:33Z"
+    "updated_at": "2026-08-17T02:12:14Z"
   }
 }
