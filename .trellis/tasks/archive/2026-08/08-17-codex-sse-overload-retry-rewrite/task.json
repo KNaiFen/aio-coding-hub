@@ -3,7 +3,7 @@
   "name": "codex-sse-overload-retry-rewrite",
   "title": "为 Codex Responses 改写过载错误码",
   "description": "",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": null,
   "scope": null,
   "package": "aio-coding-hub",
@@ -11,7 +11,7 @@
   "creator": "KNaiFen",
   "assignee": "KNaiFen",
   "createdAt": "2026-08-17",
-  "completedAt": null,
+  "completedAt": "2026-08-17",
   "branch": "task/08-17-codex-sse-overload-retry-rewrite",
   "base_branch": "main",
   "worktree_path": "/Users/knaifen/Documents/Codex/aio-coding-hub/08-17-codex-sse-overload-retry-rewrite",
@@ -26,11 +26,11 @@
   "coordination": {
     "version": 1,
     "route": "delegated",
-    "phase": "delivered",
+    "phase": "completed",
     "writer": "main",
     "base_sha": "cbdc1d32cf24df7da553c1d027ed5d7d266b89b5",
     "planning_commit": "93054650c9202404ee72b10f2e0d824ce6977e83",
     "block": null,
-    "updated_at": "2026-08-17T07:00:46Z"
+    "updated_at": "2026-08-17T08:25:27Z"
   }
 }
