@@ -168,8 +168,10 @@ mod tests {
 
     #[test]
     fn codex_responses_overload_rewrite_is_fail_closed_without_settings() {
-        assert!(!handler_runtime_settings(None, false, false)
-            .enable_codex_responses_overload_error_rewrite);
+        assert!(
+            !handler_runtime_settings(None, false, false)
+                .enable_codex_responses_overload_error_rewrite
+        );
     }
 
     #[test]
@@ -177,7 +179,9 @@ mod tests {
         let mut settings = crate::settings::AppSettings::default();
         settings.enable_codex_responses_overload_error_rewrite = true;
 
-        assert!(handler_runtime_settings(Some(&settings), false, false)
-            .enable_codex_responses_overload_error_rewrite);
+        assert!(
+            handler_runtime_settings(Some(&settings), false, false)
+                .enable_codex_responses_overload_error_rewrite
+        );
     }
 }

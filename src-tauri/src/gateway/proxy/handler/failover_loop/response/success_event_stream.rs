@@ -889,9 +889,8 @@ where
             active_bridge_type,
             provider_ctx_owned.provider_bridged,
         );
-        let rewrite_codex_responses_overload_errors = common
-            .enable_codex_responses_overload_error_rewrite
-            && is_native_codex_responses;
+        let rewrite_codex_responses_overload_errors =
+            common.enable_codex_responses_overload_error_rewrite && is_native_codex_responses;
         if rewrite_codex_responses_overload_errors {
             response_headers.remove(header::CONTENT_LENGTH);
         }

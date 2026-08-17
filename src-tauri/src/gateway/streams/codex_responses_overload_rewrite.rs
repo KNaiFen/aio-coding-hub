@@ -204,7 +204,8 @@ mod tests {
     #[test]
     fn handles_chunk_boundaries_crlf_and_multiple_frames() {
         let target = target_frame("slow_down", "\r\n");
-        let untouched = "event: response.completed\r\ndata: {\"type\":\"response.completed\"}\r\n\r\n";
+        let untouched =
+            "event: response.completed\r\ndata: {\"type\":\"response.completed\"}\r\n\r\n";
         let input = format!(": keepalive\r\n\r\n{target}{untouched}");
         let split = input.len() / 2;
         let output = rewrite_chunks(&[&input.as_bytes()[..split], &input.as_bytes()[split..]]);
@@ -251,7 +252,8 @@ mod tests {
 
     #[test]
     fn unterminated_tail_is_flushed_byte_exact_at_eof() {
-        let tail = b"event: response.failed\ndata: {\"response\":{\"error\":{\"code\":\"slow_down\"}}}";
+        let tail =
+            b"event: response.failed\ndata: {\"response\":{\"error\":{\"code\":\"slow_down\"}}}";
         assert_eq!(rewrite_chunks(&[tail]), tail);
     }
 }

@@ -21,8 +21,7 @@ use super::super::util::{
 use super::plugin_chunk::PLUGIN_STREAM_ERROR_MARKER;
 use super::request_end::{emit_request_event_and_spawn_request_log, StreamRequestCompletion};
 use super::{
-    CodexResponsesOverloadErrorRewriter, RelayBodyStream, StreamFinalizeCtx,
-    UpstreamOutputTiming,
+    CodexResponsesOverloadErrorRewriter, RelayBodyStream, StreamFinalizeCtx, UpstreamOutputTiming,
 };
 
 pub(in crate::gateway) struct UpstreamModelObserverStream<S, B>
@@ -859,8 +858,8 @@ where
         let mut downstream_closed = false;
         let mut upstream_ended_normally = false;
         let mut upstream_transport_error_seen = false;
-        let mut overload_rewriter = rewrite_codex_responses_overload_errors
-            .then(CodexResponsesOverloadErrorRewriter::new);
+        let mut overload_rewriter =
+            rewrite_codex_responses_overload_errors.then(CodexResponsesOverloadErrorRewriter::new);
 
         let is_codex_responses = is_codex_responses_path(&tee.ctx.cli_key, &tee.ctx.path);
         let mut drain_deadline: Option<tokio::time::Instant> = None;

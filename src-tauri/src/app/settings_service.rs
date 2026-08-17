@@ -2532,9 +2532,11 @@ mod tests {
         ));
 
         assert!(matches!(rollback, OwnedSettingsRollback::Restored));
-        assert!(!settings::read(&handle)
-            .expect("rolled back settings")
-            .enable_codex_responses_overload_error_rewrite);
+        assert!(
+            !settings::read(&handle)
+                .expect("rolled back settings")
+                .enable_codex_responses_overload_error_rewrite
+        );
     }
 
     #[test]
