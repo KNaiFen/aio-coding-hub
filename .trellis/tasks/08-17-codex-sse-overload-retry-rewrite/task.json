@@ -12,9 +12,9 @@
   "assignee": "KNaiFen",
   "createdAt": "2026-08-17",
   "completedAt": null,
-  "branch": null,
+  "branch": "task/08-17-codex-sse-overload-retry-rewrite",
   "base_branch": "main",
-  "worktree_path": null,
+  "worktree_path": "/Users/knaifen/Documents/Codex/aio-coding-hub/08-17-codex-sse-overload-retry-rewrite",
   "commit": null,
   "pr_url": null,
   "subtasks": [],
@@ -25,12 +25,12 @@
   "meta": {},
   "coordination": {
     "version": 1,
-    "route": "main",
-    "phase": "planning",
-    "writer": "main",
-    "base_sha": null,
-    "planning_commit": null,
+    "route": "delegated",
+    "phase": "ready",
+    "writer": "/root/codex_sse_overload_executor",
+    "base_sha": "cbdc1d32cf24df7da553c1d027ed5d7d266b89b5",
+    "planning_commit": "93054650c9202404ee72b10f2e0d824ce6977e83",
     "block": null,
-    "updated_at": "2026-08-17T04:26:43Z"
+    "updated_at": "2026-08-17T04:33:17Z"
   }
 }
