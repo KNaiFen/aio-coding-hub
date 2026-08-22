@@ -19,10 +19,10 @@
 | AIO task mechanism | `.trellis/scripts/task.py`, `common/task_coordination.py`, and `common/task_acceptance.py` still own repository-local coordination and fixed-head acceptance | confirmed; replacement is deferred to milestones B and C |
 | Project-specific policies | AIO owns GitHub identity, `ci-gate`, `pr-title`, local Air-safe checks, Rust/Tauri paths and release rules | confirmed; these must not move into GKD generic policy |
 | Local verifier interface | Installed generic `gkd-local-verify` names GKD's own `scripts/gkd-verify`; AIO's current `AGENTS.md` names `node scripts/check-local-verification.mjs --base <SHA>` | confirmed gap; B must add adapter dispatch before AIO can claim the generic skill as its verifier |
-| Installed runtime compatibility | Accepted bundle `gkd-role` has `#!/usr/bin/env python3` and imports `tomllib`; this machine resolves `python3` to 3.9.6, which raises `ModuleNotFoundError` | blocked outside this task; a minimal GKD runtime compatibility repair must be accepted before B can run project verification or route decisions |
+| Installed runtime compatibility | Accepted bundle `gkd-role` has `#!/usr/bin/env python3` and imports `tomllib`; the default shell resolves `python3` to 3.9.6, while `/opt/homebrew/bin/python3` is 3.14.6 and loads the command successfully | confirmed host invocation precondition; B commands must run with a Python 3.11+ interpreter without writing a machine path into AIO policy |
 | User-owned planning material | Main checkout has untracked `.trellis/tasks/08-17-gkd-workflow-remediation/` | confirmed; this task neither edits nor stages it |
 
-There are no material open questions for this documentation-only milestone. The GKD runtime compatibility defect is a recorded external blocker, not a reason to alter AIO source or machine state. Later implementation must stop if the pinned bundle, AIO repository identity, required-check policy, or supported GKD runtime differs from these recorded facts.
+There are no material open questions for this documentation-only milestone. The host interpreter selection is a runtime precondition, not a reason to alter AIO source or machine state. Later implementation must stop if the pinned bundle, AIO repository identity, required-check policy, or supported GKD runtime differs from these recorded facts.
 
 ## Goal
 
