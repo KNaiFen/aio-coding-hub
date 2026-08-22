@@ -12,6 +12,7 @@
 | Current path / concern | Current responsibility | Target ownership | Follow-up milestone |
 |---|---|---|---|
 | `AGENTS.md` and `.trellis/workflow.md` | Role names, main/executor/accept boundaries and lifecycle guidance | AIO policy/adapter retains concise hard boundaries; generic role procedures become bundle references | B, then E removes superseded prose |
+| Accepted bundle `bin/gkd-role` | Runtime entrypoint for bundle/project verification and automatic route gates | GKD generic runtime; it must run on the supported host interpreter before any AIO adapter can rely on it | Pre-B GKD runtime repair |
 | `.trellis/scripts/task.py` | Legacy task CLI command routing and persisted coordination entry points | GKD bundle task core replaces generic task lifecycle; AIO adapter supplies repository policy inputs | B and C |
 | `.trellis/scripts/common/task_coordination.py` | Legacy writer, worktree, base and handoff state | Bundle task core plus machine-local attachments; no hand-edited task JSON migration | C |
 | `.trellis/scripts/common/task_acceptance.py` | Legacy fixed-head verification and synchronous squash merge | Bundle acceptance core; AIO adapter provides repository identity and required checks | B and C |

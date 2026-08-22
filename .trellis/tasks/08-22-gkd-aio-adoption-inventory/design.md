@@ -9,7 +9,7 @@
 ## 迁移安全门
 
 1. bundle 版本、发行资产 SHA-256 和已验证 output digest 必须同时固定；canonical source 不是安装或验收证据。
-2. 每个 adapter 都必须核验 repo/policy/origin 三方一致，任一不符即停止。
+2. 每个 adapter 都必须核验 repo/policy/origin 三方一致，任一不符即停止。执行该核验的 bundle runtime 必须先在目标主机的默认解释器上返回机器可判定结果。
 3. 状态迁移只可调用支持的 bundle/adapter 命令。旧任务 JSON、offer、claim、receipt 或历史交接不得手改或补造。
 4. CI 与 release 改动必须固定 PR head，AIO 的 required checks 以实时项目策略为准。
 5. 旧实现删除依赖于 fixture、adapter smoke、真实 canary 和独立验收；没有证据时保留旧路径并报告 GKD 核心缺陷。

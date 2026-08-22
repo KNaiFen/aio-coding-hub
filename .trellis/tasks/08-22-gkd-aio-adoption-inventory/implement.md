@@ -18,5 +18,6 @@
 ## Stop Conditions
 
 - Pinned release asset, output bundle digest, AIO origin or required-check policy differs from recorded facts.
+- The verified bundle runtime cannot complete its command under the host's default interpreter.
 - A step would require a production install, paid runner, Secret, unapproved GitHub setting, tag/Release or GKD canonical source change.
 - A state migration cannot use a supported command or would require making historical worktrees live again.
