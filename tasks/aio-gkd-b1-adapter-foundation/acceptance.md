@@ -27,6 +27,6 @@
 
 - 归档路径：任务资料保留在 `tasks/aio-gkd-b1-adapter-foundation/`，这是 GKD task core 资料而非 Trellis task，未运行 `task.py archive --no-commit`。
 - `validate --all`：未运行；该命令只验证 Trellis JSONL，不覆盖本 GKD task core。
-- records-only PR：待本收尾分支创建后回填。
-- worktree：待 records-only PR 建立后删除已合并且干净的 candidate worktree。
-- 本地/远端分支：待 records-only PR 建立后删除已合并的 `task/aio-gkd-b1-adapter-foundation`。
+- records-only PR：[KNaiFen/aio-coding-hub#171](https://github.com/KNaiFen/aio-coding-hub/pull/171)。
+- worktree：`/private/var/folders/dv/7psz5djd3537ghdrhkpzy7dw0000gn/T/gkd-aio-b1.HgScBo/candidate` 已在 clean、无人写入且候选树与合并树一致后删除。
+- 本地/远端分支：远端 `task/aio-gkd-b1-adapter-foundation` 已不存在；同名本地分支在确认上述树一致后删除。
