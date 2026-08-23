@@ -14,10 +14,10 @@ function writeCanonical(relativePath, value) {
 
 function readFixture() {
   const pin = {
-    assetSha256: "9d9e6ea0fff64e0894af08a547b6798f1f6634e0e4cf4e174cd8dfc5c0179954",
-    bundleVersion: "0.1.3",
-    executionBundleDigest: "cc465d26f08edb2a133775e4d6a58aa517eab1bde0ec2e1ec72f6d9f2c8883bd",
-    releaseSourceSha: "2a63cd8ff2fcb7f0cb155dcc32578cda4b3381af",
+    assetSha256: "713fc828d234bc7ddd298cb68f5abfe1ede29f7891c283924cf3c3b98b2c0330",
+    bundleVersion: "0.1.4",
+    executionBundleDigest: "cdaa791ace82a5e7c407b29a93a4211b852d7f364900bbcd8a549dbe918bf2a7",
+    releaseSourceSha: "be1e515a64c4095676922c484555fb2a048da681",
   };
   const withoutDigest = {
     adapterName: "aio-gkd-review",
@@ -33,14 +33,26 @@ function readFixture() {
     ],
     schemaVersion: 1,
   };
+  const policy = {
+    baseBranch: "main",
+    provider: "github",
+    repository: "github.com/KNaiFen/aio-coding-hub",
+    requiredChecks: ["ci-gate", "pr-title"],
+    schemaVersion: 1,
+  };
   return {
     pin,
     adapter: { ...withoutDigest, adapterDigest: digestObject(withoutDigest) },
-    policy: {
-      baseBranch: "main",
-      provider: "github",
-      repository: "github.com/KNaiFen/aio-coding-hub",
-      requiredChecks: ["ci-gate", "pr-title"],
+    policy,
+    resourceFacts: {
+      billing: { cost: "unknown", verified: false },
+      policy: {
+        baseBranch: policy.baseBranch,
+        policyDigest: digestObject(policy),
+        requiredChecks: policy.requiredChecks,
+      },
+      resource: { capacity: "unknown", verified: false },
+      runner: { kind: "github-hosted-linux", source: "github-actions-workflow", verified: true },
       schemaVersion: 1,
     },
   };
@@ -50,6 +62,7 @@ function writeFixture(fixture) {
   writeCanonical(".gkd/bundle-pin.json", fixture.pin);
   writeCanonical(".gkd/review-adapter.json", fixture.adapter);
   writeCanonical(".gkd/policy.json", fixture.policy);
+  writeCanonical(".gkd/resource-facts.json", fixture.resourceFacts);
 }
 
 function expectFailure(mutate, expected) {
@@ -64,10 +77,14 @@ try {
   assert.deepEqual(verifyAdapter(root), {
     outcome: "adapter_ready",
     adapterDigest: "eac007446f5ce616aad866185b66da59a1fc5c74b32de21c0dffe117ed0443b6",
-    bundleVersion: "0.1.3",
+    bundleVersion: "0.1.4",
   });
 
   writeFileSync(join(root, ".gkd/bundle-pin.json"), "{ }\n");
+  assert.throws(() => verifyAdapter(root), /ADAPTER_JSON_NOT_CANONICAL/);
+
+  writeFixture(readFixture());
+  writeFileSync(join(root, ".gkd/resource-facts.json"), "{ }\n");
   assert.throws(() => verifyAdapter(root), /ADAPTER_JSON_NOT_CANONICAL/);
 
   expectFailure(
@@ -98,9 +115,45 @@ try {
   );
   expectFailure(
     (fixture) => {
-      fixture.pin.bundleVersion = "0.1.4";
+      fixture.pin.bundleVersion = "0.1.3";
     },
     /PIN_INVALID/
+  );
+  expectFailure(
+    (fixture) => {
+      fixture.resourceFacts.unexpected = true;
+    },
+    /RESOURCE_FACTS_FIELDS_INVALID/
+  );
+  expectFailure(
+    (fixture) => {
+      fixture.resourceFacts.runner.source = "github-hosted-linux";
+    },
+    /RESOURCE_RUNNER_INVALID/
+  );
+  expectFailure(
+    (fixture) => {
+      fixture.policy.requiredChecks = ["ci-gate"];
+    },
+    /RESOURCE_POLICY_BINDING_INVALID/
+  );
+  expectFailure(
+    (fixture) => {
+      fixture.resourceFacts.policy.requiredChecks = ["ci-gate"];
+    },
+    /RESOURCE_POLICY_BINDING_INVALID/
+  );
+  expectFailure(
+    (fixture) => {
+      fixture.resourceFacts.resource.verified = true;
+    },
+    /RESOURCE_RESOURCE_INVALID/
+  );
+  expectFailure(
+    (fixture) => {
+      fixture.resourceFacts.billing.verified = true;
+    },
+    /RESOURCE_BILLING_INVALID/
   );
 } finally {
   rmSync(root, { recursive: true, force: true });
