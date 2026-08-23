@@ -1,0 +1,23 @@
+#!/usr/bin/env node
+import { spawnSync } from "node:child_process";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const modulePath = fileURLToPath(import.meta.url);
+const repoRoot = dirname(dirname(modulePath));
+
+if (process.argv.length !== 4 || process.argv[2] !== "--base-sha") {
+  console.error("usage: scripts/gkd-verify --base-sha <full-lowercase-sha>");
+  process.exit(2);
+}
+
+const result = spawnSync(
+  process.execPath,
+  [resolve(repoRoot, "scripts/check-local-verification.mjs"), "--base", process.argv[3]],
+  { cwd: repoRoot, stdio: "inherit" }
+);
+if (result.error) {
+  console.error(result.error.message);
+  process.exit(1);
+}
+process.exit(result.status ?? 1);

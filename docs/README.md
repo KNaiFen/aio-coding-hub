@@ -36,6 +36,7 @@
 
 - [Homebrew 发布指南](./release-homebrew.md)
 - [GitHub Actions 治理与远端配置](./operations/github-actions-governance.md)
+- [GKD 项目 adapter](./operations/gkd-adapter.md)
 - [任务方案与实施结果留痕规范](./operations/task-documentation-records.md)
 - [多 Worktree 任务交付入口](./operations/multi-worktree-delivery.md)：按 planning、execution、acceptance、cleanup 阶段加载专题。
 - [仓库执行规则](../AGENTS.md)

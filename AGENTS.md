@@ -26,7 +26,8 @@
 - 仓库和 PR 默认使用 `origin`；`upstream` 只读抓取。GitHub 操作显式使用 `-R KNaiFen/aio-coding-hub`。
 - 不推送远端 `main`。执行 session 只推任务分支；PR 仅由 main 或获授权的 `$gkd-accept` 通过固定 head 验收命令合并。
 - 常规 checkout 不安装依赖，不运行 package-manager、开发服务器、格式化器、lint、类型检查、测试、构建、Cargo、rustfmt、Clippy、Specta、Tauri、签名或打包。
-- 本地验证只使用 `$gkd-local-verify` 调用 `node scripts/check-local-verification.mjs --base <登记的完整 SHA>`；runner 固定执行依赖无关合同/selftest、变更 Node 文件语法和 diff 检查，不接受命令透传。
+- 本地验证只使用 `$gkd-local-verify` 调用 `scripts/gkd-verify --base-sha <登记的完整 SHA>`；该版本化入口固定委托 `node scripts/check-local-verification.mjs --base <登记的完整 SHA>`，执行依赖无关合同/selftest、变更 Node 文件语法和 diff 检查，不接受命令透传。
+- Git 内的 GKD 项目事实仅为 `.gkd/policy.json`、`.gkd/bundle-pin.json` 与 `.gkd/review-adapter.json`；角色技能、claim receipt 和 runtime inventory 属于 project-local staging，不能提交或替代项目 policy。
 
 - GitHub Actions 承担依赖安装、前端/Rust 检查、audit、签名和桌面打包。普通 PR 等自动 `ci-gate` 与 `pr-title`，不额外手动启动常规 `ci`。
 - upstream merge/drift repair 只做最小集成；若上游与 fork 产品行为冲突，停止并把证据和选项交给 main/用户。
