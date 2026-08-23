@@ -12,14 +12,17 @@ const IDENTITY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
 const POLICY_PATH = /^[A-Za-z0-9._/-]{1,255}$/;
 
-const BUNDLE_VERSION = "0.1.3";
-const RELEASE_SOURCE_SHA = "2a63cd8ff2fcb7f0cb155dcc32578cda4b3381af";
-const EXECUTION_BUNDLE_DIGEST = "cc465d26f08edb2a133775e4d6a58aa517eab1bde0ec2e1ec72f6d9f2c8883bd";
-const ASSET_SHA256 = "9d9e6ea0fff64e0894af08a547b6798f1f6634e0e4cf4e174cd8dfc5c0179954";
+const BUNDLE_VERSION = "0.1.4";
+const RELEASE_SOURCE_SHA = "be1e515a64c4095676922c484555fb2a048da681";
+const EXECUTION_BUNDLE_DIGEST = "cdaa791ace82a5e7c407b29a93a4211b852d7f364900bbcd8a549dbe918bf2a7";
+const ASSET_SHA256 = "713fc828d234bc7ddd298cb68f5abfe1ede29f7891c283924cf3c3b98b2c0330";
 const ADAPTER_NAME = "aio-gkd-review";
 const REPOSITORY_ID = "aio-coding-hub";
 const REPOSITORY_IDENTITY = "KNaiFen/aio-coding-hub";
 const POLICY_PATH_VALUE = ".gkd/policy.json";
+const RESOURCE_FACTS_PATH = ".gkd/resource-facts.json";
+const RUNNER_KIND = "github-hosted-linux";
+const RUNNER_SOURCE = "github-actions-workflow";
 
 export class AdapterError extends Error {}
 
@@ -153,12 +156,52 @@ function validatePolicy(policy, repository) {
   }
 }
 
+function validateResourceFactsPolicy(resourcePolicy, policy) {
+  assertExactKeys(resourcePolicy, ["baseBranch", "policyDigest", "requiredChecks"], "RESOURCE_POLICY_FIELDS_INVALID");
+  if (
+    resourcePolicy.policyDigest !== digestObject(policy) ||
+    resourcePolicy.baseBranch !== policy.baseBranch ||
+    JSON.stringify(resourcePolicy.requiredChecks) !== JSON.stringify(policy.requiredChecks)
+  ) {
+    fail("RESOURCE_POLICY_BINDING_INVALID");
+  }
+}
+
+function validateResourceFacts(resourceFacts, policy) {
+  assertExactKeys(resourceFacts, ["billing", "policy", "resource", "runner", "schemaVersion"], "RESOURCE_FACTS_FIELDS_INVALID");
+  if (resourceFacts.schemaVersion !== 1) fail("RESOURCE_FACTS_INVALID");
+
+  assertExactKeys(resourceFacts.runner, ["kind", "source", "verified"], "RESOURCE_RUNNER_FIELDS_INVALID");
+  if (
+    resourceFacts.runner.kind !== RUNNER_KIND ||
+    resourceFacts.runner.source !== RUNNER_SOURCE ||
+    resourceFacts.runner.verified !== true
+  ) {
+    fail("RESOURCE_RUNNER_INVALID");
+  }
+
+  assertExactKeys(resourceFacts.resource, ["capacity", "verified"], "RESOURCE_RESOURCE_FIELDS_INVALID");
+  if (resourceFacts.resource.capacity !== "unknown" || resourceFacts.resource.verified !== false) {
+    fail("RESOURCE_RESOURCE_INVALID");
+  }
+
+  assertExactKeys(resourceFacts.billing, ["cost", "verified"], "RESOURCE_BILLING_FIELDS_INVALID");
+  if (resourceFacts.billing.cost !== "unknown" || resourceFacts.billing.verified !== false) {
+    fail("RESOURCE_BILLING_INVALID");
+  }
+
+  validateResourceFactsPolicy(resourceFacts.policy, policy);
+}
+
 export function verifyAdapter(root = repoRoot) {
   const pin = readJsonFile(root, ".gkd/bundle-pin.json", true);
   const adapter = readJsonFile(root, ".gkd/review-adapter.json", true);
+  const policy = readJsonFile(root, adapter.repositories[0].policyPath, false);
+  const resourceFacts = readJsonFile(root, RESOURCE_FACTS_PATH, true);
   validatePin(pin);
   validateAdapter(adapter);
-  validatePolicy(readJsonFile(root, adapter.repositories[0].policyPath, false), adapter.repositories[0]);
+  validatePolicy(policy, adapter.repositories[0]);
+  validateResourceFacts(resourceFacts, policy);
   return {
     outcome: "adapter_ready",
     adapterDigest: adapter.adapterDigest,
