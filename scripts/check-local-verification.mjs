@@ -8,6 +8,13 @@ const repoRoot = dirname(dirname(modulePath));
 const FULL_SHA = /^[0-9a-f]{40}$/;
 const NODE_SOURCE = /\.(?:cjs|js|mjs)$/;
 const MAX_UNTRACKED_TEXT_BYTES = 16 * 1024 * 1024;
+const ADAPTER_SMOKE_PATHS = new Set([
+  "scripts/check-gkd-adapter.mjs",
+  "scripts/check-gkd-adapter.selftest.mjs",
+  "scripts/check-local-verification.mjs",
+  "scripts/check-local-verification.selftest.mjs",
+  "scripts/gkd-verify",
+]);
 
 export class VerificationError extends Error {}
 export class UsageError extends Error {}
@@ -82,6 +89,10 @@ function changedPaths(root, base) {
   );
 }
 
+export function shouldRunAdapterSmoke(paths) {
+  return [...paths].some((path) => path.startsWith(".gkd/") || ADAPTER_SMOKE_PATHS.has(path));
+}
+
 export function collectChangedNodeFiles(root, base) {
   return [...changedPaths(root, base)]
     .filter((path) => NODE_SOURCE.test(path))
@@ -128,7 +139,7 @@ function assertUntrackedWhitespace(root) {
 }
 
 function runNodeScript(relativePath) {
-  run(process.execPath, [join(repoRoot, relativePath)], { label: relativePath });
+  return run(process.execPath, [join(repoRoot, relativePath)], { label: relativePath });
 }
 
 function runDiffChecks(base) {
@@ -153,7 +164,23 @@ export function verify(base) {
   runDiffChecks(base);
   assertUntrackedWhitespace(repoRoot);
 
-  const nodeFiles = collectChangedNodeFiles(repoRoot, base);
+  const paths = changedPaths(repoRoot, base);
+  let adapterSmoke;
+  if (shouldRunAdapterSmoke(paths)) {
+    runNodeScript("scripts/check-gkd-adapter.selftest.mjs");
+    adapterSmoke = JSON.parse(runNodeScript("scripts/check-gkd-adapter.mjs").stdout);
+  }
+  const nodeFiles = [...paths]
+    .filter((path) => NODE_SOURCE.test(path))
+    .filter((path) => {
+      try {
+        return lstatSync(resolve(repoRoot, path)).isFile() || lstatSync(resolve(repoRoot, path)).isSymbolicLink();
+      } catch (error) {
+        if (error?.code === "ENOENT") return false;
+        throw error;
+      }
+    })
+    .sort();
   for (const path of nodeFiles) {
     run(process.execPath, ["--check", assertSafeFile(repoRoot, path)], {
       label: `node --check ${path}`,
@@ -173,8 +200,13 @@ export function verify(base) {
       "index-diff",
       "worktree-diff",
       "untracked-whitespace",
+      ...(adapterSmoke ? ["gkd-adapter-selftest", "gkd-adapter-smoke"] : []),
       "changed-node-syntax",
     ],
+    adapter_smoke: {
+      executed: adapterSmoke !== undefined,
+      adapter_digest: adapterSmoke?.adapterDigest ?? null,
+    },
     cloud_owned: [
       "dependencies",
       "format",

@@ -10,6 +10,7 @@ import {
   findWhitespaceErrors,
   parseArguments,
   parseNulPaths,
+  shouldRunAdapterSmoke,
 } from "./check-local-verification.mjs";
 
 const fullSha = "a".repeat(40);
@@ -21,6 +22,10 @@ assert.deepEqual(parseNulPaths("a.mjs\0b.js\0"), ["a.mjs", "b.js"]);
 assert.deepEqual(findWhitespaceErrors("clean.mjs", Buffer.from("const ok = true;\n")), []);
 assert.deepEqual(findWhitespaceErrors("binary", Buffer.from([0, 32, 10])), []);
 assert.match(findWhitespaceErrors("bad.mjs", Buffer.from("const bad = true; \n"))[0], /trailing whitespace/);
+assert.equal(shouldRunAdapterSmoke(new Set(["src/main.ts"])), false);
+assert.equal(shouldRunAdapterSmoke(new Set([".gkd/review-adapter.json"])), true);
+assert.equal(shouldRunAdapterSmoke(new Set(["scripts/check-gkd-adapter.mjs"])), true);
+assert.equal(shouldRunAdapterSmoke(new Set(["scripts/gkd-verify"])), true);
 
 function runGit(cwd, args) {
   const result = spawnSync("git", args, { cwd, encoding: "utf8", shell: false });
