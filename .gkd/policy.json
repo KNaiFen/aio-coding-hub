@@ -1,0 +1,1 @@
+{"baseBranch":"main","provider":"github","repository":"github.com/KNaiFen/aio-coding-hub","requiredChecks":["ci-gate","pr-title"],"schemaVersion":1}
