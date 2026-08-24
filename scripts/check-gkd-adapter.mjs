@@ -21,6 +21,7 @@ const REPOSITORY_ID = "aio-coding-hub";
 const REPOSITORY_IDENTITY = "KNaiFen/aio-coding-hub";
 const POLICY_PATH_VALUE = ".gkd/policy.json";
 const ADAPTER_POLICY_PATH = ".gkd/adapter-policy.json";
+const HISTORY_ADAPTER_PATH = ".gkd/history-adapter.json";
 const RESOURCE_FACTS_PATH = ".gkd/resource-facts.json";
 const RUNNER_KIND = "github-hosted-linux";
 const RUNNER_SOURCE = "github-actions-workflow";
@@ -314,12 +315,63 @@ function validateAdapterPolicy(adapterPolicy) {
   validateAdapterPolicyRelease(adapterPolicy.release);
 }
 
+export function validateHistoryAdapter(historyAdapter) {
+  assertExactKeys(
+    historyAdapter,
+    ["active", "archive", "manifestName", "schemaVersion"],
+    "HISTORY_ADAPTER_FIELDS_INVALID"
+  );
+  if (historyAdapter.schemaVersion !== 1 || historyAdapter.manifestName !== "task.json") {
+    fail("HISTORY_ADAPTER_INVALID");
+  }
+
+  assertExactKeys(
+    historyAdapter.active,
+    ["coordinationVersionsRejected", "location", "requiredCount", "root", "worktreePath"],
+    "HISTORY_ADAPTER_ACTIVE_FIELDS_INVALID"
+  );
+  assertExactValue(
+    historyAdapter.active,
+    {
+      coordinationVersionsRejected: [1],
+      location: "tracked-immediate-child",
+      requiredCount: 1,
+      root: ".trellis/tasks",
+      worktreePath: "must-be-null",
+    },
+    "HISTORY_ADAPTER_ACTIVE_INVALID"
+  );
+
+  assertExactKeys(
+    historyAdapter.archive,
+    ["location", "requiredStatus", "root", "worktreePath"],
+    "HISTORY_ADAPTER_ARCHIVE_FIELDS_INVALID"
+  );
+  assertExactValue(
+    historyAdapter.archive,
+    {
+      location: "tracked-descendants",
+      requiredStatus: "completed",
+      root: ".trellis/tasks/archive",
+      worktreePath: "ignored",
+    },
+    "HISTORY_ADAPTER_ARCHIVE_INVALID"
+  );
+}
+
+export function readHistoryAdapter(root = repoRoot) {
+  const historyAdapter = readJsonFile(root, HISTORY_ADAPTER_PATH, true);
+  validateHistoryAdapter(historyAdapter);
+  return historyAdapter;
+}
+
 export function verifyAdapter(root = repoRoot) {
   const pin = readJsonFile(root, ".gkd/bundle-pin.json", true);
   const adapter = readJsonFile(root, ".gkd/review-adapter.json", true);
   const policy = readJsonFile(root, adapter.repositories[0].policyPath, false);
   const adapterPolicy = readJsonFile(root, ADAPTER_POLICY_PATH, true);
   const resourceFacts = readJsonFile(root, RESOURCE_FACTS_PATH, true);
+  readHistoryAdapter(root);
   validatePin(pin);
   validateAdapter(adapter);
   validatePolicy(policy, adapter.repositories[0]);

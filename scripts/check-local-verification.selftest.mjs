@@ -1,16 +1,18 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
   UsageError,
   collectChangedNodeFiles,
+  changedPaths,
   findWhitespaceErrors,
   parseArguments,
   parseNulPaths,
   shouldRunAdapterSmoke,
+  shouldRunHistorySmoke,
 } from "./check-local-verification.mjs";
 
 const fullSha = "a".repeat(40);
@@ -26,6 +28,13 @@ assert.equal(shouldRunAdapterSmoke(new Set(["src/main.ts"])), false);
 assert.equal(shouldRunAdapterSmoke(new Set([".gkd/review-adapter.json"])), true);
 assert.equal(shouldRunAdapterSmoke(new Set(["scripts/check-gkd-adapter.mjs"])), true);
 assert.equal(shouldRunAdapterSmoke(new Set(["scripts/gkd-verify"])), true);
+assert.equal(shouldRunHistorySmoke(new Set(["src/main.ts"])), false);
+assert.equal(shouldRunHistorySmoke(new Set([".gkd/history-adapter.json"])), true);
+assert.equal(shouldRunHistorySmoke(new Set(["scripts/check-gkd-history.mjs"])), true);
+assert.equal(shouldRunHistorySmoke(new Set(["scripts/check-gkd-adapter.mjs"])), true);
+assert.equal(shouldRunHistorySmoke(new Set([".trellis/tasks/current-task/task.json"])), true);
+assert.equal(shouldRunHistorySmoke(new Set([".trellis/tasks/archive/08-01-finished/task.json"])), true);
+assert.equal(shouldRunHistorySmoke(new Set([".trellis/tasks/current-task/requirements.md"])), false);
 
 function runGit(cwd, args) {
   const result = spawnSync("git", args, { cwd, encoding: "utf8", shell: false });
@@ -39,9 +48,33 @@ try {
   runGit(root, ["config", "user.name", "Local Verify Selftest"]);
   runGit(root, ["config", "user.email", "local-verify@example.invalid"]);
   writeFileSync(join(root, "base.mjs"), "export const base = true;\n");
+  mkdirSync(join(root, ".trellis/tasks/current-task"), { recursive: true });
+  mkdirSync(join(root, ".trellis/tasks/archive/08-01-finished"), { recursive: true });
+  writeFileSync(join(root, ".trellis/tasks/current-task/task.json"), "{}\n");
+  writeFileSync(join(root, ".trellis/tasks/archive/08-01-finished/task.json"), "{}\n");
+  writeFileSync(join(root, ".trellis/tasks/current-task/requirements.md"), "# requirements\n");
   runGit(root, ["add", "base.mjs"]);
+  runGit(root, ["add", ".trellis"]);
   runGit(root, ["commit", "-m", "base"]);
   const base = runGit(root, ["rev-parse", "HEAD"]);
+
+  rmSync(join(root, ".trellis/tasks/current-task/task.json"));
+  const activeManifestDeletion = changedPaths(root, base);
+  assert.equal(shouldRunHistorySmoke(activeManifestDeletion), true);
+  assert.equal(activeManifestDeletion.has(".trellis/tasks/current-task/task.json"), true);
+  writeFileSync(join(root, ".trellis/tasks/current-task/task.json"), "{}\n");
+
+  rmSync(join(root, ".trellis/tasks/archive/08-01-finished/task.json"));
+  const archiveManifestDeletion = changedPaths(root, base);
+  assert.equal(shouldRunHistorySmoke(archiveManifestDeletion), true);
+  assert.equal(archiveManifestDeletion.has(".trellis/tasks/archive/08-01-finished/task.json"), true);
+  writeFileSync(join(root, ".trellis/tasks/archive/08-01-finished/task.json"), "{}\n");
+
+  rmSync(join(root, ".trellis/tasks/current-task/requirements.md"));
+  const nonManifestDeletion = changedPaths(root, base);
+  assert.equal(shouldRunHistorySmoke(nonManifestDeletion), false);
+  assert.equal(nonManifestDeletion.has(".trellis/tasks/current-task/requirements.md"), true);
+  writeFileSync(join(root, ".trellis/tasks/current-task/requirements.md"), "# requirements\n");
 
   writeFileSync(join(root, "committed.mjs"), "export const committed = true;\n");
   runGit(root, ["add", "committed.mjs"]);
