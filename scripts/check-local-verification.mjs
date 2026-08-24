@@ -11,6 +11,8 @@ const MAX_UNTRACKED_TEXT_BYTES = 16 * 1024 * 1024;
 const ADAPTER_SMOKE_PATHS = new Set([
   "scripts/check-gkd-adapter.mjs",
   "scripts/check-gkd-adapter.selftest.mjs",
+  "scripts/check-gkd-ci-release.mjs",
+  "scripts/check-gkd-ci-release.selftest.mjs",
   "scripts/check-local-verification.mjs",
   "scripts/check-local-verification.selftest.mjs",
   "scripts/gkd-verify",
@@ -177,9 +179,12 @@ export function verify(base) {
 
   const paths = changedPaths(repoRoot, base);
   let adapterSmoke;
+  let ciReleaseSmoke;
   if (shouldRunAdapterSmoke(paths)) {
     runNodeScript("scripts/check-gkd-adapter.selftest.mjs");
     adapterSmoke = JSON.parse(runNodeScript("scripts/check-gkd-adapter.mjs").stdout);
+    runNodeScript("scripts/check-gkd-ci-release.selftest.mjs");
+    ciReleaseSmoke = JSON.parse(runNodeScript("scripts/check-gkd-ci-release.mjs").stdout);
   }
   let historySmoke;
   if (shouldRunHistorySmoke(paths)) {
@@ -217,12 +222,18 @@ export function verify(base) {
       "worktree-diff",
       "untracked-whitespace",
       ...(adapterSmoke ? ["gkd-adapter-selftest", "gkd-adapter-smoke"] : []),
+      ...(ciReleaseSmoke ? ["gkd-ci-release-selftest", "gkd-ci-release-smoke"] : []),
       ...(historySmoke ? ["gkd-history-selftest", "gkd-history-smoke"] : []),
       "changed-node-syntax",
     ],
     adapter_smoke: {
       executed: adapterSmoke !== undefined,
       adapter_digest: adapterSmoke?.adapterDigest ?? null,
+    },
+    ci_release_smoke: {
+      executed: ciReleaseSmoke !== undefined,
+      adapter_digest: ciReleaseSmoke?.adapterDigest ?? null,
+      recommendation_digest: ciReleaseSmoke?.recommendationDigest ?? null,
     },
     history_smoke: {
       executed: historySmoke !== undefined,

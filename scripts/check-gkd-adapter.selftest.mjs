@@ -75,6 +75,8 @@ function readFixture() {
         paths: [
           "scripts/check-gkd-adapter.mjs",
           "scripts/check-gkd-adapter.selftest.mjs",
+          "scripts/check-gkd-ci-release.mjs",
+          "scripts/check-gkd-ci-release.selftest.mjs",
           "scripts/check-local-verification.mjs",
           "scripts/check-local-verification.selftest.mjs",
           "scripts/gkd-verify",
