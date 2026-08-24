@@ -40,9 +40,70 @@ function readFixture() {
     requiredChecks: ["ci-gate", "pr-title"],
     schemaVersion: 1,
   };
+  const adapterPolicy = {
+    ci: {
+      artifacts: [
+        { nameTemplate: "cloud-native-fixes-{sha}-{run_attempt}", retentionDays: 7 },
+        { nameTemplate: "dev-build-{target_id}-{sha}", retentionDays: 7 },
+        { nameTemplate: "release-candidate-{sha}-{run_id}-{run_attempt}", retentionDays: 30 },
+        { nameTemplate: "release-platform-{sha}-{run_attempt}-{target_id}", retentionDays: 1 },
+        { nameTemplate: "tui-platform-{sha}-{run_attempt}-{target_id}", retentionDays: 1 },
+      ],
+      cacheClasses: ["pnpm", "rust"],
+      runnerClasses: ["macos-latest", "ubuntu-22.04", "ubuntu-latest", "windows-latest"],
+    },
+    release: {
+      candidate: {
+        artifactNameTemplate: "release-candidate-{sha}-{run_id}-{run_attempt}",
+        branch: "main",
+        conclusion: "success",
+        events: ["push", "workflow_dispatch"],
+        repository: "KNaiFen/aio-coding-hub",
+        sameSourceSha: true,
+        uniqueUnexpired: true,
+        workflow: "ci.yml",
+      },
+      checksum: { algorithm: "sha256", coversAllOtherAssets: true, manifest: "SHA256SUMS.txt" },
+      existingRelease: { assetNamesAndChecksumsMustMatch: true, overwrite: false },
+      requireMainAncestor: true,
+      tagTemplate: "aio-coding-hub-v{semver}",
+    },
+    schemaVersion: 1,
+    verification: {
+      adapterSmoke: {
+        pathPrefixes: [".gkd/"],
+        paths: [
+          "scripts/check-gkd-adapter.mjs",
+          "scripts/check-gkd-adapter.selftest.mjs",
+          "scripts/check-local-verification.mjs",
+          "scripts/check-local-verification.selftest.mjs",
+          "scripts/gkd-verify",
+        ],
+      },
+      baseArgument: "--base-sha",
+      baseShaPattern: "^[0-9a-f]{40}$",
+      cloudOwned: [
+        "dependencies",
+        "format",
+        "lint",
+        "typecheck",
+        "tests",
+        "coverage",
+        "build",
+        "generators",
+        "rust-cargo",
+        "tauri",
+        "signing-packaging",
+        "dev-server-runtime-ui",
+      ],
+      entrypoint: "scripts/gkd-verify",
+      zeroArtifact: true,
+    },
+  };
   return {
     pin,
     adapter: { ...withoutDigest, adapterDigest: digestObject(withoutDigest) },
+    adapterPolicy,
     policy,
     resourceFacts: {
       billing: { cost: "unknown", verified: false },
@@ -61,6 +122,7 @@ function readFixture() {
 function writeFixture(fixture) {
   writeCanonical(".gkd/bundle-pin.json", fixture.pin);
   writeCanonical(".gkd/review-adapter.json", fixture.adapter);
+  writeCanonical(".gkd/adapter-policy.json", fixture.adapterPolicy);
   writeCanonical(".gkd/policy.json", fixture.policy);
   writeCanonical(".gkd/resource-facts.json", fixture.resourceFacts);
 }
@@ -81,6 +143,10 @@ try {
   });
 
   writeFileSync(join(root, ".gkd/bundle-pin.json"), "{ }\n");
+  assert.throws(() => verifyAdapter(root), /ADAPTER_JSON_NOT_CANONICAL/);
+
+  writeFixture(readFixture());
+  writeFileSync(join(root, ".gkd/adapter-policy.json"), "{ }\n");
   assert.throws(() => verifyAdapter(root), /ADAPTER_JSON_NOT_CANONICAL/);
 
   writeFixture(readFixture());
@@ -118,6 +184,114 @@ try {
       fixture.pin.bundleVersion = "0.1.3";
     },
     /PIN_INVALID/
+  );
+  expectFailure(
+    (fixture) => {
+      fixture.adapterPolicy.unexpected = true;
+    },
+    /ADAPTER_POLICY_FIELDS_INVALID/
+  );
+  expectFailure(
+    (fixture) => {
+      fixture.adapterPolicy.verification.entrypoint = "scripts/other";
+    },
+    /ADAPTER_POLICY_VERIFICATION_INVALID/
+  );
+  expectFailure(
+    (fixture) => {
+      fixture.adapterPolicy.verification.baseShaPattern = "^[0-9a-f]+$";
+    },
+    /ADAPTER_POLICY_VERIFICATION_INVALID/
+  );
+  expectFailure(
+    (fixture) => {
+      fixture.adapterPolicy.verification.zeroArtifact = false;
+    },
+    /ADAPTER_POLICY_VERIFICATION_INVALID/
+  );
+  expectFailure(
+    (fixture) => {
+      fixture.adapterPolicy.verification.adapterSmoke.paths.pop();
+    },
+    /ADAPTER_POLICY_SMOKE_INVALID/
+  );
+  expectFailure(
+    (fixture) => {
+      fixture.adapterPolicy.verification.cloudOwned.pop();
+    },
+    /ADAPTER_POLICY_CLOUD_BOUNDARY_INVALID/
+  );
+  expectFailure(
+    (fixture) => {
+      fixture.adapterPolicy.ci.runnerClasses[0] = "self-hosted";
+    },
+    /ADAPTER_POLICY_RUNNERS_INVALID/
+  );
+  expectFailure(
+    (fixture) => {
+      fixture.adapterPolicy.ci.cacheClasses = ["pnpm"];
+    },
+    /ADAPTER_POLICY_CACHES_INVALID/
+  );
+  expectFailure(
+    (fixture) => {
+      fixture.adapterPolicy.ci.artifacts[0].nameTemplate = "cloud-fixes-{sha}";
+    },
+    /ADAPTER_POLICY_ARTIFACTS_INVALID/
+  );
+  expectFailure(
+    (fixture) => {
+      fixture.adapterPolicy.ci.artifacts[0].retentionDays = 30;
+    },
+    /ADAPTER_POLICY_ARTIFACTS_INVALID/
+  );
+  expectFailure(
+    (fixture) => {
+      fixture.adapterPolicy.ci.artifacts[0].unexpected = true;
+    },
+    /ADAPTER_POLICY_ARTIFACT_FIELDS_INVALID/
+  );
+  expectFailure(
+    (fixture) => {
+      fixture.adapterPolicy.release.tagTemplate = "v{semver}";
+    },
+    /ADAPTER_POLICY_TAG_INVALID/
+  );
+  expectFailure(
+    (fixture) => {
+      fixture.adapterPolicy.release.candidate.sameSourceSha = false;
+    },
+    /ADAPTER_POLICY_CANDIDATE_INVALID/
+  );
+  expectFailure(
+    (fixture) => {
+      fixture.adapterPolicy.release.candidate.conclusion = "failure";
+    },
+    /ADAPTER_POLICY_CANDIDATE_INVALID/
+  );
+  expectFailure(
+    (fixture) => {
+      fixture.adapterPolicy.release.candidate.uniqueUnexpired = false;
+    },
+    /ADAPTER_POLICY_CANDIDATE_INVALID/
+  );
+  expectFailure(
+    (fixture) => {
+      fixture.adapterPolicy.release.checksum.manifest = "checksums.txt";
+    },
+    /ADAPTER_POLICY_CHECKSUM_INVALID/
+  );
+  expectFailure(
+    (fixture) => {
+      fixture.adapterPolicy.release.requireMainAncestor = false;
+    },
+    /ADAPTER_POLICY_MAIN_ANCESTRY_INVALID/
+  );
+  expectFailure(
+    (fixture) => {
+      fixture.adapterPolicy.release.existingRelease.overwrite = true;
+    },
+    /ADAPTER_POLICY_IMMUTABILITY_INVALID/
   );
   expectFailure(
     (fixture) => {
