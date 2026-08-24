@@ -20,9 +20,40 @@ const ADAPTER_NAME = "aio-gkd-review";
 const REPOSITORY_ID = "aio-coding-hub";
 const REPOSITORY_IDENTITY = "KNaiFen/aio-coding-hub";
 const POLICY_PATH_VALUE = ".gkd/policy.json";
+const ADAPTER_POLICY_PATH = ".gkd/adapter-policy.json";
 const RESOURCE_FACTS_PATH = ".gkd/resource-facts.json";
 const RUNNER_KIND = "github-hosted-linux";
 const RUNNER_SOURCE = "github-actions-workflow";
+const ADAPTER_SMOKE_PATHS = [
+  "scripts/check-gkd-adapter.mjs",
+  "scripts/check-gkd-adapter.selftest.mjs",
+  "scripts/check-local-verification.mjs",
+  "scripts/check-local-verification.selftest.mjs",
+  "scripts/gkd-verify",
+];
+const CLOUD_OWNED = [
+  "dependencies",
+  "format",
+  "lint",
+  "typecheck",
+  "tests",
+  "coverage",
+  "build",
+  "generators",
+  "rust-cargo",
+  "tauri",
+  "signing-packaging",
+  "dev-server-runtime-ui",
+];
+const RUNNER_CLASSES = ["macos-latest", "ubuntu-22.04", "ubuntu-latest", "windows-latest"];
+const CACHE_CLASSES = ["pnpm", "rust"];
+const ARTIFACT_CLASSES = [
+  { nameTemplate: "cloud-native-fixes-{sha}-{run_attempt}", retentionDays: 7 },
+  { nameTemplate: "dev-build-{target_id}-{sha}", retentionDays: 7 },
+  { nameTemplate: "release-candidate-{sha}-{run_id}-{run_attempt}", retentionDays: 30 },
+  { nameTemplate: "release-platform-{sha}-{run_attempt}-{target_id}", retentionDays: 1 },
+  { nameTemplate: "tui-platform-{sha}-{run_attempt}-{target_id}", retentionDays: 1 },
+];
 
 export class AdapterError extends Error {}
 
@@ -38,6 +69,10 @@ function assertExactKeys(value, keys, code) {
   if (!isRecord(value) || Object.keys(value).length !== keys.length || !keys.every((key) => key in value)) {
     fail(code);
   }
+}
+
+function assertExactValue(value, expected, code) {
+  if (JSON.stringify(value) !== JSON.stringify(expected)) fail(code);
 }
 
 export function canonicalJson(value) {
@@ -193,14 +228,102 @@ function validateResourceFacts(resourceFacts, policy) {
   validateResourceFactsPolicy(resourceFacts.policy, policy);
 }
 
+function validateAdapterPolicyVerification(verification) {
+  assertExactKeys(
+    verification,
+    ["adapterSmoke", "baseArgument", "baseShaPattern", "cloudOwned", "entrypoint", "zeroArtifact"],
+    "ADAPTER_POLICY_VERIFICATION_FIELDS_INVALID"
+  );
+  assertExactKeys(verification.adapterSmoke, ["pathPrefixes", "paths"], "ADAPTER_POLICY_SMOKE_FIELDS_INVALID");
+  assertExactValue(verification.adapterSmoke.pathPrefixes, [".gkd/"], "ADAPTER_POLICY_SMOKE_INVALID");
+  assertExactValue(verification.adapterSmoke.paths, ADAPTER_SMOKE_PATHS, "ADAPTER_POLICY_SMOKE_INVALID");
+  assertExactValue(verification.cloudOwned, CLOUD_OWNED, "ADAPTER_POLICY_CLOUD_BOUNDARY_INVALID");
+  if (
+    verification.entrypoint !== "scripts/gkd-verify" ||
+    verification.baseArgument !== "--base-sha" ||
+    verification.baseShaPattern !== "^[0-9a-f]{40}$" ||
+    verification.zeroArtifact !== true
+  ) {
+    fail("ADAPTER_POLICY_VERIFICATION_INVALID");
+  }
+}
+
+function validateAdapterPolicyCi(ci) {
+  assertExactKeys(ci, ["artifacts", "cacheClasses", "runnerClasses"], "ADAPTER_POLICY_CI_FIELDS_INVALID");
+  assertExactValue(ci.runnerClasses, RUNNER_CLASSES, "ADAPTER_POLICY_RUNNERS_INVALID");
+  assertExactValue(ci.cacheClasses, CACHE_CLASSES, "ADAPTER_POLICY_CACHES_INVALID");
+  if (!Array.isArray(ci.artifacts) || ci.artifacts.length !== ARTIFACT_CLASSES.length) {
+    fail("ADAPTER_POLICY_ARTIFACTS_INVALID");
+  }
+  for (const artifact of ci.artifacts) {
+    assertExactKeys(artifact, ["nameTemplate", "retentionDays"], "ADAPTER_POLICY_ARTIFACT_FIELDS_INVALID");
+  }
+  assertExactValue(ci.artifacts, ARTIFACT_CLASSES, "ADAPTER_POLICY_ARTIFACTS_INVALID");
+}
+
+function validateAdapterPolicyRelease(release) {
+  assertExactKeys(
+    release,
+    ["candidate", "checksum", "existingRelease", "requireMainAncestor", "tagTemplate"],
+    "ADAPTER_POLICY_RELEASE_FIELDS_INVALID"
+  );
+  assertExactKeys(
+    release.candidate,
+    ["artifactNameTemplate", "branch", "conclusion", "events", "repository", "sameSourceSha", "uniqueUnexpired", "workflow"],
+    "ADAPTER_POLICY_CANDIDATE_FIELDS_INVALID"
+  );
+  assertExactValue(
+    release.candidate,
+    {
+      artifactNameTemplate: "release-candidate-{sha}-{run_id}-{run_attempt}",
+      branch: "main",
+      conclusion: "success",
+      events: ["push", "workflow_dispatch"],
+      repository: REPOSITORY_IDENTITY,
+      sameSourceSha: true,
+      uniqueUnexpired: true,
+      workflow: "ci.yml",
+    },
+    "ADAPTER_POLICY_CANDIDATE_INVALID"
+  );
+  assertExactKeys(release.checksum, ["algorithm", "coversAllOtherAssets", "manifest"], "ADAPTER_POLICY_CHECKSUM_FIELDS_INVALID");
+  assertExactValue(
+    release.checksum,
+    { algorithm: "sha256", coversAllOtherAssets: true, manifest: "SHA256SUMS.txt" },
+    "ADAPTER_POLICY_CHECKSUM_INVALID"
+  );
+  assertExactKeys(
+    release.existingRelease,
+    ["assetNamesAndChecksumsMustMatch", "overwrite"],
+    "ADAPTER_POLICY_IMMUTABILITY_FIELDS_INVALID"
+  );
+  assertExactValue(
+    release.existingRelease,
+    { assetNamesAndChecksumsMustMatch: true, overwrite: false },
+    "ADAPTER_POLICY_IMMUTABILITY_INVALID"
+  );
+  if (release.tagTemplate !== "aio-coding-hub-v{semver}") fail("ADAPTER_POLICY_TAG_INVALID");
+  if (release.requireMainAncestor !== true) fail("ADAPTER_POLICY_MAIN_ANCESTRY_INVALID");
+}
+
+function validateAdapterPolicy(adapterPolicy) {
+  assertExactKeys(adapterPolicy, ["ci", "release", "schemaVersion", "verification"], "ADAPTER_POLICY_FIELDS_INVALID");
+  if (adapterPolicy.schemaVersion !== 1) fail("ADAPTER_POLICY_INVALID");
+  validateAdapterPolicyVerification(adapterPolicy.verification);
+  validateAdapterPolicyCi(adapterPolicy.ci);
+  validateAdapterPolicyRelease(adapterPolicy.release);
+}
+
 export function verifyAdapter(root = repoRoot) {
   const pin = readJsonFile(root, ".gkd/bundle-pin.json", true);
   const adapter = readJsonFile(root, ".gkd/review-adapter.json", true);
   const policy = readJsonFile(root, adapter.repositories[0].policyPath, false);
+  const adapterPolicy = readJsonFile(root, ADAPTER_POLICY_PATH, true);
   const resourceFacts = readJsonFile(root, RESOURCE_FACTS_PATH, true);
   validatePin(pin);
   validateAdapter(adapter);
   validatePolicy(policy, adapter.repositories[0]);
+  validateAdapterPolicy(adapterPolicy);
   validateResourceFacts(resourceFacts, policy);
   return {
     outcome: "adapter_ready",
