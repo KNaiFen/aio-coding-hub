@@ -100,6 +100,9 @@ jobs:
       - name: Validate cloud-only verification contract
         run: node scripts/check-cloud-only-verification.mjs
 
+      - name: Validate GKD CI and release adapter
+        run: node scripts/check-gkd-ci-release.selftest.mjs && node scripts/check-gkd-ci-release.mjs
+
       - name: Validate Trellis task coordination
         run: PYTHONPATH=.trellis/scripts python3 -m unittest discover -s .trellis/scripts/tests -p 'test_*.py'
 
@@ -171,12 +174,11 @@ jobs:
         run: node scripts/check-release-signing-secret-scope.selftest.mjs && node scripts/check-release-signing-secret-scope.mjs
 
   frontend:
-    needs: [change-scope, contracts]
+    needs: change-scope
     if: >-
       always() &&
       needs.change-scope.result == 'success' &&
-      needs.change-scope.outputs.frontend_ci == 'true' &&
-      needs.contracts.result == 'success'
+      needs.change-scope.outputs.frontend_ci == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -222,12 +224,11 @@ jobs:
         run: pnpm build
 
   rust:
-    needs: [change-scope, contracts]
+    needs: change-scope
     if: >-
       always() &&
       needs.change-scope.result == 'success' &&
-      needs.change-scope.outputs.rust_ci == 'true' &&
-      needs.contracts.result == 'success'
+      needs.change-scope.outputs.rust_ci == 'true'
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:

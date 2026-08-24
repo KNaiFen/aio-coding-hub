@@ -75,11 +75,11 @@ const CI_JOB_CONDITIONS = new Map([
   ],
   [
     "frontend",
-    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.frontend_ci == 'true' && needs.contracts.result == 'success'",
+    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.frontend_ci == 'true'",
   ],
   [
     "rust",
-    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.rust_ci == 'true' && needs.contracts.result == 'success'",
+    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.rust_ci == 'true'",
   ],
   [
     "candidate-plan",
