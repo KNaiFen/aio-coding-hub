@@ -14,10 +14,10 @@ function writeCanonical(relativePath, value) {
 
 function readFixture() {
   const pin = {
-    assetSha256: "713fc828d234bc7ddd298cb68f5abfe1ede29f7891c283924cf3c3b98b2c0330",
-    bundleVersion: "0.1.4",
-    executionBundleDigest: "cdaa791ace82a5e7c407b29a93a4211b852d7f364900bbcd8a549dbe918bf2a7",
-    releaseSourceSha: "be1e515a64c4095676922c484555fb2a048da681",
+    assetSha256: "f259475f4ca6c3425e53d734d03633541d6a1997e41991eb5a6115958d06a298",
+    bundleVersion: "0.1.5",
+    executionBundleDigest: "d749b753fb11aeab44d41b4e1d8bec44c7fa2d18a4b08148fbc0e0c127e27e6d",
+    releaseSourceSha: "60ac0c49f1054ce2edea49b3ab6758bfbd3432b3",
   };
   const withoutDigest = {
     adapterName: "aio-gkd-review",
@@ -77,7 +77,7 @@ try {
   assert.deepEqual(verifyAdapter(root), {
     outcome: "adapter_ready",
     adapterDigest: "eac007446f5ce616aad866185b66da59a1fc5c74b32de21c0dffe117ed0443b6",
-    bundleVersion: "0.1.4",
+    bundleVersion: "0.1.5",
   });
 
   writeFileSync(join(root, ".gkd/bundle-pin.json"), "{ }\n");
