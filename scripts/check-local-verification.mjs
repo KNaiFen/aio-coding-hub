@@ -98,7 +98,10 @@ export function shouldRunAdapterSmoke(paths) {
 }
 
 export function shouldRunHistorySmoke(paths) {
-  return shouldRunAdapterSmoke(paths) || [...paths].some((path) => HISTORY_SMOKE_PATHS.has(path));
+  return shouldRunAdapterSmoke(paths) || [...paths].some(
+    (path) => HISTORY_SMOKE_PATHS.has(path) ||
+      (path.startsWith(".trellis/tasks/") && path.endsWith("/task.json"))
+  );
 }
 
 export function collectChangedNodeFiles(root, base) {

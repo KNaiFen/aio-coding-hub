@@ -31,6 +31,9 @@ assert.equal(shouldRunHistorySmoke(new Set(["src/main.ts"])), false);
 assert.equal(shouldRunHistorySmoke(new Set([".gkd/history-adapter.json"])), true);
 assert.equal(shouldRunHistorySmoke(new Set(["scripts/check-gkd-history.mjs"])), true);
 assert.equal(shouldRunHistorySmoke(new Set(["scripts/check-gkd-adapter.mjs"])), true);
+assert.equal(shouldRunHistorySmoke(new Set([".trellis/tasks/current-task/task.json"])), true);
+assert.equal(shouldRunHistorySmoke(new Set([".trellis/tasks/archive/08-01-finished/task.json"])), true);
+assert.equal(shouldRunHistorySmoke(new Set([".trellis/tasks/current-task/requirements.md"])), false);
 
 function runGit(cwd, args) {
   const result = spawnSync("git", args, { cwd, encoding: "utf8", shell: false });
