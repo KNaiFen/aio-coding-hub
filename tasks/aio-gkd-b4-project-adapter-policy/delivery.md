@@ -16,9 +16,15 @@
 ## Verification
 
 - Implementation head: `9025bc381ff9dcec1cb98142cb77666f34969403`.
-- `scripts/gkd-verify --base-sha b35e34245a1667e647965be58ba44654ca0ba053` passed the local runner selftest, cloud-only contract checks, adapter selftest/smoke, committed/index/worktree diff checks, untracked whitespace check, and changed Node syntax checks.
+- Manual-recovery verification head: `f61fca35aa125836559ce23a5421b325bb4e86ca`.
+- `scripts/gkd-verify --base-sha b35e34245a1667e647965be58ba44654ca0ba053` passed again at the manual-recovery verification head, covering the local runner selftest, cloud-only contract checks, adapter selftest/smoke, committed/index/worktree diff checks, untracked whitespace check, and changed Node syntax checks.
 - Required GitHub checks `ci-gate` and `pr-title` remain pending for the final fixed delivery head.
 - Dependency installation, formatting, linting, type checking, tests, coverage, builds, generators, Rust/Tauri checks, and signing or packaging remain cloud-owned.
+
+## Manual Recovery
+
+- The prior fixed-head acceptance attempt at `6a066eb74518052be3d9543958fca9f7a638bf5a` was rejected solely because the CI monitor received an unsupported absolute policy path and returned `POLICY_PATH_UNSUPPORTED`; no candidate-code finding was recorded.
+- Review of the requirements, rejected attempt, current diff, and existing implementation found no new defect, so the implementation remains unchanged.
 
 ## Scope And Risk
 
@@ -28,4 +34,4 @@
 
 ## Candidate Output Bundle
 
-- Deterministic Git source archive of implementation head `9025bc381ff9dcec1cb98142cb77666f34969403` SHA-256: `f375f09708e28a9cf4840d226da198d987d8a682cc823b567271c0ce49982d58`.
+- Deterministic Git source archive of manual-recovery implementation head `f61fca35aa125836559ce23a5421b325bb4e86ca` SHA-256: `c545c0bb3e6bae304dfd8b33adea8cbc09dda9647fb4a8f955ad103bee5c9014`.
