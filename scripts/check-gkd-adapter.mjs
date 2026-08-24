@@ -12,10 +12,10 @@ const IDENTITY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const BRANCH = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
 const POLICY_PATH = /^[A-Za-z0-9._/-]{1,255}$/;
 
-const BUNDLE_VERSION = "0.1.4";
-const RELEASE_SOURCE_SHA = "be1e515a64c4095676922c484555fb2a048da681";
-const EXECUTION_BUNDLE_DIGEST = "cdaa791ace82a5e7c407b29a93a4211b852d7f364900bbcd8a549dbe918bf2a7";
-const ASSET_SHA256 = "713fc828d234bc7ddd298cb68f5abfe1ede29f7891c283924cf3c3b98b2c0330";
+const BUNDLE_VERSION = "0.1.5";
+const RELEASE_SOURCE_SHA = "60ac0c49f1054ce2edea49b3ab6758bfbd3432b3";
+const EXECUTION_BUNDLE_DIGEST = "d749b753fb11aeab44d41b4e1d8bec44c7fa2d18a4b08148fbc0e0c127e27e6d";
+const ASSET_SHA256 = "f259475f4ca6c3425e53d734d03633541d6a1997e41991eb5a6115958d06a298";
 const ADAPTER_NAME = "aio-gkd-review";
 const REPOSITORY_ID = "aio-coding-hub";
 const REPOSITORY_IDENTITY = "KNaiFen/aio-coding-hub";
