@@ -6,6 +6,8 @@
 
 `.gkd/history-adapter.json` 是 AIO 专有的 tracked Trellis history 边界。`scripts/check-gkd-history.mjs` 只从 `git ls-files` 枚举 `.trellis/tasks` 下的 manifest：要求恰好一个 immediate-child active manifest，其 `worktree_path` 必须为 `null` 且不得使用 `coordination.version=1`；所有 archive descendant manifest 必须为 `completed`。archive 中历史 `worktree_path` 的值和存在性均被忽略，不作路径解析、不访问对应 filesystem 也不输出；未跟踪的 task 目录不是项目状态。当前 tracked inventory 为 1 个 active 和 107 个 archive manifest。
 
+`.gkd/ci-release-adapter.json` 绑定已取证的 speed-first recommendation、Air-safe Node-only micro boundary、独立 cloud job groups、`ci-gate`/`pr-title` required checks、redacted leak scan、artifact/cache bounds，以及 candidate 与 finalization 的 same-source-SHA 规则。`scripts/check-gkd-ci-release.mjs` 只读取相对仓库路径，输出稳定 code/digest；它不 dispatch workflow、查询 GitHub、写 settings/Secrets、创建 tag 或发布 Release。
+
 更新这些 adapter 文件时，必须保持 canonical JSON，并使用 `node scripts/check-gkd-adapter.mjs` 验证 pin、adapter digest、adapter policy、resource facts、history adapter 与通用 policy binding。仓库的版本化 GKD 本地验证入口是 `scripts/gkd-verify --base-sha <full-lowercase-sha>`，它只委托既有的零依赖 local runner，并在 history 表面变化时运行 read-only checker 及其 selftest。
 
 角色技能、claim receipt 和 runtime inventory 属于 project-local staging，不进入 Git；本仓库只保存可审查的通用 policy、pin、review adapter、project-only adapter policy、resource facts 和 history adapter，不复制 GKD 通用生命周期或运行时状态。adapter policy 不是实时 workflow/API discovery，resource facts 不能充当实时资源扫描、CPU/内存/磁盘容量或价格/账单事实，history adapter 也不恢复旧 Trellis 协调或接受流程。

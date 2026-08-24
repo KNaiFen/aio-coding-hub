@@ -27,6 +27,7 @@ assert.match(findWhitespaceErrors("bad.mjs", Buffer.from("const bad = true; \n")
 assert.equal(shouldRunAdapterSmoke(new Set(["src/main.ts"])), false);
 assert.equal(shouldRunAdapterSmoke(new Set([".gkd/review-adapter.json"])), true);
 assert.equal(shouldRunAdapterSmoke(new Set(["scripts/check-gkd-adapter.mjs"])), true);
+assert.equal(shouldRunAdapterSmoke(new Set(["scripts/check-gkd-ci-release.mjs"])), true);
 assert.equal(shouldRunAdapterSmoke(new Set(["scripts/gkd-verify"])), true);
 assert.equal(shouldRunHistorySmoke(new Set(["src/main.ts"])), false);
 assert.equal(shouldRunHistorySmoke(new Set([".gkd/history-adapter.json"])), true);
