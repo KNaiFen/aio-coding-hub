@@ -81,11 +81,11 @@ function assertSafeFile(root, path) {
   return absolute;
 }
 
-function changedPaths(root, base) {
+export function changedPaths(root, base) {
   const commands = [
-    ["diff", "--name-only", "-z", "--diff-filter=ACMR", base, "HEAD", "--"],
-    ["diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR", "--"],
-    ["diff", "--name-only", "-z", "--diff-filter=ACMR", "--"],
+    ["diff", "--name-only", "-z", "--diff-filter=ACMRD", base, "HEAD", "--"],
+    ["diff", "--cached", "--name-only", "-z", "--diff-filter=ACMRD", "--"],
+    ["diff", "--name-only", "-z", "--diff-filter=ACMRD", "--"],
     ["ls-files", "--others", "--exclude-standard", "-z"],
   ];
   return new Set(
