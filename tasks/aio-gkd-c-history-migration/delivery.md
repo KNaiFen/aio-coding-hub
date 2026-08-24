@@ -22,7 +22,7 @@
 | Tracked-only 1/107 inventory | 通过 | History smoke 返回 `active_count=1`、`archived_count=107`；isolated fixture 证明未跟踪 manifest 被忽略。 |
 | Active fail-closed rules | 通过 | Selftest 覆盖零/多 active、缺失或非 null `worktree_path`、`coordination.version=1` 和 malformed coordination。 |
 | Archive compatibility | 通过 | Selftest 接受 stale Unix、Windows、relative、null 或 absent worktree facts，拒绝 malformed 或非 completed archive。 |
-| Determinism and no writes | 通过 | Selftest 比较重复结果与前后 Git status；固定 base 到 implementation head 的 `.trellis/tasks/**` 路径集和内容无差异；local-verifier selftest 明确覆盖 active/archive manifest 触发和非 manifest 文档不触发。 |
+| Determinism and no writes | 通过 | Selftest 比较重复结果与前后 Git status；固定 base 到 implementation head 的 `.trellis/tasks/**` 路径集和内容无差异；local-verifier selftest 通过真实 Git 删除场景证明 active/archive manifest 触发、非 manifest 文档不触发。 |
 | Canonical route and closeout | 部分完成 | clean-main bootstrap、portable locator、epoch 1 automatic offer/claim 与 fresh exact executor repair 已完成；本文件提交后的 canonical delivery、独立 acceptance 与 records-only closeout 仍由各自角色完成。 |
 | Required verification | 部分完成 | 本地合同与 `git diff --check` 已通过；最终 fixed delivery head 的 `ci-gate`/`pr-title` 尚待 canonical monitor。 |
 
@@ -40,12 +40,13 @@
 
 - Epoch 0 fixed head `8be7e9cd676e0115acb05f3508cbdf095ee60c6d` 经独立审查被拒绝；HIGH finding 指出 manifest-only 变更不会触发 history smoke。
 - Epoch 1 仅修复该 finding：`.trellis/tasks/**/task.json` 现在触发 history smoke，active/archive manifest 与非 manifest Trellis 文档的触发行为均由 selftest 固定。
+- Epoch 2 仅修复同一 HIGH 的删除路径漏检：提交、暂存和 worktree 三类 diff filter 均从 `ACMR` 改为 `ACMRD`；selftest 以真实删除分别证明 active/archive manifest 触发 history smoke，并保持非 manifest Trellis 文档为 false。
 
 ## 验证
 
 | 类型 | 命令或检查 | 结果 | 说明 |
 |---|---|---|---|
-| 本地 | `scripts/gkd-verify --base-sha 3f856c88749f4875889164fa72caeebc22143d98` | 通过 | 在 implementation head `a3e0cbe4ff2e959906575033892e98e7bd5f4a40` 上返回 `local_ready`；覆盖 local/cloud-only contract selftests、adapter/history selftests 与 smoke、三层 diff、untracked whitespace 和六个 Node 文件语法。 |
+| 本地 | `scripts/gkd-verify --base-sha 3f856c88749f4875889164fa72caeebc22143d98` | 通过 | 在 implementation head `b913fccbc877e5ac482869c745c98959f481de83` 上返回 `local_ready`；history smoke 返回 `active_count=1`、`archived_count=107`，并覆盖删除触发 selftest、adapter/history selftests 与 smoke、三层 diff、untracked whitespace 和六个 Node 文件语法。 |
 | 本地 | `git diff --check` | 通过 | 无 whitespace error。 |
 | 本地 | fixed base 对 `.trellis/tasks/**` 的 path/content diff | 通过 | 无 tracked 路径或内容差异。 |
 | GitHub | `ci-gate` / `pr-title` | 等待 | 仅在 final fixed delivery head 上由 canonical monitor 观察一次。 |
@@ -67,8 +68,8 @@
 
 ## Candidate Output Bundle
 
-- Implementation head：`a3e0cbe4ff2e959906575033892e98e7bd5f4a40`。
-- Deterministic Git source archive SHA-256：`e01299e1814a910a0815124f8bd0476a749cb9e1e631805f2f9d8a5f4c55cabe`。
+- Implementation head：`b913fccbc877e5ac482869c745c98959f481de83`。
+- Deterministic Git source archive SHA-256：`7121abfa2d7bb8eacd29c825a20409990f74eb9a4fe15c64109f22d0f71c90b0`。
 
 ## 阻塞快照
 
