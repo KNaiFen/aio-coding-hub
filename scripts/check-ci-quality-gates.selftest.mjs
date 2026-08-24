@@ -240,15 +240,26 @@ for (const [name, fixture, expected] of [
     /ci\.yml contracts if must equal/,
   ],
   [
-    "frontend must require the contracts job to succeed",
+    "frontend must stay independent from contracts",
     {
       ...valid,
       ciWorkflow: ciWorkflow.replace(
-        "      needs.change-scope.outputs.frontend_ci == 'true' &&\n      needs.contracts.result == 'success'\n    runs-on: ubuntu-latest",
-        "      needs.change-scope.outputs.frontend_ci == 'true'\n    runs-on: ubuntu-latest"
+        "      needs.change-scope.outputs.frontend_ci == 'true'\n    runs-on: ubuntu-latest",
+        "      needs.change-scope.outputs.frontend_ci == 'true' &&\n      needs.contracts.result == 'success'\n    runs-on: ubuntu-latest"
       ),
     },
     /ci\.yml frontend if must equal/,
+  ],
+  [
+    "rust must stay independent from contracts",
+    {
+      ...valid,
+      ciWorkflow: ciWorkflow.replace(
+        "      needs.change-scope.outputs.rust_ci == 'true'\n    runs-on: ubuntu-22.04",
+        "      needs.change-scope.outputs.rust_ci == 'true' &&\n      needs.contracts.result == 'success'\n    runs-on: ubuntu-22.04"
+      ),
+    },
+    /ci\.yml rust if must equal/,
   ],
   [
     "contracts must run for checked docs or either code domain",
