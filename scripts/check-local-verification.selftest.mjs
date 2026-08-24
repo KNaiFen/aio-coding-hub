@@ -11,6 +11,7 @@ import {
   parseArguments,
   parseNulPaths,
   shouldRunAdapterSmoke,
+  shouldRunHistorySmoke,
 } from "./check-local-verification.mjs";
 
 const fullSha = "a".repeat(40);
@@ -26,6 +27,10 @@ assert.equal(shouldRunAdapterSmoke(new Set(["src/main.ts"])), false);
 assert.equal(shouldRunAdapterSmoke(new Set([".gkd/review-adapter.json"])), true);
 assert.equal(shouldRunAdapterSmoke(new Set(["scripts/check-gkd-adapter.mjs"])), true);
 assert.equal(shouldRunAdapterSmoke(new Set(["scripts/gkd-verify"])), true);
+assert.equal(shouldRunHistorySmoke(new Set(["src/main.ts"])), false);
+assert.equal(shouldRunHistorySmoke(new Set([".gkd/history-adapter.json"])), true);
+assert.equal(shouldRunHistorySmoke(new Set(["scripts/check-gkd-history.mjs"])), true);
+assert.equal(shouldRunHistorySmoke(new Set(["scripts/check-gkd-adapter.mjs"])), true);
 
 function runGit(cwd, args) {
   const result = spawnSync("git", args, { cwd, encoding: "utf8", shell: false });

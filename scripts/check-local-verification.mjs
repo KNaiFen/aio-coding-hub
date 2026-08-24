@@ -15,6 +15,10 @@ const ADAPTER_SMOKE_PATHS = new Set([
   "scripts/check-local-verification.selftest.mjs",
   "scripts/gkd-verify",
 ]);
+const HISTORY_SMOKE_PATHS = new Set([
+  "scripts/check-gkd-history.mjs",
+  "scripts/check-gkd-history.selftest.mjs",
+]);
 
 export class VerificationError extends Error {}
 export class UsageError extends Error {}
@@ -91,6 +95,10 @@ function changedPaths(root, base) {
 
 export function shouldRunAdapterSmoke(paths) {
   return [...paths].some((path) => path.startsWith(".gkd/") || ADAPTER_SMOKE_PATHS.has(path));
+}
+
+export function shouldRunHistorySmoke(paths) {
+  return shouldRunAdapterSmoke(paths) || [...paths].some((path) => HISTORY_SMOKE_PATHS.has(path));
 }
 
 export function collectChangedNodeFiles(root, base) {
@@ -170,6 +178,11 @@ export function verify(base) {
     runNodeScript("scripts/check-gkd-adapter.selftest.mjs");
     adapterSmoke = JSON.parse(runNodeScript("scripts/check-gkd-adapter.mjs").stdout);
   }
+  let historySmoke;
+  if (shouldRunHistorySmoke(paths)) {
+    runNodeScript("scripts/check-gkd-history.selftest.mjs");
+    historySmoke = JSON.parse(runNodeScript("scripts/check-gkd-history.mjs").stdout);
+  }
   const nodeFiles = [...paths]
     .filter((path) => NODE_SOURCE.test(path))
     .filter((path) => {
@@ -201,11 +214,17 @@ export function verify(base) {
       "worktree-diff",
       "untracked-whitespace",
       ...(adapterSmoke ? ["gkd-adapter-selftest", "gkd-adapter-smoke"] : []),
+      ...(historySmoke ? ["gkd-history-selftest", "gkd-history-smoke"] : []),
       "changed-node-syntax",
     ],
     adapter_smoke: {
       executed: adapterSmoke !== undefined,
       adapter_digest: adapterSmoke?.adapterDigest ?? null,
+    },
+    history_smoke: {
+      executed: historySmoke !== undefined,
+      active_count: historySmoke?.activeCount ?? null,
+      archived_count: historySmoke?.archivedCount ?? null,
     },
     cloud_owned: [
       "dependencies",

@@ -100,10 +100,28 @@ function readFixture() {
       zeroArtifact: true,
     },
   };
+  const historyAdapter = {
+    active: {
+      coordinationVersionsRejected: [1],
+      location: "tracked-immediate-child",
+      requiredCount: 1,
+      root: ".trellis/tasks",
+      worktreePath: "must-be-null",
+    },
+    archive: {
+      location: "tracked-descendants",
+      requiredStatus: "completed",
+      root: ".trellis/tasks/archive",
+      worktreePath: "ignored",
+    },
+    manifestName: "task.json",
+    schemaVersion: 1,
+  };
   return {
     pin,
     adapter: { ...withoutDigest, adapterDigest: digestObject(withoutDigest) },
     adapterPolicy,
+    historyAdapter,
     policy,
     resourceFacts: {
       billing: { cost: "unknown", verified: false },
@@ -123,6 +141,7 @@ function writeFixture(fixture) {
   writeCanonical(".gkd/bundle-pin.json", fixture.pin);
   writeCanonical(".gkd/review-adapter.json", fixture.adapter);
   writeCanonical(".gkd/adapter-policy.json", fixture.adapterPolicy);
+  writeCanonical(".gkd/history-adapter.json", fixture.historyAdapter);
   writeCanonical(".gkd/policy.json", fixture.policy);
   writeCanonical(".gkd/resource-facts.json", fixture.resourceFacts);
 }
@@ -151,6 +170,10 @@ try {
 
   writeFixture(readFixture());
   writeFileSync(join(root, ".gkd/resource-facts.json"), "{ }\n");
+  assert.throws(() => verifyAdapter(root), /ADAPTER_JSON_NOT_CANONICAL/);
+
+  writeFixture(readFixture());
+  writeFileSync(join(root, ".gkd/history-adapter.json"), "{ }\n");
   assert.throws(() => verifyAdapter(root), /ADAPTER_JSON_NOT_CANONICAL/);
 
   expectFailure(
@@ -190,6 +213,42 @@ try {
       fixture.adapterPolicy.unexpected = true;
     },
     /ADAPTER_POLICY_FIELDS_INVALID/
+  );
+  expectFailure(
+    (fixture) => {
+      fixture.historyAdapter.unexpected = true;
+    },
+    /HISTORY_ADAPTER_FIELDS_INVALID/
+  );
+  expectFailure(
+    (fixture) => {
+      fixture.historyAdapter.active.requiredCount = 2;
+    },
+    /HISTORY_ADAPTER_ACTIVE_INVALID/
+  );
+  expectFailure(
+    (fixture) => {
+      fixture.historyAdapter.active.unexpected = true;
+    },
+    /HISTORY_ADAPTER_ACTIVE_FIELDS_INVALID/
+  );
+  expectFailure(
+    (fixture) => {
+      fixture.historyAdapter.active.coordinationVersionsRejected = [];
+    },
+    /HISTORY_ADAPTER_ACTIVE_INVALID/
+  );
+  expectFailure(
+    (fixture) => {
+      fixture.historyAdapter.archive.worktreePath = "required";
+    },
+    /HISTORY_ADAPTER_ARCHIVE_INVALID/
+  );
+  expectFailure(
+    (fixture) => {
+      fixture.historyAdapter.archive.unexpected = true;
+    },
+    /HISTORY_ADAPTER_ARCHIVE_FIELDS_INVALID/
   );
   expectFailure(
     (fixture) => {
