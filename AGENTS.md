@@ -35,7 +35,3 @@
 - 不使用通用 worker、临时 agent、手写状态、候选 worktree 脚本或管理员绕过替代 canonical bundle。
 - 不安装依赖，不运行 package-manager、开发服务器、lint、类型检查、测试、构建、Cargo、Tauri、签名或打包；只运行 `$gkd-local-verify` 允许的零依赖检查。
 - 不记录真实凭据、完整对话、全量日志或未脱敏用户数据。
-
-<!-- TRELLIS:START -->
-Trellis 目录仅保存既有项目资料和历史记录；它不是 GKD 的任务状态、路由或验收入口。
-<!-- TRELLIS:END -->
