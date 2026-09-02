@@ -193,7 +193,7 @@ sudo xattr -cr /Applications/"AIO Coding Hub.app"
 仓库不在本地安装依赖、启动开发服务，也不在本地运行格式化、类型检查、Lint、测试或构建。允许的本地检查不依赖 `node_modules`，且不会生成 Node/Rust 产物：
 
 ```bash
-node scripts/check-local-verification.mjs --base <完整的任务基准 SHA>
+scripts/gkd-verify --base-sha <完整的任务基准 SHA>
 ```
 
 该固定 runner 会自行运行允许的合同/selftest、提交与工作区 diff 检查，以及所有变更 `.js`/`.cjs`/`.mjs` 文件的语法检查；不要追加或改用其他本地命令。普通 PR 与受保护分支推送会自动触发 `ci`，以对应提交的 `ci-gate` 和 `pr-title` 为准；不要为常规验证额外手动运行 `ci`。`workflow_dispatch` 仅用于 `main` 的恢复或候选构建，Provider trend release benchmark 由相关自动 CI 路径或独立 `performance` 工作流执行；需要桌面集成制品时，在 Actions 页面按需运行 `dev-build` 并选择目标。
@@ -243,7 +243,7 @@ curl http://127.0.0.1:37123/health
 
 - [项目知识库入口](docs/README.md)：产品、架构、插件、运维、任务和历史资料的权威导航。
 - [待处理事项](PENDING.md) 与 [已完成事项](PENDING_COMPLETED.md)：延后工作和交付记录。
-- [Trellis 任务索引](.trellis/tasks/README.md)：实施计划、研究、验证和归档任务。
+- [GKD 任务目录](tasks/)：由 canonical bundle 生成的需求、计划、交付和验收事实。
 
 现行实现和机器可读合同优先于历史审计、旧计划和会话日志；完整文档生命周期见 [知识库维护规则](docs/README.md#维护规则)。
 

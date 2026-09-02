@@ -4,17 +4,15 @@
 
 This repository keeps local worktrees free of dependency and build artifacts.
 The contract applies to repository rules, README instructions, root/workspace
-package scripts, Tauri build hooks, Trellis workflow/agent guidance, active AIO
+package scripts, Tauri build hooks, canonical GKD task guidance, active AIO
 specs, `ci.yml`, `pr-title.yml`, `performance.yml`, and `dev-build.yml`.
-Historical tasks, archived records, and workspace journals remain historical
-evidence and are not rewritten.
 
 ## 2. Local Allowlist
 
 Local execution uses one dependency-free, non-writing entry point with the task's recorded full base SHA:
 
 ```bash
-node scripts/check-local-verification.mjs --base <full-task-base-sha>
+scripts/gkd-verify --base-sha <full-lowercase-sha>
 ```
 
 The runner has a fixed subprocess allowlist: its own self-test, the cloud-only
@@ -89,7 +87,7 @@ The checker self-test must fail when:
 
 - a root/workspace script lacks the Actions guard or a local dev/precommit
   entry reappears;
-- README or active Trellis guidance recommends a prohibited local command;
+- README or active GKD guidance recommends a prohibited local command;
 - AGENTS/README stop routing local verification through the fixed runner, or
   the runner loses its fixed contract/self-test and diff/syntax command set;
 - Tauri regains a local dev hook;

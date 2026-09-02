@@ -28,8 +28,7 @@ waiting for a check that never reports.
 - `.github/**` and the classifier/self-test scripts are immutable control-plane
   exceptions: code hard-codes them to complete CI, so the policy cannot grant
   itself or its interpreter a cheaper route.
-- `.github/**`, `.trellis/scripts/**`, `.trellis/config.yaml`, root dependency
-  files, CI/tooling scripts, generated frontend bindings, and
+- `.github/**`, `.gkd/**`, root dependency files, CI/tooling scripts, generated frontend bindings, and
   `docs/plugins/plugin-api-v1-contract.json` require complete CI. Unknown paths
   also require complete CI.
 - A path matching conflicting documentation or source tiers requires complete

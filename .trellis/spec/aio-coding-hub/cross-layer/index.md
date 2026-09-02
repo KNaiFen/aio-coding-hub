@@ -40,8 +40,6 @@ TypeScript bindings, frontend adapters, and React UI.
 - [Gateway listen and token contract](./gateway-listen-token-contract.md):
   lifecycle-serialized listener rebinding and CLI proxy sync, non-loopback
   Bearer authentication, one-shot plaintext ownership, and frontend rollback.
-- [Trellis task context archive contract](./trellis-task-context-archive-contract.md):
-  exact self-reference rewriting and repository-wide context validation before archive commit.
 - [Request-log retention, usage-ledger, and pagination contract](./request-log-usage-ledger-pagination-contract.md):
   independent detail/statistics lifetimes, non-blocking ledger backfill, and
   opaque cursor pagination without changing the Home realtime feed.
@@ -192,12 +190,6 @@ gateway access-token presentation:
    reveal/acknowledge/rotate semantics, and credential-stripping unchanged.
 4. Keep one page-lifetime reveal owner and test pending, success, `null`, error,
    tab unmount, close-without-ack, copy, acknowledge, and rotate paths.
-
-When changing Trellis task archive or context validation:
-
-1. Read [Trellis task context archive contract](./trellis-task-context-archive-contract.md).
-2. Keep path rewriting JSON-aware and limited to the archived task's exact `file` prefix.
-3. Validate all active and archived manifests before archive auto-commit.
 
 When changing request-log retention, usage statistics, or the Logs page:
 

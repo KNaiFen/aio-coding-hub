@@ -55,8 +55,7 @@ expectScope(["src/main.tsx", "docs/plugins/authoring.md"], {
 for (const path of [
   ".github/workflows/ci.yml",
   ".github/ci-scope.json",
-  ".trellis/config.yaml",
-  ".trellis/scripts/task.py",
+  ".gkd/policy.json",
   "docs/plugins/plugin-api-v1-contract.json",
   "docs/image.png",
   "package.json",

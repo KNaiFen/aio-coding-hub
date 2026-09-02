@@ -100,11 +100,11 @@ jobs:
       - name: Validate cloud-only verification contract
         run: node scripts/check-cloud-only-verification.mjs
 
+      - name: Validate GKD adapter
+        run: node scripts/check-gkd-adapter.selftest.mjs && node scripts/check-gkd-adapter.mjs
+
       - name: Validate GKD CI and release adapter
         run: node scripts/check-gkd-ci-release.selftest.mjs && node scripts/check-gkd-ci-release.mjs
-
-      - name: Validate Trellis task coordination
-        run: PYTHONPATH=.trellis/scripts python3 -m unittest discover -s .trellis/scripts/tests -p 'test_*.py'
 
       - name: Validate cloud-only verification self-test
         if: needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true'

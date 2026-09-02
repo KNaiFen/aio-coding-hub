@@ -9,8 +9,8 @@
 1. 当前代码、类型、机器可读合同与自动化校验。
 2. `AGENTS.md` 和 `.trellis/spec/` 中适用于当前目录的强制规则。
 3. 本页列出的现行产品、架构、插件与运维文档。
-4. `PENDING.md` 和 `.trellis/tasks/` 中尚未交付的任务决策。
-5. `docs/history/`、`PENDING_COMPLETED.md` 与 Trellis 任务归档中的历史证据。
+4. `PENDING.md` 和 `tasks/` 中尚未交付的任务决策。
+5. `docs/history/` 与 `PENDING_COMPLETED.md` 中的历史证据。
 6. `.trellis/workspace/` 中的会话日志。
 
 历史审计、旧计划、任务正文和会话日志用于解释当时发生了什么，不得覆盖当前实现和现行规范。
@@ -37,11 +37,9 @@
 - [Homebrew 发布指南](./release-homebrew.md)
 - [GitHub Actions 治理与远端配置](./operations/github-actions-governance.md)
 - [GKD 项目 adapter](./operations/gkd-adapter.md)
-- [任务方案与实施结果留痕规范](./operations/task-documentation-records.md)
-- [多 Worktree 任务交付入口](./operations/multi-worktree-delivery.md)：按 planning、execution、acceptance、cleanup 阶段加载专题。
+- [GKD 任务记录](./operations/task-documentation-records.md)：requirements、plan、delivery 与收尾记录。
 - [仓库执行规则](../AGENTS.md)
-- [Trellis 工作流](../.trellis/workflow.md)
-- [Trellis 规范目录](../.trellis/spec/)
+- [项目规范目录](../.trellis/spec/)
 
 本仓库执行零产物本地策略。本地允许的验证范围以 `AGENTS.md` 为准；依赖安装、前端完整质量门、Rust、生成绑定和构建由 GitHub Actions 负责。
 
@@ -49,13 +47,12 @@
 
 - [待处理事项](../PENDING.md)：用户明确要求累积、尚未完成的小问题。
 - [已完成事项](../PENDING_COMPLETED.md)：已交付或明确放弃的 PENDING 历史。
-- [Trellis 任务索引](../.trellis/tasks/README.md)：正式任务、实施计划、研究与验证证据。
-- [Trellis 会话记录](../.trellis/workspace/index.md)：按开发者保存的会话追溯材料，不是现行事实源。
+- [GKD 任务目录](../tasks/)：正式任务、计划、交付与验收证据。
 
 ## 历史资料
 
 - [历史资料索引](./history/README.md)：带日期的审计、被替代计划和工程分析。
-- [Trellis 已归档任务](../.trellis/tasks/archive/)：完成任务的 PRD、设计、实施和检查上下文。
+- [历史资料索引](./history/README.md)：已完成任务和审计证据。
 
 ## 文档状态
 
@@ -68,7 +65,7 @@
 
 1. 新增长期文档时放入稳定分类目录，并在本页或对应子索引中添加入口；不要恢复根目录散落文档。
 2. 实现、公共 API、发布流程或验证边界变化时，同一变更内更新相关现行文档和机器合同。
-3. Trellis 活动状态由 `task.py` 写入 `task.json`；main 在终态 `acceptance.md` 记录验收版本、结果、merge、知识库/PENDING 和清理事实。有功能 PR 时在其合并后收尾；无功能 PR 的失败、放弃或部分完成通过 records-only PR 收尾；阻塞任务保持活动。
+3. GKD 活动状态由 canonical `gkd-task` 写入任务目录；`gkd_acceptor` 与可信 main 负责固定 head 验收、merge 和收尾。
 4. 历史文件只修正状态说明、有效入口或明确的链接损坏，不把旧结论改写成今天的结论。
-5. 使用相对链接；提交前通过 `$gkd-local-verify` 的固定 runner 运行仓库允许的合同、Node 语法和 diff 检查，并按需运行适用的 Trellis 检查。没有覆盖某类链接时如实说明，不把 `validate --all` 当 Markdown 校验。
+5. 使用相对链接；提交前通过 `$gkd-local-verify` 的固定 runner 运行仓库允许的合同、Node 语法和 diff 检查。不要自行选择额外本地命令。
 6. `.local/` 外部参考 checkout、`.playwright-cli/`、`.impeccable/`、`.trellis/.runtime/`、`.codegraph/` 等本地产物不进入知识库。

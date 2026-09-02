@@ -18,15 +18,15 @@
     ]
   },
   "checkedDocumentation": {
-    "exactPaths": ["README.md", "README_EN.md", ".trellis/workflow.md"],
+    "exactPaths": ["README.md", "README_EN.md"],
     "prefixRules": [
-      {
-        "prefix": ".trellis/agents/",
-        "extensions": [".md"]
-      },
       {
         "prefix": ".trellis/spec/",
         "extensions": [".md"]
+      },
+      {
+        "prefix": "tasks/",
+        "extensions": [".md", ".json"]
       },
       {
         "prefix": "docs/",
@@ -63,6 +63,10 @@
   "sharedSource": {
     "exactPaths": ["package.json", "pnpm-lock.yaml", "src/generated/bindings.ts"],
     "prefixRules": [
+      {
+        "prefix": ".gkd/",
+        "extensions": [".json"]
+      },
       {
         "prefix": "scripts/",
         "extensions": [".js", ".mjs"]

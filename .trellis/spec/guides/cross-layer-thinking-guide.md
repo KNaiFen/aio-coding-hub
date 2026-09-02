@@ -140,22 +140,16 @@ In Trellis, command templates (e.g., `record-session.md`) exist in **multiple pl
 
 ## Generated Runtime Template Upgrade Consistency
 
-Some generated files are both documentation and runtime input. In Trellis,
-`.trellis/workflow.md` is parsed by `get_context.py`, `workflow_phase.py`,
-SessionStart filters, and per-turn hooks. Template changes must be validated
-against both fresh init and upgrade paths.
+Some generated files are both documentation and runtime input. For GKD, the
+canonical bundle owns generation and parsing of task envelopes and receipts;
+the project repository must only validate adapter declarations.
 
 ### Checklist: After Modifying A Runtime-Parsed Template
 
-- [ ] Identify every runtime parser that reads the template, not just the file
-      writer that installs it
-- [ ] Check whether relevant syntax lives outside obvious managed regions
-      such as tag blocks
-- [ ] Verify fresh `init` output and a versioned `update` scenario that writes
-      the older `.trellis/.version`
-- [ ] Add an upgrade regression using an older pristine template fixture, then
-      assert the installed file reaches the current packaged shape
-- [ ] Update the backend spec that owns the runtime contract
+- [ ] Identify the bundle command that generates the envelope or receipt
+- [ ] Verify the adapter consumes canonical bytes and rejects drift
+- [ ] Keep runtime state out of Git and out of project task Markdown
+- [ ] Update the project adapter spec when the bundle contract changes
 
 ---
 
@@ -184,13 +178,8 @@ served 0.6 beta behavior under the Release selector. The fix was to restore root
 release docs, move the 0.6 content to `beta/` and `zh/beta/`, and add a grep
 audit for beta markers against the root release tree.
 
-**Real-world example**: Codex inline mode changed workflow platform markers from
-`[Codex]` / `[Kilo, Antigravity, Windsurf]` to `[codex-sub-agent]` /
-`[codex-inline, Kilo, Antigravity, Windsurf]`. Fresh init was correct, but
-`trellis update` only merged `[workflow-state:*]` blocks and preserved stale
-markers outside those blocks. Result: upgraded projects got new hook scripts
-but old workflow routing, so `get_context.py --mode phase --platform codex`
-could return empty Phase 2.1 detail.
+**Rule**: do not copy bundle lifecycle templates into the project or maintain a
+second parser for task state.
 
 ---
 
@@ -237,30 +226,19 @@ In Trellis, command templates (e.g., `record-session.md`) exist in **multiple pl
 
 ## Generated Runtime Template Upgrade Consistency
 
-Some generated files are both documentation and runtime input. In Trellis,
-`.trellis/workflow.md` is parsed by `get_context.py`, `workflow_phase.py`,
-SessionStart filters, and per-turn hooks. Template changes must be validated
-against both fresh init and upgrade paths.
+Some generated files are both documentation and runtime input. For GKD, the
+canonical bundle owns generation and parsing of task envelopes and receipts;
+the project repository must only validate adapter declarations.
 
 ### Checklist: After Modifying A Runtime-Parsed Template
 
-- [ ] Identify every runtime parser that reads the template, not just the file
-  writer that installs it
-- [ ] Check whether relevant syntax lives outside obvious managed regions
-  such as tag blocks
-- [ ] Verify fresh `init` output and a versioned `update` scenario that writes
-  the older `.trellis/.version`
-- [ ] Add an upgrade regression using an older pristine template fixture, then
-  assert the installed file reaches the current packaged shape
-- [ ] Update the backend spec that owns the runtime contract
+- [ ] Identify the bundle command that generates the envelope or receipt
+- [ ] Verify the adapter consumes canonical bytes and rejects drift
+- [ ] Keep runtime state out of Git and out of project task Markdown
+- [ ] Update the project adapter spec when the bundle contract changes
 
-**Real-world example**: Codex inline mode changed workflow platform markers from
-`[Codex]` / `[Kilo, Antigravity, Windsurf]` to `[codex-sub-agent]` /
-`[codex-inline, Kilo, Antigravity, Windsurf]`. Fresh init was correct, but
-`trellis update` only merged `[workflow-state:*]` blocks and preserved stale
-markers outside those blocks. Result: upgraded projects got new hook scripts
-but old workflow routing, so `get_context.py --mode phase --platform codex`
-could return empty Phase 2.1 detail.
+**Rule**: do not copy bundle lifecycle templates into the project or maintain a
+second parser for task state.
 
 ---
 

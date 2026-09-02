@@ -99,23 +99,6 @@ for (const [name, mutate, expected] of [
     /README\.md must not present a package\/native command/,
   ],
   [
-    "Trellis local lint instruction",
-    (fixture) => {
-      fixture.trellisWorkflow += "\nRun project lint and type-check\n";
-    },
-    /\.trellis\/workflow\.md contains a prohibited local instruction/,
-  ],
-  [
-    "Trellis fixed local verification routing",
-    (fixture) => {
-      fixture.trellisWorkflow = fixture.trellisWorkflow.replace(
-        "通过 `$gkd-local-verify` 的固定 runner 执行 `AGENTS.md` 允许的本地检查",
-        "自行选择本地检查"
-      );
-    },
-    /\.trellis\/workflow\.md must include.*gkd-local-verify/,
-  ],
-  [
     "GKD role routing",
     (fixture) => {
       fixture.agents = fixture.agents.replaceAll("$gkd-main", "$main");
@@ -123,11 +106,25 @@ for (const [name, mutate, expected] of [
     /AGENTS\.md must include "\$gkd-main"/,
   ],
   [
+    "canonical GKD task routing",
+    (fixture) => {
+      fixture.agents = fixture.agents.replaceAll("gkd-task", "legacy-task");
+    },
+    /AGENTS\.md must include "gkd-task"/,
+  ],
+  [
+    "old task lifecycle removed",
+    (fixture) => {
+      fixture.agents += "\npython3 .trellis/scripts/task.py accept\n";
+    },
+    /AGENTS\.md contains a prohibited local instruction/,
+  ],
+  [
     "fixed local verification routing",
     (fixture) => {
-      fixture.agents = fixture.agents.replaceAll("check-local-verification.mjs", "local-check.mjs");
+      fixture.agents = fixture.agents.replaceAll("scripts/gkd-verify --base-sha", "scripts/local-check");
     },
-    /AGENTS\.md must include "check-local-verification\.mjs"/,
+    /AGENTS\.md must include "scripts\/gkd-verify --base-sha"/,
   ],
   [
     "fixed local runner self-test",
@@ -226,6 +223,16 @@ for (const [name, mutate, expected] of [
       );
     },
     /ci\.yml contracts must include node scripts\/check-cloud-only-verification\.mjs/,
+  ],
+  [
+    "contracts GKD adapter step",
+    (fixture) => {
+      fixture.ciWorkflow = fixture.ciWorkflow.replace(
+        "        run: node scripts/check-gkd-adapter.selftest.mjs && node scripts/check-gkd-adapter.mjs",
+        "        run: true"
+      );
+    },
+    /ci\.yml contracts must include node scripts\/check-gkd-adapter\.selftest\.mjs/,
   ],
 ]) {
   expectContractFailure(name, mutate, expected);

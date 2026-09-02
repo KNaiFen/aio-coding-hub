@@ -277,7 +277,7 @@ cloud-owned gates and must not be invoked locally.
 Allowed local verification is limited to:
 
 ```bash
-node scripts/check-local-verification.mjs --base <full-task-base-sha>
+scripts/gkd-verify --base-sha <full-lowercase-sha>
 ```
 
 ### 7. Wrong vs Correct
