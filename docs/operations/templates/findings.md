@@ -1,4 +1,4 @@
-# GKD 验收整改：{{任务名称}}
+# 验收整改：{{任务名称}}
 
 - 被验收 head：`{{完整 SHA}}`
 - finding ID：`{{稳定 ID}}`
@@ -8,4 +8,4 @@
 - 修改边界：{{允许触碰与明确禁止}}
 - 复验方式：{{固定 head、CI、policy 和 AC}}
 
-阻塞 finding 只能由 trusted main 调用 `gkd-task rework` 生成新 offer；禁止复用旧 claim、activation 或 receipt。
+阻塞 finding 只能由 trusted main 生成新 offer；禁止复用旧 claim、activation 或 receipt。
