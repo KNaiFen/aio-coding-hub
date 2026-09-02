@@ -36,7 +36,6 @@
 
 - [Homebrew 发布指南](./release-homebrew.md)
 - [GitHub Actions 治理与远端配置](./operations/github-actions-governance.md)
-- [GKD 项目 adapter](./operations/gkd-adapter.md)
 - [仓库执行规则](../AGENTS.md)
 - [项目规范目录](../.trellis/spec/)
 
