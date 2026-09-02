@@ -24,8 +24,6 @@ TypeScript bindings, frontend adapters, and React UI.
   history paths, DB-reference validation, and asset-scope authority.
 - [Settings ownership and rollback contract](./settings-ownership-rollback-contract.md):
   lock-internal field-owned RMW, whole-snapshot CAS, and safe rollback.
-- [Trellis task context archive contract](./trellis-task-context-archive-contract.md):
-  exact self-reference rewriting and repository-wide context validation before archive commit.
 
 ## Pre-Development Checklist
 
@@ -92,12 +90,6 @@ When changing a production settings writer:
 2. Name the fields owned by the writer and search every production `settings::write` call.
 3. Keep read, mutation, validation and write under the shared settings lock.
 4. Define a committed-field token and CAS rollback for external side effects.
-
-When changing Trellis task archive or context validation:
-
-1. Read [Trellis task context archive contract](./trellis-task-context-archive-contract.md).
-2. Keep path rewriting JSON-aware and limited to the archived task's exact `file` prefix.
-3. Validate all active and archived manifests before archive auto-commit.
 
 ## Quality Check
 
