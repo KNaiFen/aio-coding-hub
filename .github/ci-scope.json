@@ -8,10 +8,6 @@
         "extensions": [".md", ".json", ".jsonl"]
       },
       {
-        "prefix": ".trellis/workspace/",
-        "extensions": [".md"]
-      },
-      {
         "prefix": "omx_wiki/",
         "extensions": [".md"]
       }
