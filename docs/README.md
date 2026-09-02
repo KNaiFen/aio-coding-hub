@@ -37,7 +37,6 @@
 - [Homebrew 发布指南](./release-homebrew.md)
 - [GitHub Actions 治理与远端配置](./operations/github-actions-governance.md)
 - [GKD 项目 adapter](./operations/gkd-adapter.md)
-- [GKD 任务记录](./operations/task-documentation-records.md)：requirements、plan、delivery 与收尾记录。
 - [仓库执行规则](../AGENTS.md)
 - [项目规范目录](../.trellis/spec/)
 
@@ -47,7 +46,7 @@
 
 - [待处理事项](../PENDING.md)：用户明确要求累积、尚未完成的小问题。
 - [已完成事项](../PENDING_COMPLETED.md)：已交付或明确放弃的 PENDING 历史。
-- [GKD 任务目录](../tasks/)：正式任务、计划、交付与验收证据。
+- [任务目录](../tasks/)：正式任务、计划、交付与验收证据。
 
 ## 历史资料
 
@@ -65,7 +64,7 @@
 
 1. 新增长期文档时放入稳定分类目录，并在本页或对应子索引中添加入口；不要恢复根目录散落文档。
 2. 实现、公共 API、发布流程或验证边界变化时，同一变更内更新相关现行文档和机器合同。
-3. GKD 活动状态由 canonical `gkd-task` 写入任务目录；`gkd_acceptor` 与可信 main 负责固定 head 验收、merge 和收尾。
+3. 任务目录只保存正式任务、计划、交付与验收证据。
 4. 历史文件只修正状态说明、有效入口或明确的链接损坏，不把旧结论改写成今天的结论。
-5. 使用相对链接；提交前通过 `$gkd-local-verify` 的固定 runner 运行仓库允许的合同、Node 语法和 diff 检查。不要自行选择额外本地命令。
+5. 使用相对链接；提交前按 `AGENTS.md` 规定的验证范围执行检查。
 6. `.local/` 外部参考 checkout、`.playwright-cli/`、`.impeccable/`、`.trellis/.runtime/`、`.codegraph/` 等本地产物不进入知识库。
