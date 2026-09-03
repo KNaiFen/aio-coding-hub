@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.60.56](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.56) (2026-09-03)
+
+### Highlights
+
+* show an estimated output token speed in TUI request details when precise timing is unavailable
+
 ## [0.60.55](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.55) (2026-08-17)
 
 ### Highlights
