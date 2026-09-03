@@ -16,15 +16,15 @@ fn add_column_if_missing(
         )
         .map_err(|error| format!("failed to inspect {table}.{column}: {error}"))?;
     if !exists {
-        conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {definition};"))
+        conn.execute_batch(&format!(
+            "ALTER TABLE {table} ADD COLUMN {column} {definition};"
+        ))
         .map_err(|error| format!("failed to add {table}.{column}: {error}"))?;
     }
     Ok(())
 }
 
-pub(super) fn migrate_v53_to_v54(
-    conn: &mut Connection,
-) -> crate::shared::error::AppResult<()> {
+pub(super) fn migrate_v53_to_v54(conn: &mut Connection) -> crate::shared::error::AppResult<()> {
     let tx = conn
         .transaction()
         .map_err(|error| format!("failed to start v53->v54 transaction: {error}"))?;

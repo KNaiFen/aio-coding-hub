@@ -204,18 +204,20 @@ fn request_log_insert_from_args(
         0
     };
     let estimated_final_upstream_attempt_duration_ms = (successful
-        && metrics.output_tokens.is_some_and(|output_tokens| output_tokens > 0))
-        .then_some(estimated_final_upstream_attempt_duration_ms)
-        .flatten()
-        .and_then(|value| {
-            if value == 0
-                || value > duration_ms as u128
-                || ttfb_ms.is_some_and(|ttfb_ms| value < ttfb_ms as u128)
-            {
-                return None;
-            }
-            Some(value.min(i64::MAX as u128) as i64)
-        });
+        && metrics
+            .output_tokens
+            .is_some_and(|output_tokens| output_tokens > 0))
+    .then_some(estimated_final_upstream_attempt_duration_ms)
+    .flatten()
+    .and_then(|value| {
+        if value == 0
+            || value > duration_ms as u128
+            || ttfb_ms.is_some_and(|ttfb_ms| value < ttfb_ms as u128)
+        {
+            return None;
+        }
+        Some(value.min(i64::MAX as u128) as i64)
+    });
 
     Some(request_logs::RequestLogInsert {
         trace_id,
@@ -985,7 +987,10 @@ WHERE trace_id = ?1
         assert_eq!(insert.cache_creation_input_tokens, Some(5));
         assert_eq!(insert.cache_creation_5m_input_tokens, Some(6));
         assert_eq!(insert.cache_creation_1h_input_tokens, Some(7));
-        assert_eq!(insert.estimated_final_upstream_attempt_duration_ms, Some(250));
+        assert_eq!(
+            insert.estimated_final_upstream_attempt_duration_ms,
+            Some(250)
+        );
         assert_eq!(insert.usage_json, None);
     }
 

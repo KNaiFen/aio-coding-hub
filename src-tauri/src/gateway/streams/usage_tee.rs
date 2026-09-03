@@ -721,11 +721,13 @@ where
             .with_final_upstream_attempt_timing(
                 final_upstream_attempt_duration_ms,
                 final_upstream_attempt_timing_version,
-                (!stream_error_seen).then(|| {
-                    self.ctx
-                        .upstream_output_timing
-                        .observed_final_attempt_duration_ms()
-                }).flatten(),
+                (!stream_error_seen)
+                    .then(|| {
+                        self.ctx
+                            .upstream_output_timing
+                            .observed_final_attempt_duration_ms()
+                    })
+                    .flatten(),
             )
             .with_terminal_signal(terminal_signal)
             .with_stream_internal_error(self.tracker.stream_internal_error_evidence().cloned()),

@@ -1102,8 +1102,8 @@ fn estimated_output_tokens_per_second(request: &ObserverRequest) -> Option<f64> 
     if output_tokens <= 0 || estimated_final_upstream_attempt_duration_ms <= 0 {
         return None;
     }
-    let rate = output_tokens as f64
-        / (estimated_final_upstream_attempt_duration_ms as f64 / 1_000.0);
+    let rate =
+        output_tokens as f64 / (estimated_final_upstream_attempt_duration_ms as f64 / 1_000.0);
     rate.is_finite().then_some(rate)
 }
 
