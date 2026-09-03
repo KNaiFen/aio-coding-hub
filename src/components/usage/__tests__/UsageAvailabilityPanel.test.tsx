@@ -59,6 +59,8 @@ function makeLog(
     final_upstream_attempt_duration_ms: overrides.final_upstream_attempt_duration_ms ?? null,
     final_upstream_attempt_timing_version:
       overrides.final_upstream_attempt_timing_version ?? 0,
+    estimated_final_upstream_attempt_duration_ms:
+      overrides.estimated_final_upstream_attempt_duration_ms ?? null,
   };
 }
 

@@ -73,6 +73,9 @@ where
             .with_final_upstream_attempt_timing(
                 final_attempt_duration_ms,
                 i64::from(error_code.is_none() && final_attempt_duration_ms.is_some()),
+                self.ctx
+                    .upstream_output_timing
+                    .observed_final_attempt_duration_ms(),
             ),
         );
     }

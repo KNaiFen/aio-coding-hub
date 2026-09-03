@@ -1,1 +1,0 @@
-{"active":{"coordinationVersionsRejected":[1],"location":"tracked-immediate-child","requiredCount":1,"root":".trellis/tasks","worktreePath":"must-be-null"},"archive":{"location":"tracked-descendants","requiredStatus":"completed","root":".trellis/tasks/archive","worktreePath":"ignored"},"manifestName":"task.json","schemaVersion":1}

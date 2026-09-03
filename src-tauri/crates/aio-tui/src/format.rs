@@ -421,14 +421,22 @@ pub fn request_card_lines(
         .cost_usd
         .map(format_cost)
         .unwrap_or_else(|| "—".to_string());
-    let route_summary = match output_tokens_per_second(request) {
-        Some(rate) => format!(
+    let route_summary = if let Some(rate) = output_tokens_per_second(request) {
+        format!(
             "{}  {}  {}",
             request_card_route_result(request),
             card_timing,
             format_tokens_per_second_short(rate)
-        ),
-        None => format!("{}  {}", request_card_route_result(request), card_timing),
+        )
+    } else if let Some(rate) = estimated_output_tokens_per_second(request) {
+        format!(
+            "{}  {}  ≈{}",
+            request_card_route_result(request),
+            card_timing,
+            format_tokens_per_second_short(rate)
+        )
+    } else {
+        format!("{}  {}", request_card_route_result(request), card_timing)
     };
     let mut lines = vec![RequestCardLine::new(
         truncate_display(
@@ -1081,9 +1089,6 @@ pub fn output_tokens_per_second(request: &ObserverRequest) -> Option<f64> {
 fn estimated_output_tokens_per_second(request: &ObserverRequest) -> Option<f64> {
     if output_tokens_per_second(request).is_some()
         || request.state != ObserverRequestState::Terminal
-        || request.attempt_count != 1
-        || request.retry_count != 0
-        || request.provider_switch_count != 0
         || request.error_code.is_some()
         || !request
             .status
@@ -1092,11 +1097,13 @@ fn estimated_output_tokens_per_second(request: &ObserverRequest) -> Option<f64> 
         return None;
     }
     let output_tokens = request.usage.as_ref()?.output_tokens?;
-    let duration_ms = request.duration_ms?;
-    if output_tokens <= 0 || duration_ms <= 0 {
+    let estimated_final_upstream_attempt_duration_ms =
+        request.estimated_final_upstream_attempt_duration_ms?;
+    if output_tokens <= 0 || estimated_final_upstream_attempt_duration_ms <= 0 {
         return None;
     }
-    let rate = output_tokens as f64 / (duration_ms as f64 / 1_000.0);
+    let rate =
+        output_tokens as f64 / (estimated_final_upstream_attempt_duration_ms as f64 / 1_000.0);
     rate.is_finite().then_some(rate)
 }
 
@@ -1216,6 +1223,7 @@ mod tests {
             upstream_stream_timing_version: 0,
             final_upstream_attempt_duration_ms: None,
             final_upstream_attempt_timing_version: 0,
+            estimated_final_upstream_attempt_duration_ms: None,
             attempt_count,
             retry_count,
             provider_switch_count,
@@ -1626,9 +1634,9 @@ mod tests {
     }
 
     #[test]
-    fn detail_shows_estimated_output_rate_only_for_single_successful_attempt() {
-        let mut request = request_with_route_counts(1, 0, 0);
-        request.duration_ms = Some(20_000);
+    fn detail_shows_same_boundary_estimated_output_rate() {
+        let mut request = request_with_route_counts(2, 1, 1);
+        request.estimated_final_upstream_attempt_duration_ms = Some(20_000);
         request.usage = Some(ObserverRequestUsage {
             input_tokens: None,
             output_tokens: Some(248),
@@ -1642,7 +1650,7 @@ mod tests {
         assert!(detail_lines(&request, 10)
             .iter()
             .any(|line| line == "输出速率  ≈12.4 t/s"));
-        assert!(!request_card_lines(&request, 10, 80)[3].text.contains('≈'));
+        assert!(request_card_lines(&request, 10, 80)[3].text.contains('≈'));
 
         request.final_upstream_attempt_duration_ms = Some(10_000);
         request.final_upstream_attempt_timing_version = 1;
@@ -1654,19 +1662,12 @@ mod tests {
 
         request.final_upstream_attempt_duration_ms = None;
         request.final_upstream_attempt_timing_version = 0;
-        request.attempt_count = 2;
-        assert_eq!(estimated_output_tokens_per_second(&request), None);
-        assert!(detail_lines(&request, 10)
-            .iter()
-            .any(|line| line == "输出速率  —"));
-
-        request.attempt_count = 1;
         request.status = Some(500);
         assert_eq!(estimated_output_tokens_per_second(&request), None);
         request.status = Some(200);
-        request.duration_ms = None;
+        request.estimated_final_upstream_attempt_duration_ms = None;
         assert_eq!(estimated_output_tokens_per_second(&request), None);
-        request.duration_ms = Some(20_000);
+        request.estimated_final_upstream_attempt_duration_ms = Some(20_000);
         request.usage.as_mut().expect("usage").output_tokens = None;
         assert_eq!(estimated_output_tokens_per_second(&request), None);
     }

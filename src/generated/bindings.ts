@@ -4447,6 +4447,7 @@ export type RequestLogDetail = {
   upstream_stream_timing_version: number;
   final_upstream_attempt_duration_ms: number | null;
   final_upstream_attempt_timing_version: number;
+  estimated_final_upstream_attempt_duration_ms: number | null;
   attempts_json: string;
   input_tokens: number | null;
   output_tokens: number | null;
@@ -4527,6 +4528,7 @@ export type RequestLogSummary = {
   upstream_stream_timing_version: number;
   final_upstream_attempt_duration_ms: number | null;
   final_upstream_attempt_timing_version: number;
+  estimated_final_upstream_attempt_duration_ms: number | null;
   attempt_count: number;
   has_failover: boolean;
   start_provider_id: number;

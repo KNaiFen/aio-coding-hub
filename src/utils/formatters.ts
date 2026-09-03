@@ -104,6 +104,22 @@ export function computeOutputTokensPerSecond(
   return Number.isFinite(rate) ? rate : null;
 }
 
+export function computeEstimatedOutputTokensPerSecond(
+  outputTokens: number | null | undefined,
+  estimatedFinalUpstreamAttemptDurationMs: number | null | undefined
+) {
+  if (outputTokens == null || !Number.isFinite(outputTokens) || outputTokens <= 0) return null;
+  if (
+    estimatedFinalUpstreamAttemptDurationMs == null ||
+    !Number.isFinite(estimatedFinalUpstreamAttemptDurationMs) ||
+    estimatedFinalUpstreamAttemptDurationMs <= 0
+  ) {
+    return null;
+  }
+  const rate = outputTokens / (estimatedFinalUpstreamAttemptDurationMs / 1000);
+  return Number.isFinite(rate) ? rate : null;
+}
+
 export function formatTokensPerSecond(value: number | null | undefined) {
   if (value == null || !Number.isFinite(value)) return "—";
   const v = Math.max(0, value);

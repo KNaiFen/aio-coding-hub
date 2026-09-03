@@ -113,11 +113,7 @@ validator for a field whose raw contract requires exact values.
 
 GitHub Actions must run the focused frontend/Rust tests, generate bindings,
 format, lint, type-check, run Clippy, and complete the affected Rust suite.
-Locally, use only the dependency-free repository contract and diff check:
-
-```bash
-node scripts/check-local-verification.mjs --base <full-task-base-sha>
-```
+Local worktree checks must follow `AGENTS.md` and the `$gkd-main` skill.
 
 ### 7. Wrong vs Correct
 

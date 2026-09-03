@@ -1765,6 +1765,7 @@ mod tests {
             upstream_stream_timing_version: 0,
             final_upstream_attempt_duration_ms: None,
             final_upstream_attempt_timing_version: 0,
+            estimated_final_upstream_attempt_duration_ms: None,
             attempt_count: 1,
             retry_count: 0,
             provider_switch_count: 0,

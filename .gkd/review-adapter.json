@@ -1,1 +1,0 @@
-{"adapterDigest":"eac007446f5ce616aad866185b66da59a1fc5c74b32de21c0dffe117ed0443b6","adapterName":"aio-gkd-review","repositories":[{"capabilities":{"artifacts":true,"checks":true,"diff":true,"pullRequest":true},"defaultBranch":"main","id":"aio-coding-hub","identity":"KNaiFen/aio-coding-hub","policyPath":".gkd/policy.json","provider":"github"}],"schemaVersion":1}

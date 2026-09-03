@@ -79,17 +79,6 @@ for (const [name, fixture, expected] of [
     /ci\.yml contracts must include node scripts\/check-cloud-only-verification/,
   ],
   [
-    "contracts local verification runner self-test",
-    {
-      ...valid,
-      ciWorkflow: ciWorkflow.replace(
-        "        run: node scripts/check-local-verification.selftest.mjs\n",
-        ""
-      ),
-    },
-    /ci\.yml contracts must include node scripts\/check-local-verification\.selftest\.mjs/,
-  ],
-  [
     "frontend build",
     { ...valid, ciWorkflow: ciWorkflow.replace("        run: pnpm build\n", "") },
     /ci\.yml frontend must include pnpm build/,

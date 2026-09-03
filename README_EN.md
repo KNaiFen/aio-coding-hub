@@ -196,13 +196,7 @@ sudo xattr -cr /Applications/"AIO Coding Hub.app"
 
 ### Zero-Artifact Local Checks and Cloud Validation
 
-Do not install repository dependencies, start a development server, or run formatting, type checking, linting, tests, or builds locally. The allowed local checks do not need `node_modules` and do not create Node or Rust artifacts:
-
-```bash
-node scripts/check-local-verification.mjs --base <full-task-base-sha>
-```
-
-The fixed runner owns the allowed contract/self-tests, committed and worktree diff checks, and syntax checks for every changed `.js`, `.cjs`, and `.mjs` file; do not append or substitute another local command. Regular pull requests and protected-branch pushes trigger `ci` automatically; use the commit's `ci-gate` and `pr-title` results. Do not start an additional manual `ci` run for routine validation. `workflow_dispatch` is reserved for `main` recovery or candidate builds, while the Provider trend release benchmark runs on relevant automatic CI paths or the standalone `performance` workflow. Run `dev-build` from Actions only when a desktop integration artifact is needed.
+Do not install repository dependencies, start a development server, or run formatting, type checking, linting, tests, or builds locally. Worktree plans, progress, and review records follow `AGENTS.md` and the `$gkd-main` skill; GitHub Actions owns the complete quality gates. Regular pull requests and protected-branch pushes trigger `ci` automatically; use the commit's `ci-gate` and `pr-title` results. Do not start an additional manual `ci` run for routine validation. `workflow_dispatch` is reserved for `main` recovery or candidate builds, while the Provider trend release benchmark runs on relevant automatic CI paths or the standalone `performance` workflow. Run `dev-build` from Actions only when a desktop integration artifact is needed.
 
 <!-- SUPPORT_MATRIX_SOURCE_BUILD:START -->
 | Scope | Cloud workflow target | Notes |
@@ -238,9 +232,9 @@ curl http://127.0.0.1:37123/health
 
 - [Project knowledge base](docs/README.md): the canonical map for product, architecture, plugin, operations, task, and historical documentation.
 - [Pending work](PENDING.md) and [completed work](PENDING_COMPLETED.md): deferred items and delivery evidence.
-- [Trellis task index](.trellis/tasks/README.md): plans, research, checks, and archived task context.
+- Task plans, progress, and review records stay with their worktree; the repository does not maintain a second lifecycle state store.
 
-Current code and machine-readable contracts take precedence over historical audits, superseded plans, and session journals.
+Current code takes precedence over historical audits, superseded plans, and session journals.
 
 ## Tech Stack
 

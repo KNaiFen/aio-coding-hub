@@ -99,45 +99,18 @@ for (const [name, mutate, expected] of [
     /README\.md must not present a package\/native command/,
   ],
   [
-    "Trellis local lint instruction",
+    "legacy GKD references",
     (fixture) => {
-      fixture.trellisWorkflow += "\nRun project lint and type-check\n";
+      fixture.agents += `\n\`${["gkd", "task"].join("-")}\`\n`;
     },
-    /\.trellis\/workflow\.md contains a prohibited local instruction/,
+    /AGENTS\.md contains a prohibited local instruction/,
   ],
   [
-    "Trellis fixed local verification routing",
+    "missing worktree handoff file",
     (fixture) => {
-      fixture.trellisWorkflow = fixture.trellisWorkflow.replace(
-        "通过 `$gkd-local-verify` 的固定 runner 执行 `AGENTS.md` 允许的本地检查",
-        "自行选择本地检查"
-      );
+      fixture.agents = fixture.agents.replaceAll("progress.md", "status.md");
     },
-    /\.trellis\/workflow\.md must include.*gkd-local-verify/,
-  ],
-  [
-    "GKD role routing",
-    (fixture) => {
-      fixture.agents = fixture.agents.replaceAll("$gkd-main", "$main");
-    },
-    /AGENTS\.md must include "\$gkd-main"/,
-  ],
-  [
-    "fixed local verification routing",
-    (fixture) => {
-      fixture.agents = fixture.agents.replaceAll("check-local-verification.mjs", "local-check.mjs");
-    },
-    /AGENTS\.md must include "check-local-verification\.mjs"/,
-  ],
-  [
-    "fixed local runner self-test",
-    (fixture) => {
-      fixture.localVerificationRunner = fixture.localVerificationRunner.replace(
-        'runNodeScript("scripts/check-local-verification.selftest.mjs")',
-        'runNodeScript("scripts/other.selftest.mjs")'
-      );
-    },
-    /local verification runner must include.*check-local-verification\.selftest\.mjs/,
+    /AGENTS\.md must include "progress\.md"/,
   ],
   [
     "active spec bare cargo command",

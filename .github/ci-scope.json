@@ -8,22 +8,14 @@
         "extensions": [".md", ".json", ".jsonl"]
       },
       {
-        "prefix": ".trellis/workspace/",
-        "extensions": [".md"]
-      },
-      {
         "prefix": "omx_wiki/",
         "extensions": [".md"]
       }
     ]
   },
   "checkedDocumentation": {
-    "exactPaths": ["README.md", "README_EN.md", ".trellis/workflow.md"],
+    "exactPaths": ["README.md", "README_EN.md"],
     "prefixRules": [
-      {
-        "prefix": ".trellis/agents/",
-        "extensions": [".md"]
-      },
       {
         "prefix": ".trellis/spec/",
         "extensions": [".md"]
