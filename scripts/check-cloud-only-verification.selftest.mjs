@@ -99,42 +99,18 @@ for (const [name, mutate, expected] of [
     /README\.md must not present a package\/native command/,
   ],
   [
-    "GKD role routing",
+    "legacy GKD references",
     (fixture) => {
-      fixture.agents = fixture.agents.replaceAll("$gkd-main", "$main");
-    },
-    /AGENTS\.md must include "\$gkd-main"/,
-  ],
-  [
-    "canonical GKD task routing",
-    (fixture) => {
-      fixture.agents = fixture.agents.replaceAll("gkd-task", "legacy-task");
-    },
-    /AGENTS\.md must include "gkd-task"/,
-  ],
-  [
-    "old task lifecycle removed",
-    (fixture) => {
-      fixture.agents += "\npython3 .trellis/scripts/task.py accept\n";
+      fixture.agents += `\n\`${["gkd", "task"].join("-")}\`\n`;
     },
     /AGENTS\.md contains a prohibited local instruction/,
   ],
   [
-    "fixed local verification routing",
+    "missing worktree handoff file",
     (fixture) => {
-      fixture.agents = fixture.agents.replaceAll("scripts/gkd-verify --base-sha", "scripts/local-check");
+      fixture.agents = fixture.agents.replaceAll("progress.md", "status.md");
     },
-    /AGENTS\.md must include "scripts\/gkd-verify --base-sha"/,
-  ],
-  [
-    "fixed local runner self-test",
-    (fixture) => {
-      fixture.localVerificationRunner = fixture.localVerificationRunner.replace(
-        'runNodeScript("scripts/check-local-verification.selftest.mjs")',
-        'runNodeScript("scripts/other.selftest.mjs")'
-      );
-    },
-    /local verification runner must include.*check-local-verification\.selftest\.mjs/,
+    /AGENTS\.md must include "progress\.md"/,
   ],
   [
     "active spec bare cargo command",
@@ -223,16 +199,6 @@ for (const [name, mutate, expected] of [
       );
     },
     /ci\.yml contracts must include node scripts\/check-cloud-only-verification\.mjs/,
-  ],
-  [
-    "contracts GKD adapter step",
-    (fixture) => {
-      fixture.ciWorkflow = fixture.ciWorkflow.replace(
-        "        run: node scripts/check-gkd-adapter.selftest.mjs && node scripts/check-gkd-adapter.mjs",
-        "        run: true"
-      );
-    },
-    /ci\.yml contracts must include node scripts\/check-gkd-adapter\.selftest\.mjs/,
   ],
 ]) {
   expectContractFailure(name, mutate, expected);

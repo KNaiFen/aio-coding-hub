@@ -100,19 +100,9 @@ jobs:
       - name: Validate cloud-only verification contract
         run: node scripts/check-cloud-only-verification.mjs
 
-      - name: Validate GKD adapter
-        run: node scripts/check-gkd-adapter.selftest.mjs && node scripts/check-gkd-adapter.mjs
-
-      - name: Validate GKD CI and release adapter
-        run: node scripts/check-gkd-ci-release.selftest.mjs && node scripts/check-gkd-ci-release.mjs
-
       - name: Validate cloud-only verification self-test
         if: needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true'
         run: node scripts/check-cloud-only-verification.selftest.mjs
-
-      - name: Validate local verification runner self-test
-        if: needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true'
-        run: node scripts/check-local-verification.selftest.mjs
 
       - name: Validate CI change-scope classifier
         if: needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true'

@@ -146,7 +146,6 @@ of that replay model.
 
 ## Runtime contract ownership
 
-Generated task envelopes, receipts, and lifecycle state have one owner: the
-canonical GKD bundle. Project code must consume those contracts through the
-bundle interfaces instead of copying parsers or maintaining a second script
-tree.
+Generated task envelopes, receipts, and lifecycle state have one owner. Project
+code must consume those contracts through the owning interfaces instead of
+copying parsers or maintaining a second script tree.

@@ -140,16 +140,15 @@ In Trellis, command templates (e.g., `record-session.md`) exist in **multiple pl
 
 ## Generated Runtime Template Upgrade Consistency
 
-Some generated files are both documentation and runtime input. For GKD, the
-canonical bundle owns generation and parsing of task envelopes and receipts;
-the project repository must only validate adapter declarations.
+Some generated files are both documentation and runtime input. Keep generation
+and parsing in the owning application layer; do not add a second workflow state
+format or parser to the project repository.
 
 ### Checklist: After Modifying A Runtime-Parsed Template
 
-- [ ] Identify the bundle command that generates the envelope or receipt
-- [ ] Verify the adapter consumes canonical bytes and rejects drift
-- [ ] Keep runtime state out of Git and out of project task Markdown
-- [ ] Update the project adapter spec when the bundle contract changes
+- [ ] Identify the owning generator and parser
+- [ ] Keep transient runtime state out of Git
+- [ ] Update the relevant active spec when the contract changes
 
 ---
 
@@ -178,8 +177,8 @@ served 0.6 beta behavior under the Release selector. The fix was to restore root
 release docs, move the 0.6 content to `beta/` and `zh/beta/`, and add a grep
 audit for beta markers against the root release tree.
 
-**Rule**: do not copy bundle lifecycle templates into the project or maintain a
-second parser for task state.
+**Rule**: do not copy external workflow templates into the project or maintain
+a second parser for workflow state.
 
 ---
 
@@ -226,19 +225,18 @@ In Trellis, command templates (e.g., `record-session.md`) exist in **multiple pl
 
 ## Generated Runtime Template Upgrade Consistency
 
-Some generated files are both documentation and runtime input. For GKD, the
-canonical bundle owns generation and parsing of task envelopes and receipts;
-the project repository must only validate adapter declarations.
+Some generated files are both documentation and runtime input. Keep generation
+and parsing in the owning application layer; do not add a second workflow state
+format or parser to the project repository.
 
 ### Checklist: After Modifying A Runtime-Parsed Template
 
-- [ ] Identify the bundle command that generates the envelope or receipt
-- [ ] Verify the adapter consumes canonical bytes and rejects drift
-- [ ] Keep runtime state out of Git and out of project task Markdown
-- [ ] Update the project adapter spec when the bundle contract changes
+- [ ] Identify the owning generator and parser
+- [ ] Keep transient runtime state out of Git
+- [ ] Update the relevant active spec when the contract changes
 
-**Rule**: do not copy bundle lifecycle templates into the project or maintain a
-second parser for task state.
+**Rule**: do not copy external workflow templates into the project or maintain
+a second parser for workflow state.
 
 ---
 

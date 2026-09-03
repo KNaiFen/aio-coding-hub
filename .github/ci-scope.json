@@ -21,10 +21,6 @@
         "extensions": [".md"]
       },
       {
-        "prefix": "tasks/",
-        "extensions": [".md", ".json"]
-      },
-      {
         "prefix": "docs/",
         "extensions": [".md"]
       }
@@ -59,10 +55,6 @@
   "sharedSource": {
     "exactPaths": ["package.json", "pnpm-lock.yaml", "src/generated/bindings.ts"],
     "prefixRules": [
-      {
-        "prefix": ".gkd/",
-        "extensions": [".json"]
-      },
       {
         "prefix": "scripts/",
         "extensions": [".js", ".mjs"]

@@ -8,7 +8,7 @@ export function assertGithubActionsEnvironment(env = process.env) {
 
   throw new Error(
     "This repository package script is GitHub Actions-only. " +
-      "Run scripts/gkd-verify --base-sha <full-lowercase-sha> locally instead."
+      "Run the approved checks in GitHub Actions instead."
   );
 }
 

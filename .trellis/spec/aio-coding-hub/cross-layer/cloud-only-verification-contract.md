@@ -4,28 +4,18 @@
 
 This repository keeps local worktrees free of dependency and build artifacts.
 The contract applies to repository rules, README instructions, root/workspace
-package scripts, Tauri build hooks, canonical GKD task guidance, active AIO
-specs, `ci.yml`, `pr-title.yml`, `performance.yml`, and `dev-build.yml`.
+package scripts, Tauri build hooks, active AIO specs, `ci.yml`, `pr-title.yml`,
+`performance.yml`, and `dev-build.yml`.
 
 ## 2. Local Allowlist
 
-Local execution uses one dependency-free, non-writing entry point with the task's recorded full base SHA:
-
-```bash
-scripts/gkd-verify --base-sha <full-lowercase-sha>
-```
-
-The runner has a fixed subprocess allowlist: its own self-test, the cloud-only
-contract and self-test, committed/index/worktree diff checks, untracked text
-whitespace checks, and `node --check` for changed `.js`, `.cjs`, and `.mjs`
-files. It rejects command passthrough, unknown options, non-full SHAs, and a base
-that is not an ancestor of `HEAD`. Do not invoke it through a package manager or
-replace it with hand-selected commands. Repository dependency
-installation, development servers, formatting, type checking, linting, tests,
-coverage, builds, generators, Cargo, Tauri, signing, and packaging are all
-cloud-owned, even if a previous checkout already contains dependencies or
-targets. A task may add another direct Node source contract only when it imports
-no third-party package, does not spawn a prohibited tool, and does not write.
+Local work follows the declared worktree plan and the `AGENTS.md` boundary. Do
+not install dependencies, start development servers, or run package/native
+quality gates locally. GitHub Actions owns dependency installation, formatting,
+type checking, linting, tests, coverage, builds, generators, Cargo, Tauri,
+signing, and packaging. A task may add another direct Node source contract only
+when it imports no third-party package, does not spawn a prohibited tool, and
+does not write.
 
 ## 3. Package And Tauri Boundaries
 
@@ -87,9 +77,8 @@ The checker self-test must fail when:
 
 - a root/workspace script lacks the Actions guard or a local dev/precommit
   entry reappears;
-- README or active GKD guidance recommends a prohibited local command;
-- AGENTS/README stop routing local verification through the fixed runner, or
-  the runner loses its fixed contract/self-test and diff/syntax command set;
+- README or AGENTS recommends a prohibited local command or bypasses the
+  `$gkd-main` worktree handoff;
 - Tauri regains a local dev hook;
 - `dev-build.yml` or `performance.yml` gains a non-manual trigger, manual CI can
   run heavy jobs outside `main`, or candidate desktop/TUI jobs stop

@@ -46,12 +46,6 @@ function readMarkdownTree(root, relativeDir) {
 }
 
 export function loadCloudOnlyVerificationFixture(root = repoRoot) {
-  const roleSkillNames = [
-    "gkd-main",
-    "gkd-execute",
-    "gkd-local-verify",
-    "gkd-ci-monitor",
-  ];
   return {
     rootPackage: readJson(root, "package.json"),
     pluginSdkPackage: readJson(root, "packages/plugin-sdk/package.json"),
@@ -61,8 +55,6 @@ export function loadCloudOnlyVerificationFixture(root = repoRoot) {
     agents: readText(root, "AGENTS.md"),
     readme: readText(root, "README.md"),
     readmeEn: readText(root, "README_EN.md"),
-    localVerificationRunner: readText(root, "scripts/check-local-verification.mjs"),
-    roleSkillNames,
     activeSpecs: readMarkdownTree(root, ".trellis/spec/aio-coding-hub"),
     ciWorkflow: readText(root, ".github/workflows/ci.yml"),
     devBuildWorkflow: readText(root, ".github/workflows/dev-build.yml"),
@@ -480,8 +472,6 @@ export function assertCloudOnlyVerificationContract(fixture) {
     agents,
     readme,
     readmeEn,
-    localVerificationRunner,
-    roleSkillNames,
     activeSpecs,
     ciWorkflow,
     devBuildWorkflow,
@@ -520,39 +510,32 @@ export function assertCloudOnlyVerificationContract(fixture) {
   }
 
   requireText(agents, "Keep the local checkout zero-artifact.", "AGENTS.md", failures);
-  requireText(agents, "scripts/gkd-verify --base-sha", "AGENTS.md", failures);
+  requireText(agents, "$gkd-main", "AGENTS.md", failures);
+  for (const handoffFile of ["plan.md", "progress.md", "review.md"]) {
+    requireText(agents, handoffFile, "AGENTS.md", failures);
+  }
+  requireAbsent(
+    agents,
+    /gkd-task|gkd-role|gkd_acceptor|gkd-ci-monitor|gkd-local-verify|gkd-verify|TrustedMainRuntimeBridge|\.gkd\//i,
+    "AGENTS.md",
+    failures
+  );
   requireAbsent(agents, /Use `pnpm dev`/i, "AGENTS.md", failures);
   for (const [label, text] of [
     ["README.md", readme],
     ["README_EN.md", readmeEn],
   ]) {
-    requireText(text, "gkd-verify --base-sha", label, failures);
     requireText(text, "workflow_dispatch", label, failures);
+    requireAbsent(
+      text,
+      /gkd-task|gkd-role|gkd_acceptor|gkd-ci-monitor|gkd-local-verify|gkd-verify|TrustedMainRuntimeBridge|\.gkd\//i,
+      label,
+      failures
+    );
     assertNoForbiddenReadmeCommand(text, label, failures);
   }
 
-  for (const roleSkillName of roleSkillNames) {
-    requireText(agents, `$${roleSkillName}`, "AGENTS.md", failures);
-  }
-  for (const required of [
-    "gkd-task",
-    "gkd-role route",
-    "TrustedMainRuntimeBridge.prepare",
-    "gkd_acceptor",
-    "scripts/gkd-verify --base-sha",
-  ]) {
-    requireText(agents, required, "AGENTS.md", failures);
-  }
   requireAbsent(agents, /task\.py\s+(?:accept|start|delegate|deliver)/i, "AGENTS.md", failures);
-  for (const command of [
-    'runNodeScript("scripts/check-local-verification.selftest.mjs")',
-    'runNodeScript("scripts/check-cloud-only-verification.selftest.mjs")',
-    'runNodeScript("scripts/check-cloud-only-verification.mjs")',
-    '["diff", "--check", base, "HEAD", "--"]',
-    '["--check", assertSafeFile(repoRoot, path)]',
-  ]) {
-    requireText(localVerificationRunner, command, "local verification runner", failures);
-  }
   assertActiveSpecs(activeSpecs, failures);
 
   if (!/^\s*workflow_dispatch:\s*$/m.test(ciWorkflow)) {
@@ -572,7 +555,6 @@ export function assertCloudOnlyVerificationContract(fixture) {
     "contracts",
     [
       "node scripts/check-cloud-only-verification.mjs",
-      "node scripts/check-gkd-adapter.selftest.mjs && node scripts/check-gkd-adapter.mjs",
     ],
     failures
   );
