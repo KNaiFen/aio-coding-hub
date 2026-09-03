@@ -1,6 +1,6 @@
 [package]
 name = "aio-tui"
-version = "0.60.56"
+version = "0.60.57"
 edition = "2021"
 publish = false
 

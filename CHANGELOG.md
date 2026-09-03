@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.60.57](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.57) (2026-09-04)
+
+### Highlights
+
+* align estimated output token speed with the final upstream attempt timing boundary
+
 ## [0.60.56](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.56) (2026-09-03)
 
 ### Highlights
