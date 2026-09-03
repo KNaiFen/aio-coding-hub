@@ -303,6 +303,8 @@ pub struct ObserverRequest {
     pub final_upstream_attempt_duration_ms: Option<i64>,
     #[serde(default)]
     pub final_upstream_attempt_timing_version: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimated_final_upstream_attempt_duration_ms: Option<i64>,
     pub attempt_count: u32,
     pub retry_count: u32,
     pub provider_switch_count: u32,

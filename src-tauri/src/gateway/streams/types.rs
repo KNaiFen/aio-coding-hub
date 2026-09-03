@@ -179,6 +179,14 @@ impl UpstreamOutputTiming {
             .filter(|duration_ms| *duration_ms > 0)
     }
 
+    pub(in crate::gateway) fn observed_final_attempt_duration_ms(&self) -> Option<u128> {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .final_attempt_duration_ms
+            .filter(|duration_ms| *duration_ms > 0)
+    }
+
     pub(in crate::gateway) fn duration_ms(&self) -> Option<u128> {
         let state = self
             .state

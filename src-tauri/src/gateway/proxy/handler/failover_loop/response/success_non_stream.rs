@@ -1538,7 +1538,7 @@ where
                 None,
                 usage,
             )
-            .with_final_upstream_attempt_timing(final_upstream_attempt_duration_ms, 1),
+            .with_final_upstream_attempt_timing(final_upstream_attempt_duration_ms, 1, None),
         ),
     )
     .await;

@@ -988,6 +988,7 @@ fn project_active(
         upstream_stream_timing_version: 0,
         final_upstream_attempt_duration_ms: None,
         final_upstream_attempt_timing_version: 0,
+        estimated_final_upstream_attempt_duration_ms: None,
         attempt_count,
         retry_count: attempt_count.saturating_sub(1),
         provider_switch_count: 0,
@@ -1060,6 +1061,9 @@ fn project_terminal(
             .final_upstream_attempt_duration_ms
             .filter(|value| *value > 0),
         final_upstream_attempt_timing_version: row.final_upstream_attempt_timing_version,
+        estimated_final_upstream_attempt_duration_ms: row
+            .estimated_final_upstream_attempt_duration_ms
+            .filter(|value| *value > 0),
         attempt_count,
         retry_count,
         provider_switch_count,

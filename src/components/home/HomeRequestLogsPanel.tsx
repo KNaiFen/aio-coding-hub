@@ -34,6 +34,7 @@ import { Switch } from "../../ui/Switch";
 import { Tooltip } from "../../ui/Tooltip";
 import { cn } from "../../utils/cn";
 import {
+  computeEstimatedOutputTokensPerSecond,
   computeOutputTokensPerSecond,
   formatDurationMs,
   formatInteger,
@@ -185,6 +186,13 @@ const RequestLogCard = memo(function RequestLogCard({
     log.final_upstream_attempt_duration_ms,
     hasSuccessfulTerminalResult ? log.final_upstream_attempt_timing_version : 0
   );
+  const estimatedOutputTokensPerSecond =
+    outputTokensPerSecond == null && hasSuccessfulTerminalResult
+      ? computeEstimatedOutputTokensPerSecond(
+          log.output_tokens,
+          log.estimated_final_upstream_attempt_duration_ms
+        )
+      : null;
 
   const costMultiplier = log.cost_multiplier;
   const isFree = Number.isFinite(costMultiplier) && costMultiplier === 0;
@@ -504,17 +512,21 @@ const RequestLogCard = memo(function RequestLogCard({
                 <div
                   className="col-start-4 row-start-2 flex items-center gap-1 h-4"
                   title={
-                    outputTokensPerSecond != null
-                      ? formatTokensPerSecond(outputTokensPerSecond)
+                    outputTokensPerSecond != null || estimatedOutputTokensPerSecond != null
+                      ? outputTokensPerSecond != null
+                        ? formatTokensPerSecond(outputTokensPerSecond)
+                        : `≈${formatTokensPerSecond(estimatedOutputTokensPerSecond)}`
                       : undefined
                   }
                 >
                   <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/75 select-none shrink-0">
                     速率
                   </span>
-                  {outputTokensPerSecond != null ? (
+                  {outputTokensPerSecond != null || estimatedOutputTokensPerSecond != null ? (
                     <span className="font-mono tabular-nums text-xs font-semibold text-foreground/90 truncate">
-                      {formatTokensPerSecondShort(outputTokensPerSecond)}
+                      {outputTokensPerSecond != null
+                        ? formatTokensPerSecondShort(outputTokensPerSecond)
+                        : `≈${formatTokensPerSecondShort(estimatedOutputTokensPerSecond!)}`}
                     </span>
                   ) : (
                     <span className="text-muted-foreground/40 text-xs font-mono select-none">

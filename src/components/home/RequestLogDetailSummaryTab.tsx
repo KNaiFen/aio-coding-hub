@@ -3,6 +3,7 @@ import type { RequestLogErrorObservation } from "./requestLogErrorDetails";
 import { Card } from "../../ui/Card";
 import { cn } from "../../utils/cn";
 import {
+  computeEstimatedOutputTokensPerSecond,
   computeOutputTokensPerSecond,
   formatDurationMs,
   formatTokensPerSecond,
@@ -61,6 +62,11 @@ export function RequestLogDetailSummaryTab({
   const isPriorityServiceTier =
     selectedLog.cli_key === "codex" &&
     hasPriorityServiceTierSpecialSetting(selectedLog.special_settings_json);
+  const hasSuccessfulTerminalResult =
+    selectedLog.status != null &&
+    selectedLog.status >= 200 &&
+    selectedLog.status < 300 &&
+    !selectedLog.error_code;
   const ttfbMs = sanitizeTtfbMs(selectedLog.ttfb_ms, displayDurationMs);
   const cacheCreation = resolveCacheCreationDisplay(selectedLog);
 
@@ -159,7 +165,14 @@ export function RequestLogDetailSummaryTab({
                     ? selectedLog.final_upstream_attempt_timing_version
                     : 0
                 );
-                return rate != null ? formatTokensPerSecond(rate) : "—";
+                if (rate != null) return formatTokensPerSecond(rate);
+                const estimate = hasSuccessfulTerminalResult
+                  ? computeEstimatedOutputTokensPerSecond(
+                      selectedLog.output_tokens,
+                      selectedLog.estimated_final_upstream_attempt_duration_ms
+                    )
+                  : null;
+                return estimate != null ? `≈${formatTokensPerSecond(estimate)}` : "—";
               })()}
             />
             <MetricCard label="花费" value={formatUsd(selectedLog.cost_usd)} />
