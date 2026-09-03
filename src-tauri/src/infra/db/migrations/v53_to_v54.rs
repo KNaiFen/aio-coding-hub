@@ -8,6 +8,17 @@ fn add_column_if_missing(
     column: &str,
     definition: &str,
 ) -> Result<(), String> {
+    let table_exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+            [table],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("failed to inspect table {table}: {error}"))?;
+    if !table_exists {
+        return Ok(());
+    }
+
     let exists: bool = conn
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",

@@ -967,6 +967,7 @@ WHERE trace_id = ?1
     #[test]
     fn request_log_insert_uses_usage_metrics_when_usage_missing() {
         let mut args = base_args();
+        args.duration_ms = 1_000;
         args.estimated_final_upstream_attempt_duration_ms = Some(250);
         args.usage_metrics = Some(UsageMetrics {
             input_tokens: Some(1),
