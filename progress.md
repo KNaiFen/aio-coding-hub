@@ -11,7 +11,7 @@
 ## 验证
 
 - 已运行：`git diff --check`，通过。
-- 未运行：`scripts/gkd-verify --base-sha <full-lowercase-sha>`；当前 worktree 和主 checkout 均不存在该脚本。
+- 未运行仓库声明的零依赖合同检查；当前没有可用入口。
 - 未运行：Rust 测试、lint、类型检查、构建和开发服务器；仓库规则明确禁止本地运行。
 
 ## 剩余风险
