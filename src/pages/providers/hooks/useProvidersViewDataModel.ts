@@ -85,6 +85,7 @@ type ProviderUiState = {
   editTarget: ProviderSummary | null;
   deleteTarget: ProviderSummary | null;
   testTarget: ProviderSummary | null;
+  routeDraftSelectionInitialized: boolean;
   routeDraftSelection: RouteDraftSelection;
 };
 
@@ -121,6 +122,7 @@ function createProviderUiState(activeCli: CliKey): ProviderUiState {
     editTarget: null,
     deleteTarget: null,
     testTarget: null,
+    routeDraftSelectionInitialized: false,
     routeDraftSelection: { kind: "default", modeId: null },
   };
 }
@@ -299,6 +301,7 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
     editTarget,
     deleteTarget,
     testTarget,
+    routeDraftSelectionInitialized,
     routeDraftSelection: storedRouteDraftSelection,
   } = effectiveProviderUiState;
   let routeDraftSelection = storedRouteDraftSelection;
@@ -345,6 +348,7 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
     (value) => {
       setProviderUiState((current) => ({
         ...current,
+        routeDraftSelectionInitialized: true,
         routeDraftSelection:
           typeof value === "function" ? value(current.routeDraftSelection) : value,
       }));
@@ -503,6 +507,19 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
   const sortModesLoading = sortModesQuery.isLoading || sortModeActiveQuery.isLoading;
   const sortModesAvailable =
     sortModesQuery.data != null && sortModeActiveQuery.data != null ? true : null;
+  const activeModeByCli = useMemo(
+    () => buildActiveModeByCli(sortModeActiveQuery.data ?? []),
+    [sortModeActiveQuery.data]
+  );
+  const activeModeId = activeModeByCli[activeCli] ?? null;
+  const routeDraftSelectionReady = sortModesQuery.data != null && sortModeActiveQuery.data != null;
+  if (!routeDraftSelectionInitialized && routeDraftSelectionReady) {
+    routeDraftSelection =
+      activeModeId != null && sortModes.some((mode) => mode.id === activeModeId)
+        ? { kind: "mode", modeId: activeModeId }
+        : { kind: "default", modeId: null };
+    setRouteDraftSelection(routeDraftSelection);
+  }
   const routeDraftModeMissing =
     routeDraftSelection.kind === "mode" &&
     !sortModes.some((mode) => mode.id === routeDraftSelection.modeId);
@@ -510,11 +527,6 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
     routeDraftSelection = { kind: "default", modeId: null };
     setRouteDraftSelection(routeDraftSelection);
   }
-  const activeModeByCli = useMemo(
-    () => buildActiveModeByCli(sortModeActiveQuery.data ?? []),
-    [sortModeActiveQuery.data]
-  );
-  const activeModeId = activeModeByCli[activeCli] ?? null;
   const selectedSortMode = useMemo(
     () =>
       routeDraftSelection.kind === "mode"

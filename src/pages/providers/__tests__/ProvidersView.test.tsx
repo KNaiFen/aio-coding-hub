@@ -243,6 +243,106 @@ afterEach(() => {
 });
 
 describe("pages/providers/ProvidersView", () => {
+  it("shows the active sort mode when entering the providers page", async () => {
+    vi.mocked(useProvidersListQuery).mockReturnValue({
+      data: [
+        {
+          id: 1,
+          cli_key: "claude",
+          name: "P1",
+          enabled: true,
+          base_urls: ["https://a"],
+          base_url_mode: "order",
+          cost_multiplier: 1,
+          claude_models: {},
+        },
+      ],
+      isFetching: false,
+    } as any);
+    vi.mocked(useDefaultRouteProvidersQuery).mockReturnValue({
+      data: [{ provider_id: 1 }],
+      isFetching: false,
+    } as any);
+    vi.mocked(useGatewayCircuitStatusQuery).mockReturnValue({
+      data: [],
+      isFetching: false,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useProviderSetEnabledMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProviderDeleteMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useProvidersReorderMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useGatewayCircuitResetProviderMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+    } as any);
+    vi.mocked(useGatewayCircuitResetCliMutation).mockReturnValue({ mutateAsync: vi.fn() } as any);
+    vi.mocked(useSortModesListQuery).mockReturnValue({
+      data: [{ id: 10, name: "Review", created_at: 1, updated_at: 1 }],
+      isLoading: false,
+    } as any);
+    vi.mocked(useSortModeActiveListQuery).mockReturnValue({
+      data: [{ cli_key: "claude", mode_id: 10 }],
+      isLoading: false,
+    } as any);
+    vi.mocked(useSortModeProvidersListQuery).mockReturnValue({
+      data: [{ provider_id: 1, enabled: true }],
+      isFetching: false,
+    } as any);
+
+    renderWithQuery(<ProvidersView activeCli="claude" setActiveCli={vi.fn()} />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "选择调用顺序" })).toHaveValue("mode:10")
+    );
+    expect(screen.getByText("Review 按照从上到下依次调用")).toBeInTheDocument();
+    expect(useSortModeProvidersListQuery).toHaveBeenLastCalledWith(
+      { modeId: 10, cliKey: "claude" },
+      { enabled: true }
+    );
+  });
+
+  it("does not overwrite a manually selected order when active-mode data refreshes", async () => {
+    vi.mocked(useProvidersListQuery).mockReturnValue({
+      data: [],
+      isFetching: false,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useGatewayCircuitStatusQuery).mockReturnValue({
+      data: [],
+      isFetching: false,
+      refetch: vi.fn(),
+    } as any);
+    vi.mocked(useSortModesListQuery).mockReturnValue({
+      data: [
+        { id: 10, name: "Review", created_at: 1, updated_at: 1 },
+        { id: 20, name: "Work", created_at: 1, updated_at: 1 },
+      ],
+      isLoading: false,
+    } as any);
+    vi.mocked(useSortModeActiveListQuery).mockReturnValue({
+      data: [{ cli_key: "claude", mode_id: 10 }],
+      isLoading: false,
+    } as any);
+
+    const { result, rerender } = renderHook(() => useProvidersViewDataModel("claude"), {
+      wrapper: queryWrapper(),
+    });
+
+    await waitFor(() =>
+      expect(result.current.routeDraftSelection).toEqual({ kind: "mode", modeId: 10 })
+    );
+
+    act(() => result.current.selectRouteDraft("mode:20"));
+    expect(result.current.routeDraftSelection).toEqual({ kind: "mode", modeId: 20 });
+
+    vi.mocked(useSortModeActiveListQuery).mockReturnValue({
+      data: [{ cli_key: "claude", mode_id: 10 }],
+      isLoading: false,
+    } as any);
+    rerender();
+
+    expect(result.current.routeDraftSelection).toEqual({ kind: "mode", modeId: 20 });
+  });
+
   it("treats cooldown-only circuits as unavailable for reset-all visibility", () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_700_000_000_000);
