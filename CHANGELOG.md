@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.60.58](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.58) (2026-09-05)
+
+### Highlights
+
+* place the estimated token speed marker before the unit in TUI and desktop request logs
+* remove the abandoned legacy planning task and stale local-verification references
+
 ## [0.60.57](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.57) (2026-09-04)
 
 ### Highlights
