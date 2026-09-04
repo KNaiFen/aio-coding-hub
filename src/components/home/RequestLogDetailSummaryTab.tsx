@@ -172,7 +172,7 @@ export function RequestLogDetailSummaryTab({
                       selectedLog.estimated_final_upstream_attempt_duration_ms
                     )
                   : null;
-                return estimate != null ? `≈${formatTokensPerSecond(estimate)}` : "—";
+                return estimate != null ? formatTokensPerSecond(estimate, true) : "—";
               })()}
             />
             <MetricCard label="花费" value={formatUsd(selectedLog.cost_usd)} />

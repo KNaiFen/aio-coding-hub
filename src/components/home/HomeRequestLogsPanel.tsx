@@ -515,7 +515,7 @@ const RequestLogCard = memo(function RequestLogCard({
                     outputTokensPerSecond != null || estimatedOutputTokensPerSecond != null
                       ? outputTokensPerSecond != null
                         ? formatTokensPerSecond(outputTokensPerSecond)
-                        : `≈${formatTokensPerSecond(estimatedOutputTokensPerSecond)}`
+                        : formatTokensPerSecond(estimatedOutputTokensPerSecond, true)
                       : undefined
                   }
                 >
@@ -526,7 +526,7 @@ const RequestLogCard = memo(function RequestLogCard({
                     <span className="font-mono tabular-nums text-xs font-semibold text-foreground/90 truncate">
                       {outputTokensPerSecond != null
                         ? formatTokensPerSecondShort(outputTokensPerSecond)
-                        : `≈${formatTokensPerSecondShort(estimatedOutputTokensPerSecond!)}`}
+                        : formatTokensPerSecondShort(estimatedOutputTokensPerSecond!, true)}
                     </span>
                   ) : (
                     <span className="text-muted-foreground/40 text-xs font-mono select-none">

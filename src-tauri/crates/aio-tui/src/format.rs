@@ -426,14 +426,14 @@ pub fn request_card_lines(
             "{}  {}  {}",
             request_card_route_result(request),
             card_timing,
-            format_tokens_per_second_short(rate)
+            format_tokens_per_second_short(rate, false)
         )
     } else if let Some(rate) = estimated_output_tokens_per_second(request) {
         format!(
-            "{}  {}  ≈{}",
+            "{}  {}  {}",
             request_card_route_result(request),
             card_timing,
-            format_tokens_per_second_short(rate)
+            format_tokens_per_second_short(rate, true)
         )
     } else {
         format!("{}  {}", request_card_route_result(request), card_timing)
@@ -666,10 +666,10 @@ pub fn detail_lines(request: &ObserverRequest, now_ms: i64) -> Vec<String> {
         format!(
             "输出速率  {}",
             output_tokens_per_second(request)
-                .map(format_tokens_per_second_short)
+                .map(|rate| format_tokens_per_second_short(rate, false))
                 .or_else(|| {
                     estimated_output_tokens_per_second(request)
-                        .map(|rate| format!("≈{}", format_tokens_per_second_short(rate)))
+                        .map(|rate| format_tokens_per_second_short(rate, true))
                 })
                 .unwrap_or_else(|| "—".to_string())
         ),
@@ -1107,12 +1107,13 @@ fn estimated_output_tokens_per_second(request: &ObserverRequest) -> Option<f64> 
     rate.is_finite().then_some(rate)
 }
 
-pub fn format_tokens_per_second_short(value: f64) -> String {
+pub fn format_tokens_per_second_short(value: f64, approximate: bool) -> String {
     let value = value.max(0.0);
+    let unit = if approximate { " ≈t/s" } else { " t/s" };
     if value >= 1_000.0 {
-        format!("{:.1}k t/s", value / 1_000.0)
+        format!("{:.1}k{unit}", value / 1_000.0)
     } else {
-        format!("{value:.1} t/s")
+        format!("{value:.1}{unit}")
     }
 }
 
@@ -1611,7 +1612,8 @@ mod tests {
             cache_creation_tokens: None,
         });
         assert_eq!(output_tokens_per_second(&request), Some(60.0));
-        assert_eq!(format_tokens_per_second_short(1_500.0), "1.5k t/s");
+        assert_eq!(format_tokens_per_second_short(1_500.0, false), "1.5k t/s");
+        assert_eq!(format_tokens_per_second_short(39.0, true), "39.0 ≈t/s");
 
         request.duration_ms = Some(29_520);
         request.ttfb_ms = Some(29_360);
@@ -1649,8 +1651,10 @@ mod tests {
         assert_eq!(estimated_output_tokens_per_second(&request), Some(12.4));
         assert!(detail_lines(&request, 10)
             .iter()
-            .any(|line| line == "输出速率  ≈12.4 t/s"));
-        assert!(request_card_lines(&request, 10, 80)[3].text.contains('≈'));
+            .any(|line| line == "输出速率  12.4 ≈t/s"));
+        assert!(request_card_lines(&request, 10, 80)[3]
+            .text
+            .ends_with("12.4 ≈t/s"));
 
         request.final_upstream_attempt_duration_ms = Some(10_000);
         request.final_upstream_attempt_timing_version = 1;
