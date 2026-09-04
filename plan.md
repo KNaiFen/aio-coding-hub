@@ -39,5 +39,5 @@
 
 ## 允许的验证
 
-- 仅运行仓库规定的零依赖检查：`scripts/gkd-verify --base-sha <full-lowercase-sha>`。
+- 仅运行仓库已声明且存在的零依赖检查；入口缺失时停止。
 - 不运行依赖安装、package manager、测试运行器、lint、类型检查、构建、Cargo/Tauri 或开发服务器。
