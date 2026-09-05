@@ -1,5 +1,7 @@
 # 执行交接 r2
 
+本记录为已完成的 r2 实现快照；后续交付授权以同目录 plan.md 的 r3 为准。
+
 - PLAN：主工作树 `.gkd/plan.md` r2，用户已批准四项方案并要求开始执行。
 - Route：direct-main；writer：main；worktree：`../workflow-streamline`；branch：`ci/streamline-gkd-workflow`；base：`ca17a2d0312ed5ed83cda1931d5396834b4a284c`。
 - 本任务校准现行 GKD 交接和检查器、纯文档 PR/push 分类、提交/发版操作说明、upstream 同步警告终态。

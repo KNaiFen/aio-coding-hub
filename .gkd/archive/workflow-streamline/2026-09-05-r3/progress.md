@@ -7,4 +7,5 @@
 - 零依赖验证通过：ci-change-scope、cloud-only、sync-upstream-policy、ci-quality-gates、GitHub Actions pin、spec-links、release-promotion selftest/check，以及变更 Node 文件语法和 `git diff --check`。
 - 额外用 Bash 替身覆盖 sync PR 创建/更新、DIRTY、UNKNOWN、BLOCKED、空状态、命令失败；无真实 GitHub 写调用。
 - 消融审查：未修改主 CI/release DAG、产品文件、依赖、版本、历史归档或 GitHub 设置；未发现需删除的活动旧 GKD 入口。
-- 尚未提交、推送、PR 或云端验证；等待 main 审查与本地中文提交。
+- 实现已提交为 `6c9cec5ed670c660d6397449a5414e7bd649e58a`，main 本地审查通过。
+- 用户已授权推送、合并和清理。本归档随交付提交，创建时 PR 与云端验证尚未执行；其后状态以 GitHub PR 的检查及合并记录为准。
