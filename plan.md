@@ -1,3 +1,5 @@
+> 状态：历史发布计划，保留本文件原有正文，不代表当前发布状态或新任务授权。现行流程使用 `$gkd-main` 与 `.gkd/plan.md`，项目入口见 [AGENTS.md](AGENTS.md)。
+
 # 发布 AIO Coding Hub 0.60.58
 
 ## 目标

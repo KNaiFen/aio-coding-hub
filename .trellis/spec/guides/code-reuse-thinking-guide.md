@@ -1,151 +1,64 @@
 # Code Reuse Thinking Guide
 
-> **Purpose**: Stop and think before creating new code - does it already exist?
+> **Purpose**: Reuse existing behavior when it reduces inconsistency and maintenance cost.
 
----
+## Before Writing Related Code
 
-## The Problem
-
-**Duplicated code is the #1 source of inconsistency bugs.**
-
-When you copy-paste or rewrite existing logic:
-- Bug fixes don't propagate
-- Behavior diverges over time
-- Codebase becomes harder to understand
-
----
-
-## Before Writing New Code
-
-### Step 1: Search First
+When the change repeats existing behavior or adds a shared helper, search the
+owning module and its consumers for an existing implementation. Broaden the
+search only when ownership or impact is unclear.
 
 ```bash
-# Search for similar function names
-grep -r "functionName" .
-
-# Search for similar logic
-grep -r "keyword" .
+rg "functionName|related_keyword" path/to/affected/module
 ```
 
-### Step 2: Ask These Questions
-
-| Question | If Yes... |
-|----------|-----------|
-| Does a similar function exist? | Use or extend it |
-| Is this pattern used elsewhere? | Follow the existing pattern |
-| Could this be a shared utility? | Create it in the right place |
-| Am I copying code from another file? | **STOP** - extract to shared |
-
----
-
-## Common Duplication Patterns
-
-### Pattern 1: Copy-Paste Functions
-
-**Bad**: Copying a validation function to another file
-
-**Good**: Extract to shared utilities, import where needed
-
-### Pattern 2: Similar Components
-
-**Bad**: Creating a new component that's 80% similar to existing
-
-**Good**: Extend existing component with props/variants
-
-### Pattern 3: Repeated Constants
-
-**Bad**: Defining the same constant in multiple files
-
-**Good**: Single source of truth, import everywhere
-
-### Pattern 4: Repeated Payload Field Extraction
-
-**Bad**: Multiple consumers cast the same JSON/event fields locally:
-
-```typescript
-const description = (ev as { description?: string }).description;
-const context = (ev as { context?: ContextEntry[] }).context;
-```
-
-This is duplicated contract logic even when the code is only two lines. Each
-consumer now has its own definition of what a valid payload means.
-
-**Good**: Put the decoder, type guard, or projection next to the data owner:
-
-```typescript
-if (isThreadEvent(ev)) {
-  renderThreadEvent(ev);
-}
-```
-
-**Rule**: If the same untyped payload field is read in 2+ places, create a
-shared type guard / normalizer / projection before adding a third reader.
-
----
+| Question | Decision |
+| --- | --- |
+| Does an existing function own the same behavior? | Reuse it, or extend it when the current contract fits. |
+| Is the similarity semantic or only visual? | Share behavior that must evolve together; keep independent behavior local. |
+| Do consumers repeat a protocol or constant? | Keep that contract with its owner and import it. |
+| Would extraction reduce real maintenance cost? | Extract only when the resulting interface is simpler than the duplication. |
 
 ## When to Abstract
 
-**Abstract when**:
-- Same code appears 3+ times
-- Logic is complex enough to have bugs
-- Multiple people might need this
+Use DRY for knowledge that must stay consistent: shared constants, protocol
+decoding, and state transitions should have a clear owner. Similar text, a copy,
+or an arbitrary number of occurrences alone does not justify an abstraction.
 
-**Don't abstract when**:
-- Only used once
-- Trivial one-liner
-- Abstraction would be more complex than duplication
+Prefer existing helpers and local patterns. Do not create utilities for imagined
+future consumers, one-off operations, or trivial expressions when the new
+interface adds more complexity than it removes. Components with similar markup
+may remain separate when their behavior and ownership differ.
 
----
+## Payload and State Ownership
 
-## After Batch Modifications
+Repeated casts of the same external JSON or event field can duplicate a
+contract even when the code is short. Decode external data at its existing
+boundary and let consumers use the resulting types or projections. Trust typed
+internal data and framework guarantees; do not add another validation layer
+merely to share a helper.
 
-When you've made similar changes to multiple files:
+When multiple consumers derive the same state from `action`, `kind`, or
+`status`, keep the transition logic with the state owner. Use the existing
+reducer or dispatcher where appropriate; do not impose a new reducer on an
+isolated branch that is already clear.
 
-1. **Review**: Did you catch all instances?
-2. **Search**: Run grep to find any missed
-3. **Consider**: Should this be abstracted?
+For event replay, display code and commands consume the owning replay model
+instead of reimplementing its transitions. Error handling stays visible at the
+boundary; shared helpers must not silently turn failures into default values.
 
-### Reducers Should Use Exhaustive Structure
+## After Related Changes
 
-When state is derived from action-like values (`action`, `kind`, `status`,
-`phase`), prefer a reducer with one `switch` over scattered `if/else` updates.
+Check only the affected owners and consumers:
 
-```typescript
-// BAD - action-specific state transitions are hard to audit
-if (action === "opened") { ... }
-else if (action === "comment") { ... }
-else if (action === "status") { ... }
+- Did shared contract changes reach every relevant consumer?
+- Do repeated implementations express the same behavior and need to evolve together?
+- Is a new abstraction smaller and clearer than the duplication it replaces?
+- Are shared constants, payload decoding, and derived state still owned in one place?
+- Can any speculative option, wrapper, or helper added in this change be removed?
 
-// GOOD - one reducer owns the transition table
-switch (event.action) {
-  case "opened":
-    ...
-    return;
-  case "comment":
-    ...
-    return;
-}
-```
+## Workflow Ownership
 
-This matters when the event log is the source of truth. A reducer is the
-documented replay model; display code and commands should not duplicate pieces
-of that replay model.
-
----
-
-## Checklist Before Commit
-
-- [ ] Searched for existing similar code
-- [ ] No copy-pasted logic that should be shared
-- [ ] No repeated untyped payload field extraction outside a shared decoder
-- [ ] Constants defined in one place
-- [ ] Similar patterns follow same structure
-- [ ] Reducer/action transitions live in one reducer or command dispatcher
-
----
-
-## Runtime contract ownership
-
-Generated task envelopes, receipts, and lifecycle state have one owner. Project
-code must consume those contracts through the owning interfaces instead of
-copying parsers or maintaining a second script tree.
+GKD owns task lifecycle and handoff rules. Project code and documentation must
+use those interfaces rather than copy workflow parsers, state formats, or a
+second script tree.

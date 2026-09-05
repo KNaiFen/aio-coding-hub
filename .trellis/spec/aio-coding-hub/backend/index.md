@@ -26,6 +26,8 @@ Rules for the root application's Rust backend and local gateway runtime.
 
 ## Pre-Development Checklist
 
+Read only the contracts for the behavior or shared inputs affected by the change.
+
 When changing gateway retry or circuit behavior:
 
 1. Read [Gateway attempt budget contract](./gateway-attempt-budget-contract.md).
@@ -148,6 +150,12 @@ When changing Provider Sync managed-backup pruning:
    eliminating that final syscall boundary.
 
 ## Quality Check
+
+Each item applies only when its corresponding behavior or shared inputs are
+affected. Preserve the contract's expected semantics and necessary regression
+coverage; unrelated changes do not trigger this entire checklist. Before
+committing, use only approved local checks; dependency-backed verification runs
+in GitHub Actions under the [cloud-only contract](../cross-layer/cloud-only-verification-contract.md).
 
 - Unit-test the attempt-budget calculation at its boundary values.
 - GitHub Actions must run route-level tests that exercise real provider retries
