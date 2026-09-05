@@ -8,6 +8,40 @@ import { assertGithubActionsEnvironment } from "./require-github-actions.mjs";
 
 const valid = loadCloudOnlyVerificationFixture();
 assert.doesNotThrow(() => assertCloudOnlyVerificationContract(valid));
+
+const wordingFixture = {
+  ...valid,
+  agents: `$gkd-main .gkd/plan.md .gkd/execution.md .gkd/progress.md .gkd/review.md
+Keep the local checkout zero-artifact.
+普通 PR 等自动 \`ci-gate\` 与 \`pr-title\`，不额外手动启动常规 \`ci\`。`,
+  readme: "workflow_dispatch 仅用于 main 恢复或候选构建；不要为常规验证额外手动运行 `ci`。",
+  readmeEn: "workflow_dispatch is for main recovery or candidates. Do not start an additional manual `ci` run for routine validation.",
+};
+assert.doesNotThrow(() => assertCloudOnlyVerificationContract(wordingFixture));
+for (const [field, original, equivalent] of [
+  ["agents", "Keep the local checkout zero-artifact.", "本地工作树不得留下依赖或构建产物。"],
+  [
+    "agents",
+    "普通 PR 等自动 `ci-gate` 与 `pr-title`，不额外手动启动常规 `ci`。",
+    "常规 PR 由自动 `ci-gate` 与 `pr-title` 验证，不再手动重复触发 `ci`。",
+  ],
+  [
+    "readme",
+    "不要为常规验证额外手动运行 `ci`。",
+    "普通 PR 使用自动检查，常规验证不得再启动一轮手动 `ci`。",
+  ],
+  [
+    "readmeEn",
+    "Do not start an additional manual `ci` run for routine validation.",
+    "Use automatic PR checks without launching another manual `ci` run for routine validation.",
+  ],
+]) {
+  const rewritten = wordingFixture[field].replace(original, equivalent);
+  assert.notEqual(rewritten, wordingFixture[field], `${field} wording fixture must change`);
+  assert.doesNotThrow(() =>
+    assertCloudOnlyVerificationContract({ ...wordingFixture, [field]: rewritten })
+  );
+}
 assert.doesNotThrow(() =>
   assertCloudOnlyVerificationContract({
     ...valid,
@@ -112,6 +146,13 @@ for (const [name, mutate, expected] of [
       fixture.agents += `\n\`${["gkd", "task"].join("-")}\`\n`;
     },
     /AGENTS\.md contains a prohibited local instruction/,
+  ],
+  [
+    "missing GKD workflow entry",
+    (fixture) => {
+      fixture.agents = fixture.agents.replaceAll("$gkd-main", "project workflow");
+    },
+    /AGENTS\.md must include "\$gkd-main"/,
   ],
   [
     "missing worktree handoff file",

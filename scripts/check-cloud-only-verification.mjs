@@ -509,7 +509,6 @@ export function assertCloudOnlyVerificationContract(fixture) {
     failures.push("src-tauri/tauri.conf.json must retain the cloud frontend build hook");
   }
 
-  requireText(agents, "Keep the local checkout zero-artifact.", "AGENTS.md", failures);
   requireText(agents, "$gkd-main", "AGENTS.md", failures);
   for (const handoffFile of [".gkd/plan.md", ".gkd/execution.md", ".gkd/progress.md", ".gkd/review.md"]) {
     requireText(agents, handoffFile, "AGENTS.md", failures);
@@ -541,14 +540,6 @@ export function assertCloudOnlyVerificationContract(fixture) {
   if (!/^\s*workflow_dispatch:\s*$/m.test(ciWorkflow)) {
     failures.push("ci.yml must retain workflow_dispatch");
   }
-  requireText(
-    agents,
-    "普通 PR 等自动 `ci-gate` 与 `pr-title`，不额外手动启动常规 `ci`。",
-    "AGENTS.md",
-    failures
-  );
-  requireText(readme, "不要为常规验证额外手动运行 `ci`", "README.md", failures);
-  requireText(readmeEn, "Do not start an additional manual `ci` run for routine validation.", "README_EN.md", failures);
   assertManualCiBoundary(ciWorkflow, failures);
   assertWorkflowRunCommands(
     ciWorkflow,

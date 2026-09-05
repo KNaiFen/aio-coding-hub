@@ -190,9 +190,11 @@ sudo xattr -cr /Applications/"AIO Coding Hub.app"
 
 ### 本地零产物与云端验证
 
-仓库不在本地安装依赖、启动开发服务，也不在本地运行格式化、类型检查、Lint、测试或构建。开发任务的 worktree、计划、执行交接、进度和审查记录遵循 `AGENTS.md` 与 `$gkd-main` skill，使用 `.gkd/` Markdown；完整质量门由 GitHub Actions 执行。普通 PR 与受保护分支推送会自动触发 `ci`，PR 合并等待对应的 `ci-gate` 和独立 `pr-title`；不要为常规验证额外手动运行 `ci`。`workflow_dispatch` 仅用于 `main` 的恢复或候选构建，Provider trend release benchmark 由相关自动 CI 路径或独立 `performance` 工作流执行；需要桌面集成制品时，在 Actions 页面按需运行 `dev-build` 并选择目标。
+仓库不在本地安装依赖、启动开发服务，也不在本地运行格式化、类型检查、Lint、测试或构建。任务流程以 `$gkd-main` skill 为准，[AGENTS.md](AGENTS.md) 补充 AIO 的环境与 Git 约束。main 在 `.gkd/plan.md` 记录获批方案，并按 GKD 选择 direct-main 或 delegated；仅 delegated 生成执行 worktree 的 `.gkd/execution.md` 和 `.gkd/progress.md`。资料按受影响行为读取，历史记录不指导新任务。
 
-纯文档 PR 与主干推送保留轻量分类；`.gkd/` Markdown 不触发前端或 Rust 构建，README、AGENTS 和规范变更仍执行文档合同。含代码或未知文件的主干推送仍跑完整 CI，CodeQL 保持独立运行。任务从 `origin/main` 建分支，squash 合并后同步远端实际结果；版本标签只指向已生成成功签名候选的实际 main 合并提交。详见[提交与发版流程](docs/operations/github-actions-governance.md#提交与发版)。
+提交前只执行计划批准的零依赖、无产物检查。合并前等待自动 CI 按改动分类选中的质量门：普通 PR 与受保护分支推送自动触发 `ci`，PR 需要对应的 `ci-gate` 和独立 `pr-title`；常规 PR 验证不重复触发手动 `ci`。`workflow_dispatch` 仅用于 `main` 的恢复或候选构建，Provider trend release benchmark 由相关自动 CI 路径或独立 `performance` 工作流执行；需要桌面集成制品时，在 Actions 页面按需运行 `dev-build` 并选择目标。
+
+纯文档 PR 与纯文档主干推送保留轻量分类；`.gkd/` Markdown 不触发前端或 Rust 构建，README、AGENTS 和规范变更仍执行文档合同。纯前端或纯 Rust PR 只运行相应域，shared、混合或未知路径运行两端；含代码或未知文件的主干推送仍跑完整 CI，CodeQL 保持独立运行。任务从 `origin/main` 建分支，包括 direct-main；squash 合并后同步远端实际结果。版本标签只指向已生成成功签名候选的实际 main 合并提交。详见[提交与发版流程](docs/operations/github-actions-governance.md#提交与发版)。
 
 <!-- SUPPORT_MATRIX_SOURCE_BUILD:START -->
 | 分类 | 云端工作流目标 | 说明 |
@@ -239,7 +241,7 @@ curl http://127.0.0.1:37123/health
 
 - [项目知识库入口](docs/README.md)：产品、架构、插件、运维、任务和历史资料的权威导航。
 - [待处理事项](PENDING.md) 与 [已完成事项](PENDING_COMPLETED.md)：延后工作和交付记录。
-- 任务计划、进度与审查记录随各自 worktree 保存，不在仓库维护第二套生命周期事实。
+- 任务计划、交接、进度、审查与归档按 GKD 路线维护，不在仓库维护第二套生命周期事实。
 
 现行实现优先于历史审计、旧计划和会话日志；完整文档维护规则见 [知识库维护规则](docs/README.md#维护规则)。
 
@@ -258,7 +260,7 @@ curl http://127.0.0.1:37123/health
 
 ## 质量保证
 
-GitHub Actions 的完整 CI 负责依赖审计、前端 Lint、TypeScript、插件 SDK/脚手架测试、E2E、覆盖率、Vite build、Rust 格式、`Cargo.lock`、生成绑定、Clippy、Rust 测试与 audit。`ci-gate` 统一收口这些结果；跨平台桌面打包仍是 main 候选或按需 `dev-build`，不是每个 PR 的必需任务。
+GitHub Actions 按改动分类运行相应质量门：前端包括依赖审计、Lint、TypeScript、插件 SDK/脚手架测试、E2E、覆盖率和 Vite build；Rust 包括格式、`Cargo.lock`、生成绑定、Clippy、测试与 audit。`ci-gate` 要求所选 job 成功、未选 job 为 `skipped`；跨平台桌面打包仍是 main 候选或按需 `dev-build`，不是每个 PR 的必需任务。
 
 CI 检测到格式、锁文件或生成绑定漂移时，下载并审查它提供的有界补丁，不要在本地重新生成。
 
@@ -275,12 +277,12 @@ CI 检测到格式、锁文件或生成绑定漂移时，下载并审查它提�
 
 ## 参与贡献
 
-欢迎提交 Issue 和 PR！采用 [Conventional Commits](https://www.conventionalcommits.org/) 规范。
+欢迎提交 Issue 和 PR！开发流程与授权遵循 `$gkd-main`，实施约束见 [AGENTS.md](AGENTS.md)。每个完成的任务通过任务分支 PR 集成，使用简短中文 [Conventional Commit](https://www.conventionalcommits.org/)。
 
 ```bash
-feat(ui): add usage heatmap
-fix(gateway): handle timeout correctly
-docs: update installation guide
+feat(ui): 添加用量热力图
+fix(gateway): 修正超时处理
+docs: 更新安装指南
 ```
 
 ---

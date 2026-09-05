@@ -31,7 +31,7 @@ These guides help you **ask the right questions before coding**.
 
 ### When to Think About Cross-Layer Issues
 
-- [ ] Feature touches 3+ layers (API, Service, Component, Database)
+- [ ] Feature changes a boundary between API, service, component, or database
 - [ ] Data format changes between layers
 - [ ] Multiple consumers need the same data
 - [ ] You're not sure where to put some logic
@@ -43,10 +43,10 @@ These guides help you **ask the right questions before coding**.
 ### When to Think About Code Reuse
 
 - [ ] You're writing similar code to something that exists
-- [ ] You see the same pattern repeated 3+ times
+- [ ] Multiple consumers repeat the same contract or behavior
 - [ ] You're adding a new field to multiple places
-- [ ] **You're modifying any constant or config**
-- [ ] **You're creating a new utility/helper function** ← Search first!
+- [ ] You're modifying a shared constant or config
+- [ ] You're creating a helper for behavior that may already have an owner
 - [ ] Two files read the same untyped payload field with local casts
 - [ ] Multiple branches update the same derived state from `kind` / `action`
 
@@ -73,26 +73,30 @@ These guides help you **ask the right questions before coding**.
 2. **Ignoring design comments**: Flagging intentional behavior documented in code comments as bugs
 3. **Variable misreading**: Not tracing a variable to its actual definition (e.g., Map keyed by path vs name)
 
-**Verification rule**: Every CRITICAL/WARNING finding must be verified against the actual code before prioritizing. Budget ~35% false-positive rate for AI reviews.
+**Verification rule**: Verify findings against the actual code, data source, and intended behavior before prioritizing. Do not assume a fixed false-positive rate.
 
 ---
 
-## Pre-Modification Rule (CRITICAL)
+## Search Scope Before Modification
 
-> **Before changing ANY value, ALWAYS search first!**
+Search definitions and consumers when changing shared configuration, protocols,
+constants, or names, or when the impact is unclear. Start in the owning module
+and expand across the repository only when the references or uncertainty require
+it. An isolated wording or local-value change does not require a repository-wide
+search.
 
 ```bash
-# Search for the value you're about to change
-grep -r "value_to_change" .
+# Search the relevant owner and consumers
+rg "symbol_or_config_key" path/to/affected/module
 ```
 
-This single habit prevents most "forgot to update X" bugs.
+Review the affected consumers together so shared changes remain consistent.
 
 ---
 
 ## How to Use This Directory
 
-1. **Before coding**: Skim the relevant thinking guide
+1. **Before coding**: Read a guide only when its trigger applies
 2. **During coding**: If something feels repetitive or complex, check the guides
 3. **After bugs**: Add new insights to the relevant guide (learn from mistakes)
 
@@ -104,4 +108,4 @@ Found a new "didn't think of that" moment? Add it to the relevant guide.
 
 ---
 
-**Core Principle**: 30 minutes of thinking saves 3 hours of debugging.
+**Core Principle**: Match investigation and verification to the changed behavior.

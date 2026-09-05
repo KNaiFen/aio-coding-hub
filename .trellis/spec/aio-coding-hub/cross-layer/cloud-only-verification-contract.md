@@ -9,13 +9,28 @@ package scripts, Tauri build hooks, active AIO specs, `ci.yml`, `pr-title.yml`,
 
 ## 2. Local Allowlist
 
-Main maintains `.gkd/plan.md` and `.gkd/review.md`; execution follows the declared
-worktree's `.gkd/execution.md`, updates `.gkd/progress.md`, and respects `AGENTS.md`.
+Within system, developer, and explicit user instructions, `$gkd-main` owns
+lifecycle, route, role, authorization, acceptance, and closeout decisions.
+`AGENTS.md` adds AIO environment and Git constraints; conflicting project rules
+must be corrected rather than used to bypass GKD.
+
+Main maintains `.gkd/plan.md` and `.gkd/review.md`. GKD selects direct-main or
+delegated; only delegated creates a declared worktree's `.gkd/execution.md`
+and `.gkd/progress.md`. Its execution session follows that handoff, reads the
+applicable rules and behavior contracts, and returns material deviations to
+main. Historical records do not direct new work. Both implementation routes use
+task branches and PRs under AIO Git rules; direct-main does not mean pushing main.
+
 Do not install dependencies, start development servers, or run package/native
 quality gates locally. GitHub Actions owns dependency installation, formatting,
 type checking, linting, tests, coverage, builds, generators, Cargo, Tauri,
 signing, and packaging. Plan-approved direct Node contracts use only built-in
 modules, do not spawn prohibited tools, and do not write files.
+Before committing, use the approved dependency-free checks for the changed
+surface and read-only file/Git inspection. Before merging, wait for the
+automatic CI jobs selected by the classifier. Local checks do not replace
+cloud quality gates, and module-specific regression scenarios apply only to
+affected behavior or shared inputs.
 Current GKD Markdown and read-only monitoring/acceptance roles are supported;
 retired lifecycle commands and external runtime state remain unsupported.
 
@@ -79,8 +94,9 @@ The checker self-test must fail when:
 
 - a root/workspace script lacks the Actions guard or a local dev/precommit
   entry reappears;
-- README or AGENTS recommends a prohibited local command or bypasses the
-  `$gkd-main` worktree handoff;
+- README or AGENTS recommends a prohibited local command, or AGENTS loses the
+  `$gkd-main` entry or a required `.gkd/plan.md`, `.gkd/execution.md`,
+  `.gkd/progress.md`, or `.gkd/review.md` reference;
 - Tauri regains a local dev hook;
 - `dev-build.yml` or `performance.yml` gains a non-manual trigger, manual CI can
   run heavy jobs outside `main`, or candidate desktop/TUI jobs stop
@@ -98,5 +114,14 @@ The checker self-test must fail when:
 - `pr-title.yml` checks out PR code, misses title edits, or is folded back into
   full CI.
 
-The positive fixture and repository scan must run without dependencies and
-without writing any file.
+The documentation checker retains required GKD entry references and forbidden
+local-command checks. It does not require verbatim zero-artifact or routine
+manual-CI sentences in AGENTS and the READMEs. Positive self-tests must accept
+equivalent wording for those instructions; review still checks that the prose
+clearly preserves their meaning. Existing checks for package guards, Tauri
+hooks, automatic/manual gates, selected jobs, required commands, and candidate
+PR boundaries remain in force.
+
+The positive fixtures and repository scan must run without dependencies and
+without writing any file. GKD owns independent acceptance and closeout; a
+successful local scan alone is not completion of the full task.

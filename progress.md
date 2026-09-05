@@ -1,3 +1,5 @@
+> 状态：历史发布进度，正文中的“进行中”仅反映当时记录，不指导新任务。现行流程使用 `$gkd-main`；delegated 进度位于执行 worktree 的 `.gkd/progress.md`，项目入口见 [AGENTS.md](AGENTS.md)。
+
 # 进度
 
 ## 已完成

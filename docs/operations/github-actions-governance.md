@@ -22,12 +22,12 @@ PR 的 `change-scope` 按 `.github/ci-scope.json` 分别输出 frontend、Rust �
 
 ## 提交与发版
 
-1. main 维护 `.gkd/plan.md`，批准后从已更新的 `origin/main` 创建任务 worktree，并生成 `.gkd/execution.md`。进度写入执行 worktree 的 `.gkd/progress.md`，主代理审查写入主工作树的 `.gkd/review.md`；任务记录不充当构建或发布输入。
-2. 每个完成的任务提交简短中文 Conventional Commit，通过任务分支 PR 接受自动 `ci-gate` 和 `pr-title`。PR squash 后以远端实际 merge SHA 为集成事实，同步远端结果，不再把原任务分支重复合入本地 main。本地 main 有独有提交时先比较文件差异、保留现场，不能按 ahead 数量推断遗漏功能或自动重置历史。
+1. 生命周期、路线和授权遵循 `$gkd-main`，[AGENTS.md](../../AGENTS.md) 补充项目约束。main 先维护并取得 `.gkd/plan.md` 的执行批准，再按 GKD 选择 direct-main 或 delegated。实施均从已更新的 `origin/main` 建立任务分支；仅 delegated 在独立 worktree 生成 `.gkd/execution.md` 并记录 `.gkd/progress.md`。main 按 GKD 维护 `.gkd/review.md`；任务记录不充当构建或发布输入。
+2. 每个完成的任务提交简短中文 Conventional Commit。提交前执行获批方案中的零依赖、无产物检查；合并前通过任务分支 PR 等待自动分类器选中的 job 和 required `ci-gate`、`pr-title`，本地结果不替代云端质量门。PR squash 后以远端实际 merge SHA 为集成事实，同步远端结果，不再把原任务分支重复合入本地 main。本地 main 有独有提交时先比较文件差异、保留现场，不能按 ahead 数量推断遗漏功能或自动重置历史。
 3. 版本 PR 合并后，等待该实际 main merge SHA 的成功 CI 与签名候选。候选完成前不推送发布标签；有候选时不额外手动重建，以免产生同 SHA 多候选歧义。main 后续有新提交也不能将标签移到新 HEAD。
 4. 对该 SHA 推送 `aio-coding-hub-vMAJOR.MINOR.PATCH` 标签后，release 只晋升对应成功 main CI 的精确候选，不重新构建；同名 Release 的资产相同则无操作，不同则失败。手动 CI/发布仅用于明确恢复场景，候选缺失或过期时先确认目标提交与恢复方式，不用当前 main 替代旧发布来源。
 
-归档使用 `.gkd/archive/` 的脱敏 Markdown；合并前保留任务 worktree。提交、推送、合并和发版分别按任务授权执行；历史根级记录与 Trellis 归档不作为新任务入口。
+独立验收、CI 监控、归档和现场清理由 GKD 路由；归档只保存 `.gkd/archive/` 下的脱敏 Markdown 事实。提交、推送、合并和发版按已有任务授权执行，材料性变化交回 main 确认；历史根级记录与 Trellis 归档不作为新任务入口。
 
 ## Upstream Sync GitHub App
 
