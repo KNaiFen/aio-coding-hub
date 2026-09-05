@@ -190,7 +190,9 @@ sudo xattr -cr /Applications/"AIO Coding Hub.app"
 
 ### 本地零产物与云端验证
 
-仓库不在本地安装依赖、启动开发服务，也不在本地运行格式化、类型检查、Lint、测试或构建。开发任务的 worktree、计划、进度和审查记录遵循 `AGENTS.md` 与 `$gkd-main` skill；完整质量门由 GitHub Actions 执行。普通 PR 与受保护分支推送会自动触发 `ci`，以对应提交的 `ci-gate` 和 `pr-title` 为准；不要为常规验证额外手动运行 `ci`。`workflow_dispatch` 仅用于 `main` 的恢复或候选构建，Provider trend release benchmark 由相关自动 CI 路径或独立 `performance` 工作流执行；需要桌面集成制品时，在 Actions 页面按需运行 `dev-build` 并选择目标。
+仓库不在本地安装依赖、启动开发服务，也不在本地运行格式化、类型检查、Lint、测试或构建。开发任务的 worktree、计划、执行交接、进度和审查记录遵循 `AGENTS.md` 与 `$gkd-main` skill，使用 `.gkd/` Markdown；完整质量门由 GitHub Actions 执行。普通 PR 与受保护分支推送会自动触发 `ci`，PR 合并等待对应的 `ci-gate` 和独立 `pr-title`；不要为常规验证额外手动运行 `ci`。`workflow_dispatch` 仅用于 `main` 的恢复或候选构建，Provider trend release benchmark 由相关自动 CI 路径或独立 `performance` 工作流执行；需要桌面集成制品时，在 Actions 页面按需运行 `dev-build` 并选择目标。
+
+纯文档 PR 与主干推送保留轻量分类；`.gkd/` Markdown 不触发前端或 Rust 构建，README、AGENTS 和规范变更仍执行文档合同。含代码或未知文件的主干推送仍跑完整 CI，CodeQL 保持独立运行。任务从 `origin/main` 建分支，squash 合并后同步远端实际结果；版本标签只指向已生成成功签名候选的实际 main 合并提交。详见[提交与发版流程](docs/operations/github-actions-governance.md#提交与发版)。
 
 <!-- SUPPORT_MATRIX_SOURCE_BUILD:START -->
 | 分类 | 云端工作流目标 | 说明 |

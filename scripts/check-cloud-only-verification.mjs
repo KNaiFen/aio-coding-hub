@@ -511,12 +511,12 @@ export function assertCloudOnlyVerificationContract(fixture) {
 
   requireText(agents, "Keep the local checkout zero-artifact.", "AGENTS.md", failures);
   requireText(agents, "$gkd-main", "AGENTS.md", failures);
-  for (const handoffFile of ["plan.md", "progress.md", "review.md"]) {
+  for (const handoffFile of [".gkd/plan.md", ".gkd/execution.md", ".gkd/progress.md", ".gkd/review.md"]) {
     requireText(agents, handoffFile, "AGENTS.md", failures);
   }
   requireAbsent(
     agents,
-    /gkd-task|gkd-role|gkd_acceptor|gkd-ci-monitor|gkd-local-verify|gkd-verify|TrustedMainRuntimeBridge|\.gkd\//i,
+    /gkd-task|gkd-role|gkd_acceptor|gkd-local-verify|gkd-verify|TrustedMainRuntimeBridge/i,
     "AGENTS.md",
     failures
   );
@@ -528,7 +528,7 @@ export function assertCloudOnlyVerificationContract(fixture) {
     requireText(text, "workflow_dispatch", label, failures);
     requireAbsent(
       text,
-      /gkd-task|gkd-role|gkd_acceptor|gkd-ci-monitor|gkd-local-verify|gkd-verify|TrustedMainRuntimeBridge|\.gkd\//i,
+      /gkd-task|gkd-role|gkd_acceptor|gkd-local-verify|gkd-verify|TrustedMainRuntimeBridge/i,
       label,
       failures
     );

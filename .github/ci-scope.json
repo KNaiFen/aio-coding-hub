@@ -1,8 +1,19 @@
 {
   "version": 2,
   "processDocumentation": {
-    "exactPaths": ["AGENTS.md", "CHANGELOG.md", "PENDING.md", "PENDING_COMPLETED.md"],
+    "exactPaths": [
+      "CHANGELOG.md",
+      "PENDING.md",
+      "PENDING_COMPLETED.md",
+      "plan.md",
+      "progress.md",
+      "review.md"
+    ],
     "prefixRules": [
+      {
+        "prefix": ".gkd/",
+        "extensions": [".md"]
+      },
       {
         "prefix": ".trellis/tasks/",
         "extensions": [".md", ".json", ".jsonl"]
@@ -14,7 +25,7 @@
     ]
   },
   "checkedDocumentation": {
-    "exactPaths": ["README.md", "README_EN.md"],
+    "exactPaths": ["AGENTS.md", "README.md", "README_EN.md"],
     "prefixRules": [
       {
         "prefix": ".trellis/spec/",
