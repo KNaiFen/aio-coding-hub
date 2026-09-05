@@ -1,3 +1,5 @@
+> 归档快照：gkd-rule-alignment，PLAN/execution r2。记录各阶段当时事实，不是活动指令；本机目录已替换为逻辑路径。
+
 # gkd-rule-alignment 执行进度
 
 ## 起始现场
