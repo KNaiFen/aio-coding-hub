@@ -9,13 +9,15 @@ package scripts, Tauri build hooks, active AIO specs, `ci.yml`, `pr-title.yml`,
 
 ## 2. Local Allowlist
 
-Local work follows the declared worktree plan and the `AGENTS.md` boundary. Do
-not install dependencies, start development servers, or run package/native
+Main maintains `.gkd/plan.md` and `.gkd/review.md`; execution follows the declared
+worktree's `.gkd/execution.md`, updates `.gkd/progress.md`, and respects `AGENTS.md`.
+Do not install dependencies, start development servers, or run package/native
 quality gates locally. GitHub Actions owns dependency installation, formatting,
 type checking, linting, tests, coverage, builds, generators, Cargo, Tauri,
-signing, and packaging. A task may add another direct Node source contract only
-when it imports no third-party package, does not spawn a prohibited tool, and
-does not write.
+signing, and packaging. Plan-approved direct Node contracts use only built-in
+modules, do not spawn prohibited tools, and do not write files.
+Current GKD Markdown and read-only monitoring/acceptance roles are supported;
+retired lifecycle commands and external runtime state remain unsupported.
 
 ## 3. Package And Tauri Boundaries
 
@@ -36,23 +38,23 @@ does not write.
 semantics. Manual runs are main-only and report `manual-ci-gate`, so they cannot
 replace the protected branch check. Routine PR validation uses the automatic
 workflow rather than a second manual run. Pull requests select frontend, Rust,
-or both from the changed paths; `dev`/`main` pushes and main manual runs always
-select both domains.
+or both from the changed paths. Proven documentation-only PRs and `dev`/`main`
+pushes skip both domains; pushes containing code or unknown paths and main
+manual runs select both domains.
 
 - `contracts` is the only dependency-free static contract job. It runs the
   cloud-only checker for checked documentation or either selected source
-  domain, and runs the cloud-only and local-runner self-tests when a source
-  domain is selected.
+  domain, and runs the cloud-only self-test when a source domain is selected.
 - `frontend` installs frozen dependencies, audits them, runs lint, both plugin
   package type checks and tests, root unit coverage, and the Vite build. The
   root coverage run discovers `src/e2e`; there is no separate E2E command.
   It may be skipped only when the classifier proves no frontend/shared path is
-  present, and it requires the selected `contracts` job to succeed.
+  present. It runs alongside contracts; the gate requires both to succeed.
 - `rust` installs the pinned toolchain, runs Rust formatting and lock/binding
   canonicalization, fails with a bounded drift artifact when files change,
   then runs Clippy, Rust tests, and dependency audit. It may be skipped only for
-  a frontend-only or documentation-only PR; shared/unknown paths and protected
-  branch pushes select it.
+  a frontend-only PR or a documentation-only PR/push; shared/unknown paths and
+  protected branch pushes containing code select it.
 - Candidate desktop/TUI jobs remain limited to eligible main commits or an
   explicit manual candidate request. They are skipped for PR branches and are
   not required for every PR.

@@ -358,7 +358,9 @@ export function runClassifier(options, runGit = runGitCommand) {
       return changed.reason === "manual-dispatch" ? manualCiResult() : fullCiResult(changed.reason);
     }
     const result = classifyPaths(changed.paths, policy);
-    return options.eventName === "push" ? forceFullResult(result, "branch-push") : result;
+    return options.eventName === "push" && (result.frontendCi || result.rustCi)
+      ? forceFullResult(result, "branch-push")
+      : result;
   } catch (error) {
     return fullCiResult("classification-error", conciseError(error));
   }

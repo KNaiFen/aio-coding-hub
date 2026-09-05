@@ -25,6 +25,10 @@ waiting for a check that never reports.
 
 - Only exact paths and prefix-plus-extension rules in `.github/ci-scope.json`
   may select a documentation, frontend, or Rust-only tier.
+- `.gkd/` Markdown and the existing root `plan.md`, `progress.md`, and
+  `review.md` are process records with no build or release consumers. Other
+  extensions under `.gkd/` remain unknown and require complete CI. `AGENTS.md`
+  is checked documentation so handoff changes run the cloud-only contract.
 - `.github/**` and the classifier/self-test scripts are immutable control-plane
   exceptions: code hard-codes them to complete CI, so the policy cannot grant
   itself or its interpreter a cheaper route.
@@ -38,10 +42,11 @@ waiting for a check that never reports.
   flags. Mixed documentation plus one source domain runs the targeted docs and
   source jobs; frontend plus Rust or any shared path runs complete CI.
 - Pull requests use their base/head merge base and may use domain selection.
-  Pushes use the event's `before` and head objects but are forced to complete CI
-  because `ci.yml` only accepts `dev`/`main` pushes. Main-only manual and
-  unsupported events also require complete CI; manual CI omits the release
-  benchmark because it has a dedicated workflow.
+  Pushes use the event's `before` and head objects. Proven documentation-only
+  pushes keep their documentation tier; any code or unknown path forces complete
+  CI for `dev`/`main` integration. Main-only manual and unsupported events also
+  require complete CI; manual CI omits the release benchmark because it has a
+  dedicated workflow.
 - Parse NUL-delimited `git diff --name-status` records. Renames and copies
   classify both old and new paths; deletions classify the old path.
 - Invalid/all-zero SHAs, missing history, Git errors, malformed policy,
@@ -56,9 +61,9 @@ waiting for a check that never reports.
   checked documentation or either source domain is selected. Step conditions
   keep docs-only checks on `docs_checks`, source self-tests on frontend/Rust
   selection, and plugin docs/API checks on checked docs or frontend selection.
-  Frontend and Rust consume only their respective selection output and require
-  `contracts` success. Candidate planning still requires `full_ci=true` and
-  retains all existing main/version-change and signed-build requirements.
+  Frontend, Rust, and contracts run in parallel after successful classification;
+  `ci-gate` requires all selected jobs to succeed. Candidate planning requires
+  `full_ci=true` and retains the main/version-change and signed-build requirements.
 - `ci-gate` uses `always()`, depends on every selectable job, and validates both
   selected successes and unselected `skipped` results. A classifier failure,
   missing output, unexpected skip, cancellation, or selected-suite failure must

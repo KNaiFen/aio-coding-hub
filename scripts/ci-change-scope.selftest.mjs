@@ -33,6 +33,19 @@ expectScope(["PENDING.md", ".trellis/tasks/08-03-task/task.json", "omx_wiki/guid
   fullCi: false,
   docsChecks: false,
 });
+const gkdDocuments = [
+  ".gkd/plan.md",
+  ".gkd/plan-changes.md",
+  ".gkd/execution.md",
+  ".gkd/progress.md",
+  ".gkd/review.md",
+  ".gkd/archive/workflow/summary.md",
+  "plan.md",
+  "progress.md",
+  "review.md",
+];
+expectScope(gkdDocuments, { scope: "process-docs", fullCi: false, docsChecks: false });
+expectScope(["AGENTS.md"], { scope: "checked-docs", fullCi: false, docsChecks: true });
 expectScope(["README.md", "docs/plugins/authoring.md", ".trellis/spec/example/rule.md"], {
   scope: "checked-docs",
   fullCi: false,
@@ -60,6 +73,9 @@ for (const path of [
   "package.json",
   "pnpm-lock.yaml",
   "scripts/check-spec-links.mjs",
+  ".gkd/state.json",
+  ".gkd/scripts/run.mjs",
+  ".gkd/archive/workflow/check.sh",
 ]) {
   assert.equal(classifyPath(path, policy).tier, "shared", path);
 }
@@ -182,6 +198,15 @@ assert.equal(docsToFrontendCopy.docsChecks, true);
 assert.equal(docsToFrontendCopy.frontendCi, true);
 assert.equal(docsToFrontendCopy.rustCi, false);
 assert.equal(classifyNameStatus("D\0src-tauri/src/removed.rs\0", policy).scope, "rust");
+assert.equal(
+  classifyNameStatus("R100\0.gkd/progress.md\0.gkd/archive/workflow/progress.md\0", policy).scope,
+  "process-docs"
+);
+assert.equal(classifyNameStatus("D\0.gkd/execution.md\0", policy).scope, "process-docs");
+assert.equal(
+  classifyNameStatus("R100\0src/main.tsx\0.gkd/archive/workflow/main.md\0", policy).scope,
+  "frontend"
+);
 
 const baseSha = sha("a");
 const headSha = sha("b");
@@ -255,6 +280,30 @@ assert.equal(branchPush.frontendCi, true);
 assert.equal(branchPush.rustCi, true);
 assert.equal(branchPush.sharedCi, true);
 assert.equal(branchPush.providerTrendBenchmark, false);
+
+for (const eventName of ["pull_request", "push"]) {
+  for (const [paths, scope] of [
+    [gkdDocuments, "process-docs"],
+    [["README.md", "AGENTS.md", ".gkd/review.md"], "checked-docs"],
+    [[".gkd/progress.md", "src/main.tsx"], eventName === "push" ? "full" : "frontend"],
+    [[".gkd/progress.md", "src-tauri/src/lib.rs"], eventName === "push" ? "full" : "rust"],
+    [[".gkd/state.json"], "full"],
+    [[".gkd/review.md", ".github/workflows/ci.yml"], "full"],
+    [[".gkd/review.md", "package.json"], "full"],
+  ]) {
+    const result = runClassifier(
+      { eventName, baseSha, beforeSha: baseSha, headSha, policyPath },
+      (args) =>
+        args[0] === "merge-base" ? mergeBaseSha : paths.map((path) => `M\0${path}\0`).join("")
+    );
+    assert.equal(result.scope, scope, `${eventName}: ${paths.join(", ")}`);
+    if (scope.endsWith("docs")) {
+      assert.equal(result.frontendCi, false);
+      assert.equal(result.rustCi, false);
+      assert.equal(result.providerTrendBenchmark, false);
+    }
+  }
+}
 
 assert.throws(
   () =>

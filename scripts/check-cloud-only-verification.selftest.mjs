@@ -11,6 +11,14 @@ assert.doesNotThrow(() => assertCloudOnlyVerificationContract(valid));
 assert.doesNotThrow(() =>
   assertCloudOnlyVerificationContract({
     ...valid,
+    agents: `${valid.agents}\n$gkd-ci-monitor gkd_accept .gkd/archive/\n`,
+    readme: `${valid.readme}\n$gkd-ci-monitor .gkd/execution.md\n`,
+    readmeEn: `${valid.readmeEn}\n$gkd-ci-monitor .gkd/execution.md\n`,
+  })
+);
+assert.doesNotThrow(() =>
+  assertCloudOnlyVerificationContract({
+    ...valid,
     ciWorkflow: valid.ciWorkflow.replace("    steps:\n", "    steps: # executable steps\n"),
   })
 );
@@ -110,7 +118,14 @@ for (const [name, mutate, expected] of [
     (fixture) => {
       fixture.agents = fixture.agents.replaceAll("progress.md", "status.md");
     },
-    /AGENTS\.md must include "progress\.md"/,
+    /AGENTS\.md must include "\.gkd\/progress\.md"/,
+  ],
+  [
+    "legacy plan-only execution handoff",
+    (fixture) => {
+      fixture.agents = fixture.agents.replaceAll(".gkd/execution.md", ".gkd/plan.md");
+    },
+    /AGENTS\.md must include "\.gkd\/execution\.md"/,
   ],
   [
     "active spec bare cargo command",
