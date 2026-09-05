@@ -8,4 +8,6 @@
 - 额外用 Bash 替身覆盖 sync PR 创建/更新、DIRTY、UNKNOWN、BLOCKED、空状态、命令失败；无真实 GitHub 写调用。
 - 消融审查：未修改主 CI/release DAG、产品文件、依赖、版本、历史归档或 GitHub 设置；未发现需删除的活动旧 GKD 入口。
 - 实现已提交为 `6c9cec5ed670c660d6397449a5414e7bd649e58a`，main 本地审查通过。
-- 用户已授权推送、合并和清理。本归档随交付提交，创建时 PR 与云端验证尚未执行；其后状态以 GitHub PR 的检查及合并记录为准。
+- 用户已授权推送、合并和清理；已创建 PR #190。
+- 首轮 CI 的 frontend、rust、pr-title 成功，contracts 因 Linux summary 输出重定向失败，ci-gate 随之失败。r4 修复测试输出方式，推送后等待新 head 的自动检查。
+- 最终状态以 GitHub PR 的检查及合并记录为准。

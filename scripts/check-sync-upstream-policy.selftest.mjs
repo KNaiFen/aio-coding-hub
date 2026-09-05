@@ -413,7 +413,9 @@ const openPrRun = workflow
   .split("        run: |\n")[1]
   .split("\n")
   .map((line) => line.slice(10))
-  .join("\n");
+  .join("\n")
+  // Node pipes cannot be reopened through /dev/stdout on Linux.
+  .replaceAll('>> "${GITHUB_STEP_SUMMARY}"', ">&1");
 const commandStubs = `
 git() {
   [[ "$1 $2" == "merge-base --is-ancestor" ]] || return 99
@@ -471,7 +473,6 @@ for (const [name, overrides, exitCode, expected] of [
       GITHUB_REPOSITORY: "fixture/aio",
       TARGET_BRANCH: "main",
       UPSTREAM_REPO: "upstream/aio",
-      GITHUB_STEP_SUMMARY: "/dev/stdout",
       TEST_TOPOLOGY: "diverged",
       TEST_EXISTING_PR: "",
       TEST_CREATED_URL: "https://github.com/fixture/aio/pull/123",

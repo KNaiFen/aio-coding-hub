@@ -1,5 +1,12 @@
 # Main 审查 r3
 
+## r4 云端返工记录
+
+- PR #190 / 首轮 head `eeb279e4027a1c9fd0e34c4ca0d5f6fbad9a423a` / run `33960979398`。
+- frontend、rust、pr-title 成功；contracts 中 sync policy selftest 因 Linux 无法重新打开 Node pipe 的 `/dev/stdout` 失败，ci-gate 正确阻止合并。
+- 修复将测试 summary 直接输出到已有 stdout 描述符；不改变生产 workflow，只调整测试输出目的地。
+- 该修复需新 head 的自动 CI 通过；下述 r3 本地证据不代表云端通过。
+
 - PLAN r3 / execution r2；route：direct-main。
 - 实现 head：`6c9cec5ed670c660d6397449a5414e7bd649e58a`。
 - 结论：本地实现及归档审查通过，云端检查待执行；没有预先批准绕过门禁合并。
