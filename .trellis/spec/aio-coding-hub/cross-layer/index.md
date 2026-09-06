@@ -57,16 +57,15 @@ TypeScript bindings, frontend adapters, and React UI.
   documentation allowlists, rename-aware Git ranges, fail-closed suite
   selection, and a stable required gate.
 - [Cloud-only verification contract](./cloud-only-verification-contract.md):
-  zero-artifact local checks, Actions-only package scripts, change-selected
+  local resource constraints, Actions-only package scripts, change-selected
   CI gates, and bounded generated-file drift handling.
 - [Release promotion contract](./release-promotion-contract.md): remote tag
   identity, immutable main source commits, exact-SHA candidate reuse, and
   trigger-parity regression coverage.
 
-## Pre-Development Checklist
+## Behavior Boundaries
 
-Read only the contracts for the behavior and boundaries affected by the change.
-These checklists do not require unrelated modules to be investigated.
+The following boundaries apply to the corresponding behavior or shared inputs.
 
 When changing a Codex `config.toml` field:
 
@@ -240,15 +239,13 @@ When changing release source validation or candidate promotion:
 3. Verify annotated-tag push and manual dispatch paths without rewriting local
    tag refs or rebuilding promoted assets.
 
-## Quality Check
+## Regression Scenarios
 
 Apply each scenario below only when its behavior or shared inputs are affected.
 Ordinary documentation changes do not trigger business regression scenarios.
 
 - Read [Cloud-only verification contract](./cloud-only-verification-contract.md)
-  for the local allowlist and cloud gates. Before committing, run the approved
-  dependency-free checks for the changed surface; before merging, wait for the
-  automatic CI jobs selected by the current classifier.
+  for the tool environment, local resource constraints, and cloud gates.
 - For affected cross-layer contracts, GitHub Actions regenerates and verifies
   `src/generated/bindings.ts`, tests Rust parsing/write safety and frontend
   behavior, and runs Clippy for all affected target families. A host-only local

@@ -113,7 +113,7 @@ validator for a field whose raw contract requires exact values.
 
 GitHub Actions must run the focused frontend/Rust tests, generate bindings,
 format, lint, type-check, run Clippy, and complete the affected Rust suite.
-Local worktree checks must follow `AGENTS.md` and the `$gkd-main` skill.
+The local resource boundary is recorded in the [cloud-only contract](./cloud-only-verification-contract.md).
 
 ### 7. Wrong vs Correct
 

@@ -194,13 +194,13 @@ sudo xattr -cr /Applications/"AIO Coding Hub.app"
 
 </details>
 
-### Zero-Artifact Local Checks and Cloud Validation
+### Local Resource Constraints and Cloud Validation
 
-Do not install repository dependencies, start a development server, or run formatting, type checking, linting, tests, or builds locally. The `$gkd-main` skill owns task workflow; [AGENTS.md](AGENTS.md) adds AIO environment and Git constraints. Main records the approved plan in `.gkd/plan.md` and selects direct-main or delegated under GKD. Only delegated tasks create `.gkd/execution.md` and `.gkd/progress.md` in an execution worktree. Read documentation for the affected behavior; historical records do not direct new tasks.
+Task workflow follows the user-level `$gkd-main` skill. See [AGENTS.md](AGENTS.md) for local resource constraints and the package-script environment. Dependency installation, full tests and coverage, compilation, packaging, and long-running performance checks use GitHub Actions.
 
-Before committing, run only plan-approved checks that need no dependencies and write no artifacts. Before merging, wait for the quality gates selected by automatic CI: regular pull requests and protected-branch pushes trigger `ci`, and PR merges require the corresponding `ci-gate` and independent `pr-title` results. Routine PR validation must not trigger a duplicate manual `ci` run. `workflow_dispatch` is reserved for `main` recovery or candidate builds, while the Provider trend release benchmark runs on relevant automatic CI paths or the standalone `performance` workflow. Run `dev-build` from Actions only when a desktop integration artifact is needed.
+Regular pull requests and protected-branch pushes trigger `ci`, and PR merges require the corresponding `ci-gate` and independent `pr-title` results. Routine PR validation must not trigger a duplicate manual `ci` run. `workflow_dispatch` is reserved for `main` recovery or candidate builds, while the Provider trend release benchmark runs on relevant automatic CI paths or the standalone `performance` workflow. Run `dev-build` from Actions only when a desktop integration artifact is needed.
 
-Documentation-only PRs and documentation-only protected-branch pushes retain their documentation tier. GKD Markdown skips frontend and Rust builds; README, AGENTS, and specification changes still run documentation contracts. Frontend-only or Rust-only PRs run the affected domain; shared, mixed, or unknown paths run both. Protected-branch pushes with code or unknown files retain complete CI; CodeQL runs independently. Start task branches from `origin/main`, including direct-main work, and synchronize the remote result after squash merges. Release tags must point to the actual main merge commit with a successful signed candidate. See the [commit and release procedure](docs/operations/github-actions-governance.md#提交与发版).
+Documentation-only PRs and documentation-only protected-branch pushes retain their documentation tier. GKD Markdown skips frontend and Rust builds; README, AGENTS, and specification changes still run documentation contracts. Frontend-only or Rust-only PRs run the affected domain; shared, mixed, or unknown paths run both. Protected-branch pushes with code or unknown files retain complete CI; CodeQL runs independently. Release tags must point to the actual main merge commit with a successful signed candidate. See [commits and releases](docs/operations/github-actions-governance.md#提交与发版).
 
 <!-- SUPPORT_MATRIX_SOURCE_BUILD:START -->
 | Scope | Cloud workflow target | Notes |
@@ -236,7 +236,6 @@ curl http://127.0.0.1:37123/health
 
 - [Project knowledge base](docs/README.md): the canonical map for product, architecture, plugin, operations, task, and historical documentation.
 - [Pending work](PENDING.md) and [completed work](PENDING_COMPLETED.md): deferred items and delivery evidence.
-- Task plans, handoffs, progress, reviews, and archives follow the GKD route; the repository does not maintain a second lifecycle state store.
 
 Current code takes precedence over historical audits, superseded plans, and session journals.
 
@@ -272,13 +271,7 @@ When CI reports formatting, lockfile, or generated-binding drift, download and r
 
 ## Contributing
 
-Issues and PRs welcome! Follow `$gkd-main` for workflow and authorization, and [AGENTS.md](AGENTS.md) for AIO constraints. Each completed task uses a task-branch PR and a concise Chinese [Conventional Commit](https://www.conventionalcommits.org/) message.
-
-```bash
-feat(ui): 添加用量热力图
-fix(gateway): 修正超时处理
-docs: 更新安装指南
-```
+Issues and PRs welcome! Follow the user-level `$gkd-main` skill for workflow and [AGENTS.md](AGENTS.md) for AIO constraints.
 
 ---
 
