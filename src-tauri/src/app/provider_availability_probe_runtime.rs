@@ -3089,7 +3089,26 @@ INSERT INTO providers(
             gateway_state::with_app_running_gateway_slot_mut(app.handle(), |slot| {
                 *slot = Some(gateway)
             });
-            clock.block_on(async {
+            let (release, blocked) = std::sync::mpsc::channel();
+            let (release_preparation, blocked_preparation) = std::sync::mpsc::channel();
+            let (release_next, blocked_next) = std::sync::mpsc::channel();
+            let (stop_diagnostic, diagnostic_stopped) = std::sync::mpsc::channel();
+            let (elapsed, deadline) = oneshot::channel();
+            // A real clock bounds diagnostics while the probe's clock is paused.
+            let diagnostic = std::thread::spawn(move || {
+                if matches!(
+                    diagnostic_stopped.recv_timeout(Duration::from_secs(30)),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+                ) {
+                    let _ = elapsed.send(());
+                }
+            });
+            let phase = std::cell::Cell::new("setup");
+            let mut lock_holder = None;
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| clock.block_on(async {
+                tokio::select! {
+                    _ = deadline => Err(phase.get()),
+                    () = async {
                 tokio::time::pause();
                 let clock_driver = tokio::spawn(async { loop { tokio::task::yield_now().await; } });
                 let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await.unwrap();
@@ -3113,8 +3132,7 @@ INSERT INTO providers(
                 state.reconcile_schedules(vec![loaded(provider_id, 1, 60_000)], 0, false, 1, true).await;
 
                 let (entered, ready) = oneshot::channel();
-                let (release, blocked) = std::sync::mpsc::channel();
-                let lock_holder = std::thread::spawn({
+                lock_holder = Some(std::thread::spawn({
                     let app = app.handle().clone(); let circuit = circuit.clone();
                     move || {
                         let hold = || { entered.send(()).unwrap(); blocked.recv().unwrap(); };
@@ -3124,18 +3142,19 @@ INSERT INTO providers(
                             circuit.hold_probe_health_for_test(hold);
                         }
                     }
-                });
+                }));
+                phase.set("acquire real lock");
                 ready.await.unwrap();
                 let (entered, ready) = oneshot::channel();
-                let (release_preparation, blocked) = std::sync::mpsc::channel();
                 let (exited, prepared) = oneshot::channel();
                 *state.shared.next_pause.lock().unwrap() = Some(provider_availability::ProbeTestPause {
-                    stage: if before_configuration { "configuration" } else if hold_manager { "manager" } else { "circuit" }, entered, release: blocked, exited,
+                    stage: if before_configuration { "configuration" } else if hold_manager { "manager" } else { "circuit" }, entered, release: blocked_preparation, exited,
                 });
                 let first = tokio::spawn({
                     let state = state.clone(); let app = app.handle().clone(); let db = db.clone();
                     async move { state.probe_manual(app, db, provider_id).await }
                 });
+                phase.set("reach probe checkpoint");
                 ready.await.unwrap();
                 let second = match state.begin_probe(provider_id, None).await {
                     ProbeDecision::Wait(receiver) => receiver,
@@ -3143,9 +3162,11 @@ INSERT INTO providers(
                 };
                 let mut prepared = prepared;
                 if !before_configuration {
+                    phase.set("leave checkpoint with real lock held");
                     release_preparation.send(()).unwrap();
                     (&mut prepared).await.unwrap();
                 }
+                phase.set("deliver timeout with real lock held");
                 tokio::time::advance(Duration::from_secs(60)).await;
                 for result in [first.await.unwrap(), second.await.unwrap().result] {
                     if before_configuration {
@@ -3159,6 +3180,7 @@ INSERT INTO providers(
                 }
                 assert!(state.shared.inner.lock().await.entries[&provider_id].in_flight.is_none());
                 if before_configuration {
+                    phase.set("release expired configuration checkpoint");
                     release_preparation.send(()).unwrap();
                     (&mut prepared).await.unwrap();
                 }
@@ -3167,6 +3189,7 @@ INSERT INTO providers(
                     release.send(()).unwrap();
                 }
                 if change_configuration {
+                    phase.set("write changed configuration");
                     let db = db.clone();
                     blocking::run("timeout_configuration_isolation", move || -> AppResult<()> {
                         db.open_connection()?.execute("UPDATE providers SET name = 'new lock configuration' WHERE id = ?1", [provider_id])
@@ -3175,26 +3198,34 @@ INSERT INTO providers(
                     }).await.unwrap();
                 }
                 drop(mutation);
+                let (entered, next_ready) = oneshot::channel();
+                let (exited, next_prepared) = oneshot::channel();
+                *state.shared.next_pause.lock().unwrap() = Some(provider_availability::ProbeTestPause {
+                    stage: "configuration", entered, release: blocked_next, exited,
+                });
                 let next = tokio::spawn({
                     let state = state.clone(); let app = app.handle().clone(); let db = db.clone();
                     async move { state.probe_manual(app, db, provider_id).await }
                 });
-                loop {
-                    if state.shared.inner.lock().await.entries[&provider_id].in_flight.is_some() { break; }
-                    tokio::task::yield_now().await;
-                }
+                phase.set("admit next flight");
+                next_ready.await.unwrap();
+                assert!(state.shared.inner.lock().await.entries[&provider_id].in_flight.is_some());
                 if !change_configuration { release.send(()).unwrap(); }
-                lock_holder.join().unwrap();
+                lock_holder.take().unwrap().join().unwrap();
+                release_next.send(()).unwrap();
+                next_prepared.await.unwrap();
+                phase.set("complete next flight and ordered timeout consumption");
                 let result = next.await.unwrap().unwrap();
                 assert!(result.ok);
                 if change_configuration { assert_eq!(result.provider_name, "new lock configuration"); }
-                assert!(state.shared.inner.lock().await.entries[&provider_id].in_flight.is_none());
+                assert!(state.shared.inner.lock().await.entries.get(&provider_id).is_none_or(|entry| entry.in_flight.is_none()));
                 assert_eq!(circuit.snapshot(provider_id, now).state, if change_configuration {
                     crate::circuit_breaker::CircuitState::Closed
                 } else {
                     crate::circuit_breaker::CircuitState::HalfOpen
                 });
                 let db_check = db.clone();
+                phase.set("verify durable observations");
                 let observations = blocking::run("ordered_timeout_observations", move || -> AppResult<(i64, i64)> {
                     let mut conn = db_check.open_connection()?;
                     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
@@ -3214,8 +3245,25 @@ INSERT INTO providers(
                 clock_driver.abort();
                 assert!(clock_driver.await.unwrap_err().is_cancelled());
                 tokio::time::resume();
-            });
+                    } => Ok(()),
+                }
+            })));
+            // Release fixtures even after an assertion fails, before propagating
+            // failure or dropping the runtime that owns the probe tasks.
+            let _ = release_preparation.send(());
+            let _ = release_next.send(());
+            let _ = release.send(());
+            let _ = stop_diagnostic.send(());
+            diagnostic.join().unwrap();
+            if let Some(lock_holder) = lock_holder {
+                lock_holder.join().unwrap();
+            }
             let _ = gateway_state::take_app_running_gateway(app.handle());
+            match outcome {
+                Ok(Ok(())) => {}
+                Ok(Err(phase)) => panic!("probe lock fixture timed out at {phase}: manager={hold_manager}, before_configuration={before_configuration}, change_configuration={change_configuration}"),
+                Err(panic) => std::panic::resume_unwind(panic),
+            }
         }
     }
 
