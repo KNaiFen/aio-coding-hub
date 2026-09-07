@@ -49,6 +49,9 @@ fn answer_blocks(value: &Value, kind: &str) -> Result<bool, &'static str> {
 
 fn gemini_text(content: &Value) -> Result<bool, &'static str> {
     no_error(content)?;
+    if content.get("role").is_some_and(|role| role != "model") {
+        return Err("PROBE_STRUCTURE");
+    }
     let mut answered = false;
     for part in content["parts"].as_array().ok_or("PROBE_STRUCTURE")? {
         no_error(part)?;
@@ -364,6 +367,29 @@ mod tests {
             for value in [json!({"error":{"message":"failed"}}), json!({}), json!([]), json!(null)] {
                 assert!(validate_json(protocol, &value).is_err());
             }
+        }
+    }
+
+    #[test]
+    fn gemini_json_and_sse_only_accept_model_or_missing_role() {
+        for role in [None, Some(json!("model")), Some(json!("user")), Some(json!("assistant")), Some(json!("system")), Some(json!(null)), Some(json!(42))] {
+            let mut value = json!({"candidates":[{"index":0,"finishReason":"STOP","content":{"parts":[{"text":"OK"}]}}]});
+            if let Some(role) = &role {
+                value["candidates"][0]["content"]["role"] = role.clone();
+            }
+            let expected = if role.as_ref().is_none_or(|role| role == "model") {
+                Ok(())
+            } else {
+                Err("PROBE_STRUCTURE")
+            };
+            assert_eq!(validate_json(ProbeProtocol::Gemini, &value), expected);
+            let mut stream = ProbeStream::new(ProbeProtocol::Gemini);
+            assert_eq!(stream.frame(format!("data: {value}\n\n").as_bytes()), expected);
+            assert_eq!(stream.terminal(), expected.is_ok());
+            let mut wrapped_stream = ProbeStream::new(ProbeProtocol::Gemini);
+            let wrapped = json!({"response": value});
+            assert_eq!(gemini_oauth_frame(&mut wrapped_stream, format!("data: {wrapped}\n\n").as_bytes()), expected);
+            assert_eq!(wrapped_stream.terminal(), expected.is_ok());
         }
     }
 
