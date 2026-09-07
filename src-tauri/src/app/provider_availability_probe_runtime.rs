@@ -2352,12 +2352,6 @@ INSERT INTO providers(
                 });
                 read_ready.await.unwrap();
                 assert!(!read.is_finished(), "SQL ordering waits for the existing OAuth transaction");
-                let (entered, next_ready) = oneshot::channel();
-                let (next_release, blocked) = std::sync::mpsc::channel();
-                let (exited, next_ended) = oneshot::channel();
-                *state.shared.next_pause.lock().unwrap() = Some(provider_availability::ProbeTestPause {
-                    stage: "oauth_read", entered, release: blocked, exited,
-                });
                 let next = tokio::spawn({
                     let state = state.clone(); let app = app.handle().clone(); let db = db.clone();
                     async move { state.probe_manual(app, db, provider_id).await }
@@ -2372,15 +2366,161 @@ INSERT INTO providers(
                 ended.await.unwrap();
                 assert_eq!(read.await.unwrap(), if accepted { "synthetic-refreshed" } else { "synthetic-old" });
                 drop(mutation);
-                next_ready.await.unwrap();
-                next_release.send(()).unwrap();
-                next_ended.await.unwrap();
                 let result = next.await.unwrap().unwrap();
                 assert!(result.ok);
                 if mutate { assert_eq!(result.provider_name, "new oauth configuration"); }
                 assert_eq!(refreshes.load(Ordering::SeqCst) - before_refreshes, if accepted { 1 } else { 2 });
                 assert_eq!(crate::providers::get_oauth_details(&db, provider_id).unwrap().oauth_access_token, "synthetic-refreshed");
             }
+        }
+        server.abort();
+        assert!(server.await.unwrap_err().is_cancelled());
+        clock_driver.abort();
+        assert!(clock_driver.await.unwrap_err().is_cancelled());
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test(start_paused = true)]
+    async fn accepted_oauth_commit_orders_real_reads_without_blocking_admission_or_slots() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _home = crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_HOME", temp.path());
+        let app = tauri::test::mock_app();
+        let clock_driver = tokio::spawn(async { loop { tokio::task::yield_now().await; } });
+        let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let _upstream = crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_PROBE_OAUTH_BASE_URL", &url);
+        let refreshes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let generations = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let router = axum::Router::new().route("/token", axum::routing::post({
+            let refreshes = refreshes.clone();
+            move || {
+                refreshes.fetch_add(1, Ordering::SeqCst);
+                async { axum::Json(serde_json::json!({"access_token":"synthetic-refreshed","refresh_token":"synthetic-rotated-refresh","token_type":"Bearer","expires_in":3600})) }
+            }
+        })).route("/v1/messages", axum::routing::post({
+            let generations = generations.clone();
+            move |headers: axum::http::HeaderMap, axum::Json(body): axum::Json<serde_json::Value>| {
+                generations.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    assert_eq!(headers["authorization"], "Bearer synthetic-refreshed");
+                    assert_eq!(body["model"], "claude-sonnet-4-6");
+                    assert_eq!(body["max_tokens"], 100);
+                    axum::Json(serde_json::json!({"type":"message","role":"assistant","content":[{"type":"text","text":"OK"}],"stop_reason":"end_turn"}))
+                }
+            }
+        }));
+        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap(); });
+        for expired_reads in [0, 33] {
+            let before_refreshes = refreshes.load(Ordering::SeqCst);
+            let before_generations = generations.load(Ordering::SeqCst);
+            let db = crate::db::init_for_tests(&temp.path().join(format!("oauth-read-order-{expired_reads}.db"))).unwrap();
+            let conn = db.open_connection().unwrap();
+            assert_eq!(conn.query_row("PRAGMA journal_mode", [], |row| row.get::<_, String>(0)).unwrap(), "wal");
+            conn.execute("INSERT INTO providers(provider_uuid, cli_key, name, base_url, api_key_plaintext, created_at, updated_at) VALUES (?1, 'claude', 'synthetic oauth', ?2, '', 1, 1)", params![crate::shared::uuid::new_uuid_v4(), url]).unwrap();
+            let provider_id = conn.last_insert_rowid();
+            drop(conn);
+            crate::providers::update_oauth_tokens(&db, provider_id, "oauth", "claude_oauth", "synthetic-old", Some("synthetic-refresh"),
+                None, &format!("{url}/token"), "synthetic-client", None, Some(crate::shared::time::now_unix_seconds() - 1), None).unwrap();
+            let state = ProviderAvailabilityProbeRuntimeState::default();
+            state.reconcile_schedules(vec![loaded(provider_id, 1, 60_000)], 0, false, 1, true).await;
+            let (entered, ready) = oneshot::channel();
+            let (release, blocked) = std::sync::mpsc::channel();
+            let (exited, ended) = oneshot::channel();
+            *state.shared.next_pause.lock().unwrap() = Some(provider_availability::ProbeTestPause {
+                stage: "oauth_accepted", entered, release: blocked, exited,
+            });
+            let first = tokio::spawn({
+                let state = state.clone(); let app = app.handle().clone(); let db = db.clone();
+                async move { state.probe_manual(app, db, provider_id).await }
+            });
+            ready.await.unwrap();
+            let old_budget = state.shared.inner.lock().await.entries[&provider_id].in_flight.as_ref().unwrap().budget.clone();
+            tokio::time::advance(Duration::from_secs(60)).await;
+            let result = first.await.unwrap().unwrap();
+            assert!(!result.ok);
+            assert!(result.error.unwrap().starts_with("PROBE_TIMEOUT"));
+            assert_eq!(result.tested_model.as_deref(), Some("claude-sonnet-4-6"));
+
+            // No pause is installed in any new flight. Each notification only
+            // observes its production read attempting the credential lock.
+            for _ in 0..expired_reads {
+                let admitted_at = tokio::time::Instant::now();
+                let next = tokio::spawn({
+                    let state = state.clone(); let app = app.handle().clone(); let db = db.clone();
+                    async move { state.probe_manual(app, db, provider_id).await }
+                });
+                let budget = loop {
+                    if let Some(flight) = state.shared.inner.lock().await.entries[&provider_id].in_flight.as_ref() {
+                        break flight.budget.clone();
+                    }
+                    tokio::task::yield_now().await;
+                };
+                budget.oauth_read_waiting.notified().await;
+                assert!(!Arc::ptr_eq(&budget, &old_budget));
+                assert_eq!(budget.deadline, admitted_at + Duration::from_secs(60));
+                tokio::time::advance(Duration::from_secs(60)).await;
+                let result = next.await.unwrap().unwrap();
+                assert!(!result.ok);
+                assert!(result.error.unwrap().starts_with("PROBE_TIMEOUT"));
+                assert_eq!(result.tested_model.as_deref(), Some("claude-sonnet-4-6"));
+                assert!(state.shared.inner.lock().await.entries[&provider_id].in_flight.is_none());
+                assert!(tokio::time::timeout(Duration::ZERO, budget.oauth_read_completed.notified()).await.is_err());
+                // 33 canceled readers exceed the global maximum of 32 slots;
+                // this real shared entry must remain available before commit.
+                assert_eq!(blocking::run("oauth_wait_slot_check", || Ok::<_, AppError>(7)).await.unwrap(), 7);
+                assert_eq!(refreshes.load(Ordering::SeqCst) - before_refreshes, 1);
+                assert_eq!(generations.load(Ordering::SeqCst) - before_generations, 0);
+            }
+            let next = tokio::spawn({
+                let state = state.clone(); let app = app.handle().clone(); let db = db.clone();
+                async move { state.probe_manual(app, db, provider_id).await }
+            });
+            let budget = loop {
+                if let Some(flight) = state.shared.inner.lock().await.entries[&provider_id].in_flight.as_ref() {
+                    break flight.budget.clone();
+                }
+                tokio::task::yield_now().await;
+            };
+            budget.oauth_read_waiting.notified().await;
+            assert!(!next.is_finished());
+            // Let both runtimes execute the unpaused production read while the
+            // old commit stays blocked. The sampling timer controls no probe work.
+            let (sampled, sample_ready) = oneshot::channel();
+            let sample = std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(100));
+                sampled.send(()).unwrap();
+            });
+            tokio::select! {
+                _ = budget.oauth_read_completed.notified() => panic!("new OAuth read overtook the accepted commit"),
+                result = sample_ready => result.unwrap(),
+            }
+            sample.join().unwrap();
+            let db_read = db.clone();
+            let stored = blocking::run("oauth_uncommitted_wal_read", move || {
+                crate::providers::get_oauth_details(&db_read, provider_id)
+            }).await.unwrap();
+            assert_eq!(stored.oauth_access_token, "synthetic-old", "ordinary WAL SELECT can still see the pre-commit token");
+            assert_eq!(refreshes.load(Ordering::SeqCst) - before_refreshes, 1);
+            assert_eq!(generations.load(Ordering::SeqCst) - before_generations, 0);
+            release.send(()).unwrap();
+            ended.await.unwrap();
+            budget.oauth_read_completed.notified().await;
+            let result = next.await.unwrap().unwrap();
+            assert!(result.ok);
+            assert_eq!(result.requested_model.as_deref(), Some("claude-sonnet-4-6"));
+            assert_eq!(result.tested_model.as_deref(), Some("claude-sonnet-4-6"));
+            assert_eq!(refreshes.load(Ordering::SeqCst) - before_refreshes, 1, "accepted rotation must prevent another refresh");
+            assert_eq!(generations.load(Ordering::SeqCst) - before_generations, 1, "only the final flight generates");
+            let details = crate::providers::get_oauth_details(&db, provider_id).unwrap();
+            assert_eq!(details.oauth_access_token, "synthetic-refreshed");
+            assert_eq!(details.oauth_refresh_token.as_deref(), Some("synthetic-rotated-refresh"));
+            let counts = blocking::run("oauth_ordered_timeout_observations", move || -> AppResult<(i64, i64)> {
+                let mut conn = db.open_connection()?;
+                let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
+                Ok(tx.query_row("SELECT SUM(success = 0), SUM(success = 1) FROM provider_availability_observations WHERE provider_id = ?1", [provider_id], |row| Ok((row.get(0)?, row.get(1)?))).unwrap())
+            }).await.unwrap();
+            assert_eq!(counts, (expired_reads + 1, 1));
         }
         server.abort();
         assert!(server.await.unwrap_err().is_cancelled());

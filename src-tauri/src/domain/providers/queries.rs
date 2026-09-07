@@ -8,6 +8,7 @@ use crate::shared::sqlite::enabled_to_int;
 use crate::shared::time::now_unix_seconds;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, TransactionBehavior};
 use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Duration;
 
 const PROVIDER_USAGE_PROJECTION_BATCH_SIZE: usize = 100;
@@ -1501,6 +1502,40 @@ pub(crate) async fn resolve_effective_transport_credential_with_probe_runtime(
     .await
 }
 
+fn oauth_credential_gate(provider_id: i64) -> Arc<tokio::sync::RwLock<()>> {
+    static GATES: OnceLock<Mutex<HashMap<i64, Weak<tokio::sync::RwLock<()>>>>> = OnceLock::new();
+    let mut gates = GATES.get_or_init(|| Mutex::new(HashMap::new())).lock().expect("OAuth credential gates");
+    gates.retain(|_, gate| gate.strong_count() > 0);
+    if let Some(gate) = gates.get(&provider_id).and_then(Weak::upgrade) {
+        return gate;
+    }
+    let gate = Arc::new(tokio::sync::RwLock::new(()));
+    gates.insert(provider_id, Arc::downgrade(&gate));
+    gate
+}
+
+pub(crate) async fn get_oauth_details_for_credential(
+    db: &db::Db,
+    provider_id: i64,
+    budget: Option<Arc<crate::domain::provider_availability::ProbeBudget>>,
+) -> crate::shared::error::AppResult<ProviderOAuthDetails> {
+    #[cfg(test)]
+    if let Some(budget) = &budget { budget.oauth_read_waiting.notify_one(); }
+    let credential_read = oauth_credential_gate(provider_id).read_owned().await;
+    crate::blocking::run("provider_oauth_credential_read", {
+        let db = db.clone();
+        move || {
+            let _credential_read = credential_read;
+            if let Some(budget) = &budget { budget.checkpoint("oauth_read")?; }
+            let details = get_oauth_details(&db, provider_id)?;
+            #[cfg(test)]
+            if let Some(budget) = &budget { budget.oauth_read_completed.notify_one(); }
+            if let Some(budget) = &budget { budget.check()?; }
+            Ok::<_, crate::shared::error::AppError>(details)
+        }
+    }).await
+}
+
 async fn resolve_effective_transport_credential_inner(
     db: &db::Db,
     client: &reqwest::Client,
@@ -1521,17 +1556,7 @@ async fn resolve_effective_transport_credential_inner(
         return Ok(api_key.to_string());
     }
 
-    let details = crate::blocking::run("provider_oauth_credential_read", {
-        let db = db.clone();
-        let provider_id = transport.provider_id;
-        let budget = budget.clone();
-        move || {
-            if let Some(budget) = &budget { budget.checkpoint("oauth_read")?; }
-            let details = get_oauth_details(&db, provider_id)?;
-            if let Some(budget) = &budget { budget.check()?; }
-            Ok::<_, crate::shared::error::AppError>(details)
-        }
-    }).await?;
+    let details = get_oauth_details_for_credential(db, transport.provider_id, budget.clone()).await?;
     if details.cli_key != cli_key {
         return Err(format!(
             "SEC_INVALID_STATE: oauth details cli_key mismatch for provider_id={} (expected={cli_key}, actual={})",
@@ -1582,6 +1607,9 @@ async fn resolve_effective_transport_credential_inner(
                                 }
                                 None => None,
                             };
+                            // Readers wait asynchronously for accepted CAS commits,
+                            // without occupying blocking slots or probe admission.
+                            let credential_write = oauth_credential_gate(transport.provider_id).write_owned().await;
                             let persisted = crate::blocking::run("provider_oauth_credential_write", {
                                 let db = db.clone();
                                 let provider_id = transport.provider_id;
@@ -1591,6 +1619,7 @@ async fn resolve_effective_transport_credential_inner(
                                 let budget = budget.clone();
                                 move || {
                                     let _probe_mutation_guard = probe_mutation_guard;
+                                    let _credential_write = credential_write;
                                     if let Some(budget) = &budget { budget.check()?; }
                                     update_oauth_tokens_if_last_refreshed_matches_inner(
                                         &db,

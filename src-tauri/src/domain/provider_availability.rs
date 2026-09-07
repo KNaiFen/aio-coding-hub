@@ -56,6 +56,10 @@ pub(crate) struct ProbeBudget {
     pub(crate) pause: Mutex<Option<ProbeTestPause>>,
     #[cfg(test)]
     pub(crate) completion_waiting: tokio::sync::Notify,
+    #[cfg(test)]
+    pub(crate) oauth_read_waiting: tokio::sync::Notify,
+    #[cfg(test)]
+    pub(crate) oauth_read_completed: tokio::sync::Notify,
 }
 
 #[cfg(test)]
@@ -79,6 +83,10 @@ impl ProbeBudget {
             pause: Mutex::new(None),
             #[cfg(test)]
             completion_waiting: tokio::sync::Notify::new(),
+            #[cfg(test)]
+            oauth_read_waiting: tokio::sync::Notify::new(),
+            #[cfg(test)]
+            oauth_read_completed: tokio::sync::Notify::new(),
         })
     }
 
@@ -878,17 +886,9 @@ pub(crate) async fn test_provider_availability_with_budget<R: tauri::Runtime>(
                 } else if protocol != crate::gateway::ProbeProtocol::Responses {
                     return Err("PROBE_OAUTH_PROTOCOL: ChatGPT requires Responses".into());
                 }
-                let details = blocking::run("provider_availability_oauth_details", {
-                    let db = db.clone();
-                    let budget = budget.clone();
-                    let provider_id = provider.transport_provider_id;
-                    move || {
-                        budget.checkpoint("oauth_details")?;
-                        let details = crate::providers::get_oauth_details(&db, provider_id)?;
-                        budget.check()?;
-                        Ok::<_, AppError>(details)
-                    }
-                }).await?;
+                let details = crate::providers::get_oauth_details_for_credential(
+                    &db, provider.transport_provider_id, Some(budget.clone()),
+                ).await?;
                 if let Some(account_id) = crate::gateway::probe_codex_account_id(details.oauth_id_token.as_deref())
                     .or_else(|| crate::gateway::probe_codex_account_id(Some(&details.oauth_access_token))) {
                     headers.insert("chatgpt-account-id", HeaderValue::from_str(&account_id).map_err(|_| "PROBE_AUTH")?);
