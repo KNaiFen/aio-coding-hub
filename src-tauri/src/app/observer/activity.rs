@@ -266,7 +266,7 @@ mod platform {
             let first_work = activity.work().await;
             let second_work = activity.work().await;
             tokio::time::advance(Duration::from_secs(50)).await;
-            activity.sync().await;
+            tokio::task::yield_now().await;
             assert!(active());
             drop(first_work);
             activity.sync().await;
@@ -276,8 +276,11 @@ mod platform {
             assert!(!active());
             activity.touch_snapshot().await;
             tokio::time::advance(LEASE).await;
-            tokio::task::yield_now().await;
-            activity.sync().await;
+            // Only the controller's expiry task may reconcile this expired lease.
+            for _ in 0..100 {
+                if !active() { break; }
+                tokio::task::yield_now().await;
+            }
             assert!(!active());
             activity.touch_snapshot().await;
             activity.close();
@@ -290,6 +293,77 @@ mod platform {
             drop(late_work);
             let counts = NATIVE_COUNTS.with(std::cell::Cell::get);
             assert_eq!((counts.0 - initial_counts.0, counts.1 - initial_counts.1), (3, 3));
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn expiry_task_ends_a_snapshot_lease_without_another_request() {
+            let app = tauri::test::mock_app();
+            let activity = Activity::new(app.handle());
+            let id = activity.0.id;
+            let initial = NATIVE_COUNTS.with(std::cell::Cell::get);
+            activity.touch_snapshot().await;
+            assert!(TOKENS.with(|tokens| tokens.borrow().contains_key(&id)));
+            tokio::time::advance(LEASE).await;
+            for _ in 0..100 {
+                if !TOKENS.with(|tokens| tokens.borrow().contains_key(&id)) { break; }
+                tokio::task::yield_now().await;
+            }
+            assert!(!TOKENS.with(|tokens| tokens.borrow().contains_key(&id)), "expiry task must end the token");
+            let counts = NATIVE_COUNTS.with(std::cell::Cell::get);
+            assert_eq!((counts.0 - initial.0, counts.1 - initial.1), (1, 1));
+            activity.close();
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn cancelled_work_and_closed_controller_release_native_activity() {
+            let app = tauri::test::mock_app();
+            let activity = Activity::new(app.handle());
+            let id = activity.0.id;
+            let initial = NATIVE_COUNTS.with(std::cell::Cell::get);
+            let active = || TOKENS.with(|tokens| tokens.borrow().contains_key(&id));
+            let task_activity = activity.clone();
+            let (started, ready) = oneshot::channel();
+            let task = tokio::spawn(async move {
+                let _work = task_activity.work().await;
+                started.send(()).unwrap();
+                std::future::pending::<()>().await;
+            });
+            ready.await.unwrap();
+            assert!(active());
+            assert_eq!(activity.0.state.lock().unwrap().work, 1);
+            task.abort();
+            assert!(task.await.unwrap_err().is_cancelled());
+            assert_eq!(activity.0.state.lock().unwrap().work, 0);
+            assert!(!active());
+
+            assert!(tokio::time::timeout(Duration::from_secs(65), async {
+                let _work = activity.work().await;
+                assert!(active());
+                std::future::pending::<()>().await;
+            }).await.is_err());
+            assert_eq!(activity.0.state.lock().unwrap().work, 0);
+            assert!(!active());
+
+            let failed_activity = activity.clone();
+            let failed_task = tokio::spawn(async move {
+                let _work = failed_activity.work().await;
+                panic!("synthetic observer request failure");
+            });
+            assert!(failed_task.await.unwrap_err().is_panic());
+            assert_eq!(activity.0.state.lock().unwrap().work, 0);
+            assert!(!active());
+
+            let work = activity.work().await;
+            assert!(active());
+            activity.close();
+            assert!(!active());
+            assert!(activity.0.task.lock().unwrap().is_none());
+            drop(work);
+            assert_eq!(activity.0.state.lock().unwrap().work, 0);
+            activity.touch_snapshot().await;
+            assert!(!active());
+            let counts = NATIVE_COUNTS.with(std::cell::Cell::get);
+            assert_eq!((counts.0 - initial.0, counts.1 - initial.1), (4, 4));
         }
     }
 }
