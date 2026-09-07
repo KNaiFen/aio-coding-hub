@@ -10,7 +10,11 @@ use reqwest::header::{HeaderMap, HeaderValue};
 use rusqlite::{params, params_from_iter, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+#[cfg(test)]
+use std::time::Instant;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
@@ -41,6 +45,102 @@ pub struct ProviderAvailabilityResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[specta(optional)]
     pub tested_model: Option<String>,
+}
+
+pub(crate) struct ProbeBudget {
+    pub(crate) deadline: tokio::time::Instant,
+    started: tokio::time::Instant,
+    clock: tokio::runtime::Handle,
+    evidence: Mutex<Option<ProviderAvailabilityResult>>,
+    current: AtomicBool,
+    #[cfg(test)]
+    pub(crate) pause: Mutex<Option<ProbeTestPause>>,
+}
+
+#[cfg(test)]
+pub(crate) struct ProbeTestPause {
+    pub(crate) stage: &'static str,
+    pub(crate) entered: tokio::sync::oneshot::Sender<()>,
+    pub(crate) release: std::sync::mpsc::Receiver<()>,
+    pub(crate) exited: tokio::sync::oneshot::Sender<()>,
+}
+
+impl ProbeBudget {
+    pub(crate) fn new() -> Arc<Self> {
+        let started = tokio::time::Instant::now();
+        Arc::new(Self {
+            started,
+            deadline: started + WORK_TIMEOUT,
+            clock: tokio::runtime::Handle::current(),
+            evidence: Mutex::new(None),
+            current: AtomicBool::new(true),
+            #[cfg(test)]
+            pause: Mutex::new(None),
+        })
+    }
+
+    pub(crate) fn expired(&self) -> bool {
+        let _clock = self.clock.enter();
+        tokio::time::Instant::now() >= self.deadline
+    }
+
+    pub(crate) fn check(&self) -> AppResult<()> {
+        if self.expired() {
+            Err(probe_failure(&AppError::from("PROBE_TIMEOUT")))
+        } else if !self.current.load(Ordering::Acquire) {
+            Err(AppError::new("PROBE_PREPARATION", "供应商配置已变化或本次探测已完成"))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(crate) fn invalidate(&self) {
+        self.current.store(false, Ordering::Release);
+    }
+
+    pub(crate) fn checkpoint(&self, _stage: &'static str) -> AppResult<()> {
+        #[cfg(test)]
+        {
+            let pause = {
+                let mut slot = self.pause.lock().expect("probe test pause");
+                if slot.as_ref().is_some_and(|pause| pause.stage == _stage) {
+                    slot.take()
+                } else {
+                    None
+                }
+            };
+            if let Some(pause) = pause {
+                pause.entered.send(()).expect("probe pause observer");
+                pause.release.recv().expect("probe pause release");
+                let result = self.check();
+                let _ = pause.exited.send(());
+                return result;
+            }
+        }
+        self.check()
+    }
+
+    fn remember(&self, result: &ProviderAvailabilityResult) {
+        *self.evidence.lock().expect("probe model evidence") = Some(result.clone());
+    }
+
+    fn elapsed_ms(&self) -> i64 {
+        let _clock = self.clock.enter();
+        self.started.elapsed().as_millis().min(i64::MAX as u128) as i64
+    }
+
+    pub(crate) fn timeout_result(&self) -> AppResult<ProviderAvailabilityResult> {
+        let error = probe_failure(&AppError::from("PROBE_TIMEOUT"));
+        match self.evidence.lock().expect("probe model evidence").clone() {
+            Some(mut result) => {
+                result.ok = false;
+                result.error = Some(error.to_string());
+                result.latency_ms = self.elapsed_ms();
+                Ok(result)
+            }
+            None => Err(error),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, specta::Type, PartialEq, Eq)]
@@ -169,8 +269,9 @@ fn probe_response_preview(body: &ProbeResponseBody) -> String {
     preview
 }
 
-async fn load_provider_for_test(db: db::Db, provider_id: i64) -> AppResult<LoadedProvider> {
+async fn load_provider_for_test(db: db::Db, provider_id: i64, budget: Arc<ProbeBudget>) -> AppResult<LoadedProvider> {
     blocking::run("provider_availability_load", move || -> AppResult<LoadedProvider> {
+        budget.checkpoint("configuration")?;
         if provider_id <= 0 {
             return Err(format!("SEC_INVALID_INPUT: invalid provider_id={provider_id}").into());
         }
@@ -263,8 +364,9 @@ WHERE id = ?1
 async fn load_effective_provider_for_test(
     db: db::Db,
     provider_id: i64,
+    budget: Arc<ProbeBudget>,
 ) -> AppResult<LoadedProvider> {
-    let provider = load_provider_for_test(db.clone(), provider_id).await?;
+    let provider = load_provider_for_test(db.clone(), provider_id, budget.clone()).await?;
     let Some(bridge_type) = provider.bridge_type.as_deref() else {
         return Ok(provider);
     };
@@ -279,6 +381,7 @@ async fn load_effective_provider_for_test(
 
     let bridge_type = bridge_type.to_string();
     let (source, source_cli_key) = blocking::run("provider_availability_source", move || {
+        budget.check()?;
         crate::providers::get_source_provider_for_availability(&db, source_provider_id, &bridge_type)
     }).await?;
 
@@ -578,15 +681,28 @@ fn probe_failure(error: &AppError) -> AppError {
     AppError::new(code, message)
 }
 
+#[cfg(test)]
 pub async fn test_provider_availability<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     db: db::Db,
     provider_id: i64,
 ) -> AppResult<ProviderAvailabilityResult> {
-    let started = Instant::now();
-    let deadline = tokio::time::Instant::now() + WORK_TIMEOUT;
-    let provider = tokio::time::timeout_at(deadline, load_effective_provider_for_test(db.clone(), provider_id))
-        .await.map_err(|_| probe_failure(&AppError::from("PROBE_TIMEOUT")))??;
+    let budget = ProbeBudget::new();
+    match tokio::time::timeout_at(budget.deadline, test_provider_availability_with_budget(app, db, provider_id, budget.clone())).await {
+        Ok(_) if budget.expired() => budget.timeout_result(),
+        Ok(result) => result,
+        Err(_) => budget.timeout_result(),
+    }
+}
+
+pub(crate) async fn test_provider_availability_with_budget<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    db: db::Db,
+    provider_id: i64,
+    budget: Arc<ProbeBudget>,
+) -> AppResult<ProviderAvailabilityResult> {
+    let provider = load_effective_provider_for_test(db.clone(), provider_id, budget.clone()).await?;
+    budget.check()?;
 
     if let Some(bridge_type) = provider.bridge_type.as_deref() {
         let bridge_label = if bridge_type == CX2CC_BRIDGE_TYPE {
@@ -643,87 +759,85 @@ pub async fn test_provider_availability<R: tauri::Runtime>(
         });
     }
 
-    let bridge_probe_source_model =
-        if should_map_bridge_probe_model(provider.bridge_type.as_deref()) {
-            let settings = crate::settings::read(app)?;
-            Some(resolve_codex_probe_model_from_sources(
-                provider.availability_test_model.as_deref(),
-                Some(settings.codex_provider_test_model.as_str()),
-            ))
+    let app = app.clone();
+    let preparation_budget = budget.clone();
+    let (provider, mut url, mut headers, mut body, mut parsed_url, mut protocol, mut result, client) = blocking::run("provider_availability_prepare", move || -> AppResult<_> {
+        preparation_budget.check()?;
+        let bridge_probe_source_model = if should_map_bridge_probe_model(provider.bridge_type.as_deref()) {
+            let settings = crate::settings::read(&app)?;
+            Some(resolve_codex_probe_model_from_sources(provider.availability_test_model.as_deref(),
+                Some(settings.codex_provider_test_model.as_str())))
         } else {
             None
         };
-    let regular_probe_model = if provider.bridge_type.as_deref() == Some(CX2CC_BRIDGE_TYPE) {
-        Some(crate::gateway::cx2cc_probe_model("claude-sonnet-4-6", &provider.claude_models, &crate::settings::read(app)?))
-    } else if bridge_probe_source_model.is_none() && provider.cli_key == "codex"
-    {
-        match normalize_probe_model(provider.availability_test_model.as_deref()) {
-            Some(model) => Some(model),
-            None => {
-                let settings = crate::settings::read(app)?;
-                Some(resolve_codex_probe_model_from_sources(
-                    None,
-                    Some(settings.codex_provider_test_model.as_str()),
-                ))
+        let regular_probe_model = if provider.bridge_type.as_deref() == Some(CX2CC_BRIDGE_TYPE) {
+            Some(crate::gateway::cx2cc_probe_model("claude-sonnet-4-6", &provider.claude_models, &crate::settings::read(&app)?))
+        } else if bridge_probe_source_model.is_none() && provider.cli_key == "codex" {
+            match normalize_probe_model(provider.availability_test_model.as_deref()) {
+                Some(model) => Some(model),
+                None => {
+                    let settings = crate::settings::read(&app)?;
+                    Some(resolve_codex_probe_model_from_sources(None, Some(settings.codex_provider_test_model.as_str())))
+                }
             }
-        }
-    } else {
-        None
-    };
-    let grok_preferences = if provider.cli_key == "grok" {
-        Some(crate::grok_config::get(app)?.effective_preferences)
-    } else {
-        None
-    };
-    let (mut url, mut headers, mut body) = if let Some(source_model) = bridge_probe_source_model.as_deref() {
-        build_bridge_probe_request(&provider, &base_url, "", source_model)?
-    } else {
-        build_probe_request(
-            &provider.cli_key,
-            &base_url,
-            "",
-            regular_probe_model.as_deref(),
-            grok_preferences.as_ref(),
-        )?
-    };
+        } else {
+            None
+        };
+        let grok_preferences = if provider.cli_key == "grok" {
+            Some(crate::grok_config::get(&app)?.effective_preferences)
+        } else {
+            None
+        };
+        let (url, headers, body) = if let Some(source_model) = bridge_probe_source_model.as_deref() {
+            build_bridge_probe_request(&provider, &base_url, "", source_model)?
+        } else {
+            build_probe_request(&provider.cli_key, &base_url, "", regular_probe_model.as_deref(), grok_preferences.as_ref())?
+        };
 
-    let mut parsed_url = reqwest::Url::parse(&url).map_err(|_| "PROBE_INVALID_URL")?;
-    let mut protocol = if parsed_url.path().ends_with("/responses") {
-        crate::gateway::ProbeProtocol::Responses
-    } else if parsed_url.path().ends_with("/chat/completions") {
-        crate::gateway::ProbeProtocol::Chat
-    } else if parsed_url.path().ends_with("/messages") {
-        crate::gateway::ProbeProtocol::Anthropic
-    } else {
-        crate::gateway::ProbeProtocol::Gemini
-    };
-    let tested_model = body.get("model").and_then(serde_json::Value::as_str).map(str::to_string)
-        .or_else(|| parsed_url.path().split("/models/").nth(1)?.split(':').next().map(str::to_string));
-    let requested_model = if provider.bridge_type.as_deref() == Some(CX2CC_BRIDGE_TYPE) {
-        Some("claude-sonnet-4-6".to_string())
-    } else { bridge_probe_source_model.clone().or_else(|| tested_model.clone()) };
-    let mut result = ProviderAvailabilityResult {
-        ok: false, provider_id: provider.id, provider_name: provider.name.clone(), base_url,
-        status: None, latency_ms: 0, error: None, response_preview: None,
-        requested_model, tested_model,
-    };
+        let parsed_url = reqwest::Url::parse(&url).map_err(|_| "PROBE_INVALID_URL")?;
+        let protocol = if parsed_url.path().ends_with("/responses") {
+            crate::gateway::ProbeProtocol::Responses
+        } else if parsed_url.path().ends_with("/chat/completions") {
+            crate::gateway::ProbeProtocol::Chat
+        } else if parsed_url.path().ends_with("/messages") {
+            crate::gateway::ProbeProtocol::Anthropic
+        } else {
+            crate::gateway::ProbeProtocol::Gemini
+        };
+        let tested_model = body.get("model").and_then(serde_json::Value::as_str).map(str::to_string)
+            .or_else(|| parsed_url.path().split("/models/").nth(1)?.split(':').next().map(str::to_string));
+        let requested_model = if provider.bridge_type.as_deref() == Some(CX2CC_BRIDGE_TYPE) {
+            Some("claude-sonnet-4-6".to_string())
+        } else { bridge_probe_source_model.clone().or_else(|| tested_model.clone()) };
+        let result = ProviderAvailabilityResult {
+            ok: false, provider_id: provider.id, provider_name: provider.name.clone(), base_url,
+            status: None, latency_ms: 0, error: None, response_preview: None,
+            requested_model, tested_model,
+        };
+        preparation_budget.remember(&result);
 
-    let client = reqwest::Client::builder()
-        .user_agent(format!(
-            "aio-coding-hub-probe/{}",
-            env!("CARGO_PKG_VERSION")
-        ))
-        .connect_timeout(CONNECT_TIMEOUT)
-        .timeout(REQUEST_TIMEOUT)
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|e| format!("HTTP_CLIENT_INIT: {e}"))?;
+        let client = reqwest::Client::builder()
+            .user_agent(format!("aio-coding-hub-probe/{}", env!("CARGO_PKG_VERSION")))
+            .connect_timeout(CONNECT_TIMEOUT)
+            .timeout(REQUEST_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|e| format!("HTTP_CLIENT_INIT: {e}"))?;
+        preparation_budget.check()?;
+        Ok((provider, url, headers, body, parsed_url, protocol, result, client))
+    }).await?;
 
     let mut effective_credential = String::new();
-    let execution: AppResult<()> = match tokio::time::timeout_at(deadline, async {
-        effective_credential = crate::providers::resolve_effective_transport_credential(
-            &db, &client, &provider.cli_key, &provider.transport_context(),
-        ).await?;
+    let execution: AppResult<()> = async {
+        effective_credential = if provider.auth_mode == "oauth" {
+            crate::providers::resolve_effective_transport_credential_for_probe(
+                &db, &client, &provider.cli_key, &provider.transport_context(), budget.clone(),
+            ).await?
+        } else {
+            crate::providers::resolve_effective_transport_credential(
+                &db, &client, &provider.cli_key, &provider.transport_context(),
+            ).await?
+        };
         let gemini_oauth = provider.auth_mode == "oauth" && provider.cli_key == "gemini";
         if provider.auth_mode == "oauth" {
             headers.remove("x-api-key");
@@ -742,7 +856,17 @@ pub async fn test_provider_availability<R: tauri::Runtime>(
                 } else if protocol != crate::gateway::ProbeProtocol::Responses {
                     return Err("PROBE_OAUTH_PROTOCOL: ChatGPT requires Responses".into());
                 }
-                let details = crate::providers::get_oauth_details(&db, provider.transport_provider_id)?;
+                let details = blocking::run("provider_availability_oauth_details", {
+                    let db = db.clone();
+                    let budget = budget.clone();
+                    let provider_id = provider.transport_provider_id;
+                    move || {
+                        budget.checkpoint("oauth_details")?;
+                        let details = crate::providers::get_oauth_details(&db, provider_id)?;
+                        budget.check()?;
+                        Ok::<_, AppError>(details)
+                    }
+                }).await?;
                 if let Some(account_id) = crate::gateway::probe_codex_account_id(details.oauth_id_token.as_deref())
                     .or_else(|| crate::gateway::probe_codex_account_id(Some(&details.oauth_access_token))) {
                     headers.insert("chatgpt-account-id", HeaderValue::from_str(&account_id).map_err(|_| "PROBE_AUTH")?);
@@ -762,9 +886,7 @@ pub async fn test_provider_availability<R: tauri::Runtime>(
         } else {
             headers.insert("authorization", HeaderValue::from_str(&format!("Bearer {effective_credential}")).map_err(|_| "PROBE_AUTH")?);
         }
-        if tokio::time::Instant::now() >= deadline {
-            return Err("PROBE_TIMEOUT: probe preparation exhausted the work budget".into());
-        }
+        budget.check()?;
         let response = client.post(&url).headers(headers).json(&body).send().await
             .map_err(|error| if error.is_timeout() { "PROBE_TIMEOUT" } else { "PROBE_HTTP" })?;
         let status = response.status().as_u16();
@@ -801,11 +923,8 @@ pub async fn test_provider_availability<R: tauri::Runtime>(
             }
         }
         Ok(())
-    }).await {
-        Ok(result) => result,
-        Err(_) => Err(crate::shared::error::AppError::new("PROBE_TIMEOUT", "probe work exceeded 60 seconds")),
-    };
-    result.latency_ms = started.elapsed().as_millis().min(i64::MAX as u128) as i64;
+    }.await;
+    result.latency_ms = budget.elapsed_ms();
     match execution {
         Ok(()) => result.ok = true,
         Err(error) => {
@@ -984,6 +1103,7 @@ ON CONFLICT(trace_id, provider_id) DO UPDATE SET
 /// fact. The runtime owns generation checks; this function owns the durable,
 /// provider-backed projection boundary and deliberately has no error/detail
 /// parameters to keep probe diagnostics out of the status timeline.
+#[cfg(test)]
 pub(crate) fn record_probe_observation(
     db: &db::Db,
     trace_id: &str,
@@ -995,6 +1115,16 @@ pub(crate) fn record_probe_observation(
         return Err("SEC_INVALID_INPUT: invalid provider availability observation".into());
     }
     let conn = db.open_connection()?;
+    record_probe_observation_in_conn(&conn, trace_id, provider_id, observed_at_ms, success)
+}
+
+pub(crate) fn record_probe_observation_in_conn(
+    conn: &rusqlite::Connection,
+    trace_id: &str,
+    provider_id: i64,
+    observed_at_ms: i64,
+    success: bool,
+) -> AppResult<()> {
     conn.execute(
         r#"
 INSERT INTO provider_availability_observations(

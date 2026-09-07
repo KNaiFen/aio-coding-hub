@@ -1468,7 +1468,17 @@ pub(crate) async fn resolve_effective_transport_credential(
     cli_key: &str,
     transport: &ProviderTransportContext,
 ) -> crate::shared::error::AppResult<String> {
-    resolve_effective_transport_credential_inner(db, client, cli_key, transport, None).await
+    resolve_effective_transport_credential_inner(db, client, cli_key, transport, None, None).await
+}
+
+pub(crate) async fn resolve_effective_transport_credential_for_probe(
+    db: &db::Db,
+    client: &reqwest::Client,
+    cli_key: &str,
+    transport: &ProviderTransportContext,
+    budget: std::sync::Arc<crate::domain::provider_availability::ProbeBudget>,
+) -> crate::shared::error::AppResult<String> {
+    resolve_effective_transport_credential_inner(db, client, cli_key, transport, None, Some(budget)).await
 }
 
 pub(crate) async fn resolve_effective_transport_credential_with_probe_runtime(
@@ -1486,6 +1496,7 @@ pub(crate) async fn resolve_effective_transport_credential_with_probe_runtime(
         cli_key,
         transport,
         probe_runtime.as_ref(),
+        None,
     )
     .await
 }
@@ -1498,6 +1509,7 @@ async fn resolve_effective_transport_credential_inner(
     probe_runtime: Option<
         &crate::app::provider_availability_probe_runtime::ProviderAvailabilityProbeRuntimeState,
     >,
+    budget: Option<std::sync::Arc<crate::domain::provider_availability::ProbeBudget>>,
 ) -> crate::shared::error::AppResult<String> {
     if transport.auth_mode != "oauth" {
         let api_key = transport.api_key_plaintext.trim();
@@ -1509,7 +1521,17 @@ async fn resolve_effective_transport_credential_inner(
         return Ok(api_key.to_string());
     }
 
-    let details = get_oauth_details(db, transport.provider_id)?;
+    let details = crate::blocking::run("provider_oauth_credential_read", {
+        let db = db.clone();
+        let provider_id = transport.provider_id;
+        let budget = budget.clone();
+        move || {
+            if let Some(budget) = &budget { budget.checkpoint("oauth_read")?; }
+            let details = get_oauth_details(&db, provider_id)?;
+            if let Some(budget) = &budget { budget.check()?; }
+            Ok::<_, crate::shared::error::AppError>(details)
+        }
+    }).await?;
     if details.cli_key != cli_key {
         return Err(format!(
             "SEC_INVALID_STATE: oauth details cli_key mismatch for provider_id={} (expected={cli_key}, actual={})",
@@ -1554,30 +1576,42 @@ async fn resolve_effective_transport_credential_inner(
                     Ok(refreshed) => {
                         let new_token = refreshed.access_token.trim().to_string();
                         if !new_token.is_empty() {
-                            let _probe_mutation_guard = match probe_runtime {
+                            let probe_mutation_guard = match probe_runtime {
                                 Some(runtime) => {
                                     runtime.begin_mutation(transport.provider_id).await
                                 }
                                 None => None,
                             };
-                            match update_oauth_tokens_if_last_refreshed_matches(
-                                db,
-                                transport.provider_id,
-                                "oauth",
-                                oauth_adapter.provider_type(),
-                                &new_token,
-                                refreshed.refresh_token.as_deref().or(Some(refresh_token)),
-                                refreshed
-                                    .id_token
-                                    .as_deref()
-                                    .or(details.oauth_id_token.as_deref()),
-                                token_uri,
-                                details.oauth_client_id.as_deref().unwrap_or(""),
-                                details.oauth_client_secret.as_deref(),
-                                refreshed.expires_at.or(details.oauth_expires_at),
-                                details.oauth_email.as_deref(),
-                                details.oauth_last_refreshed_at,
-                            ) {
+                            let persisted = crate::blocking::run("provider_oauth_credential_write", {
+                                let db = db.clone();
+                                let provider_id = transport.provider_id;
+                                let details = details.clone();
+                                let new_token = new_token.clone();
+                                let oauth_provider_type = oauth_adapter.provider_type().to_string();
+                                let budget = budget.clone();
+                                move || {
+                                    let _probe_mutation_guard = probe_mutation_guard;
+                                    if let Some(budget) = &budget { budget.check()?; }
+                                    update_oauth_tokens_if_last_refreshed_matches_inner(
+                                        &db,
+                                        provider_id,
+                                        "oauth",
+                                        &oauth_provider_type,
+                                        &new_token,
+                                        refreshed.refresh_token.as_deref().or(details.oauth_refresh_token.as_deref()),
+                                        refreshed.id_token.as_deref().or(details.oauth_id_token.as_deref()),
+                                        details.oauth_token_uri.as_deref().unwrap_or(""),
+                                        details.oauth_client_id.as_deref().unwrap_or(""),
+                                        details.oauth_client_secret.as_deref(),
+                                        refreshed.expires_at.or(details.oauth_expires_at),
+                                        details.oauth_email.as_deref(),
+                                        details.oauth_last_refreshed_at,
+                                        budget.as_deref(),
+                                    )
+                                }
+                            }).await;
+                            if let Some(budget) = &budget { budget.check()?; }
+                            match persisted {
                                 Ok(true) => {}
                                 Ok(false) => {
                                     tracing::info!(
@@ -2872,7 +2906,32 @@ pub(crate) fn update_oauth_tokens_if_last_refreshed_matches(
     email: Option<&str>,
     expected_last_refreshed_at: Option<i64>,
 ) -> crate::shared::error::AppResult<bool> {
-    let conn = db.open_connection()?;
+    update_oauth_tokens_if_last_refreshed_matches_inner(db, provider_id, auth_mode,
+        oauth_provider_type, access_token, refresh_token, id_token, token_uri, client_id,
+        client_secret, expires_at, email, expected_last_refreshed_at, None)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn update_oauth_tokens_if_last_refreshed_matches_inner(
+    db: &crate::db::Db,
+    provider_id: i64,
+    auth_mode: &str,
+    oauth_provider_type: &str,
+    access_token: &str,
+    refresh_token: Option<&str>,
+    id_token: Option<&str>,
+    token_uri: &str,
+    client_id: &str,
+    client_secret: Option<&str>,
+    expires_at: Option<i64>,
+    email: Option<&str>,
+    expected_last_refreshed_at: Option<i64>,
+    budget: Option<&crate::domain::provider_availability::ProbeBudget>,
+) -> crate::shared::error::AppResult<bool> {
+    let mut conn = db.open_connection()?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| db_err!("failed to start OAuth CAS transaction: {e}"))?;
+    if let Some(budget) = budget { budget.check()?; }
     let now = crate::shared::time::now_unix_seconds();
     // Ensure CAS token advances even if two updates happen in the same second.
     let refreshed_at = match expected_last_refreshed_at {
@@ -2880,7 +2939,7 @@ pub(crate) fn update_oauth_tokens_if_last_refreshed_matches(
         _ => now,
     };
 
-    let rows = conn
+    let rows = tx
         .execute(
             r#"
 UPDATE providers SET
@@ -2921,6 +2980,8 @@ WHERE id = ?12
             ],
         )
         .map_err(|e| crate::shared::error::db_err!("failed to CAS-update OAuth tokens: {e}"))?;
+    if let Some(budget) = budget { budget.checkpoint("oauth_write")?; }
+    tx.commit().map_err(|e| db_err!("failed to commit OAuth CAS transaction: {e}"))?;
     Ok(rows == 1)
 }
 

@@ -7,6 +7,74 @@ fn breaker() -> CircuitBreaker {
 }
 
 #[test]
+fn probe_commit_rechecks_expiry_after_config_and_health_lock_waits() {
+    for hold_config in [true, false] {
+        let cb = Arc::new(CircuitBreaker::new(CircuitBreakerConfig {
+            failure_threshold: 1, open_duration_secs: 1,
+        }, HashMap::new(), None));
+        cb.record_failure(7, 1_000, None);
+        let clock = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
+        let budget = clock.block_on(async {
+            tokio::time::pause();
+            crate::domain::provider_availability::ProbeBudget::new()
+        });
+        let config = hold_config.then(|| cb.config.lock().unwrap());
+        let health = (!hold_config).then(|| cb.health.lock().unwrap());
+        let (started, ready) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn({
+            let cb = cb.clone(); let budget = budget.clone();
+            move || {
+                started.send(()).unwrap();
+                cb.record_probe_outcome_if(7, 1_001, true, |apply| {
+                    if budget.expired() { return false; }
+                    apply();
+                    true
+                })
+            }
+        });
+        ready.recv().unwrap();
+        clock.block_on(tokio::time::advance(std::time::Duration::from_secs(60)));
+        drop(config);
+        drop(health);
+        let effects = worker.join().unwrap();
+        assert!(effects.is_empty());
+        assert_eq!(cb.snapshot(7, 1_001).state, CircuitState::Open);
+        assert_eq!(cb.health.lock().unwrap()[&7].half_open_success_count, 0);
+
+        let effects = cb.record_probe_outcome_if(7, 1_001, true, |apply| {
+            assert_eq!(apply(), Some(true));
+            true
+        });
+        assert_eq!(effects.len(), 1);
+        assert_eq!(effects[0].reason, "OPEN_EXPIRED");
+        assert_eq!(cb.health.lock().unwrap()[&7].half_open_success_count, 1);
+    }
+}
+
+#[test]
+fn probe_entry_preserves_closed_history_and_original_half_open_threshold() {
+    let cb = breaker();
+    cb.record_failure(7, 1_000, None);
+    let before = cb.health.lock().unwrap()[&7].failure_timestamps.clone();
+    let effects = cb.record_probe_outcome_if(7, 2_000, true, |apply| {
+        assert_eq!(apply(), None);
+        true
+    });
+    assert!(effects.is_empty());
+    assert_eq!(cb.health.lock().unwrap()[&7].failure_timestamps, before);
+
+    cb.update_config(CircuitBreakerConfig { failure_threshold: 1, open_duration_secs: 1 });
+    cb.record_failure(7, 2_000, None);
+    for expected in [true, true, false] {
+        cb.record_probe_outcome_if(7, 2_001, true, |apply| {
+            assert_eq!(apply(), Some(expected));
+            true
+        });
+    }
+    assert_eq!(cb.snapshot(7, 2_001).state, CircuitState::Closed);
+}
+
+#[test]
 fn closed_to_open_after_threshold() {
     let cb = breaker();
     let pid = 1;

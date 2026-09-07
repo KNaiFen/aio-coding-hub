@@ -2,8 +2,8 @@
 
 use crate::domain::provider_availability::{self, ProviderAvailabilityResult};
 use crate::shared::error::{db_err, AppError, AppResult};
-use crate::{blocking, db, providers};
-use rusqlite::params;
+use crate::{blocking, db};
+use rusqlite::{params, OptionalExtension};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, Weak};
@@ -35,6 +35,8 @@ impl Default for ProviderAvailabilityProbeRuntimeState {
                 provider_mutation_gates: StdMutex::new(HashMap::new()),
                 scheduled_limiter: Arc::new(Semaphore::new(MAX_CONCURRENT_SCHEDULED_PROBES)),
                 scheduler_started: AtomicBool::new(false),
+                #[cfg(test)]
+                next_pause: StdMutex::new(None),
             }),
         }
     }
@@ -45,6 +47,8 @@ struct RuntimeShared {
     provider_mutation_gates: StdMutex<HashMap<i64, Weak<Mutex<()>>>>,
     scheduled_limiter: Arc<Semaphore>,
     scheduler_started: AtomicBool,
+    #[cfg(test)]
+    next_pause: StdMutex<Option<provider_availability::ProbeTestPause>>,
 }
 
 #[must_use = "hold this guard until the Provider mutation is durably committed"]
@@ -83,6 +87,8 @@ struct RuntimeEntry {
 
 struct InFlightProbe {
     generation: u64,
+    recovery_epoch: u64,
+    budget: Arc<provider_availability::ProbeBudget>,
     waiters: Vec<oneshot::Sender<CompletedProbe>>,
     turn_waiters: Vec<oneshot::Sender<()>>,
 }
@@ -211,6 +217,7 @@ impl ProbeSource {
 enum ProbeDecision {
     Lead {
         generation: u64,
+        budget: Arc<provider_availability::ProbeBudget>,
         receiver: oneshot::Receiver<CompletedProbe>,
     },
     Wait(oneshot::Receiver<CompletedProbe>),
@@ -268,6 +275,7 @@ impl ProviderAvailabilityProbeRuntimeState {
             entry.generation = generation;
             entry.schedule = None;
             entry.recovery = None;
+            if let Some(flight) = &entry.in_flight { flight.budget.invalidate(); }
         }
         remove_idle_entry(&mut inner, provider_id);
     }
@@ -331,6 +339,7 @@ impl ProviderAvailabilityProbeRuntimeState {
                 }
                 ProbeDecision::Lead {
                     generation,
+                    budget,
                     receiver,
                 } => {
                     let trace_id = match source {
@@ -345,16 +354,25 @@ impl ProviderAvailabilityProbeRuntimeState {
                     // The requester may time out or disconnect. Keep the real probe
                     // alive so its shared flight is always completed and released.
                     let state = self.clone();
-                    tauri::async_runtime::spawn(async move {
-                        let result = provider_availability::test_provider_availability(
-                            &app,
-                            db.clone(),
-                            provider_id,
-                        )
-                        .await;
-                        state
-                            .finish_probe(&app, &db, provider_id, generation, &trace_id, result)
-                            .await;
+                    tokio::spawn(async move {
+                        let work = async {
+                            let result = provider_availability::test_provider_availability_with_budget(
+                                &app, db.clone(), provider_id, budget.clone(),
+                            ).await;
+                            let result = if budget.expired() { budget.timeout_result() } else { result };
+                            if result.is_err() {
+                                let mut inner = state.shared.inner.lock().await;
+                                complete_flight(&mut inner, provider_id, generation, &budget, result, None);
+                            } else {
+                                state.finish_probe(&app, &db, provider_id, generation,
+                                    budget.clone(), &trace_id, result).await;
+                            }
+                        };
+                        if tokio::time::timeout_at(budget.deadline, work).await.is_err() {
+                            let mut inner = state.shared.inner.lock().await;
+                            complete_flight(&mut inner, provider_id, generation, &budget,
+                                budget.timeout_result(), None);
+                        }
                     });
                     return Some(
                         receiver
@@ -423,92 +441,108 @@ impl ProviderAvailabilityProbeRuntimeState {
             return ProbeDecision::WaitForTurn(receiver);
         }
         let (sender, receiver) = oneshot::channel();
+        let budget = provider_availability::ProbeBudget::new();
+        #[cfg(test)]
+        {
+            *budget.pause.lock().expect("probe test pause") = self.shared.next_pause.lock().expect("next probe pause").take();
+        }
         entry.in_flight = Some(InFlightProbe {
             generation,
+            recovery_epoch: entry.recovery_epoch,
+            budget: budget.clone(),
             waiters: vec![sender],
             turn_waiters: Vec::new(),
         });
         ProbeDecision::Lead {
             generation,
+            budget,
             receiver,
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn finish_probe<R: tauri::Runtime>(
         &self,
         app: &tauri::AppHandle<R>,
         db: &db::Db,
         provider_id: i64,
         generation: u64,
+        budget: Arc<provider_availability::ProbeBudget>,
         trace_id: &str,
         result: AppResult<ProviderAvailabilityResult>,
     ) {
-        let completed_at_ms = crate::shared::time::now_unix_millis();
-        let completed_at_unix = completed_at_ms.div_euclid(1_000);
-        let mut inner = self.shared.inner.lock().await;
-        let Some((in_flight, should_record)) =
-            take_finished_flight(&mut inner, provider_id, generation)
-        else {
-            return;
-        };
-
-        // Keep generation validation and the insert ordered against invalidation.
-        // Credential writers invalidate first, then persist their new value.
-        let recovery = if should_record {
-            if let Ok(probe) = result.as_ref() {
-                if let Err(error) = provider_availability::record_probe_observation(
-                    db,
-                    trace_id,
-                    provider_id,
-                    completed_at_ms,
-                    probe.ok,
-                ) {
-                    tracing::warn!(
-                        error = %error.code(),
-                        provider_id,
-                        "provider availability probe observation write failed"
-                    );
+        let state = self.clone();
+        let app = app.clone();
+        let db = db.clone();
+        let trace_id = trace_id.to_string();
+        let fallback = result.clone();
+        let work_budget = budget.clone();
+        let finish = blocking::run("provider_availability_finish", move || -> AppResult<()> {
+            let budget = work_budget;
+            budget.checkpoint("completion")?;
+            let completed_at_ms = crate::shared::time::now_unix_millis();
+            // An IMMEDIATE transaction orders this prepared fact before later
+            // configuration writes. A timed-out or invalidated flight rolls it back.
+            let mut conn = db.open_connection()?;
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .map_err(|e| db_err!("failed to prepare probe observation: {e}"))?;
+            budget.check()?;
+            let cli_key = tx.query_row("SELECT cli_key FROM providers WHERE id = ?1", [provider_id], |row| row.get::<_, String>(0))
+                .optional().map_err(|e| db_err!("failed to load probe evidence provider: {e}"))?;
+            if let Ok(probe) = &result {
+                if let Err(error) = provider_availability::record_probe_observation_in_conn(&tx, &trace_id, provider_id, completed_at_ms, probe.ok) {
+                    tracing::warn!(error = %error.code(), provider_id, "provider availability observation write failed");
                 }
-                if record_probe_circuit_evidence(
-                    app,
-                    db,
-                    trace_id,
-                    provider_id,
-                    probe,
-                    completed_at_unix,
-                ) {
-                    let circuit_is_half_open = probe.ok
-                        && running_gateway_circuit_is_half_open(
-                            app,
-                            provider_id,
-                            completed_at_unix,
-                        );
-                    update_recovery_work_after_circuit_evidence(
-                        &mut inner,
-                        provider_id,
-                        generation,
-                        completed_at_ms,
-                        probe.ok,
-                        circuit_is_half_open,
-                    )
-                } else {
-                    None
+            }
+            budget.checkpoint("observation")?;
+            let circuit = gateway_state::try_with_app_running_gateway(&app, |runtime| {
+                runtime.map(|runtime| runtime.availability_probe_circuit())
+            }).flatten();
+            budget.checkpoint("circuit")?;
+            let mut accepted = false;
+            let mut commit = |apply: &mut dyn FnMut() -> Option<bool>| {
+                let mut inner = state.shared.inner.blocking_lock();
+                if !flight_is_current(&inner, provider_id, generation, &budget) || budget.expired() {
+                    return false;
+                }
+                let recovery = apply().and_then(|half_open| {
+                    update_recovery_work_after_circuit_evidence(&mut inner, provider_id, generation,
+                        completed_at_ms, result.as_ref().is_ok_and(|probe| probe.ok), half_open)
+                });
+                accepted = complete_flight(&mut inner, provider_id, generation, &budget, result.clone(), recovery);
+                accepted
+            };
+            let effects = match (circuit.as_ref(), cli_key.as_deref(), result.as_ref()) {
+                (Some(circuit), Some(_), Ok(probe)) if probe.provider_id == provider_id => {
+                    Some(circuit.record_probe_outcome_if(provider_id,
+                        completed_at_ms.div_euclid(1_000), probe.ok, &mut commit))
+                }
+                _ => { commit(&mut || None); None }
+            };
+            if accepted {
+                // Result publication is the memory commit. Durable I/O and events
+                // may finish later, without retaining the flight or mutation gate.
+                if tx.commit().is_err() {
+                    tracing::warn!(error = "DB_ERROR", provider_id, "provider availability observation commit failed");
                 }
             } else {
-                None
+                drop(tx);
             }
-        } else {
-            None
-        };
-
-        let completed = CompletedProbe { result, recovery };
-        for waiter in in_flight.waiters {
-            let _ = waiter.send(completed.clone());
+            if let (Some(effects), Some(cli_key), Ok(probe)) = (effects, cli_key.as_deref(), result.as_ref()) {
+                crate::gateway::runtime::GatewayRuntime::publish_availability_probe_outcome(
+                    Some(&app), &trace_id, cli_key, provider_id,
+                    &probe.provider_name, &probe.base_url, completed_at_ms.div_euclid(1_000), effects);
+            }
+            Ok(())
+        }).await;
+        if let Err(error) = finish {
+            if !budget.expired() {
+                tracing::warn!(error = %error.code(), provider_id, "provider availability completion failed");
+            }
         }
-        for waiter in in_flight.turn_waiters {
-            let _ = waiter.send(());
-        }
-        remove_idle_entry(&mut inner, provider_id);
+        let mut inner = self.shared.inner.lock().await;
+        let result = if budget.expired() { budget.timeout_result() } else { fallback };
+        complete_flight(&mut inner, provider_id, generation, &budget, result, None);
     }
 
     async fn run_scheduler<R: tauri::Runtime>(self, app: tauri::AppHandle<R>, db: db::Db) {
@@ -690,46 +724,6 @@ fn coordinator_stopped_completion() -> CompletedProbe {
     }
 }
 
-fn record_probe_circuit_evidence<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-    db: &db::Db,
-    trace_id: &str,
-    provider_id: i64,
-    probe: &ProviderAvailabilityResult,
-    completed_at_unix: i64,
-) -> bool {
-    if probe.provider_id != provider_id {
-        return false;
-    }
-    let cli_key = match providers::cli_key_by_id(db, provider_id) {
-        Ok(Some(cli_key)) => cli_key,
-        Ok(None) => return false,
-        Err(error) => {
-            tracing::warn!(
-                error = %error.code(),
-                provider_id,
-                "failed to load Provider cli_key for circuit evidence"
-            );
-            return false;
-        }
-    };
-    gateway_state::try_with_app_running_gateway(app, |runtime| {
-        runtime.is_some_and(|runtime| {
-            runtime.record_availability_probe_outcome(
-                Some(app),
-                trace_id,
-                &cli_key,
-                provider_id,
-                &probe.provider_name,
-                &probe.base_url,
-                completed_at_unix,
-                probe.ok,
-            )
-        })
-    })
-    .unwrap_or(false)
-}
-
 fn running_gateway_circuit_is_half_open<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     provider_id: i64,
@@ -745,14 +739,47 @@ fn take_finished_flight(
     inner: &mut RuntimeInner,
     provider_id: i64,
     generation: u64,
+    budget: &Arc<provider_availability::ProbeBudget>,
 ) -> Option<(InFlightProbe, bool)> {
     let entry = inner.entries.get_mut(&provider_id)?;
-    if entry.in_flight.as_ref()?.generation != generation {
+    let flight = entry.in_flight.as_ref()?;
+    if flight.generation != generation || !Arc::ptr_eq(&flight.budget, budget) {
         return None;
     }
     let in_flight = entry.in_flight.take()?;
     let should_record = entry.generation == generation;
     Some((in_flight, should_record))
+}
+
+fn flight_is_current(
+    inner: &RuntimeInner,
+    provider_id: i64,
+    generation: u64,
+    budget: &Arc<provider_availability::ProbeBudget>,
+) -> bool {
+    inner.entries.get(&provider_id).is_some_and(|entry| {
+        entry.generation == generation && entry.in_flight.as_ref().is_some_and(|flight| {
+            flight.generation == generation && flight.recovery_epoch == entry.recovery_epoch
+                && Arc::ptr_eq(&flight.budget, budget)
+        })
+    })
+}
+
+fn complete_flight(
+    inner: &mut RuntimeInner,
+    provider_id: i64,
+    generation: u64,
+    budget: &Arc<provider_availability::ProbeBudget>,
+    result: AppResult<ProviderAvailabilityResult>,
+    recovery: Option<RecoveryDirective>,
+) -> bool {
+    let Some((flight, _)) = take_finished_flight(inner, provider_id, generation, budget) else { return false; };
+    budget.invalidate();
+    let completed = CompletedProbe { result, recovery };
+    for waiter in flight.waiters { let _ = waiter.send(completed.clone()); }
+    for waiter in flight.turn_waiters { let _ = waiter.send(()); }
+    remove_idle_entry(inner, provider_id);
+    true
 }
 
 fn invalidate_recovery_work(inner: &mut RuntimeInner, provider_id: i64, generation: u64) {
@@ -861,6 +888,7 @@ fn reconcile_schedules_inner(
                 let generation = inner.allocate_generation();
                 if let Some(entry) = inner.entries.get_mut(&loaded.provider_id) {
                     entry.generation = generation;
+                    if let Some(flight) = &entry.in_flight { flight.budget.invalidate(); }
                 }
             }
             remove_idle_entry(inner, loaded.provider_id);
@@ -879,6 +907,7 @@ fn reconcile_schedules_inner(
             let generation = inner.allocate_generation();
             let entry = inner.entries.entry(loaded.provider_id).or_default();
             entry.generation = generation;
+            if let Some(flight) = &entry.in_flight { flight.budget.invalidate(); }
             entry.schedule_seen_epoch = scan_epoch;
             entry.schedule = Some(ScheduledProbeState {
                 config,
@@ -931,6 +960,7 @@ fn reconcile_schedules_inner(
                 let generation = inner.allocate_generation();
                 if let Some(entry) = inner.entries.get_mut(&provider_id) {
                     entry.generation = generation;
+                    if let Some(flight) = &entry.in_flight { flight.budget.invalidate(); }
                 }
             }
             remove_idle_entry(inner, provider_id);
@@ -1763,8 +1793,8 @@ INSERT INTO providers(
     #[tokio::test]
     async fn invalidated_flight_blocks_the_replacement_until_it_finishes() {
         let state = ProviderAvailabilityProbeRuntimeState::default();
-        let generation = match state.begin_probe(4, None).await {
-            ProbeDecision::Lead { generation, .. } => generation,
+        let (generation, budget) = match state.begin_probe(4, None).await {
+            ProbeDecision::Lead { generation, budget, .. } => (generation, budget),
             _ => panic!("first probe must lead"),
         };
         assert!(matches!(
@@ -1782,7 +1812,7 @@ INSERT INTO providers(
         };
         let in_flight = {
             let mut inner = state.shared.inner.lock().await;
-            let (in_flight, should_record) = take_finished_flight(&mut inner, 4, generation)
+            let (in_flight, should_record) = take_finished_flight(&mut inner, 4, generation, &budget)
                 .expect("invalidated flight remains available for completion");
             assert!(
                 !should_record,
@@ -1804,8 +1834,8 @@ INSERT INTO providers(
     #[tokio::test]
     async fn timed_out_probe_completes_shared_waiters_and_allows_another_flight() {
         let state = ProviderAvailabilityProbeRuntimeState::default();
-        let (generation, first) = match state.begin_probe(7, None).await {
-            ProbeDecision::Lead { generation, receiver } => (generation, receiver),
+        let (generation, budget, first) = match state.begin_probe(7, None).await {
+            ProbeDecision::Lead { generation, budget, receiver } => (generation, budget, receiver),
             _ => panic!("first probe must lead"),
         };
         let second = match state.begin_probe(7, None).await {
@@ -1815,12 +1845,265 @@ INSERT INTO providers(
         let temp = tempfile::tempdir().unwrap();
         let db = crate::db::init_for_tests(&temp.path().join("timeout.db")).unwrap();
         let app = tauri::test::mock_app();
-        state.finish_probe(app.handle(), &db, 7, generation, "timeout-probe",
+        state.finish_probe(app.handle(), &db, 7, generation, budget, "timeout-probe",
             Err(AppError::new("PROBE_TIMEOUT", "synthetic timeout"))).await;
         for waiter in [first, second] {
             assert_eq!(waiter.await.unwrap().result.unwrap_err().code(), "PROBE_TIMEOUT");
         }
         assert!(matches!(state.begin_probe(7, None).await, ProbeDecision::Lead { .. }));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn shared_deadline_releases_waiters_and_isolates_late_blocking_work() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _home = crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_HOME", temp.path());
+        let app = tauri::test::mock_app();
+        // Tauri blocking jobs run on its runtime; keep this clock from advancing
+        // automatically while they communicate with the paused test runtime.
+        let clock_driver = tokio::spawn(async { loop { tokio::task::yield_now().await; } });
+        let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let _upstream = crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_PROBE_OAUTH_BASE_URL", &url);
+        let requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = requests.clone();
+        let router = axum::Router::new().route("/v1/messages", axum::routing::post(move || {
+            let seen = seen.clone();
+            async move {
+                seen.fetch_add(1, Ordering::SeqCst);
+                axum::Json(serde_json::json!({"type":"message","role":"assistant","content":[{"type":"text","text":"OK"}],"stop_reason":"end_turn"}))
+            }
+        })).route("/token", axum::routing::post(|| async {
+            axum::Json(serde_json::json!({"access_token":"synthetic-refreshed-token","token_type":"Bearer","expires_in":3600}))
+        }));
+        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap(); });
+
+        for stage in ["configuration", "oauth_read", "oauth_write", "completion", "observation", "configuration_change"] {
+            let db = crate::db::init_for_tests(&temp.path().join(format!("{stage}.db"))).unwrap();
+            let conn = db.open_connection().unwrap();
+            conn.execute("INSERT INTO providers(provider_uuid, cli_key, name, base_url, api_key_plaintext, created_at, updated_at) VALUES (?1, 'claude', 'synthetic probe', ?2, 'synthetic-key', 1, 1)", params![crate::shared::uuid::new_uuid_v4(), url]).unwrap();
+            let provider_id = conn.last_insert_rowid();
+            drop(conn);
+            if matches!(stage, "oauth_read" | "oauth_write") {
+                crate::providers::update_oauth_tokens(&db, provider_id, "oauth", "claude_oauth", "synthetic-token", Some("synthetic-refresh-token"),
+                    None, &format!("{url}/token"), "synthetic-client", None,
+                    Some(crate::shared::time::now_unix_seconds() + if stage == "oauth_write" { -1 } else { 3_600 }), None).unwrap();
+            }
+            let state = ProviderAvailabilityProbeRuntimeState::default();
+            state.reconcile_schedules(vec![loaded(provider_id, 1, 60_000)], 0, false, 1, true).await;
+            let (entered, ready) = oneshot::channel();
+            let (release, blocked) = std::sync::mpsc::channel();
+            let (exited, ended) = oneshot::channel();
+            *state.shared.next_pause.lock().unwrap() = Some(provider_availability::ProbeTestPause {
+                stage: if stage == "configuration_change" { "observation" } else { stage },
+                entered, release: blocked, exited,
+            });
+            let first = tokio::spawn({
+                let state = state.clone(); let app = app.handle().clone(); let db = db.clone();
+                async move { state.probe_manual(app, db, provider_id).await }
+            });
+            ready.await.unwrap();
+            let (generation, old_budget) = {
+                let inner = state.shared.inner.lock().await;
+                let flight = inner.entries[&provider_id].in_flight.as_ref().unwrap();
+                (flight.generation, flight.budget.clone())
+            };
+            let second = tokio::spawn({
+                let state = state.clone(); let app = app.handle().clone(); let db = db.clone();
+                async move { state.probe_manual(app, db, provider_id).await }
+            });
+            loop {
+                if state.shared.inner.lock().await.entries[&provider_id].in_flight.as_ref().unwrap().waiters.len() == 2 { break; }
+                tokio::task::yield_now().await;
+            }
+            tokio::time::advance(Duration::from_secs(60)).await;
+            for waiter in [first, second] {
+                match waiter.await.unwrap() {
+                    Ok(result) => {
+                        assert!(!result.ok, "{stage}");
+                        assert!(result.error.as_deref().unwrap().starts_with("PROBE_TIMEOUT"));
+                        assert_eq!(result.tested_model.as_deref(), Some("claude-sonnet-4-6"));
+                    }
+                    Err(error) => {
+                        assert_eq!(stage, "configuration", "known models must survive timeout");
+                        assert_eq!(error.code(), "PROBE_TIMEOUT");
+                    }
+                }
+            }
+            assert!(state.shared.inner.lock().await.entries[&provider_id].in_flight.is_none());
+            if stage == "configuration_change" {
+                let mutation = state.begin_mutation(provider_id).await.unwrap();
+                release.send(()).unwrap();
+                ended.await.unwrap();
+                let db_update = db.clone();
+                blocking::run("probe_timeout_configuration_change", move || -> AppResult<()> {
+                    let conn = db_update.open_connection()?;
+                    conn.execute("UPDATE providers SET name = 'new configuration' WHERE id = ?1", [provider_id])
+                        .map_err(|e| db_err!("test configuration write failed: {e}"))?;
+                    Ok(())
+                }).await.unwrap();
+                drop(mutation);
+                let fresh = state.probe_manual(app.handle().clone(), db.clone(), provider_id).await.unwrap();
+                assert!(fresh.ok);
+                assert_eq!(fresh.provider_name, "new configuration");
+                let db_check = db.clone();
+                let successes = blocking::run("probe_configuration_observations", move || -> AppResult<i64> {
+                    let mut conn = db_check.open_connection()?;
+                    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
+                    Ok(tx.query_row("SELECT COUNT(*) FROM provider_availability_observations WHERE success = 1", [], |row| row.get(0)).unwrap())
+                }).await.unwrap();
+                assert_eq!(successes, 1, "old prepared success cannot survive configuration invalidation");
+                continue;
+            }
+
+            let (entered, ready) = oneshot::channel();
+            let (next_release, blocked) = std::sync::mpsc::channel();
+            let (exited, next_ended) = oneshot::channel();
+            *state.shared.next_pause.lock().unwrap() = Some(provider_availability::ProbeTestPause {
+                stage: "configuration", entered, release: blocked, exited,
+            });
+            let next = tokio::spawn({
+                let state = state.clone(); let app = app.handle().clone(); let db = db.clone();
+                async move { state.probe_manual(app, db, provider_id).await }
+            });
+            ready.await.unwrap();
+            let next_budget = {
+                let mut inner = state.shared.inner.lock().await;
+                let entry = inner.entries.get_mut(&provider_id).unwrap();
+                assert_eq!(entry.generation, generation, "same configuration must remain isolated");
+                let next_budget = entry.in_flight.as_ref().unwrap().budget.clone();
+                assert!(!Arc::ptr_eq(&old_budget, &next_budget));
+                queue_recovery_from_completion(&mut inner, provider_id, generation, 1_000);
+                next_budget
+            };
+            let recovery = state.shared.inner.lock().await.entries[&provider_id].recovery;
+            release.send(()).unwrap();
+            ended.await.unwrap();
+            let db_check = db.clone();
+            let observations = blocking::run("probe_timeout_observation_check", move || -> AppResult<i64> {
+                let mut conn = db_check.open_connection()?;
+                let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
+                Ok(tx.query_row("SELECT COUNT(*) FROM provider_availability_observations", [], |row| row.get(0)).unwrap())
+            }).await.unwrap();
+            assert_eq!(observations, 0, "{stage}: late success must roll back");
+            if stage == "oauth_write" {
+                assert_eq!(crate::providers::get_oauth_details(&db, provider_id).unwrap().oauth_access_token, "synthetic-token");
+            }
+            {
+                let mut inner = state.shared.inner.lock().await;
+                assert!(flight_is_current(&inner, provider_id, generation, &next_budget));
+                assert_eq!(inner.entries[&provider_id].recovery, recovery);
+                assert!(!complete_flight(&mut inner, provider_id, generation, &old_budget, old_budget.timeout_result(), None));
+                assert!(flight_is_current(&inner, provider_id, generation, &next_budget));
+            }
+            next_release.send(()).unwrap();
+            next_ended.await.unwrap();
+            assert!(next.await.unwrap().unwrap().ok, "{stage}: next real probe must succeed");
+            assert!(state.shared.inner.lock().await.entries[&provider_id].in_flight.is_none());
+        }
+        assert_eq!(requests.load(Ordering::SeqCst), 9, "no retries or late generation requests");
+        server.abort();
+        assert!(server.await.unwrap_err().is_cancelled());
+        clock_driver.abort();
+        assert!(clock_driver.await.unwrap_err().is_cancelled());
+    }
+
+    #[test]
+    fn shared_deadline_survives_gateway_and_circuit_lock_waits() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _home = crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_HOME", temp.path());
+        let clock = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        for hold_manager in [true, false] {
+            let gateway = crate::gateway::runtime::GatewayRuntime::for_probe_tests(&clock);
+            let circuit = gateway.availability_probe_circuit();
+            let app = tauri::test::mock_app();
+            app.manage(gateway_state::GatewayState::default());
+            gateway_state::with_app_running_gateway_slot_mut(app.handle(), |slot| *slot = Some(gateway));
+            clock.block_on(async {
+                tokio::time::pause();
+                let clock_driver = tokio::spawn(async { loop { tokio::task::yield_now().await; } });
+                let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+                let url = format!("http://{}", listener.local_addr().unwrap());
+                let router = axum::Router::new().route("/v1/messages", axum::routing::post(|| async {
+                    axum::Json(serde_json::json!({"type":"message","role":"assistant","content":[{"type":"text","text":"OK"}],"stop_reason":"end_turn"}))
+                }));
+                let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap(); });
+                let db = crate::db::init_for_tests(&temp.path().join(format!("lock-{hold_manager}.db"))).unwrap();
+                let conn = db.open_connection().unwrap();
+                conn.execute("INSERT INTO providers(provider_uuid, cli_key, name, base_url, api_key_plaintext, created_at, updated_at) VALUES (?1, 'claude', 'synthetic lock probe', ?2, 'synthetic-key', 1, 1)", params![crate::shared::uuid::new_uuid_v4(), url]).unwrap();
+                let provider_id = conn.last_insert_rowid();
+                drop(conn);
+                circuit.update_config(crate::circuit_breaker::CircuitBreakerConfig { failure_threshold: 1, open_duration_secs: 1 });
+                let now = crate::shared::time::now_unix_seconds();
+                circuit.record_failure(provider_id, now - 2, None);
+                let state = ProviderAvailabilityProbeRuntimeState::default();
+                state.reconcile_schedules(vec![loaded(provider_id, 1, 60_000)], 0, false, 1, true).await;
+
+                let (entered, ready) = oneshot::channel();
+                let (release, blocked) = std::sync::mpsc::channel();
+                let lock_holder = std::thread::spawn({
+                    let app = app.handle().clone(); let circuit = circuit.clone();
+                    move || {
+                        let hold = || { entered.send(()).unwrap(); blocked.recv().unwrap(); };
+                        if hold_manager {
+                            gateway_state::try_with_app_running_gateway(&app, |_| hold());
+                        } else {
+                            circuit.hold_probe_health_for_test(hold);
+                        }
+                    }
+                });
+                ready.await.unwrap();
+                let (entered, ready) = oneshot::channel();
+                let (release_preparation, blocked) = std::sync::mpsc::channel();
+                let (exited, prepared) = oneshot::channel();
+                *state.shared.next_pause.lock().unwrap() = Some(provider_availability::ProbeTestPause {
+                    stage: if hold_manager { "observation" } else { "circuit" }, entered, release: blocked, exited,
+                });
+                let first = tokio::spawn({
+                    let state = state.clone(); let app = app.handle().clone(); let db = db.clone();
+                    async move { state.probe_manual(app, db, provider_id).await }
+                });
+                ready.await.unwrap();
+                let second = match state.begin_probe(provider_id, None).await {
+                    ProbeDecision::Wait(receiver) => receiver,
+                    _ => panic!("lock-waiting probe must remain shared"),
+                };
+                release_preparation.send(()).unwrap();
+                prepared.await.unwrap();
+                tokio::time::advance(Duration::from_secs(60)).await;
+                for result in [first.await.unwrap(), second.await.unwrap().result] {
+                    let result = result.unwrap();
+                    assert!(!result.ok);
+                    assert!(result.error.unwrap().starts_with("PROBE_TIMEOUT"));
+                    assert_eq!(result.tested_model.as_deref(), Some("claude-sonnet-4-6"));
+                }
+                assert!(state.shared.inner.lock().await.entries[&provider_id].in_flight.is_none());
+                let next = tokio::spawn({
+                    let state = state.clone(); let app = app.handle().clone(); let db = db.clone();
+                    async move { state.probe_manual(app, db, provider_id).await }
+                });
+                loop {
+                    if state.shared.inner.lock().await.entries[&provider_id].in_flight.is_some() { break; }
+                    tokio::task::yield_now().await;
+                }
+                release.send(()).unwrap();
+                lock_holder.join().unwrap();
+                assert!(next.await.unwrap().unwrap().ok);
+                assert!(state.shared.inner.lock().await.entries[&provider_id].in_flight.is_none());
+                assert_eq!(circuit.snapshot(provider_id, now).state, crate::circuit_breaker::CircuitState::HalfOpen);
+                // Only the new flight counted: one further success must still
+                // leave the circuit half open, and the following one closes it.
+                assert_eq!(circuit.record_success(provider_id, now).after.state, crate::circuit_breaker::CircuitState::HalfOpen);
+                assert_eq!(circuit.record_success(provider_id, now).after.state, crate::circuit_breaker::CircuitState::Closed);
+                server.abort();
+                assert!(server.await.unwrap_err().is_cancelled());
+                clock_driver.abort();
+                assert!(clock_driver.await.unwrap_err().is_cancelled());
+                tokio::time::resume();
+            });
+            gateway_state::take_app_running_gateway(app.handle());
+        }
     }
 
     #[tokio::test]
@@ -1878,8 +2161,8 @@ INSERT INTO providers(
     #[tokio::test]
     async fn coalesced_probe_flight_has_only_one_recording_owner() {
         let state = ProviderAvailabilityProbeRuntimeState::default();
-        let generation = match state.begin_probe(5, None).await {
-            ProbeDecision::Lead { generation, .. } => generation,
+        let (generation, budget) = match state.begin_probe(5, None).await {
+            ProbeDecision::Lead { generation, budget, .. } => (generation, budget),
             _ => panic!("first probe must lead"),
         };
         assert!(matches!(
@@ -1888,11 +2171,11 @@ INSERT INTO providers(
         ));
 
         let mut inner = state.shared.inner.lock().await;
-        let (in_flight, should_record) = take_finished_flight(&mut inner, 5, generation)
+        let (in_flight, should_record) = take_finished_flight(&mut inner, 5, generation, &budget)
             .expect("coalesced flight finishes once");
         assert_eq!(in_flight.waiters.len(), 2);
         assert!(should_record);
-        assert!(take_finished_flight(&mut inner, 5, generation).is_none());
+        assert!(take_finished_flight(&mut inner, 5, generation, &budget).is_none());
     }
 
     #[tokio::test]
