@@ -3151,6 +3151,7 @@ INSERT INTO providers(
                 *state.shared.next_pause.lock().unwrap() = Some(provider_availability::ProbeTestPause {
                     stage: if before_configuration { "configuration" } else if hold_manager { "manager" } else { "circuit" }, entered, release: blocked_preparation, exited,
                 });
+                let started = tokio::time::Instant::now();
                 let first = tokio::spawn({
                     let state = state.clone(); let app = app.handle().clone(); let db = db.clone();
                     async move { state.probe_manual(app, db, provider_id).await }
@@ -3161,15 +3162,53 @@ INSERT INTO providers(
                     ProbeDecision::Wait(receiver) => receiver,
                     _ => panic!("lock-waiting probe must remain shared"),
                 };
+                let budget = state.shared.inner.lock().await.entries[&provider_id]
+                    .in_flight.as_ref().unwrap().budget.clone();
+                assert_eq!(budget.deadline - started, Duration::from_secs(60));
+                assert_eq!(tokio::time::Instant::now(), started);
+                assert!(!budget.expired());
+                let timeout_witness = tokio::time::timeout_at(
+                    budget.deadline,
+                    std::future::pending::<()>(),
+                );
+                tokio::pin!(timeout_witness);
+                phase.set("register timeout on the probe clock");
+                std::future::poll_fn(|cx| {
+                    assert!(std::future::Future::poll(timeout_witness.as_mut(), cx).is_pending());
+                    std::task::Poll::Ready(())
+                }).await;
                 let mut prepared = prepared;
                 if !before_configuration {
                     phase.set("leave checkpoint with real lock held");
                     release_preparation.send(()).unwrap();
                     (&mut prepared).await.unwrap();
                 }
-                phase.set("deliver timeout with real lock held");
-                tokio::time::advance(Duration::from_secs(60)).await;
-                for result in [first.await.unwrap(), second.await.unwrap().result] {
+                phase.set("advance to the unchanged probe deadline");
+                tokio::time::advance(budget.deadline - tokio::time::Instant::now()).await;
+                assert_eq!(tokio::time::Instant::now(), budget.deadline);
+                assert!(budget.expired());
+                assert_eq!(budget.check().unwrap_err().code(), "PROBE_TIMEOUT");
+                // Drive the timer tick past the deadline without changing the budget.
+                tokio::time::advance(Duration::from_millis(1)).await;
+                assert_eq!(tokio::time::Instant::now(), budget.deadline + Duration::from_millis(1));
+                phase.set("drive registered timeout with real lock held");
+                assert!(timeout_witness.await.is_err());
+                phase.set("publish shared timeout with real lock held");
+                loop {
+                    let inner = state.shared.inner.lock().await;
+                    let entry = &inner.entries[&provider_id];
+                    if entry.in_flight.is_none() {
+                        assert_eq!(entry.pending_timeouts.len(), 1);
+                        break;
+                    }
+                    drop(inner);
+                    tokio::task::yield_now().await;
+                }
+                phase.set("receive first shared timeout with real lock held");
+                let first_result = first.await.unwrap();
+                phase.set("receive second shared timeout with real lock held");
+                let second_result = second.await.unwrap().result;
+                for result in [first_result, second_result] {
                     if before_configuration {
                         assert_eq!(result.unwrap_err().code(), "PROBE_TIMEOUT");
                     } else {
