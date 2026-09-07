@@ -9,11 +9,19 @@ fn breaker() -> CircuitBreaker {
 #[test]
 fn probe_commit_rechecks_expiry_after_config_and_health_lock_waits() {
     for hold_config in [true, false] {
-        let cb = Arc::new(CircuitBreaker::new(CircuitBreakerConfig {
-            failure_threshold: 1, open_duration_secs: 1,
-        }, HashMap::new(), None));
+        let cb = Arc::new(CircuitBreaker::new(
+            CircuitBreakerConfig {
+                failure_threshold: 1,
+                open_duration_secs: 1,
+            },
+            HashMap::new(),
+            None,
+        ));
         cb.record_failure(7, 1_000, None);
-        let clock = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
+        let clock = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
         let budget = clock.block_on(async {
             tokio::time::pause();
             crate::domain::provider_availability::ProbeBudget::new()
@@ -22,11 +30,14 @@ fn probe_commit_rechecks_expiry_after_config_and_health_lock_waits() {
         let health = (!hold_config).then(|| cb.health.lock().unwrap());
         let (started, ready) = std::sync::mpsc::channel();
         let worker = std::thread::spawn({
-            let cb = cb.clone(); let budget = budget.clone();
+            let cb = cb.clone();
+            let budget = budget.clone();
             move || {
                 started.send(()).unwrap();
                 cb.record_probe_outcome_if(7, 1_001, true, |apply| {
-                    if budget.expired() { return false; }
+                    if budget.expired() {
+                        return false;
+                    }
                     assert_eq!(apply(), Some(true));
                     true
                 })
@@ -63,7 +74,10 @@ fn probe_entry_preserves_closed_history_and_original_half_open_threshold() {
     assert!(effects.is_empty());
     assert_eq!(cb.health.lock().unwrap()[&7].failure_timestamps, before);
 
-    cb.update_config(CircuitBreakerConfig { failure_threshold: 1, open_duration_secs: 1 });
+    cb.update_config(CircuitBreakerConfig {
+        failure_threshold: 1,
+        open_duration_secs: 1,
+    });
     cb.record_failure(7, 2_000, None);
     for expected in [true, true, false] {
         cb.record_probe_outcome_if(7, 2_001, true, |apply| {

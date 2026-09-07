@@ -239,7 +239,7 @@ struct ProviderUsageSums {
 fn aggregate_costs_sql(provider_count: usize) -> String {
     let values = values_clause(provider_count, 3);
     format!(
-            r#"
+        r#"
 WITH provider_windows(provider_id, ts_5h, ts_daily) AS (VALUES {values}),
 eligible_costs AS MATERIALIZED (
   SELECT final_provider_id, created_at, cost_usd_femto
@@ -765,19 +765,43 @@ WHERE id = last_insert_rowid()
         insert_log(&conn, unrelated, 500, 80 * FEMTO);
         insert_log_with_exclusion(&conn, provider, 501, 90 * FEMTO, 1);
         insert_log(&conn, provider, 502, 100 * FEMTO);
-        conn.execute("UPDATE usage_ledger SET error_present = 1 WHERE created_at = 502", []).unwrap();
-        conn.execute("UPDATE request_logs SET error_code = 'ERROR' WHERE created_at = 502", []).unwrap();
+        conn.execute(
+            "UPDATE usage_ledger SET error_present = 1 WHERE created_at = 502",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE request_logs SET error_code = 'ERROR' WHERE created_at = 502",
+            [],
+        )
+        .unwrap();
         let query = aggregate_costs_sql(2);
         let parameters = [provider, 400, 300, empty, 400, 300, 200, 100];
         for complete in [false, true] {
             if complete {
-                conn.execute("UPDATE usage_ledger_backfill_state SET status = 'complete' WHERE id = 1", []).unwrap();
+                conn.execute(
+                    "UPDATE usage_ledger_backfill_state SET status = 'complete' WHERE id = 1",
+                    [],
+                )
+                .unwrap();
             } else {
-                conn.execute("DELETE FROM usage_ledger WHERE created_at = 99", []).unwrap();
+                conn.execute("DELETE FROM usage_ledger WHERE created_at = 99", [])
+                    .unwrap();
             }
-            let rows = conn.prepare(&query).unwrap().query_map(parameters, |row| {
-                Ok((row.get::<_, i64>(0)?, (1..=5).map(|i| row.get::<_, f64>(i).unwrap()).collect::<Vec<_>>()))
-            }).unwrap().collect::<Result<HashMap<_, _>, _>>().unwrap();
+            let rows = conn
+                .prepare(&query)
+                .unwrap()
+                .query_map(parameters, |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        (1..=5)
+                            .map(|i| row.get::<_, f64>(i).unwrap())
+                            .collect::<Vec<_>>(),
+                    ))
+                })
+                .unwrap()
+                .collect::<Result<HashMap<_, _>, _>>()
+                .unwrap();
             let original = r#"
 WITH provider_windows(provider_id, ts_5h, ts_daily) AS (VALUES (?, ?, ?), (?, ?, ?))
 SELECT w.provider_id,
@@ -792,22 +816,50 @@ LEFT JOIN usage_events r ON r.final_provider_id = w.provider_id
   AND r.error_present = 0 AND r.cost_usd_femto IS NOT NULL
 GROUP BY w.provider_id
 "#;
-            let original_rows = conn.prepare(original).unwrap().query_map(parameters, |row| {
-                Ok((row.get::<_, i64>(0)?, (1..=5).map(|i| row.get::<_, f64>(i).unwrap()).collect::<Vec<_>>()))
-            }).unwrap().collect::<Result<HashMap<_, _>, _>>().unwrap();
+            let original_rows = conn
+                .prepare(original)
+                .unwrap()
+                .query_map(parameters, |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        (1..=5)
+                            .map(|i| row.get::<_, f64>(i).unwrap())
+                            .collect::<Vec<_>>(),
+                    ))
+                })
+                .unwrap()
+                .collect::<Result<HashMap<_, _>, _>>()
+                .unwrap();
             assert_eq!(rows, original_rows);
             assert_eq!(rows[&empty], vec![0.0; 5]);
-            assert_eq!(rows[&provider], [5.0, 9.0, 12.0, 14.0, if complete { 14.0 } else { 15.0 }]
-                .map(|value| value * FEMTO as f64).to_vec());
-            let plan = conn.prepare(&format!("EXPLAIN QUERY PLAN {query}")).unwrap()
-                .query_map(parameters, |row| row.get::<_, String>(3)).unwrap()
-                .collect::<Result<Vec<_>, _>>().unwrap().join("\n");
+            assert_eq!(
+                rows[&provider],
+                [5.0, 9.0, 12.0, 14.0, if complete { 14.0 } else { 15.0 }]
+                    .map(|value| value * FEMTO as f64)
+                    .to_vec()
+            );
+            let plan = conn
+                .prepare(&format!("EXPLAIN QUERY PLAN {query}"))
+                .unwrap()
+                .query_map(parameters, |row| row.get::<_, String>(3))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+                .join("\n");
             assert!(plan.contains("MATERIALIZE eligible_costs"), "{plan}");
             assert!(!plan.contains("MATERIALIZE usage_events"), "{plan}");
-            let widths = conn.prepare(&format!("EXPLAIN {query}")).unwrap()
-                .query_map(parameters, |row| Ok((row.get::<_, String>(1)?, row.get::<_, i64>(3)?)))
-                .unwrap().collect::<Result<Vec<_>, _>>().unwrap();
-            assert!(widths.iter().any(|(opcode, width)| opcode == "OpenEphemeral" && *width == 3));
+            let widths = conn
+                .prepare(&format!("EXPLAIN {query}"))
+                .unwrap()
+                .query_map(parameters, |row| {
+                    Ok((row.get::<_, String>(1)?, row.get::<_, i64>(3)?))
+                })
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert!(widths
+                .iter()
+                .any(|(opcode, width)| opcode == "OpenEphemeral" && *width == 3));
         }
     }
 

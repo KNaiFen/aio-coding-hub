@@ -1,7 +1,7 @@
 //! Authenticated loopback-only observation service for the standalone TUI.
 
-mod descriptor;
 mod activity;
+mod descriptor;
 mod snapshot;
 
 use aio_observer_protocol::{
@@ -299,7 +299,9 @@ async fn start<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> crate::shared::er
 struct CloseActivity<R: tauri::Runtime>(Arc<activity::ObserverActivity<R>>);
 
 impl<R: tauri::Runtime> Drop for CloseActivity<R> {
-    fn drop(&mut self) { self.0.close(); }
+    fn drop(&mut self) {
+        self.0.close();
+    }
 }
 
 fn observer_router<R: tauri::Runtime>(state: ObserverHttpState<R>) -> Router {
@@ -345,7 +347,10 @@ pub(crate) async fn stop_best_effort<R: tauri::Runtime>(app: &tauri::AppHandle<R
     .await;
 }
 
-async fn health<R: tauri::Runtime>(State(state): State<ObserverHttpState<R>>, headers: HeaderMap) -> Response {
+async fn health<R: tauri::Runtime>(
+    State(state): State<ObserverHttpState<R>>,
+    headers: HeaderMap,
+) -> Response {
     if !authorized(&headers, &state.token) {
         return api_error(StatusCode::UNAUTHORIZED, "OBS_UNAUTHORIZED", "unauthorized");
     }
@@ -421,22 +426,30 @@ async fn snapshot_handler<R: tauri::Runtime>(
         match wait_for_db_query_permit(state.db_query_limiter.clone()).await {
             Some(permit) => Some(permit),
             None => {
-                tracing::warn!(cli = scope.as_str(), include_providers = query.include_providers,
-                    permit_wait_ms = permit_started.elapsed().as_millis(), error = "OBS_BUSY",
-                    "observer DB permit unavailable");
+                tracing::warn!(
+                    cli = scope.as_str(),
+                    include_providers = query.include_providers,
+                    permit_wait_ms = permit_started.elapsed().as_millis(),
+                    error = "OBS_BUSY",
+                    "observer DB permit unavailable"
+                );
                 return api_error(
                     StatusCode::TOO_MANY_REQUESTS,
                     "OBS_BUSY",
                     "observer is busy",
-                )
+                );
             }
         }
     } else {
         None
     };
     if permit_started.elapsed() >= DB_QUERY_PERMIT_TIMEOUT * 3 / 4 {
-        tracing::warn!(cli = scope.as_str(), include_providers = query.include_providers,
-            permit_wait_ms = permit_started.elapsed().as_millis(), "observer DB permit slow");
+        tracing::warn!(
+            cli = scope.as_str(),
+            include_providers = query.include_providers,
+            permit_wait_ms = permit_started.elapsed().as_millis(),
+            "observer DB permit slow"
+        );
     }
     if let Some(snapshot) = cached_snapshot(&state, key).await {
         return secured(Json(snapshot).into_response());
@@ -487,13 +500,22 @@ async fn provider_test_availability_handler<R: tauri::Runtime>(
     match tokio::time::timeout(OBSERVER_PROBE_TIMEOUT, async {
         let _activity_work = state.activity.work().await;
         run_provider_test(&state, provider_id).await
-    }).await {
+    })
+    .await
+    {
         Ok(response) => response,
-        Err(_) => api_error(StatusCode::GATEWAY_TIMEOUT, "OBS_PROBE_TIMEOUT", "provider probe timed out"),
+        Err(_) => api_error(
+            StatusCode::GATEWAY_TIMEOUT,
+            "OBS_PROBE_TIMEOUT",
+            "provider probe timed out",
+        ),
     }
 }
 
-async fn run_provider_test<R: tauri::Runtime>(state: &ObserverHttpState<R>, provider_id: i64) -> Response {
+async fn run_provider_test<R: tauri::Runtime>(
+    state: &ObserverHttpState<R>,
+    provider_id: i64,
+) -> Response {
     let Some(db_state) = state.app.try_state::<crate::app_state::DbInitState>() else {
         return api_error(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -520,7 +542,10 @@ async fn run_provider_test<R: tauri::Runtime>(state: &ObserverHttpState<R>, prov
             "provider probe is unavailable",
         );
     };
-    let result = match runtime.probe_manual(state.app.clone(), db, provider_id).await {
+    let result = match runtime
+        .probe_manual(state.app.clone(), db, provider_id)
+        .await
+    {
         Ok(result) => result,
         Err(error) if error.code() == "DB_NOT_FOUND" => {
             return api_error(
@@ -537,9 +562,8 @@ async fn run_provider_test<R: tauri::Runtime>(state: &ObserverHttpState<R>, prov
             )
         }
     };
-    let error = (!result.ok).then(|| {
-        bounded_observer_text(result.error.as_deref().unwrap_or("PROBE_FAILED"), 128)
-    });
+    let error = (!result.ok)
+        .then(|| bounded_observer_text(result.error.as_deref().unwrap_or("PROBE_FAILED"), 128));
     secured(
         Json(ObserverProviderAvailabilityTestResult {
             ok: result.ok,
@@ -553,8 +577,14 @@ async fn run_provider_test<R: tauri::Runtime>(state: &ObserverHttpState<R>, prov
                 .response_preview
                 .as_deref()
                 .map(|value| bounded_observer_text(value, 500)),
-            requested_model: result.requested_model.as_deref().map(|value| bounded_observer_text(value, 256)),
-            tested_model: result.tested_model.as_deref().map(|value| bounded_observer_text(value, 256)),
+            requested_model: result
+                .requested_model
+                .as_deref()
+                .map(|value| bounded_observer_text(value, 256)),
+            tested_model: result
+                .tested_model
+                .as_deref()
+                .map(|value| bounded_observer_text(value, 256)),
         })
         .into_response(),
     )
@@ -627,7 +657,10 @@ async fn read_only_db<R: tauri::Runtime>(state: &ObserverHttpState<R>) -> Option
     }
 }
 
-async fn cached_snapshot<R: tauri::Runtime>(state: &ObserverHttpState<R>, key: CacheKey) -> Option<ObserverSnapshotV1> {
+async fn cached_snapshot<R: tauri::Runtime>(
+    state: &ObserverHttpState<R>,
+    key: CacheKey,
+) -> Option<ObserverSnapshotV1> {
     let mut cache = state.cache.lock().await;
     get_cached_snapshot(&mut cache, key, Instant::now())
 }

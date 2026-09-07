@@ -103,7 +103,10 @@ impl ProbeBudget {
         if self.expired() {
             Err(probe_failure(&AppError::from("PROBE_TIMEOUT")))
         } else if !current {
-            Err(AppError::new("PROBE_PREPARATION", "供应商配置已变化或本次探测已完成"))
+            Err(AppError::new(
+                "PROBE_PREPARATION",
+                "供应商配置已变化或本次探测已完成",
+            ))
         } else {
             Ok(())
         }
@@ -266,11 +269,13 @@ async fn read_probe_response_body_with_limit(
         .min(limit);
     let mut bytes = Vec::with_capacity(capacity);
 
-    while let Some(chunk) = resp
-        .chunk()
-        .await
-        .map_err(|error| if error.is_timeout() { "PROBE_TIMEOUT" } else { "PROBE_READ" })?
-    {
+    while let Some(chunk) = resp.chunk().await.map_err(|error| {
+        if error.is_timeout() {
+            "PROBE_TIMEOUT"
+        } else {
+            "PROBE_READ"
+        }
+    })? {
         if append_probe_response_chunk(&mut bytes, chunk.as_ref(), limit) {
             truncated = true;
             break;
@@ -299,7 +304,11 @@ fn probe_response_preview(body: &ProbeResponseBody) -> String {
     preview
 }
 
-async fn load_provider_for_test(db: db::Db, provider_id: i64, budget: Arc<ProbeBudget>) -> AppResult<LoadedProvider> {
+async fn load_provider_for_test(
+    db: db::Db,
+    provider_id: i64,
+    budget: Arc<ProbeBudget>,
+) -> AppResult<LoadedProvider> {
     blocking::run("provider_availability_load", move || -> AppResult<LoadedProvider> {
         budget.checkpoint("configuration")?;
         if provider_id <= 0 {
@@ -412,8 +421,13 @@ async fn load_effective_provider_for_test(
     let bridge_type = bridge_type.to_string();
     let (source, source_cli_key) = blocking::run("provider_availability_source", move || {
         budget.check()?;
-        crate::providers::get_source_provider_for_availability(&db, source_provider_id, &bridge_type)
-    }).await?;
+        crate::providers::get_source_provider_for_availability(
+            &db,
+            source_provider_id,
+            &bridge_type,
+        )
+    })
+    .await?;
 
     Ok(LoadedProvider {
         id: provider.id,
@@ -693,15 +707,23 @@ fn probe_failure(error: &AppError) -> AppError {
         error.code()
     };
     let (code, message) = match code {
-        "PROBE_NO_TEXT" => ("PROBE_NO_TEXT", "本次探测未获得有效回答；仅推理内容不算回答，输出预算可能已耗尽"),
+        "PROBE_NO_TEXT" => (
+            "PROBE_NO_TEXT",
+            "本次探测未获得有效回答；仅推理内容不算回答，输出预算可能已耗尽",
+        ),
         "PROBE_UNFINISHED" => ("PROBE_UNFINISHED", "响应提前结束，未收到完整结束标记"),
         "PROBE_TERMINATION" => ("PROBE_TERMINATION", "上游以不支持的原因结束了生成"),
         "PROBE_READ" => ("PROBE_READ", "读取上游响应失败"),
         "PROBE_TOO_LARGE" => ("PROBE_TOO_LARGE", "上游响应超过 64 KiB 限制"),
         "PROBE_TIMEOUT" => ("PROBE_TIMEOUT", "本次探测超时，请稍后重试"),
         "PROBE_HTTP" => ("PROBE_HTTP", "上游 HTTP 请求失败"),
-        "PROBE_AUTH" | "AUTH_RELOGIN_REQUIRED" | "OAUTH_REFRESH_FAILED" => ("PROBE_AUTH", "认证失败，请检查凭据或重新登录"),
-        "PROBE_MODEL_QUOTA" => ("PROBE_MODEL_QUOTA", "上游拒绝请求，请检查模型、配额或频率限制"),
+        "PROBE_AUTH" | "AUTH_RELOGIN_REQUIRED" | "OAUTH_REFRESH_FAILED" => {
+            ("PROBE_AUTH", "认证失败，请检查凭据或重新登录")
+        }
+        "PROBE_MODEL_QUOTA" => (
+            "PROBE_MODEL_QUOTA",
+            "上游拒绝请求，请检查模型、配额或频率限制",
+        ),
         "PROBE_STRUCTURE" => ("PROBE_STRUCTURE", "上游响应格式不符合预期协议"),
         "PROBE_UPSTREAM_ERROR" => ("PROBE_UPSTREAM_ERROR", "上游返回错误，本次生成失败"),
         "PROBE_OAUTH_PROTOCOL" => ("PROBE_OAUTH_PROTOCOL", "OAuth 认证不支持当前请求协议"),
@@ -718,7 +740,12 @@ pub async fn test_provider_availability<R: tauri::Runtime>(
     provider_id: i64,
 ) -> AppResult<ProviderAvailabilityResult> {
     let budget = ProbeBudget::new();
-    match tokio::time::timeout_at(budget.deadline, test_provider_availability_with_budget(app, db, provider_id, budget.clone())).await {
+    match tokio::time::timeout_at(
+        budget.deadline,
+        test_provider_availability_with_budget(app, db, provider_id, budget.clone()),
+    )
+    .await
+    {
         Ok(_) if budget.expired() => budget.timeout_result(),
         Ok(result) => result,
         Err(_) => budget.timeout_result(),
@@ -731,7 +758,8 @@ pub(crate) async fn test_provider_availability_with_budget<R: tauri::Runtime>(
     provider_id: i64,
     budget: Arc<ProbeBudget>,
 ) -> AppResult<ProviderAvailabilityResult> {
-    let provider = load_effective_provider_for_test(db.clone(), provider_id, budget.clone()).await?;
+    let provider =
+        load_effective_provider_for_test(db.clone(), provider_id, budget.clone()).await?;
     budget.check()?;
 
     if let Some(bridge_type) = provider.bridge_type.as_deref() {
@@ -791,23 +819,42 @@ pub(crate) async fn test_provider_availability_with_budget<R: tauri::Runtime>(
 
     let app = app.clone();
     let preparation_budget = budget.clone();
-    let (provider, mut url, mut headers, mut body, mut parsed_url, mut protocol, mut result, client) = blocking::run("provider_availability_prepare", move || -> AppResult<_> {
+    let (
+        provider,
+        mut url,
+        mut headers,
+        mut body,
+        mut parsed_url,
+        mut protocol,
+        mut result,
+        client,
+    ) = blocking::run("provider_availability_prepare", move || -> AppResult<_> {
         preparation_budget.check()?;
-        let bridge_probe_source_model = if should_map_bridge_probe_model(provider.bridge_type.as_deref()) {
-            let settings = crate::settings::read(&app)?;
-            Some(resolve_codex_probe_model_from_sources(provider.availability_test_model.as_deref(),
-                Some(settings.codex_provider_test_model.as_str())))
-        } else {
-            None
-        };
+        let bridge_probe_source_model =
+            if should_map_bridge_probe_model(provider.bridge_type.as_deref()) {
+                let settings = crate::settings::read(&app)?;
+                Some(resolve_codex_probe_model_from_sources(
+                    provider.availability_test_model.as_deref(),
+                    Some(settings.codex_provider_test_model.as_str()),
+                ))
+            } else {
+                None
+            };
         let regular_probe_model = if provider.bridge_type.as_deref() == Some(CX2CC_BRIDGE_TYPE) {
-            Some(crate::gateway::cx2cc_probe_model("claude-sonnet-4-6", &provider.claude_models, &crate::settings::read(&app)?))
+            Some(crate::gateway::cx2cc_probe_model(
+                "claude-sonnet-4-6",
+                &provider.claude_models,
+                &crate::settings::read(&app)?,
+            ))
         } else if bridge_probe_source_model.is_none() && provider.cli_key == "codex" {
             match normalize_probe_model(provider.availability_test_model.as_deref()) {
                 Some(model) => Some(model),
                 None => {
                     let settings = crate::settings::read(&app)?;
-                    Some(resolve_codex_probe_model_from_sources(None, Some(settings.codex_provider_test_model.as_str())))
+                    Some(resolve_codex_probe_model_from_sources(
+                        None,
+                        Some(settings.codex_provider_test_model.as_str()),
+                    ))
                 }
             }
         } else {
@@ -818,10 +865,17 @@ pub(crate) async fn test_provider_availability_with_budget<R: tauri::Runtime>(
         } else {
             None
         };
-        let (url, headers, body) = if let Some(source_model) = bridge_probe_source_model.as_deref() {
+        let (url, headers, body) = if let Some(source_model) = bridge_probe_source_model.as_deref()
+        {
             build_bridge_probe_request(&provider, &base_url, "", source_model)?
         } else {
-            build_probe_request(&provider.cli_key, &base_url, "", regular_probe_model.as_deref(), grok_preferences.as_ref())?
+            build_probe_request(
+                &provider.cli_key,
+                &base_url,
+                "",
+                regular_probe_model.as_deref(),
+                grok_preferences.as_ref(),
+            )?
         };
 
         let parsed_url = reqwest::Url::parse(&url).map_err(|_| "PROBE_INVALID_URL")?;
@@ -834,45 +888,84 @@ pub(crate) async fn test_provider_availability_with_budget<R: tauri::Runtime>(
         } else {
             crate::gateway::ProbeProtocol::Gemini
         };
-        let tested_model = body.get("model").and_then(serde_json::Value::as_str).map(str::to_string)
-            .or_else(|| parsed_url.path().split("/models/").nth(1)?.split(':').next().map(str::to_string));
+        let tested_model = body
+            .get("model")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+            .or_else(|| {
+                parsed_url
+                    .path()
+                    .split("/models/")
+                    .nth(1)?
+                    .split(':')
+                    .next()
+                    .map(str::to_string)
+            });
         let requested_model = if provider.bridge_type.as_deref() == Some(CX2CC_BRIDGE_TYPE) {
             Some("claude-sonnet-4-6".to_string())
-        } else { bridge_probe_source_model.clone().or_else(|| tested_model.clone()) };
+        } else {
+            bridge_probe_source_model
+                .clone()
+                .or_else(|| tested_model.clone())
+        };
         let result = ProviderAvailabilityResult {
-            ok: false, provider_id: provider.id, provider_name: provider.name.clone(), base_url,
-            status: None, latency_ms: 0, error: None, response_preview: None,
-            requested_model, tested_model,
+            ok: false,
+            provider_id: provider.id,
+            provider_name: provider.name.clone(),
+            base_url,
+            status: None,
+            latency_ms: 0,
+            error: None,
+            response_preview: None,
+            requested_model,
+            tested_model,
         };
         preparation_budget.remember(&result);
 
         let client = reqwest::Client::builder()
-            .user_agent(format!("aio-coding-hub-probe/{}", env!("CARGO_PKG_VERSION")))
+            .user_agent(format!(
+                "aio-coding-hub-probe/{}",
+                env!("CARGO_PKG_VERSION")
+            ))
             .connect_timeout(CONNECT_TIMEOUT)
             .timeout(REQUEST_TIMEOUT)
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|e| format!("HTTP_CLIENT_INIT: {e}"))?;
         preparation_budget.check()?;
-        Ok((provider, url, headers, body, parsed_url, protocol, result, client))
-    }).await?;
+        Ok((
+            provider, url, headers, body, parsed_url, protocol, result, client,
+        ))
+    })
+    .await?;
 
     let mut effective_credential = String::new();
     let execution: AppResult<()> = async {
         effective_credential = if provider.auth_mode == "oauth" {
             crate::providers::resolve_effective_transport_credential_for_probe(
-                &db, &client, &provider.cli_key, &provider.transport_context(), budget.clone(),
-            ).await?
+                &db,
+                &client,
+                &provider.cli_key,
+                &provider.transport_context(),
+                budget.clone(),
+            )
+            .await?
         } else {
             crate::providers::resolve_effective_transport_credential(
-                &db, &client, &provider.cli_key, &provider.transport_context(),
-            ).await?
+                &db,
+                &client,
+                &provider.cli_key,
+                &provider.transport_context(),
+            )
+            .await?
         };
         let gemini_oauth = provider.auth_mode == "oauth" && provider.cli_key == "gemini";
         if provider.auth_mode == "oauth" {
             headers.remove("x-api-key");
             let adapter = crate::gateway::oauth::registry::resolve_oauth_adapter(
-                &provider.cli_key, provider.transport_provider_id, provider.oauth_provider_type.as_deref(),
+                &provider.cli_key,
+                provider.transport_provider_id,
+                provider.oauth_provider_type.as_deref(),
             )?;
             adapter.inject_upstream_headers(&mut headers, &effective_credential)?;
             if provider.cli_key == "codex" {
@@ -887,83 +980,161 @@ pub(crate) async fn test_provider_availability_with_budget<R: tauri::Runtime>(
                     return Err("PROBE_OAUTH_PROTOCOL: ChatGPT requires Responses".into());
                 }
                 let details = crate::providers::get_oauth_details_for_credential(
-                    &db, provider.transport_provider_id, Some(budget.clone()),
-                ).await?;
-                if let Some(account_id) = crate::gateway::probe_codex_account_id(details.oauth_id_token.as_deref())
-                    .or_else(|| crate::gateway::probe_codex_account_id(Some(&details.oauth_access_token))) {
-                    headers.insert("chatgpt-account-id", HeaderValue::from_str(&account_id).map_err(|_| "PROBE_AUTH")?);
+                    &db,
+                    provider.transport_provider_id,
+                    Some(budget.clone()),
+                )
+                .await?;
+                if let Some(account_id) =
+                    crate::gateway::probe_codex_account_id(details.oauth_id_token.as_deref())
+                        .or_else(|| {
+                            crate::gateway::probe_codex_account_id(Some(
+                                &details.oauth_access_token,
+                            ))
+                        })
+                {
+                    headers.insert(
+                        "chatgpt-account-id",
+                        HeaderValue::from_str(&account_id).map_err(|_| "PROBE_AUTH")?,
+                    );
                 }
                 body = crate::gateway::probe_codex_oauth_body(&body);
                 url = build_probe_url(&result.base_url, "/responses", None)?;
             } else if gemini_oauth {
-                let prepared = crate::gateway::prepare_gemini_oauth_probe(&client, &effective_credential, parsed_url.path(), &body).await?;
+                let prepared = crate::gateway::prepare_gemini_oauth_probe(
+                    &client,
+                    &effective_credential,
+                    parsed_url.path(),
+                    &body,
+                )
+                .await?;
                 url = prepared.0;
                 body = prepared.1;
             }
         } else if provider.cli_key == "gemini" {
-            parsed_url.query_pairs_mut().clear().append_pair("key", &effective_credential);
+            parsed_url
+                .query_pairs_mut()
+                .clear()
+                .append_pair("key", &effective_credential);
             url = parsed_url.to_string();
         } else if provider.cli_key == "claude" {
-            headers.insert("x-api-key", HeaderValue::from_str(&effective_credential).map_err(|_| "PROBE_AUTH")?);
+            headers.insert(
+                "x-api-key",
+                HeaderValue::from_str(&effective_credential).map_err(|_| "PROBE_AUTH")?,
+            );
         } else {
-            headers.insert("authorization", HeaderValue::from_str(&format!("Bearer {effective_credential}")).map_err(|_| "PROBE_AUTH")?);
+            headers.insert(
+                "authorization",
+                HeaderValue::from_str(&format!("Bearer {effective_credential}"))
+                    .map_err(|_| "PROBE_AUTH")?,
+            );
         }
         budget.check()?;
-        let response = client.post(&url).headers(headers).json(&body).send().await
-            .map_err(|error| if error.is_timeout() { "PROBE_TIMEOUT" } else { "PROBE_HTTP" })?;
+        let response = client
+            .post(&url)
+            .headers(headers)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|error| {
+                if error.is_timeout() {
+                    "PROBE_TIMEOUT"
+                } else {
+                    "PROBE_HTTP"
+                }
+            })?;
         let status = response.status().as_u16();
         result.status = Some(status);
         if !response.status().is_success() {
-            let body = read_probe_response_body_with_limit(response, PROBE_RESPONSE_BODY_LIMIT).await
-                .map_err(|code| crate::shared::error::AppError::new(code, "probe response read failed"))?;
-            let preview = redact_probe_credential(&probe_response_preview(&body), &effective_credential);
-            let code = if looks_like_auth_failure(status, &preview) { "PROBE_AUTH" }
-                else if matches!(status, 400 | 404 | 429) { "PROBE_MODEL_QUOTA" } else { "PROBE_HTTP" };
+            let body = read_probe_response_body_with_limit(response, PROBE_RESPONSE_BODY_LIMIT)
+                .await
+                .map_err(|code| {
+                    crate::shared::error::AppError::new(code, "probe response read failed")
+                })?;
+            let preview =
+                redact_probe_credential(&probe_response_preview(&body), &effective_credential);
+            let code = if looks_like_auth_failure(status, &preview) {
+                "PROBE_AUTH"
+            } else if matches!(status, 400 | 404 | 429) {
+                "PROBE_MODEL_QUOTA"
+            } else {
+                "PROBE_HTTP"
+            };
             result.response_preview = Some(preview);
             return Err(format!("{code}: HTTP {status}").into());
         }
-        let is_sse = response.headers().get("content-type").and_then(|value| value.to_str().ok())
-            .is_some_and(|value| value.split(';').next().is_some_and(|mime| mime.trim() == "text/event-stream"));
+        let is_sse = response
+            .headers()
+            .get("content-type")
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| {
+                value
+                    .split(';')
+                    .next()
+                    .is_some_and(|mime| mime.trim() == "text/event-stream")
+            });
         if body.get("stream") == Some(&serde_json::Value::Bool(true)) && !is_sse {
             return Err("PROBE_STRUCTURE: expected SSE".into());
         }
         if is_sse {
             read_probe_stream(response, protocol, gemini_oauth).await?;
         } else {
-            let response_body = read_probe_response_body_with_limit(response, PROBE_RESPONSE_BODY_LIMIT).await
-                .map_err(|code| crate::shared::error::AppError::new(code, "probe response read failed"))?;
-            if response_body.truncated { return Err("PROBE_TOO_LARGE".into()); }
-            let value: serde_json::Value = serde_json::from_slice(&response_body.bytes).map_err(|_| "PROBE_STRUCTURE")?;
+            let response_body =
+                read_probe_response_body_with_limit(response, PROBE_RESPONSE_BODY_LIMIT)
+                    .await
+                    .map_err(|code| {
+                        crate::shared::error::AppError::new(code, "probe response read failed")
+                    })?;
+            if response_body.truncated {
+                return Err("PROBE_TOO_LARGE".into());
+            }
+            let value: serde_json::Value =
+                serde_json::from_slice(&response_body.bytes).map_err(|_| "PROBE_STRUCTURE")?;
             let value = if gemini_oauth {
                 crate::gateway::probe_gemini_oauth_response(&value)?
             } else {
                 &value
             };
             if let Err(error) = crate::gateway::validate_probe_json(protocol, value) {
-                result.response_preview = Some(redact_probe_credential(&probe_response_preview(&response_body), &effective_credential));
+                result.response_preview = Some(redact_probe_credential(
+                    &probe_response_preview(&response_body),
+                    &effective_credential,
+                ));
                 return Err(error.into());
             }
         }
         Ok(())
-    }.await;
+    }
+    .await;
     result.latency_ms = budget.elapsed_ms();
     match execution {
         Ok(()) => result.ok = true,
         Err(error) => {
             result.error = Some(probe_failure(&error).to_string());
-        },
+        }
     }
     Ok(result)
 }
 
-async fn read_probe_stream(mut response: reqwest::Response, protocol: crate::gateway::ProbeProtocol, gemini_oauth: bool) -> AppResult<()> {
+async fn read_probe_stream(
+    mut response: reqwest::Response,
+    protocol: crate::gateway::ProbeProtocol,
+    gemini_oauth: bool,
+) -> AppResult<()> {
     let mut stream = crate::gateway::ProbeStream::new(protocol);
     let mut buffer = Vec::new();
     let mut received = 0usize;
-    while let Some(chunk) = response.chunk().await.map_err(|error|
-        if error.is_timeout() { "PROBE_TIMEOUT" } else { "PROBE_READ" })? {
+    while let Some(chunk) = response.chunk().await.map_err(|error| {
+        if error.is_timeout() {
+            "PROBE_TIMEOUT"
+        } else {
+            "PROBE_READ"
+        }
+    })? {
         received += chunk.len();
-        if received > PROBE_RESPONSE_BODY_LIMIT { return Err("PROBE_TOO_LARGE".into()); }
+        if received > PROBE_RESPONSE_BODY_LIMIT {
+            return Err("PROBE_TOO_LARGE".into());
+        }
         buffer.extend_from_slice(&chunk);
         while let Some(end) = crate::gateway::next_frame_end(&buffer) {
             if gemini_oauth {
@@ -1813,7 +1984,13 @@ mod tests {
         response_status: u16,
         response_body: &'static str,
     ) -> (String, tokio::task::JoinHandle<String>) {
-        response_from_request_capture_with_type(expected_path, response_status, response_body, "application/json").await
+        response_from_request_capture_with_type(
+            expected_path,
+            response_status,
+            response_body,
+            "application/json",
+        )
+        .await
     }
 
     async fn response_from_request_capture_with_type(
@@ -2133,7 +2310,9 @@ mod tests {
             params.availability_test_model = Some("selected-model".into());
             let provider = upsert(&db, params).unwrap();
             let app = tauri::test::mock_app();
-            let result = test_provider_availability(app.handle(), db, provider.id).await.unwrap();
+            let result = test_provider_availability(app.handle(), db, provider.id)
+                .await
+                .unwrap();
             assert!(!result.ok, "status {status}");
             assert_eq!(result.status, Some(status));
             assert_eq!(result.tested_model.as_deref(), Some("selected-model"));
@@ -2159,11 +2338,14 @@ mod tests {
         params.enabled = false;
         let provider = upsert(&db, params).unwrap();
         let app = tauri::test::mock_app();
-        let result = test_provider_availability(app.handle(), db, provider.id).await.unwrap();
+        let result = test_provider_availability(app.handle(), db, provider.id)
+            .await
+            .unwrap();
         assert!(result.ok);
         assert_eq!(result.requested_model, result.tested_model);
         let request = server.await.unwrap();
-        let body: serde_json::Value = serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        let body: serde_json::Value =
+            serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
         assert_eq!(body["model"], "selected-model");
         assert_eq!(body["input"][0]["content"], PROBE_PROMPT);
         assert_eq!(body["max_output_tokens"], 100);
@@ -2174,8 +2356,10 @@ mod tests {
     async fn api_key_probe_entry_sends_authenticated_generation_with_wire_budget() {
         let _env_lock = crate::test_support::test_env_lock();
         let temp = tempfile::tempdir().unwrap();
-        let _home = crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_HOME", temp.path());
-        let _grok = crate::test_support::ScopedTestEnvVar::set("GROK_HOME", temp.path().join("grok"));
+        let _home =
+            crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_HOME", temp.path());
+        let _grok =
+            crate::test_support::ScopedTestEnvVar::set("GROK_HOME", temp.path().join("grok"));
         crate::test_support::clear_settings_cache();
         let app = tauri::test::mock_app();
         for (index, (cli, backend, path, model, response, budget_pointer)) in [
@@ -2235,11 +2419,15 @@ mod tests {
         use base64::Engine;
         let _env_lock = crate::test_support::test_env_lock();
         let temp = tempfile::tempdir().unwrap();
-        let _home = crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_HOME", temp.path());
-        let _grok = crate::test_support::ScopedTestEnvVar::set("GROK_HOME", temp.path().join("grok"));
+        let _home =
+            crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_HOME", temp.path());
+        let _grok =
+            crate::test_support::ScopedTestEnvVar::set("GROK_HOME", temp.path().join("grok"));
         crate::test_support::clear_settings_cache();
         let app = tauri::test::mock_app();
-        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(br#"{"https://api.openai.com/auth":{"chatgpt_account_id":"synthetic-account"}}"#);
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
+            br#"{"https://api.openai.com/auth":{"chatgpt_account_id":"synthetic-account"}}"#,
+        );
         let id_token = format!("header.{payload}.signature");
         for (cli, kind, path, model, response, content_type) in [
             ("claude", "claude_oauth", "/v1/messages", "claude-sonnet-4-6",
@@ -2313,18 +2501,39 @@ mod tests {
     async fn fixed_bridge_probe_entry_succeeds_with_source_auth_model_and_budget() {
         let _env_lock = crate::test_support::test_env_lock();
         let temp = tempfile::tempdir().unwrap();
-        let _home = crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_HOME", temp.path());
+        let _home =
+            crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_HOME", temp.path());
         crate::test_support::clear_settings_cache();
         let app = tauri::test::mock_app();
         for (kind, source_cli, path, response, budget) in [
-            (CODEX_TO_OPENAI_RESPONSES_BRIDGE_TYPE, "codex", "/v1/responses",
-                r#"{"object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"OK"}]}]}"#, "max_output_tokens"),
-            (CODEX_TO_OPENAI_CHAT_BRIDGE_TYPE, "codex", "/v1/chat/completions",
-                r#"{"object":"chat.completion","choices":[{"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}]}"#, "max_tokens"),
-            (CODEX_TO_ANTHROPIC_MESSAGES_BRIDGE_TYPE, "claude", "/v1/messages",
-                r#"{"type":"message","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"OK"}]}"#, "max_tokens"),
-            (CX2CC_BRIDGE_TYPE, "codex", "/v1/responses",
-                r#"{"object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"OK"}]}]}"#, "max_output_tokens"),
+            (
+                CODEX_TO_OPENAI_RESPONSES_BRIDGE_TYPE,
+                "codex",
+                "/v1/responses",
+                r#"{"object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"OK"}]}]}"#,
+                "max_output_tokens",
+            ),
+            (
+                CODEX_TO_OPENAI_CHAT_BRIDGE_TYPE,
+                "codex",
+                "/v1/chat/completions",
+                r#"{"object":"chat.completion","choices":[{"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}]}"#,
+                "max_tokens",
+            ),
+            (
+                CODEX_TO_ANTHROPIC_MESSAGES_BRIDGE_TYPE,
+                "claude",
+                "/v1/messages",
+                r#"{"type":"message","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"OK"}]}"#,
+                "max_tokens",
+            ),
+            (
+                CX2CC_BRIDGE_TYPE,
+                "codex",
+                "/v1/responses",
+                r#"{"object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"OK"}]}]}"#,
+                "max_output_tokens",
+            ),
         ] {
             let db = crate::db::init_for_tests(&temp.path().join(format!("{kind}.db"))).unwrap();
             let (url, server) = response_from_request_capture(path, 200, response).await;
@@ -2334,28 +2543,52 @@ mod tests {
             source.api_key = Some("synthetic-source-key".into());
             let source = upsert(&db, source).unwrap();
             let mut bridge = default_provider_params("bridge");
-            bridge.cli_key = if kind == CX2CC_BRIDGE_TYPE { "claude" } else { "codex" }.into();
+            bridge.cli_key = if kind == CX2CC_BRIDGE_TYPE {
+                "claude"
+            } else {
+                "codex"
+            }
+            .into();
             bridge.base_urls = vec![];
             bridge.api_key = None;
             bridge.bridge_type = Some(kind.into());
             bridge.source_provider_id = Some(source.id);
             if kind == CX2CC_BRIDGE_TYPE {
-                bridge.claude_models = Some(crate::providers::ClaudeModels { sonnet_model: Some("wire-model".into()), ..Default::default() });
+                bridge.claude_models = Some(crate::providers::ClaudeModels {
+                    sonnet_model: Some("wire-model".into()),
+                    ..Default::default()
+                });
             } else {
                 bridge.availability_test_model = Some("selected-model".into());
-                bridge.model_mapping = Some(ModelMapping { default_model: Some("wire-model".into()), ..Default::default() });
+                bridge.model_mapping = Some(ModelMapping {
+                    default_model: Some("wire-model".into()),
+                    ..Default::default()
+                });
             }
             let bridge = upsert(&db, bridge).unwrap();
             crate::providers::set_enabled(&db, source.id, false).unwrap();
-            let result = test_provider_availability(app.handle(), db, bridge.id).await.unwrap();
+            let result = test_provider_availability(app.handle(), db, bridge.id)
+                .await
+                .unwrap();
             assert!(result.ok, "{kind}: {:?}", result.error);
             assert_eq!(result.provider_id, bridge.id);
-            assert_eq!(result.requested_model.as_deref(), Some(if kind == CX2CC_BRIDGE_TYPE { "claude-sonnet-4-6" } else { "selected-model" }));
+            assert_eq!(
+                result.requested_model.as_deref(),
+                Some(if kind == CX2CC_BRIDGE_TYPE {
+                    "claude-sonnet-4-6"
+                } else {
+                    "selected-model"
+                })
+            );
             assert_eq!(result.tested_model.as_deref(), Some("wire-model"));
             let request = server.await.unwrap();
             let (headers, raw_body) = request.split_once("\r\n\r\n").unwrap();
             let headers = headers.to_ascii_lowercase();
-            assert!(headers.contains(if source_cli == "claude" { "x-api-key: synthetic-source-key" } else { "authorization: bearer synthetic-source-key" }));
+            assert!(headers.contains(if source_cli == "claude" {
+                "x-api-key: synthetic-source-key"
+            } else {
+                "authorization: bearer synthetic-source-key"
+            }));
             let body: serde_json::Value = serde_json::from_str(raw_body).unwrap();
             assert_eq!(body["model"], "wire-model");
             assert_eq!(body[budget], 100);
@@ -2365,7 +2598,10 @@ mod tests {
     #[tokio::test]
     async fn successful_http_does_not_accept_non_answers() {
         for body in [
-            "<html>OK</html>", "", "{}", r#"{"error":{"message":"quota"}}"#,
+            "<html>OK</html>",
+            "",
+            "{}",
+            r#"{"error":{"message":"quota"}}"#,
             r#"{"object":"response","status":"completed","output":[]}"#,
             r#"{"object":"response","status":"in_progress","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"OK"}]}]}"#,
         ] {
@@ -2377,7 +2613,9 @@ mod tests {
             params.availability_test_model = Some("selected-model".into());
             let provider = upsert(&db, params).unwrap();
             let app = tauri::test::mock_app();
-            let result = test_provider_availability(app.handle(), db, provider.id).await.unwrap();
+            let result = test_provider_availability(app.handle(), db, provider.id)
+                .await
+                .unwrap();
             assert!(!result.ok, "{body}");
             assert_eq!(result.tested_model.as_deref(), Some("selected-model"));
             assert!(result.error.as_deref().unwrap().starts_with("PROBE_"));
@@ -2400,7 +2638,10 @@ mod tests {
             ("PROBE_STRUCTURE", "响应格式"),
             ("PROBE_UPSTREAM_ERROR", "上游返回错误"),
         ] {
-            for error in [AppError::from(code.to_string()), AppError::new(code, "SYNTHETIC_PRIVATE_DETAIL")] {
+            for error in [
+                AppError::from(code.to_string()),
+                AppError::new(code, "SYNTHETIC_PRIVATE_DETAIL"),
+            ] {
                 let display = probe_failure(&error).to_string();
                 assert!(display.starts_with(&format!("{code}: ")));
                 assert!(display.contains(reason));
@@ -2412,7 +2653,14 @@ mod tests {
         assert!(no_text.contains("仅推理内容不算回答"));
         assert!(no_text.contains("输出预算"));
         assert!(!no_text.contains("永久"));
-        assert_eq!(probe_failure(&AppError::new("UPSTREAM_PRIVATE_CODE", "SYNTHETIC_PRIVATE_DETAIL")).code(), "PROBE_PREPARATION");
+        assert_eq!(
+            probe_failure(&AppError::new(
+                "UPSTREAM_PRIVATE_CODE",
+                "SYNTHETIC_PRIVATE_DETAIL"
+            ))
+            .code(),
+            "PROBE_PREPARATION"
+        );
     }
 
     #[tokio::test]
@@ -2426,76 +2674,138 @@ mod tests {
         params.availability_test_model = Some("selected-model".into());
         let provider = upsert(&db, params).unwrap();
         let app = tauri::test::mock_app();
-        let result = test_provider_availability(app.handle(), db, provider.id).await.unwrap();
+        let result = test_provider_availability(app.handle(), db, provider.id)
+            .await
+            .unwrap();
         assert!(!result.ok);
         assert_eq!(result.tested_model.as_deref(), Some("selected-model"));
-        assert_eq!(result.error, Some(probe_failure(&AppError::from("PROBE_NO_TEXT")).to_string()));
+        assert_eq!(
+            result.error,
+            Some(probe_failure(&AppError::from("PROBE_NO_TEXT")).to_string())
+        );
         let request = server.await.unwrap();
-        let body: serde_json::Value = serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        let body: serde_json::Value =
+            serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
         assert_eq!(body["max_output_tokens"], 100);
     }
 
     #[test]
     fn fixed_bridge_wire_budgets_and_models_match_target_protocols() {
         for (bridge_type, path, budget_key) in [
-            (CODEX_TO_OPENAI_RESPONSES_BRIDGE_TYPE, "/v1/responses", "max_output_tokens"),
-            (CODEX_TO_OPENAI_CHAT_BRIDGE_TYPE, "/v1/chat/completions", "max_tokens"),
-            (CODEX_TO_ANTHROPIC_MESSAGES_BRIDGE_TYPE, "/v1/messages", "max_tokens"),
+            (
+                CODEX_TO_OPENAI_RESPONSES_BRIDGE_TYPE,
+                "/v1/responses",
+                "max_output_tokens",
+            ),
+            (
+                CODEX_TO_OPENAI_CHAT_BRIDGE_TYPE,
+                "/v1/chat/completions",
+                "max_tokens",
+            ),
+            (
+                CODEX_TO_ANTHROPIC_MESSAGES_BRIDGE_TYPE,
+                "/v1/messages",
+                "max_tokens",
+            ),
         ] {
-            let mapping = ModelMapping { default_model: Some("wire-model".into()), ..Default::default() };
-            let (target, body) = crate::gateway::build_translated_bridge_probe(bridge_type, mapping, "selected-model").unwrap();
+            let mapping = ModelMapping {
+                default_model: Some("wire-model".into()),
+                ..Default::default()
+            };
+            let (target, body) = crate::gateway::build_translated_bridge_probe(
+                bridge_type,
+                mapping,
+                "selected-model",
+            )
+            .unwrap();
             assert_eq!(target, path);
             assert_eq!(body["model"], "wire-model");
             assert_eq!(body[budget_key], 100);
             assert!(body.get("reasoning").is_none());
             assert!(body.get("thinking").is_none());
-            assert!(body.get("tools").is_none_or(|tools| tools.as_array().is_some_and(Vec::is_empty)));
+            assert!(body
+                .get("tools")
+                .is_none_or(|tools| tools.as_array().is_some_and(Vec::is_empty)));
             assert_eq!(body["stream"], false);
         }
         let (_, headers, _) = build_probe_request_with_body(
-            "grok", "https://example.test", "synthetic", "/v1/chat/completions", serde_json::json!({})
-        ).unwrap();
+            "grok",
+            "https://example.test",
+            "synthetic",
+            "/v1/chat/completions",
+            serde_json::json!({}),
+        )
+        .unwrap();
         assert_eq!(header_value(&headers, "authorization"), "Bearer synthetic");
     }
 
     #[test]
     fn oauth_probe_headers_use_the_existing_provider_adapters() {
-        for (cli, kind) in [("claude", "claude_oauth"), ("codex", "codex_oauth"), ("gemini", "gemini_oauth")] {
-            let adapter = crate::gateway::oauth::registry::resolve_oauth_adapter(cli, 1, Some(kind)).unwrap();
-            let (_, mut headers, body) = build_probe_request(cli, "https://example.test", "", None, None).unwrap();
+        for (cli, kind) in [
+            ("claude", "claude_oauth"),
+            ("codex", "codex_oauth"),
+            ("gemini", "gemini_oauth"),
+        ] {
+            let adapter =
+                crate::gateway::oauth::registry::resolve_oauth_adapter(cli, 1, Some(kind)).unwrap();
+            let (_, mut headers, body) =
+                build_probe_request(cli, "https://example.test", "", None, None).unwrap();
             headers.remove("x-api-key");
-            adapter.inject_upstream_headers(&mut headers, "synthetic-token").unwrap();
-            assert_eq!(header_value(&headers, "authorization"), "Bearer synthetic-token");
+            adapter
+                .inject_upstream_headers(&mut headers, "synthetic-token")
+                .unwrap();
+            assert_eq!(
+                header_value(&headers, "authorization"),
+                "Bearer synthetic-token"
+            );
             assert!(!headers.contains_key("x-api-key"));
             match cli {
                 "claude" => {
                     assert!(header_value(&headers, "anthropic-beta").contains("oauth-2025-04-20"));
                     assert_eq!(body["max_tokens"], 100);
-                },
+                }
                 "gemini" => {
                     assert!(!header_value(&headers, "x-goog-api-client").is_empty());
                     assert_eq!(body["generationConfig"]["maxOutputTokens"], 100);
-                },
+                }
                 _ => {
                     let body = crate::gateway::probe_codex_oauth_body(&body);
                     assert_eq!(body["stream"], true);
                     assert_eq!(body["store"], false);
                     assert!(body.get("max_output_tokens").is_none());
-                },
+                }
             }
         }
-        let models = crate::providers::ClaudeModels { sonnet_model: Some("mapped-codex".into()), ..Default::default() };
-        assert_eq!(crate::gateway::cx2cc_probe_model("claude-sonnet-4-6", &models, &crate::settings::AppSettings::default()), "mapped-codex");
+        let models = crate::providers::ClaudeModels {
+            sonnet_model: Some("mapped-codex".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            crate::gateway::cx2cc_probe_model(
+                "claude-sonnet-4-6",
+                &models,
+                &crate::settings::AppSettings::default()
+            ),
+            "mapped-codex"
+        );
     }
 
     #[tokio::test]
     async fn bounded_body_distinguishes_exact_complete_overflow_and_read_failure() {
         for (raw, expected) in [
-            ("HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n4\r\nabcd\r\n0\r\n\r\n", Some(false)),
-            ("HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n5\r\nabcde\r\n0\r\n\r\n", Some(true)),
+            (
+                "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n4\r\nabcd\r\n0\r\n\r\n",
+                Some(false),
+            ),
+            (
+                "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n5\r\nabcde\r\n0\r\n\r\n",
+                Some(true),
+            ),
             ("HTTP/1.1 200 OK\r\ncontent-length: 9\r\n\r\nabcd", None),
         ] {
-            let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+            let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+                .await
+                .unwrap();
             let url = format!("http://{}", listener.local_addr().unwrap());
             let server = tokio::spawn(async move {
                 let (mut socket, _) = listener.accept().await.unwrap();
@@ -2504,14 +2814,21 @@ mod tests {
                 socket.write_all(raw.as_bytes()).await.unwrap();
                 socket.shutdown().await.unwrap();
             });
-            let response = reqwest::Client::builder().no_proxy().build().unwrap().get(url).send().await.unwrap();
+            let response = reqwest::Client::builder()
+                .no_proxy()
+                .build()
+                .unwrap()
+                .get(url)
+                .send()
+                .await
+                .unwrap();
             let body = read_probe_response_body_with_limit(response, 4).await;
             match expected {
                 Some(truncated) => {
                     let body = body.unwrap();
                     assert_eq!(body.bytes, b"abcd");
                     assert_eq!(body.truncated, truncated);
-                },
+                }
                 None => assert_eq!(body.unwrap_err(), "PROBE_READ"),
             }
             server.await.unwrap();
@@ -2520,14 +2837,19 @@ mod tests {
 
     #[tokio::test]
     async fn sse_terminal_returns_before_eof_and_latency_includes_body() {
-        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let (release, released) = tokio::sync::oneshot::channel::<()>();
         let server = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
             let mut request = [0u8; 1024];
             socket.read(&mut request).await.unwrap();
-            socket.write_all(b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n\r\n").await.unwrap();
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n\r\n")
+                .await
+                .unwrap();
             tokio::time::sleep(Duration::from_millis(30)).await;
             socket.write_all(b"event: response.completed\ndata: {\"response\":{\"id\":\"resp_1\",\"object\":\"response\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"OK\"}]}]}}\n\ndata: [DO").await.unwrap();
             let _ = released.await;
@@ -2535,7 +2857,13 @@ mod tests {
         let client = reqwest::Client::builder().no_proxy().build().unwrap();
         let started = Instant::now();
         let response = client.get(url).send().await.unwrap();
-        tokio::time::timeout(Duration::from_secs(2), read_probe_stream(response, crate::gateway::ProbeProtocol::Responses, false)).await.unwrap().unwrap();
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            read_probe_stream(response, crate::gateway::ProbeProtocol::Responses, false),
+        )
+        .await
+        .unwrap()
+        .unwrap();
         assert!(started.elapsed() >= Duration::from_millis(30));
         release.send(()).unwrap();
         server.await.unwrap();
@@ -2544,7 +2872,9 @@ mod tests {
     #[tokio::test]
     async fn sse_body_timeout_and_early_eof_never_succeed() {
         for stall in [false, true] {
-            let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+            let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+                .await
+                .unwrap();
             let url = format!("http://{}", listener.local_addr().unwrap());
             let (release, released) = tokio::sync::oneshot::channel::<()>();
             let server = tokio::spawn(async move {
@@ -2552,13 +2882,30 @@ mod tests {
                 let mut request = [0u8; 1024];
                 socket.read(&mut request).await.unwrap();
                 socket.write_all(b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n\r\ndata: {\"type\":\"response.output_text.delta\",\"response_id\":\"resp_1\",\"delta\":\"OK\"}\n\n").await.unwrap();
-                if stall { let _ = released.await; }
+                if stall {
+                    let _ = released.await;
+                }
                 socket.shutdown().await.unwrap();
             });
-            let client = reqwest::Client::builder().no_proxy().timeout(Duration::from_millis(100)).build().unwrap();
+            let client = reqwest::Client::builder()
+                .no_proxy()
+                .timeout(Duration::from_millis(100))
+                .build()
+                .unwrap();
             let response = client.get(url).send().await.unwrap();
-            let error = read_probe_stream(response, crate::gateway::ProbeProtocol::Responses, false).await.unwrap_err().to_string();
-            assert!(error.contains(if stall { "PROBE_TIMEOUT" } else { "PROBE_UNFINISHED" }), "{error}");
+            let error =
+                read_probe_stream(response, crate::gateway::ProbeProtocol::Responses, false)
+                    .await
+                    .unwrap_err()
+                    .to_string();
+            assert!(
+                error.contains(if stall {
+                    "PROBE_TIMEOUT"
+                } else {
+                    "PROBE_UNFINISHED"
+                }),
+                "{error}"
+            );
             let _ = release.send(());
             server.await.unwrap();
         }
@@ -2575,7 +2922,9 @@ mod tests {
         params.bridge_type = Some(CX2CC_BRIDGE_TYPE.into());
         let provider = upsert(&db, params).unwrap();
         let app = tauri::test::mock_app();
-        let result = test_provider_availability(app.handle(), db, provider.id).await.unwrap();
+        let result = test_provider_availability(app.handle(), db, provider.id)
+            .await
+            .unwrap();
         assert!(!result.ok);
         assert!(result.status.is_none());
         assert!(result.tested_model.is_none());
@@ -2619,7 +2968,11 @@ mod tests {
         assert_eq!(result.provider_name, "Codex bridge");
         assert_eq!(result.base_url, source_base_url);
         assert_eq!(result.status, Some(400));
-        assert!(result.error.as_deref().unwrap().contains("PROBE_MODEL_QUOTA"));
+        assert!(result
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("PROBE_MODEL_QUOTA"));
 
         let request = server_task.await.expect("server task");
         assert!(request
@@ -2719,7 +3072,11 @@ mod tests {
         assert_eq!(result.provider_name, "Codex bridge");
         assert_eq!(result.base_url, source_base_url);
         assert_eq!(result.status, Some(400));
-        assert!(result.error.as_deref().unwrap().contains("PROBE_MODEL_QUOTA"));
+        assert!(result
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("PROBE_MODEL_QUOTA"));
 
         let request = server_task.await.expect("server task");
         assert!(request
@@ -2788,13 +3145,18 @@ mod tests {
         assert_eq!(result.provider_name, "Codex bridge");
         assert_eq!(result.base_url, source_base_url);
         assert_eq!(result.status, Some(400));
-        assert!(result.error.as_deref().unwrap().contains("PROBE_MODEL_QUOTA"));
+        assert!(result
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("PROBE_MODEL_QUOTA"));
 
         let request = server_task.await.expect("server task");
         assert!(request
             .to_ascii_lowercase()
             .contains("authorization: bearer oauth-access-token"));
-        let payload: serde_json::Value = serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        let payload: serde_json::Value =
+            serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
         assert_eq!(payload["stream"], true);
         assert_eq!(payload["store"], false);
         assert!(payload.get("max_output_tokens").is_none());

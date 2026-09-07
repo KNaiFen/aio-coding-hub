@@ -4140,6 +4140,8 @@ export type ProviderAvailabilityResult = {
   latency_ms: number;
   error: string | null;
   response_preview: string | null;
+  requested_model?: string | null;
+  tested_model?: string | null;
 };
 export type ProviderAvailabilityState = "healthy" | "degraded" | "unhealthy" | "no_data";
 export type ProviderAvailabilityTimeline = {

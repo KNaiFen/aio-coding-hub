@@ -285,7 +285,9 @@ impl ProviderAvailabilityProbeRuntimeState {
             entry.generation = generation;
             entry.schedule = None;
             entry.recovery = None;
-            if let Some(flight) = &entry.in_flight { flight.budget.invalidate(); }
+            if let Some(flight) = &entry.in_flight {
+                flight.budget.invalidate();
+            }
         }
         remove_idle_entry(&mut inner, provider_id);
     }
@@ -366,31 +368,78 @@ impl ProviderAvailabilityProbeRuntimeState {
                     let state = self.clone();
                     tokio::spawn(async move {
                         let work = async {
-                            let result = provider_availability::test_provider_availability_with_budget(
-                                &app, db.clone(), provider_id, budget.clone(),
-                            ).await;
+                            let result =
+                                provider_availability::test_provider_availability_with_budget(
+                                    &app,
+                                    db.clone(),
+                                    provider_id,
+                                    budget.clone(),
+                                )
+                                .await;
                             if budget.expired() {
                                 return;
                             } else if result.is_err() {
                                 let mut inner = state.shared.inner.lock().await;
                                 if !budget.expired() {
-                                    complete_flight(&mut inner, provider_id, generation, &budget, result, None);
+                                    complete_flight(
+                                        &mut inner,
+                                        provider_id,
+                                        generation,
+                                        &budget,
+                                        result,
+                                        None,
+                                    );
                                 }
                             } else {
-                                state.finish_probe(&app, &db, provider_id, generation,
-                                    budget.clone(), &trace_id, result).await;
+                                state
+                                    .finish_probe(
+                                        &app,
+                                        &db,
+                                        provider_id,
+                                        generation,
+                                        budget.clone(),
+                                        &trace_id,
+                                        result,
+                                    )
+                                    .await;
                             }
                         };
-                        let timed_out = tokio::time::timeout_at(budget.deadline, work).await.is_err();
-                        if (timed_out || budget.expired()) && state.expire_probe(
-                            provider_id, generation, &budget, &trace_id,
-                        ).await {
+                        let timed_out = tokio::time::timeout_at(budget.deadline, work)
+                            .await
+                            .is_err();
+                        if (timed_out || budget.expired())
+                            && state
+                                .expire_probe(provider_id, generation, &budget, &trace_id)
+                                .await
+                        {
                             loop {
-                                state.finish_probe(&app, &db, provider_id, generation,
-                                    budget.clone(), &trace_id, budget.timeout_result()).await;
-                                let pending = state.shared.inner.lock().await.entries.get(&provider_id)
-                                    .is_some_and(|entry| entry.pending_timeouts.iter().any(|timeout| timeout.trace_id == trace_id));
-                                if !pending { break; }
+                                state
+                                    .finish_probe(
+                                        &app,
+                                        &db,
+                                        provider_id,
+                                        generation,
+                                        budget.clone(),
+                                        &trace_id,
+                                        budget.timeout_result(),
+                                    )
+                                    .await;
+                                let pending = state
+                                    .shared
+                                    .inner
+                                    .lock()
+                                    .await
+                                    .entries
+                                    .get(&provider_id)
+                                    .is_some_and(|entry| {
+                                        entry
+                                            .pending_timeouts
+                                            .iter()
+                                            .any(|timeout| timeout.trace_id == trace_id)
+                                    });
+                                if !pending {
+                                    break;
+                                }
                                 // Retain the accepted fact across transient SQL
                                 // failures; this owner exits once it is persisted.
                                 tokio::time::sleep(SCHEDULER_TICK).await;
@@ -418,11 +467,18 @@ impl ProviderAvailabilityProbeRuntimeState {
         let mut inner = self.shared.inner.lock().await;
         let current = flight_is_current(&inner, provider_id, generation, budget);
         if current {
-            inner.entries.get_mut(&provider_id).expect("timeout entry").pending_timeouts.push_back(TimeoutProbe {
-                generation, trace_id: trace_id.to_string(),
-                completed_at_ms: crate::shared::time::now_unix_millis(), result: result.clone(),
-                circuit_consumed: false,
-            });
+            inner
+                .entries
+                .get_mut(&provider_id)
+                .expect("timeout entry")
+                .pending_timeouts
+                .push_back(TimeoutProbe {
+                    generation,
+                    trace_id: trace_id.to_string(),
+                    completed_at_ms: crate::shared::time::now_unix_millis(),
+                    result: result.clone(),
+                    circuit_consumed: false,
+                });
             invalidate_recovery_work(&mut inner, provider_id, generation);
         }
         complete_flight(&mut inner, provider_id, generation, budget, result, None);
@@ -489,7 +545,12 @@ impl ProviderAvailabilityProbeRuntimeState {
         let budget = provider_availability::ProbeBudget::new();
         #[cfg(test)]
         {
-            *budget.pause.lock().expect("probe test pause") = self.shared.next_pause.lock().expect("next probe pause").take();
+            *budget.pause.lock().expect("probe test pause") = self
+                .shared
+                .next_pause
+                .lock()
+                .expect("next probe pause")
+                .take();
         }
         entry.in_flight = Some(InFlightProbe {
             generation,
@@ -524,7 +585,9 @@ impl ProviderAvailabilityProbeRuntimeState {
         let work_budget = budget.clone();
         let completion_gate = {
             let inner = self.shared.inner.lock().await;
-            let Some(entry) = inner.entries.get(&provider_id) else { return; };
+            let Some(entry) = inner.entries.get(&provider_id) else {
+                return;
+            };
             entry.completion_gate.clone()
         };
         #[cfg(test)]
@@ -538,8 +601,13 @@ impl ProviderAvailabilityProbeRuntimeState {
             loop {
                 let pending = {
                     let inner = state.shared.inner.blocking_lock();
-                    let Some(entry) = inner.entries.get(&provider_id)
-                        .filter(|entry| Arc::ptr_eq(&entry.completion_gate, &completion_gate)) else { return Ok(()); };
+                    let Some(entry) = inner
+                        .entries
+                        .get(&provider_id)
+                        .filter(|entry| Arc::ptr_eq(&entry.completion_gate, &completion_gate))
+                    else {
+                        return Ok(());
+                    };
                     entry.pending_timeouts.front().cloned()
                 };
                 if pending.is_none() {
@@ -548,27 +616,55 @@ impl ProviderAvailabilityProbeRuntimeState {
                 }
                 let circuit = gateway_state::try_with_app_running_gateway(&app, |runtime| {
                     runtime.map(|runtime| runtime.availability_probe_circuit())
-                }).flatten();
+                })
+                .flatten();
                 let (trace_id, completed_at_ms, result) = match &pending {
-                    Some(timeout) => (timeout.trace_id.as_str(), timeout.completed_at_ms, &timeout.result),
+                    Some(timeout) => (
+                        timeout.trace_id.as_str(),
+                        timeout.completed_at_ms,
+                        &timeout.result,
+                    ),
                     None => {
                         budget.check()?;
-                        (trace_id.as_str(), crate::shared::time::now_unix_millis(), &result)
+                        (
+                            trace_id.as_str(),
+                            crate::shared::time::now_unix_millis(),
+                            &result,
+                        )
                     }
                 };
                 // The transaction preserves SQL order after acceptance. An
                 // unaccepted ordinary result still rolls back on invalidation.
                 let mut conn = db.open_connection()?;
-                let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                let tx = conn
+                    .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                     .map_err(|e| db_err!("failed to prepare probe observation: {e}"))?;
-                if pending.is_none() { budget.check()?; }
-                let provider = tx.query_row("SELECT cli_key, name, base_url FROM providers WHERE id = ?1", [provider_id], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
-                })
-                    .optional().map_err(|e| db_err!("failed to load probe evidence provider: {e}"))?;
+                if pending.is_none() {
+                    budget.check()?;
+                }
+                let provider = tx
+                    .query_row(
+                        "SELECT cli_key, name, base_url FROM providers WHERE id = ?1",
+                        [provider_id],
+                        |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, String>(1)?,
+                                row.get::<_, String>(2)?,
+                            ))
+                        },
+                    )
+                    .optional()
+                    .map_err(|e| db_err!("failed to load probe evidence provider: {e}"))?;
                 let ok = result.as_ref().is_ok_and(|probe| probe.ok);
                 if pending.is_some() || result.is_ok() {
-                    provider_availability::record_probe_observation_in_conn(&tx, trace_id, provider_id, completed_at_ms, ok)?;
+                    provider_availability::record_probe_observation_in_conn(
+                        &tx,
+                        trace_id,
+                        provider_id,
+                        completed_at_ms,
+                        ok,
+                    )?;
                 }
                 if pending.is_none() {
                     budget.checkpoint("observation")?;
@@ -578,56 +674,105 @@ impl ProviderAvailabilityProbeRuntimeState {
                 let mut commit = |apply: &mut dyn FnMut() -> Option<bool>| {
                     let mut inner = state.shared.inner.blocking_lock();
                     if let Some(timeout) = &pending {
-                        let entry = inner.entries.get_mut(&provider_id).expect("pending timeout entry");
+                        let entry = inner
+                            .entries
+                            .get_mut(&provider_id)
+                            .expect("pending timeout entry");
                         let front = entry.pending_timeouts.front_mut().expect("ordered timeout");
                         if !front.circuit_consumed {
-                            if entry.generation == timeout.generation { let _ = apply(); }
+                            if entry.generation == timeout.generation {
+                                let _ = apply();
+                            }
                             front.circuit_consumed = true;
                         }
                         accepted = true;
                         return true;
                     }
-                    if !flight_is_current(&inner, provider_id, generation, &budget) || budget.expired() {
+                    if !flight_is_current(&inner, provider_id, generation, &budget)
+                        || budget.expired()
+                    {
                         return false;
                     }
                     let recovery = apply().and_then(|half_open| {
-                        update_recovery_work_after_circuit_evidence(&mut inner, provider_id, generation,
-                            completed_at_ms, ok, half_open)
+                        update_recovery_work_after_circuit_evidence(
+                            &mut inner,
+                            provider_id,
+                            generation,
+                            completed_at_ms,
+                            ok,
+                            half_open,
+                        )
                     });
-                    accepted = complete_flight(&mut inner, provider_id, generation, &budget, result.clone(), recovery);
+                    accepted = complete_flight(
+                        &mut inner,
+                        provider_id,
+                        generation,
+                        &budget,
+                        result.clone(),
+                        recovery,
+                    );
                     accepted
                 };
                 let effects = match (circuit.as_ref(), provider.as_ref()) {
-                    (Some(circuit), Some(_)) if pending.is_some() || result.as_ref().is_ok_and(|probe| probe.provider_id == provider_id) => {
-                        Some(circuit.record_probe_outcome_if(provider_id,
-                            completed_at_ms.div_euclid(1_000), ok, &mut commit))
+                    (Some(circuit), Some(_))
+                        if pending.is_some()
+                            || result
+                                .as_ref()
+                                .is_ok_and(|probe| probe.provider_id == provider_id) =>
+                    {
+                        Some(circuit.record_probe_outcome_if(
+                            provider_id,
+                            completed_at_ms.div_euclid(1_000),
+                            ok,
+                            &mut commit,
+                        ))
                     }
-                    _ => { commit(&mut || None); None }
+                    _ => {
+                        commit(&mut || None);
+                        None
+                    }
                 };
                 let committed = if accepted {
                     // No coordination or admission lock spans durable I/O.
-                    tx.commit().map_err(|e| db_err!("failed to commit probe observation: {e}"))
+                    tx.commit()
+                        .map_err(|e| db_err!("failed to commit probe observation: {e}"))
                 } else {
                     drop(tx);
                     Ok(())
                 };
-                if let (Some(effects), Some((cli_key, name, base_url))) = (effects, provider.as_ref()) {
+                if let (Some(effects), Some((cli_key, name, base_url))) =
+                    (effects, provider.as_ref())
+                {
                     crate::gateway::runtime::GatewayRuntime::publish_availability_probe_outcome(
-                        Some(&app), trace_id, cli_key, provider_id,
-                        name, base_url, completed_at_ms.div_euclid(1_000), effects);
+                        Some(&app),
+                        trace_id,
+                        cli_key,
+                        provider_id,
+                        name,
+                        base_url,
+                        completed_at_ms.div_euclid(1_000),
+                        effects,
+                    );
                 }
                 committed?;
                 if pending.is_some() {
                     let mut inner = state.shared.inner.blocking_lock();
-                    let entry = inner.entries.get_mut(&provider_id).expect("persisted timeout entry");
-                    entry.pending_timeouts.pop_front().expect("persisted timeout");
+                    let entry = inner
+                        .entries
+                        .get_mut(&provider_id)
+                        .expect("persisted timeout entry");
+                    entry
+                        .pending_timeouts
+                        .pop_front()
+                        .expect("persisted timeout");
                     remove_idle_entry(&mut inner, provider_id);
                 } else {
                     break;
                 }
             }
             Ok(())
-        }).await;
+        })
+        .await;
         if let Err(error) = finish {
             if error.code() != "PROBE_TIMEOUT" && error.code() != "PROBE_PREPARATION" {
                 tracing::warn!(error = %error.code(), provider_id, "provider availability completion failed");
@@ -637,7 +782,11 @@ impl ProviderAvailabilityProbeRuntimeState {
             let mut inner = self.shared.inner.lock().await;
             if budget.expired() {
                 false
-            } else if inner.entries.get(&provider_id).is_some_and(|entry| !entry.pending_timeouts.is_empty()) {
+            } else if inner
+                .entries
+                .get(&provider_id)
+                .is_some_and(|entry| !entry.pending_timeouts.is_empty())
+            {
                 true
             } else {
                 complete_flight(&mut inner, provider_id, generation, &budget, fallback, None);
@@ -862,10 +1011,12 @@ fn flight_is_current(
     budget: &Arc<provider_availability::ProbeBudget>,
 ) -> bool {
     inner.entries.get(&provider_id).is_some_and(|entry| {
-        entry.generation == generation && entry.in_flight.as_ref().is_some_and(|flight| {
-            flight.generation == generation && flight.recovery_epoch == entry.recovery_epoch
-                && Arc::ptr_eq(&flight.budget, budget)
-        })
+        entry.generation == generation
+            && entry.in_flight.as_ref().is_some_and(|flight| {
+                flight.generation == generation
+                    && flight.recovery_epoch == entry.recovery_epoch
+                    && Arc::ptr_eq(&flight.budget, budget)
+            })
     })
 }
 
@@ -877,11 +1028,17 @@ fn complete_flight(
     result: AppResult<ProviderAvailabilityResult>,
     recovery: Option<RecoveryDirective>,
 ) -> bool {
-    let Some((flight, _)) = take_finished_flight(inner, provider_id, generation, budget) else { return false; };
+    let Some((flight, _)) = take_finished_flight(inner, provider_id, generation, budget) else {
+        return false;
+    };
     budget.invalidate();
     let completed = CompletedProbe { result, recovery };
-    for waiter in flight.waiters { let _ = waiter.send(completed.clone()); }
-    for waiter in flight.turn_waiters { let _ = waiter.send(()); }
+    for waiter in flight.waiters {
+        let _ = waiter.send(completed.clone());
+    }
+    for waiter in flight.turn_waiters {
+        let _ = waiter.send(());
+    }
     remove_idle_entry(inner, provider_id);
     true
 }
@@ -961,7 +1118,9 @@ fn settle_recovery_target(
 
 fn remove_idle_entry(inner: &mut RuntimeInner, provider_id: i64) {
     let should_remove = inner.entries.get(&provider_id).is_some_and(|entry| {
-        entry.schedule.is_none() && entry.recovery.is_none() && entry.in_flight.is_none()
+        entry.schedule.is_none()
+            && entry.recovery.is_none()
+            && entry.in_flight.is_none()
             && entry.pending_timeouts.is_empty()
     });
     if should_remove {
@@ -993,7 +1152,9 @@ fn reconcile_schedules_inner(
                 let generation = inner.allocate_generation();
                 if let Some(entry) = inner.entries.get_mut(&loaded.provider_id) {
                     entry.generation = generation;
-                    if let Some(flight) = &entry.in_flight { flight.budget.invalidate(); }
+                    if let Some(flight) = &entry.in_flight {
+                        flight.budget.invalidate();
+                    }
                 }
             }
             remove_idle_entry(inner, loaded.provider_id);
@@ -1012,7 +1173,9 @@ fn reconcile_schedules_inner(
             let generation = inner.allocate_generation();
             let entry = inner.entries.entry(loaded.provider_id).or_default();
             entry.generation = generation;
-            if let Some(flight) = &entry.in_flight { flight.budget.invalidate(); }
+            if let Some(flight) = &entry.in_flight {
+                flight.budget.invalidate();
+            }
             entry.schedule_seen_epoch = scan_epoch;
             entry.schedule = Some(ScheduledProbeState {
                 config,
@@ -1065,7 +1228,9 @@ fn reconcile_schedules_inner(
                 let generation = inner.allocate_generation();
                 if let Some(entry) = inner.entries.get_mut(&provider_id) {
                     entry.generation = generation;
-                    if let Some(flight) = &entry.in_flight { flight.budget.invalidate(); }
+                    if let Some(flight) = &entry.in_flight {
+                        flight.budget.invalidate();
+                    }
                 }
             }
             remove_idle_entry(inner, provider_id);
@@ -1899,7 +2064,9 @@ INSERT INTO providers(
     async fn invalidated_flight_blocks_the_replacement_until_it_finishes() {
         let state = ProviderAvailabilityProbeRuntimeState::default();
         let (generation, budget) = match state.begin_probe(4, None).await {
-            ProbeDecision::Lead { generation, budget, .. } => (generation, budget),
+            ProbeDecision::Lead {
+                generation, budget, ..
+            } => (generation, budget),
             _ => panic!("first probe must lead"),
         };
         assert!(matches!(
@@ -1917,8 +2084,9 @@ INSERT INTO providers(
         };
         let in_flight = {
             let mut inner = state.shared.inner.lock().await;
-            let (in_flight, should_record) = take_finished_flight(&mut inner, 4, generation, &budget)
-                .expect("invalidated flight remains available for completion");
+            let (in_flight, should_record) =
+                take_finished_flight(&mut inner, 4, generation, &budget)
+                    .expect("invalidated flight remains available for completion");
             assert!(
                 !should_record,
                 "an invalidated probe must not write an observation"
@@ -1940,7 +2108,11 @@ INSERT INTO providers(
     async fn timed_out_probe_completes_shared_waiters_and_allows_another_flight() {
         let state = ProviderAvailabilityProbeRuntimeState::default();
         let (generation, budget, first) = match state.begin_probe(7, None).await {
-            ProbeDecision::Lead { generation, budget, receiver } => (generation, budget, receiver),
+            ProbeDecision::Lead {
+                generation,
+                budget,
+                receiver,
+            } => (generation, budget, receiver),
             _ => panic!("first probe must lead"),
         };
         let second = match state.begin_probe(7, None).await {
@@ -1950,12 +2122,27 @@ INSERT INTO providers(
         let temp = tempfile::tempdir().unwrap();
         let db = crate::db::init_for_tests(&temp.path().join("timeout.db")).unwrap();
         let app = tauri::test::mock_app();
-        state.finish_probe(app.handle(), &db, 7, generation, budget, "timeout-probe",
-            Err(AppError::new("PROBE_TIMEOUT", "synthetic timeout"))).await;
+        state
+            .finish_probe(
+                app.handle(),
+                &db,
+                7,
+                generation,
+                budget,
+                "timeout-probe",
+                Err(AppError::new("PROBE_TIMEOUT", "synthetic timeout")),
+            )
+            .await;
         for waiter in [first, second] {
-            assert_eq!(waiter.await.unwrap().result.unwrap_err().code(), "PROBE_TIMEOUT");
+            assert_eq!(
+                waiter.await.unwrap().result.unwrap_err().code(),
+                "PROBE_TIMEOUT"
+            );
         }
-        assert!(matches!(state.begin_probe(7, None).await, ProbeDecision::Lead { .. }));
+        assert!(matches!(
+            state.begin_probe(7, None).await,
+            ProbeDecision::Lead { .. }
+        ));
     }
 
     #[allow(clippy::await_holding_lock)]
@@ -1963,14 +2150,24 @@ INSERT INTO providers(
     async fn shared_deadline_releases_waiters_and_isolates_late_blocking_work() {
         let _env_lock = crate::test_support::test_env_lock();
         let temp = tempfile::tempdir().unwrap();
-        let _home = crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_HOME", temp.path());
+        let _home =
+            crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_HOME", temp.path());
         let app = tauri::test::mock_app();
         // Tauri blocking jobs run on its runtime; keep this clock from advancing
         // automatically while they communicate with the paused test runtime.
-        let clock_driver = tokio::spawn(async { loop { tokio::task::yield_now().await; } });
-        let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let clock_driver = tokio::spawn(async {
+            loop {
+                tokio::task::yield_now().await;
+            }
+        });
+        let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
-        let _upstream = crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_PROBE_OAUTH_BASE_URL", &url);
+        let _upstream = crate::test_support::ScopedTestEnvVar::set(
+            "AIO_CODING_HUB_TEST_PROBE_OAUTH_BASE_URL",
+            &url,
+        );
         let requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let seen = requests.clone();
         let router = axum::Router::new().route("/v1/messages", axum::routing::post(move || {
@@ -1982,30 +2179,65 @@ INSERT INTO providers(
         })).route("/token", axum::routing::post(|| async {
             axum::Json(serde_json::json!({"access_token":"synthetic-refreshed-token","token_type":"Bearer","expires_in":3600}))
         }));
-        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap(); });
+        let server = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
 
-        for stage in ["configuration", "oauth_read", "oauth_write", "completion", "observation", "configuration_change"] {
+        for stage in [
+            "configuration",
+            "oauth_read",
+            "oauth_write",
+            "completion",
+            "observation",
+            "configuration_change",
+        ] {
             let db = crate::db::init_for_tests(&temp.path().join(format!("{stage}.db"))).unwrap();
             let conn = db.open_connection().unwrap();
             conn.execute("INSERT INTO providers(provider_uuid, cli_key, name, base_url, api_key_plaintext, created_at, updated_at) VALUES (?1, 'claude', 'synthetic probe', ?2, 'synthetic-key', 1, 1)", params![crate::shared::uuid::new_uuid_v4(), url]).unwrap();
             let provider_id = conn.last_insert_rowid();
             drop(conn);
             if matches!(stage, "oauth_read" | "oauth_write") {
-                crate::providers::update_oauth_tokens(&db, provider_id, "oauth", "claude_oauth", "synthetic-token", Some("synthetic-refresh-token"),
-                    None, &format!("{url}/token"), "synthetic-client", None,
-                    Some(crate::shared::time::now_unix_seconds() + if stage == "oauth_write" { -1 } else { 3_600 }), None).unwrap();
+                crate::providers::update_oauth_tokens(
+                    &db,
+                    provider_id,
+                    "oauth",
+                    "claude_oauth",
+                    "synthetic-token",
+                    Some("synthetic-refresh-token"),
+                    None,
+                    &format!("{url}/token"),
+                    "synthetic-client",
+                    None,
+                    Some(
+                        crate::shared::time::now_unix_seconds()
+                            + if stage == "oauth_write" { -1 } else { 3_600 },
+                    ),
+                    None,
+                )
+                .unwrap();
             }
             let state = ProviderAvailabilityProbeRuntimeState::default();
-            state.reconcile_schedules(vec![loaded(provider_id, 1, 60_000)], 0, false, 1, true).await;
+            state
+                .reconcile_schedules(vec![loaded(provider_id, 1, 60_000)], 0, false, 1, true)
+                .await;
             let (entered, ready) = oneshot::channel();
             let (release, blocked) = std::sync::mpsc::channel();
             let (exited, ended) = oneshot::channel();
-            *state.shared.next_pause.lock().unwrap() = Some(provider_availability::ProbeTestPause {
-                stage: if stage == "configuration_change" { "observation" } else { stage },
-                entered, release: blocked, exited,
-            });
+            *state.shared.next_pause.lock().unwrap() =
+                Some(provider_availability::ProbeTestPause {
+                    stage: if stage == "configuration_change" {
+                        "observation"
+                    } else {
+                        stage
+                    },
+                    entered,
+                    release: blocked,
+                    exited,
+                });
             let first = tokio::spawn({
-                let state = state.clone(); let app = app.handle().clone(); let db = db.clone();
+                let state = state.clone();
+                let app = app.handle().clone();
+                let db = db.clone();
                 async move { state.probe_manual(app, db, provider_id).await }
             });
             ready.await.unwrap();
@@ -2015,11 +2247,22 @@ INSERT INTO providers(
                 (flight.generation, flight.budget.clone())
             };
             let second = tokio::spawn({
-                let state = state.clone(); let app = app.handle().clone(); let db = db.clone();
+                let state = state.clone();
+                let app = app.handle().clone();
+                let db = db.clone();
                 async move { state.probe_manual(app, db, provider_id).await }
             });
             loop {
-                if state.shared.inner.lock().await.entries[&provider_id].in_flight.as_ref().unwrap().waiters.len() == 2 { break; }
+                if state.shared.inner.lock().await.entries[&provider_id]
+                    .in_flight
+                    .as_ref()
+                    .unwrap()
+                    .waiters
+                    .len()
+                    == 2
+                {
+                    break;
+                }
                 tokio::task::yield_now().await;
             }
             tokio::time::advance(Duration::from_secs(60)).await;
@@ -2027,7 +2270,11 @@ INSERT INTO providers(
                 match waiter.await.unwrap() {
                     Ok(result) => {
                         assert!(!result.ok, "{stage}");
-                        assert!(result.error.as_deref().unwrap().starts_with("PROBE_TIMEOUT"));
+                        assert!(result
+                            .error
+                            .as_deref()
+                            .unwrap()
+                            .starts_with("PROBE_TIMEOUT"));
                         assert_eq!(result.tested_model.as_deref(), Some("claude-sonnet-4-6"));
                     }
                     Err(error) => {
@@ -2036,20 +2283,33 @@ INSERT INTO providers(
                     }
                 }
             }
-            assert!(state.shared.inner.lock().await.entries[&provider_id].in_flight.is_none());
+            assert!(state.shared.inner.lock().await.entries[&provider_id]
+                .in_flight
+                .is_none());
             if stage == "configuration_change" {
                 let mutation = state.begin_mutation(provider_id).await.unwrap();
                 release.send(()).unwrap();
                 ended.await.unwrap();
                 let db_update = db.clone();
-                blocking::run("probe_timeout_configuration_change", move || -> AppResult<()> {
-                    let conn = db_update.open_connection()?;
-                    conn.execute("UPDATE providers SET name = 'new configuration' WHERE id = ?1", [provider_id])
+                blocking::run(
+                    "probe_timeout_configuration_change",
+                    move || -> AppResult<()> {
+                        let conn = db_update.open_connection()?;
+                        conn.execute(
+                            "UPDATE providers SET name = 'new configuration' WHERE id = ?1",
+                            [provider_id],
+                        )
                         .map_err(|e| db_err!("test configuration write failed: {e}"))?;
-                    Ok(())
-                }).await.unwrap();
+                        Ok(())
+                    },
+                )
+                .await
+                .unwrap();
                 drop(mutation);
-                let fresh = state.probe_manual(app.handle().clone(), db.clone(), provider_id).await.unwrap();
+                let fresh = state
+                    .probe_manual(app.handle().clone(), db.clone(), provider_id)
+                    .await
+                    .unwrap();
                 assert!(fresh.ok);
                 assert_eq!(fresh.provider_name, "new configuration");
                 let db_check = db.clone();
@@ -2058,25 +2318,37 @@ INSERT INTO providers(
                     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
                     Ok(tx.query_row("SELECT COUNT(*) FROM provider_availability_observations WHERE success = 1", [], |row| row.get(0)).unwrap())
                 }).await.unwrap();
-                assert_eq!(successes, 1, "old prepared success cannot survive configuration invalidation");
+                assert_eq!(
+                    successes, 1,
+                    "old prepared success cannot survive configuration invalidation"
+                );
                 continue;
             }
 
             let (entered, ready) = oneshot::channel();
             let (next_release, blocked) = std::sync::mpsc::channel();
             let (exited, next_ended) = oneshot::channel();
-            *state.shared.next_pause.lock().unwrap() = Some(provider_availability::ProbeTestPause {
-                stage: "configuration", entered, release: blocked, exited,
-            });
+            *state.shared.next_pause.lock().unwrap() =
+                Some(provider_availability::ProbeTestPause {
+                    stage: "configuration",
+                    entered,
+                    release: blocked,
+                    exited,
+                });
             let next = tokio::spawn({
-                let state = state.clone(); let app = app.handle().clone(); let db = db.clone();
+                let state = state.clone();
+                let app = app.handle().clone();
+                let db = db.clone();
                 async move { state.probe_manual(app, db, provider_id).await }
             });
             ready.await.unwrap();
             let next_budget = {
                 let mut inner = state.shared.inner.lock().await;
                 let entry = inner.entries.get_mut(&provider_id).unwrap();
-                assert_eq!(entry.generation, generation, "same configuration must remain isolated");
+                assert_eq!(
+                    entry.generation, generation,
+                    "same configuration must remain isolated"
+                );
                 let next_budget = entry.in_flight.as_ref().unwrap().budget.clone();
                 assert!(!Arc::ptr_eq(&old_budget, &next_budget));
                 queue_recovery_from_completion(&mut inner, provider_id, generation, 1_000);
@@ -2086,7 +2358,12 @@ INSERT INTO providers(
             release.send(()).unwrap();
             ended.await.unwrap();
             loop {
-                if state.shared.inner.lock().await.entries[&provider_id].pending_timeouts.is_empty() { break; }
+                if state.shared.inner.lock().await.entries[&provider_id]
+                    .pending_timeouts
+                    .is_empty()
+                {
+                    break;
+                }
                 tokio::task::yield_now().await;
             }
             let db_check = db.clone();
@@ -2096,23 +2373,57 @@ INSERT INTO providers(
                 assert_eq!(tx.query_row("SELECT COUNT(*) FROM provider_availability_observations WHERE success = 1", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
                 Ok(tx.query_row("SELECT COUNT(*) FROM provider_availability_observations WHERE success = 0", [], |row| row.get(0)).unwrap())
             }).await.unwrap();
-            assert_eq!(observations, 1, "{stage}: one timeout fact replaces the late success");
+            assert_eq!(
+                observations, 1,
+                "{stage}: one timeout fact replaces the late success"
+            );
             if stage == "oauth_write" {
-                assert_eq!(crate::providers::get_oauth_details(&db, provider_id).unwrap().oauth_access_token, "synthetic-token");
+                assert_eq!(
+                    crate::providers::get_oauth_details(&db, provider_id)
+                        .unwrap()
+                        .oauth_access_token,
+                    "synthetic-token"
+                );
             }
             {
                 let mut inner = state.shared.inner.lock().await;
-                assert!(flight_is_current(&inner, provider_id, generation, &next_budget));
+                assert!(flight_is_current(
+                    &inner,
+                    provider_id,
+                    generation,
+                    &next_budget
+                ));
                 assert_eq!(inner.entries[&provider_id].recovery, recovery);
-                assert!(!complete_flight(&mut inner, provider_id, generation, &old_budget, old_budget.timeout_result(), None));
-                assert!(flight_is_current(&inner, provider_id, generation, &next_budget));
+                assert!(!complete_flight(
+                    &mut inner,
+                    provider_id,
+                    generation,
+                    &old_budget,
+                    old_budget.timeout_result(),
+                    None
+                ));
+                assert!(flight_is_current(
+                    &inner,
+                    provider_id,
+                    generation,
+                    &next_budget
+                ));
             }
             next_release.send(()).unwrap();
             next_ended.await.unwrap();
-            assert!(next.await.unwrap().unwrap().ok, "{stage}: next real probe must succeed");
-            assert!(state.shared.inner.lock().await.entries[&provider_id].in_flight.is_none());
+            assert!(
+                next.await.unwrap().unwrap().ok,
+                "{stage}: next real probe must succeed"
+            );
+            assert!(state.shared.inner.lock().await.entries[&provider_id]
+                .in_flight
+                .is_none());
         }
-        assert_eq!(requests.load(Ordering::SeqCst), 9, "no retries or late generation requests");
+        assert_eq!(
+            requests.load(Ordering::SeqCst),
+            9,
+            "no retries or late generation requests"
+        );
         server.abort();
         assert!(server.await.unwrap_err().is_cancelled());
         clock_driver.abort();
@@ -2124,10 +2435,17 @@ INSERT INTO providers(
     async fn repeated_completion_timeouts_leave_blocking_slots_for_other_providers() {
         let _env_lock = crate::test_support::test_env_lock();
         let temp = tempfile::tempdir().unwrap();
-        let _home = crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_HOME", temp.path());
+        let _home =
+            crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_HOME", temp.path());
         let app = tauri::test::mock_app();
-        let clock_driver = tokio::spawn(async { loop { tokio::task::yield_now().await; } });
-        let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let clock_driver = tokio::spawn(async {
+            loop {
+                tokio::task::yield_now().await;
+            }
+        });
+        let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let router = axum::Router::new().route("/v1/messages", axum::routing::post({
@@ -2137,7 +2455,9 @@ INSERT INTO providers(
                 async { axum::Json(serde_json::json!({"type":"message","role":"assistant","content":[{"type":"text","text":"OK"}],"stop_reason":"end_turn"})) }
             }
         }));
-        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap(); });
+        let server = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
         let db = crate::db::init_for_tests(&temp.path().join("completion-queue.db")).unwrap();
         let conn = db.open_connection().unwrap();
         for name in ["blocked completion", "independent provider"] {
@@ -2147,30 +2467,48 @@ INSERT INTO providers(
         let provider_id = other_id - 1;
         drop(conn);
         let state = ProviderAvailabilityProbeRuntimeState::default();
-        state.reconcile_schedules(vec![loaded(provider_id, 1, 60_000)], 0, false, 1, true).await;
+        state
+            .reconcile_schedules(vec![loaded(provider_id, 1, 60_000)], 0, false, 1, true)
+            .await;
         let (entered, ready) = oneshot::channel();
         let (release, blocked) = std::sync::mpsc::channel();
         let (exited, ended) = oneshot::channel();
         *state.shared.next_pause.lock().unwrap() = Some(provider_availability::ProbeTestPause {
-            stage: "completion", entered, release: blocked, exited,
+            stage: "completion",
+            entered,
+            release: blocked,
+            exited,
         });
         let first = tokio::spawn({
-            let state = state.clone(); let app = app.handle().clone(); let db = db.clone();
+            let state = state.clone();
+            let app = app.handle().clone();
+            let db = db.clone();
             async move { state.probe_manual(app, db, provider_id).await }
         });
         ready.await.unwrap();
         tokio::time::advance(Duration::from_secs(60)).await;
-        assert!(first.await.unwrap().unwrap().error.unwrap().starts_with("PROBE_TIMEOUT"));
+        assert!(first
+            .await
+            .unwrap()
+            .unwrap()
+            .error
+            .unwrap()
+            .starts_with("PROBE_TIMEOUT"));
 
         // Exceed shared::blocking's maximum of 32 slots while the first real
         // completion closure still owns its gate and its blocking permit.
         for round in 0..33 {
             let next = tokio::spawn({
-                let state = state.clone(); let app = app.handle().clone(); let db = db.clone();
+                let state = state.clone();
+                let app = app.handle().clone();
+                let db = db.clone();
                 async move { state.probe_manual(app, db, provider_id).await }
             });
             let budget = loop {
-                if let Some(flight) = state.shared.inner.lock().await.entries[&provider_id].in_flight.as_ref() {
+                if let Some(flight) = state.shared.inner.lock().await.entries[&provider_id]
+                    .in_flight
+                    .as_ref()
+                {
                     break flight.budget.clone();
                 }
                 tokio::task::yield_now().await;
@@ -2186,22 +2524,45 @@ INSERT INTO providers(
                 let entry = &inner.entries[&provider_id];
                 assert!(entry.in_flight.is_none());
                 assert_eq!(entry.pending_timeouts.len(), round + 2);
-                assert!(entry.completion_gate.try_lock().is_err(), "canceled async owner must not release the real closure's gate");
+                assert!(
+                    entry.completion_gate.try_lock().is_err(),
+                    "canceled async owner must not release the real closure's gate"
+                );
             }
-            let other = state.probe_manual(app.handle().clone(), db.clone(), other_id).await.unwrap();
-            assert!(other.ok, "independent provider must finish on round {round}");
+            let other = state
+                .probe_manual(app.handle().clone(), db.clone(), other_id)
+                .await
+                .unwrap();
+            assert!(
+                other.ok,
+                "independent provider must finish on round {round}"
+            );
             assert_eq!(other.tested_model.as_deref(), Some("claude-sonnet-4-6"));
         }
-        assert_eq!(requests.load(Ordering::SeqCst), 67, "one generation per real flight");
+        assert_eq!(
+            requests.load(Ordering::SeqCst),
+            67,
+            "one generation per real flight"
+        );
         release.send(()).unwrap();
         ended.await.unwrap();
-        assert!(state.probe_manual(app.handle().clone(), db.clone(), provider_id).await.unwrap().ok);
+        assert!(
+            state
+                .probe_manual(app.handle().clone(), db.clone(), provider_id)
+                .await
+                .unwrap()
+                .ok
+        );
         let counts = blocking::run("completion_queue_observations", move || -> AppResult<(i64, i64)> {
             let mut conn = db.open_connection()?;
             let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
             Ok(tx.query_row("SELECT SUM(success = 0), SUM(success = 1) FROM provider_availability_observations WHERE provider_id = ?1", [provider_id], |row| Ok((row.get(0)?, row.get(1)?))).unwrap())
         }).await.unwrap();
-        assert_eq!(counts, (34, 1), "queued timeouts persist once before the new success");
+        assert_eq!(
+            counts,
+            (34, 1),
+            "queued timeouts persist once before the new success"
+        );
         server.abort();
         assert!(server.await.unwrap_err().is_cancelled());
         clock_driver.abort();
@@ -2210,17 +2571,24 @@ INSERT INTO providers(
 
     #[test]
     fn observation_transaction_and_real_circuit_resets_do_not_invert_locks() {
-        let clock = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let clock = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let temp = tempfile::tempdir().unwrap();
         for reset_cli in [false, true] {
             let app = tauri::test::mock_app();
             app.manage(gateway_state::GatewayState::default());
             let gateway = crate::gateway::runtime::GatewayRuntime::for_probe_tests(&clock);
-            gateway_state::with_app_running_gateway_slot_mut(app.handle(), |slot| *slot = Some(gateway));
+            gateway_state::with_app_running_gateway_slot_mut(app.handle(), |slot| {
+                *slot = Some(gateway)
+            });
             // The paused observation and the real reset need separate connections.
             let db = crate::db::init_for_tests_with_pool_size(
-                &temp.path().join(format!("reset-{reset_cli}.db")), 2,
-            ).unwrap();
+                &temp.path().join(format!("reset-{reset_cli}.db")),
+                2,
+            )
+            .unwrap();
             let conn = db.open_connection().unwrap();
             conn.execute("INSERT INTO providers(provider_uuid, cli_key, name, base_url, api_key_plaintext, created_at, updated_at) VALUES (?1, 'claude', 'synthetic reset', 'https://example.test', 'synthetic-key', 1, 1)", [crate::shared::uuid::new_uuid_v4()]).unwrap();
             let provider_id = conn.last_insert_rowid();
@@ -2286,12 +2654,22 @@ INSERT INTO providers(
     async fn oauth_acceptance_orders_timeout_and_configuration_before_commit() {
         let _env_lock = crate::test_support::test_env_lock();
         let temp = tempfile::tempdir().unwrap();
-        let _home = crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_HOME", temp.path());
+        let _home =
+            crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_HOME", temp.path());
         let app = tauri::test::mock_app();
-        let clock_driver = tokio::spawn(async { loop { tokio::task::yield_now().await; } });
-        let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let clock_driver = tokio::spawn(async {
+            loop {
+                tokio::task::yield_now().await;
+            }
+        });
+        let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
-        let _upstream = crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_PROBE_OAUTH_BASE_URL", &url);
+        let _upstream = crate::test_support::ScopedTestEnvVar::set(
+            "AIO_CODING_HUB_TEST_PROBE_OAUTH_BASE_URL",
+            &url,
+        );
         let refreshes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let router = axum::Router::new().route("/token", axum::routing::post({
             let refreshes = refreshes.clone();
@@ -2303,34 +2681,65 @@ INSERT INTO providers(
             assert_eq!(headers["authorization"], "Bearer synthetic-refreshed");
             axum::Json(serde_json::json!({"type":"message","role":"assistant","content":[{"type":"text","text":"OK"}],"stop_reason":"end_turn"}))
         }));
-        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap(); });
+        let server = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
         for accepted in [false, true] {
             for mutate in [false, true] {
                 let before_refreshes = refreshes.load(Ordering::SeqCst);
                 // Allow the CAS, timeout consumer, configuration load, and SQL
                 // ordering check to acquire independent connections.
                 let db = crate::db::init_for_tests_with_pool_size(
-                    &temp.path().join(format!("oauth-{accepted}-{mutate}.db")), 4,
-                ).unwrap();
+                    &temp.path().join(format!("oauth-{accepted}-{mutate}.db")),
+                    4,
+                )
+                .unwrap();
                 let conn = db.open_connection().unwrap();
                 conn.execute("INSERT INTO providers(provider_uuid, cli_key, name, base_url, api_key_plaintext, created_at, updated_at) VALUES (?1, 'claude', 'synthetic oauth', ?2, '', 1, 1)", params![crate::shared::uuid::new_uuid_v4(), url]).unwrap();
                 let provider_id = conn.last_insert_rowid();
                 drop(conn);
-                crate::providers::update_oauth_tokens(&db, provider_id, "oauth", "claude_oauth", "synthetic-old", Some("synthetic-refresh"),
-                    None, &format!("{url}/token"), "synthetic-client", None, Some(crate::shared::time::now_unix_seconds() - 1), None).unwrap();
+                crate::providers::update_oauth_tokens(
+                    &db,
+                    provider_id,
+                    "oauth",
+                    "claude_oauth",
+                    "synthetic-old",
+                    Some("synthetic-refresh"),
+                    None,
+                    &format!("{url}/token"),
+                    "synthetic-client",
+                    None,
+                    Some(crate::shared::time::now_unix_seconds() - 1),
+                    None,
+                )
+                .unwrap();
                 let state = ProviderAvailabilityProbeRuntimeState::default();
                 let (entered, ready) = oneshot::channel();
                 let (release, blocked) = std::sync::mpsc::channel();
                 let (exited, ended) = oneshot::channel();
-                *state.shared.next_pause.lock().unwrap() = Some(provider_availability::ProbeTestPause {
-                    stage: if accepted { "oauth_accepted" } else { "oauth_accept" }, entered, release: blocked, exited,
-                });
+                *state.shared.next_pause.lock().unwrap() =
+                    Some(provider_availability::ProbeTestPause {
+                        stage: if accepted {
+                            "oauth_accepted"
+                        } else {
+                            "oauth_accept"
+                        },
+                        entered,
+                        release: blocked,
+                        exited,
+                    });
                 let first = tokio::spawn({
-                    let state = state.clone(); let app = app.handle().clone(); let db = db.clone();
+                    let state = state.clone();
+                    let app = app.handle().clone();
+                    let db = db.clone();
                     async move { state.probe_manual(app, db, provider_id).await }
                 });
                 ready.await.unwrap();
-                let mutation = if mutate { state.begin_mutation(provider_id).await } else { None };
+                let mutation = if mutate {
+                    state.begin_mutation(provider_id).await
+                } else {
+                    None
+                };
                 if !mutate {
                     tokio::time::advance(Duration::from_secs(60)).await;
                     let result = first.await.unwrap().unwrap();
@@ -2358,26 +2767,58 @@ INSERT INTO providers(
                     }
                 });
                 read_ready.await.unwrap();
-                assert!(!read.is_finished(), "SQL ordering waits for the existing OAuth transaction");
+                assert!(
+                    !read.is_finished(),
+                    "SQL ordering waits for the existing OAuth transaction"
+                );
                 let next = tokio::spawn({
-                    let state = state.clone(); let app = app.handle().clone(); let db = db.clone();
+                    let state = state.clone();
+                    let app = app.handle().clone();
+                    let db = db.clone();
                     async move { state.probe_manual(app, db, provider_id).await }
                 });
                 if !mutate {
                     loop {
-                        if state.shared.inner.lock().await.entries.get(&provider_id).is_some_and(|entry| entry.in_flight.is_some()) { break; }
+                        if state
+                            .shared
+                            .inner
+                            .lock()
+                            .await
+                            .entries
+                            .get(&provider_id)
+                            .is_some_and(|entry| entry.in_flight.is_some())
+                        {
+                            break;
+                        }
                         tokio::task::yield_now().await;
                     }
                 }
                 release.send(()).unwrap();
                 ended.await.unwrap();
-                assert_eq!(read.await.unwrap(), if accepted { "synthetic-refreshed" } else { "synthetic-old" });
+                assert_eq!(
+                    read.await.unwrap(),
+                    if accepted {
+                        "synthetic-refreshed"
+                    } else {
+                        "synthetic-old"
+                    }
+                );
                 drop(mutation);
                 let result = next.await.unwrap().unwrap();
                 assert!(result.ok);
-                if mutate { assert_eq!(result.provider_name, "new oauth configuration"); }
-                assert_eq!(refreshes.load(Ordering::SeqCst) - before_refreshes, if accepted { 1 } else { 2 });
-                assert_eq!(crate::providers::get_oauth_details(&db, provider_id).unwrap().oauth_access_token, "synthetic-refreshed");
+                if mutate {
+                    assert_eq!(result.provider_name, "new oauth configuration");
+                }
+                assert_eq!(
+                    refreshes.load(Ordering::SeqCst) - before_refreshes,
+                    if accepted { 1 } else { 2 }
+                );
+                assert_eq!(
+                    crate::providers::get_oauth_details(&db, provider_id)
+                        .unwrap()
+                        .oauth_access_token,
+                    "synthetic-refreshed"
+                );
             }
         }
         server.abort();
@@ -2391,12 +2832,22 @@ INSERT INTO providers(
     async fn accepted_oauth_commit_orders_real_reads_without_blocking_admission_or_slots() {
         let _env_lock = crate::test_support::test_env_lock();
         let temp = tempfile::tempdir().unwrap();
-        let _home = crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_HOME", temp.path());
+        let _home =
+            crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_HOME", temp.path());
         let app = tauri::test::mock_app();
-        let clock_driver = tokio::spawn(async { loop { tokio::task::yield_now().await; } });
-        let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let clock_driver = tokio::spawn(async {
+            loop {
+                tokio::task::yield_now().await;
+            }
+        });
+        let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
-        let _upstream = crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_PROBE_OAUTH_BASE_URL", &url);
+        let _upstream = crate::test_support::ScopedTestEnvVar::set(
+            "AIO_CODING_HUB_TEST_PROBE_OAUTH_BASE_URL",
+            &url,
+        );
         let refreshes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let generations = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let router = axum::Router::new().route("/token", axum::routing::post({
@@ -2417,36 +2868,72 @@ INSERT INTO providers(
                 }
             }
         }));
-        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap(); });
+        let server = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
         for expired_reads in [0, 33] {
             let before_refreshes = refreshes.load(Ordering::SeqCst);
             let before_generations = generations.load(Ordering::SeqCst);
             // Keep read connections available while the accepted CAS and its
             // timeout consumer retain their own connections before commit.
             let db = crate::db::init_for_tests_with_pool_size(
-                &temp.path().join(format!("oauth-read-order-{expired_reads}.db")), 4,
-            ).unwrap();
+                &temp
+                    .path()
+                    .join(format!("oauth-read-order-{expired_reads}.db")),
+                4,
+            )
+            .unwrap();
             let conn = db.open_connection().unwrap();
-            assert_eq!(conn.query_row("PRAGMA journal_mode", [], |row| row.get::<_, String>(0)).unwrap(), "wal");
+            assert_eq!(
+                conn.query_row("PRAGMA journal_mode", [], |row| row.get::<_, String>(0))
+                    .unwrap(),
+                "wal"
+            );
             conn.execute("INSERT INTO providers(provider_uuid, cli_key, name, base_url, api_key_plaintext, created_at, updated_at) VALUES (?1, 'claude', 'synthetic oauth', ?2, '', 1, 1)", params![crate::shared::uuid::new_uuid_v4(), url]).unwrap();
             let provider_id = conn.last_insert_rowid();
             drop(conn);
-            crate::providers::update_oauth_tokens(&db, provider_id, "oauth", "claude_oauth", "synthetic-old", Some("synthetic-refresh"),
-                None, &format!("{url}/token"), "synthetic-client", None, Some(crate::shared::time::now_unix_seconds() - 1), None).unwrap();
+            crate::providers::update_oauth_tokens(
+                &db,
+                provider_id,
+                "oauth",
+                "claude_oauth",
+                "synthetic-old",
+                Some("synthetic-refresh"),
+                None,
+                &format!("{url}/token"),
+                "synthetic-client",
+                None,
+                Some(crate::shared::time::now_unix_seconds() - 1),
+                None,
+            )
+            .unwrap();
             let state = ProviderAvailabilityProbeRuntimeState::default();
-            state.reconcile_schedules(vec![loaded(provider_id, 1, 60_000)], 0, false, 1, true).await;
+            state
+                .reconcile_schedules(vec![loaded(provider_id, 1, 60_000)], 0, false, 1, true)
+                .await;
             let (entered, ready) = oneshot::channel();
             let (release, blocked) = std::sync::mpsc::channel();
             let (exited, ended) = oneshot::channel();
-            *state.shared.next_pause.lock().unwrap() = Some(provider_availability::ProbeTestPause {
-                stage: "oauth_accepted", entered, release: blocked, exited,
-            });
+            *state.shared.next_pause.lock().unwrap() =
+                Some(provider_availability::ProbeTestPause {
+                    stage: "oauth_accepted",
+                    entered,
+                    release: blocked,
+                    exited,
+                });
             let first = tokio::spawn({
-                let state = state.clone(); let app = app.handle().clone(); let db = db.clone();
+                let state = state.clone();
+                let app = app.handle().clone();
+                let db = db.clone();
                 async move { state.probe_manual(app, db, provider_id).await }
             });
             ready.await.unwrap();
-            let old_budget = state.shared.inner.lock().await.entries[&provider_id].in_flight.as_ref().unwrap().budget.clone();
+            let old_budget = state.shared.inner.lock().await.entries[&provider_id]
+                .in_flight
+                .as_ref()
+                .unwrap()
+                .budget
+                .clone();
             tokio::time::advance(Duration::from_secs(60)).await;
             let result = first.await.unwrap().unwrap();
             assert!(!result.ok);
@@ -2458,11 +2945,16 @@ INSERT INTO providers(
             for _ in 0..expired_reads {
                 let admitted_at = tokio::time::Instant::now();
                 let next = tokio::spawn({
-                    let state = state.clone(); let app = app.handle().clone(); let db = db.clone();
+                    let state = state.clone();
+                    let app = app.handle().clone();
+                    let db = db.clone();
                     async move { state.probe_manual(app, db, provider_id).await }
                 });
                 let budget = loop {
-                    if let Some(flight) = state.shared.inner.lock().await.entries[&provider_id].in_flight.as_ref() {
+                    if let Some(flight) = state.shared.inner.lock().await.entries[&provider_id]
+                        .in_flight
+                        .as_ref()
+                    {
                         break flight.budget.clone();
                     }
                     tokio::task::yield_now().await;
@@ -2475,20 +2967,37 @@ INSERT INTO providers(
                 assert!(!result.ok);
                 assert!(result.error.unwrap().starts_with("PROBE_TIMEOUT"));
                 assert_eq!(result.tested_model.as_deref(), Some("claude-sonnet-4-6"));
-                assert!(state.shared.inner.lock().await.entries[&provider_id].in_flight.is_none());
-                assert!(tokio::time::timeout(Duration::ZERO, budget.oauth_read_completed.notified()).await.is_err());
+                assert!(state.shared.inner.lock().await.entries[&provider_id]
+                    .in_flight
+                    .is_none());
+                assert!(tokio::time::timeout(
+                    Duration::ZERO,
+                    budget.oauth_read_completed.notified()
+                )
+                .await
+                .is_err());
                 // 33 canceled readers exceed the global maximum of 32 slots;
                 // this real shared entry must remain available before commit.
-                assert_eq!(blocking::run("oauth_wait_slot_check", || Ok::<_, AppError>(7)).await.unwrap(), 7);
+                assert_eq!(
+                    blocking::run("oauth_wait_slot_check", || Ok::<_, AppError>(7))
+                        .await
+                        .unwrap(),
+                    7
+                );
                 assert_eq!(refreshes.load(Ordering::SeqCst) - before_refreshes, 1);
                 assert_eq!(generations.load(Ordering::SeqCst) - before_generations, 0);
             }
             let next = tokio::spawn({
-                let state = state.clone(); let app = app.handle().clone(); let db = db.clone();
+                let state = state.clone();
+                let app = app.handle().clone();
+                let db = db.clone();
                 async move { state.probe_manual(app, db, provider_id).await }
             });
             let budget = loop {
-                if let Some(flight) = state.shared.inner.lock().await.entries[&provider_id].in_flight.as_ref() {
+                if let Some(flight) = state.shared.inner.lock().await.entries[&provider_id]
+                    .in_flight
+                    .as_ref()
+                {
                     break flight.budget.clone();
                 }
                 tokio::task::yield_now().await;
@@ -2510,8 +3019,13 @@ INSERT INTO providers(
             let db_read = db.clone();
             let stored = blocking::run("oauth_uncommitted_wal_read", move || {
                 crate::providers::get_oauth_details(&db_read, provider_id)
-            }).await.unwrap();
-            assert_eq!(stored.oauth_access_token, "synthetic-old", "ordinary WAL SELECT can still see the pre-commit token");
+            })
+            .await
+            .unwrap();
+            assert_eq!(
+                stored.oauth_access_token, "synthetic-old",
+                "ordinary WAL SELECT can still see the pre-commit token"
+            );
             assert_eq!(refreshes.load(Ordering::SeqCst) - before_refreshes, 1);
             assert_eq!(generations.load(Ordering::SeqCst) - before_generations, 0);
             release.send(()).unwrap();
@@ -2521,11 +3035,22 @@ INSERT INTO providers(
             assert!(result.ok);
             assert_eq!(result.requested_model.as_deref(), Some("claude-sonnet-4-6"));
             assert_eq!(result.tested_model.as_deref(), Some("claude-sonnet-4-6"));
-            assert_eq!(refreshes.load(Ordering::SeqCst) - before_refreshes, 1, "accepted rotation must prevent another refresh");
-            assert_eq!(generations.load(Ordering::SeqCst) - before_generations, 1, "only the final flight generates");
+            assert_eq!(
+                refreshes.load(Ordering::SeqCst) - before_refreshes,
+                1,
+                "accepted rotation must prevent another refresh"
+            );
+            assert_eq!(
+                generations.load(Ordering::SeqCst) - before_generations,
+                1,
+                "only the final flight generates"
+            );
             let details = crate::providers::get_oauth_details(&db, provider_id).unwrap();
             assert_eq!(details.oauth_access_token, "synthetic-refreshed");
-            assert_eq!(details.oauth_refresh_token.as_deref(), Some("synthetic-rotated-refresh"));
+            assert_eq!(
+                details.oauth_refresh_token.as_deref(),
+                Some("synthetic-rotated-refresh")
+            );
             let counts = blocking::run("oauth_ordered_timeout_observations", move || -> AppResult<(i64, i64)> {
                 let mut conn = db.open_connection()?;
                 let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
@@ -2543,17 +3068,25 @@ INSERT INTO providers(
     fn shared_deadline_survives_gateway_and_circuit_lock_waits() {
         let _env_lock = crate::test_support::test_env_lock();
         let temp = tempfile::tempdir().unwrap();
-        let _home = crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_HOME", temp.path());
-        let clock = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let _home =
+            crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_HOME", temp.path());
+        let clock = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         for (hold_manager, before_configuration, change_configuration) in [
-            (true, false, false), (false, false, false),
-            (false, true, false), (false, false, true),
+            (true, false, false),
+            (false, false, false),
+            (false, true, false),
+            (false, false, true),
         ] {
             let gateway = crate::gateway::runtime::GatewayRuntime::for_probe_tests(&clock);
             let circuit = gateway.availability_probe_circuit();
             let app = tauri::test::mock_app();
             app.manage(gateway_state::GatewayState::default());
-            gateway_state::with_app_running_gateway_slot_mut(app.handle(), |slot| *slot = Some(gateway));
+            gateway_state::with_app_running_gateway_slot_mut(app.handle(), |slot| {
+                *slot = Some(gateway)
+            });
             clock.block_on(async {
                 tokio::time::pause();
                 let clock_driver = tokio::spawn(async { loop { tokio::task::yield_now().await; } });
@@ -2740,7 +3273,9 @@ INSERT INTO providers(
     async fn coalesced_probe_flight_has_only_one_recording_owner() {
         let state = ProviderAvailabilityProbeRuntimeState::default();
         let (generation, budget) = match state.begin_probe(5, None).await {
-            ProbeDecision::Lead { generation, budget, .. } => (generation, budget),
+            ProbeDecision::Lead {
+                generation, budget, ..
+            } => (generation, budget),
             _ => panic!("first probe must lead"),
         };
         assert!(matches!(
@@ -2775,11 +3310,19 @@ INSERT INTO providers(
     async fn pending_timeout_keeps_consumer_order_across_generation_changes() {
         let state = ProviderAvailabilityProbeRuntimeState::default();
         let (generation, budget) = match state.begin_probe(99, None).await {
-            ProbeDecision::Lead { generation, budget, .. } => (generation, budget),
+            ProbeDecision::Lead {
+                generation, budget, ..
+            } => (generation, budget),
             _ => panic!("first flight leads"),
         };
-        assert!(state.expire_probe(99, generation, &budget, "retained-timeout").await);
-        let completion_gate = state.shared.inner.lock().await.entries[&99].completion_gate.clone();
+        assert!(
+            state
+                .expire_probe(99, generation, &budget, "retained-timeout")
+                .await
+        );
+        let completion_gate = state.shared.inner.lock().await.entries[&99]
+            .completion_gate
+            .clone();
         drop(state.begin_mutation(99).await);
         {
             let inner = state.shared.inner.lock().await;
@@ -2790,11 +3333,23 @@ INSERT INTO providers(
         }
         {
             let mut inner = state.shared.inner.lock().await;
-            inner.entries.get_mut(&99).unwrap().pending_timeouts.pop_front().unwrap();
+            inner
+                .entries
+                .get_mut(&99)
+                .unwrap()
+                .pending_timeouts
+                .pop_front()
+                .unwrap();
             remove_idle_entry(&mut inner, 99);
             assert!(!inner.entries.contains_key(&99));
         }
-        assert!(matches!(state.begin_probe(99, None).await, ProbeDecision::Lead { .. }));
-        assert!(!Arc::ptr_eq(&state.shared.inner.lock().await.entries[&99].completion_gate, &completion_gate));
+        assert!(matches!(
+            state.begin_probe(99, None).await,
+            ProbeDecision::Lead { .. }
+        ));
+        assert!(!Arc::ptr_eq(
+            &state.shared.inner.lock().await.entries[&99].completion_gate,
+            &completion_gate
+        ));
     }
 }

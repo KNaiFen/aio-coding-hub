@@ -1,10 +1,10 @@
 //! Usage: Codex ChatGPT backend compatibility helpers for `failover_loop`.
 
 use crate::gateway::proxy::protocol_bridge::cx2cc as bridge_cx2cc;
+pub(super) use crate::gateway::proxy::protocol_bridge::probe::parse_codex_chatgpt_account_id;
 use crate::gateway::upstream_identity;
 use axum::body::Bytes;
 use axum::http::{header, HeaderMap, HeaderName, HeaderValue};
-pub(super) use crate::gateway::proxy::protocol_bridge::probe::parse_codex_chatgpt_account_id;
 
 pub(super) fn is_codex_chatgpt_backend(
     cli_key: &str,

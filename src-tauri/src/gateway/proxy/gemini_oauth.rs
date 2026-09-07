@@ -785,14 +785,20 @@ mod tests {
             }),
             None,
             Some("projects/probe-test"),
-        ).unwrap();
+        )
+        .unwrap();
         let body: Value = serde_json::from_slice(&prepared.body_bytes).unwrap();
         assert_eq!(prepared.forwarded_path, "/v1internal:generateContent");
         assert_eq!(body["model"], "gemini-2.0-flash");
         assert_eq!(body["project"], "projects/probe-test");
         assert_eq!(body["request"]["generationConfig"]["maxOutputTokens"], 100);
-        assert_eq!(body["request"]["contents"][0]["parts"][0]["text"], "Reply with the single word OK.");
-        assert!(body["request"]["generationConfig"].get("thinkingConfig").is_none());
+        assert_eq!(
+            body["request"]["contents"][0]["parts"][0]["text"],
+            "Reply with the single word OK."
+        );
+        assert!(body["request"]["generationConfig"]
+            .get("thinkingConfig")
+            .is_none());
     }
 
     #[test]

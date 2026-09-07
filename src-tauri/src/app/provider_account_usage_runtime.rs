@@ -237,7 +237,12 @@ impl ProviderAccountUsageRuntimeState {
         RefreshDecision::Lead(generation)
     }
 
-    async fn perform_refresh<R: tauri::Runtime>(&self, app: tauri::AppHandle<R>, provider_id: i64, generation: u64) {
+    async fn perform_refresh<R: tauri::Runtime>(
+        &self,
+        app: tauri::AppHandle<R>,
+        provider_id: i64,
+        generation: u64,
+    ) {
         let result = match self.shared.fetch_limiter.clone().acquire_owned().await {
             Ok(permit) => {
                 let result =

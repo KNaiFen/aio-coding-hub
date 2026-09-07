@@ -60,7 +60,8 @@ impl ProjectionBudget {
         if Instant::now() >= self.deadline {
             self.errors.push(("deadline", "OBS_DB_DEADLINE".into()));
             return Err(crate::shared::error::AppError::new(
-                "OBS_DB_DEADLINE", "observer projection deadline exceeded",
+                "OBS_DB_DEADLINE",
+                "observer projection deadline exceeded",
             ));
         }
         Ok(())
@@ -321,13 +322,7 @@ async fn load_db_projection<R: tauri::Runtime>(
         blocking::run("observer_snapshot", move || {
             let _db_query_permit = db_query_permit;
             let mut budget = ProjectionBudget::new(started, scope, include_providers);
-            collect_db_projection(
-                &app,
-                &db,
-                &folder_cache,
-                &request,
-                &mut budget,
-            )
+            collect_db_projection(&app, &db, &folder_cache, &request, &mut budget)
         }),
     )
     .await
@@ -338,9 +333,13 @@ async fn load_db_projection<R: tauri::Runtime>(
                 Ok(Err(error)) => error.code(),
                 _ => "OBS_DB_TIMEOUT",
             };
-            tracing::warn!(cli = scope.as_str(), include_providers,
-                total_ms = started.elapsed().as_millis(), error = code,
-                "observer DB projection unavailable");
+            tracing::warn!(
+                cli = scope.as_str(),
+                include_providers,
+                total_ms = started.elapsed().as_millis(),
+                error = code,
+                "observer DB projection unavailable"
+            );
             None
         }
     }
@@ -355,48 +354,63 @@ fn collect_db_projection<R: tauri::Runtime>(
 ) -> crate::shared::error::AppResult<DbProjection> {
     budget.check()?;
     let active_trace_ids = observer_active_trace_ids(&request.active);
-    let terminal_trace_ids = budget.stage("persisted", ||
-        request_logs::observer_persisted_trace_ids(db, &active_trace_ids)
-    ).unwrap_or_default();
+    let terminal_trace_ids = budget
+        .stage("persisted", || {
+            request_logs::observer_persisted_trace_ids(db, &active_trace_ids)
+        })
+        .unwrap_or_default();
     let active_trace_ids = active_trace_ids
         .into_iter()
         .filter(|trace_id| !terminal_trace_ids.contains(trace_id))
         .collect::<Vec<_>>();
     let cli_key = (request.scope != CliScope::All).then(|| request.scope.as_str());
     budget.check()?;
-    let inference_result = budget.stage("inferences", || request_logs::list_observer_terminal_inferences(
-        db,
-        cli_key,
-        DOMINANT_PROVIDER_SAMPLE_LIMIT,
-    ));
+    let inference_result = budget.stage("inferences", || {
+        request_logs::list_observer_terminal_inferences(db, cli_key, DOMINANT_PROVIDER_SAMPLE_LIMIT)
+    });
     let inference_available = inference_result.is_ok();
     let inference_rows = inference_result.unwrap_or_default();
     budget.check()?;
-    let recent_result = budget.stage("recent", || load_observer_recent_rows(request.history_limit, |limit| {
-        request_logs::list_observer_recent_terminal(db, cli_key, limit, &active_trace_ids)
-    }));
+    let recent_result = budget.stage("recent", || {
+        load_observer_recent_rows(request.history_limit, |limit| {
+            request_logs::list_observer_recent_terminal(db, cli_key, limit, &active_trace_ids)
+        })
+    });
     let recent_available = recent_result.is_ok();
     let recent_rows = recent_result.unwrap_or_default();
     let rendered_active = rendered_active(&request.active, &terminal_trace_ids, request.scope);
     budget.check()?;
-    let folders = budget.stage("folders", || Ok(resolve_folders(
-        app,
-        folder_cache,
-        &rendered_active,
-        inference_rows.first(),
-        &recent_rows,
-    )))?;
+    let folders = budget.stage("folders", || {
+        Ok(resolve_folders(
+            app,
+            folder_cache,
+            &rendered_active,
+            inference_rows.first(),
+            &recent_rows,
+        ))
+    })?;
 
     let provider_cli_key = preferred_cli_key(request.scope, inference_rows.first());
     budget.check()?;
     let spend = if request.include_providers || provider_cli_key.is_some() {
-        let spend_cli = if request.include_providers { cli_key } else { provider_cli_key.as_deref() };
-        budget.stage("spend", || provider_limit_usage::list_v1(db, spend_cli))
-            .map(|rows| rows.into_iter().map(|row| (row.provider_id, row)).collect::<HashMap<_, _>>())
+        let spend_cli = if request.include_providers {
+            cli_key
+        } else {
+            provider_cli_key.as_deref()
+        };
+        budget
+            .stage("spend", || provider_limit_usage::list_v1(db, spend_cli))
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|row| (row.provider_id, row))
+                    .collect::<HashMap<_, _>>()
+            })
     } else {
         Ok(HashMap::new())
     };
-    budget.counts.push(("spend", spend.as_ref().map_or(0, HashMap::len)));
+    budget
+        .counts
+        .push(("spend", spend.as_ref().map_or(0, HashMap::len)));
     budget.check()?;
     let provider_result = provider_cli_key
         .as_deref()
@@ -428,7 +442,9 @@ fn collect_db_projection<R: tauri::Runtime>(
     let (provider_details, provider_details_truncated) = provider_details_result
         .and_then(Result::ok)
         .unwrap_or_default();
-    budget.counts.push(("candidates", provider_candidates.len()));
+    budget
+        .counts
+        .push(("candidates", provider_candidates.len()));
     budget.counts.push(("details", provider_details.len()));
     Ok(DbProjection {
         inference_available,
@@ -453,13 +469,17 @@ fn load_provider_candidates(
     db: &crate::db::Db,
     cli_key: &str,
     now_unix: i64,
-    spend: &crate::shared::error::AppResult<HashMap<i64, provider_limit_usage::ProviderLimitUsageRow>>,
+    spend: &crate::shared::error::AppResult<
+        HashMap<i64, provider_limit_usage::ProviderLimitUsageRow>,
+    >,
     budget: &mut ProjectionBudget,
 ) -> crate::shared::error::AppResult<(Vec<ProviderCandidate>, HashSet<i64>)> {
     let spend = spend.as_ref().map_err(Clone::clone)?;
-    let providers = budget.stage("candidate_rows", ||
-        providers::list_enabled_gateway_provider_identities_using_active_mode(db, cli_key))?;
-    let mut limited_provider_ids = spend.values()
+    let providers = budget.stage("candidate_rows", || {
+        providers::list_enabled_gateway_provider_identities_using_active_mode(db, cli_key)
+    })?;
+    let mut limited_provider_ids = spend
+        .values()
         .filter(|row| row.cli_key == cli_key && row.is_limit_reached())
         .map(|row| row.provider_id)
         .collect::<HashSet<_>>();
@@ -472,14 +492,17 @@ fn load_provider_candidates(
         oauth_provider_ids.chunks(crate::domain::provider_oauth_limits::MAX_DISPLAY_PROVIDER_IDS)
     {
         limited_provider_ids.extend(
-            budget.stage("candidate_oauth", || crate::domain::provider_oauth_limits::list_display_snapshots(
-                db,
-                provider_ids,
-                now_unix,
-            ))?
-            .into_iter()
-            .filter(|snapshot| snapshot.limited)
-            .map(|snapshot| snapshot.provider_id),
+            budget
+                .stage("candidate_oauth", || {
+                    crate::domain::provider_oauth_limits::list_display_snapshots(
+                        db,
+                        provider_ids,
+                        now_unix,
+                    )
+                })?
+                .into_iter()
+                .filter(|snapshot| snapshot.limited)
+                .map(|snapshot| snapshot.provider_id),
         );
     }
     let providers = providers
@@ -497,45 +520,54 @@ fn load_provider_observations(
     cli_key: Option<&str>,
     now_unix: i64,
     availability_hours: u32,
-    spend: &crate::shared::error::AppResult<HashMap<i64, provider_limit_usage::ProviderLimitUsageRow>>,
+    spend: &crate::shared::error::AppResult<
+        HashMap<i64, provider_limit_usage::ProviderLimitUsageRow>,
+    >,
     budget: &mut ProjectionBudget,
 ) -> crate::shared::error::AppResult<(Vec<ProviderObservation>, bool)> {
     let spend_by_provider = spend.as_ref().map_err(Clone::clone)?;
-    let (rows, truncated) = budget.stage("detail_rows", ||
-        providers::list_observer_rows(db, cli_key, PROVIDER_STATUS_LIMIT))?;
+    let (rows, truncated) = budget.stage("detail_rows", || {
+        providers::list_observer_rows(db, cli_key, PROVIDER_STATUS_LIMIT)
+    })?;
     let provider_ids = rows.iter().map(|row| row.id).collect::<Vec<_>>();
-    let availability_by_provider = budget.stage("detail_availability", || crate::domain::provider_availability::timelines(
-        db,
-        &provider_ids,
-        availability_hours,
-        crate::domain::provider_availability::TUI_PROVIDER_AVAILABILITY_BUCKETS,
-        now_unix.saturating_mul(1_000),
-    ))
-    .map(|timelines| {
-        timelines
-            .into_iter()
-            .map(|timeline| {
-                (
-                    timeline.provider_id,
-                    observer_availability_timeline(timeline),
-                )
-            })
-            .collect::<HashMap<_, _>>()
-    })
-    .unwrap_or_default();
+    let availability_by_provider = budget
+        .stage("detail_availability", || {
+            crate::domain::provider_availability::timelines(
+                db,
+                &provider_ids,
+                availability_hours,
+                crate::domain::provider_availability::TUI_PROVIDER_AVAILABILITY_BUCKETS,
+                now_unix.saturating_mul(1_000),
+            )
+        })
+        .map(|timelines| {
+            timelines
+                .into_iter()
+                .map(|timeline| {
+                    (
+                        timeline.provider_id,
+                        observer_availability_timeline(timeline),
+                    )
+                })
+                .collect::<HashMap<_, _>>()
+        })
+        .unwrap_or_default();
     let oauth_provider_ids = rows
         .iter()
         .filter(|row| row.auth_mode == "oauth")
         .map(|row| row.id)
         .collect::<Vec<_>>();
-    let oauth_by_provider = budget.stage("detail_oauth", || crate::domain::provider_oauth_limits::list_display_snapshots(
-        db,
-        &oauth_provider_ids,
-        now_unix,
-    ))?
-    .into_iter()
-    .map(|snapshot| (snapshot.provider_id, snapshot))
-    .collect::<HashMap<_, _>>();
+    let oauth_by_provider = budget
+        .stage("detail_oauth", || {
+            crate::domain::provider_oauth_limits::list_display_snapshots(
+                db,
+                &oauth_provider_ids,
+                now_unix,
+            )
+        })?
+        .into_iter()
+        .map(|snapshot| (snapshot.provider_id, snapshot))
+        .collect::<HashMap<_, _>>();
 
     let items = rows
         .into_iter()
@@ -696,7 +728,10 @@ fn preferred_cli_key(
     last_inference.map(|row| row.cli_key.clone())
 }
 
-fn today_usage(db: &crate::db::Db, budget: &mut ProjectionBudget) -> crate::shared::error::AppResult<ObserverTodayUsage> {
+fn today_usage(
+    db: &crate::db::Db,
+    budget: &mut ProjectionBudget,
+) -> crate::shared::error::AppResult<ObserverTodayUsage> {
     let summary = budget.stage("today_summary", || usage_stats::summary(db, "today", None))?;
     let params = usage_stats::UsageQueryParams {
         period: "daily".to_string(),
@@ -708,7 +743,9 @@ fn today_usage(db: &crate::db::Db, budget: &mut ProjectionBudget) -> crate::shar
         day_start_hour: None,
         exclude_cx2cc_gateway_bridge: None,
     };
-    let rows = budget.stage("today_cost", || usage_stats::leaderboard_v2(db, "cli", &params, None, |_| Vec::new()))?;
+    let rows = budget.stage("today_cost", || {
+        usage_stats::leaderboard_v2(db, "cli", &params, None, |_| Vec::new())
+    })?;
     let mut covered = false;
     let mut cost_usd = 0.0_f64;
     for value in rows.into_iter().filter_map(|row| row.cost_usd) {
@@ -1832,7 +1869,8 @@ mod tests {
             .map(|rows| rows.into_iter().map(|row| (row.provider_id, row)).collect());
         let mut budget = ProjectionBudget::new(Instant::now(), CliScope::Codex, true);
         let (providers, limited) =
-            load_provider_candidates(&db, "codex", 1_000, &spend, &mut budget).expect("load candidates");
+            load_provider_candidates(&db, "codex", 1_000, &spend, &mut budget)
+                .expect("load candidates");
         assert_eq!(
             providers
                 .iter()
@@ -1843,7 +1881,8 @@ mod tests {
         assert_eq!(limited, HashSet::from([spend_limited, oauth_limited]));
 
         let (observed, truncated) =
-            load_provider_observations(&db, Some("codex"), 1_000, 6, &spend, &mut budget).expect("load observations");
+            load_provider_observations(&db, Some("codex"), 1_000, 6, &spend, &mut budget)
+                .expect("load observations");
         assert!(!truncated);
         assert_eq!(
             observed
@@ -1867,7 +1906,10 @@ mod tests {
         let mut budget = ProjectionBudget::new(Instant::now(), CliScope::All, true);
         budget.deadline = Instant::now();
         let mut called = false;
-        let result = budget.stage("query", || { called = true; Ok(()) });
+        let result = budget.stage("query", || {
+            called = true;
+            Ok(())
+        });
         assert_eq!(result.unwrap_err().code(), "OBS_DB_DEADLINE");
         assert!(!called);
     }
@@ -1876,7 +1918,10 @@ mod tests {
     fn spend_failure_rejects_both_provider_projections_before_querying() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db = crate::db::init_for_tests(&dir.path().join("failure.db")).unwrap();
-        let spend = Err(crate::shared::error::AppError::new("DB_ERROR", "synthetic failure"));
+        let spend = Err(crate::shared::error::AppError::new(
+            "DB_ERROR",
+            "synthetic failure",
+        ));
         let mut budget = ProjectionBudget::new(Instant::now(), CliScope::Codex, true);
         assert!(load_provider_candidates(&db, "codex", 1, &spend, &mut budget).is_err());
         assert!(load_provider_observations(&db, Some("codex"), 1, 6, &spend, &mut budget).is_err());
@@ -1890,20 +1935,36 @@ mod tests {
         let codex = insert_observer_provider(&db, "codex", Some(0.0));
         let claude = insert_observer_provider(&db, "claude", Some(0.0));
         let conn = db.open_connection().unwrap();
-        conn.execute("UPDATE providers SET cli_key = 'claude' WHERE id = ?1", [claude]).unwrap();
+        conn.execute(
+            "UPDATE providers SET cli_key = 'claude' WHERE id = ?1",
+            [claude],
+        )
+        .unwrap();
         let spend = provider_limit_usage::list_v1(&db, None)
             .map(|rows| rows.into_iter().map(|row| (row.provider_id, row)).collect());
         conn.execute_batch("DROP VIEW usage_events").unwrap();
-        for (scope, expected) in [(Some("codex"), vec![codex]), (None, vec![codex, claude]), (Some("grok"), vec![])] {
+        for (scope, expected) in [
+            (Some("codex"), vec![codex]),
+            (None, vec![codex, claude]),
+            (Some("grok"), vec![]),
+        ] {
             let mut budget = ProjectionBudget::new(Instant::now(), CliScope::All, true);
-            let (details, truncated) = load_provider_observations(&db, scope, 1, 6, &spend, &mut budget).unwrap();
+            let (details, truncated) =
+                load_provider_observations(&db, scope, 1, 6, &spend, &mut budget).unwrap();
             assert!(!truncated);
-            assert_eq!(details.iter().map(|row| row.id).collect::<Vec<_>>(), expected);
+            assert_eq!(
+                details.iter().map(|row| row.id).collect::<Vec<_>>(),
+                expected
+            );
             assert!(details.iter().all(|row| row.spend_limited));
         }
         let mut budget = ProjectionBudget::new(Instant::now(), CliScope::Codex, false);
-        let (candidates, limited) = load_provider_candidates(&db, "codex", 1, &spend, &mut budget).unwrap();
-        assert_eq!(candidates.iter().map(|row| row.id).collect::<Vec<_>>(), vec![codex]);
+        let (candidates, limited) =
+            load_provider_candidates(&db, "codex", 1, &spend, &mut budget).unwrap();
+        assert_eq!(
+            candidates.iter().map(|row| row.id).collect::<Vec<_>>(),
+            vec![codex]
+        );
         assert_eq!(limited, HashSet::from([codex]));
     }
 
@@ -1925,11 +1986,19 @@ mod tests {
             Ok::<(), crate::shared::error::AppError>(())
         }));
         started.await.unwrap();
-        assert!(tokio::time::timeout(Duration::from_millis(1), work).await.is_err());
+        assert!(tokio::time::timeout(Duration::from_millis(1), work)
+            .await
+            .is_err());
         assert_eq!(limiter.available_permits(), 0);
         release.send(()).unwrap();
-        assert_eq!(complete.await.unwrap().unwrap_err().code(), "OBS_DB_DEADLINE");
-        let permit = tokio::time::timeout(Duration::from_secs(2), limiter.acquire_owned()).await.unwrap().unwrap();
+        assert_eq!(
+            complete.await.unwrap().unwrap_err().code(),
+            "OBS_DB_DEADLINE"
+        );
+        let permit = tokio::time::timeout(Duration::from_secs(2), limiter.acquire_owned())
+            .await
+            .unwrap()
+            .unwrap();
         drop(permit);
     }
 
@@ -1954,10 +2023,12 @@ mod tests {
             .map(|rows| rows.into_iter().map(|row| (row.provider_id, row)).collect());
         let mut budget = ProjectionBudget::new(Instant::now(), CliScope::All, true);
         budget.deadline = Instant::now() + Duration::from_secs(60);
-        let (candidates, limited) = load_provider_candidates(&db, "codex", 1, &spend, &mut budget).unwrap();
+        let (candidates, limited) =
+            load_provider_candidates(&db, "codex", 1, &spend, &mut budget).unwrap();
         assert_eq!(candidates.len(), PROVIDER_STATUS_LIMIT + 1);
         assert!(limited.contains(&first));
-        let (details, truncated) = load_provider_observations(&db, None, 1, 6, &spend, &mut budget).unwrap();
+        let (details, truncated) =
+            load_provider_observations(&db, None, 1, 6, &spend, &mut budget).unwrap();
         assert_eq!(details.len(), PROVIDER_STATUS_LIMIT);
         assert!(truncated);
     }

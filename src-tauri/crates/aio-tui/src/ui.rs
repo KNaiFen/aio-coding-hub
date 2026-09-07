@@ -2458,7 +2458,9 @@ mod tests {
             provider_probe_detail_lines(state.provider_probes.get(&1).expect("probe result"));
         assert!(result_lines.iter().any(|line| line == "结果：可用"));
         assert!(result_lines.iter().any(|line| line == "HTTP：200"));
-        assert!(result_lines.iter().any(|line| line == "模型：input-model -> wire-model"));
+        assert!(result_lines
+            .iter()
+            .any(|line| line == "模型：input-model -> wire-model"));
         assert!(result_lines
             .iter()
             .any(|line| line == "Base URL：https://example.com/v1"));
@@ -2492,7 +2494,8 @@ mod tests {
         let old = serde_json::json!({"ok":false,"providerId":1,"providerName":"A",
             "baseUrl":"https://example.test","status":200,"latencyMs":20,
             "error":"PROBE_NO_TEXT","responsePreview":null});
-        let mut result: ObserverProviderAvailabilityTestResult = serde_json::from_value(old).unwrap();
+        let mut result: ObserverProviderAvailabilityTestResult =
+            serde_json::from_value(old).unwrap();
         let lines = provider_probe_detail_lines(&ProviderProbeState::Complete(result.clone()));
         assert!(!lines.iter().any(|line| line.starts_with("模型：")));
         result.tested_model = Some("actual-model".into());

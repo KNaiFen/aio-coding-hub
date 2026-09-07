@@ -25,7 +25,11 @@ impl ModelMapper for CX2CCModelMapper {
     }
 }
 
-pub(crate) fn map_claude_to_openai(source_model: &str, cm: &ClaudeModels, settings: &Cx2ccSettings) -> String {
+pub(crate) fn map_claude_to_openai(
+    source_model: &str,
+    cm: &ClaudeModels,
+    settings: &Cx2ccSettings,
+) -> String {
     if source_model.contains("opus") {
         if let Some(ref m) = cm.opus_model {
             return m.clone();

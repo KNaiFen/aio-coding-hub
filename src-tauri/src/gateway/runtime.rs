@@ -462,12 +462,22 @@ impl GatewayRuntime {
         ok: bool,
     ) -> bool {
         let mut consumed = false;
-        let effects = self.circuit.record_probe_outcome_if(provider_id, now_unix, ok, |apply| {
+        let effects = self
+            .circuit
+            .record_probe_outcome_if(provider_id, now_unix, ok, |apply| {
                 consumed = apply().is_some();
                 true
             });
-        Self::publish_availability_probe_outcome(app, trace_id, cli_key,
-            provider_id, provider_name, provider_base_url, now_unix, effects);
+        Self::publish_availability_probe_outcome(
+            app,
+            trace_id,
+            cli_key,
+            provider_id,
+            provider_name,
+            provider_base_url,
+            now_unix,
+            effects,
+        );
         consumed
     }
 
@@ -488,8 +498,18 @@ impl GatewayRuntime {
     ) {
         if let Some(app) = app {
             for transition in transitions {
-                emit_circuit_transition(app, trace_id, cli_key, provider_id, provider_name,
-                    provider_base_url, &transition, now_unix, None, None);
+                emit_circuit_transition(
+                    app,
+                    trace_id,
+                    cli_key,
+                    provider_id,
+                    provider_name,
+                    provider_base_url,
+                    &transition,
+                    now_unix,
+                    None,
+                    None,
+                );
             }
         }
     }
@@ -550,8 +570,11 @@ impl GatewayRuntime {
 
     #[cfg(test)]
     pub(crate) fn for_probe_tests(rt: &tokio::runtime::Runtime) -> Self {
-        Self::for_tests(rt, Arc::new(session_manager::SessionManager::new()),
-            Arc::new(Mutex::new(RecentErrorCache::default())))
+        Self::for_tests(
+            rt,
+            Arc::new(session_manager::SessionManager::new()),
+            Arc::new(Mutex::new(RecentErrorCache::default())),
+        )
     }
 
     #[cfg(test)]
