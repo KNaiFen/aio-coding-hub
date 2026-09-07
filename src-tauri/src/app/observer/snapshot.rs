@@ -1940,6 +1940,11 @@ mod tests {
             [claude],
         )
         .unwrap();
+        conn.execute(
+            "INSERT INTO default_route_providers (cli_key, provider_id, sort_order, created_at, updated_at) VALUES ('codex', ?1, 0, 1, 1)",
+            [codex],
+        )
+        .unwrap();
         drop(conn);
         let spend = provider_limit_usage::list_v1(&db, None)
             .map(|rows| rows.into_iter().map(|row| (row.provider_id, row)).collect());
@@ -2011,6 +2016,11 @@ mod tests {
         let db = crate::db::init_for_tests(&dir.path().join("truncated.db")).unwrap();
         let first = insert_observer_provider(&db, "first", Some(0.0));
         let conn = db.open_connection().unwrap();
+        conn.execute(
+            "INSERT INTO default_route_providers (cli_key, provider_id, sort_order, created_at, updated_at) VALUES ('codex', ?1, 0, 1, 1)",
+            [first],
+        )
+        .unwrap();
         for index in 1..=PROVIDER_STATUS_LIMIT {
             conn.execute(
                 "INSERT INTO providers (provider_uuid, cli_key, name, base_url, api_key_plaintext, enabled, created_at, updated_at) VALUES (?1, 'codex', ?2, 'http://example.test', 'synthetic', 1, 1, 1)",
