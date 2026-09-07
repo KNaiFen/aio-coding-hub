@@ -12,7 +12,7 @@ use super::background_tasks::GatewayBackgroundTasks;
 use super::codex_session_id::CodexSessionIdCache;
 use super::events::emit_circuit_transition;
 use super::plugins::pipeline::GatewayPluginPipeline;
-use super::proxy::{provider_router, ProviderBaseUrlPingCache, RecentErrorCache};
+use super::proxy::{ProviderBaseUrlPingCache, RecentErrorCache};
 use super::{GatewayProviderCircuitStatus, GatewayStatus};
 
 pub(in crate::gateway) struct GatewayAppState<R: tauri::Runtime = tauri::Wry> {
@@ -448,6 +448,7 @@ impl GatewayRuntime {
             .collect()
     }
 
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn record_availability_probe_outcome<R: tauri::Runtime>(
         &self,
@@ -460,48 +461,57 @@ impl GatewayRuntime {
         now_unix: i64,
         ok: bool,
     ) -> bool {
-        // Availability probes are HalfOpen recovery evidence; they must not
-        // clear or prune a Closed circuit's request-failure history.
-        let snapshot = self.circuit.snapshot(provider_id, now_unix);
-        if snapshot.state == circuit_breaker::CircuitState::Closed {
-            return false;
-        }
-        let allow = self.circuit.should_allow(provider_id, now_unix);
-        if let (Some(app), Some(transition)) = (app, allow.transition.as_ref()) {
-            emit_circuit_transition(
-                app,
-                trace_id,
-                cli_key,
-                provider_id,
-                provider_name,
-                provider_base_url,
-                transition,
-                now_unix,
-                None,
-                None,
-            );
-        }
-
-        if !allow.allow || allow.after.state != circuit_breaker::CircuitState::HalfOpen {
-            return false;
-        }
-
-        let args = provider_router::RecordCircuitArgs::new(
+        let mut consumed = false;
+        let effects = self
+            .circuit
+            .record_probe_outcome_if(provider_id, now_unix, ok, |apply| {
+                consumed = apply().is_some();
+                true
+            });
+        Self::publish_availability_probe_outcome(
             app,
-            self.circuit.as_ref(),
             trace_id,
             cli_key,
             provider_id,
             provider_name,
             provider_base_url,
             now_unix,
+            effects,
         );
-        if ok {
-            let _ = provider_router::record_success_and_emit_transition(args);
-        } else {
-            let _ = provider_router::record_failure_and_emit_transition(args);
+        consumed
+    }
+
+    pub(crate) fn availability_probe_circuit(&self) -> Arc<circuit_breaker::CircuitBreaker> {
+        self.circuit.clone()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn publish_availability_probe_outcome<R: tauri::Runtime>(
+        app: Option<&tauri::AppHandle<R>>,
+        trace_id: &str,
+        cli_key: &str,
+        provider_id: i64,
+        provider_name: &str,
+        provider_base_url: &str,
+        now_unix: i64,
+        transitions: Vec<circuit_breaker::CircuitTransition>,
+    ) {
+        if let Some(app) = app {
+            for transition in transitions {
+                emit_circuit_transition(
+                    app,
+                    trace_id,
+                    cli_key,
+                    provider_id,
+                    provider_name,
+                    provider_base_url,
+                    &transition,
+                    now_unix,
+                    None,
+                    None,
+                );
+            }
         }
-        true
     }
 
     pub(crate) fn circuit_is_half_open(&self, provider_id: i64, now_unix: i64) -> bool {
@@ -555,6 +565,15 @@ impl GatewayRuntime {
             circuit_task,
             oauth_refresh_shutdown,
             oauth_refresh_task,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_probe_tests(rt: &tokio::runtime::Runtime) -> Self {
+        Self::for_tests(
+            rt,
+            Arc::new(session_manager::SessionManager::new()),
+            Arc::new(Mutex::new(RecentErrorCache::default())),
         )
     }
 

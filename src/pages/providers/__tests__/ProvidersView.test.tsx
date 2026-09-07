@@ -2505,7 +2505,7 @@ describe("pages/providers/ProvidersView", () => {
       mutateAsync: vi
         .fn()
         .mockReturnValueOnce(firstPromise)
-        .mockResolvedValueOnce({ ok: false, latency_ms: null, status: 503, error: null })
+        .mockResolvedValueOnce({ ok: false, latency_ms: null, status: 503, error: null, tested_model: "wire-model" })
         .mockResolvedValueOnce(null)
         .mockRejectedValueOnce(new Error("probe down")),
     };
@@ -2525,10 +2525,10 @@ describe("pages/providers/ProvidersView", () => {
     await guarded;
 
     await act(async () => {
-      resolveFirst({ ok: true, latency_ms: 42, status: 200, error: null });
+      resolveFirst({ ok: true, latency_ms: 42, status: 200, error: null, requested_model: "source-model", tested_model: "wire-model" });
       await first;
     });
-    expect(toast).toHaveBeenCalledWith("P1: 可用 (42ms)");
+    expect(toast).toHaveBeenCalledWith("P1: 可用 [source-model -> wire-model] (42ms)");
     expect(logToConsole).toHaveBeenCalledWith(
       "info",
       "供应商可用性测试",
@@ -2542,7 +2542,7 @@ describe("pages/providers/ProvidersView", () => {
       await result.current.testProviderAvailability(provider);
     });
 
-    expect(toast).toHaveBeenCalledWith("P1: 不可用 — 未知错误");
+    expect(toast).toHaveBeenCalledWith("P1: 不可用 [wire-model] — 未知错误");
     expect(toast).toHaveBeenCalledWith("测试失败：Error: probe down");
     expect(testMutation.mutateAsync).toHaveBeenCalledTimes(4);
   });

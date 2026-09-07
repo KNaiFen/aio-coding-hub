@@ -782,7 +782,7 @@ describe("query/providers", () => {
     expect(readProviderAccountUsageCache(client, 14)).toEqual(accountUsage);
   });
 
-  it("uses a fixed consumer heartbeat while the backend owns the remote interval", () => {
+  it("pauses hidden consumers and reads the shared cache once on visibility restoration", async () => {
     setTauriRuntime();
     vi.mocked(providerAccountUsageFetch).mockClear();
     vi.mocked(providerAccountUsageFetch).mockResolvedValue({
@@ -828,13 +828,34 @@ describe("query/providers", () => {
     });
     const wrapper = createQueryWrapper(client);
 
-    renderHook(() => useProviderAccountUsageQuery(provider), { wrapper });
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const hook = renderHook(() => useProviderAccountUsageQuery(provider), { wrapper });
+    await waitFor(() => expect(providerAccountUsageFetch).toHaveBeenCalledOnce());
 
     const query = client.getQueryCache().find({ queryKey: providerAccountUsageKeys.detail(15) });
     expect((query?.options as { refetchInterval?: unknown }).refetchInterval).toBe(5_000);
     expect(
       (query?.options as { refetchIntervalInBackground?: unknown }).refetchIntervalInBackground
-    ).toBe(true);
+    ).toBeUndefined();
+    try {
+      await act(async () => {
+        visibility.mockReturnValue("hidden");
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      expect((query?.options as { enabled?: unknown }).enabled).toBe(false);
+      expect((query?.options as { refetchInterval?: unknown }).refetchInterval).toBe(false);
+      expect(providerAccountUsageFetch).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        visibility.mockReturnValue("visible");
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      await waitFor(() => expect(providerAccountUsageFetch).toHaveBeenCalledTimes(2));
+      expect(providerAccountUsageFetch).toHaveBeenLastCalledWith(15, false);
+      expect((query?.options as { refetchInterval?: unknown }).refetchInterval).toBe(5_000);
+    } finally {
+      hook.unmount();
+      visibility.mockRestore();
+    }
   });
 
   it("active OAuth limits refresh resets circuit after every successful refresh", async () => {

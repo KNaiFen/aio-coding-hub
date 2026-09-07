@@ -1036,7 +1036,11 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
         ordinary_policy: modelRoutingPolicyDraft,
         expected_ordinary_policy_revision: ordinaryRoutingRevision,
         cross_policy:
-          routeMode == null || crossRoutingRevision == null ? null : crossRoutingPolicy,
+          routeMode == null || crossRoutingRevision == null
+            ? null
+            : crossRoutingDirty
+              ? crossRoutingPolicy
+              : routingPolicyView.cross_policy,
         expected_cross_policy_revision: routeMode == null ? null : crossRoutingRevision,
       });
       const ordinaryPolicy = cloneModelRoutingPolicy(saved.ordinary_policy);
@@ -1063,6 +1067,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
   }, [
     cliKey,
     adoptCrossRoutingView,
+    crossRoutingDirty,
     crossRoutingPolicy,
     crossRoutingRevision,
     editProvider,
