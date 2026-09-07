@@ -785,6 +785,11 @@ WHERE id = last_insert_rowid()
                 )
                 .unwrap();
             } else {
+                conn.execute(
+                    "UPDATE usage_ledger_backfill_state SET status = 'incomplete' WHERE id = 1",
+                    [],
+                )
+                .unwrap();
                 conn.execute("DELETE FROM usage_ledger WHERE created_at = 99", [])
                     .unwrap();
             }
