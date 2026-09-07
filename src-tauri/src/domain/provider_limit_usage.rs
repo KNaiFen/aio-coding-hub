@@ -778,6 +778,24 @@ WHERE id = last_insert_rowid()
             let rows = conn.prepare(&query).unwrap().query_map(parameters, |row| {
                 Ok((row.get::<_, i64>(0)?, (1..=5).map(|i| row.get::<_, f64>(i).unwrap()).collect::<Vec<_>>()))
             }).unwrap().collect::<Result<HashMap<_, _>, _>>().unwrap();
+            let original = r#"
+WITH provider_windows(provider_id, ts_5h, ts_daily) AS (VALUES (?, ?, ?), (?, ?, ?))
+SELECT w.provider_id,
+  TOTAL(CASE WHEN r.created_at >= w.ts_5h THEN r.cost_usd_femto ELSE 0 END),
+  TOTAL(CASE WHEN r.created_at >= w.ts_daily THEN r.cost_usd_femto ELSE 0 END),
+  TOTAL(CASE WHEN r.created_at >= ? THEN r.cost_usd_femto ELSE 0 END),
+  TOTAL(CASE WHEN r.created_at >= ? THEN r.cost_usd_femto ELSE 0 END),
+  TOTAL(r.cost_usd_femto)
+FROM provider_windows w
+LEFT JOIN usage_events r ON r.final_provider_id = w.provider_id
+  AND r.excluded_from_stats = 0 AND r.status >= 200 AND r.status < 300
+  AND r.error_present = 0 AND r.cost_usd_femto IS NOT NULL
+GROUP BY w.provider_id
+"#;
+            let original_rows = conn.prepare(original).unwrap().query_map(parameters, |row| {
+                Ok((row.get::<_, i64>(0)?, (1..=5).map(|i| row.get::<_, f64>(i).unwrap()).collect::<Vec<_>>()))
+            }).unwrap().collect::<Result<HashMap<_, _>, _>>().unwrap();
+            assert_eq!(rows, original_rows);
             assert_eq!(rows[&empty], vec![0.0; 5]);
             assert_eq!(rows[&provider], [5.0, 9.0, 12.0, 14.0, if complete { 14.0 } else { 15.0 }]
                 .map(|value| value * FEMTO as f64).to_vec());

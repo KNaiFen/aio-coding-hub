@@ -39,6 +39,7 @@ struct ProjectionBudget {
     blocking_queue_ms: u128,
     stages: Vec<(&'static str, u128)>,
     errors: Vec<(&'static str, String)>,
+    counts: Vec<(&'static str, usize)>,
 }
 
 impl ProjectionBudget {
@@ -51,6 +52,7 @@ impl ProjectionBudget {
             blocking_queue_ms: started.elapsed().as_millis(),
             stages: Vec::new(),
             errors: Vec::new(),
+            counts: Vec::new(),
         }
     }
 
@@ -87,7 +89,7 @@ impl Drop for ProjectionBudget {
                 cli = self.scope.as_str(), include_providers = self.include_providers,
                 blocking_queue_ms = self.blocking_queue_ms,
                 total_ms = self.started.elapsed().as_millis(),
-                stages = ?self.stages, errors = ?self.errors,
+                stages = ?self.stages, errors = ?self.errors, counts = ?self.counts,
                 "observer DB projection diagnostics"
             );
         }
@@ -394,6 +396,7 @@ fn collect_db_projection(
     } else {
         Ok(HashMap::new())
     };
+    budget.counts.push(("spend", spend.as_ref().map_or(0, HashMap::len)));
     budget.check()?;
     let provider_result = provider_cli_key
         .as_deref()
@@ -425,6 +428,8 @@ fn collect_db_projection(
     let (provider_details, provider_details_truncated) = provider_details_result
         .and_then(Result::ok)
         .unwrap_or_default();
+    budget.counts.push(("candidates", provider_candidates.len()));
+    budget.counts.push(("details", provider_details.len()));
     Ok(DbProjection {
         inference_available,
         inference_rows,
@@ -1876,6 +1881,85 @@ mod tests {
         assert!(load_provider_candidates(&db, "codex", 1, &spend, &mut budget).is_err());
         assert!(load_provider_observations(&db, Some("codex"), 1, 6, &spend, &mut budget).is_err());
         assert!(budget.stages.is_empty());
+    }
+
+    #[test]
+    fn fixed_and_all_provider_views_reuse_spend_after_the_source_is_unavailable() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::init_for_tests(&dir.path().join("shared-spend.db")).unwrap();
+        let codex = insert_observer_provider(&db, "codex", Some(0.0));
+        let claude = insert_observer_provider(&db, "claude", Some(0.0));
+        let conn = db.open_connection().unwrap();
+        conn.execute("UPDATE providers SET cli_key = 'claude' WHERE id = ?1", [claude]).unwrap();
+        let spend = provider_limit_usage::list_v1(&db, None)
+            .map(|rows| rows.into_iter().map(|row| (row.provider_id, row)).collect());
+        conn.execute_batch("DROP VIEW usage_events").unwrap();
+        for (scope, expected) in [(Some("codex"), vec![codex]), (None, vec![codex, claude]), (Some("grok"), vec![])] {
+            let mut budget = ProjectionBudget::new(Instant::now(), CliScope::All, true);
+            let (details, truncated) = load_provider_observations(&db, scope, 1, 6, &spend, &mut budget).unwrap();
+            assert!(!truncated);
+            assert_eq!(details.iter().map(|row| row.id).collect::<Vec<_>>(), expected);
+            assert!(details.iter().all(|row| row.spend_limited));
+        }
+        let mut budget = ProjectionBudget::new(Instant::now(), CliScope::Codex, false);
+        let (candidates, limited) = load_provider_candidates(&db, "codex", 1, &spend, &mut budget).unwrap();
+        assert_eq!(candidates.iter().map(|row| row.id).collect::<Vec<_>>(), vec![codex]);
+        assert_eq!(limited, HashSet::from([codex]));
+    }
+
+    #[tokio::test]
+    async fn timed_out_blocking_work_keeps_permit_until_it_stops_at_the_deadline() {
+        let limiter = Arc::new(tokio::sync::Semaphore::new(1));
+        let permit = limiter.clone().acquire_owned().await.unwrap();
+        let (entered, started) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        let (finished, complete) = tokio::sync::oneshot::channel();
+        let work = tokio::spawn(crate::blocking::run("observer_deadline_test", move || {
+            let _permit = permit;
+            let mut budget = ProjectionBudget::new(Instant::now(), CliScope::All, true);
+            budget.deadline = Instant::now();
+            entered.send(()).unwrap();
+            wait.recv().unwrap();
+            let result = budget.stage("must_not_run", || panic!("expired query started"));
+            finished.send(result.map(|_: ()| ())).unwrap();
+            Ok::<(), crate::shared::error::AppError>(())
+        }));
+        started.await.unwrap();
+        assert!(tokio::time::timeout(Duration::from_millis(1), work).await.is_err());
+        assert_eq!(limiter.available_permits(), 0);
+        release.send(()).unwrap();
+        assert_eq!(complete.await.unwrap().unwrap_err().code(), "OBS_DB_DEADLINE");
+        let permit = tokio::time::timeout(Duration::from_secs(2), limiter.acquire_owned()).await.unwrap().unwrap();
+        drop(permit);
+    }
+
+    #[test]
+    fn candidates_keep_all_rows_when_details_are_truncated() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::init_for_tests(&dir.path().join("truncated.db")).unwrap();
+        let first = insert_observer_provider(&db, "first", Some(0.0));
+        let conn = db.open_connection().unwrap();
+        for index in 1..=PROVIDER_STATUS_LIMIT {
+            conn.execute(
+                "INSERT INTO providers (cli_key, name, base_url, api_key_plaintext, enabled, created_at, updated_at) VALUES ('codex', ?1, 'http://example.test', 'synthetic', 1, 1, 1)",
+                [format!("provider-{index}")],
+            ).unwrap();
+            conn.execute(
+                "INSERT INTO default_route_providers (cli_key, provider_id, sort_order, created_at, updated_at) VALUES ('codex', last_insert_rowid(), ?1, 1, 1)",
+                [index as i64],
+            ).unwrap();
+        }
+        drop(conn);
+        let spend = provider_limit_usage::list_v1(&db, None)
+            .map(|rows| rows.into_iter().map(|row| (row.provider_id, row)).collect());
+        let mut budget = ProjectionBudget::new(Instant::now(), CliScope::All, true);
+        budget.deadline = Instant::now() + Duration::from_secs(60);
+        let (candidates, limited) = load_provider_candidates(&db, "codex", 1, &spend, &mut budget).unwrap();
+        assert_eq!(candidates.len(), PROVIDER_STATUS_LIMIT + 1);
+        assert!(limited.contains(&first));
+        let (details, truncated) = load_provider_observations(&db, None, 1, 6, &spend, &mut budget).unwrap();
+        assert_eq!(details.len(), PROVIDER_STATUS_LIMIT);
+        assert!(truncated);
     }
 
     #[test]

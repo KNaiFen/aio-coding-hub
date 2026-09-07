@@ -24,6 +24,8 @@ mod platform {
                 NSActivityOptions::UserInitiatedAllowingIdleSystemSleep,
                 &NSString::from_str("AIO TUI observation"),
             );
+            #[cfg(test)]
+            NATIVE_COUNTS.with(|counts| { let (begin, end) = counts.get(); counts.set((begin + 1, end)); });
             tracing::debug!("observer activity begin");
             Self(token)
         }
@@ -33,12 +35,18 @@ mod platform {
         fn drop(&mut self) {
             // SAFETY: this is the unchanged token returned by beginActivity above.
             unsafe { NSProcessInfo::processInfo().endActivity(&self.0) };
+            #[cfg(test)]
+            NATIVE_COUNTS.with(|counts| { let (begin, end) = counts.get(); counts.set((begin, end + 1)); });
             tracing::debug!("observer activity end");
         }
     }
 
     thread_local! {
         static TOKENS: RefCell<HashMap<u64, NativeToken>> = RefCell::new(HashMap::new());
+    }
+    #[cfg(test)]
+    thread_local! {
+        static NATIVE_COUNTS: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) };
     }
 
     #[derive(Default)]
@@ -60,27 +68,32 @@ mod platform {
         }
     }
 
-    struct Inner {
-        app: tauri::AppHandle,
+    struct Inner<R: tauri::Runtime> {
+        app: tauri::AppHandle<R>,
         id: u64,
         state: Mutex<LeaseState>,
         wake: Arc<Notify>,
+        task: Mutex<Option<tokio::task::JoinHandle<()>>>,
     }
 
-    #[derive(Clone)]
-    pub(super) struct Activity(Arc<Inner>);
+    pub(super) struct Activity<R: tauri::Runtime = tauri::Wry>(Arc<Inner<R>>);
 
-    impl Activity {
-        pub(super) fn new(app: &tauri::AppHandle) -> Self {
+    impl<R: tauri::Runtime> Clone for Activity<R> {
+        fn clone(&self) -> Self { Self(self.0.clone()) }
+    }
+
+    impl<R: tauri::Runtime> Activity<R> {
+        pub(super) fn new(app: &tauri::AppHandle<R>) -> Self {
             let inner = Arc::new(Inner {
                 app: app.clone(),
                 id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
                 state: Mutex::new(LeaseState::default()),
                 wake: Arc::new(Notify::new()),
+                task: Mutex::new(None),
             });
             let weak = Arc::downgrade(&inner);
             let wake = inner.wake.clone();
-            tauri::async_runtime::spawn(async move {
+            let task = tokio::spawn(async move {
                 loop {
                     let Some(inner) = weak.upgrade() else { break };
                     let deadline = {
@@ -101,6 +114,7 @@ mod platform {
                     }
                 }
             });
+            *inner.task.lock().expect("observer activity task") = Some(task);
             Self(inner)
         }
 
@@ -136,7 +150,7 @@ mod platform {
             self.sync().await;
         }
 
-        pub(super) async fn work(&self) -> Work {
+        pub(super) async fn work(&self) -> Work<R> {
             let active = {
                 let mut state = self.0.state.lock().expect("observer activity state");
                 if state.closed { false } else { state.work += 1; true }
@@ -148,14 +162,17 @@ mod platform {
 
         pub(super) fn close(&self) {
             self.0.state.lock().expect("observer activity state").closed = true;
+            if let Some(task) = self.0.task.lock().expect("observer activity task").take() {
+                task.abort();
+            }
             self.0.wake.notify_one();
             self.dispatch(None);
         }
     }
 
-    pub(super) struct Work(Option<Activity>);
+    pub(super) struct Work<R: tauri::Runtime>(Option<Activity<R>>);
 
-    impl Drop for Work {
+    impl<R: tauri::Runtime> Drop for Work<R> {
         fn drop(&mut self) {
             if let Some(activity) = self.0.take() {
                 activity.0.state.lock().expect("observer activity state").work -= 1;
@@ -207,6 +224,72 @@ mod platform {
             assert!(!options.contains(NSActivityOptions::IdleDisplaySleepDisabled));
             let token = NativeToken::begin();
             drop(token);
+        }
+
+        #[test]
+        fn stale_expiry_and_multiple_work_references_cannot_end_a_new_lease() {
+            let now = Instant::now();
+            let mut state = LeaseState::default();
+            state.renew(now);
+            let first_expiry = now + LEASE;
+            state.renew(now + Duration::from_secs(14));
+            assert!(state.desired(first_expiry));
+            assert!(!state.desired(now + Duration::from_secs(29)));
+            state.work = 2;
+            assert!(state.desired(now + Duration::from_secs(60)));
+            state.work -= 1;
+            assert!(state.desired(now + Duration::from_secs(64)));
+            state.work -= 1;
+            assert!(!state.desired(now + Duration::from_secs(65)));
+            state.closed = true;
+            state.work = 1;
+            state.renew(now + Duration::from_secs(66));
+            assert!(!state.desired(now + Duration::from_secs(66)));
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn controller_expires_shared_lease_releases_work_and_closes_its_task() {
+            let app = tauri::test::mock_app();
+            let activity = Activity::new(app.handle());
+            let id = activity.0.id;
+            let initial_counts = NATIVE_COUNTS.with(std::cell::Cell::get);
+            let active = || TOKENS.with(|tokens| tokens.borrow().contains_key(&id));
+            assert!(!active());
+            activity.touch_snapshot().await;
+            assert!(active());
+            let other_client = activity.clone();
+            tokio::time::advance(Duration::from_secs(10)).await;
+            other_client.touch_snapshot().await;
+            tokio::time::advance(Duration::from_secs(6)).await;
+            activity.sync().await;
+            assert!(active());
+            let first_work = activity.work().await;
+            let second_work = activity.work().await;
+            tokio::time::advance(Duration::from_secs(50)).await;
+            activity.sync().await;
+            assert!(active());
+            drop(first_work);
+            activity.sync().await;
+            assert!(active());
+            drop(second_work);
+            activity.sync().await;
+            assert!(!active());
+            activity.touch_snapshot().await;
+            tokio::time::advance(LEASE).await;
+            tokio::task::yield_now().await;
+            activity.sync().await;
+            assert!(!active());
+            activity.touch_snapshot().await;
+            activity.close();
+            activity.sync().await;
+            assert!(!active());
+            assert!(activity.0.task.lock().unwrap().is_none());
+            activity.touch_snapshot().await;
+            let late_work = activity.work().await;
+            assert!(!active());
+            drop(late_work);
+            let counts = NATIVE_COUNTS.with(std::cell::Cell::get);
+            assert_eq!((counts.0 - initial_counts.0, counts.1 - initial_counts.1), (3, 3));
         }
     }
 }
