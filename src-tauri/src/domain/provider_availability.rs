@@ -123,19 +123,19 @@ impl ProbeBudget {
 
     #[cfg(test)]
     pub(crate) fn pause_at(&self, stage: &'static str) {
-            let pause = {
-                let mut slot = self.pause.lock().expect("probe test pause");
-                if slot.as_ref().is_some_and(|pause| pause.stage == stage) {
-                    slot.take()
-                } else {
-                    None
-                }
-            };
-            if let Some(pause) = pause {
-                pause.entered.send(()).expect("probe pause observer");
-                pause.release.recv().expect("probe pause release");
-                let _ = pause.exited.send(());
+        let pause = {
+            let mut slot = self.pause.lock().expect("probe test pause");
+            if slot.as_ref().is_some_and(|pause| pause.stage == stage) {
+                slot.take()
+            } else {
+                None
             }
+        };
+        if let Some(pause) = pause {
+            pause.entered.send(()).expect("probe pause observer");
+            pause.release.recv().expect("probe pause release");
+            let _ = pause.exited.send(());
+        }
     }
 
     fn remember(&self, result: &ProviderAvailabilityResult) {

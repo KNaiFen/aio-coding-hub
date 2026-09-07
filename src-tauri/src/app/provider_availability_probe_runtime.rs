@@ -4,7 +4,7 @@ use crate::domain::provider_availability::{self, ProviderAvailabilityResult};
 use crate::shared::error::{db_err, AppError, AppResult};
 use crate::{blocking, db};
 use rusqlite::{params, OptionalExtension};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, Weak};
 use std::time::{Duration, Instant};
@@ -80,9 +80,19 @@ struct RuntimeEntry {
     recovery_epoch: u64,
     schedule_seen_epoch: u64,
     // A configuration change advances the generation before its database write.
-    // Retain the old flight until it completes so a new generation never runs a
-    // second network probe for the same Provider concurrently.
+    // Retain the old flight until completion or its deadline releases the slot.
     in_flight: Option<InFlightProbe>,
+    completion_gate: Arc<StdMutex<()>>,
+    pending_timeouts: VecDeque<TimeoutProbe>,
+}
+
+#[derive(Clone)]
+struct TimeoutProbe {
+    generation: u64,
+    trace_id: String,
+    completed_at_ms: i64,
+    result: AppResult<ProviderAvailabilityResult>,
+    circuit_consumed: bool,
 }
 
 struct InFlightProbe {
@@ -359,19 +369,32 @@ impl ProviderAvailabilityProbeRuntimeState {
                             let result = provider_availability::test_provider_availability_with_budget(
                                 &app, db.clone(), provider_id, budget.clone(),
                             ).await;
-                            let result = if budget.expired() { budget.timeout_result() } else { result };
-                            if result.is_err() {
+                            if budget.expired() {
+                                return;
+                            } else if result.is_err() {
                                 let mut inner = state.shared.inner.lock().await;
-                                complete_flight(&mut inner, provider_id, generation, &budget, result, None);
+                                if !budget.expired() {
+                                    complete_flight(&mut inner, provider_id, generation, &budget, result, None);
+                                }
                             } else {
                                 state.finish_probe(&app, &db, provider_id, generation,
                                     budget.clone(), &trace_id, result).await;
                             }
                         };
-                        if tokio::time::timeout_at(budget.deadline, work).await.is_err() {
-                            let mut inner = state.shared.inner.lock().await;
-                            complete_flight(&mut inner, provider_id, generation, &budget,
-                                budget.timeout_result(), None);
+                        let timed_out = tokio::time::timeout_at(budget.deadline, work).await.is_err();
+                        if (timed_out || budget.expired()) && state.expire_probe(
+                            provider_id, generation, &budget, &trace_id,
+                        ).await {
+                            loop {
+                                state.finish_probe(&app, &db, provider_id, generation,
+                                    budget.clone(), &trace_id, budget.timeout_result()).await;
+                                let pending = state.shared.inner.lock().await.entries.get(&provider_id)
+                                    .is_some_and(|entry| entry.pending_timeouts.iter().any(|timeout| timeout.trace_id == trace_id));
+                                if !pending { break; }
+                                // Retain the accepted fact across transient SQL
+                                // failures; this owner exits once it is persisted.
+                                tokio::time::sleep(SCHEDULER_TICK).await;
+                            }
                         }
                     });
                     return Some(
@@ -382,6 +405,28 @@ impl ProviderAvailabilityProbeRuntimeState {
                 }
             }
         }
+    }
+
+    async fn expire_probe(
+        &self,
+        provider_id: i64,
+        generation: u64,
+        budget: &Arc<provider_availability::ProbeBudget>,
+        trace_id: &str,
+    ) -> bool {
+        let result = budget.timeout_result();
+        let mut inner = self.shared.inner.lock().await;
+        let current = flight_is_current(&inner, provider_id, generation, budget);
+        if current {
+            inner.entries.get_mut(&provider_id).expect("timeout entry").pending_timeouts.push_back(TimeoutProbe {
+                generation, trace_id: trace_id.to_string(),
+                completed_at_ms: crate::shared::time::now_unix_millis(), result: result.clone(),
+                circuit_consumed: false,
+            });
+            invalidate_recovery_work(&mut inner, provider_id, generation);
+        }
+        complete_flight(&mut inner, provider_id, generation, budget, result, None);
+        current
     }
 
     async fn begin_probe(
@@ -477,74 +522,128 @@ impl ProviderAvailabilityProbeRuntimeState {
         let trace_id = trace_id.to_string();
         let fallback = result.clone();
         let work_budget = budget.clone();
+        let completion_gate = {
+            let inner = self.shared.inner.lock().await;
+            let Some(entry) = inner.entries.get(&provider_id) else { return; };
+            entry.completion_gate.clone()
+        };
         let finish = blocking::run("provider_availability_finish", move || -> AppResult<()> {
             let budget = work_budget;
-            budget.checkpoint("completion")?;
-            budget.checkpoint("manager")?;
-            let circuit = gateway_state::try_with_app_running_gateway(&app, |runtime| {
-                runtime.map(|runtime| runtime.availability_probe_circuit())
-            }).flatten();
-            budget.check()?;
-            let completed_at_ms = crate::shared::time::now_unix_millis();
-            // An IMMEDIATE transaction orders this prepared fact before later
-            // configuration writes. A timed-out or invalidated flight rolls it back.
-            let mut conn = db.open_connection()?;
-            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                .map_err(|e| db_err!("failed to prepare probe observation: {e}"))?;
-            budget.check()?;
-            let cli_key = tx.query_row("SELECT cli_key FROM providers WHERE id = ?1", [provider_id], |row| row.get::<_, String>(0))
-                .optional().map_err(|e| db_err!("failed to load probe evidence provider: {e}"))?;
-            if let Ok(probe) = &result {
-                if let Err(error) = provider_availability::record_probe_observation_in_conn(&tx, &trace_id, provider_id, completed_at_ms, probe.ok) {
-                    tracing::warn!(error = %error.code(), provider_id, "provider availability observation write failed");
+            // Only consumers take this gate. Admission and timeout publication
+            // remain independent of blocked SQL or circuit work.
+            let _completion = completion_gate.lock().expect("probe completion order");
+            loop {
+                let pending = {
+                    let inner = state.shared.inner.blocking_lock();
+                    let Some(entry) = inner.entries.get(&provider_id)
+                        .filter(|entry| Arc::ptr_eq(&entry.completion_gate, &completion_gate)) else { return Ok(()); };
+                    entry.pending_timeouts.front().cloned()
+                };
+                if pending.is_none() {
+                    budget.checkpoint("completion")?;
+                    budget.checkpoint("manager")?;
                 }
-            }
-            budget.checkpoint("observation")?;
-            budget.checkpoint("circuit")?;
-            let mut accepted = false;
-            let mut commit = |apply: &mut dyn FnMut() -> Option<bool>| {
-                let mut inner = state.shared.inner.blocking_lock();
-                if !flight_is_current(&inner, provider_id, generation, &budget) || budget.expired() {
-                    return false;
+                let circuit = gateway_state::try_with_app_running_gateway(&app, |runtime| {
+                    runtime.map(|runtime| runtime.availability_probe_circuit())
+                }).flatten();
+                let (trace_id, completed_at_ms, result) = match &pending {
+                    Some(timeout) => (timeout.trace_id.as_str(), timeout.completed_at_ms, &timeout.result),
+                    None => {
+                        budget.check()?;
+                        (trace_id.as_str(), crate::shared::time::now_unix_millis(), &result)
+                    }
+                };
+                // The transaction preserves SQL order after acceptance. An
+                // unaccepted ordinary result still rolls back on invalidation.
+                let mut conn = db.open_connection()?;
+                let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                    .map_err(|e| db_err!("failed to prepare probe observation: {e}"))?;
+                if pending.is_none() { budget.check()?; }
+                let provider = tx.query_row("SELECT cli_key, name, base_url FROM providers WHERE id = ?1", [provider_id], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+                })
+                    .optional().map_err(|e| db_err!("failed to load probe evidence provider: {e}"))?;
+                let ok = result.as_ref().is_ok_and(|probe| probe.ok);
+                if pending.is_some() || result.is_ok() {
+                    provider_availability::record_probe_observation_in_conn(&tx, trace_id, provider_id, completed_at_ms, ok)?;
                 }
-                let recovery = apply().and_then(|half_open| {
-                    update_recovery_work_after_circuit_evidence(&mut inner, provider_id, generation,
-                        completed_at_ms, result.as_ref().is_ok_and(|probe| probe.ok), half_open)
-                });
-                accepted = complete_flight(&mut inner, provider_id, generation, &budget, result.clone(), recovery);
-                accepted
-            };
-            let effects = match (circuit.as_ref(), cli_key.as_deref(), result.as_ref()) {
-                (Some(circuit), Some(_), Ok(probe)) if probe.provider_id == provider_id => {
-                    Some(circuit.record_probe_outcome_if(provider_id,
-                        completed_at_ms.div_euclid(1_000), probe.ok, &mut commit))
+                if pending.is_none() {
+                    budget.checkpoint("observation")?;
+                    budget.checkpoint("circuit")?;
                 }
-                _ => { commit(&mut || None); None }
-            };
-            if accepted {
-                // Result publication is the memory commit. Durable I/O and events
-                // may finish later, without retaining the flight or mutation gate.
-                if tx.commit().is_err() {
-                    tracing::warn!(error = "DB_ERROR", provider_id, "provider availability observation commit failed");
+                let mut accepted = false;
+                let mut commit = |apply: &mut dyn FnMut() -> Option<bool>| {
+                    let mut inner = state.shared.inner.blocking_lock();
+                    if let Some(timeout) = &pending {
+                        let entry = inner.entries.get_mut(&provider_id).expect("pending timeout entry");
+                        let front = entry.pending_timeouts.front_mut().expect("ordered timeout");
+                        if !front.circuit_consumed {
+                            if entry.generation == timeout.generation { let _ = apply(); }
+                            front.circuit_consumed = true;
+                        }
+                        accepted = true;
+                        return true;
+                    }
+                    if !flight_is_current(&inner, provider_id, generation, &budget) || budget.expired() {
+                        return false;
+                    }
+                    let recovery = apply().and_then(|half_open| {
+                        update_recovery_work_after_circuit_evidence(&mut inner, provider_id, generation,
+                            completed_at_ms, ok, half_open)
+                    });
+                    accepted = complete_flight(&mut inner, provider_id, generation, &budget, result.clone(), recovery);
+                    accepted
+                };
+                let effects = match (circuit.as_ref(), provider.as_ref()) {
+                    (Some(circuit), Some(_)) if pending.is_some() || result.as_ref().is_ok_and(|probe| probe.provider_id == provider_id) => {
+                        Some(circuit.record_probe_outcome_if(provider_id,
+                            completed_at_ms.div_euclid(1_000), ok, &mut commit))
+                    }
+                    _ => { commit(&mut || None); None }
+                };
+                let committed = if accepted {
+                    // No coordination or admission lock spans durable I/O.
+                    tx.commit().map_err(|e| db_err!("failed to commit probe observation: {e}"))
+                } else {
+                    drop(tx);
+                    Ok(())
+                };
+                if let (Some(effects), Some((cli_key, name, base_url))) = (effects, provider.as_ref()) {
+                    crate::gateway::runtime::GatewayRuntime::publish_availability_probe_outcome(
+                        Some(&app), trace_id, cli_key, provider_id,
+                        name, base_url, completed_at_ms.div_euclid(1_000), effects);
                 }
-            } else {
-                drop(tx);
-            }
-            if let (Some(effects), Some(cli_key), Ok(probe)) = (effects, cli_key.as_deref(), result.as_ref()) {
-                crate::gateway::runtime::GatewayRuntime::publish_availability_probe_outcome(
-                    Some(&app), &trace_id, cli_key, provider_id,
-                    &probe.provider_name, &probe.base_url, completed_at_ms.div_euclid(1_000), effects);
+                committed?;
+                if pending.is_some() {
+                    let mut inner = state.shared.inner.blocking_lock();
+                    let entry = inner.entries.get_mut(&provider_id).expect("persisted timeout entry");
+                    entry.pending_timeouts.pop_front().expect("persisted timeout");
+                    remove_idle_entry(&mut inner, provider_id);
+                } else {
+                    break;
+                }
             }
             Ok(())
         }).await;
         if let Err(error) = finish {
-            if !budget.expired() {
+            if error.code() != "PROBE_TIMEOUT" && error.code() != "PROBE_PREPARATION" {
                 tracing::warn!(error = %error.code(), provider_id, "provider availability completion failed");
             }
         }
-        let mut inner = self.shared.inner.lock().await;
-        let result = if budget.expired() { budget.timeout_result() } else { fallback };
-        complete_flight(&mut inner, provider_id, generation, &budget, result, None);
+        let wait_for_deadline = {
+            let mut inner = self.shared.inner.lock().await;
+            if budget.expired() {
+                false
+            } else if inner.entries.get(&provider_id).is_some_and(|entry| !entry.pending_timeouts.is_empty()) {
+                true
+            } else {
+                complete_flight(&mut inner, provider_id, generation, &budget, fallback, None);
+                false
+            }
+        };
+        if wait_for_deadline {
+            tokio::time::sleep_until(budget.deadline).await;
+        }
     }
 
     async fn run_scheduler<R: tauri::Runtime>(self, app: tauri::AppHandle<R>, db: db::Db) {
@@ -860,6 +959,7 @@ fn settle_recovery_target(
 fn remove_idle_entry(inner: &mut RuntimeInner, provider_id: i64) {
     let should_remove = inner.entries.get(&provider_id).is_some_and(|entry| {
         entry.schedule.is_none() && entry.recovery.is_none() && entry.in_flight.is_none()
+            && entry.pending_timeouts.is_empty()
     });
     if should_remove {
         inner.entries.remove(&provider_id);
@@ -1982,13 +2082,18 @@ INSERT INTO providers(
             let recovery = state.shared.inner.lock().await.entries[&provider_id].recovery;
             release.send(()).unwrap();
             ended.await.unwrap();
+            loop {
+                if state.shared.inner.lock().await.entries[&provider_id].pending_timeouts.is_empty() { break; }
+                tokio::task::yield_now().await;
+            }
             let db_check = db.clone();
             let observations = blocking::run("probe_timeout_observation_check", move || -> AppResult<i64> {
                 let mut conn = db_check.open_connection()?;
                 let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
-                Ok(tx.query_row("SELECT COUNT(*) FROM provider_availability_observations", [], |row| row.get(0)).unwrap())
+                assert_eq!(tx.query_row("SELECT COUNT(*) FROM provider_availability_observations WHERE success = 1", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+                Ok(tx.query_row("SELECT COUNT(*) FROM provider_availability_observations WHERE success = 0", [], |row| row.get(0)).unwrap())
             }).await.unwrap();
-            assert_eq!(observations, 0, "{stage}: late success must roll back");
+            assert_eq!(observations, 1, "{stage}: one timeout fact replaces the late success");
             if stage == "oauth_write" {
                 assert_eq!(crate::providers::get_oauth_details(&db, provider_id).unwrap().oauth_access_token, "synthetic-token");
             }
@@ -2077,7 +2182,7 @@ INSERT INTO providers(
                 ).unwrap();
                 assert_eq!(count, 1);
             });
-            gateway_state::take_app_running_gateway(app.handle());
+            let _ = gateway_state::take_app_running_gateway(app.handle());
         }
     }
 
@@ -2146,7 +2251,7 @@ INSERT INTO providers(
                             let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
                             let token = tx.query_row("SELECT oauth_access_token FROM providers WHERE id = ?1", [provider_id], |row| row.get::<_, String>(0)).unwrap();
                             if mutate {
-                                tx.execute("UPDATE providers SET name = 'new oauth configuration' WHERE id = ?1 AND oauth_access_token = ?2", params![provider_id, token]).unwrap();
+                                assert_eq!(tx.execute("UPDATE providers SET name = 'new oauth configuration' WHERE id = ?1 AND oauth_access_token = ?2", params![provider_id, token]).unwrap(), 1);
                             }
                             tx.commit().unwrap();
                             Ok(token)
@@ -2155,7 +2260,7 @@ INSERT INTO providers(
                 });
                 read_ready.await.unwrap();
                 assert!(!read.is_finished(), "SQL ordering waits for the existing OAuth transaction");
-                let (entered, mut next_ready) = oneshot::channel();
+                let (entered, next_ready) = oneshot::channel();
                 let (next_release, blocked) = std::sync::mpsc::channel();
                 let (exited, next_ended) = oneshot::channel();
                 *state.shared.next_pause.lock().unwrap() = Some(provider_availability::ProbeTestPause {
@@ -2165,12 +2270,17 @@ INSERT INTO providers(
                     let state = state.clone(); let app = app.handle().clone(); let db = db.clone();
                     async move { state.probe_manual(app, db, provider_id).await }
                 });
-                if !mutate { (&mut next_ready).await.unwrap(); }
+                if !mutate {
+                    loop {
+                        if state.shared.inner.lock().await.entries.get(&provider_id).is_some_and(|entry| entry.in_flight.is_some()) { break; }
+                        tokio::task::yield_now().await;
+                    }
+                }
                 release.send(()).unwrap();
                 ended.await.unwrap();
                 assert_eq!(read.await.unwrap(), if accepted { "synthetic-refreshed" } else { "synthetic-old" });
                 drop(mutation);
-                if mutate { (&mut next_ready).await.unwrap(); }
+                next_ready.await.unwrap();
                 next_release.send(()).unwrap();
                 next_ended.await.unwrap();
                 let result = next.await.unwrap().unwrap();
@@ -2192,7 +2302,10 @@ INSERT INTO providers(
         let temp = tempfile::tempdir().unwrap();
         let _home = crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_HOME", temp.path());
         let clock = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-        for hold_manager in [true, false] {
+        for (hold_manager, before_configuration, change_configuration) in [
+            (true, false, false), (false, false, false),
+            (false, true, false), (false, false, true),
+        ] {
             let gateway = crate::gateway::runtime::GatewayRuntime::for_probe_tests(&clock);
             let circuit = gateway.availability_probe_circuit();
             let app = tauri::test::mock_app();
@@ -2207,14 +2320,17 @@ INSERT INTO providers(
                     axum::Json(serde_json::json!({"type":"message","role":"assistant","content":[{"type":"text","text":"OK"}],"stop_reason":"end_turn"}))
                 }));
                 let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap(); });
-                let db = crate::db::init_for_tests(&temp.path().join(format!("lock-{hold_manager}.db"))).unwrap();
+                let db = crate::db::init_for_tests(&temp.path().join(format!("lock-{hold_manager}-{before_configuration}-{change_configuration}.db"))).unwrap();
                 let conn = db.open_connection().unwrap();
                 conn.execute("INSERT INTO providers(provider_uuid, cli_key, name, base_url, api_key_plaintext, created_at, updated_at) VALUES (?1, 'claude', 'synthetic lock probe', ?2, 'synthetic-key', 1, 1)", params![crate::shared::uuid::new_uuid_v4(), url]).unwrap();
                 let provider_id = conn.last_insert_rowid();
                 drop(conn);
-                circuit.update_config(crate::circuit_breaker::CircuitBreakerConfig { failure_threshold: 1, open_duration_secs: 1 });
+                circuit.update_config(crate::circuit_breaker::CircuitBreakerConfig { failure_threshold: 1, open_duration_secs: 0 });
                 let now = crate::shared::time::now_unix_seconds();
                 circuit.record_failure(provider_id, now - 2, None);
+                assert!(circuit.should_allow(provider_id, now).allow);
+                assert_eq!(circuit.record_success(provider_id, now).after.state, crate::circuit_breaker::CircuitState::HalfOpen);
+                assert_eq!(circuit.record_success(provider_id, now).after.state, crate::circuit_breaker::CircuitState::HalfOpen);
                 let state = ProviderAvailabilityProbeRuntimeState::default();
                 state.reconcile_schedules(vec![loaded(provider_id, 1, 60_000)], 0, false, 1, true).await;
 
@@ -2225,7 +2341,7 @@ INSERT INTO providers(
                     move || {
                         let hold = || { entered.send(()).unwrap(); blocked.recv().unwrap(); };
                         if hold_manager {
-                            gateway_state::try_with_app_running_gateway(&app, |_| hold());
+                            let _ = gateway_state::try_with_app_running_gateway(&app, |_| hold());
                         } else {
                             circuit.hold_probe_health_for_test(hold);
                         }
@@ -2236,7 +2352,7 @@ INSERT INTO providers(
                 let (release_preparation, blocked) = std::sync::mpsc::channel();
                 let (exited, prepared) = oneshot::channel();
                 *state.shared.next_pause.lock().unwrap() = Some(provider_availability::ProbeTestPause {
-                    stage: if hold_manager { "manager" } else { "circuit" }, entered, release: blocked, exited,
+                    stage: if before_configuration { "configuration" } else if hold_manager { "manager" } else { "circuit" }, entered, release: blocked, exited,
                 });
                 let first = tokio::spawn({
                     let state = state.clone(); let app = app.handle().clone(); let db = db.clone();
@@ -2247,16 +2363,40 @@ INSERT INTO providers(
                     ProbeDecision::Wait(receiver) => receiver,
                     _ => panic!("lock-waiting probe must remain shared"),
                 };
-                release_preparation.send(()).unwrap();
-                prepared.await.unwrap();
+                let mut prepared = prepared;
+                if !before_configuration {
+                    release_preparation.send(()).unwrap();
+                    (&mut prepared).await.unwrap();
+                }
                 tokio::time::advance(Duration::from_secs(60)).await;
                 for result in [first.await.unwrap(), second.await.unwrap().result] {
-                    let result = result.unwrap();
-                    assert!(!result.ok);
-                    assert!(result.error.unwrap().starts_with("PROBE_TIMEOUT"));
-                    assert_eq!(result.tested_model.as_deref(), Some("claude-sonnet-4-6"));
+                    if before_configuration {
+                        assert_eq!(result.unwrap_err().code(), "PROBE_TIMEOUT");
+                    } else {
+                        let result = result.unwrap();
+                        assert!(!result.ok);
+                        assert!(result.error.unwrap().starts_with("PROBE_TIMEOUT"));
+                        assert_eq!(result.tested_model.as_deref(), Some("claude-sonnet-4-6"));
+                    }
                 }
                 assert!(state.shared.inner.lock().await.entries[&provider_id].in_flight.is_none());
+                if before_configuration {
+                    release_preparation.send(()).unwrap();
+                    (&mut prepared).await.unwrap();
+                }
+                let mutation = if change_configuration { state.begin_mutation(provider_id).await } else { None };
+                if change_configuration {
+                    release.send(()).unwrap();
+                }
+                if change_configuration {
+                    let db = db.clone();
+                    blocking::run("timeout_configuration_isolation", move || -> AppResult<()> {
+                        db.open_connection()?.execute("UPDATE providers SET name = 'new lock configuration' WHERE id = ?1", [provider_id])
+                            .map_err(|e| db_err!("test configuration write failed: {e}"))?;
+                        Ok(())
+                    }).await.unwrap();
+                }
+                drop(mutation);
                 let next = tokio::spawn({
                     let state = state.clone(); let app = app.handle().clone(); let db = db.clone();
                     async move { state.probe_manual(app, db, provider_id).await }
@@ -2265,22 +2405,39 @@ INSERT INTO providers(
                     if state.shared.inner.lock().await.entries[&provider_id].in_flight.is_some() { break; }
                     tokio::task::yield_now().await;
                 }
-                release.send(()).unwrap();
+                if !change_configuration { release.send(()).unwrap(); }
                 lock_holder.join().unwrap();
-                assert!(next.await.unwrap().unwrap().ok);
+                let result = next.await.unwrap().unwrap();
+                assert!(result.ok);
+                if change_configuration { assert_eq!(result.provider_name, "new lock configuration"); }
                 assert!(state.shared.inner.lock().await.entries[&provider_id].in_flight.is_none());
-                assert_eq!(circuit.snapshot(provider_id, now).state, crate::circuit_breaker::CircuitState::HalfOpen);
-                // Only the new flight counted: one further success must still
-                // leave the circuit half open, and the following one closes it.
-                assert_eq!(circuit.record_success(provider_id, now).after.state, crate::circuit_breaker::CircuitState::HalfOpen);
-                assert_eq!(circuit.record_success(provider_id, now).after.state, crate::circuit_breaker::CircuitState::Closed);
+                assert_eq!(circuit.snapshot(provider_id, now).state, if change_configuration {
+                    crate::circuit_breaker::CircuitState::Closed
+                } else {
+                    crate::circuit_breaker::CircuitState::HalfOpen
+                });
+                let db_check = db.clone();
+                let observations = blocking::run("ordered_timeout_observations", move || -> AppResult<(i64, i64)> {
+                    let mut conn = db_check.open_connection()?;
+                    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
+                    Ok(tx.query_row("SELECT SUM(success = 0), SUM(success = 1) FROM provider_availability_observations", [],
+                        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+                    ).unwrap())
+                }).await.unwrap();
+                assert_eq!(observations, (1, 1), "timeout consumed once before the next success");
+                if !change_configuration {
+                    // The timeout reset both prior successes; the new flight is
+                    // the first recovery success, regardless of late completion.
+                    assert_eq!(circuit.record_success(provider_id, now).after.state, crate::circuit_breaker::CircuitState::HalfOpen);
+                    assert_eq!(circuit.record_success(provider_id, now).after.state, crate::circuit_breaker::CircuitState::Closed);
+                }
                 server.abort();
                 assert!(server.await.unwrap_err().is_cancelled());
                 clock_driver.abort();
                 assert!(clock_driver.await.unwrap_err().is_cancelled());
                 tokio::time::resume();
             });
-            gateway_state::take_app_running_gateway(app.handle());
+            let _ = gateway_state::take_app_running_gateway(app.handle());
         }
     }
 
@@ -2369,5 +2526,32 @@ INSERT INTO providers(
             ProbeDecision::Stale
         ));
         assert!(!state.shared.inner.lock().await.entries.contains_key(&99));
+    }
+
+    #[tokio::test]
+    async fn pending_timeout_keeps_consumer_order_across_generation_changes() {
+        let state = ProviderAvailabilityProbeRuntimeState::default();
+        let (generation, budget) = match state.begin_probe(99, None).await {
+            ProbeDecision::Lead { generation, budget, .. } => (generation, budget),
+            _ => panic!("first flight leads"),
+        };
+        assert!(state.expire_probe(99, generation, &budget, "retained-timeout").await);
+        let completion_gate = state.shared.inner.lock().await.entries[&99].completion_gate.clone();
+        drop(state.begin_mutation(99).await);
+        {
+            let inner = state.shared.inner.lock().await;
+            let entry = &inner.entries[&99];
+            assert_ne!(entry.generation, generation);
+            assert_eq!(entry.pending_timeouts.len(), 1);
+            assert!(Arc::ptr_eq(&entry.completion_gate, &completion_gate));
+        }
+        {
+            let mut inner = state.shared.inner.lock().await;
+            inner.entries.get_mut(&99).unwrap().pending_timeouts.pop_front().unwrap();
+            remove_idle_entry(&mut inner, 99);
+            assert!(!inner.entries.contains_key(&99));
+        }
+        assert!(matches!(state.begin_probe(99, None).await, ProbeDecision::Lead { .. }));
+        assert!(!Arc::ptr_eq(&state.shared.inner.lock().await.entries[&99].completion_gate, &completion_gate));
     }
 }
