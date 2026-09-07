@@ -559,32 +559,49 @@ describe("pages/providers/ProviderRoutingEditor", () => {
     let serverView = policyView({ crossTarget: TARGET_UUID });
     vi.mocked(providerModelRoutingPolicyGet).mockImplementation(async () => serverView);
     const onSaved = vi.fn();
-    const view = renderDialog(editor({ onSaved }));
+    const onOpenChange = vi.fn();
+    const view = renderDialog(editor({ onSaved, onOpenChange }));
+    const queryKey = providerRoutingPolicyQueryKey({
+      cliKey: "grok",
+      providerId: 1,
+      providerUuid: SOURCE_UUID,
+      modeId: MODE_ONE.modeId,
+      modeUuid: MODE_ONE.modeUuid,
+    });
     fireEvent.change(await screen.findByDisplayValue("cross-source"), {
       target: { value: "local-draft" },
     });
     serverView = { ...serverView, source_member_enabled: false };
     await act(async () => {
-      await view.client.refetchQueries({
-        queryKey: providerRoutingPolicyQueryKey({
-          cliKey: "grok", providerId: 1, providerUuid: SOURCE_UUID,
-          modeId: MODE_ONE.modeId, modeUuid: MODE_ONE.modeUuid,
-        }),
-        exact: true,
-      });
+      await view.client.refetchQueries({ queryKey, exact: true });
     });
+    expect(await screen.findByText(/当前供应商在该方案中已禁用/)).toBeInTheDocument();
     vi.mocked(providerModelRoutingPolicySave).mockRejectedValueOnce(
       new Error("SEC_INVALID_INPUT: disabled source member cannot change cross-provider routing policy")
     );
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
     await waitFor(() => expect(providerModelRoutingPolicySave).toHaveBeenCalledOnce());
     expect(providerModelRoutingPolicySave).toHaveBeenCalledWith(expect.objectContaining({
+      expected_cross_policy_revision: serverView.cross_policy_revision,
       cross_policy: expect.objectContaining({
         rules: [expect.objectContaining({ source_model: "local-draft" })],
       }),
     }));
-    expect(screen.getByDisplayValue("local-draft")).toBeInTheDocument();
+    await waitFor(() => expect(toast).toHaveBeenCalledWith(
+      "保存供应商模型路由失败：Error: SEC_INVALID_INPUT: disabled source member cannot change cross-provider routing policy"
+    ));
+    await waitFor(() => expect(screen.getByRole("button", { name: "保存" })).toBeEnabled());
     expect(onSaved).not.toHaveBeenCalled();
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+    expect(toast).not.toHaveBeenCalledWith("Provider 已更新");
+    expect(screen.getByText(/当前供应商在该方案中已禁用/)).toBeInTheDocument();
+
+    serverView = { ...serverView, source_member_enabled: true };
+    await act(async () => {
+      await view.client.refetchQueries({ queryKey, exact: true });
+    });
+    expect(await screen.findByDisplayValue("local-draft")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("cross-source")).not.toBeInTheDocument();
   });
 
   it("keeps ordinary edits across a mode change and confirms dirty cross drafts", async () => {
