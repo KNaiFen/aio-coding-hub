@@ -480,6 +480,11 @@ impl ProviderAvailabilityProbeRuntimeState {
         let finish = blocking::run("provider_availability_finish", move || -> AppResult<()> {
             let budget = work_budget;
             budget.checkpoint("completion")?;
+            budget.checkpoint("manager")?;
+            let circuit = gateway_state::try_with_app_running_gateway(&app, |runtime| {
+                runtime.map(|runtime| runtime.availability_probe_circuit())
+            }).flatten();
+            budget.check()?;
             let completed_at_ms = crate::shared::time::now_unix_millis();
             // An IMMEDIATE transaction orders this prepared fact before later
             // configuration writes. A timed-out or invalidated flight rolls it back.
@@ -495,9 +500,6 @@ impl ProviderAvailabilityProbeRuntimeState {
                 }
             }
             budget.checkpoint("observation")?;
-            let circuit = gateway_state::try_with_app_running_gateway(&app, |runtime| {
-                runtime.map(|runtime| runtime.availability_probe_circuit())
-            }).flatten();
             budget.checkpoint("circuit")?;
             let mut accepted = false;
             let mut commit = |apply: &mut dyn FnMut() -> Option<bool>| {
@@ -2010,6 +2012,76 @@ INSERT INTO providers(
     }
 
     #[test]
+    fn observation_transaction_and_real_circuit_resets_do_not_invert_locks() {
+        let clock = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        for reset_cli in [false, true] {
+            let app = tauri::test::mock_app();
+            app.manage(gateway_state::GatewayState::default());
+            let gateway = crate::gateway::runtime::GatewayRuntime::for_probe_tests(&clock);
+            gateway_state::with_app_running_gateway_slot_mut(app.handle(), |slot| *slot = Some(gateway));
+            let db = crate::db::init_for_tests(&temp.path().join(format!("reset-{reset_cli}.db"))).unwrap();
+            let conn = db.open_connection().unwrap();
+            conn.execute("INSERT INTO providers(provider_uuid, cli_key, name, base_url, api_key_plaintext, created_at, updated_at) VALUES (?1, 'claude', 'synthetic reset', 'https://example.test', 'synthetic-key', 1, 1)", [crate::shared::uuid::new_uuid_v4()]).unwrap();
+            let provider_id = conn.last_insert_rowid();
+            drop(conn);
+            clock.block_on(async {
+                let state = ProviderAvailabilityProbeRuntimeState::default();
+                let (generation, budget, receiver) = match state.begin_probe(provider_id, None).await {
+                    ProbeDecision::Lead { generation, budget, receiver } => (generation, budget, receiver),
+                    _ => panic!("first probe leads"),
+                };
+                let (entered, ready) = oneshot::channel();
+                let (release, blocked) = std::sync::mpsc::channel();
+                let (exited, ended) = oneshot::channel();
+                *budget.pause.lock().unwrap() = Some(provider_availability::ProbeTestPause {
+                    stage: "observation", entered, release: blocked, exited,
+                });
+                let finish = tokio::spawn({
+                    let state = state.clone(); let app = app.handle().clone(); let db = db.clone();
+                    async move {
+                        state.finish_probe(&app, &db, provider_id, generation, budget, "reset-race", Ok(ProviderAvailabilityResult {
+                            ok: true, provider_id, provider_name: "synthetic reset".into(),
+                            base_url: "https://example.test".into(), status: Some(200), latency_ms: 1,
+                            error: None, response_preview: None, requested_model: None, tested_model: None,
+                        })).await;
+                    }
+                });
+                ready.await.unwrap();
+                let (manager_entered, manager_ready) = oneshot::channel();
+                let (reset_done, reset_result) = oneshot::channel();
+                let reset = std::thread::spawn({
+                    let app = app.handle().clone(); let db = db.clone();
+                    move || {
+                        let result = gateway_state::try_with_app_running_gateway(&app, |running| {
+                            manager_entered.send(()).unwrap();
+                            if reset_cli {
+                                crate::gateway::control_service::GatewayControlService::circuit_reset_cli(running, &db, "claude")
+                                    .map(|count| assert_eq!(count, 1))
+                            } else {
+                                crate::gateway::control_service::GatewayControlService::circuit_reset_provider(running, &db, provider_id)
+                            }
+                        }).unwrap();
+                        reset_done.send(result).unwrap();
+                    }
+                });
+                manager_ready.await.unwrap();
+                release.send(()).unwrap();
+                ended.await.unwrap();
+                tokio::time::timeout(Duration::from_secs(2), finish).await.unwrap().unwrap();
+                tokio::time::timeout(Duration::from_secs(2), reset_result).await.unwrap().unwrap().unwrap();
+                reset.join().unwrap();
+                assert!(receiver.await.unwrap().result.unwrap().ok);
+                let count: i64 = db.open_connection().unwrap().query_row(
+                    "SELECT COUNT(*) FROM provider_availability_observations WHERE success = 1", [], |row| row.get(0),
+                ).unwrap();
+                assert_eq!(count, 1);
+            });
+            gateway_state::take_app_running_gateway(app.handle());
+        }
+    }
+
+    #[test]
     fn shared_deadline_survives_gateway_and_circuit_lock_waits() {
         let _env_lock = crate::test_support::test_env_lock();
         let temp = tempfile::tempdir().unwrap();
@@ -2059,7 +2131,7 @@ INSERT INTO providers(
                 let (release_preparation, blocked) = std::sync::mpsc::channel();
                 let (exited, prepared) = oneshot::channel();
                 *state.shared.next_pause.lock().unwrap() = Some(provider_availability::ProbeTestPause {
-                    stage: if hold_manager { "observation" } else { "circuit" }, entered, release: blocked, exited,
+                    stage: if hold_manager { "manager" } else { "circuit" }, entered, release: blocked, exited,
                 });
                 let first = tokio::spawn({
                     let state = state.clone(); let app = app.handle().clone(); let db = db.clone();
