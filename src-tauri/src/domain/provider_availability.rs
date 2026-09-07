@@ -11,7 +11,6 @@ use rusqlite::{params, params_from_iter, OptionalExtension, TransactionBehavior}
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 #[cfg(test)]
 use std::time::Instant;
@@ -52,7 +51,7 @@ pub(crate) struct ProbeBudget {
     started: tokio::time::Instant,
     clock: tokio::runtime::Handle,
     evidence: Mutex<Option<ProviderAvailabilityResult>>,
-    current: AtomicBool,
+    current: Mutex<bool>,
     #[cfg(test)]
     pub(crate) pause: Mutex<Option<ProbeTestPause>>,
 }
@@ -73,7 +72,7 @@ impl ProbeBudget {
             deadline: started + WORK_TIMEOUT,
             clock: tokio::runtime::Handle::current(),
             evidence: Mutex::new(None),
-            current: AtomicBool::new(true),
+            current: Mutex::new(true),
             #[cfg(test)]
             pause: Mutex::new(None),
         })
@@ -85,9 +84,13 @@ impl ProbeBudget {
     }
 
     pub(crate) fn check(&self) -> AppResult<()> {
+        self.check_current(*self.current.lock().expect("probe acceptance"))
+    }
+
+    fn check_current(&self, current: bool) -> AppResult<()> {
         if self.expired() {
             Err(probe_failure(&AppError::from("PROBE_TIMEOUT")))
-        } else if !self.current.load(Ordering::Acquire) {
+        } else if !current {
             Err(AppError::new("PROBE_PREPARATION", "供应商配置已变化或本次探测已完成"))
         } else {
             Ok(())
@@ -95,15 +98,34 @@ impl ProbeBudget {
     }
 
     pub(crate) fn invalidate(&self) {
-        self.current.store(false, Ordering::Release);
+        *self.current.lock().expect("probe acceptance") = false;
     }
 
     pub(crate) fn checkpoint(&self, _stage: &'static str) -> AppResult<()> {
         #[cfg(test)]
+        self.pause_at(_stage);
+        self.check()
+    }
+
+    pub(crate) fn accept_oauth_write(&self) -> AppResult<()> {
+        #[cfg(test)]
+        self.pause_at("oauth_accept");
+        // Invalidation and this acceptance are ordered by the same short lock.
+        // Once accepted, the existing SQL transaction may commit after expiry.
         {
+            let current = self.current.lock().expect("probe acceptance");
+            self.check_current(*current)?;
+        }
+        #[cfg(test)]
+        self.pause_at("oauth_accepted");
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pause_at(&self, stage: &'static str) {
             let pause = {
                 let mut slot = self.pause.lock().expect("probe test pause");
-                if slot.as_ref().is_some_and(|pause| pause.stage == _stage) {
+                if slot.as_ref().is_some_and(|pause| pause.stage == stage) {
                     slot.take()
                 } else {
                     None
@@ -112,12 +134,8 @@ impl ProbeBudget {
             if let Some(pause) = pause {
                 pause.entered.send(()).expect("probe pause observer");
                 pause.release.recv().expect("probe pause release");
-                let result = self.check();
                 let _ = pause.exited.send(());
-                return result;
             }
-        }
-        self.check()
     }
 
     fn remember(&self, result: &ProviderAvailabilityResult) {

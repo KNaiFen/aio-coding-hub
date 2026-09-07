@@ -2980,7 +2980,10 @@ WHERE id = ?12
             ],
         )
         .map_err(|e| crate::shared::error::db_err!("failed to CAS-update OAuth tokens: {e}"))?;
-    if let Some(budget) = budget { budget.checkpoint("oauth_write")?; }
+    if let Some(budget) = budget {
+        budget.checkpoint("oauth_write")?;
+        budget.accept_oauth_write()?;
+    }
     tx.commit().map_err(|e| db_err!("failed to commit OAuth CAS transaction: {e}"))?;
     Ok(rows == 1)
 }
