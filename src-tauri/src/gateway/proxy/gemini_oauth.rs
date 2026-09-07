@@ -56,7 +56,7 @@ pub(super) async fn prepare_upstream_request(
     )
 }
 
-fn prepare_upstream_request_with_project(
+pub(super) fn prepare_upstream_request_with_project(
     forwarded_path: &str,
     query: Option<&str>,
     body_value: Value,

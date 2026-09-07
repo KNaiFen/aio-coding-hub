@@ -311,6 +311,12 @@ impl LoadedProvider {
     }
 
     fn resolved_base_url(&self) -> AppResult<String> {
+        #[cfg(test)]
+        if self.auth_mode == "oauth" {
+            if let Ok(base_url) = std::env::var("AIO_CODING_HUB_TEST_PROBE_OAUTH_BASE_URL") {
+                return Ok(base_url);
+            }
+        }
         crate::gateway::resolve_transport_base_url(&self.transport_context(), &self.cli_key)
             .map_err(Into::into)
     }
@@ -554,7 +560,7 @@ fn probe_failure(error: &AppError) -> AppError {
         error.code()
     };
     let (code, message) = match code {
-        "PROBE_NO_TEXT" => ("PROBE_NO_TEXT", "本次探测未获得有效回答；仅推理内容不算回答，100 token 预算可能已耗尽"),
+        "PROBE_NO_TEXT" => ("PROBE_NO_TEXT", "本次探测未获得有效回答；仅推理内容不算回答，输出预算可能已耗尽"),
         "PROBE_UNFINISHED" => ("PROBE_UNFINISHED", "响应提前结束，未收到完整结束标记"),
         "PROBE_TERMINATION" => ("PROBE_TERMINATION", "上游以不支持的原因结束了生成"),
         "PROBE_READ" => ("PROBE_READ", "读取上游响应失败"),
@@ -1655,6 +1661,15 @@ mod tests {
         response_status: u16,
         response_body: &'static str,
     ) -> (String, tokio::task::JoinHandle<String>) {
+        response_from_request_capture_with_type(expected_path, response_status, response_body, "application/json").await
+    }
+
+    async fn response_from_request_capture_with_type(
+        expected_path: &'static str,
+        response_status: u16,
+        response_body: &'static str,
+        content_type: &'static str,
+    ) -> (String, tokio::task::JoinHandle<String>) {
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
             .await
             .expect("bind test server");
@@ -1697,7 +1712,7 @@ mod tests {
             );
 
             let response = format!(
-                "HTTP/1.1 {response_status} OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                "HTTP/1.1 {response_status} OK\r\ncontent-type: {content_type}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
                 response_body.len(),
                 response_body
             );
@@ -2002,6 +2017,199 @@ mod tests {
         assert_eq!(body["max_output_tokens"], 100);
     }
 
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn api_key_probe_entry_sends_authenticated_generation_with_wire_budget() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _home = crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_HOME", temp.path());
+        let _grok = crate::test_support::ScopedTestEnvVar::set("GROK_HOME", temp.path().join("grok"));
+        crate::test_support::clear_settings_cache();
+        let app = tauri::test::mock_app();
+        for (index, (cli, backend, path, model, response, budget_pointer)) in [
+            ("claude", crate::grok_config::GrokApiBackend::Responses, "/v1/messages", "claude-sonnet-4-6",
+                r#"{"type":"message","role":"assistant","stop_reason":"max_tokens","content":[{"type":"text","text":"OK"}]}"#, "/max_tokens"),
+            ("codex", crate::grok_config::GrokApiBackend::Responses, "/v1/responses", "selected-model",
+                r#"{"object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"OK"}]}]}"#, "/max_output_tokens"),
+            ("gemini", crate::grok_config::GrokApiBackend::Responses, "/v1beta/models/gemini-2.0-flash:generateContent?key=sk-test", "gemini-2.0-flash",
+                r#"{"candidates":[{"finishReason":"STOP","content":{"role":"model","parts":[{"text":"OK"}]}}]}"#, "/generationConfig/maxOutputTokens"),
+            ("grok", crate::grok_config::GrokApiBackend::Responses, "/v1/responses", "grok-entry-model",
+                r#"{"object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"OK"}]}]}"#, "/max_output_tokens"),
+            ("grok", crate::grok_config::GrokApiBackend::ChatCompletions, "/v1/chat/completions", "grok-entry-model",
+                r#"{"object":"chat.completion","choices":[{"message":{"role":"assistant","content":"OK"},"finish_reason":"length"}]}"#, "/max_tokens"),
+        ].into_iter().enumerate() {
+            crate::settings::update(app.handle(), |settings| {
+                settings.grok_proxy_preferences = Some(crate::grok_config::GrokProxyPreferences {
+                    model_id: "grok-entry-model".into(), api_backend: backend, ..Default::default()
+                });
+                Ok(())
+            }).unwrap();
+            let db = crate::db::init_for_tests(&temp.path().join(format!("api-key-{index}.db"))).unwrap();
+            let (url, server) = response_from_request_capture(path, 200, response).await;
+            let mut params = default_provider_params(cli);
+            params.cli_key = cli.into();
+            params.base_urls = vec![url];
+            params.availability_test_model = (cli == "codex").then(|| model.to_string());
+            let provider = upsert(&db, params).unwrap();
+            let result = test_provider_availability(app.handle(), db, provider.id).await.unwrap();
+            assert!(result.ok, "{cli}: {:?}", result.error);
+            assert_eq!(result.tested_model.as_deref(), Some(model));
+            assert_eq!(result.requested_model, result.tested_model);
+            let request = server.await.unwrap();
+            let (headers, raw_body) = request.split_once("\r\n\r\n").unwrap();
+            let headers = headers.to_ascii_lowercase();
+            let body: serde_json::Value = serde_json::from_str(raw_body).unwrap();
+            assert_eq!(body.pointer(budget_pointer), Some(&serde_json::json!(100)));
+            assert!(!body.to_string().contains("reasoning"));
+            assert!(!body.to_string().contains("thinking"));
+            match cli {
+                "gemini" => assert_eq!(body["contents"][0]["parts"][0]["text"], PROBE_PROMPT),
+                "claude" => {
+                    assert!(headers.contains("x-api-key: sk-test"));
+                    assert!(headers.contains("anthropic-version: 2023-06-01"));
+                    assert_eq!(body["model"], model);
+                },
+                _ => {
+                    assert!(headers.contains("authorization: bearer sk-test"));
+                    assert_eq!(body["model"], model);
+                },
+            }
+        }
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn oauth_probe_entry_uses_real_adapters_and_wrapped_generation() {
+        use base64::Engine;
+        let _env_lock = crate::test_support::test_env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _home = crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_HOME", temp.path());
+        let _grok = crate::test_support::ScopedTestEnvVar::set("GROK_HOME", temp.path().join("grok"));
+        crate::test_support::clear_settings_cache();
+        let app = tauri::test::mock_app();
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(br#"{"https://api.openai.com/auth":{"chatgpt_account_id":"synthetic-account"}}"#);
+        let id_token = format!("header.{payload}.signature");
+        for (cli, kind, path, model, response, content_type) in [
+            ("claude", "claude_oauth", "/v1/messages", "claude-sonnet-4-6",
+                r#"{"type":"message","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"OK"}]}"#, "application/json"),
+            ("codex", "codex_oauth", "/responses", "selected-model",
+                "event: response.completed\ndata: {\"response\":{\"id\":\"resp_1\",\"object\":\"response\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"OK\"}]}]}}\n\n", "text/event-stream"),
+            ("gemini", "gemini_oauth", "/v1internal:generateContent", "gemini-2.0-flash",
+                r#"{"response":{"candidates":[{"finishReason":"MAX_TOKENS","content":{"role":"model","parts":[{"text":"OK"}]}}]}}"#, "application/json"),
+            ("grok", "grok_oauth", "/v1/responses", "grok-entry-model",
+                r#"{"object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"OK"}]}]}"#, "application/json"),
+        ] {
+            crate::settings::update(app.handle(), |settings| {
+                settings.grok_proxy_preferences = Some(crate::grok_config::GrokProxyPreferences {
+                    model_id: "grok-entry-model".into(), ..Default::default()
+                });
+                Ok(())
+            }).unwrap();
+            let db = crate::db::init_for_tests(&temp.path().join(format!("{cli}-oauth.db"))).unwrap();
+            let (url, server) = response_from_request_capture_with_type(path, 200, response, content_type).await;
+            let _upstream = crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_PROBE_OAUTH_BASE_URL", &url);
+            let _project = crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_PROBE_GEMINI_PROJECT", "synthetic-project");
+            let mut params = default_provider_params(cli);
+            params.cli_key = cli.into();
+            params.base_urls = vec![url];
+            params.auth_mode = Some(ProviderAuthMode::Oauth);
+            params.api_key = None;
+            params.availability_test_model = (cli == "codex").then(|| model.to_string());
+            let provider = upsert(&db, params).unwrap();
+            crate::providers::update_oauth_tokens(&db, provider.id, "oauth", kind, "synthetic-token", None,
+                Some(&id_token), "https://example.invalid/token", "synthetic-client", None,
+                Some(crate::shared::time::now_unix_seconds() + 3_600), None).unwrap();
+            let result = test_provider_availability(app.handle(), db, provider.id).await.unwrap();
+            assert!(result.ok, "{cli}: {:?}", result.error);
+            assert_eq!(result.tested_model.as_deref(), Some(model));
+            assert_eq!(result.requested_model, result.tested_model);
+            let request = server.await.unwrap();
+            let (headers, raw_body) = request.split_once("\r\n\r\n").unwrap();
+            let headers = headers.to_ascii_lowercase();
+            let body: serde_json::Value = serde_json::from_str(raw_body).unwrap();
+            assert!(headers.contains("authorization: bearer synthetic-token"));
+            assert!(!headers.contains("x-api-key:"));
+            assert_eq!(body["model"], model);
+            match cli {
+                "codex" => {
+                    assert!(headers.contains("chatgpt-account-id: synthetic-account"));
+                    assert_eq!(body["stream"], true);
+                    assert_eq!(body["store"], false);
+                    assert!(body.get("max_output_tokens").is_none());
+                    assert!(body.get("max_tokens").is_none());
+                },
+                "gemini" => {
+                    assert!(headers.contains("x-goog-api-client:"));
+                    assert_eq!(body["project"], "synthetic-project");
+                    assert_eq!(body["request"]["generationConfig"]["maxOutputTokens"], 100);
+                    assert_eq!(body["request"]["contents"][0]["parts"][0]["text"], PROBE_PROMPT);
+                },
+                "claude" => {
+                    assert!(headers.contains("oauth-2025-04-20"));
+                    assert_eq!(body["max_tokens"], 100);
+                },
+                _ => {
+                    assert!(headers.contains("x-grok-client-version:"));
+                    assert_eq!(body["max_output_tokens"], 100);
+                },
+            }
+        }
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn fixed_bridge_probe_entry_succeeds_with_source_auth_model_and_budget() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _home = crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_HOME", temp.path());
+        crate::test_support::clear_settings_cache();
+        let app = tauri::test::mock_app();
+        for (kind, source_cli, path, response, budget) in [
+            (CODEX_TO_OPENAI_RESPONSES_BRIDGE_TYPE, "codex", "/v1/responses",
+                r#"{"object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"OK"}]}]}"#, "max_output_tokens"),
+            (CODEX_TO_OPENAI_CHAT_BRIDGE_TYPE, "codex", "/v1/chat/completions",
+                r#"{"object":"chat.completion","choices":[{"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}]}"#, "max_tokens"),
+            (CODEX_TO_ANTHROPIC_MESSAGES_BRIDGE_TYPE, "claude", "/v1/messages",
+                r#"{"type":"message","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"OK"}]}"#, "max_tokens"),
+            (CX2CC_BRIDGE_TYPE, "codex", "/v1/responses",
+                r#"{"object":"response","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"OK"}]}]}"#, "max_output_tokens"),
+        ] {
+            let db = crate::db::init_for_tests(&temp.path().join(format!("{kind}.db"))).unwrap();
+            let (url, server) = response_from_request_capture(path, 200, response).await;
+            let mut source = default_provider_params("source");
+            source.cli_key = source_cli.into();
+            source.base_urls = vec![url];
+            source.api_key = Some("synthetic-source-key".into());
+            let source = upsert(&db, source).unwrap();
+            let mut bridge = default_provider_params("bridge");
+            bridge.cli_key = if kind == CX2CC_BRIDGE_TYPE { "claude" } else { "codex" }.into();
+            bridge.base_urls = vec![];
+            bridge.api_key = None;
+            bridge.bridge_type = Some(kind.into());
+            bridge.source_provider_id = Some(source.id);
+            if kind == CX2CC_BRIDGE_TYPE {
+                bridge.claude_models = Some(crate::providers::ClaudeModels { sonnet_model: Some("wire-model".into()), ..Default::default() });
+            } else {
+                bridge.availability_test_model = Some("selected-model".into());
+                bridge.model_mapping = Some(ModelMapping { default_model: Some("wire-model".into()), ..Default::default() });
+            }
+            let bridge = upsert(&db, bridge).unwrap();
+            crate::providers::set_enabled(&db, source.id, false).unwrap();
+            let result = test_provider_availability(app.handle(), db, bridge.id).await.unwrap();
+            assert!(result.ok, "{kind}: {:?}", result.error);
+            assert_eq!(result.provider_id, bridge.id);
+            assert_eq!(result.requested_model.as_deref(), Some(if kind == CX2CC_BRIDGE_TYPE { "claude-sonnet-4-6" } else { "selected-model" }));
+            assert_eq!(result.tested_model.as_deref(), Some("wire-model"));
+            let request = server.await.unwrap();
+            let (headers, raw_body) = request.split_once("\r\n\r\n").unwrap();
+            let headers = headers.to_ascii_lowercase();
+            assert!(headers.contains(if source_cli == "claude" { "x-api-key: synthetic-source-key" } else { "authorization: bearer synthetic-source-key" }));
+            let body: serde_json::Value = serde_json::from_str(raw_body).unwrap();
+            assert_eq!(body["model"], "wire-model");
+            assert_eq!(body[budget], 100);
+        }
+    }
+
     #[tokio::test]
     async fn successful_http_does_not_accept_non_answers() {
         for body in [
@@ -2050,7 +2258,7 @@ mod tests {
         }
         let no_text = probe_failure(&AppError::from("PROBE_NO_TEXT")).to_string();
         assert!(no_text.contains("仅推理内容不算回答"));
-        assert!(no_text.contains("100 token"));
+        assert!(no_text.contains("输出预算"));
         assert!(!no_text.contains("永久"));
         assert_eq!(probe_failure(&AppError::new("UPSTREAM_PRIVATE_CODE", "SYNTHETIC_PRIVATE_DETAIL")).code(), "PROBE_PREPARATION");
     }

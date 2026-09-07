@@ -41,6 +41,17 @@ pub(super) use handler::proxy_impl;
 pub(super) async fn prepare_gemini_oauth_probe(
     client: &reqwest::Client, access_token: &str, path: &str, body: &serde_json::Value,
 ) -> Result<(String, serde_json::Value), String> {
+    #[cfg(test)]
+    if let Ok(project) = std::env::var("AIO_CODING_HUB_TEST_PROBE_GEMINI_PROJECT") {
+        let request = gemini_oauth::prepare_upstream_request_with_project(
+            path, None, body.clone(), None, Some(&project),
+        )?;
+        let base_url = std::env::var("AIO_CODING_HUB_TEST_PROBE_OAUTH_BASE_URL")
+            .expect("synthetic project requires a mock upstream");
+        let url = crate::gateway::util::build_target_url(&base_url, &request.forwarded_path, request.query.as_deref())?;
+        let body = serde_json::from_slice(&request.body_bytes).map_err(|_| "PROBE_STRUCTURE".to_string())?;
+        return Ok((url.to_string(), body));
+    }
     let request = gemini_oauth::prepare_upstream_request(
         client, access_token, path, None, Some(body), &bytes::Bytes::new(), None,
     ).await?;
