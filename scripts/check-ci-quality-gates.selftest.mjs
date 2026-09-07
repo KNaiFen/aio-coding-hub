@@ -43,6 +43,26 @@ assert.doesNotThrow(() =>
 
 for (const [name, fixture, expected] of [
   [
+    "observer macOS activity command",
+    { ...valid, ciWorkflow: ciWorkflow.replace("        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --lib app::observer::activity -- --test-threads=1\n", "") },
+    /observer-macos must include/,
+  ],
+  [
+    "observer macOS gate dependency",
+    { ...valid, ciWorkflow: ciWorkflow.replace("      - observer-macos\n", "") },
+    /ci-gate must include - observer-macos/,
+  ],
+  [
+    "observer macOS failed result accepted",
+    { ...valid, ciWorkflow: ciWorkflow.replace('[[ "$OBSERVER_MACOS_RESULT" == "success" ]]', '[[ "$OBSERVER_MACOS_RESULT" != "cancelled" ]]') },
+    /approved fail-closed aggregation script/,
+  ],
+  [
+    "observer macOS missing skipped validation",
+    { ...valid, ciWorkflow: ciWorkflow.replace('            [[ "$OBSERVER_MACOS_RESULT" == "skipped" ]]\n', "") },
+    /approved fail-closed aggregation script/,
+  ],
+  [
     "dedicated E2E package entry",
     {
       ...valid,

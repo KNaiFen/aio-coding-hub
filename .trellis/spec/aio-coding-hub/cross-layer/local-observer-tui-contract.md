@@ -41,6 +41,27 @@ remote administration API.
   that query lane within a bounded deadline; contention timeout returns
   `OBS_BUSY` and is never cached as an unavailable projection. A genuinely
   missing or slow database read marks only the affected sections unavailable.
+- The DB budget remains 1500 ms, DB permit wait 1600 ms, and snapshot HTTP
+  budget 3500 ms. A monotonic deadline follows blocking work through its start
+  and major stage boundaries. Expired work does not start another query; an
+  already running SQL statement retains its permit until it returns. Errors
+  and projections over 75% of budget report only scope, detail flag, stage,
+  counts, elapsed times, and error codes, never user content.
+- Each DB projection loads spend usage once for the required CLI scope and
+  shares it between candidates and details. Candidate eligibility is independent
+  of the 512-row detail cap. Spend failure makes both affected sections
+  unavailable. Aggregation still reads `usage_events`, filtering batch IDs and
+  valid statistical rows before materializing only provider, time, and cost.
+- On macOS, valid authenticated snapshots renew a shared 15-second monotonic
+  user-activity lease before cache and admission checks. Manual probes hold a
+  work reference after input/admission checks. One observer controller owns
+  at most one `UserInitiatedAllowingIdleSystemSleep` activity, with reason
+  `AIO TUI observation`, and one resettable expiry task. It permits display and
+  system sleep, closes on every observer shutdown path, and rejects late renewals.
+  Health, invalid requests, startup, and scheduled probes establish no lease.
+  Other platforms add neither native activities nor expiry tasks. Rust CI also
+  runs `app::observer::activity` tests on macOS; the aggregate gate requires this
+  job only when `rust_ci=true`.
 - Circuit status is read through a non-mutating peek. It must not reserve a
   half-open probe, persist state, emit events, or alter provider health.
 - Observer startup, refresh, serialization, authentication, and TUI parsing

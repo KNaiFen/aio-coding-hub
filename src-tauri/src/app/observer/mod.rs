@@ -1,6 +1,7 @@
 //! Authenticated loopback-only observation service for the standalone TUI.
 
 mod descriptor;
+mod activity;
 mod snapshot;
 
 use aio_observer_protocol::{
@@ -45,6 +46,7 @@ pub(crate) struct ObserverRuntimeState {
 }
 
 struct ObserverRuntime {
+    activity: Arc<activity::ObserverActivity>,
     shutdown: Option<oneshot::Sender<()>>,
     task: tauri::async_runtime::JoinHandle<()>,
     descriptor_path: PathBuf,
@@ -141,6 +143,7 @@ impl FolderLookupCache {
 
 #[derive(Clone)]
 struct ObserverHttpState {
+    activity: Arc<activity::ObserverActivity>,
     app: tauri::AppHandle,
     db: Arc<Mutex<ObserverDbState>>,
     token: Arc<str>,
@@ -211,7 +214,9 @@ async fn start(app: tauri::AppHandle) -> crate::shared::error::AppResult<()> {
     })
     .await?;
 
+    let activity = Arc::new(activity::ObserverActivity::new(&app));
     let http_state = ObserverHttpState {
+        activity: activity.clone(),
         app: app.clone(),
         db: Arc::new(Mutex::new(ObserverDbState::default())),
         token: Arc::from(descriptor.token.as_str()),
@@ -233,6 +238,7 @@ async fn start(app: tauri::AppHandle) -> crate::shared::error::AppResult<()> {
 
     let mut runtime = state.runtime.lock().await;
     if state.stopping.load(Ordering::Acquire) {
+        activity.close();
         drop(runtime);
         let _ = crate::blocking::run(
             "observer_descriptor_remove_cancelled_start",
@@ -245,10 +251,17 @@ async fn start(app: tauri::AppHandle) -> crate::shared::error::AppResult<()> {
         return Ok(());
     }
     if runtime.is_some() {
+        activity.close();
         return Ok(());
     }
 
+    let server_activity = activity.clone();
     let task = tauri::async_runtime::spawn(async move {
+        struct CloseActivity(Arc<activity::ObserverActivity>);
+        impl Drop for CloseActivity {
+            fn drop(&mut self) { self.0.close(); }
+        }
+        let _close_activity = CloseActivity(server_activity);
         let server = axum::serve(listener, router).with_graceful_shutdown(async move {
             let _ = shutdown_rx.await;
         });
@@ -258,6 +271,7 @@ async fn start(app: tauri::AppHandle) -> crate::shared::error::AppResult<()> {
     });
     tracing::info!(port, "local observer service started");
     *runtime = Some(ObserverRuntime {
+        activity,
         shutdown: Some(shutdown_tx),
         task,
         descriptor_path,
@@ -276,6 +290,7 @@ pub(crate) async fn stop_best_effort(app: &tauri::AppHandle) {
     let Some(mut runtime) = runtime else {
         return;
     };
+    runtime.activity.close();
     if let Some(shutdown) = runtime.shutdown.take() {
         let _ = shutdown.send(());
     }
@@ -348,6 +363,7 @@ async fn snapshot_handler(
             "invalid history limit",
         );
     }
+    state.activity.touch_snapshot().await;
     let _permit = match state.limiter.clone().try_acquire_owned() {
         Ok(permit) => permit,
         Err(_) => {
@@ -368,10 +384,14 @@ async fn snapshot_handler(
         return secured(Json(snapshot).into_response());
     }
     let db = read_only_db(&state).await;
+    let permit_started = Instant::now();
     let db_query_permit = if db.is_some() {
         match wait_for_db_query_permit(state.db_query_limiter.clone()).await {
             Some(permit) => Some(permit),
             None => {
+                tracing::warn!(cli = scope.as_str(), include_providers = query.include_providers,
+                    permit_wait_ms = permit_started.elapsed().as_millis(), error = "OBS_BUSY",
+                    "observer DB permit unavailable");
                 return api_error(
                     StatusCode::TOO_MANY_REQUESTS,
                     "OBS_BUSY",
@@ -382,6 +402,10 @@ async fn snapshot_handler(
     } else {
         None
     };
+    if permit_started.elapsed() >= DB_QUERY_PERMIT_TIMEOUT * 3 / 4 {
+        tracing::warn!(cli = scope.as_str(), include_providers = query.include_providers,
+            permit_wait_ms = permit_started.elapsed().as_millis(), "observer DB permit slow");
+    }
     if let Some(snapshot) = cached_snapshot(&state, key).await {
         return secured(Json(snapshot).into_response());
     }
@@ -428,6 +452,7 @@ async fn provider_test_availability_handler(
             )
         }
     };
+    let _activity_work = state.activity.work().await;
     let Some(db_state) = state.app.try_state::<crate::app_state::DbInitState>() else {
         return api_error(
             StatusCode::SERVICE_UNAVAILABLE,

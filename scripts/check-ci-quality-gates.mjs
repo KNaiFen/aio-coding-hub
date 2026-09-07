@@ -53,13 +53,14 @@ const CI_GATE_RESULT_ENV = new Map([
   ["CONTRACTS_RESULT", "${{ needs.contracts.result }}"],
   ["FRONTEND_RESULT", "${{ needs.frontend.result }}"],
   ["RUST_RESULT", "${{ needs.rust.result }}"],
+  ["OBSERVER_MACOS_RESULT", "${{ needs.observer-macos.result }}"],
   ["PLAN_RESULT", "${{ needs.candidate-plan.result }}"],
   ["SHOULD_BUILD", "${{ needs.candidate-plan.outputs.should_build }}"],
   ["BUILD_RESULT", "${{ needs.build-release-candidate.result }}"],
   ["TUI_BUILD_RESULT", "${{ needs.build-tui-release-candidate.result }}"],
   ["ASSEMBLE_RESULT", "${{ needs.assemble-release-candidate.result }}"],
 ]);
-const CI_GATE_RUN_SHA256 = "e1b5dce438571ce9cf94e818fa1bd62acf70d964c09a78879733f4367dd0e3ca";
+const CI_GATE_RUN_SHA256 = "9f33c0c292156d3886a41a4dc5135d2d2ae637abd6dc951db61465254add4b11";
 const CODEQL_STRATEGY_BLOCK = `strategy:
   fail-fast: false
   matrix:
@@ -79,6 +80,10 @@ const CI_JOB_CONDITIONS = new Map([
   ],
   [
     "rust",
+    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.rust_ci == 'true'",
+  ],
+  [
+    "observer-macos",
     "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.rust_ci == 'true'",
   ],
   [
@@ -723,12 +728,21 @@ export function assertCiQualityGates({
     failures
   );
   requireWorkflowRunScript(ciWorkflow, "ci.yml", "rust", RUST_CANONICALIZE_RUN, failures);
+  requireWorkflowRunScript(
+    ciWorkflow, "ci.yml", "observer-macos",
+    "cargo test --manifest-path src-tauri/Cargo.toml --locked --lib app::observer::activity -- --test-threads=1",
+    failures
+  );
+  if (workflowJobScalar(ciWorkflow, "observer-macos", "runs-on") !== "macos-latest" ||
+      workflowJobScalar(ciWorkflow, "observer-macos", "timeout-minutes") !== "30") {
+    failures.push("ci.yml observer-macos must use macos-latest with a 30 minute timeout");
+  }
   const ciGateName = "${{ github.event_name == 'workflow_dispatch' && 'manual-ci-gate' || 'ci-gate' }}";
   if (workflowJobScalar(ciWorkflow, "ci-gate", "name") !== ciGateName) {
     failures.push(`ci.yml ci-gate must include name: ${ciGateName}`);
   }
   const ciGateNeeds = workflowJobList(ciWorkflow, "ci-gate", "needs");
-  for (const job of ["manual-dispatch-guard", "contracts", "frontend", "rust"]) {
+  for (const job of ["manual-dispatch-guard", "contracts", "frontend", "rust", "observer-macos"]) {
     if (!ciGateNeeds.includes(job)) failures.push(`ci.yml ci-gate must include - ${job}`);
   }
   if (workflowJobBody(ciWorkflow, "pr-title") || ciGateNeeds.includes("pr-title")) {

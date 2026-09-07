@@ -6,7 +6,8 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import type { QueryClient, QueryFunctionContext } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import { useDocumentVisibility } from "../hooks/useDocumentVisibility";
 import {
   defaultRouteProvidersList,
   defaultRouteProviderSetSessionReusePriority,
@@ -625,22 +626,30 @@ export function useOAuthLimitsQuery(providerId: number, enabled: boolean) {
 }
 
 export function useProviderAccountUsageQuery(provider: ProviderSummary, enabled = true) {
+  const visible = useDocumentVisibility();
   const normalizedProviderId = validateProviderId(provider.id);
   const options = providerAccountUsageQueryOptions(normalizedProviderId);
   const configured = isProviderAccountUsageConfigured(provider);
-  const consumerEnabled = enabled && configured;
+  const consumerEnabled = enabled && configured && visible;
 
-  return useQuery({
+  const query = useQuery({
     ...options,
     enabled: consumerEnabled,
     refetchInterval: consumerEnabled ? 5_000 : false,
-    refetchIntervalInBackground: true,
     refetchOnMount: "always",
     meta: {
       configured: enabled && configured,
       force: false,
     },
   });
+  const wasEnabled = useRef(consumerEnabled);
+  useEffect(() => {
+    if (consumerEnabled && !wasEnabled.current) {
+      void query.refetch({ cancelRefetch: false });
+    }
+    wasEnabled.current = consumerEnabled;
+  }, [consumerEnabled, query.refetch]);
+  return query;
 }
 
 export function useProviderAvailabilityTimelinesQuery(
