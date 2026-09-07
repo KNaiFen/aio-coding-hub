@@ -4,7 +4,7 @@
 //! are reachable and functional. Supports all recognized provider CLI types.
 
 use crate::providers::{is_supported_bridge_type, ModelMapping, CX2CC_BRIDGE_TYPE};
-use crate::shared::error::{db_err, AppResult};
+use crate::shared::error::{db_err, AppError, AppResult};
 use crate::{blocking, db};
 use reqwest::header::{HeaderMap, HeaderValue};
 use rusqlite::{params, params_from_iter, OptionalExtension, TransactionBehavior};
@@ -545,6 +545,33 @@ fn looks_like_auth_failure(status: u16, response_text: &str) -> bool {
 fn should_map_bridge_probe_model(bridge_type: Option<&str>) -> bool {
     matches!(bridge_type, Some(value) if value != CX2CC_BRIDGE_TYPE && is_supported_bridge_type(value))
 }
+
+fn probe_failure(error: &AppError) -> AppError {
+    let raw = error.to_string();
+    let code = if error.code() == "INTERNAL_ERROR" {
+        raw.strip_prefix("INTERNAL_ERROR: ").unwrap_or_default()
+    } else {
+        error.code()
+    };
+    let (code, message) = match code {
+        "PROBE_NO_TEXT" => ("PROBE_NO_TEXT", "本次探测未获得有效回答；仅推理内容不算回答，100 token 预算可能已耗尽"),
+        "PROBE_UNFINISHED" => ("PROBE_UNFINISHED", "响应提前结束，未收到完整结束标记"),
+        "PROBE_TERMINATION" => ("PROBE_TERMINATION", "上游以不支持的原因结束了生成"),
+        "PROBE_READ" => ("PROBE_READ", "读取上游响应失败"),
+        "PROBE_TOO_LARGE" => ("PROBE_TOO_LARGE", "上游响应超过 64 KiB 限制"),
+        "PROBE_TIMEOUT" => ("PROBE_TIMEOUT", "本次探测超时，请稍后重试"),
+        "PROBE_HTTP" => ("PROBE_HTTP", "上游 HTTP 请求失败"),
+        "PROBE_AUTH" | "AUTH_RELOGIN_REQUIRED" | "OAUTH_REFRESH_FAILED" => ("PROBE_AUTH", "认证失败，请检查凭据或重新登录"),
+        "PROBE_MODEL_QUOTA" => ("PROBE_MODEL_QUOTA", "上游拒绝请求，请检查模型、配额或频率限制"),
+        "PROBE_STRUCTURE" => ("PROBE_STRUCTURE", "上游响应格式不符合预期协议"),
+        "PROBE_UPSTREAM_ERROR" => ("PROBE_UPSTREAM_ERROR", "上游返回错误，本次生成失败"),
+        "PROBE_OAUTH_PROTOCOL" => ("PROBE_OAUTH_PROTOCOL", "OAuth 认证不支持当前请求协议"),
+        "PROBE_INVALID_URL" => ("PROBE_INVALID_URL", "供应商地址格式无效"),
+        _ => ("PROBE_PREPARATION", "探测准备失败，请检查供应商配置"),
+    };
+    AppError::new(code, message)
+}
+
 pub async fn test_provider_availability<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     db: db::Db,
@@ -553,7 +580,7 @@ pub async fn test_provider_availability<R: tauri::Runtime>(
     let started = Instant::now();
     let deadline = tokio::time::Instant::now() + WORK_TIMEOUT;
     let provider = tokio::time::timeout_at(deadline, load_effective_provider_for_test(db.clone(), provider_id))
-        .await.map_err(|_| crate::shared::error::AppError::new("PROBE_TIMEOUT", "probe preparation exceeded 60 seconds"))??;
+        .await.map_err(|_| probe_failure(&AppError::from("PROBE_TIMEOUT")))??;
 
     if let Some(bridge_type) = provider.bridge_type.as_deref() {
         let bridge_label = if bridge_type == CX2CC_BRIDGE_TYPE {
@@ -776,13 +803,7 @@ pub async fn test_provider_availability<R: tauri::Runtime>(
     match execution {
         Ok(()) => result.ok = true,
         Err(error) => {
-            let code = if error.code() == "INTERNAL_ERROR" {
-                let raw = error.to_string();
-                raw.strip_prefix("INTERNAL_ERROR: ")
-                    .filter(|code| code.starts_with("PROBE_") && code.bytes().all(|byte| byte.is_ascii_uppercase() || byte == b'_'))
-                    .unwrap_or("PROBE_PREPARATION").to_string()
-            } else { error.code().to_string() };
-            result.error = Some(code);
+            result.error = Some(probe_failure(&error).to_string());
         },
     }
     Ok(result)
@@ -1949,6 +1970,12 @@ mod tests {
             assert!(!result.ok, "status {status}");
             assert_eq!(result.status, Some(status));
             assert_eq!(result.tested_model.as_deref(), Some("selected-model"));
+            let expected = match status {
+                401 | 403 => "PROBE_AUTH: 认证失败",
+                400 | 404 | 429 => "PROBE_MODEL_QUOTA: 上游拒绝请求",
+                _ => "PROBE_HTTP: 上游 HTTP 请求失败",
+            };
+            assert!(result.error.as_deref().unwrap().starts_with(expected));
             server.await.unwrap();
         }
     }
@@ -1996,6 +2023,56 @@ mod tests {
             assert!(result.error.as_deref().unwrap().starts_with("PROBE_"));
             server.await.unwrap();
         }
+    }
+
+    #[test]
+    fn probe_failures_expose_fixed_chinese_reasons_without_upstream_details() {
+        for (code, reason) in [
+            ("PROBE_NO_TEXT", "本次探测未获得有效回答"),
+            ("PROBE_UNFINISHED", "未收到完整结束标记"),
+            ("PROBE_TERMINATION", "不支持的原因"),
+            ("PROBE_READ", "读取上游响应失败"),
+            ("PROBE_TOO_LARGE", "64 KiB"),
+            ("PROBE_TIMEOUT", "本次探测超时"),
+            ("PROBE_HTTP", "HTTP 请求失败"),
+            ("PROBE_AUTH", "认证失败"),
+            ("PROBE_MODEL_QUOTA", "模型、配额或频率限制"),
+            ("PROBE_STRUCTURE", "响应格式"),
+            ("PROBE_UPSTREAM_ERROR", "上游返回错误"),
+        ] {
+            for error in [AppError::from(code.to_string()), AppError::new(code, "SYNTHETIC_PRIVATE_DETAIL")] {
+                let display = probe_failure(&error).to_string();
+                assert!(display.starts_with(&format!("{code}: ")));
+                assert!(display.contains(reason));
+                assert!(!display.contains("SYNTHETIC_PRIVATE_DETAIL"));
+                assert!(display.chars().count() <= 128);
+            }
+        }
+        let no_text = probe_failure(&AppError::from("PROBE_NO_TEXT")).to_string();
+        assert!(no_text.contains("仅推理内容不算回答"));
+        assert!(no_text.contains("100 token"));
+        assert!(!no_text.contains("永久"));
+        assert_eq!(probe_failure(&AppError::new("UPSTREAM_PRIVATE_CODE", "SYNTHETIC_PRIVATE_DETAIL")).code(), "PROBE_PREPARATION");
+    }
+
+    #[tokio::test]
+    async fn reasoning_only_token_limit_returns_the_chinese_no_answer_reason() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = crate::db::init_for_tests(&temp.path().join("reasoning-only.db")).unwrap();
+        let (url, server) = response_from_request_capture("/v1/responses", 200,
+            r#"{"object":"response","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[{"type":"reasoning","summary":[{"text":"OK"}]}],"usage":{"output_tokens":100}}"#).await;
+        let mut params = default_provider_params("reasoning-only");
+        params.base_urls = vec![url];
+        params.availability_test_model = Some("selected-model".into());
+        let provider = upsert(&db, params).unwrap();
+        let app = tauri::test::mock_app();
+        let result = test_provider_availability(app.handle(), db, provider.id).await.unwrap();
+        assert!(!result.ok);
+        assert_eq!(result.tested_model.as_deref(), Some("selected-model"));
+        assert_eq!(result.error, Some(probe_failure(&AppError::from("PROBE_NO_TEXT")).to_string()));
+        let request = server.await.unwrap();
+        let body: serde_json::Value = serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(body["max_output_tokens"], 100);
     }
 
     #[test]
