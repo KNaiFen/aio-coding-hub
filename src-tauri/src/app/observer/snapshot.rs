@@ -1940,9 +1940,12 @@ mod tests {
             [claude],
         )
         .unwrap();
+        drop(conn);
         let spend = provider_limit_usage::list_v1(&db, None)
             .map(|rows| rows.into_iter().map(|row| (row.provider_id, row)).collect());
+        let conn = db.open_connection().unwrap();
         conn.execute_batch("DROP VIEW usage_events").unwrap();
+        drop(conn);
         for (scope, expected) in [
             (Some("codex"), vec![codex]),
             (None, vec![codex, claude]),
@@ -2010,12 +2013,13 @@ mod tests {
         let conn = db.open_connection().unwrap();
         for index in 1..=PROVIDER_STATUS_LIMIT {
             conn.execute(
-                "INSERT INTO providers (cli_key, name, base_url, api_key_plaintext, enabled, created_at, updated_at) VALUES ('codex', ?1, 'http://example.test', 'synthetic', 1, 1, 1)",
-                [format!("provider-{index}")],
+                "INSERT INTO providers (provider_uuid, cli_key, name, base_url, api_key_plaintext, enabled, created_at, updated_at) VALUES (?1, 'codex', ?2, 'http://example.test', 'synthetic', 1, 1, 1)",
+                rusqlite::params![crate::shared::uuid::new_uuid_v4(), format!("provider-{index}")],
             ).unwrap();
+            let provider_id = conn.last_insert_rowid();
             conn.execute(
-                "INSERT INTO default_route_providers (cli_key, provider_id, sort_order, created_at, updated_at) VALUES ('codex', last_insert_rowid(), ?1, 1, 1)",
-                [index as i64],
+                "INSERT INTO default_route_providers (cli_key, provider_id, sort_order, created_at, updated_at) VALUES ('codex', ?1, ?2, 1, 1)",
+                rusqlite::params![provider_id, index as i64],
             ).unwrap();
         }
         drop(conn);
