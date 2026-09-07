@@ -527,7 +527,7 @@ describe("pages/providers/ProviderRoutingEditor", () => {
     );
   });
 
-  it.each([
+  it.each<[string, ProviderModelRoutingPolicyView]>([
     ["disabled null", policyView({ memberEnabled: false })],
     ["disabled empty", { ...policyView({ memberEnabled: false }), cross_policy: { enabled: false, rules: [] } }],
     ["disabled rules", policyView({ memberEnabled: false, crossTarget: TARGET_UUID })],
