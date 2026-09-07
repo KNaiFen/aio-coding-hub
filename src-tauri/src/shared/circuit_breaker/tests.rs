@@ -27,7 +27,7 @@ fn probe_commit_rechecks_expiry_after_config_and_health_lock_waits() {
                 started.send(()).unwrap();
                 cb.record_probe_outcome_if(7, 1_001, true, |apply| {
                     if budget.expired() { return false; }
-                    apply();
+                    assert_eq!(apply(), Some(true));
                     true
                 })
             }

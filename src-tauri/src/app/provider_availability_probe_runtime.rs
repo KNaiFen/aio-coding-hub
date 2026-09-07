@@ -1853,6 +1853,7 @@ INSERT INTO providers(
         assert!(matches!(state.begin_probe(7, None).await, ProbeDecision::Lead { .. }));
     }
 
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test(start_paused = true)]
     async fn shared_deadline_releases_waiters_and_isolates_late_blocking_work() {
         let _env_lock = crate::test_support::test_env_lock();
