@@ -340,7 +340,8 @@ jobs:
           workspaces: src-tauri
 
       - name: Observer macOS activity tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --lib app::observer::activity -- --test-threads=1
+        run: |
+          cargo test --manifest-path src-tauri/Cargo.toml --locked --lib app::observer::activity -- --test-threads=1
 
   candidate-plan:
     needs: change-scope

@@ -44,8 +44,8 @@ assert.doesNotThrow(() =>
 for (const [name, fixture, expected] of [
   [
     "observer macOS activity command",
-    { ...valid, ciWorkflow: ciWorkflow.replace("        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --lib app::observer::activity -- --test-threads=1\n", "") },
-    /observer-macos must include/,
+    { ...valid, ciWorkflow: ciWorkflow.replace("        run: |\n          cargo test --manifest-path src-tauri/Cargo.toml --locked --lib app::observer::activity -- --test-threads=1\n", "") },
+    /observer-macos must retain the approved fail-closed script/,
   ],
   [
     "observer macOS gate dependency",
