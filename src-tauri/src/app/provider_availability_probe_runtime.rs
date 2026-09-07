@@ -376,32 +376,32 @@ impl ProviderAvailabilityProbeRuntimeState {
                                     budget.clone(),
                                 )
                                 .await;
-                            if budget.expired() {
-                                return;
-                            } else if result.is_err() {
-                                let mut inner = state.shared.inner.lock().await;
-                                if !budget.expired() {
-                                    complete_flight(
-                                        &mut inner,
-                                        provider_id,
-                                        generation,
-                                        &budget,
-                                        result,
-                                        None,
-                                    );
+                            if !budget.expired() {
+                                if result.is_err() {
+                                    let mut inner = state.shared.inner.lock().await;
+                                    if !budget.expired() {
+                                        complete_flight(
+                                            &mut inner,
+                                            provider_id,
+                                            generation,
+                                            &budget,
+                                            result,
+                                            None,
+                                        );
+                                    }
+                                } else {
+                                    state
+                                        .finish_probe(
+                                            &app,
+                                            &db,
+                                            provider_id,
+                                            generation,
+                                            budget.clone(),
+                                            &trace_id,
+                                            result,
+                                        )
+                                        .await;
                                 }
-                            } else {
-                                state
-                                    .finish_probe(
-                                        &app,
-                                        &db,
-                                        provider_id,
-                                        generation,
-                                        budget.clone(),
-                                        &trace_id,
-                                        result,
-                                    )
-                                    .await;
                             }
                         };
                         let timed_out = tokio::time::timeout_at(budget.deadline, work)
