@@ -82,7 +82,7 @@ struct RuntimeEntry {
     // A configuration change advances the generation before its database write.
     // Retain the old flight until completion or its deadline releases the slot.
     in_flight: Option<InFlightProbe>,
-    completion_gate: Arc<StdMutex<()>>,
+    completion_gate: Arc<Mutex<()>>,
     pending_timeouts: VecDeque<TimeoutProbe>,
 }
 
@@ -527,11 +527,14 @@ impl ProviderAvailabilityProbeRuntimeState {
             let Some(entry) = inner.entries.get(&provider_id) else { return; };
             entry.completion_gate.clone()
         };
+        #[cfg(test)]
+        budget.completion_waiting.notify_one();
+        // Queue consumers before acquiring a global blocking slot. The actual
+        // closure owns the guard even if its async owner reaches its deadline.
+        let completion = completion_gate.clone().lock_owned().await;
         let finish = blocking::run("provider_availability_finish", move || -> AppResult<()> {
             let budget = work_budget;
-            // Only consumers take this gate. Admission and timeout publication
-            // remain independent of blocked SQL or circuit work.
-            let _completion = completion_gate.lock().expect("probe completion order");
+            let _completion = completion;
             loop {
                 let pending = {
                     let inner = state.shared.inner.blocking_lock();
@@ -2110,6 +2113,95 @@ INSERT INTO providers(
             assert!(state.shared.inner.lock().await.entries[&provider_id].in_flight.is_none());
         }
         assert_eq!(requests.load(Ordering::SeqCst), 9, "no retries or late generation requests");
+        server.abort();
+        assert!(server.await.unwrap_err().is_cancelled());
+        clock_driver.abort();
+        assert!(clock_driver.await.unwrap_err().is_cancelled());
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test(start_paused = true)]
+    async fn repeated_completion_timeouts_leave_blocking_slots_for_other_providers() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _home = crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_HOME", temp.path());
+        let app = tauri::test::mock_app();
+        let clock_driver = tokio::spawn(async { loop { tokio::task::yield_now().await; } });
+        let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let router = axum::Router::new().route("/v1/messages", axum::routing::post({
+            let requests = requests.clone();
+            move || {
+                requests.fetch_add(1, Ordering::SeqCst);
+                async { axum::Json(serde_json::json!({"type":"message","role":"assistant","content":[{"type":"text","text":"OK"}],"stop_reason":"end_turn"})) }
+            }
+        }));
+        let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap(); });
+        let db = crate::db::init_for_tests(&temp.path().join("completion-queue.db")).unwrap();
+        let conn = db.open_connection().unwrap();
+        for name in ["blocked completion", "independent provider"] {
+            conn.execute("INSERT INTO providers(provider_uuid, cli_key, name, base_url, api_key_plaintext, created_at, updated_at) VALUES (?1, 'claude', ?2, ?3, 'synthetic-key', 1, 1)", params![crate::shared::uuid::new_uuid_v4(), name, url]).unwrap();
+        }
+        let other_id = conn.last_insert_rowid();
+        let provider_id = other_id - 1;
+        drop(conn);
+        let state = ProviderAvailabilityProbeRuntimeState::default();
+        state.reconcile_schedules(vec![loaded(provider_id, 1, 60_000)], 0, false, 1, true).await;
+        let (entered, ready) = oneshot::channel();
+        let (release, blocked) = std::sync::mpsc::channel();
+        let (exited, ended) = oneshot::channel();
+        *state.shared.next_pause.lock().unwrap() = Some(provider_availability::ProbeTestPause {
+            stage: "completion", entered, release: blocked, exited,
+        });
+        let first = tokio::spawn({
+            let state = state.clone(); let app = app.handle().clone(); let db = db.clone();
+            async move { state.probe_manual(app, db, provider_id).await }
+        });
+        ready.await.unwrap();
+        tokio::time::advance(Duration::from_secs(60)).await;
+        assert!(first.await.unwrap().unwrap().error.unwrap().starts_with("PROBE_TIMEOUT"));
+
+        // Exceed shared::blocking's maximum of 32 slots while the first real
+        // completion closure still owns its gate and its blocking permit.
+        for round in 0..33 {
+            let next = tokio::spawn({
+                let state = state.clone(); let app = app.handle().clone(); let db = db.clone();
+                async move { state.probe_manual(app, db, provider_id).await }
+            });
+            let budget = loop {
+                if let Some(flight) = state.shared.inner.lock().await.entries[&provider_id].in_flight.as_ref() {
+                    break flight.budget.clone();
+                }
+                tokio::task::yield_now().await;
+            };
+            budget.completion_waiting.notified().await;
+            tokio::time::advance(Duration::from_secs(60)).await;
+            let result = next.await.unwrap().unwrap();
+            assert!(!result.ok);
+            assert!(result.error.unwrap().starts_with("PROBE_TIMEOUT"));
+            assert_eq!(result.tested_model.as_deref(), Some("claude-sonnet-4-6"));
+            {
+                let inner = state.shared.inner.lock().await;
+                let entry = &inner.entries[&provider_id];
+                assert!(entry.in_flight.is_none());
+                assert_eq!(entry.pending_timeouts.len(), round + 2);
+                assert!(entry.completion_gate.try_lock().is_err(), "canceled async owner must not release the real closure's gate");
+            }
+            let other = state.probe_manual(app.handle().clone(), db.clone(), other_id).await.unwrap();
+            assert!(other.ok, "independent provider must finish on round {round}");
+            assert_eq!(other.tested_model.as_deref(), Some("claude-sonnet-4-6"));
+        }
+        assert_eq!(requests.load(Ordering::SeqCst), 67, "one generation per real flight");
+        release.send(()).unwrap();
+        ended.await.unwrap();
+        assert!(state.probe_manual(app.handle().clone(), db.clone(), provider_id).await.unwrap().ok);
+        let counts = blocking::run("completion_queue_observations", move || -> AppResult<(i64, i64)> {
+            let mut conn = db.open_connection()?;
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
+            Ok(tx.query_row("SELECT SUM(success = 0), SUM(success = 1) FROM provider_availability_observations WHERE provider_id = ?1", [provider_id], |row| Ok((row.get(0)?, row.get(1)?))).unwrap())
+        }).await.unwrap();
+        assert_eq!(counts, (34, 1), "queued timeouts persist once before the new success");
         server.abort();
         assert!(server.await.unwrap_err().is_cancelled());
         clock_driver.abort();

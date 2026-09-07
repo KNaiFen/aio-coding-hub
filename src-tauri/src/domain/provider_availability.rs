@@ -54,6 +54,8 @@ pub(crate) struct ProbeBudget {
     current: Mutex<bool>,
     #[cfg(test)]
     pub(crate) pause: Mutex<Option<ProbeTestPause>>,
+    #[cfg(test)]
+    pub(crate) completion_waiting: tokio::sync::Notify,
 }
 
 #[cfg(test)]
@@ -75,6 +77,8 @@ impl ProbeBudget {
             current: Mutex::new(true),
             #[cfg(test)]
             pause: Mutex::new(None),
+            #[cfg(test)]
+            completion_waiting: tokio::sync::Notify::new(),
         })
     }
 
