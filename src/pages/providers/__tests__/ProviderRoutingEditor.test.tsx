@@ -527,6 +527,66 @@ describe("pages/providers/ProviderRoutingEditor", () => {
     );
   });
 
+  it.each([
+    ["disabled null", policyView({ memberEnabled: false })],
+    ["disabled empty", { ...policyView({ memberEnabled: false }), cross_policy: { enabled: false, rules: [] } }],
+    ["disabled rules", policyView({ memberEnabled: false, crossTarget: TARGET_UUID })],
+    ["enabled null", policyView()],
+    ["Default", policyView({ mode: null })],
+    ["non-member", policyView({ memberPresent: false })],
+  ])("preserves the original cross policy on ordinary save: %s", async (_name, serverView) => {
+    vi.mocked(providerModelRoutingPolicyGet).mockResolvedValue(serverView);
+    vi.mocked(providerModelRoutingPolicySave).mockImplementation(async (input) => {
+      expect(input.cross_policy).toEqual(serverView.cross_policy);
+      return { ...serverView, ordinary_policy: input.ordinary_policy };
+    });
+    const onSaved = vi.fn();
+    renderDialog(editor({ routeMode: serverView.selected_mode ? MODE_ONE : null, onSaved }));
+    fireEvent.change(await screen.findByDisplayValue("grok-source"), {
+      target: { value: "ordinary-edit" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
+    expect(providerModelRoutingPolicySave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cross_policy: serverView.cross_policy,
+        expected_cross_policy_revision: serverView.cross_policy_revision,
+      })
+    );
+  });
+
+  it("keeps a dirty cross draft when its source member becomes disabled", async () => {
+    let serverView = policyView({ crossTarget: TARGET_UUID });
+    vi.mocked(providerModelRoutingPolicyGet).mockImplementation(async () => serverView);
+    const onSaved = vi.fn();
+    const view = renderDialog(editor({ onSaved }));
+    fireEvent.change(await screen.findByDisplayValue("cross-source"), {
+      target: { value: "local-draft" },
+    });
+    serverView = { ...serverView, source_member_enabled: false };
+    await act(async () => {
+      await view.client.refetchQueries({
+        queryKey: providerRoutingPolicyQueryKey({
+          cliKey: "grok", providerId: 1, providerUuid: SOURCE_UUID,
+          modeId: MODE_ONE.modeId, modeUuid: MODE_ONE.modeUuid,
+        }),
+        exact: true,
+      });
+    });
+    vi.mocked(providerModelRoutingPolicySave).mockRejectedValueOnce(
+      new Error("SEC_INVALID_INPUT: disabled source member cannot change cross-provider routing policy")
+    );
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(providerModelRoutingPolicySave).toHaveBeenCalledOnce());
+    expect(providerModelRoutingPolicySave).toHaveBeenCalledWith(expect.objectContaining({
+      cross_policy: expect.objectContaining({
+        rules: [expect.objectContaining({ source_model: "local-draft" })],
+      }),
+    }));
+    expect(screen.getByDisplayValue("local-draft")).toBeInTheDocument();
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+
   it("keeps ordinary edits across a mode change and confirms dirty cross drafts", async () => {
     vi.mocked(providerModelRoutingPolicyGet).mockImplementation(async (input) =>
       policyView({
