@@ -169,8 +169,8 @@ impl DbProjection {
     }
 }
 
-pub(super) async fn build_snapshot(
-    app: &tauri::AppHandle,
+pub(super) async fn build_snapshot<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     db: Option<&crate::db::Db>,
     db_query_permit: Option<OwnedSemaphorePermit>,
     folder_cache: Arc<StdMutex<FolderLookupCache>>,
@@ -303,8 +303,8 @@ pub(super) async fn build_snapshot(
     }
 }
 
-async fn load_db_projection(
-    app: &tauri::AppHandle,
+async fn load_db_projection<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     db: Option<&crate::db::Db>,
     db_query_permit: Option<OwnedSemaphorePermit>,
     folder_cache: Arc<StdMutex<FolderLookupCache>>,
@@ -346,8 +346,8 @@ async fn load_db_projection(
     }
 }
 
-fn collect_db_projection(
-    app: &tauri::AppHandle,
+fn collect_db_projection<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     db: &crate::db::Db,
     folder_cache: &Arc<StdMutex<FolderLookupCache>>,
     request: &DbProjectionRequest,
@@ -723,8 +723,8 @@ fn today_usage(db: &crate::db::Db, budget: &mut ProjectionBudget) -> crate::shar
     })
 }
 
-fn preferred_provider(
-    app: &tauri::AppHandle,
+fn preferred_provider<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     gateway_running: bool,
     now_unix: i64,
     projection: &DbProjection,
@@ -764,8 +764,8 @@ fn preferred_provider(
     .unwrap_or_else(ObserverSection::empty)
 }
 
-fn project_provider_statuses(
-    app: &tauri::AppHandle,
+fn project_provider_statuses<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     gateway_running: bool,
     now_unix: i64,
     projection: &DbProjection,
@@ -964,8 +964,8 @@ fn folder_lookup_keys<'a>(
     keys
 }
 
-fn resolve_folders(
-    app: &tauri::AppHandle,
+fn resolve_folders<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     folder_cache: &Arc<StdMutex<FolderLookupCache>>,
     active: &[&ActiveRequestSnapshotItem],
     last_inference: Option<&request_logs::RequestLogSummary>,

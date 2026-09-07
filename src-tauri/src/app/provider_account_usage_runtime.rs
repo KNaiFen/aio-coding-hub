@@ -102,17 +102,17 @@ impl ProviderAccountUsageRuntimeState {
             .await;
     }
 
-    pub(crate) async fn touch_tui(
+    pub(crate) async fn touch_tui<R: tauri::Runtime>(
         &self,
-        app: &tauri::AppHandle,
+        app: &tauri::AppHandle<R>,
         targets: impl IntoIterator<Item = ProviderAccountUsageTarget>,
     ) {
         self.touch(app, targets, ConsumerKind::Tui).await;
     }
 
-    async fn touch(
+    async fn touch<R: tauri::Runtime>(
         &self,
-        app: &tauri::AppHandle,
+        app: &tauri::AppHandle<R>,
         targets: impl IntoIterator<Item = ProviderAccountUsageTarget>,
         consumer: ConsumerKind,
     ) {
@@ -165,9 +165,9 @@ impl ProviderAccountUsageRuntimeState {
         }
     }
 
-    pub(crate) async fn fetch(
+    pub(crate) async fn fetch<R: tauri::Runtime>(
         &self,
-        app: tauri::AppHandle,
+        app: tauri::AppHandle<R>,
         provider_id: i64,
         force: bool,
     ) -> ProviderAccountUsageResult {
@@ -237,7 +237,7 @@ impl ProviderAccountUsageRuntimeState {
         RefreshDecision::Lead(generation)
     }
 
-    async fn perform_refresh(&self, app: tauri::AppHandle, provider_id: i64, generation: u64) {
+    async fn perform_refresh<R: tauri::Runtime>(&self, app: tauri::AppHandle<R>, provider_id: i64, generation: u64) {
         let result = match self.shared.fetch_limiter.clone().acquire_owned().await {
             Ok(permit) => {
                 let result =
@@ -289,7 +289,7 @@ impl ProviderAccountUsageRuntimeState {
         result.clone()
     }
 
-    async fn run_scheduler(self, app: tauri::AppHandle) {
+    async fn run_scheduler<R: tauri::Runtime>(self, app: tauri::AppHandle<R>) {
         loop {
             let due = self.collect_due_provider_ids().await;
             let Some(due) = due else {
