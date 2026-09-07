@@ -452,7 +452,16 @@ async fn provider_test_availability_handler(
             )
         }
     };
-    let _activity_work = state.activity.work().await;
+    match tokio::time::timeout(OBSERVER_PROBE_TIMEOUT, async {
+        let _activity_work = state.activity.work().await;
+        run_provider_test(&state, provider_id).await
+    }).await {
+        Ok(response) => response,
+        Err(_) => api_error(StatusCode::GATEWAY_TIMEOUT, "OBS_PROBE_TIMEOUT", "provider probe timed out"),
+    }
+}
+
+async fn run_provider_test(state: &ObserverHttpState, provider_id: i64) -> Response {
     let Some(db_state) = state.app.try_state::<crate::app_state::DbInitState>() else {
         return api_error(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -479,40 +488,25 @@ async fn provider_test_availability_handler(
             "provider probe is unavailable",
         );
     };
-    let result = match tokio::time::timeout(
-        OBSERVER_PROBE_TIMEOUT,
-        runtime.probe_manual(state.app.clone(), db, provider_id),
-    )
-    .await
-    {
-        Ok(Ok(result)) => result,
-        Ok(Err(error)) if error.code() == "DB_NOT_FOUND" => {
+    let result = match runtime.probe_manual(state.app.clone(), db, provider_id).await {
+        Ok(result) => result,
+        Err(error) if error.code() == "DB_NOT_FOUND" => {
             return api_error(
                 StatusCode::NOT_FOUND,
                 "OBS_PROVIDER_NOT_FOUND",
                 "provider not found",
             )
         }
-        Ok(Err(_)) => {
+        Err(_) => {
             return api_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "OBS_PROBE_FAILED",
                 "provider probe failed",
             )
         }
-        Err(_) => {
-            return api_error(
-                StatusCode::GATEWAY_TIMEOUT,
-                "OBS_PROBE_TIMEOUT",
-                "provider probe timed out",
-            )
-        }
     };
-    let error = (!result.ok).then(|| match result.status {
-        Some(401 | 403) => "认证失败".to_string(),
-        Some(status) if status >= 500 => "上游服务异常".to_string(),
-        Some(_) => "供应商响应不可用".to_string(),
-        None => "连接或请求失败".to_string(),
+    let error = (!result.ok).then(|| {
+        bounded_observer_text(result.error.as_deref().unwrap_or("PROBE_FAILED"), 128)
     });
     secured(
         Json(ObserverProviderAvailabilityTestResult {
@@ -527,6 +521,8 @@ async fn provider_test_availability_handler(
                 .response_preview
                 .as_deref()
                 .map(|value| bounded_observer_text(value, 500)),
+            requested_model: result.requested_model.as_deref().map(|value| bounded_observer_text(value, 256)),
+            tested_model: result.tested_model.as_deref().map(|value| bounded_observer_text(value, 256)),
         })
         .into_response(),
     )

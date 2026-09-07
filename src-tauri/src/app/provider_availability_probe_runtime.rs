@@ -1465,6 +1465,8 @@ INSERT INTO providers(
                 latency_ms: 1,
                 error: None,
                 response_preview: None,
+                requested_model: Some("test-model".into()),
+                tested_model: Some("test-model".into()),
             }),
             recovery: Some(RecoveryDirective::from_completion(
                 generation,
@@ -1797,6 +1799,28 @@ INSERT INTO providers(
             _ => panic!("new configuration must lead after the old flight finishes"),
         };
         assert_ne!(replacement_generation, generation);
+    }
+
+    #[tokio::test]
+    async fn timed_out_probe_completes_shared_waiters_and_allows_another_flight() {
+        let state = ProviderAvailabilityProbeRuntimeState::default();
+        let (generation, first) = match state.begin_probe(7, None).await {
+            ProbeDecision::Lead { generation, receiver } => (generation, receiver),
+            _ => panic!("first probe must lead"),
+        };
+        let second = match state.begin_probe(7, None).await {
+            ProbeDecision::Wait(receiver) => receiver,
+            _ => panic!("same provider must coalesce"),
+        };
+        let temp = tempfile::tempdir().unwrap();
+        let db = crate::db::init_for_tests(&temp.path().join("timeout.db")).unwrap();
+        let app = tauri::test::mock_app();
+        state.finish_probe(app.handle(), &db, 7, generation, "timeout-probe",
+            Err(AppError::new("PROBE_TIMEOUT", "synthetic timeout"))).await;
+        for waiter in [first, second] {
+            assert_eq!(waiter.await.unwrap().result.unwrap_err().code(), "PROBE_TIMEOUT");
+        }
+        assert!(matches!(state.begin_probe(7, None).await, ProbeDecision::Lead { .. }));
     }
 
     #[tokio::test]

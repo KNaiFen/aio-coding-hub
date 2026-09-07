@@ -38,6 +38,17 @@ pub(super) use types::ErrorCategory;
 
 pub(super) use handler::proxy_impl;
 
+pub(super) async fn prepare_gemini_oauth_probe(
+    client: &reqwest::Client, access_token: &str, path: &str, body: &serde_json::Value,
+) -> Result<(String, serde_json::Value), String> {
+    let request = gemini_oauth::prepare_upstream_request(
+        client, access_token, path, None, Some(body), &bytes::Bytes::new(), None,
+    ).await?;
+    let url = crate::gateway::util::build_target_url(&request.base_url, &request.forwarded_path, request.query.as_deref())?;
+    let body = serde_json::from_slice(&request.body_bytes).map_err(|_| "PROBE_STRUCTURE".to_string())?;
+    Ok((url.to_string(), body))
+}
+
 const CLAUDE_COUNT_TOKENS_PATH: &str = "/v1/messages/count_tokens";
 const CLAUDE_LOGGED_MESSAGES_PATH: &str = "/v1/messages";
 

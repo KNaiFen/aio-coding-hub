@@ -31,6 +31,7 @@ pub(crate) mod stream;
 pub(crate) mod traits;
 
 pub(crate) mod cx2cc;
+pub(crate) mod probe;
 #[allow(dead_code)]
 pub(crate) mod inbound;
 #[allow(dead_code)]
