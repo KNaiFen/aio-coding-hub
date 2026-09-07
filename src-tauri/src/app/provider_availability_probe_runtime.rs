@@ -2217,7 +2217,10 @@ INSERT INTO providers(
             app.manage(gateway_state::GatewayState::default());
             let gateway = crate::gateway::runtime::GatewayRuntime::for_probe_tests(&clock);
             gateway_state::with_app_running_gateway_slot_mut(app.handle(), |slot| *slot = Some(gateway));
-            let db = crate::db::init_for_tests(&temp.path().join(format!("reset-{reset_cli}.db"))).unwrap();
+            // The paused observation and the real reset need separate connections.
+            let db = crate::db::init_for_tests_with_pool_size(
+                &temp.path().join(format!("reset-{reset_cli}.db")), 2,
+            ).unwrap();
             let conn = db.open_connection().unwrap();
             conn.execute("INSERT INTO providers(provider_uuid, cli_key, name, base_url, api_key_plaintext, created_at, updated_at) VALUES (?1, 'claude', 'synthetic reset', 'https://example.test', 'synthetic-key', 1, 1)", [crate::shared::uuid::new_uuid_v4()]).unwrap();
             let provider_id = conn.last_insert_rowid();
@@ -2304,7 +2307,11 @@ INSERT INTO providers(
         for accepted in [false, true] {
             for mutate in [false, true] {
                 let before_refreshes = refreshes.load(Ordering::SeqCst);
-                let db = crate::db::init_for_tests(&temp.path().join(format!("oauth-{accepted}-{mutate}.db"))).unwrap();
+                // Allow the CAS, timeout consumer, configuration load, and SQL
+                // ordering check to acquire independent connections.
+                let db = crate::db::init_for_tests_with_pool_size(
+                    &temp.path().join(format!("oauth-{accepted}-{mutate}.db")), 4,
+                ).unwrap();
                 let conn = db.open_connection().unwrap();
                 conn.execute("INSERT INTO providers(provider_uuid, cli_key, name, base_url, api_key_plaintext, created_at, updated_at) VALUES (?1, 'claude', 'synthetic oauth', ?2, '', 1, 1)", params![crate::shared::uuid::new_uuid_v4(), url]).unwrap();
                 let provider_id = conn.last_insert_rowid();
@@ -2338,8 +2345,8 @@ INSERT INTO providers(
                     let db = db.clone();
                     async move {
                         blocking::run("oauth_acceptance_read_order", move || -> AppResult<String> {
-                            reading.send(()).unwrap();
                             let mut conn = db.open_connection()?;
+                            reading.send(()).unwrap();
                             let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap();
                             let token = tx.query_row("SELECT oauth_access_token FROM providers WHERE id = ?1", [provider_id], |row| row.get::<_, String>(0)).unwrap();
                             if mutate {
@@ -2414,7 +2421,11 @@ INSERT INTO providers(
         for expired_reads in [0, 33] {
             let before_refreshes = refreshes.load(Ordering::SeqCst);
             let before_generations = generations.load(Ordering::SeqCst);
-            let db = crate::db::init_for_tests(&temp.path().join(format!("oauth-read-order-{expired_reads}.db"))).unwrap();
+            // Keep read connections available while the accepted CAS and its
+            // timeout consumer retain their own connections before commit.
+            let db = crate::db::init_for_tests_with_pool_size(
+                &temp.path().join(format!("oauth-read-order-{expired_reads}.db")), 4,
+            ).unwrap();
             let conn = db.open_connection().unwrap();
             assert_eq!(conn.query_row("PRAGMA journal_mode", [], |row| row.get::<_, String>(0)).unwrap(), "wal");
             conn.execute("INSERT INTO providers(provider_uuid, cli_key, name, base_url, api_key_plaintext, created_at, updated_at) VALUES (?1, 'claude', 'synthetic oauth', ?2, '', 1, 1)", params![crate::shared::uuid::new_uuid_v4(), url]).unwrap();
