@@ -3105,7 +3105,8 @@ INSERT INTO providers(
             });
             let phase = std::cell::Cell::new("setup");
             let mut lock_holder = None;
-            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| clock.block_on(async {
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                clock.block_on(async {
                 tokio::select! {
                     _ = deadline => Err(phase.get()),
                     () = async {
@@ -3247,7 +3248,8 @@ INSERT INTO providers(
                 tokio::time::resume();
                     } => Ok(()),
                 }
-            })));
+            })
+            }));
             // Release fixtures even after an assertion fails, before propagating
             // failure or dropping the runtime that owns the probe tasks.
             let _ = release_preparation.send(());
