@@ -2671,11 +2671,12 @@ INSERT INTO providers(
             &url,
         );
         let refreshes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        // The refreshed token must outlive the default 3600-second refresh lead.
         let router = axum::Router::new().route("/token", axum::routing::post({
             let refreshes = refreshes.clone();
             move || {
                 refreshes.fetch_add(1, Ordering::SeqCst);
-                async { axum::Json(serde_json::json!({"access_token":"synthetic-refreshed","token_type":"Bearer","expires_in":3600})) }
+                async { axum::Json(serde_json::json!({"access_token":"synthetic-refreshed","token_type":"Bearer","expires_in":7200})) }
             }
         })).route("/v1/messages", axum::routing::post(|headers: axum::http::HeaderMap| async move {
             assert_eq!(headers["authorization"], "Bearer synthetic-refreshed");
@@ -2850,11 +2851,12 @@ INSERT INTO providers(
         );
         let refreshes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let generations = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        // The refreshed token must outlive the default 3600-second refresh lead.
         let router = axum::Router::new().route("/token", axum::routing::post({
             let refreshes = refreshes.clone();
             move || {
                 refreshes.fetch_add(1, Ordering::SeqCst);
-                async { axum::Json(serde_json::json!({"access_token":"synthetic-refreshed","refresh_token":"synthetic-rotated-refresh","token_type":"Bearer","expires_in":3600})) }
+                async { axum::Json(serde_json::json!({"access_token":"synthetic-refreshed","refresh_token":"synthetic-rotated-refresh","token_type":"Bearer","expires_in":7200})) }
             }
         })).route("/v1/messages", axum::routing::post({
             let generations = generations.clone();
