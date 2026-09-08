@@ -163,6 +163,9 @@ macro_rules! generated_command_registry {
             model_prices_sync_basellm => crate::commands::model_prices::model_prices_sync_basellm,
             model_price_aliases_get => crate::commands::model_prices::model_price_aliases_get,
             model_price_aliases_set => crate::commands::model_prices::model_price_aliases_set,
+            model_price_rules_get => crate::commands::model_prices::model_price_rules_get,
+            model_price_rules_set => crate::commands::model_prices::model_price_rules_set,
+            model_price_reference_get => crate::commands::model_prices::model_price_reference_get,
             // ── prompts ──
             prompts_list => crate::commands::prompts::prompts_list,
             prompts_list_summary => crate::commands::prompts::prompts_list_summary,

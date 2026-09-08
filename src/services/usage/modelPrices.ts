@@ -5,6 +5,9 @@ import {
   type ModelPriceAliasRuleV1 as GeneratedModelPriceAliasRule,
   type ModelPriceSummary as GeneratedModelPriceSummary,
   type ModelPricesSyncReport as GeneratedModelPricesSyncReport,
+  type ModelPriceRuleV1 as GeneratedModelPriceRule,
+  type ModelPriceRulesV1 as GeneratedModelPriceRules,
+  type ModelPriceReference,
 } from "../../generated/bindings";
 import { invokeGeneratedIpc, mapGeneratedCommandResponse } from "../generatedIpc";
 import { narrowGeneratedStringUnion, type Override } from "../generatedTypeUtils";
@@ -104,6 +107,70 @@ export type ModelPriceSummary = Override<
     cli_key: CliKey;
   }
 >;
+
+export type ModelPriceRule = Override<GeneratedModelPriceRule, { cli_key: CliKey }>;
+export type ModelPriceRules = Override<GeneratedModelPriceRules, { rules: ModelPriceRule[] }>;
+export type { ModelPriceReference };
+export const MODEL_PRICE_ITEMS = ["input", "output", "cache_read", "cache_write_5m", "cache_write_1h"] as const;
+export type ModelPriceItemKey = (typeof MODEL_PRICE_ITEMS)[number];
+
+function validatePriceNumber(value: number | null, scale: number): void {
+  if (value !== null && (!Number.isFinite(value) || value < 0 || value > 1_000_000 || Math.round(value * scale) / scale !== value)) {
+    throw new Error("单价或倍率超出范围或精度限制");
+  }
+}
+
+export function normalizeModelPriceRules(value: GeneratedModelPriceRules): ModelPriceRules {
+  if (value.version !== 1 || !Array.isArray(value.rules) || value.rules.length > 512) {
+    throw new Error("不支持的定价规则版本或规则数量");
+  }
+  const keys = new Set<string>();
+  const rules = value.rules.map((rule) => {
+    const cli_key = validateModelPricesCliKey(rule.cli_key);
+    const model = normalizeRequiredText(rule.model, "model", 200);
+    if (new TextEncoder().encode(model).length > 200 || model.includes("*")) {
+      throw new Error("模型名称须完整且不超过 200 字节");
+    }
+    const key = JSON.stringify([cli_key, model]);
+    if (keys.has(key)) throw new Error("同一 CLI 和模型只能有一条定价规则");
+    keys.add(key);
+    if (typeof rule.enabled !== "boolean") throw new Error("无效的规则启用状态");
+    if (rule.multiplier !== null && MODEL_PRICE_ITEMS.some((item) => rule[item].multiplier !== null)) {
+      throw new Error("整体倍率与分项倍率不能同时设置");
+    }
+    validatePriceNumber(rule.multiplier, 1_000_000);
+    for (const item of MODEL_PRICE_ITEMS) {
+      validatePriceNumber(rule[item].price, 1_000_000_000);
+      validatePriceNumber(rule[item].multiplier, 1_000_000);
+    }
+    return { ...rule, cli_key, model };
+  });
+  return { version: 1, rules };
+}
+
+export async function modelPriceRulesGet() {
+  return invokeGeneratedIpc<ModelPriceRules>({
+    title: "读取自定义定价失败", cmd: "model_price_rules_get",
+    invoke: async () => mapGeneratedCommandResponse(await commands.modelPriceRulesGet(), normalizeModelPriceRules),
+  });
+}
+
+export async function modelPriceRulesSet(rules: ModelPriceRules) {
+  const normalized = normalizeModelPriceRules(rules);
+  return invokeGeneratedIpc<ModelPriceRules>({
+    title: "保存自定义定价失败", cmd: "model_price_rules_set", args: { rules: normalized },
+    invoke: async () => mapGeneratedCommandResponse(await commands.modelPriceRulesSet(normalized), normalizeModelPriceRules),
+  });
+}
+
+export async function modelPriceReferenceGet(cliKey: CliKey, model: string) {
+  const normalizedCli = validateModelPricesCliKey(cliKey);
+  return invokeGeneratedIpc<ModelPriceReference | null>({
+    title: "读取参考价格失败", cmd: "model_price_reference_get", args: { cliKey: normalizedCli, model },
+    nullResultBehavior: "return_fallback", fallback: null,
+    invoke: () => commands.modelPriceReferenceGet(normalizedCli, model),
+  });
+}
 
 function toCliKey(value: string, label: string): CliKey {
   return narrowGeneratedStringUnion(value.trim(), CLI_KEY_VALUES, label);

@@ -278,6 +278,46 @@ INSERT INTO request_logs (
     }
 
     #[test]
+    fn historical_backfill_uses_reference_and_recorded_multiplier_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = db::init_for_tests(&dir.path().join("history-rule-isolation.db")).unwrap();
+        crate::model_prices::upsert(&db, "codex", "gpt-test", r#"{"input_cost_per_token":0.01}"#)
+            .unwrap();
+        let conn = db.open_connection().unwrap();
+        insert_backfill_candidate(&conn, "history-missing", "codex");
+        insert_backfill_candidate(&conn, "history-zero", "codex");
+        conn.execute(
+            "UPDATE request_logs SET cost_multiplier = 0.8 WHERE trace_id = 'history-missing'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE request_logs SET cost_usd_femto = 0 WHERE trace_id = 'history-zero'",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        for _ in 0..2 {
+            backfill_missing_for_cli_with_aliases(
+                &db,
+                "codex",
+                5000,
+                &model_price_aliases::ModelPriceAliasesV1::default(),
+            )
+            .unwrap();
+        }
+        let conn = db.open_connection().unwrap();
+        let values: Vec<Option<i64>> = conn
+            .prepare("SELECT cost_usd_femto FROM request_logs ORDER BY trace_id")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(values, vec![Some(800_000_000_000_000), Some(0)]);
+    }
+
+    #[test]
     fn backfill_updates_usage_ledger_and_any_remaining_request_log() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db = db::init_for_tests(&dir.path().join("cost-backfill-ledger.db")).expect("init db");

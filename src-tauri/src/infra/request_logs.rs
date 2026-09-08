@@ -742,6 +742,20 @@ fn insert_batch_once(
         return Ok(());
     }
 
+    let price_rules = crate::model_price_rules::read(app);
+    if let Err(error) = &price_rules {
+        tracing::error!(%error, "price rules unavailable; new request costs remain unknown");
+    }
+    insert_batch_with_rules(app, db, items, cache, price_rules.as_ref().ok())
+}
+
+fn insert_batch_with_rules(
+    app: &tauri::AppHandle<impl tauri::Runtime>,
+    db: &db::Db,
+    items: &[RequestLogInsert],
+    cache: &mut InsertBatchCache,
+    price_rules: Option<&crate::model_price_rules::ModelPriceRulesV1>,
+) -> Result<(), DbWriteError> {
     let now_unix = now_unix_seconds();
     let price_aliases = model_price_aliases::read_fail_open(app);
     let mut conn = db
@@ -760,6 +774,10 @@ fn insert_batch_once(
         let mut stmt_price_json = tx
             .prepare_cached("SELECT price_json FROM model_prices WHERE cli_key = ?1 AND model = ?2")
             .map_err(|e| DbWriteError::from_rusqlite("failed to prepare model_price query", e))?;
+        let mut stmt_completed_cost = tx.prepare_cached(
+            "SELECT cost_usd_femto, cost_multiplier FROM request_logs WHERE trace_id = ?1 AND (status IS NOT NULL OR error_code IS NOT NULL)
+             UNION ALL SELECT cost_usd_femto, cost_multiplier FROM usage_ledger WHERE trace_id = ?1 AND (status IS NOT NULL OR error_present != 0) LIMIT 1"
+        ).map_err(|e| DbWriteError::from_rusqlite("failed to prepare completed cost query", e))?;
 
         let mut stmt = tx
             .prepare_cached(
@@ -870,7 +888,16 @@ fn insert_batch_once(
             let (final_provider_id, _) = final_provider_from_attempts(&attempts);
             let final_provider_id_db = (final_provider_id > 0).then_some(final_provider_id);
 
-            let cost_multiplier = if final_provider_id > 0 {
+            let completed_cost: Option<(Option<i64>, f64)> = stmt_completed_cost
+                .query_row(params![item.trace_id], |row| Ok((row.get(0)?, row.get(1)?)))
+                .optional()
+                .map_err(|e| DbWriteError::from_rusqlite("failed to read completed cost", e))?;
+            if completed_cost.is_some() && item.status.is_none() && item.error_code.is_none() {
+                continue;
+            }
+            let cost_multiplier = if let Some((_, multiplier)) = completed_cost {
+                multiplier
+            } else if final_provider_id > 0 {
                 if let Some(v) = batch_multiplier.get(&final_provider_id) {
                     *v
                 } else {
@@ -892,7 +919,11 @@ fn insert_batch_once(
                 1.0
             };
 
-            let cost_usd_femto = if is_success_status(item.status, item.error_code.as_deref()) {
+            let cost_usd_femto = if let Some((cost, _)) = completed_cost {
+                cost
+            } else if let Some(price_rules) =
+                price_rules.filter(|_| is_success_status(item.status, item.error_code.as_deref()))
+            {
                 match effective_cost_basis(
                     &item.cli_key,
                     item.requested_model.as_deref(),
@@ -922,7 +953,6 @@ fn insert_batch_once(
                                     price_aliases.resolve_target_model(priced_cli_key, priced_model)
                                 {
                                     if target_model != priced_model {
-                                        priced_model = target_model;
                                         price_json = fetch_model_price_json(
                                             &mut stmt_price_json,
                                             cache,
@@ -931,29 +961,32 @@ fn insert_batch_once(
                                             priced_cli_key,
                                             target_model,
                                         );
+                                        if price_json.is_some() {
+                                            priced_model = target_model;
+                                        }
                                     }
                                 }
                             }
 
-                            match price_json {
-                                Some(price_json) => {
-                                    let priority_applied = parse_effective_priority(
-                                        item.special_settings_json.as_deref(),
-                                    );
-                                    let options = cost::CostCalculationOptions {
-                                        priority_service_tier_applied: priority_applied,
-                                    };
-                                    cost::calculate_cost_usd_femto_with_options(
-                                        &usage,
-                                        &price_json,
-                                        cost_multiplier,
-                                        priced_cli_key,
-                                        priced_model,
-                                        &options,
-                                    )
-                                }
-                                None => None,
-                            }
+                            let rule = price_rules.resolve(
+                                priced_cli_key,
+                                &cost_basis.model,
+                                price_json.as_ref().map(|_| priced_model),
+                            );
+                            let priority_applied =
+                                parse_effective_priority(item.special_settings_json.as_deref());
+                            let options = cost::CostCalculationOptions {
+                                priority_service_tier_applied: priority_applied,
+                            };
+                            cost::calculate_cost_with_rule(
+                                &usage,
+                                price_json.as_deref(),
+                                cost_multiplier,
+                                priced_cli_key,
+                                priced_model,
+                                &options,
+                                rule,
+                            )
                         }
                     }
                     None => None,
@@ -1996,6 +2029,387 @@ VALUES ('claude', 'target-priced', '{"input_cost_per_token":0.002}', 1, 1)
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn model_rules_freeze_terminal_costs_and_project_pending_and_retained_traces() {
+        let (app, db, _dir) = init_test_db();
+        let mut cache = InsertBatchCache::default();
+        let mut rules = crate::model_price_rules::ModelPriceRulesV1 {
+            version: 1,
+            rules: vec![crate::model_price_rules::ModelPriceRuleV1 {
+                cli_key: "claude".into(),
+                model: "custom".into(),
+                enabled: true,
+                input: crate::model_price_rules::ModelPriceItemV1 {
+                    price: Some(2.0),
+                    multiplier: None,
+                },
+                output: crate::model_price_rules::ModelPriceItemV1 {
+                    price: Some(10.0),
+                    multiplier: None,
+                },
+                ..Default::default()
+            }],
+        };
+        let make = |trace: &str| RequestLogInsert {
+            requested_model: Some("custom".into()),
+            input_tokens: Some(1000),
+            ..request_log_insert(trace)
+        };
+        let pending = RequestLogInsert {
+            status: None,
+            ..make("rules-pending")
+        };
+        super::insert_batch_with_rules(
+            app.handle(),
+            &db,
+            &[make("rules-old"), pending],
+            &mut cache,
+            Some(&rules),
+        )
+        .unwrap();
+        let conn = db.open_connection().unwrap();
+        conn.execute(
+            "UPDATE request_logs SET cost_multiplier = 0.8 WHERE trace_id = 'rules-old'",
+            [],
+        )
+        .unwrap();
+        crate::usage_ledger::project_trace(&conn, "rules-old").unwrap();
+        drop(conn);
+        rules.rules[0].multiplier = Some(0.0);
+        super::insert_batch_with_rules(
+            app.handle(),
+            &db,
+            &[make("rules-old"), make("rules-pending"), make("rules-new")],
+            &mut cache,
+            Some(&rules),
+        )
+        .unwrap();
+        let conn = db.open_connection().unwrap();
+        for table in ["request_logs", "usage_ledger"] {
+            let old: (Option<i64>, f64) = conn.query_row(&format!("SELECT cost_usd_femto, cost_multiplier FROM {table} WHERE trace_id = 'rules-old'"), [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+            assert_eq!(old, (Some(2_000_000_000_000), 0.8));
+            for trace in ["rules-pending", "rules-new"] {
+                let value: Option<i64> = conn
+                    .query_row(
+                        &format!("SELECT cost_usd_femto FROM {table} WHERE trace_id = ?1"),
+                        [trace],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(value, Some(0));
+            }
+        }
+        conn.execute("DELETE FROM request_logs WHERE trace_id = 'rules-old'", [])
+            .unwrap();
+        drop(conn);
+        super::insert_batch_with_rules(
+            app.handle(),
+            &db,
+            &[RequestLogInsert {
+                status: None,
+                ..make("rules-old")
+            }],
+            &mut cache,
+            Some(&rules),
+        )
+        .unwrap();
+        assert!(!request_log_exists(&db, "rules-old"));
+        rules.rules.clear();
+        super::insert_batch_with_rules(
+            app.handle(),
+            &db,
+            &[make("rules-old"), make("rules-unpriced")],
+            &mut cache,
+            Some(&rules),
+        )
+        .unwrap();
+        rules
+            .rules
+            .push(crate::model_price_rules::ModelPriceRuleV1 {
+                cli_key: "claude".into(),
+                model: "custom".into(),
+                enabled: true,
+                input: crate::model_price_rules::ModelPriceItemV1 {
+                    price: Some(5.0),
+                    multiplier: None,
+                },
+                output: crate::model_price_rules::ModelPriceItemV1 {
+                    price: Some(5.0),
+                    multiplier: None,
+                },
+                ..Default::default()
+            });
+        super::insert_batch_with_rules(
+            app.handle(),
+            &db,
+            &[make("rules-unpriced")],
+            &mut cache,
+            Some(&rules),
+        )
+        .unwrap();
+        let conn = db.open_connection().unwrap();
+        let retained: Option<i64> = conn
+            .query_row(
+                "SELECT cost_usd_femto FROM usage_ledger WHERE trace_id = 'rules-old'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let unknown: Option<i64> = conn
+            .query_row(
+                "SELECT cost_usd_femto FROM usage_ledger WHERE trace_id = 'rules-unpriced'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(retained, Some(2_000_000_000_000));
+        assert_eq!(unknown, None);
+        drop(conn);
+        super::insert_batch_with_rules(
+            app.handle(),
+            &db,
+            &[make("rules-read-error")],
+            &mut cache,
+            None,
+        )
+        .unwrap();
+        assert!(request_log_exists(&db, "rules-read-error"));
+        assert_eq!(super::costing::cost_usd_from_femto(Some(0)), Some(0.0));
+    }
+
+    #[test]
+    fn model_rules_use_effective_route_and_bridge_identity() {
+        let (app, db, _dir) = init_test_db();
+        let rules = crate::model_price_rules::ModelPriceRulesV1 {
+            version: 1,
+            rules: vec![
+                crate::model_price_rules::ModelPriceRuleV1 {
+                    cli_key: "codex".into(),
+                    model: "target".into(),
+                    enabled: true,
+                    input: crate::model_price_rules::ModelPriceItemV1 {
+                        price: Some(2.0),
+                        multiplier: None,
+                    },
+                    output: crate::model_price_rules::ModelPriceItemV1 {
+                        price: Some(10.0),
+                        multiplier: None,
+                    },
+                    ..Default::default()
+                },
+                crate::model_price_rules::ModelPriceRuleV1 {
+                    cli_key: "claude".into(),
+                    model: "source".into(),
+                    enabled: true,
+                    input: crate::model_price_rules::ModelPriceItemV1 {
+                        price: Some(9.0),
+                        multiplier: None,
+                    },
+                    output: crate::model_price_rules::ModelPriceItemV1 {
+                        price: Some(9.0),
+                        multiplier: None,
+                    },
+                    ..Default::default()
+                },
+            ],
+        };
+        for (trace, marker, expected) in [
+            (
+                "rules-route",
+                serde_json::json!([{ "type": "configured_model_route", "providerId": 7, "pricedCliKey": "codex", "pricedModel": "target", "applied": true }]),
+                Some(1_800_000_000_000i64),
+            ),
+            (
+                "rules-bridge",
+                serde_json::json!([{ "type": "cx2cc_cost_basis", "bridge_provider_id": 7, "source_cli_key": "codex", "priced_model": "target" }]),
+                Some(1_800_000_000_000i64),
+            ),
+            (
+                "rules-missing",
+                serde_json::json!([{ "type": "configured_model_route", "providerId": 7, "pricedCliKey": "codex", "pricedModel": "missing", "applied": true }]),
+                None,
+            ),
+        ] {
+            let item = RequestLogInsert { requested_model: Some("source".into()), input_tokens: Some(1000), cache_read_input_tokens: Some(100),
+                special_settings_json: Some(marker.to_string()),
+                attempts_json: serde_json::json!([{ "provider_id": 7, "provider_name": "Test", "outcome": "success", "status": 200 }]).to_string(),
+                ..request_log_insert(trace) };
+            super::insert_batch_with_rules(
+                app.handle(),
+                &db,
+                &[item],
+                &mut InsertBatchCache::default(),
+                Some(&rules),
+            )
+            .unwrap();
+            let conn = db.open_connection().unwrap();
+            let value: Option<i64> = conn
+                .query_row(
+                    "SELECT cost_usd_femto FROM usage_ledger WHERE trace_id = ?1",
+                    [trace],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(value, expected.map(|value| value + 20_000_000_000));
+        }
+    }
+
+    #[test]
+    fn model_rules_do_not_stack_source_and_alias_target_or_alias_without_reference() {
+        let (app, db, _dir) = init_test_db();
+        crate::model_prices::upsert(
+            &db,
+            "grok",
+            "grok-build-0.1",
+            r#"{"input_cost_per_token":0.000002}"#,
+        )
+        .unwrap();
+        let mut rules = crate::model_price_rules::ModelPriceRulesV1 {
+            version: 1,
+            rules: vec![
+                crate::model_price_rules::ModelPriceRuleV1 {
+                    cli_key: "grok".into(),
+                    model: "grok-build".into(),
+                    enabled: true,
+                    multiplier: Some(2.0),
+                    ..Default::default()
+                },
+                crate::model_price_rules::ModelPriceRuleV1 {
+                    cli_key: "grok".into(),
+                    model: "grok-build-0.1".into(),
+                    enabled: true,
+                    multiplier: Some(3.0),
+                    ..Default::default()
+                },
+            ],
+        };
+        for (trace, expected) in [
+            ("rule-source", Some(4_000_000_000_000i64)),
+            ("rule-target", Some(6_000_000_000_000)),
+            ("rule-no-reference", None),
+        ] {
+            if trace == "rule-target" {
+                rules.rules[0].enabled = false;
+            }
+            if trace == "rule-no-reference" {
+                db.open_connection()
+                    .unwrap()
+                    .execute("DELETE FROM model_prices", [])
+                    .unwrap();
+            }
+            let item = RequestLogInsert {
+                cli_key: "grok".into(),
+                requested_model: Some("grok-build".into()),
+                input_tokens: Some(1000),
+                ..request_log_insert(trace)
+            };
+            super::insert_batch_with_rules(
+                app.handle(),
+                &db,
+                &[item],
+                &mut InsertBatchCache::default(),
+                Some(&rules),
+            )
+            .unwrap();
+            let value: Option<i64> = db
+                .open_connection()
+                .unwrap()
+                .query_row(
+                    "SELECT cost_usd_femto FROM usage_ledger WHERE trace_id = ?1",
+                    [trace],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(value, expected);
+        }
+    }
+
+    #[test]
+    fn model_rules_only_use_alias_context_premium_after_reference_lookup_succeeds() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let (app, db, dir) = init_test_db();
+        let _home =
+            crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_HOME", dir.path());
+        let mut aliases = crate::model_price_aliases::ModelPriceAliasesV1::default();
+        aliases
+            .rules
+            .push(crate::model_price_aliases::ModelPriceAliasRuleV1 {
+                cli_key: "claude".into(),
+                match_type: crate::model_price_aliases::ModelPriceAliasMatchTypeV1::Exact,
+                pattern: "custom".into(),
+                target_model: "missing-1m".into(),
+                enabled: true,
+            });
+        crate::model_price_aliases::write(app.handle(), aliases).unwrap();
+        let mut rules = crate::model_price_rules::ModelPriceRulesV1 {
+            version: 1,
+            rules: vec![
+                crate::model_price_rules::ModelPriceRuleV1 {
+                    cli_key: "claude".into(),
+                    model: "custom".into(),
+                    enabled: true,
+                    input: crate::model_price_rules::ModelPriceItemV1 {
+                        price: Some(2.0),
+                        multiplier: None,
+                    },
+                    output: crate::model_price_rules::ModelPriceItemV1 {
+                        price: Some(10.0),
+                        multiplier: None,
+                    },
+                    ..Default::default()
+                },
+                crate::model_price_rules::ModelPriceRuleV1 {
+                    cli_key: "claude".into(),
+                    model: "missing-1m".into(),
+                    enabled: true,
+                    multiplier: Some(3.0),
+                    ..Default::default()
+                },
+            ],
+        };
+        let mut cache = InsertBatchCache::default();
+        for (trace, expected) in [
+            ("alias-missing-reference", 750_000_000_000_000),
+            ("alias-priced-source-rule", 1_000_000_000_000_000),
+            ("alias-priced-target-rule", 3_000_000_000_000_000),
+        ] {
+            if trace == "alias-priced-source-rule" {
+                crate::model_prices::upsert(
+                    &db,
+                    "claude",
+                    "missing-1m",
+                    r#"{"input_cost_per_token":0.000002,"output_cost_per_token":0.00001}"#,
+                )
+                .unwrap();
+            }
+            if trace == "alias-priced-target-rule" {
+                rules.rules[0].enabled = false;
+            }
+            let item = RequestLogInsert {
+                requested_model: Some("custom".into()),
+                cache_creation_5m_input_tokens: Some(300_000),
+                ..request_log_insert(trace)
+            };
+            super::insert_batch_with_rules(app.handle(), &db, &[item], &mut cache, Some(&rules))
+                .unwrap();
+            let conn = db.open_connection().unwrap();
+            for table in ["request_logs", "usage_ledger"] {
+                let cost: Option<i64> = conn
+                    .query_row(
+                        &format!("SELECT cost_usd_femto FROM {table} WHERE trace_id = ?1"),
+                        [trace],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    cost,
+                    Some(expected),
+                    "unexpected cost for {trace} in {table}"
+                );
+            }
+        }
     }
 
     #[test]
