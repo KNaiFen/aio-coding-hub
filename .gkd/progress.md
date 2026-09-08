@@ -83,3 +83,10 @@
 - 上述业务回归均只新增/修改源码，未在本地运行；Rust/前端测试、格式、类型、Clippy、构建、窗口交互均待普通 PR 自动 CI。没有执行安装、包管理器、服务器、格式化或生成器。
 - `src/generated/bindings.ts` 延续前轮待云端状态；本轮未触及 IPC/DTO，也未本地生成或声称可编译。无可复用的对应 head 云端业务验证证据。
 - 本轮无材料性范围偏差或未处理 finding；本地静态通过不等于独立验收。获准本地提交说明为 `fix: 修正自定义定价与预览计算`，仅暂存本轮 8 个代码/测试文件及 progress。提交后交回 main 并停止，不推送或开展后续生命周期操作。
+
+## r5 发布准备（main）
+
+- 用户于 2026-09-08 授权推送、PR、合并、发版；两位实施 writer 和两位 accept 已停止，main 已通过 r4.1 独立代码审查。
+- main 按 PLAN r5 将五份包/应用 manifest 及 Cargo.lock 中三个本地包统一为 `0.60.60`，新增 CHANGELOG 的本次定价能力说明。未修改依赖或发布工作流。
+- main 检查本轮完整 diff，只有七个版本/说明路径；`git diff --check` 和 `node scripts/check-cloud-only-verification.mjs` 均退出 0。消融审查无多余改动。
+- 业务测试、生成绑定和构建仍待普通 PR 自动 CI；本轮没有执行本地测试或生成器。
