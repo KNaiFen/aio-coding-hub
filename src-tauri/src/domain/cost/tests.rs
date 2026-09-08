@@ -267,6 +267,46 @@ fn codex_oversubscribed_cache_buckets_clamp_ordinary_input_to_zero() {
 }
 
 #[test]
+fn fixed_input_price_clamps_oversubscribed_cache_buckets() {
+    let reference = r#"{
+      "input_cost_per_token": 0.004,
+      "cache_read_input_token_cost": 0.001,
+      "cache_creation_input_token_cost": 0.006
+    }"#;
+    let mut rule = crate::model_price_rules::ModelPriceRuleV1::default();
+    rule.input.price = Some(4_000.0);
+    for (cli, cache_read, expected) in [
+        ("codex", 80, 380_000_000_000_000),
+        ("grok", 80, 380_000_000_000_000),
+        ("gemini", 130, 430_000_000_000_000),
+        ("claude", 80, 780_000_000_000_000),
+    ] {
+        for ttl_breakdown in [false, true] {
+            let usage = CostUsage {
+                input_tokens: 100,
+                cache_read_input_tokens: cache_read,
+                cache_creation_input_tokens: 50,
+                cache_creation_5m_input_tokens: if ttl_breakdown { 50 } else { 0 },
+                ..Default::default()
+            };
+            assert_eq!(
+                calculate_cost_with_rule(
+                    &usage,
+                    Some(reference),
+                    1.0,
+                    cli,
+                    "test",
+                    &CostCalculationOptions::default(),
+                    Some(&rule),
+                ),
+                Some(expected),
+                "unexpected fixed input cost for {cli}, TTL breakdown: {ttl_breakdown}"
+            );
+        }
+    }
+}
+
+#[test]
 fn gemini_only_subtracts_cache_read_from_input() {
     let usage = CostUsage {
         input_tokens: 100,

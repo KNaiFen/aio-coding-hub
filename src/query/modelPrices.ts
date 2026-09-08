@@ -87,6 +87,7 @@ export function useModelPriceAliasesSetMutation() {
       modelPriceAliasesSet(normalizeModelPriceAliases(aliases)),
     onSuccess: (updated) => {
       queryClient.setQueryData<ModelPriceAliases | null>(modelPricesKeys.aliases(), updated);
+      queryClient.invalidateQueries({ queryKey: modelPricesKeys.references() });
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: modelPricesKeys.aliases() });

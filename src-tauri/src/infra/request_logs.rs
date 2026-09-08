@@ -950,7 +950,6 @@ fn insert_batch_with_rules(
                                     price_aliases.resolve_target_model(priced_cli_key, priced_model)
                                 {
                                     if target_model != priced_model {
-                                        priced_model = target_model;
                                         price_json = fetch_model_price_json(
                                             &mut stmt_price_json,
                                             cache,
@@ -959,6 +958,9 @@ fn insert_batch_with_rules(
                                             priced_cli_key,
                                             target_model,
                                         );
+                                        if price_json.is_some() {
+                                            priced_model = target_model;
+                                        }
                                     }
                                 }
                             }
@@ -2114,6 +2116,70 @@ VALUES ('claude', 'target-priced', '{"input_cost_per_token":0.002}', 1, 1)
             super::insert_batch_with_rules(app.handle(), &db, &[item], &mut InsertBatchCache::default(), Some(&rules)).unwrap();
             let value: Option<i64> = db.open_connection().unwrap().query_row("SELECT cost_usd_femto FROM usage_ledger WHERE trace_id = ?1", [trace], |row| row.get(0)).unwrap();
             assert_eq!(value, expected);
+        }
+    }
+
+    #[test]
+    fn model_rules_only_use_alias_context_premium_after_reference_lookup_succeeds() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let (app, db, dir) = init_test_db();
+        let _home = crate::test_support::ScopedTestEnvVar::set(
+            "AIO_CODING_HUB_TEST_HOME",
+            dir.path(),
+        );
+        let mut aliases = crate::model_price_aliases::ModelPriceAliasesV1::default();
+        aliases.rules.push(crate::model_price_aliases::ModelPriceAliasRuleV1 {
+            cli_key: "claude".into(),
+            match_type: crate::model_price_aliases::ModelPriceAliasMatchTypeV1::Exact,
+            pattern: "custom".into(),
+            target_model: "missing-1m".into(),
+            enabled: true,
+        });
+        crate::model_price_aliases::write(app.handle(), aliases).unwrap();
+        let mut rules = crate::model_price_rules::ModelPriceRulesV1 {
+            version: 1,
+            rules: vec![
+                crate::model_price_rules::ModelPriceRuleV1 {
+                    cli_key: "claude".into(), model: "custom".into(), enabled: true,
+                    input: crate::model_price_rules::ModelPriceItemV1 { price: Some(2.0), multiplier: None },
+                    output: crate::model_price_rules::ModelPriceItemV1 { price: Some(10.0), multiplier: None },
+                    ..Default::default()
+                },
+                crate::model_price_rules::ModelPriceRuleV1 {
+                    cli_key: "claude".into(), model: "missing-1m".into(), enabled: true,
+                    multiplier: Some(3.0), ..Default::default()
+                },
+            ],
+        };
+        let mut cache = InsertBatchCache::default();
+        for (trace, expected) in [
+            ("alias-missing-reference", 750_000_000_000_000),
+            ("alias-priced-source-rule", 1_000_000_000_000_000),
+            ("alias-priced-target-rule", 3_000_000_000_000_000),
+        ] {
+            if trace == "alias-priced-source-rule" {
+                crate::model_prices::upsert(
+                    &db, "claude", "missing-1m",
+                    r#"{"input_cost_per_token":0.000002,"output_cost_per_token":0.00001}"#,
+                ).unwrap();
+            }
+            if trace == "alias-priced-target-rule" {
+                rules.rules[0].enabled = false;
+            }
+            let item = RequestLogInsert {
+                requested_model: Some("custom".into()),
+                cache_creation_5m_input_tokens: Some(300_000),
+                ..request_log_insert(trace)
+            };
+            super::insert_batch_with_rules(app.handle(), &db, &[item], &mut cache, Some(&rules)).unwrap();
+            let conn = db.open_connection().unwrap();
+            for table in ["request_logs", "usage_ledger"] {
+                let cost: Option<i64> = conn.query_row(
+                    &format!("SELECT cost_usd_femto FROM {table} WHERE trace_id = ?1"),
+                    [trace], |row| row.get(0),
+                ).unwrap();
+                assert_eq!(cost, Some(expected), "unexpected cost for {trace} in {table}");
+            }
         }
     }
 

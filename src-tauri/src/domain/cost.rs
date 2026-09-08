@@ -457,7 +457,8 @@ pub fn calculate_cost_with_rule(
             .saturating_sub(priced_cache_creation_input_tokens),
         "gemini" => input_tokens.saturating_sub(cache_read_input_tokens),
         _ => input_tokens,
-    };
+    }
+    .max(0);
 
     let context_1m_applied = contains_context_1m(cli_key, model);
 

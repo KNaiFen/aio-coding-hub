@@ -49,3 +49,37 @@
 本任务按批准许可作一个中文 Conventional Commit：`feat: 支持模型自定义定价与倍率`。
 仅暂存本任务代码、测试、合同及本进度，main 所有的 execution 保留未跟踪且不修改。
 提交后停止交回 main；不推送、PR、合并、发布、清理或派生代理。
+
+## r4.1 四项审查返工
+
+日期：2026-09-08。唯一 worktree 和分支同上；本轮从初次实现提交
+`9a4ec1119074a24584a5f8bb1bb3156aef634e23` 继续，依据 execution r4.1 第 17-26 行。
+初始 Git 状态仅有 main 所有的未跟踪 `.gkd/execution.md`，本轮未修改或暂存该文件。
+
+### 实施与回归源码证据
+
+1. `src-tauri/src/domain/cost.rs` 在各 CLI 扣除缓存后的普通输入 Token 统一应用 `.max(0)`，固定输入价不能产生负费用；原参考价路径的正数门槛保持。`fixed_input_price_clamps_oversubscribed_cache_buckets` 覆盖 Codex/Grok 输入 100、read 80、write 50 时为 0.38 USD，Gemini 输入 100、read 130、write 50 时为 0.43 USD，以及 Claude 累加仍为 0.78 USD；同时覆盖总写入与 5m 明细口径。
+2. `src-tauri/src/infra/request_logs.rs` 仅在别名目标 `price_json.is_some()` 时切换 `priced_model`。`model_rules_only_use_alias_context_premium_after_reference_lookup_succeeds` 使用隔离临时应用目录中的 `custom -> missing-1m` 别名，断言原模型自定义输入 2/输出 10 USD 每百万、300k cache write 5m 在无参考价时为 0.75 USD；插入目标参考价后仍按目标 1m 名称计为 1 USD；停用原规则后目标倍率 3 接管为 3 USD。每个场景同时断言详情与账本。
+3. `ModelPriceRulesDialog.tsx` 从当前候选规则集选取启用的原模型规则，缺失时只按参考查询实际返回的参考模型寻找启用目标规则；固定价、倍率和缓存继承预览共用这一条选择结果。交互回归点击停用当前规则，断言目标输入参考 2、倍率 3 显示 6，并保留 priority/长上下文变体；覆盖无参考价、精确参考价、目标在未保存候选集内停用，以及保存时原规则字段保留。
+4. `src/query/keys.ts` 增加 `references()` 前缀；别名保存成功仅新增该参考查询前缀的失效，原别名缓存更新/失效保持。查询回归先读取 `model-a -> target-a` 的五分钟新鲜缓存，再保存 `target-b` 别名并重新挂载同一模型查询，断言重新读取目标名称和价格，且失效仅涉及 references/aliases。已有草稿交互回归增加参考刷新阶段，断言模型名和自定义输入价 7 保留、参考目标更新后生效价仍为 7。
+
+### 本轮检查与判断
+
+环境：macOS、指定 worktree、POSIX shell。仅 Git、只读文件检索和 Node 内置模块静态合同；未启动后台任务。
+
+| 实际命令 | 实际结果 |
+| --- | --- |
+| `git status --short` / `git status --short --branch` | 退出 0；确认 `feat/model-price-rules`，返工仅 8 个批准代码/测试路径，execution 保持未跟踪 |
+| `git diff 9a4ec1119074a24584a5f8bb1bb3156aef634e23 -- <上述 8 个路径>` | 分为 Rust 和前端两组执行，均退出 0；人工核对本轮完整差异 |
+| `git diff b147ced0f8cab342ee57925a5bd6b08d37e061db -- src/query/keys.ts src/query/modelPrices.ts` | 退出 0；核对原基线至当前参考查询/别名保存变化 |
+| `git diff b147ced0f8cab342ee57925a5bd6b08d37e061db --stat` | 退出 0；代码修正后累计 30 个文件，均在原批准范围，未新增依赖或生成产物 |
+| `git diff --check` | 代码与回归修正后退出 0，无输出 |
+| `node scripts/check-cloud-only-verification.mjs` | 代码与回归修正后退出 0；`[cloud-only-verification] repository contract passed` |
+
+消融判断：仅保留一个 Token 下界、别名名称赋值时机修正、组件内两次精确查找和参考查询前缀失效。没有新增规则引擎、模式/面板、跨请求缓存、辅助持久化或无关重构。未降低或删除原有断言。
+
+### 未覆盖与提交
+
+- 上述业务回归均只新增/修改源码，未在本地运行；Rust/前端测试、格式、类型、Clippy、构建、窗口交互均待普通 PR 自动 CI。没有执行安装、包管理器、服务器、格式化或生成器。
+- `src/generated/bindings.ts` 延续前轮待云端状态；本轮未触及 IPC/DTO，也未本地生成或声称可编译。无可复用的对应 head 云端业务验证证据。
+- 本轮无材料性范围偏差或未处理 finding；本地静态通过不等于独立验收。获准本地提交说明为 `fix: 修正自定义定价与预览计算`，仅暂存本轮 8 个代码/测试文件及 progress。提交后交回 main 并停止，不推送或开展后续生命周期操作。

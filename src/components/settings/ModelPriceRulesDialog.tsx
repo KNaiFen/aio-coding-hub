@@ -94,6 +94,11 @@ function PriceRulesContent({ onClose }: { onClose: () => void }) {
       validationError = formatUnknownError(error);
     }
   }
+  const effectiveRule = candidate?.rules.find((rule) =>
+    rule.enabled && rule.cli_key === cliKey && rule.model === draft?.model.trim()
+  ) ?? candidate?.rules.find((rule) =>
+    rule.enabled && rule.cli_key === cliKey && rule.model === reference.data?.reference_model
+  );
 
   function edit(index: number | null) {
     if (!source) return;
@@ -179,16 +184,15 @@ function PriceRulesContent({ onClose }: { onClose: () => void }) {
                     ["标准", price.standard], ["优先", price.priority], ["超过 200k", price.above_200k],
                     ["优先超过 200k", price.priority_above_200k],
                   ].filter(([, value]) => value !== null) : [];
-                  const fixed = item.price.trim() === "" ? null : Number(item.price);
-                  const factor = Number(draft.multiplier.trim() || item.multiplier.trim() || "1");
+                  const fixed = effectiveRule?.[key].price ?? null;
+                  const factor = effectiveRule?.multiplier ?? effectiveRule?.[key].multiplier ?? 1;
                   let cacheFallback = reference.isSuccess && reference.data === null &&
-                    draft.items.input.price.trim() !== "" && draft.items.output.price.trim() !== "" &&
-                    key.startsWith("cache_") ? `继承${key === "cache_read" && Number(draft.items.input.price) === 0 ? "输出" : "输入"}单价 × ${key === "cache_read" ? "0.1" : key === "cache_write_5m" ? "1.25" : "2"}${factor === 1 ? "" : ` × ${factor}`}` : "未定价";
+                    effectiveRule && effectiveRule.input.price !== null && effectiveRule.output.price !== null &&
+                    key.startsWith("cache_") ? `继承${key === "cache_read" && effectiveRule.input.price === 0 ? "输出" : "输入"}单价 × ${key === "cache_read" ? "0.1" : key === "cache_write_5m" ? "1.25" : "2"}${factor === 1 ? "" : ` × ${factor}`}` : "未定价";
                   if (cacheFallback !== "未定价" && key !== "cache_read" && cliKey === "claude" && draft.model.toLowerCase().includes("1m")) {
                     cacheFallback += "；超过 200k 部分 × 2";
                   }
                   const effective = validationError || reference.isError || reference.isFetching ? "--" :
-                    !draft.enabled ? references.map(([label, value]) => `${label} ${value}`).join(" / ") || "未定价" :
                     fixed !== null ? String(fixed * factor) : references.map(([label, value]) => `${label} ${Number(value) * factor}`).join(" / ") || cacheFallback;
                   return (
                     <div key={key} className="grid min-w-0 gap-2 py-3 sm:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)]">
