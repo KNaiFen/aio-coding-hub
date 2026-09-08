@@ -274,8 +274,7 @@ GitHub Actions must run the focused config-migration Rust suite, Rust formatting
 Clippy, the full affected Rust library suite, and dependency audit. These are
 cloud-owned gates and must not be invoked locally.
 
-Local worktree verification follows `AGENTS.md` and the `$gkd-main` skill;
-dependency-backed quality gates remain cloud-owned.
+The local resource boundary is recorded in the [cloud-only contract](./cloud-only-verification-contract.md).
 
 ### 7. Wrong vs Correct
 

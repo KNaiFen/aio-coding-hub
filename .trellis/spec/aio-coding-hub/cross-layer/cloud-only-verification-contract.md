@@ -2,37 +2,17 @@
 
 ## 1. Scope
 
-This repository keeps local worktrees free of dependency and build artifacts.
-The contract applies to repository rules, README instructions, root/workspace
-package scripts, Tauri build hooks, active AIO specs, `ci.yml`, `pr-title.yml`,
-`performance.yml`, and `dev-build.yml`.
+This repository prohibits local checks that generate large amounts of file
+artifacts or sustain high CPU usage. The contract applies to README instructions,
+root/workspace package scripts, Tauri build hooks, active AIO specs, `ci.yml`,
+`pr-title.yml`, `performance.yml`, and `dev-build.yml`.
 
-## 2. Local Allowlist
+## 2. Local Resource Boundary
 
-Within system, developer, and explicit user instructions, `$gkd-main` owns
-lifecycle, route, role, authorization, acceptance, and closeout decisions.
-`AGENTS.md` adds AIO environment and Git constraints; conflicting project rules
-must be corrected rather than used to bypass GKD.
-
-Main maintains `.gkd/plan.md` and `.gkd/review.md`. GKD selects direct-main or
-delegated; only delegated creates a declared worktree's `.gkd/execution.md`
-and `.gkd/progress.md`. Its execution session follows that handoff, reads the
-applicable rules and behavior contracts, and returns material deviations to
-main. Historical records do not direct new work. Both implementation routes use
-task branches and PRs under AIO Git rules; direct-main does not mean pushing main.
-
-Do not install dependencies, start development servers, or run package/native
-quality gates locally. GitHub Actions owns dependency installation, formatting,
-type checking, linting, tests, coverage, builds, generators, Cargo, Tauri,
-signing, and packaging. Plan-approved direct Node contracts use only built-in
-modules, do not spawn prohibited tools, and do not write files.
-Before committing, use the approved dependency-free checks for the changed
-surface and read-only file/Git inspection. Before merging, wait for the
-automatic CI jobs selected by the classifier. Local checks do not replace
-cloud quality gates, and module-specific regression scenarios apply only to
-affected behavior or shared inputs.
-Current GKD Markdown and read-only monitoring/acceptance roles are supported;
-retired lifecycle commands and external runtime state remain unsupported.
+Dependency installation, full tests and coverage, compilation, packaging, and
+long-running performance checks use GitHub Actions. Necessary lightweight,
+short-lived checks follow the approved `$gkd-main` plan. Project constraints
+are recorded in [AGENTS.md](../../../../AGENTS.md).
 
 ## 3. Package And Tauri Boundaries
 
@@ -83,45 +63,45 @@ manual runs select both domains.
 
 ## 5. Drift Handling
 
-Never reproduce native/generated drift locally. Inspect the Actions artifact,
-verify its file and semantic scope, apply only that bounded patch, rerun the
-allowed dependency-free contracts, and submit the candidate to CI again. Do not
-reuse artifacts from another SHA or run attempt.
+GitHub Actions owns native/generated canonicalization and emits a bounded
+patch when it detects drift. Corrections use the artifact from the affected SHA
+and run attempt. Local regeneration and artifacts from a different source are
+not supported.
 
-## 6. Tests Required
+## 6. Checker Coverage
 
-The checker self-test must fail when:
+`scripts/check-cloud-only-verification.selftest.mjs` covers failures when:
 
 - a root/workspace script lacks the Actions guard or a local dev/precommit
   entry reappears;
-- README or AGENTS recommends a prohibited local command, or AGENTS loses the
-  `$gkd-main` entry or a required `.gkd/plan.md`, `.gkd/execution.md`,
-  `.gkd/progress.md`, or `.gkd/review.md` reference;
+- README presents an unavailable local package/native command, or an active
+  AIO spec adds a bare package/native command or local quality-gate instruction;
 - Tauri regains a local dev hook;
-- `dev-build.yml` or `performance.yml` gains a non-manual trigger, manual CI can
+- `dev-build.yml` gains a non-manual trigger, manual CI can
   run heavy jobs outside `main`, or candidate desktop/TUI jobs stop
   being skipped outside eligible main runs;
+- `contracts` stops invoking the production checker unconditionally;
+- manual CI can report the same required check name.
+
+`scripts/check-ci-quality-gates.selftest.mjs` owns the CI job and command
+regressions, including failures when:
+
 - a protected CI command is moved to a comment or non-`run` field;
-- frontend/Rust selection stops using the classifier outputs, `contracts` no
-  longer runs for checked docs or either selected code domain, or a
-  shared/unknown path becomes cheap;
+- frontend/Rust selection stops using the classifier outputs, or `contracts` no
+  longer runs for checked docs or either selected code domain;
 - `contracts` stops invoking the production checker, or source-only self-tests
   become eligible on process-documentation-only changes;
 - frontend install/audit/lint/typecheck/test/build or Rust
   format/bindings/Clippy/tests/audit disappears;
 - the automatic `ci-gate` no longer owns the selectable contracts/frontend/Rust
   results, or manual CI can report the same required check name;
-- `pr-title.yml` checks out PR code, misses title edits, or is folded back into
-  full CI.
+- the PR title validation command or performance benchmark disappears.
 
-The documentation checker retains required GKD entry references and forbidden
-local-command checks. It does not require verbatim zero-artifact or routine
-manual-CI sentences in AGENTS and the READMEs. Positive self-tests must accept
-equivalent wording for those instructions; review still checks that the prose
-clearly preserves their meaning. Existing checks for package guards, Tauri
-hooks, automatic/manual gates, selected jobs, required commands, and candidate
-PR boundaries remain in force.
+`scripts/ci-change-scope.selftest.mjs` owns changed-path classification,
+including full CI for shared/unknown paths and the documentation-only tiers.
 
-The positive fixtures and repository scan must run without dependencies and
-without writing any file. GKD owns independent acceptance and closeout; a
-successful local scan alone is not completion of the full task.
+The cloud-only checker retains README and active-spec checks for unavailable
+local commands. It does not read AGENTS or parse GKD workflow prose. A focused
+positive fixture accepts a concise GKD reference alongside the cloud contract.
+The fixtures and repository scan use only built-in Node modules and write no
+files.
