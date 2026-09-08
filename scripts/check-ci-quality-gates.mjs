@@ -586,7 +586,8 @@ function assertCodeqlContract(workflow, failures) {
   if (
     codeqlSteps.some((step) => step.malformed.length > 0) ||
     codeqlSteps.map((step) => step.properties.get("uses") ?? "").join("\n") !==
-      expectedActions.join("\n")
+      expectedActions.join("\n") ||
+    !stepRunsUnconditionally(codeqlSteps[0])
   ) {
     failures.push(
       "codeql.yml analyze must contain only checkout, Initialize CodeQL, and Analyze action steps"

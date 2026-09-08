@@ -551,6 +551,18 @@ for (const [name, from, to, expected] of [
   ["analysis absent frontend output", "needs.change-scope.outputs.frontend_ci == 'false'", "needs.change-scope.outputs.frontend_ci != 'true'", /analyze must skip only proven documentation/],
   ["analysis absent Rust output", "needs.change-scope.outputs.rust_ci == 'false'", "needs.change-scope.outputs.rust_ci != 'true'", /analyze must skip only proven documentation/],
   ["analysis ignored job failure", "    timeout-minutes: 45\n", "    timeout-minutes: 45\n    continue-on-error: true\n", /analyze must use only the approved canonical job properties/],
+  [
+    "analysis checkout cannot be skipped",
+    "        with:\n          persist-credentials: false\n",
+    "        if: false\n        with:\n          persist-credentials: false\n",
+    /analyze must contain only checkout, Initialize CodeQL, and Analyze action steps/,
+  ],
+  [
+    "analysis checkout cannot ignore failures",
+    "        with:\n          persist-credentials: false\n",
+    "        continue-on-error: true\n        with:\n          persist-credentials: false\n",
+    /analyze must contain only checkout, Initialize CodeQL, and Analyze action steps/,
+  ],
   ["workflow path filter", "  push:\n", "  push:\n    paths-ignore: ['**/*.md']\n", /must not filter workflow paths/],
 ]) {
   assert.notEqual(codeqlWorkflow.replace(from, to), codeqlWorkflow, name);
