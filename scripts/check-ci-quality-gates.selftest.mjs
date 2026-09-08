@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
-import { assertCiQualityGates } from "./check-ci-quality-gates.mjs";
+import {
+  assertCiQualityGates,
+  workflowJobProperty,
+  workflowStepRun,
+  workflowSteps,
+} from "./check-ci-quality-gates.mjs";
+import { runClassifier } from "./ci-change-scope.mjs";
 
 const guard = "node scripts/require-github-actions.mjs && ";
 const packageJson = {
@@ -249,28 +257,6 @@ for (const [name, fixture, expected] of [
     /ci\.yml contracts if must equal/,
   ],
   [
-    "frontend must stay independent from contracts",
-    {
-      ...valid,
-      ciWorkflow: ciWorkflow.replace(
-        "      needs.change-scope.outputs.frontend_ci == 'true'\n    runs-on: ubuntu-latest",
-        "      needs.change-scope.outputs.frontend_ci == 'true' &&\n      needs.contracts.result == 'success'\n    runs-on: ubuntu-latest"
-      ),
-    },
-    /ci\.yml frontend if must equal/,
-  ],
-  [
-    "rust must stay independent from contracts",
-    {
-      ...valid,
-      ciWorkflow: ciWorkflow.replace(
-        "      needs.change-scope.outputs.rust_ci == 'true'\n    runs-on: ubuntu-22.04",
-        "      needs.change-scope.outputs.rust_ci == 'true' &&\n      needs.contracts.result == 'success'\n    runs-on: ubuntu-22.04"
-      ),
-    },
-    /ci\.yml rust if must equal/,
-  ],
-  [
     "contracts must run for checked docs or either code domain",
     {
       ...valid,
@@ -481,6 +467,17 @@ for (const [name, fixture, expected] of [
     /codeql\.yml Initialize CodeQL must not be conditionally skipped/,
   ],
   [
+    "CodeQL analysis cannot ignore failures",
+    {
+      ...valid,
+      codeqlWorkflow: codeqlWorkflow.replace(
+        "      - name: Analyze\n",
+        "      - name: Analyze\n        continue-on-error: true\n"
+      ),
+    },
+    /codeql\.yml Analyze must not ignore failures/,
+  ],
+  [
     "Dependabot Cargo directory",
     {
       ...valid,
@@ -502,5 +499,246 @@ for (const [name, fixture, expected] of [
 ]) {
   assert.throws(() => assertCiQualityGates(fixture), expected, name);
 }
+
+for (const job of ["frontend", "rust", "observer-macos"]) {
+  for (const needs of ["change-scope", "contracts", "[]"]) {
+    assert.throws(
+      () => assertCiQualityGates({
+        ...valid,
+        ciWorkflow: ciWorkflow.replace(
+          `  ${job}:\n    needs: [change-scope, contracts]`,
+          `  ${job}:\n    needs: ${needs}`
+        ),
+      }),
+      new RegExp(`ci.yml ${job} must need change-scope and contracts`),
+      `${job} needs ${needs}`
+    );
+  }
+  const condition = workflowJobProperty(ciWorkflow, job, "if");
+  for (const clause of [
+    "always() && ",
+    "needs.change-scope.result == 'success' && ",
+    "needs.contracts.result == 'success' && ",
+  ]) {
+    assert.throws(
+      () => assertCiQualityGates({
+        ...valid,
+        ciWorkflow: ciWorkflow.replace(
+          `  ${job}:\n    needs: [change-scope, contracts]\n    if: >-\n      ${condition.split(" && ").join(" &&\n      ")}`,
+          `  ${job}:\n    needs: [change-scope, contracts]\n    if: ${condition.replace(clause, "")}`
+        ),
+      }),
+      new RegExp(`ci.yml ${job} if must equal`),
+      `${job} missing ${clause}`
+    );
+  }
+}
+
+for (const [name, from, to, expected] of [
+  ["classifier automatic events", "if: github.event_name == 'push' || github.event_name == 'pull_request'", "if: always()", /change-scope must run only for push and pull_request/],
+  ["classifier full history", "fetch-depth: 0", "fetch-depth: 1", /change-scope must checkout full history/],
+  ["classifier Node version", "node-version: 22", "node-version: 20", /change-scope must use Node 22/],
+  ["classifier read-only permission", "      contents: read", "      contents: write", /change-scope must grant only contents: read/],
+  ["classifier timeout", "timeout-minutes: 10", "timeout-minutes: 45", /change-scope must use ubuntu-latest with a 10-minute timeout/],
+  ["classifier command", "node scripts/ci-change-scope.mjs", "echo scripts/ci-change-scope.mjs", /change-scope must invoke the existing classifier/],
+  ["classifier command inputs", '--before "$CI_BEFORE_SHA"', "", /change-scope must invoke the existing classifier/],
+  ["classifier skipped step", "      - id: scope\n", "      - id: scope\n        if: false\n", /change-scope must retain checkout, Node setup, and classification steps/],
+  ["classifier ignored job failure", "  change-scope:\n", "  change-scope:\n    continue-on-error: true\n", /change-scope must use only the approved canonical job properties/],
+  ["analysis dependency", "    needs: change-scope\n", "", /analyze must need change-scope/],
+  ["analysis classifier result", "needs.change-scope.result == 'success' &&", "", /analyze must skip only proven documentation/],
+  ["analysis cancellation", "!cancelled() &&", "always() &&", /analyze must skip only proven documentation/],
+  ["analysis implicit success", "!cancelled() &&", "", /analyze must skip only proven documentation/],
+  ["analysis absent frontend output", "needs.change-scope.outputs.frontend_ci == 'false'", "needs.change-scope.outputs.frontend_ci != 'true'", /analyze must skip only proven documentation/],
+  ["analysis absent Rust output", "needs.change-scope.outputs.rust_ci == 'false'", "needs.change-scope.outputs.rust_ci != 'true'", /analyze must skip only proven documentation/],
+  ["analysis ignored job failure", "    timeout-minutes: 45\n", "    timeout-minutes: 45\n    continue-on-error: true\n", /analyze must use only the approved canonical job properties/],
+  [
+    "analysis checkout cannot be skipped",
+    "        with:\n          persist-credentials: false\n",
+    "        if: false\n        with:\n          persist-credentials: false\n",
+    /analyze must contain only checkout, Initialize CodeQL, and Analyze action steps/,
+  ],
+  [
+    "analysis checkout cannot ignore failures",
+    "        with:\n          persist-credentials: false\n",
+    "        continue-on-error: true\n        with:\n          persist-credentials: false\n",
+    /analyze must contain only checkout, Initialize CodeQL, and Analyze action steps/,
+  ],
+  ["workflow path filter", "  push:\n", "  push:\n    paths-ignore: ['**/*.md']\n", /must not filter workflow paths/],
+]) {
+  assert.notEqual(codeqlWorkflow.replace(from, to), codeqlWorkflow, name);
+  assert.throws(
+    () => assertCiQualityGates({ ...valid, codeqlWorkflow: codeqlWorkflow.replace(from, to) }),
+    expected,
+    name
+  );
+}
+for (const output of ["scope", "frontend_ci", "rust_ci"]) {
+  assert.throws(
+    () => assertCiQualityGates({
+      ...valid,
+      codeqlWorkflow: codeqlWorkflow.replace(
+        `      ${output}: \${{ steps.scope.outputs.${output} }}`,
+        `      ${output}: ''`
+      ),
+    }),
+    /change-scope must expose the classifier scope and domain outputs/,
+    output
+  );
+}
+for (const input of ["CI_EVENT_NAME", "CI_BASE_SHA", "CI_HEAD_SHA", "CI_BEFORE_SHA"]) {
+  assert.throws(
+    () => assertCiQualityGates({
+      ...valid,
+      codeqlWorkflow: codeqlWorkflow.replace(new RegExp(`          ${input}: .*`), `          ${input}: ''`),
+    }),
+    /change-scope must bind the event and exact diff SHAs/,
+    input
+  );
+}
+
+// Evaluate the actual workflow conditions, with only Actions context syntax adapted to JavaScript.
+function jobSelected(workflow, job, { eventName = "pull_request", result = "success", outputs = {}, contractsResult = "success", cancelled = false } = {}) {
+  const condition = workflowJobProperty(workflow, job, "if")
+    .replace(/^\$\{\{\s*|\s*\}\}$/g, "")
+    .replaceAll("needs.change-scope", 'needs["change-scope"]');
+  return new Function("github", "needs", "always", "cancelled", `return (${condition});`)(
+    { event_name: eventName },
+    { "change-scope": { result, outputs }, contracts: { result: contractsResult } },
+    () => true,
+    () => cancelled
+  );
+}
+
+const policyPath = fileURLToPath(new URL("../.github/ci-scope.json", import.meta.url));
+const gateStep = workflowSteps(ciWorkflow, "ci-gate").find(
+  (step) => step.properties.get("name") === "Require expected jobs"
+);
+const gateRun = workflowStepRun(gateStep).value;
+function gateStatus(env) {
+  const result = spawnSync("bash", ["-c", gateRun], {
+    encoding: "utf8",
+    env: { ...process.env, ...env },
+  });
+  if (result.error) throw result.error;
+  assert.equal(result.signal, null, result.stderr);
+  return result.status;
+}
+
+for (const eventName of ["pull_request", "push"]) {
+  for (const [name, diff, analyze] of [
+    ["process documents", "M\0.gkd/plan.md\0M\0.gkd/progress.md\0", false],
+    ["checked documents", "M\0README.md\0M\0AGENTS.md\0M\0.trellis/spec/example/rule.md\0", false],
+    ["frontend", "M\0src/main.tsx\0", true],
+    ["Rust", "M\0src-tauri/src/lib.rs\0", true],
+    ["shared", "M\0src/generated/bindings.ts\0", true],
+    ["unknown", "M\0.gkd/state.json\0", true],
+    ["mixed domains", "M\0src/main.tsx\0M\0src-tauri/src/lib.rs\0", true],
+    ["mixed documents and source", "M\0.gkd/progress.md\0M\0src/main.tsx\0", true],
+    ["control plane", "M\0.github/workflows/codeql.yml\0", true],
+    ["empty diff", "", true],
+    ["deleted checked document", "D\0docs/removed.md\0", false],
+    ["deleted source", "D\0src-tauri/src/removed.rs\0", true],
+    ["archived process document", "R100\0.gkd/progress.md\0.gkd/archive/workflow/progress.md\0", false],
+    ["source moved to documentation", "R100\0src/main.tsx\0.gkd/archive/workflow/main.md\0", true],
+    ["cross-domain rename", "R100\0src/old.tsx\0src-tauri/src/new.rs\0", true],
+    ["cross-domain copy", "C090\0src-tauri/src/old.rs\0src/new.tsx\0", true],
+    ["documentation copy", "C090\0README.md\0docs/copy.md\0", false],
+    ["documentation copied to source", "C090\0docs/old.md\0src/copied.tsx\0", true],
+    ["invalid diff", "M\0README.md", true],
+    ["Git failure", null, true],
+  ]) {
+    const classified = runClassifier({
+      eventName,
+      baseSha: "a".repeat(40),
+      beforeSha: "a".repeat(40),
+      headSha: "b".repeat(40),
+      policyPath,
+    }, (args) => {
+      if (diff === null) throw new Error("fixture Git failure");
+      return args[0] === "merge-base" ? "c".repeat(40) : diff;
+    });
+    const outputs = {
+      scope: classified.scope,
+      frontend_ci: String(classified.frontendCi),
+      rust_ci: String(classified.rustCi),
+    };
+    const label = `${eventName}: ${name}`;
+    assert.equal(jobSelected(codeqlWorkflow, "change-scope", { eventName }), true, label);
+    assert.equal(jobSelected(codeqlWorkflow, "analyze", { eventName, outputs }), analyze, label);
+    for (const [job, selected] of [
+      ["frontend", classified.frontendCi],
+      ["rust", classified.rustCi],
+      ["observer-macos", classified.rustCi],
+    ]) {
+      for (const contractsResult of ["success", "failure", "cancelled", "skipped", ""]) {
+        for (const result of ["success", "failure", "cancelled", "skipped", ""]) {
+          assert.equal(
+            jobSelected(ciWorkflow, job, { eventName, result, outputs, contractsResult }),
+            selected && contractsResult === "success" && result === "success",
+            `${label}: ${job}, classifier ${result}, contracts ${contractsResult}`
+          );
+        }
+      }
+    }
+    const env = {
+      EVENT_NAME: eventName,
+      EVENT_REF: eventName === "push" ? "refs/heads/dev" : "refs/pull/1/merge",
+      MANUAL_GUARD_RESULT: "skipped",
+      CHANGE_SCOPE_RESULT: "success",
+      SCOPE: classified.scope,
+      FULL_CI: String(classified.fullCi),
+      FRONTEND_CI: outputs.frontend_ci,
+      RUST_CI: outputs.rust_ci,
+      SHARED_CI: String(classified.sharedCi),
+      DOCS_CHECKS: String(classified.docsChecks),
+      CONTRACTS_RESULT: classified.docsChecks || classified.frontendCi || classified.rustCi ? "success" : "skipped",
+      FRONTEND_RESULT: classified.frontendCi ? "success" : "skipped",
+      RUST_RESULT: classified.rustCi ? "success" : "skipped",
+      OBSERVER_MACOS_RESULT: classified.rustCi ? "success" : "skipped",
+      PLAN_RESULT: "skipped",
+      SHOULD_BUILD: "",
+      BUILD_RESULT: "skipped",
+      TUI_BUILD_RESULT: "skipped",
+      ASSEMBLE_RESULT: "skipped",
+    };
+    assert.equal(gateStatus(env), 0, label);
+    for (const key of ["CHANGE_SCOPE_RESULT", "CONTRACTS_RESULT", "FRONTEND_RESULT", "RUST_RESULT", "OBSERVER_MACOS_RESULT"]) {
+      if (env[key] !== "success") continue;
+      for (const result of ["failure", "cancelled", "skipped", ""]) {
+        assert.notEqual(gateStatus({ ...env, [key]: result }), 0, `${label}: ${key} ${result}`);
+      }
+    }
+    if (classified.frontendCi || classified.rustCi) {
+      for (const result of ["failure", "cancelled", "skipped"]) {
+        assert.notEqual(gateStatus({
+          ...env,
+          CONTRACTS_RESULT: result,
+          FRONTEND_RESULT: "skipped",
+          RUST_RESULT: "skipped",
+          OBSERVER_MACOS_RESULT: "skipped",
+        }), 0, `${label}: blocked by contracts ${result}`);
+      }
+    }
+  }
+}
+
+for (const eventName of ["schedule", "workflow_dispatch"]) {
+  assert.equal(jobSelected(codeqlWorkflow, "change-scope", { eventName }), false, eventName);
+  assert.equal(jobSelected(codeqlWorkflow, "analyze", { eventName, result: "skipped" }), true, eventName);
+}
+for (const scope of ["process-docs", "checked-docs"]) {
+  const docs = { scope, frontend_ci: "false", rust_ci: "false" };
+  for (const result of ["failure", "cancelled", "skipped", ""]) {
+    assert.equal(jobSelected(codeqlWorkflow, "analyze", { result, outputs: docs }), true, `${scope}: ${result}`);
+  }
+  for (const key of ["scope", "frontend_ci", "rust_ci"]) {
+    for (const value of [undefined, "", "true", "unknown"]) {
+      const outputs = { ...docs, [key]: value };
+      assert.equal(jobSelected(codeqlWorkflow, "analyze", { outputs }), true, `${key}: ${value}`);
+    }
+  }
+}
+assert.equal(jobSelected(codeqlWorkflow, "analyze"), true, "missing classifier outputs");
+assert.equal(jobSelected(codeqlWorkflow, "analyze", { cancelled: true }), false, "workflow cancelled");
 
 console.error("[ci-quality-gates:selftest] all assertions passed");
