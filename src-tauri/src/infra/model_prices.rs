@@ -136,23 +136,35 @@ pub fn reference_get(
 ) -> crate::shared::error::AppResult<Option<crate::cost::ModelPriceReference>> {
     validate_cli_key(cli_key)?;
     if model.is_empty() || model.trim() != model || model.len() > 200 || model.contains('*') {
-        return Err("SEC_INVALID_INPUT: model must be a complete name (max 200 bytes)".to_string().into());
+        return Err(
+            "SEC_INVALID_INPUT: model must be a complete name (max 200 bytes)"
+                .to_string()
+                .into(),
+        );
     }
     let conn = db.open_connection()?;
-    let mut stmt = conn.prepare_cached("SELECT price_json FROM model_prices WHERE cli_key = ?1 AND model = ?2")
+    let mut stmt = conn
+        .prepare_cached("SELECT price_json FROM model_prices WHERE cli_key = ?1 AND model = ?2")
         .map_err(|e| db_err!("failed to prepare reference price: {e}"))?;
     let mut reference_model = model;
-    let mut json: Option<String> = stmt.query_row(params![cli_key, model], |row| row.get(0)).optional()
+    let mut json: Option<String> = stmt
+        .query_row(params![cli_key, model], |row| row.get(0))
+        .optional()
         .map_err(|e| db_err!("failed to read reference price: {e}"))?;
     if json.is_none() {
         if let Some(target) = aliases.resolve_target_model(cli_key, model) {
             reference_model = target;
-            json = stmt.query_row(params![cli_key, target], |row| row.get(0)).optional()
+            json = stmt
+                .query_row(params![cli_key, target], |row| row.get(0))
+                .optional()
                 .map_err(|e| db_err!("failed to read alias reference price: {e}"))?;
         }
     }
-    let Some(json) = json else { return Ok(None); };
-    crate::cost::reference_prices(&json, cli_key, reference_model).map(Some)
+    let Some(json) = json else {
+        return Ok(None);
+    };
+    crate::cost::reference_prices(&json, cli_key, reference_model)
+        .map(Some)
         .ok_or_else(|| "invalid reference price JSON".to_string().into())
 }
 
@@ -165,15 +177,31 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db = db::init_for_tests(&dir.path().join("reference.db")).unwrap();
         let aliases = crate::model_price_aliases::ModelPriceAliasesV1::default();
-        assert!(reference_get(&db, "grok", "grok-build", &aliases).unwrap().is_none());
+        assert!(reference_get(&db, "grok", "grok-build", &aliases)
+            .unwrap()
+            .is_none());
         upsert(&db, "grok", "grok-build-0.1", r#"{"input_cost_per_token":0.000002,"input_cost_per_token_priority":0.000004,"input_cost_per_token_above_200k_tokens":0.000006}"#).unwrap();
-        let reference = reference_get(&db, "grok", "grok-build", &aliases).unwrap().unwrap();
+        let reference = reference_get(&db, "grok", "grok-build", &aliases)
+            .unwrap()
+            .unwrap();
         assert_eq!(reference.reference_model, "grok-build-0.1");
         assert_eq!(reference.input.standard, Some(2.0));
         assert_eq!(reference.input.priority, Some(4.0));
         assert_eq!(reference.input.above_200k, Some(6.0));
         assert_eq!(reference.output.standard, None);
-        upsert(&db, "grok", "grok-build", r#"{"input_cost_per_token":0.000001}"#).unwrap();
-        assert_eq!(reference_get(&db, "grok", "grok-build", &aliases).unwrap().unwrap().reference_model, "grok-build");
+        upsert(
+            &db,
+            "grok",
+            "grok-build",
+            r#"{"input_cost_per_token":0.000001}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            reference_get(&db, "grok", "grok-build", &aliases)
+                .unwrap()
+                .unwrap()
+                .reference_model,
+            "grok-build"
+        );
     }
 }

@@ -30,7 +30,13 @@ pub struct ModelPriceRuleV1 {
 
 impl ModelPriceRuleV1 {
     pub fn items(&self) -> [&ModelPriceItemV1; 5] {
-        [&self.input, &self.output, &self.cache_read, &self.cache_write_5m, &self.cache_write_1h]
+        [
+            &self.input,
+            &self.output,
+            &self.cache_read,
+            &self.cache_write_5m,
+            &self.cache_write_1h,
+        ]
     }
 }
 
@@ -43,24 +49,42 @@ pub struct ModelPriceRulesV1 {
 
 impl Default for ModelPriceRulesV1 {
     fn default() -> Self {
-        Self { version: 1, rules: Vec::new() }
+        Self {
+            version: 1,
+            rules: Vec::new(),
+        }
     }
 }
 
 impl ModelPriceRulesV1 {
     pub fn find(&self, cli_key: &str, model: &str) -> Option<&ModelPriceRuleV1> {
-        self.rules.iter().find(|rule| rule.enabled && rule.cli_key == cli_key && rule.model == model)
+        self.rules
+            .iter()
+            .find(|rule| rule.enabled && rule.cli_key == cli_key && rule.model == model)
     }
 
-    pub fn resolve(&self, cli_key: &str, model: &str, reference_model: Option<&str>) -> Option<&ModelPriceRuleV1> {
-        self.find(cli_key, model).or_else(|| reference_model.and_then(|target| self.find(cli_key, target)))
+    pub fn resolve(
+        &self,
+        cli_key: &str,
+        model: &str,
+        reference_model: Option<&str>,
+    ) -> Option<&ModelPriceRuleV1> {
+        self.find(cli_key, model)
+            .or_else(|| reference_model.and_then(|target| self.find(cli_key, target)))
     }
 }
 
 fn validate_number(value: Option<f64>, scale: f64) -> crate::shared::error::AppResult<()> {
     if let Some(value) = value {
-        if !value.is_finite() || !(0.0..=1_000_000.0).contains(&value) || (value * scale).round() / scale != value {
-            return Err("SEC_INVALID_INPUT: invalid price or multiplier range/precision".to_string().into());
+        if !value.is_finite()
+            || !(0.0..=1_000_000.0).contains(&value)
+            || (value * scale).round() / scale != value
+        {
+            return Err(
+                "SEC_INVALID_INPUT: invalid price or multiplier range/precision"
+                    .to_string()
+                    .into(),
+            );
         }
     }
     Ok(())
@@ -68,19 +92,33 @@ fn validate_number(value: Option<f64>, scale: f64) -> crate::shared::error::AppR
 
 pub fn validate(rules: &ModelPriceRulesV1) -> crate::shared::error::AppResult<()> {
     if rules.version != 1 || rules.rules.len() > 512 {
-        return Err("SEC_INVALID_INPUT: invalid price rules version or count".to_string().into());
+        return Err("SEC_INVALID_INPUT: invalid price rules version or count"
+            .to_string()
+            .into());
     }
     let mut keys = HashSet::new();
     for rule in &rules.rules {
         crate::shared::cli_key::validate_cli_key(&rule.cli_key)?;
-        if rule.model.is_empty() || rule.model.trim() != rule.model || rule.model.len() > 200 || rule.model.contains('*') {
-            return Err("SEC_INVALID_INPUT: model must be a complete name (max 200 bytes)".to_string().into());
+        if rule.model.is_empty()
+            || rule.model.trim() != rule.model
+            || rule.model.len() > 200
+            || rule.model.contains('*')
+        {
+            return Err(
+                "SEC_INVALID_INPUT: model must be a complete name (max 200 bytes)"
+                    .to_string()
+                    .into(),
+            );
         }
         if !keys.insert((&rule.cli_key, &rule.model)) {
-            return Err("SEC_INVALID_INPUT: duplicate model price rule".to_string().into());
+            return Err("SEC_INVALID_INPUT: duplicate model price rule"
+                .to_string()
+                .into());
         }
         if rule.multiplier.is_some() && rule.items().iter().any(|item| item.multiplier.is_some()) {
-            return Err("SEC_INVALID_INPUT: 整体倍率与分项倍率不能同时设置".to_string().into());
+            return Err("SEC_INVALID_INPUT: 整体倍率与分项倍率不能同时设置"
+                .to_string()
+                .into());
         }
         validate_number(rule.multiplier, 1_000_000.0)?;
         for item in rule.items() {
@@ -91,32 +129,48 @@ pub fn validate(rules: &ModelPriceRulesV1) -> crate::shared::error::AppResult<()
     Ok(())
 }
 
-fn rules_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> crate::shared::error::AppResult<PathBuf> {
-    Ok(crate::app_paths::app_data_dir(app)?.join("model-prices").join("price-rules.json"))
+fn rules_path<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> crate::shared::error::AppResult<PathBuf> {
+    Ok(crate::app_paths::app_data_dir(app)?
+        .join("model-prices")
+        .join("price-rules.json"))
 }
 
 fn read_path(path: &Path) -> crate::shared::error::AppResult<ModelPriceRulesV1> {
     let Some(bytes) = read_optional_file_with_max_len(path, MAX_FILE_BYTES)? else {
         return Ok(ModelPriceRulesV1::default());
     };
-    let rules = serde_json::from_slice(&bytes).map_err(|e| format!("failed to parse price rules: {e}"))?;
+    let rules =
+        serde_json::from_slice(&bytes).map_err(|e| format!("failed to parse price rules: {e}"))?;
     validate(&rules)?;
     Ok(rules)
 }
 
-pub fn read<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> crate::shared::error::AppResult<ModelPriceRulesV1> {
+pub fn read<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> crate::shared::error::AppResult<ModelPriceRulesV1> {
     read_path(&rules_path(app)?)
 }
 
-pub fn write<R: tauri::Runtime>(app: &tauri::AppHandle<R>, rules: ModelPriceRulesV1) -> crate::shared::error::AppResult<ModelPriceRulesV1> {
+pub fn write<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    rules: ModelPriceRulesV1,
+) -> crate::shared::error::AppResult<ModelPriceRulesV1> {
     write_path(&rules_path(app)?, rules)
 }
 
-fn write_path(path: &Path, rules: ModelPriceRulesV1) -> crate::shared::error::AppResult<ModelPriceRulesV1> {
+fn write_path(
+    path: &Path,
+    rules: ModelPriceRulesV1,
+) -> crate::shared::error::AppResult<ModelPriceRulesV1> {
     validate(&rules)?;
-    let bytes = serde_json::to_vec_pretty(&rules).map_err(|e| format!("failed to serialize price rules: {e}"))?;
+    let bytes = serde_json::to_vec_pretty(&rules)
+        .map_err(|e| format!("failed to serialize price rules: {e}"))?;
     if bytes.len() > MAX_FILE_BYTES {
-        return Err("SEC_INVALID_INPUT: price rules file too large".to_string().into());
+        return Err("SEC_INVALID_INPUT: price rules file too large"
+            .to_string()
+            .into());
     }
     write_file_atomic(path, &bytes)?;
     Ok(rules)
@@ -128,8 +182,16 @@ mod tests {
 
     #[test]
     fn validate_rejects_conflicts_duplicates_and_unrepresentable_numbers() {
-        let rule = ModelPriceRuleV1 { cli_key: "claude".into(), model: "test".into(), enabled: true, ..Default::default() };
-        let mut rules = ModelPriceRulesV1 { version: 1, rules: vec![rule.clone()] };
+        let rule = ModelPriceRuleV1 {
+            cli_key: "claude".into(),
+            model: "test".into(),
+            enabled: true,
+            ..Default::default()
+        };
+        let mut rules = ModelPriceRulesV1 {
+            version: 1,
+            rules: vec![rule.clone()],
+        };
         for value in [0.0, 1.0] {
             rules.rules[0].multiplier = Some(value);
             rules.rules[0].output.multiplier = Some(value);
@@ -148,13 +210,40 @@ mod tests {
 
     #[test]
     fn resolve_selects_one_rule_and_only_uses_a_real_reference_target() {
-        let mut rules = ModelPriceRulesV1 { version: 1, rules: vec![
-            ModelPriceRuleV1 { cli_key: "claude".into(), model: "source".into(), enabled: true, multiplier: Some(0.0), ..Default::default() },
-            ModelPriceRuleV1 { cli_key: "claude".into(), model: "target".into(), enabled: true, multiplier: Some(2.0), ..Default::default() },
-        ] };
-        assert_eq!(rules.resolve("claude", "source", Some("target")).unwrap().model, "source");
+        let mut rules = ModelPriceRulesV1 {
+            version: 1,
+            rules: vec![
+                ModelPriceRuleV1 {
+                    cli_key: "claude".into(),
+                    model: "source".into(),
+                    enabled: true,
+                    multiplier: Some(0.0),
+                    ..Default::default()
+                },
+                ModelPriceRuleV1 {
+                    cli_key: "claude".into(),
+                    model: "target".into(),
+                    enabled: true,
+                    multiplier: Some(2.0),
+                    ..Default::default()
+                },
+            ],
+        };
+        assert_eq!(
+            rules
+                .resolve("claude", "source", Some("target"))
+                .unwrap()
+                .model,
+            "source"
+        );
         rules.rules[0].enabled = false;
-        assert_eq!(rules.resolve("claude", "source", Some("target")).unwrap().model, "target");
+        assert_eq!(
+            rules
+                .resolve("claude", "source", Some("target"))
+                .unwrap()
+                .model,
+            "target"
+        );
         assert!(rules.resolve("claude", "source", None).is_none());
         assert!(rules.resolve("codex", "source", Some("target")).is_none());
     }
@@ -173,10 +262,16 @@ mod tests {
     fn atomic_rule_save_round_trips_and_rejected_save_preserves_file() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("model-prices/price-rules.json");
-        let rules = ModelPriceRulesV1 { version: 1, rules: vec![ModelPriceRuleV1 {
-            cli_key: "claude".into(), model: "new".into(), enabled: true,
-            multiplier: Some(0.0), ..Default::default()
-        }] };
+        let rules = ModelPriceRulesV1 {
+            version: 1,
+            rules: vec![ModelPriceRuleV1 {
+                cli_key: "claude".into(),
+                model: "new".into(),
+                enabled: true,
+                multiplier: Some(0.0),
+                ..Default::default()
+            }],
+        };
         write_path(&path, rules.clone()).unwrap();
         let before = std::fs::read(&path).unwrap();
         assert_eq!(read_path(&path).unwrap().rules[0].multiplier, Some(0.0));

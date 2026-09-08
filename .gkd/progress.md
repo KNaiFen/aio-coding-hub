@@ -90,3 +90,10 @@
 - main 按 PLAN r5 将五份包/应用 manifest 及 Cargo.lock 中三个本地包统一为 `0.60.60`，新增 CHANGELOG 的本次定价能力说明。未修改依赖或发布工作流。
 - main 检查本轮完整 diff，只有七个版本/说明路径；`git diff --check` 和 `node scripts/check-cloud-only-verification.mjs` 均退出 0。消融审查无多余改动。
 - 业务测试、生成绑定和构建仍待普通 PR 自动 CI；本轮没有执行本地测试或生成器。
+
+## r5 首轮云端修正（main）
+
+- PR #193，head `3c114408c1f6033a833e69a7588236dd0aab1f1a`，CI run `34182820598` attempt 1。`pr-title`、contracts、observer-macos 通过；frontend 的 lint、plugin checks 和 Unit tests 通过，Build frontend 因新增绑定缺失失败。Rust canonicalize 成功，因生成漂移门禁停止，Clippy/业务测试未执行。
+- 接收该 run 唯一 `cloud-native-fixes-dfeb65212d1e676935d90afa52de4a341ca4d2f0-1` artifact；名称使用 PR merge SHA，API workflow_run 确认上述任务 head/attempt。main 完整检查补丁：九个任务 Rust 文件仅格式调整，bindings 仅增加三条命令和对应规则/参考价 DTO，无依赖或无关改动。
+- `git apply --check` 和 `git apply` 均退出 0；接收后 `git diff --check`、`node scripts/check-cloud-only-verification.mjs` 均退出 0。未在本地执行格式化或生成器。
+- 重新推送后须以新 head 等待自动 `ci-gate`、`pr-title`，不以本次局部通过代替最终 CI。

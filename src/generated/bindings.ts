@@ -1469,6 +1469,36 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async modelPriceRulesGet(): Promise<Result<ModelPriceRulesV1, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("model_price_rules_get") };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async modelPriceRulesSet(rules: ModelPriceRulesV1): Promise<Result<ModelPriceRulesV1, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("model_price_rules_set", { rules }) };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async modelPriceReferenceGet(
+    cliKey: string,
+    model: string
+  ): Promise<Result<ModelPriceReference | null, string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("model_price_reference_get", { cliKey, model }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async promptsList(workspaceId: number): Promise<Result<PromptSummary[], string>> {
     try {
       return { status: "ok", data: await TAURI_INVOKE("prompts_list", { workspaceId }) };
@@ -3675,6 +3705,33 @@ export type ModelPriceAliasRuleV1 = {
   enabled: boolean;
 };
 export type ModelPriceAliasesV1 = { version: number; rules: ModelPriceAliasRuleV1[] };
+export type ModelPriceItemV1 = { price: number | null; multiplier: number | null };
+export type ModelPriceReference = {
+  reference_model: string;
+  input: ModelPriceReferenceItem;
+  output: ModelPriceReferenceItem;
+  cache_read: ModelPriceReferenceItem;
+  cache_write_5m: ModelPriceReferenceItem;
+  cache_write_1h: ModelPriceReferenceItem;
+};
+export type ModelPriceReferenceItem = {
+  standard: number | null;
+  priority: number | null;
+  above_200k: number | null;
+  priority_above_200k: number | null;
+};
+export type ModelPriceRuleV1 = {
+  cli_key: string;
+  model: string;
+  enabled: boolean;
+  multiplier: number | null;
+  input: ModelPriceItemV1;
+  output: ModelPriceItemV1;
+  cache_read: ModelPriceItemV1;
+  cache_write_5m: ModelPriceItemV1;
+  cache_write_1h: ModelPriceItemV1;
+};
+export type ModelPriceRulesV1 = { version: number; rules: ModelPriceRuleV1[] };
 export type ModelPriceSummary = {
   id: number;
   cli_key: string;

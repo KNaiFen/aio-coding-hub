@@ -271,7 +271,15 @@ pub fn calculate_cost_usd_femto_with_options(
     model: &str,
     options: &CostCalculationOptions,
 ) -> Option<i64> {
-    calculate_cost_with_rule(usage, Some(price_json), multiplier, cli_key, model, options, None)
+    calculate_cost_with_rule(
+        usage,
+        Some(price_json),
+        multiplier,
+        cli_key,
+        model,
+        options,
+        None,
+    )
 }
 
 #[derive(Debug, Clone, serde::Serialize, specta::Type)]
@@ -343,14 +351,13 @@ fn resolve_prices(price_json: &str, options: &CostCalculationOptions) -> Option<
     let input_cost_above_200k = get_femto(obj, "input_cost_per_token_above_200k_tokens");
     let output_cost_above_200k = get_femto(obj, "output_cost_per_token_above_200k_tokens");
 
-    let cache_creation_5m_cost = get_femto(obj, "cache_creation_input_token_cost")
-        .or_else(|| {
-            if input_cost > 0 {
-                Some(mul_ratio_femto(input_cost, 5, 4))
-            } else {
-                None
-            }
-        });
+    let cache_creation_5m_cost = get_femto(obj, "cache_creation_input_token_cost").or_else(|| {
+        if input_cost > 0 {
+            Some(mul_ratio_femto(input_cost, 5, 4))
+        } else {
+            None
+        }
+    });
     let cache_5m_known = cache_creation_5m_cost.is_some();
     let cache_creation_5m_cost = cache_creation_5m_cost.unwrap_or(0);
 
@@ -385,33 +392,78 @@ fn resolve_prices(price_json: &str, options: &CostCalculationOptions) -> Option<
     let cache_read_cost = cache_read_cost.unwrap_or(0);
 
     Some(ResolvedPrices {
-        prices: [input_cost, output_cost, cache_read_cost, cache_creation_5m_cost, cache_creation_1h_cost],
+        prices: [
+            input_cost,
+            output_cost,
+            cache_read_cost,
+            cache_creation_5m_cost,
+            cache_creation_1h_cost,
+        ],
         input_above_200k: input_cost_above_200k,
         output_above_200k: output_cost_above_200k,
-        known: [input_known, output_known, cache_read_known, cache_5m_known, cache_1h_known],
+        known: [
+            input_known,
+            output_known,
+            cache_read_known,
+            cache_5m_known,
+            cache_1h_known,
+        ],
     })
 }
 
-pub fn reference_prices(price_json: &str, cli_key: &str, model: &str) -> Option<ModelPriceReference> {
+pub fn reference_prices(
+    price_json: &str,
+    cli_key: &str,
+    model: &str,
+) -> Option<ModelPriceReference> {
     let standard = resolve_prices(price_json, &CostCalculationOptions::default())?;
-    let priority = resolve_prices(price_json, &CostCalculationOptions { priority_service_tier_applied: true })?;
+    let priority = resolve_prices(
+        price_json,
+        &CostCalculationOptions {
+            priority_service_tier_applied: true,
+        },
+    )?;
     let context = contains_context_1m(cli_key, model);
     let item = |index: usize| {
         let above = if context && index != 2 && standard.known[index] {
-            Some(mul_ratio_femto(standard.prices[index], if index == 1 { 3 } else { 2 }, if index == 1 { 2 } else { 1 }))
+            Some(mul_ratio_femto(
+                standard.prices[index],
+                if index == 1 { 3 } else { 2 },
+                if index == 1 { 2 } else { 1 },
+            ))
         } else {
-            match index { 0 => standard.input_above_200k, 1 => standard.output_above_200k, _ => None }
+            match index {
+                0 => standard.input_above_200k,
+                1 => standard.output_above_200k,
+                _ => None,
+            }
         };
         ModelPriceReferenceItem {
-            standard: standard.known[index].then_some(standard.prices[index] as f64 / 1_000_000_000.0),
-            priority: (standard.prices[index] != priority.prices[index]).then_some(priority.prices[index] as f64 / 1_000_000_000.0),
+            standard: standard.known[index]
+                .then_some(standard.prices[index] as f64 / 1_000_000_000.0),
+            priority: (standard.prices[index] != priority.prices[index])
+                .then_some(priority.prices[index] as f64 / 1_000_000_000.0),
             above_200k: above.map(|value| value as f64 / 1_000_000_000.0),
-            priority_above_200k: (context && index != 2 && standard.prices[index] != priority.prices[index]).then(||
-                mul_ratio_femto(priority.prices[index], if index == 1 { 3 } else { 2 }, if index == 1 { 2 } else { 1 }) as f64 / 1_000_000_000.0),
+            priority_above_200k: (context
+                && index != 2
+                && standard.prices[index] != priority.prices[index])
+                .then(|| {
+                    mul_ratio_femto(
+                        priority.prices[index],
+                        if index == 1 { 3 } else { 2 },
+                        if index == 1 { 2 } else { 1 },
+                    ) as f64
+                        / 1_000_000_000.0
+                }),
         }
     };
     Some(ModelPriceReference {
-        reference_model: model.to_string(), input: item(0), output: item(1), cache_read: item(2), cache_write_5m: item(3), cache_write_1h: item(4),
+        reference_model: model.to_string(),
+        input: item(0),
+        output: item(1),
+        cache_read: item(2),
+        cache_write_5m: item(3),
+        cache_write_1h: item(4),
     })
 }
 
@@ -426,14 +478,18 @@ pub fn calculate_cost_with_rule(
 ) -> Option<i64> {
     // New models need both primary prices; seed cache fallback only when no reference exists.
     let custom_reference = match (price_json, rule) {
-        (None, Some(rule)) => Some(serde_json::json!({
-            "input_cost_per_token": rule.input.price? / 1_000_000.0,
-            "output_cost_per_token": rule.output.price? / 1_000_000.0,
-        }).to_string()),
+        (None, Some(rule)) => Some(
+            serde_json::json!({
+                "input_cost_per_token": rule.input.price? / 1_000_000.0,
+                "output_cost_per_token": rule.output.price? / 1_000_000.0,
+            })
+            .to_string(),
+        ),
         _ => None,
     };
     let resolved = resolve_prices(price_json.or(custom_reference.as_deref())?, options)?;
-    let [input_cost, output_cost, cache_read_cost, cache_creation_5m_cost, cache_creation_1h_cost] = resolved.prices;
+    let [input_cost, output_cost, cache_read_cost, cache_creation_5m_cost, cache_creation_1h_cost] =
+        resolved.prices;
     let input_cost_above_200k = resolved.input_above_200k;
     let output_cost_above_200k = resolved.output_above_200k;
     let input_tokens = clamp_token_count(usage.input_tokens);
@@ -549,22 +605,45 @@ pub fn calculate_cost_with_rule(
         };
     }
     let has_ttl = cache_creation_5m_input_tokens > 0 || cache_creation_1h_input_tokens > 0;
-    let tokens = [billable_input_tokens, output_tokens, cache_read_input_tokens,
-        if has_ttl { cache_creation_5m_input_tokens } else { cache_creation_input_tokens },
-        if has_ttl { cache_creation_1h_input_tokens } else { 0 }];
+    let tokens = [
+        billable_input_tokens,
+        output_tokens,
+        cache_read_input_tokens,
+        if has_ttl {
+            cache_creation_5m_input_tokens
+        } else {
+            cache_creation_input_tokens
+        },
+        if has_ttl {
+            cache_creation_1h_input_tokens
+        } else {
+            0
+        },
+    ];
     if let Some(rule) = rule {
         for (index, item) in rule.items().iter().enumerate() {
             if let Some(price) = item.price {
-                parts[index] = (tokens[index] as i128).saturating_mul((price * 1_000_000_000.0).round() as i128);
+                parts[index] = (tokens[index] as i128)
+                    .saturating_mul((price * 1_000_000_000.0).round() as i128);
             }
             let factor = rule.multiplier.or(item.multiplier).unwrap_or(1.0);
-            parts[index] = if factor == 0.0 { 0 } else { apply_multiplier_femto(parts[index], factor)? };
+            parts[index] = if factor == 0.0 {
+                0
+            } else {
+                apply_multiplier_femto(parts[index], factor)?
+            };
         }
     }
     let cost_femto = parts.into_iter().fold(0i128, i128::saturating_add);
     let cost_femto = apply_multiplier_femto(cost_femto, multiplier)?;
-    let known_usage = rule.is_some_and(|rule| tokens.iter().enumerate().all(|(index, count)|
-        *count == 0 || resolved.known[index] || rule.items()[index].price.is_some() || custom_reference.is_some()));
+    let known_usage = rule.is_some_and(|rule| {
+        tokens.iter().enumerate().all(|(index, count)| {
+            *count == 0
+                || resolved.known[index]
+                || rule.items()[index].price.is_some()
+                || custom_reference.is_some()
+        })
+    });
     if cost_femto == 0 && known_usage && tokens.iter().any(|count| *count > 0) {
         return Some(0);
     }
