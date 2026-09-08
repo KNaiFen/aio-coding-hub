@@ -1102,6 +1102,13 @@ fn provider_probe_detail_lines(probe: &ProviderProbeState) -> Vec<String> {
                     .unwrap_or_else(|| "—".to_string())
             ));
             lines.push(format!("耗时：{}", format_duration(result.latency_ms)));
+            if let Some(model) = non_empty(result.tested_model.as_deref()) {
+                let requested = non_empty(result.requested_model.as_deref());
+                lines.push(match requested.filter(|requested| *requested != model) {
+                    Some(requested) => format!("模型：{requested} -> {model}"),
+                    None => format!("模型：{model}"),
+                });
+            }
             if !result.base_url.is_empty() {
                 lines.push(format!("Base URL：{}", result.base_url));
             }
@@ -2441,6 +2448,8 @@ mod tests {
                 base_url: "https://example.com/v1".to_string(),
                 status: Some(200),
                 latency_ms: 123,
+                requested_model: Some("input-model".into()),
+                tested_model: Some("wire-model".into()),
                 error: None,
                 response_preview: Some("ok".to_string()),
             }),
@@ -2449,6 +2458,9 @@ mod tests {
             provider_probe_detail_lines(state.provider_probes.get(&1).expect("probe result"));
         assert!(result_lines.iter().any(|line| line == "结果：可用"));
         assert!(result_lines.iter().any(|line| line == "HTTP：200"));
+        assert!(result_lines
+            .iter()
+            .any(|line| line == "模型：input-model -> wire-model"));
         assert!(result_lines
             .iter()
             .any(|line| line == "Base URL：https://example.com/v1"));
@@ -2475,6 +2487,21 @@ mod tests {
         );
         state.switch_view(DashboardView::Requests);
         assert_eq!(state.request_count(), 1);
+    }
+
+    #[test]
+    fn failed_provider_probe_shows_actual_model_and_old_results_do_not_guess() {
+        let old = serde_json::json!({"ok":false,"providerId":1,"providerName":"A",
+            "baseUrl":"https://example.test","status":200,"latencyMs":20,
+            "error":"PROBE_NO_TEXT","responsePreview":null});
+        let mut result: ObserverProviderAvailabilityTestResult =
+            serde_json::from_value(old).unwrap();
+        let lines = provider_probe_detail_lines(&ProviderProbeState::Complete(result.clone()));
+        assert!(!lines.iter().any(|line| line.starts_with("模型：")));
+        result.tested_model = Some("actual-model".into());
+        let lines = provider_probe_detail_lines(&ProviderProbeState::Complete(result));
+        assert!(lines.iter().any(|line| line == "模型：actual-model"));
+        assert!(lines.iter().any(|line| line.contains("PROBE_NO_TEXT")));
     }
 
     #[test]

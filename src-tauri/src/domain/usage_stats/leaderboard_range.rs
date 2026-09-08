@@ -122,7 +122,7 @@ impl ProviderAgg {
         };
 
         let total_cost_usd_femto = self.total_cost_usd_femto.max(0.0);
-        let cost_usd = if self.cost_covered_success > 0 && total_cost_usd_femto > 0.0 {
+        let cost_usd = if self.cost_covered_success > 0 {
             Some(total_cost_usd_femto / USD_FEMTO_DENOM)
         } else {
             None

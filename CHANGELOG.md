@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.60.60](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.60) (2026-09-08)
+
+### Highlights
+
+* customize model prices with independent input, output, and cache pricing
+* set a model-wide multiplier or individual item multipliers in one form with conflict validation
+* apply pricing changes to new completed requests while preserving historical costs
+
+## [0.60.59](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.59) (2026-09-07)
+
+### Highlights
+
+* keep TUI provider snapshots responsive while the macOS app is in the background or tray
+* preserve unchanged cross-provider routing when editing a disabled route member
+* require a real model answer and valid completion for manual and scheduled provider tests
+* show the requested and tested models with readable failure reasons and bounded probe work
+
 ## [0.60.58](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.58) (2026-09-05)
 
 ### Highlights

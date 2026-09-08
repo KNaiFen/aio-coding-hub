@@ -66,6 +66,14 @@ preserves mode/provider UUIDs and cross policy. Single-provider share and local
 provider duplication preserve only ordinary provider policy and never copy
 mode membership or cross policy.
 
+Ordinary saves preserve the backend cross-policy value when the cross draft is
+clean, including null, an explicit empty policy, and stored rules. Disabled
+source members may save ordinary fields without changing that value. A dirty
+cross draft still submits its edits and baseline revision, including after the
+source becomes disabled; rejection must retain the draft and never report a
+successful save. Clean refetches and scope changes adopt policy and revision
+together, while dirty same-scope refetches retain their original revision.
+
 Schema migration, bundle import, and runtime decoding sanitize defensively.
 Malformed rules and non-standard efforts are discarded without blocking
 startup, forwarding, or the rest of a configuration import.

@@ -236,22 +236,20 @@ struct ProviderUsageSums {
     usage_total_femto: f64,
 }
 
-fn aggregate_costs_for_providers(
-    conn: &Connection,
-    providers: &[ProviderLimitCandidate],
-    ts_weekly: i64,
-    ts_monthly: i64,
-) -> crate::shared::error::AppResult<HashMap<i64, ProviderUsageSums>> {
-    let mut out = HashMap::with_capacity(providers.len());
-    if providers.is_empty() {
-        return Ok(out);
-    }
-
-    for chunk in providers.chunks(MAX_PROVIDERS_PER_USAGE_QUERY) {
-        let values = values_clause(chunk.len(), 3);
-        let sql = format!(
-            r#"
-WITH provider_windows(provider_id, ts_5h, ts_daily) AS (VALUES {values})
+fn aggregate_costs_sql(provider_count: usize) -> String {
+    let values = values_clause(provider_count, 3);
+    format!(
+        r#"
+WITH provider_windows(provider_id, ts_5h, ts_daily) AS (VALUES {values}),
+eligible_costs AS MATERIALIZED (
+  SELECT final_provider_id, created_at, cost_usd_femto
+  FROM usage_events
+  WHERE final_provider_id IN (SELECT provider_id FROM provider_windows)
+    AND excluded_from_stats = 0
+    AND status >= 200 AND status < 300
+    AND error_present = 0
+    AND cost_usd_femto IS NOT NULL
+)
 SELECT
   w.provider_id,
   TOTAL(CASE WHEN r.created_at >= w.ts_5h THEN r.cost_usd_femto ELSE 0 END) AS usage_5h_femto,
@@ -260,15 +258,22 @@ SELECT
   TOTAL(CASE WHEN r.created_at >= ? THEN r.cost_usd_femto ELSE 0 END) AS usage_monthly_femto,
   TOTAL(r.cost_usd_femto) AS usage_total_femto
 FROM provider_windows w
-LEFT JOIN usage_events r
+LEFT JOIN eligible_costs r
   ON r.final_provider_id = w.provider_id
- AND r.excluded_from_stats = 0
- AND r.status >= 200 AND r.status < 300
- AND r.error_present = 0
- AND r.cost_usd_femto IS NOT NULL
 GROUP BY w.provider_id
 "#
-        );
+    )
+}
+
+fn aggregate_costs_for_providers(
+    conn: &Connection,
+    providers: &[ProviderLimitCandidate],
+    ts_weekly: i64,
+    ts_monthly: i64,
+) -> crate::shared::error::AppResult<HashMap<i64, ProviderUsageSums>> {
+    let mut out = HashMap::with_capacity(providers.len());
+    for chunk in providers.chunks(MAX_PROVIDERS_PER_USAGE_QUERY) {
+        let sql = aggregate_costs_sql(chunk.len());
 
         let mut params_vec = Vec::with_capacity(chunk.len() * 3 + 2);
         for provider in chunk {
@@ -744,6 +749,123 @@ WHERE id = last_insert_rowid()
 
         let error = list_v1(&db, Some("codex")).expect_err("missing usage source must fail");
         assert_eq!(error.code(), "DB_ERROR");
+    }
+
+    #[test]
+    fn filtered_cost_projection_preserves_compatibility_and_complete_backfill_totals() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = db::init_for_tests(&dir.path().join("projection.db")).expect("init db");
+        let provider = create_limited_provider(&db, "selected");
+        let empty = create_limited_provider(&db, "empty");
+        let unrelated = create_limited_provider(&db, "unrelated");
+        let conn = db.open_connection().expect("connection");
+        for (timestamp, amount) in [(99, 1), (100, 2), (200, 3), (300, 4), (400, 5)] {
+            insert_log(&conn, provider, timestamp, amount * FEMTO);
+        }
+        insert_log(&conn, unrelated, 500, 80 * FEMTO);
+        insert_log_with_exclusion(&conn, provider, 501, 90 * FEMTO, 1);
+        insert_log(&conn, provider, 502, 100 * FEMTO);
+        conn.execute(
+            "UPDATE usage_ledger SET error_present = 1 WHERE created_at = 502",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE request_logs SET error_code = 'ERROR' WHERE created_at = 502",
+            [],
+        )
+        .unwrap();
+        let query = aggregate_costs_sql(2);
+        let parameters = [provider, 400, 300, empty, 400, 300, 200, 100];
+        for complete in [false, true] {
+            if complete {
+                conn.execute(
+                    "UPDATE usage_ledger_backfill_state SET status = 'complete' WHERE id = 1",
+                    [],
+                )
+                .unwrap();
+            } else {
+                conn.execute(
+                    "UPDATE usage_ledger_backfill_state SET status = 'incomplete' WHERE id = 1",
+                    [],
+                )
+                .unwrap();
+                conn.execute("DELETE FROM usage_ledger WHERE created_at = 99", [])
+                    .unwrap();
+            }
+            let rows = conn
+                .prepare(&query)
+                .unwrap()
+                .query_map(parameters, |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        (1..=5)
+                            .map(|i| row.get::<_, f64>(i).unwrap())
+                            .collect::<Vec<_>>(),
+                    ))
+                })
+                .unwrap()
+                .collect::<Result<HashMap<_, _>, _>>()
+                .unwrap();
+            let original = r#"
+WITH provider_windows(provider_id, ts_5h, ts_daily) AS (VALUES (?, ?, ?), (?, ?, ?))
+SELECT w.provider_id,
+  TOTAL(CASE WHEN r.created_at >= w.ts_5h THEN r.cost_usd_femto ELSE 0 END),
+  TOTAL(CASE WHEN r.created_at >= w.ts_daily THEN r.cost_usd_femto ELSE 0 END),
+  TOTAL(CASE WHEN r.created_at >= ? THEN r.cost_usd_femto ELSE 0 END),
+  TOTAL(CASE WHEN r.created_at >= ? THEN r.cost_usd_femto ELSE 0 END),
+  TOTAL(r.cost_usd_femto)
+FROM provider_windows w
+LEFT JOIN usage_events r ON r.final_provider_id = w.provider_id
+  AND r.excluded_from_stats = 0 AND r.status >= 200 AND r.status < 300
+  AND r.error_present = 0 AND r.cost_usd_femto IS NOT NULL
+GROUP BY w.provider_id
+"#;
+            let original_rows = conn
+                .prepare(original)
+                .unwrap()
+                .query_map(parameters, |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        (1..=5)
+                            .map(|i| row.get::<_, f64>(i).unwrap())
+                            .collect::<Vec<_>>(),
+                    ))
+                })
+                .unwrap()
+                .collect::<Result<HashMap<_, _>, _>>()
+                .unwrap();
+            assert_eq!(rows, original_rows);
+            assert_eq!(rows[&empty], vec![0.0; 5]);
+            assert_eq!(
+                rows[&provider],
+                [5.0, 9.0, 12.0, 14.0, if complete { 14.0 } else { 15.0 }]
+                    .map(|value| value * FEMTO as f64)
+                    .to_vec()
+            );
+            let plan = conn
+                .prepare(&format!("EXPLAIN QUERY PLAN {query}"))
+                .unwrap()
+                .query_map(parameters, |row| row.get::<_, String>(3))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+                .join("\n");
+            assert!(plan.contains("MATERIALIZE eligible_costs"), "{plan}");
+            assert!(!plan.contains("MATERIALIZE usage_events"), "{plan}");
+            let widths = conn
+                .prepare(&format!("EXPLAIN {query}"))
+                .unwrap()
+                .query_map(parameters, |row| {
+                    Ok((row.get::<_, String>(1)?, row.get::<_, i64>(3)?))
+                })
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert!(widths
+                .iter()
+                .any(|(opcode, width)| opcode == "OpenEphemeral" && *width == 3));
+        }
     }
 
     #[test]

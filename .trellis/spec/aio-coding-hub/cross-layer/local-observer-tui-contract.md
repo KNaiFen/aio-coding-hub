@@ -26,7 +26,8 @@ remote administration API.
   a separate concurrency limit and timeout, returns a bounded fixed-shape result
   with credential-stripped URL and preview fields, and records the same bounded
   availability observation as the desktop and scheduled full-probe entry
-  points. It never changes routing, limits, or circuit state.
+  points. It bypasses ordinary, cross-provider, and route-mode routing, retaining
+  the existing timeline and circuit-recovery consumers of the shared result.
 - Responses are `no-store` and `nosniff`. Invalid input, authentication, busy,
   and internal failures use fixed structured messages without body, URL,
   credentials, or decoder details.
@@ -41,6 +42,27 @@ remote administration API.
   that query lane within a bounded deadline; contention timeout returns
   `OBS_BUSY` and is never cached as an unavailable projection. A genuinely
   missing or slow database read marks only the affected sections unavailable.
+- The DB budget remains 1500 ms, DB permit wait 1600 ms, and snapshot HTTP
+  budget 3500 ms. A monotonic deadline follows blocking work through its start
+  and major stage boundaries. Expired work does not start another query; an
+  already running SQL statement retains its permit until it returns. Errors
+  and projections over 75% of budget report only scope, detail flag, stage,
+  counts, elapsed times, and error codes, never user content.
+- Each DB projection loads spend usage once for the required CLI scope and
+  shares it between candidates and details. Candidate eligibility is independent
+  of the 512-row detail cap. Spend failure makes both affected sections
+  unavailable. Aggregation still reads `usage_events`, filtering batch IDs and
+  valid statistical rows before materializing only provider, time, and cost.
+- On macOS, valid authenticated snapshots renew a shared 15-second monotonic
+  user-activity lease before cache and admission checks. Manual probes hold a
+  work reference after input/admission checks. One observer controller owns
+  at most one `UserInitiatedAllowingIdleSystemSleep` activity, with reason
+  `AIO TUI observation`, and one resettable expiry task. It permits display and
+  system sleep, closes on every observer shutdown path, and rejects late renewals.
+  Health, invalid requests, startup, and scheduled probes establish no lease.
+  Other platforms add neither native activities nor expiry tasks. Rust CI also
+  runs `app::observer::activity` tests on macOS; the aggregate gate requires this
+  job only when `rust_ci=true`.
 - Circuit status is read through a non-mutating peek. It must not reserve a
   half-open probe, persist state, emit events, or alter provider health.
 - Observer startup, refresh, serialization, authentication, and TUI parsing
@@ -121,6 +143,43 @@ remote administration API.
   boundary before reading configuration. An older flight either records before
   the mutation begins or becomes stale; no probe may start in the invalidation
   to commit window and later publish an observation for the wrong generation.
+
+## Availability probe result
+
+- A probe sends one generation request to the selected provider and model, with
+  `Reply with the single word OK.` and no user content, tools, routing, failover,
+  retries, or model substitution. Disabled providers and route members remain
+  manually testable without enabling them. Fixed bridges use only their bound
+  source and model mapping; dynamic bridges without a source return failure.
+- The final wire output budget is 100 tokens, including the protocol's reasoning
+  accounting. No additional thinking or budget escalation is requested. Codex
+  OAuth reuses ChatGPT Responses compatibility (`stream=true`, `store=false`,
+  account headers), whose upstream contract removes the output-cap field; this
+  path therefore has no claimed 100-token hard cap. Gemini OAuth reuses Code
+  Assist project wrapping and validates the original unwrapped response.
+- Connect timeout is 8 seconds, HTTP including body is 45 seconds, shared work
+  including preparation is at most 60 seconds, observer waiting is 65 seconds,
+  and the TUI uses that protocol budget plus one second. Snapshot timeout stays
+  3500 ms. Latency ends after response validation, not at response headers.
+- Non-stream responses must be fully read within 64 KiB. SSE uses the existing
+  frame boundaries, including split UTF-8, and ends at a valid upstream terminal.
+  A complete body exactly at the bound differs from local truncation.
+- Success requires 2xx, valid structure, non-whitespace answer text, and an
+  explicit normal or output-token-limit terminal. Responses require completed
+  or max-output-token incomplete status and a matching response terminal for
+  SSE; Chat requires assistant text plus stop/length in the same choice and
+  `[DONE]` for SSE; Anthropic requires a text block, end_turn/stop_sequence/
+  max_tokens, and message_stop for SSE; Gemini requires non-thought text and
+  STOP/MAX_TOKENS in the same candidate. Reasoning, usage, tools, heartbeats,
+  unfinished/error streams, non-2xx, read errors, truncation, and timeout fail.
+  Output is not semantically scored and need not equal `OK` literally.
+- Additive optional `requested_model` and `tested_model` fields preserve input
+  and actual wire model evidence in desktop IPC; observer uses `requestedModel`
+  and `testedModel` with protocol version 1 unchanged. Desktop and TUI display
+  models for success and failure, showing both when mapped. Old results with
+  missing fields do not guess a model. These names cannot prove an upstream's
+  internal model identity. Fixed bounded failure codes retain failure categories;
+  preview remains bounded and credential-redacted.
 
 ## TUI behavior
 
