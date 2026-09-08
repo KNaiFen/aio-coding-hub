@@ -15,6 +15,24 @@ pub(crate) struct CodexOAuthProvider {
 
 const CODEX_LIMITS_RESPONSE_BODY_LIMIT: usize = 1024 * 1024;
 
+// Discovery fallback is verified against the 0.144.4 manifest protocol; it does not
+// change inference/refresh identity. Prefer the installed CLI's valid version.
+pub(crate) const CODEX_MODEL_DISCOVERY_FALLBACK_VERSION: &str = "0.144.4";
+
+pub(crate) fn codex_model_discovery_version(raw: Option<&str>) -> &str {
+    static VERSION: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let pattern = VERSION.get_or_init(|| {
+        regex::Regex::new(
+            r"^(?:codex-cli[ \t]+)?v?([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)$",
+        )
+        .expect("valid Codex discovery version pattern")
+    });
+    raw.and_then(|raw| pattern.captures(raw.trim()))
+        .and_then(|captures| captures.get(1))
+        .map(|version| version.as_str())
+        .unwrap_or(CODEX_MODEL_DISCOVERY_FALLBACK_VERSION)
+}
+
 impl CodexOAuthProvider {
     pub(crate) fn new() -> Self {
         Self {
@@ -98,11 +116,22 @@ impl OAuthProvider for CodexOAuthProvider {
         headers: &mut HeaderMap,
         access_token: &str,
         id_token: Option<&str>,
+        client_version: Option<&str>,
     ) -> Result<(), String> {
         self.inject_upstream_headers(headers, access_token)?;
+        let version = codex_model_discovery_version(client_version);
         headers.insert(
             axum::http::header::USER_AGENT,
-            HeaderValue::from_static(upstream_identity::CODEX_CLI_USER_AGENT),
+            HeaderValue::from_str(&format!(
+                "{}/{version}",
+                upstream_identity::CODEX_CLI_ORIGINATOR
+            ))
+            .map_err(|_| "codex oauth: invalid discovery user agent".to_string())?,
+        );
+        headers.insert(
+            "version",
+            HeaderValue::from_str(version)
+                .map_err(|_| "codex oauth: invalid discovery version".to_string())?,
         );
         if let Some(account_id) = parse_chatgpt_account_id(id_token) {
             if let Ok(value) = HeaderValue::from_str(&account_id) {
@@ -212,7 +241,7 @@ mod tests {
         let mut headers = HeaderMap::new();
 
         provider
-            .inject_model_discovery_headers(&mut headers, "new-access", Some(&id_token))
+            .inject_model_discovery_headers(&mut headers, "new-access", Some(&id_token), None)
             .expect("inject discovery headers");
 
         assert_eq!(
@@ -231,7 +260,11 @@ mod tests {
             headers
                 .get(header::USER_AGENT)
                 .and_then(|value| value.to_str().ok()),
-            Some(upstream_identity::CODEX_CLI_USER_AGENT)
+            Some("codex_cli_rs/0.144.4")
+        );
+        assert_eq!(
+            headers.get("version").and_then(|value| value.to_str().ok()),
+            Some("0.144.4")
         );
     }
 }

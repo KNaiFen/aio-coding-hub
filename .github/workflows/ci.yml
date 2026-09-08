@@ -191,6 +191,18 @@ jobs:
         working-directory: src-tauri
         run: cargo test --locked aio_catalog_pointer_matches_only_the_owned_target -- --test-threads=1
 
+      - name: Provider model discovery tests on ${{ matrix.os_family }}
+        working-directory: src-tauri
+        run: cargo test --locked provider_model_discovery -- --test-threads=1
+
+      - name: OAuth adapter tests on ${{ matrix.os_family }}
+        working-directory: src-tauri
+        run: cargo test --locked gateway::oauth::adapters -- --test-threads=1
+
+      - name: CLI version probe tests on ${{ matrix.os_family }}
+        working-directory: src-tauri
+        run: cargo test --locked infra::cli_manager::tests::run_version -- --test-threads=1
+
   rust:
     needs: support-contract
     runs-on: ubuntu-22.04

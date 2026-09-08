@@ -253,6 +253,25 @@ fn command_output_with_timeout_limit(
     }
 }
 
+#[cfg(any(windows, test))]
+pub(crate) fn run_discovery_command(
+    command: Command,
+    timeout: Duration,
+    output_limit: usize,
+) -> crate::shared::error::AppResult<String> {
+    let output = command_output_with_timeout_limit(
+        command,
+        timeout,
+        "Codex discovery probe".to_string(),
+        output_limit,
+    )?;
+    if !output.status.success() || output.stdout.truncated || output.stderr.truncated {
+        return Err("CLI_DISCOVERY_PROBE_FAILED: unsuccessful or oversized output".into());
+    }
+    String::from_utf8(output.stdout.bytes)
+        .map_err(|_| "CLI_DISCOVERY_PROBE_FAILED: invalid UTF-8".into())
+}
+
 fn terminate_command(child: &mut std::process::Child) {
     #[cfg(unix)]
     crate::shared::process::terminate_unix_process_group(child.id());
@@ -770,6 +789,25 @@ pub(crate) fn codex_launch_spec<R: tauri::Runtime>(
     }))
 }
 
+pub(crate) fn codex_discovery_version<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    deadline: Instant,
+) -> crate::shared::error::AppResult<Option<String>> {
+    #[cfg(windows)]
+    {
+        use crate::wsl::provider_model_discovery::{version_source, CodexVersionSource};
+        match version_source(app, deadline) {
+            CodexVersionSource::Native => {}
+            CodexVersionSource::Wsl(version) => return Ok(Some(version)),
+            CodexVersionSource::Fallback => return Ok(None),
+        }
+    }
+    if Instant::now() >= deadline {
+        return Ok(None);
+    }
+    codex_launch_spec(app).map(|launch| launch.and_then(|launch| launch.version))
+}
+
 pub(crate) fn codex_bundled_model_catalog_json(
     launch: &CodexLaunchSpec,
     codex_home: &Path,
@@ -1007,13 +1045,42 @@ mod tests {
         assert!(err.contains("claude/settings.json too large"));
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn run_version_reads_crlf_from_cmd_launcher_in_spaced_path() {
+        let dir = tempdir().expect("tempdir");
+        let bin_dir = dir.path().join("codex bin with spaces");
+        fs::create_dir(&bin_dir).expect("create bin dir");
+        let cli_path = bin_dir.join("codex.cmd");
+        fs::write(
+            &cli_path,
+            concat!(
+                "@echo off\r\n",
+                "if not \"%~1\"==\"--version\" exit /b 23\r\n",
+                "if not \"%~2\"==\"\" exit /b 24\r\n",
+                "> \"%~dp0args.txt\" echo %~1\r\n",
+                "echo codex-cli 0.150.2\r\n",
+            ),
+        )
+        .expect("write fake Codex launcher");
+
+        assert_eq!(
+            run_version(&cli_path).expect("run version"),
+            "codex-cli 0.150.2"
+        );
+        assert_eq!(
+            fs::read(bin_dir.join("args.txt")).expect("read captured arguments"),
+            b"--version\r\n"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn run_version_resolves_shebang_interpreter_from_exe_parent_dir() {
         use std::os::unix::fs::PermissionsExt;
 
         let dir = tempdir().expect("tempdir");
-        let bin_dir = dir.path().join("bin");
+        let bin_dir = dir.path().join("codex bin with spaces");
         fs::create_dir(&bin_dir).expect("create bin dir");
 
         // Create a fake "node" interpreter that just prints a version string.

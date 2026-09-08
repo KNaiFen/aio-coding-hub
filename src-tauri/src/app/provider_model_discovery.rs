@@ -1,6 +1,7 @@
 //! Usage: Fetch and normalize model catalogs for Provider editor drafts.
 
 use crate::app_state::{ensure_db_ready, DbInitState};
+use crate::gateway::oauth::adapters::codex::codex_model_discovery_version;
 use crate::gateway::util::build_target_url;
 use crate::{blocking, gateway, providers};
 use reqwest::header::{HeaderMap, AUTHORIZATION};
@@ -68,6 +69,7 @@ pub(crate) enum ProviderModelDiscoveryResult {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ModelCatalogFormat {
     DataIds,
+    CodexOAuthSlugs,
     GeminiNames,
     GrokOAuth,
 }
@@ -109,7 +111,7 @@ fn has_pagination_signal(root: &Value) -> bool {
 fn catalog_items(root: &Value, format: ModelCatalogFormat) -> Option<&[Value]> {
     let key = match format {
         ModelCatalogFormat::DataIds | ModelCatalogFormat::GrokOAuth => "data",
-        ModelCatalogFormat::GeminiNames => "models",
+        ModelCatalogFormat::GeminiNames | ModelCatalogFormat::CodexOAuthSlugs => "models",
     };
     root.get(key)?.as_array().map(Vec::as_slice)
 }
@@ -159,6 +161,10 @@ fn parse_model_catalog_with_format(
             ModelCatalogFormat::DataIds => {
                 object.get("id").and_then(Value::as_str).map(str::to_string)
             }
+            ModelCatalogFormat::CodexOAuthSlugs => object
+                .get("slug")
+                .and_then(Value::as_str)
+                .map(str::to_string),
             ModelCatalogFormat::GeminiNames => object
                 .get("name")
                 .and_then(Value::as_str)
@@ -170,7 +176,7 @@ fn parse_model_catalog_with_format(
             ModelCatalogFormat::GeminiNames | ModelCatalogFormat::GrokOAuth => {
                 raw.strip_prefix("models/").unwrap_or(&raw)
             }
-            ModelCatalogFormat::DataIds => &raw,
+            ModelCatalogFormat::DataIds | ModelCatalogFormat::CodexOAuthSlugs => &raw,
         };
         let normalized = providers::normalize_concrete_model_id(raw)
             .map_err(|_| DiscoveryParseError::InvalidResponse)?;
@@ -210,17 +216,24 @@ fn origin_for_url(url: &reqwest::Url) -> String {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ModelCatalogDescriptor {
+enum ModelCatalogDescriptor<'a> {
     ApiKey { format: ModelCatalogFormat },
-    CodexOAuth,
+    CodexOAuth { client_version: &'a str },
     GrokOAuth,
 }
 
-impl ModelCatalogDescriptor {
+impl<'a> ModelCatalogDescriptor<'a> {
+    fn client_version(self) -> Option<&'a str> {
+        match self {
+            Self::CodexOAuth { client_version } => Some(client_version),
+            _ => None,
+        }
+    }
+
     fn format(self) -> ModelCatalogFormat {
         match self {
             Self::ApiKey { format } => format,
-            Self::CodexOAuth => ModelCatalogFormat::DataIds,
+            Self::CodexOAuth { .. } => ModelCatalogFormat::CodexOAuthSlugs,
             Self::GrokOAuth => ModelCatalogFormat::GrokOAuth,
         }
     }
@@ -231,12 +244,12 @@ impl ModelCatalogDescriptor {
                 format: ModelCatalogFormat::GeminiNames,
             } => "/v1beta/models",
             Self::ApiKey { .. } => "/v1/models",
-            Self::CodexOAuth | Self::GrokOAuth => "/models",
+            Self::CodexOAuth { .. } | Self::GrokOAuth => "/models",
         }
     }
 }
 
-fn api_key_descriptor(cli_key: &str) -> Option<ModelCatalogDescriptor> {
+fn api_key_descriptor(cli_key: &str) -> Option<ModelCatalogDescriptor<'static>> {
     Some(ModelCatalogDescriptor::ApiKey {
         format: catalog_format(cli_key)?,
     })
@@ -316,17 +329,20 @@ async fn fetch_model_catalog(
 }
 
 async fn fetch_model_catalog_with_descriptor(
-    descriptor: ModelCatalogDescriptor,
+    descriptor: ModelCatalogDescriptor<'_>,
     base_url: &str,
     base_url_index: Option<u32>,
     headers: HeaderMap,
     client: &reqwest::Client,
     timeout: Duration,
 ) -> ProviderModelDiscoveryResult {
-    let url = match build_target_url(base_url, descriptor.endpoint_path(), None) {
+    let mut url = match build_target_url(base_url, descriptor.endpoint_path(), None) {
         Ok(url) => url,
         Err(_) => return discovery_error(ProviderModelDiscoveryErrorCode::InvalidConfig, None),
     };
+    if let Some(version) = descriptor.client_version() {
+        url.query_pairs_mut().append_pair("client_version", version);
+    }
     let origin = origin_for_url(&url);
     let request = client.get(url).headers(headers);
 
@@ -407,13 +423,15 @@ fn is_expected_provider_input_error(error: &crate::shared::error::AppError) -> b
 fn oauth_catalog_descriptor(
     cli_key: &str,
     adapter: &'static dyn crate::gateway::oauth::provider_trait::OAuthProvider,
-) -> Option<ModelCatalogDescriptor> {
+) -> Option<ModelCatalogDescriptor<'static>> {
     if adapter.cli_key() != cli_key {
         return None;
     }
 
     match (cli_key, adapter.provider_type()) {
-        ("codex", "codex_oauth") => Some(ModelCatalogDescriptor::CodexOAuth),
+        ("codex", "codex_oauth") => Some(ModelCatalogDescriptor::CodexOAuth {
+            client_version: codex_model_discovery_version(None),
+        }),
         ("grok", "grok_oauth") => Some(ModelCatalogDescriptor::GrokOAuth),
         _ => None,
     }
@@ -496,12 +514,41 @@ pub(crate) async fn provider_models_discover<R: tauri::Runtime>(
                 None,
             ));
         }
+        let local_version = if descriptor.client_version().is_some() {
+            // Reuse the CLI manager's bounded resolver/--version process lifecycle.
+            // The discovery deadline also includes time waiting for a blocking permit.
+            match tokio::time::timeout_at(
+                deadline,
+                blocking::run("provider_models_discover_codex_version", move || {
+                    crate::cli_manager::codex_discovery_version(&app, deadline.into_std())
+                }),
+            )
+            .await
+            {
+                Ok(result) => result.ok().flatten(),
+                Err(_) => {
+                    return Ok(discovery_error(
+                        ProviderModelDiscoveryErrorCode::Timeout,
+                        None,
+                    ))
+                }
+            }
+        } else {
+            None
+        };
+        let descriptor = match descriptor {
+            ModelCatalogDescriptor::CodexOAuth { .. } => ModelCatalogDescriptor::CodexOAuth {
+                client_version: codex_model_discovery_version(local_version.as_deref()),
+            },
+            other => other,
+        };
         let mut headers = HeaderMap::new();
         if adapter
             .inject_model_discovery_headers(
                 &mut headers,
                 access_token,
                 details.oauth_id_token.as_deref(),
+                descriptor.client_version(),
             )
             .is_err()
         {
@@ -638,14 +685,16 @@ pub(crate) async fn provider_models_discover<R: tauri::Runtime>(
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_body_error, fetch_model_catalog, fetch_model_catalog_with_descriptor,
-        oauth_catalog_descriptor, parse_model_catalog, parse_model_catalog_with_format,
-        provider_models_discover, DiscoveryParseError, ModelCatalogDescriptor, ModelCatalogFormat,
-        ProviderModelDiscoveryErrorCode, ProviderModelDiscoveryInput, ProviderModelDiscoveryResult,
+        classify_body_error, codex_model_discovery_version, fetch_model_catalog,
+        fetch_model_catalog_with_descriptor, oauth_catalog_descriptor, parse_model_catalog,
+        parse_model_catalog_with_format, provider_models_discover, DiscoveryParseError,
+        ModelCatalogDescriptor, ModelCatalogFormat, ProviderModelDiscoveryErrorCode,
+        ProviderModelDiscoveryInput, ProviderModelDiscoveryResult,
         ProviderModelDiscoveryUnsupportedReason,
     };
     use crate::app_state::DbInitState;
-    use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
+    use base64::Engine;
+    use reqwest::header::HeaderMap;
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -759,6 +808,7 @@ mod tests {
             assert!(request
                 .to_ascii_lowercase()
                 .contains(&expected_header.to_ascii_lowercase()));
+            assert!(!request.contains("client_version="));
             assert!(matches!(result, ProviderModelDiscoveryResult::Ready { .. }));
         }
     }
@@ -1201,27 +1251,50 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn fetches_codex_oauth_descriptor_at_default_backend_models_path() {
-        let (origin, request_task) = fixture_server(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{\"data\":[{\"id\":\"gpt-5.4\"}]} ",
-        )
+    async fn fetch_codex_oauth_fixture(
+        body: &str,
+        local_version: Option<&str>,
+    ) -> (ProviderModelDiscoveryResult, String, String) {
+        let (origin, request_task) = fixture_server(&format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        ))
         .await;
         let client = reqwest::Client::builder()
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .expect("build fixture client");
+        let adapter =
+            crate::gateway::oauth::registry::resolve_oauth_adapter("codex", 1, Some("codex_oauth"))
+                .expect("Codex OAuth adapter");
+        let descriptor = oauth_catalog_descriptor("codex", adapter).expect("OAuth descriptor");
+        let descriptor = match descriptor {
+            ModelCatalogDescriptor::CodexOAuth { .. } => ModelCatalogDescriptor::CodexOAuth {
+                client_version: codex_model_discovery_version(local_version),
+            },
+            other => panic!("expected Codex descriptor, got {other:?}"),
+        };
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(br#"{"https://api.openai.com/auth":{"chatgpt_account_id":"fixture-account"}}"#);
+        let id_token = format!("header.{payload}.signature");
         let mut headers = HeaderMap::new();
-        headers.insert(
-            AUTHORIZATION,
-            HeaderValue::from_static("Bearer oauth-secret"),
-        );
-        headers.insert("originator", HeaderValue::from_static("codex_cli_rs"));
+        adapter
+            .inject_model_discovery_headers(
+                &mut headers,
+                "oauth-secret",
+                Some(&id_token),
+                descriptor.client_version(),
+            )
+            .expect("inject real adapter discovery headers");
+        let backend_path = reqwest::Url::parse(adapter.default_base_url())
+            .expect("adapter base URL")
+            .path()
+            .to_string();
 
         let result = fetch_model_catalog_with_descriptor(
-            ModelCatalogDescriptor::CodexOAuth,
-            &origin,
+            descriptor,
+            &format!("{origin}{backend_path}"),
             None,
             headers,
             &client,
@@ -1229,12 +1302,149 @@ mod tests {
         )
         .await;
         let request = request_task.await.expect("fixture request task");
+        (result, request, origin)
+    }
 
-        assert!(request.starts_with("GET /models HTTP/1.1"));
-        assert!(request
-            .to_ascii_lowercase()
-            .contains("authorization: bearer oauth-secret"));
-        assert!(matches!(result, ProviderModelDiscoveryResult::Ready { .. }));
+    #[test]
+    fn codex_oauth_discovery_selects_local_version_without_a_minimum_clamp() {
+        for (raw, expected) in [
+            ("codex-cli 0.144.4", "0.144.4"),
+            ("  codex-cli 0.150.2  ", "0.150.2"),
+            ("codex-cli 0.137.0", "0.137.0"),
+            ("0.150.2", "0.150.2"),
+            ("codex-cli v1.2.3-alpha.1+build.7", "1.2.3-alpha.1+build.7"),
+        ] {
+            assert_eq!(codex_model_discovery_version(Some(raw)), expected);
+        }
+        for raw in [
+            None,
+            Some(""),
+            Some("unknown"),
+            Some("codex-cli nope"),
+            Some("codex-cli 0.144"),
+            Some("codex-cli 0.144.4 garbage"),
+            Some("codex-cli 0.144.4\r\nInjected: header"),
+            Some("1.2.3-"),
+            Some("1.2.3.4"),
+            Some("1.2.3+"),
+            Some("1.2.3-alpha..1"),
+        ] {
+            assert_eq!(codex_model_discovery_version(raw), "0.144.4", "{raw:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn codex_oauth_discovery_keeps_dynamic_query_and_identity_versions_coherent() {
+        for (raw, expected) in [
+            (Some("codex-cli 0.150.2"), "0.150.2"),
+            (Some("codex-cli 0.137.0"), "0.137.0"),
+            (
+                Some("codex-cli 1.2.3-alpha.1+build.7"),
+                "1.2.3-alpha.1+build.7",
+            ),
+            (Some("malformed version"), "0.144.4"),
+            (None, "0.144.4"),
+        ] {
+            let (result, request, origin) =
+                fetch_codex_oauth_fixture(r#"{"models":[]}"#, raw).await;
+            assert!(matches!(result, ProviderModelDiscoveryResult::Empty { .. }));
+            let target = request.split_whitespace().nth(1).expect("request target");
+            let url = reqwest::Url::parse(&format!("{origin}{target}")).expect("request URL");
+            assert_eq!(url.path(), "/backend-api/codex/models");
+            assert_eq!(
+                url.query_pairs().collect::<Vec<_>>(),
+                vec![("client_version".into(), expected.into())]
+            );
+            assert!(request.contains(&format!("\r\nuser-agent: codex_cli_rs/{expected}\r\n")));
+            assert!(request.contains(&format!("\r\nversion: {expected}\r\n")));
+        }
+    }
+
+    #[tokio::test]
+    async fn codex_oauth_discovery_sends_versioned_backend_path_and_adapter_identity() {
+        let (_, request, _) = fetch_codex_oauth_fixture(r#"{"models":[]}"#, None).await;
+        assert!(
+            request
+                .starts_with("GET /backend-api/codex/models?client_version=0.144.4 HTTP/1.1\r\n"),
+            "unexpected request: {request}"
+        );
+        let request = request.to_ascii_lowercase();
+        for header in [
+            "authorization: bearer oauth-secret",
+            "chatgpt-account-id: fixture-account",
+            "originator: codex_cli_rs",
+            "user-agent: codex_cli_rs/0.144.4",
+            "version: 0.144.4",
+        ] {
+            assert!(
+                request.contains(&format!("\r\n{header}\r\n")),
+                "missing {header}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn codex_oauth_discovery_preserves_unknown_slugs_sorted_and_deduplicated() {
+        let (result, _, expected_origin) = fetch_codex_oauth_fixture(
+            r#"{"models":[{"slug":" z-future-model ","display_name":"Ignored"},{"slug":"models/astra"},{"slug":"astra","capabilities":{"unknown":true}},{"slug":"z-future-model"}]}"#,
+            None,
+        )
+        .await;
+        match result {
+            ProviderModelDiscoveryResult::Ready {
+                models,
+                origin,
+                base_url_index,
+            } => {
+                assert_eq!(models, vec!["astra", "models/astra", "z-future-model"]);
+                assert_eq!(origin, expected_origin);
+                assert_eq!(base_url_index, None);
+            }
+            other => panic!("expected ready manifest, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn codex_oauth_discovery_returns_empty_manifest() {
+        let (result, _, expected_origin) =
+            fetch_codex_oauth_fixture(r#"{"models":[]}"#, None).await;
+        assert!(
+            matches!(result, ProviderModelDiscoveryResult::Empty { origin, base_url_index: None }
+            if origin == expected_origin)
+        );
+    }
+
+    #[tokio::test]
+    async fn codex_oauth_discovery_rejects_malformed_or_paginated_manifests() {
+        for body in [
+            "not json",
+            r#"{}"#,
+            r#"{"data":[{"id":"legacy-id"}]}"#,
+            r#"{"models":{}}"#,
+            r#"{"models":[{"slug":"valid"},null]}"#,
+            r#"{"models":[{"slug":"valid"},{"id":"not-a-slug"}]}"#,
+            r#"{"models":[{"slug":"valid"},{"slug":42}]}"#,
+            r#"{"models":[{"slug":"valid"},{"slug":" "}]}"#,
+            r#"{"models":[{"slug":"valid"},{"slug":"wild*"}]}"#,
+            r#"{"models":[{"slug":"valid"}],"has_more":true}"#,
+            r#"{"models":[],"next":"page"}"#,
+            r#"{"models":[],"next_page_token":"page"}"#,
+            r#"{"models":[],"nextPageToken":"page"}"#,
+            r#"{"models":[],"next_cursor":"page"}"#,
+            r#"{"models":[],"nextCursor":"page"}"#,
+        ] {
+            let (result, _, _) = fetch_codex_oauth_fixture(body, None).await;
+            assert!(
+                matches!(
+                    result,
+                    ProviderModelDiscoveryResult::Error {
+                        code: ProviderModelDiscoveryErrorCode::InvalidResponse,
+                        http_status: None,
+                    }
+                ),
+                "expected invalid response for {body}, got {result:?}"
+            );
+        }
     }
 
     #[test]
