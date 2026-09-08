@@ -8,6 +8,7 @@ import type {
 import {
   modelPriceAliasesGet,
   modelPriceAliasesSet,
+  modelPriceRulesSet,
   modelPricesList,
   modelPricesSyncBasellm,
 } from "../../services/usage/modelPrices";
@@ -18,6 +19,7 @@ import {
   isModelPricesSyncNotModified,
   useModelPriceAliasesQuery,
   useModelPriceAliasesSetMutation,
+  useModelPriceRulesSetMutation,
   useModelPricesListQuery,
   useModelPricesSyncBasellmMutation,
   useModelPricesTotalCountQuery,
@@ -33,6 +35,7 @@ vi.mock("../../services/usage/modelPrices", async () => {
     modelPricesSyncBasellm: vi.fn(),
     modelPriceAliasesGet: vi.fn(),
     modelPriceAliasesSet: vi.fn(),
+    modelPriceRulesSet: vi.fn(),
   };
 });
 
@@ -64,6 +67,17 @@ function makeModelPricesSyncReport(
 describe("query/modelPrices", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("updates only the saved rule cache without invalidating historical queries", async () => {
+    const client = createTestQueryClient();
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    const rules = { version: 1, rules: [] };
+    vi.mocked(modelPriceRulesSet).mockResolvedValue(rules);
+    const { result } = renderHook(() => useModelPriceRulesSetMutation(), { wrapper: createQueryWrapper(client) });
+    await act(async () => { await result.current.mutateAsync(rules); });
+    expect(client.getQueryData(modelPricesKeys.rules())).toEqual(rules);
+    expect(invalidate).not.toHaveBeenCalled();
   });
 
   it("calls modelPricesList with tauri runtime", async () => {

@@ -7,6 +7,11 @@ import {
   type ModelPricesSyncReport,
   modelPriceAliasesGet,
   modelPriceAliasesSet,
+  modelPriceRulesGet,
+  modelPriceRulesSet,
+  modelPriceReferenceGet,
+  normalizeModelPriceRules,
+  type ModelPriceRule,
   modelPricesList,
   modelPricesSyncBasellm,
   notifyModelPricesUpdated,
@@ -27,6 +32,9 @@ vi.mock("../../../generated/bindings", async () => {
       modelPricesSyncBasellm: vi.fn(),
       modelPriceAliasesGet: vi.fn(),
       modelPriceAliasesSet: vi.fn(),
+      modelPriceRulesGet: vi.fn(),
+      modelPriceRulesSet: vi.fn(),
+      modelPriceReferenceGet: vi.fn(),
     },
   };
 });
@@ -41,6 +49,27 @@ vi.mock("../../consoleLog", async () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+it("rejects conflicting zero and one multipliers before saving through IPC", async () => {
+  const empty = { price: null, multiplier: null };
+  for (const value of [0, 1]) {
+    const rule: ModelPriceRule = { cli_key: "claude", model: "new", enabled: true, multiplier: value,
+      input: empty, output: { price: 8, multiplier: value }, cache_read: empty, cache_write_5m: empty, cache_write_1h: empty };
+    await expect(modelPriceRulesSet({ version: 1, rules: [rule] })).rejects.toThrow("整体倍率与分项倍率不能同时设置");
+    rule.multiplier = null;
+    expect(normalizeModelPriceRules({ version: 1, rules: [rule] }).rules[0].output.multiplier).toBe(value);
+  }
+  expect(commands.modelPriceRulesSet).not.toHaveBeenCalled();
+});
+
+it("returns unpriced references and surfaces rule read and save errors", async () => {
+  vi.mocked(commands.modelPriceReferenceGet).mockResolvedValue({ status: "ok", data: null });
+  expect(await modelPriceReferenceGet("claude", "new")).toBeNull();
+  vi.mocked(commands.modelPriceRulesGet).mockResolvedValue({ status: "error", error: "read failed" });
+  await expect(modelPriceRulesGet()).rejects.toThrow("read failed");
+  vi.mocked(commands.modelPriceRulesSet).mockResolvedValue({ status: "error", error: "disk full" });
+  await expect(modelPriceRulesSet({ version: 1, rules: [] })).rejects.toThrow("disk full");
 });
 
 function makeModelPriceSummary(overrides: Partial<ModelPriceSummary> = {}): ModelPriceSummary {

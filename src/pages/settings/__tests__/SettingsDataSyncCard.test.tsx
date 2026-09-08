@@ -11,6 +11,7 @@ function renderCard(overrides: Record<string, unknown> = {}) {
     lastModelPricesSyncReport: null,
     lastModelPricesSyncTime: null,
     openModelPriceAliasesDialog: vi.fn(),
+    openModelPriceRulesDialog: vi.fn(),
     todayRequestsAvailable: "available" as const,
     todayRequestsTotal: 9,
     syncingModelPrices: false,
@@ -41,6 +42,14 @@ describe("pages/settings/SettingsDataSyncCard", () => {
     expect(props.syncModelPrices).toHaveBeenNthCalledWith(1, false);
     expect(props.syncModelPrices).toHaveBeenNthCalledWith(2, true);
     expect(props.openModelPriceAliasesDialog).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "配置自定义定价" })).toBeDisabled();
+  });
+
+  it("opens custom pricing without replacing alias configuration", () => {
+    const { props } = renderCard();
+    fireEvent.click(screen.getByRole("button", { name: "配置自定义定价" }));
+    expect(props.openModelPriceRulesDialog).toHaveBeenCalledOnce();
+    expect(props.openModelPriceAliasesDialog).not.toHaveBeenCalled();
   });
 
   it("renders unavailable/error states and all relative time buckets", () => {
@@ -57,6 +66,7 @@ describe("pages/settings/SettingsDataSyncCard", () => {
         lastModelPricesSyncReport={null}
         lastModelPricesSyncTime={now - 30_000}
         openModelPriceAliasesDialog={vi.fn()}
+        openModelPriceRulesDialog={vi.fn()}
         todayRequestsAvailable="unavailable"
         todayRequestsTotal={null}
         syncingModelPrices={false}
@@ -77,6 +87,7 @@ describe("pages/settings/SettingsDataSyncCard", () => {
         lastModelPricesSyncReport={null}
         lastModelPricesSyncTime={now - 5 * 60_000}
         openModelPriceAliasesDialog={vi.fn()}
+        openModelPriceRulesDialog={vi.fn()}
         todayRequestsAvailable="unavailable"
         todayRequestsTotal={null}
         syncingModelPrices={false}
@@ -94,6 +105,7 @@ describe("pages/settings/SettingsDataSyncCard", () => {
         lastModelPricesSyncReport={null}
         lastModelPricesSyncTime={now - 2 * 60 * 60_000}
         openModelPriceAliasesDialog={vi.fn()}
+        openModelPriceRulesDialog={vi.fn()}
         todayRequestsAvailable="unavailable"
         todayRequestsTotal={null}
         syncingModelPrices={false}
@@ -111,6 +123,7 @@ describe("pages/settings/SettingsDataSyncCard", () => {
         lastModelPricesSyncReport={null}
         lastModelPricesSyncTime={now - 3 * 24 * 60 * 60_000}
         openModelPriceAliasesDialog={vi.fn()}
+        openModelPriceRulesDialog={vi.fn()}
         todayRequestsAvailable="unavailable"
         todayRequestsTotal={null}
         syncingModelPrices={false}
@@ -132,6 +145,7 @@ describe("pages/settings/SettingsDataSyncCard", () => {
         lastModelPricesSyncReport={{ status: "not_modified", inserted: 0, updated: 0 } as any}
         lastModelPricesSyncTime={null}
         openModelPriceAliasesDialog={vi.fn()}
+        openModelPriceRulesDialog={vi.fn()}
         todayRequestsAvailable="available"
         todayRequestsTotal={null}
         syncingModelPrices={false}
@@ -152,6 +166,7 @@ describe("pages/settings/SettingsDataSyncCard", () => {
         lastModelPricesSyncReport={{ status: "updated", inserted: 3, updated: 4 } as any}
         lastModelPricesSyncTime={null}
         openModelPriceAliasesDialog={vi.fn()}
+        openModelPriceRulesDialog={vi.fn()}
         todayRequestsAvailable="available"
         todayRequestsTotal={18}
         syncingModelPrices

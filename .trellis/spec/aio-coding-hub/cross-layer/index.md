@@ -5,6 +5,8 @@ TypeScript bindings, frontend adapters, and React UI.
 
 ## Topics
 
+- [Model price rules contract](./model-price-rules-contract.md): exact custom
+  pricing, mutually exclusive multipliers, reference inheritance, and historical cost isolation.
 - [Codex config contract](./codex-config-contract.md): typed config fields,
   patch semantics, raw TOML validation, generated bindings, and UI behavior.
 - [Codex managed model route contract](./codex-managed-model-route-contract.md):

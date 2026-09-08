@@ -1,6 +1,90 @@
 use super::*;
 
 #[test]
+fn model_rule_applies_fixed_prices_and_mutually_exclusive_multipliers() {
+    let reference = r#"{"input_cost_per_token":0.000002,"output_cost_per_token":0.00001,"cache_read_input_token_cost":0.0000002}"#;
+    let mut rule = crate::model_price_rules::ModelPriceRuleV1::default();
+    rule.output.price = Some(8.0);
+    let usages = [
+        CostUsage { input_tokens: 1_000_000, ..Default::default() },
+        CostUsage { output_tokens: 1_000_000, ..Default::default() },
+        CostUsage { cache_read_input_tokens: 1_000_000, ..Default::default() },
+    ];
+    for (whole, output, expected) in [
+        (Some(0.5), None, [800_000_000_000_000, 3_200_000_000_000_000, 80_000_000_000_000]),
+        (None, Some(2.0), [1_600_000_000_000_000, 12_800_000_000_000_000, 160_000_000_000_000]),
+        (None, None, [1_600_000_000_000_000, 6_400_000_000_000_000, 160_000_000_000_000]),
+    ] {
+        rule.multiplier = whole;
+        rule.output.multiplier = output;
+        for (usage, expected) in usages.iter().zip(expected) {
+            assert_eq!(calculate_cost_with_rule(usage, Some(reference), 0.8, "claude", "test", &CostCalculationOptions::default(), Some(&rule)), Some(expected));
+        }
+    }
+}
+
+#[test]
+fn overrides_preserve_cache_reference_and_token_conventions() {
+    let reference = r#"{"input_cost_per_token":0.000002,"output_cost_per_token":0.00001}"#;
+    let mut rule = crate::model_price_rules::ModelPriceRuleV1::default();
+    rule.input.price = Some(9.0);
+    rule.cache_write_1h.price = Some(7.0);
+    rule.cache_read.multiplier = Some(2.0);
+    let usage = CostUsage { input_tokens: 1000, cache_read_input_tokens: 100,
+        cache_creation_5m_input_tokens: 100, cache_creation_1h_input_tokens: 100, ..Default::default() };
+    for (cli, expected) in [("claude", 9_990_000_000_000), ("codex", 7_290_000_000_000), ("gemini", 9_090_000_000_000)] {
+        assert_eq!(calculate_cost_with_rule(&usage, Some(reference), 1.0, cli, "test", &CostCalculationOptions::default(), Some(&rule)), Some(expected));
+    }
+}
+
+#[test]
+fn fixed_price_removes_only_its_premium_while_multiplier_preserves_tiers() {
+    let reference = r#"{"input_cost_per_token":0.000002,"input_cost_per_token_priority":0.000004,"input_cost_per_token_above_200k_tokens":0.000006,"output_cost_per_token":0.00001}"#;
+    let usage = CostUsage { input_tokens: 300_000, output_tokens: 300_000, ..Default::default() };
+    let options = CostCalculationOptions { priority_service_tier_applied: true };
+    let mut rule = crate::model_price_rules::ModelPriceRuleV1::default();
+    rule.input.multiplier = Some(2.0);
+    rule.output.price = Some(8.0);
+    assert_eq!(calculate_cost_with_rule(&usage, Some(reference), 1.0, "codex", "test", &options, Some(&rule)), Some(5_200_000_000_000_000));
+    assert_eq!(calculate_cost_with_rule(&usage, Some(reference), 1.0, "claude", "test-1m", &options, Some(&rule)), Some(5_600_000_000_000_000));
+}
+
+#[test]
+fn custom_new_models_require_primary_prices_and_distinguish_free_from_unknown() {
+    let usage = CostUsage { input_tokens: 1_000, ..Default::default() };
+    let options = CostCalculationOptions::default();
+    let mut rule = crate::model_price_rules::ModelPriceRuleV1::default();
+    rule.input.price = Some(0.0);
+    assert_eq!(calculate_cost_with_rule(&usage, None, 1.0, "claude", "new", &options, Some(&rule)), None);
+    rule.output.price = Some(0.0);
+    assert_eq!(calculate_cost_with_rule(&usage, None, 1.0, "claude", "new", &options, Some(&rule)), Some(0));
+    assert_eq!(calculate_cost_with_rule(&CostUsage::default(), None, 1.0, "claude", "new", &options, Some(&rule)), None);
+    rule.input.price = Some(2.0);
+    rule.output.price = Some(10.0);
+    let cache_usage = CostUsage { cache_read_input_tokens: 100, cache_creation_5m_input_tokens: 100, cache_creation_1h_input_tokens: 100, ..Default::default() };
+    assert_eq!(calculate_cost_with_rule(&cache_usage, None, 1.0, "claude", "new", &options, Some(&rule)), Some(670_000_000_000));
+    rule.multiplier = Some(0.0);
+    assert_eq!(calculate_cost_with_rule(&usage, None, 1.0, "claude", "new", &options, Some(&rule)), Some(0));
+    rule.input.price = None;
+    rule.output.price = None;
+    assert_eq!(calculate_cost_with_rule(&usage, Some("{}"), 1.0, "claude", "new", &options, Some(&rule)), None);
+    assert_eq!(calculate_cost_usd_femto(&usage, r#"{"input_cost_per_token":0}"#, 1.0, "claude", "old"), None);
+}
+
+#[test]
+fn empty_rule_preserves_existing_cost_and_partial_unknown_does_not_become_free() {
+    let reference = r#"{"input_cost_per_token":0.000002,"output_cost_per_token":0.00001}"#;
+    let usage = CostUsage { input_tokens: 300_000, output_tokens: 300_000, cache_read_input_tokens: 100, cache_creation_input_tokens: 100, ..Default::default() };
+    let rule = crate::model_price_rules::ModelPriceRuleV1::default();
+    for cli in ["claude", "codex", "grok", "gemini"] {
+        assert_eq!(calculate_cost_with_rule(&usage, Some(reference), 0.8, cli, "test-1m", &CostCalculationOptions::default(), Some(&rule)),
+            calculate_cost_usd_femto(&usage, reference, 0.8, cli, "test-1m"));
+    }
+    let rule = crate::model_price_rules::ModelPriceRuleV1 { multiplier: Some(0.0), ..Default::default() };
+    assert_eq!(calculate_cost_with_rule(&usage, Some(r#"{"input_cost_per_token":0.000002}"#), 1.0, "claude", "test", &CostCalculationOptions::default(), Some(&rule)), None);
+}
+
+#[test]
 fn parses_decimal_with_exponent_to_femto() {
     let femto = parse_decimal_to_femto("1.5e-6").expect("parse");
     // 0.0000015 * 1e15 = 1.5e9

@@ -1,7 +1,7 @@
 //! Usage: Model pricing related Tauri commands.
 
 use crate::app_state::{ensure_db_ready, DbInitState};
-use crate::{blocking, cost_stats, model_price_aliases, model_prices, model_prices_sync};
+use crate::{blocking, cost_stats, model_price_aliases, model_price_rules, model_prices, model_prices_sync};
 
 const MODEL_PRICE_SYNC_BACKFILL_CLI_KEYS: [&str; 3] = ["claude", "codex", "grok"];
 
@@ -107,4 +107,30 @@ pub(crate) async fn model_price_aliases_set(
     })
     .await
     .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn model_price_rules_get(app: tauri::AppHandle) -> Result<model_price_rules::ModelPriceRulesV1, String> {
+    blocking::run("model_price_rules_get", move || model_price_rules::read(&app)).await.map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn model_price_rules_set(app: tauri::AppHandle, rules: model_price_rules::ModelPriceRulesV1) -> Result<model_price_rules::ModelPriceRulesV1, String> {
+    blocking::run("model_price_rules_set", move || model_price_rules::write(&app, rules)).await.map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn model_price_reference_get(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    cli_key: String,
+    model: String,
+) -> Result<Option<crate::cost::ModelPriceReference>, String> {
+    let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
+    blocking::run("model_price_reference_get", move || {
+        model_prices::reference_get(&db, &cli_key, &model, &model_price_aliases::read(&app)?)
+    }).await.map_err(Into::into)
 }
