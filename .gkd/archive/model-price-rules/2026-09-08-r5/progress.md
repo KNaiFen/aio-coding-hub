@@ -1,7 +1,9 @@
+> 归档快照：2026-09-08 12:29 +08:00。来源：执行工作树，作者初次及返工施工角色；r5 段落作者 main。保留原记录日期、观察时点及历史结论；本机绝对路径与运行时角色标识已脱敏。下文的活动路径是原始来源说明，五类完整记录均已保存于本目录。
+
 # 自定义定价执行进度
 
 日期：2026-09-08。Execution r4，基线 `b147ced0f8cab342ee57925a5bd6b08d37e061db`。
-唯一 worktree：`/Users/knaifen/Documents/Codex/aio-coding-hub/model-price-rules`。
+唯一 worktree：`<执行工作树>`。
 分支：`feat/model-price-rules`。范围内实施与本地提交已获批准。
 
 ## 实施事实
