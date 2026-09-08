@@ -97,3 +97,10 @@
 - 接收该 run 唯一 `cloud-native-fixes-dfeb65212d1e676935d90afa52de4a341ca4d2f0-1` artifact；名称使用 PR merge SHA，API workflow_run 确认上述任务 head/attempt。main 完整检查补丁：九个任务 Rust 文件仅格式调整，bindings 仅增加三条命令和对应规则/参考价 DTO，无依赖或无关改动。
 - `git apply --check` 和 `git apply` 均退出 0；接收后 `git diff --check`、`node scripts/check-cloud-only-verification.mjs` 均退出 0。未在本地执行格式化或生成器。
 - 重新推送后须以新 head 等待自动 `ci-gate`、`pr-title`，不以本次局部通过代替最终 CI。
+
+## r5 第二轮 CI 测试连接修正（main）
+
+- head `185177ef3fc33100567f071bad32f03469751857`，CI run `34183291396` attempt 1：frontend 完整通过（含测试和构建），contracts、observer-macos、pr-title 通过。Rust 无生成漂移、Clippy 通过；2973 个库测试为 2967 passed / 2 failed / 4 ignored。
+- 仅两个新增历史回归失败：`historical_backfill_uses_reference_and_recorded_multiplier_only`、`model_rules_freeze_terminal_costs_and_project_pending_and_retained_traces` 在持有池连接时调用再次借连接的业务入口。测试池大小为 1，导致 pool timeout，尚未执行到相关金额断言。
+- main 直接按相邻测试既有模式修正两个测试的连接生命周期：调用入口前 drop，读取断言前重新借出。不增加连接池大小、不改变业务代码、数据或任何断言。完整复查两测试内所有入口调用与连接持有关系。
+- 修改仅七行连接释放/重借；`git diff --check` 与 `node scripts/check-cloud-only-verification.mjs` 退出 0。消融无新增抽象。本地未运行测试，最终新 head 自动 CI 待定。

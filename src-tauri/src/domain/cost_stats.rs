@@ -296,6 +296,7 @@ INSERT INTO request_logs (
             [],
         )
         .unwrap();
+        drop(conn);
         for _ in 0..2 {
             backfill_missing_for_cli_with_aliases(
                 &db,
@@ -305,6 +306,7 @@ INSERT INTO request_logs (
             )
             .unwrap();
         }
+        let conn = db.open_connection().unwrap();
         let values: Vec<Option<i64>> = conn
             .prepare("SELECT cost_usd_femto FROM request_logs ORDER BY trace_id")
             .unwrap()

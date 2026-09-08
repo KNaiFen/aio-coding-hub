@@ -2076,6 +2076,7 @@ VALUES ('claude', 'target-priced', '{"input_cost_per_token":0.002}', 1, 1)
         )
         .unwrap();
         crate::usage_ledger::project_trace(&conn, "rules-old").unwrap();
+        drop(conn);
         rules.rules[0].multiplier = Some(0.0);
         super::insert_batch_with_rules(
             app.handle(),
@@ -2085,6 +2086,7 @@ VALUES ('claude', 'target-priced', '{"input_cost_per_token":0.002}', 1, 1)
             Some(&rules),
         )
         .unwrap();
+        let conn = db.open_connection().unwrap();
         for table in ["request_logs", "usage_ledger"] {
             let old: (Option<i64>, f64) = conn.query_row(&format!("SELECT cost_usd_femto, cost_multiplier FROM {table} WHERE trace_id = 'rules-old'"), [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
             assert_eq!(old, (Some(2_000_000_000_000), 0.8));
@@ -2101,6 +2103,7 @@ VALUES ('claude', 'target-priced', '{"input_cost_per_token":0.002}', 1, 1)
         }
         conn.execute("DELETE FROM request_logs WHERE trace_id = 'rules-old'", [])
             .unwrap();
+        drop(conn);
         super::insert_batch_with_rules(
             app.handle(),
             &db,
@@ -2146,6 +2149,7 @@ VALUES ('claude', 'target-priced', '{"input_cost_per_token":0.002}', 1, 1)
             Some(&rules),
         )
         .unwrap();
+        let conn = db.open_connection().unwrap();
         let retained: Option<i64> = conn
             .query_row(
                 "SELECT cost_usd_femto FROM usage_ledger WHERE trace_id = 'rules-old'",
@@ -2162,6 +2166,7 @@ VALUES ('claude', 'target-priced', '{"input_cost_per_token":0.002}', 1, 1)
             .unwrap();
         assert_eq!(retained, Some(2_000_000_000_000));
         assert_eq!(unknown, None);
+        drop(conn);
         super::insert_batch_with_rules(
             app.handle(),
             &db,
