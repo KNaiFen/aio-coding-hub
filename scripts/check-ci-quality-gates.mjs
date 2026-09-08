@@ -69,6 +69,8 @@ const CODEQL_STRATEGY_BLOCK = `strategy:
         build-mode: none
       - language: rust
         build-mode: none`;
+const CODEQL_ANALYZE_IF =
+  "${{ !cancelled() && !(needs.change-scope.result == 'success' && (needs.change-scope.outputs.scope == 'process-docs' || needs.change-scope.outputs.scope == 'checked-docs') && needs.change-scope.outputs.frontend_ci == 'false' && needs.change-scope.outputs.rust_ci == 'false') }}";
 const CI_JOB_CONDITIONS = new Map([
   [
     "contracts",
@@ -76,15 +78,15 @@ const CI_JOB_CONDITIONS = new Map([
   ],
   [
     "frontend",
-    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.frontend_ci == 'true'",
+    "always() && needs.change-scope.result == 'success' && needs.contracts.result == 'success' && needs.change-scope.outputs.frontend_ci == 'true'",
   ],
   [
     "rust",
-    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.rust_ci == 'true'",
+    "always() && needs.change-scope.result == 'success' && needs.contracts.result == 'success' && needs.change-scope.outputs.rust_ci == 'true'",
   ],
   [
     "observer-macos",
-    "always() && needs.change-scope.result == 'success' && needs.change-scope.outputs.rust_ci == 'true'",
+    "always() && needs.change-scope.result == 'success' && needs.contracts.result == 'success' && needs.change-scope.outputs.rust_ci == 'true'",
   ],
   [
     "candidate-plan",
@@ -469,6 +471,9 @@ function assertCodeqlContract(workflow, failures) {
   if (!workflow.includes('- cron: "17 3 * * 1"')) {
     failures.push("codeql.yml must retain the weekly schedule");
   }
+  if (/^    paths(?:-ignore)?:/m.test(workflow)) {
+    failures.push("codeql.yml must not filter workflow paths");
+  }
 
   const permissionEntries = topLevelBlock(workflow, "permissions")
     .split(/\r?\n/)
@@ -481,6 +486,83 @@ function assertCodeqlContract(workflow, failures) {
     failures.push("codeql.yml must grant only contents: read and security-events: write");
   }
 
+  const scopeKeys = workflowJobDirectKeys(workflow, "change-scope");
+  if (
+    scopeKeys.malformed.length > 0 ||
+    scopeKeys.keys.join("\n") !==
+      ["if", "runs-on", "timeout-minutes", "permissions", "outputs", "steps"].join("\n")
+  ) {
+    failures.push("codeql.yml change-scope must use only the approved canonical job properties");
+  }
+  if (
+    workflowJobProperty(workflow, "change-scope", "if") !==
+    "github.event_name == 'push' || github.event_name == 'pull_request'"
+  ) {
+    failures.push("codeql.yml change-scope must run only for push and pull_request");
+  }
+  if (
+    workflowJobScalar(workflow, "change-scope", "runs-on") !== "ubuntu-latest" ||
+    workflowJobScalar(workflow, "change-scope", "timeout-minutes") !== "10"
+  ) {
+    failures.push("codeql.yml change-scope must use ubuntu-latest with a 10-minute timeout");
+  }
+  if (
+    workflowJobBlock(workflow, "change-scope", "permissions") !== "permissions:\n  contents: read"
+  ) {
+    failures.push("codeql.yml change-scope must grant only contents: read");
+  }
+  const scopeOutputs = ["scope", "frontend_ci", "rust_ci"];
+  if (
+    workflowJobBlock(workflow, "change-scope", "outputs") !==
+    ["outputs:", ...scopeOutputs.map((key) => `  ${key}: \${{ steps.scope.outputs.${key} }}`)].join("\n")
+  ) {
+    failures.push("codeql.yml change-scope must expose the classifier scope and domain outputs");
+  }
+  const scopeSteps = workflowSteps(workflow, "change-scope");
+  const [checkout, setupNode, classify] = scopeSteps;
+  if (
+    scopeSteps.length !== 3 ||
+    scopeSteps.some((step) => !stepRunsUnconditionally(step)) ||
+    checkout?.properties.get("uses") !==
+      "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" ||
+    setupNode?.properties.get("uses") !==
+      "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020" ||
+    classify?.properties.get("id") !== "scope" ||
+    classify?.properties.get("shell") !== "bash" ||
+    classify?.properties.has("uses")
+  ) {
+    failures.push("codeql.yml change-scope must retain checkout, Node setup, and classification steps");
+  }
+  requireStepMapping(
+    checkout, "with", new Map([["fetch-depth", "0"], ["persist-credentials", "false"]]),
+    "codeql.yml change-scope must checkout full history without persisted credentials", failures
+  );
+  requireStepMapping(
+    setupNode, "with", new Map([["node-version", "22"]]),
+    "codeql.yml change-scope must use Node 22", failures
+  );
+  requireStepMapping(
+    classify, "env", new Map([
+      ["CI_EVENT_NAME", "${{ github.event_name }}"],
+      ["CI_BASE_SHA", "${{ github.event.pull_request.base.sha || '' }}"],
+      ["CI_HEAD_SHA", "${{ github.event.pull_request.head.sha || github.sha }}"],
+      ["CI_BEFORE_SHA", "${{ github.event.before || '' }}"],
+    ]), "codeql.yml change-scope must bind the event and exact diff SHAs", failures
+  );
+  const classifyRun = classify ? workflowStepRun(classify) : undefined;
+  if (
+    classifyRun?.style !== ">" ||
+    classifyRun.value.trim().split(/\s+/).join(" ") !==
+      'node scripts/ci-change-scope.mjs --event "$CI_EVENT_NAME" --base "$CI_BASE_SHA" --head "$CI_HEAD_SHA" --before "$CI_BEFORE_SHA"'
+  ) {
+    failures.push("codeql.yml change-scope must invoke the existing classifier with all diff inputs");
+  }
+  if (workflowJobScalar(workflow, "analyze", "needs") !== "change-scope") {
+    failures.push("codeql.yml analyze must need change-scope");
+  }
+  if (workflowJobProperty(workflow, "analyze", "if") !== CODEQL_ANALYZE_IF) {
+    failures.push("codeql.yml analyze must skip only proven documentation changes unless cancelled");
+  }
   if (workflowJobScalar(workflow, "analyze", "timeout-minutes") !== "45") {
     failures.push("codeql.yml analyze must retain a 45-minute timeout");
   }
@@ -488,7 +570,7 @@ function assertCodeqlContract(workflow, failures) {
   if (
     analyzeKeys.malformed.length > 0 ||
     analyzeKeys.keys.join("\n") !==
-      ["name", "runs-on", "timeout-minutes", "strategy", "steps"].join("\n")
+      ["name", "needs", "if", "runs-on", "timeout-minutes", "strategy", "steps"].join("\n")
   ) {
     failures.push("codeql.yml analyze must use only the approved canonical job properties");
   }
@@ -535,6 +617,11 @@ function assertCodeqlContract(workflow, failures) {
 }
 
 function assertCiDependencyConditions(workflow, failures) {
+  for (const job of ["frontend", "rust", "observer-macos"]) {
+    if (workflowJobScalar(workflow, job, "needs") !== "[change-scope, contracts]") {
+      failures.push(`ci.yml ${job} must need change-scope and contracts`);
+    }
+  }
   for (const [job, expected] of CI_JOB_CONDITIONS) {
     if (workflowJobProperty(workflow, job, "if") !== expected) {
       failures.push(`ci.yml ${job} if must equal ${expected}`);
@@ -763,6 +850,8 @@ export function assertCiQualityGates({
     throw new Error(`CI quality gate contract failed:\n- ${failures.join("\n- ")}`);
   }
 }
+
+export { workflowJobProperty, workflowStepRun, workflowSteps };
 
 const modulePath = fileURLToPath(import.meta.url);
 if (process.argv[1] && resolve(process.argv[1]) === modulePath) {

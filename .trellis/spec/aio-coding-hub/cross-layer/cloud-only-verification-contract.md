@@ -5,7 +5,7 @@
 This repository prohibits local checks that generate large amounts of file
 artifacts or sustain high CPU usage. The contract applies to README instructions,
 root/workspace package scripts, Tauri build hooks, active AIO specs, `ci.yml`,
-`pr-title.yml`, `performance.yml`, and `dev-build.yml`.
+`codeql.yml`, `pr-title.yml`, `performance.yml`, and `dev-build.yml`.
 
 ## 2. Local Resource Boundary
 
@@ -43,13 +43,17 @@ manual runs select both domains.
 - `frontend` installs frozen dependencies, audits them, runs lint, both plugin
   package type checks and tests, root unit coverage, and the Vite build. The
   root coverage run discovers `src/e2e`; there is no separate E2E command.
-  It may be skipped only when the classifier proves no frontend/shared path is
-  present. It runs alongside contracts; the gate requires both to succeed.
+  When selected, it starts only after `contracts` succeeds; the gate requires
+  both to succeed. An unselected frontend domain is skipped.
 - `rust` installs the pinned toolchain, runs Rust formatting and lock/binding
   canonicalization, fails with a bounded drift artifact when files change,
-  then runs Clippy, Rust tests, and dependency audit. It may be skipped only for
-  a frontend-only PR or a documentation-only PR/push; shared/unknown paths and
-  protected branch pushes containing code select it.
+  then runs Clippy, Rust tests, and dependency audit. A frontend-only PR or a
+  documentation-only PR/push leaves it unselected; shared/unknown paths and
+  protected branch pushes containing code select it. Selected Rust and
+  `observer-macos` jobs also wait for `contracts` success, then run alongside
+  the selected frontend job. A selected job skipped because contracts failed
+  still fails the aggregate gate. `candidate-plan` remains parallel to
+  contracts, and candidate dependencies are unchanged.
 - Candidate desktop/TUI jobs remain limited to eligible main commits or an
   explicit manual candidate request. They are skipped for PR branches and are
   not required for every PR.
@@ -60,6 +64,14 @@ manual runs select both domains.
   signing or release permissions.
 - `dev-build.yml` has only the `workflow_dispatch` trigger and produces the
   selected unsigned integration artifact in GitHub Actions.
+- `codeql.yml` reuses the same classifier for automatic PR/push events. Both
+  no-build languages are skipped only after successful classification reports
+  a documentation scope and explicit false frontend/Rust outputs. Source,
+  shared, unknown, mixed, empty, or failed classification still selects both
+  languages. Schedule/manual events skip classification and analyze both;
+  failed or missing classifier outputs cannot prove documentation-only changes.
+  A failed classifier job retains its failure while analysis proceeds unless
+  the workflow was cancelled.
 
 ## 5. Drift Handling
 
@@ -89,13 +101,21 @@ regressions, including failures when:
 - a protected CI command is moved to a comment or non-`run` field;
 - frontend/Rust selection stops using the classifier outputs, or `contracts` no
   longer runs for checked docs or either selected code domain;
+- frontend/Rust/observer-macos loses the contracts dependency, success check,
+  or status expression needed to handle the skipped automatic manual guard;
 - `contracts` stops invoking the production checker, or source-only self-tests
   become eligible on process-documentation-only changes;
 - frontend install/audit/lint/typecheck/test/build or Rust
   format/bindings/Clippy/tests/audit disappears;
 - the automatic `ci-gate` no longer owns the selectable contracts/frontend/Rust
   results, or manual CI can report the same required check name;
-- the PR title validation command or performance benchmark disappears.
+- the PR title validation command or performance benchmark disappears;
+- CodeQL loses its classifier inputs, outputs, full checkout history, read-only
+  classification permissions, or proof required to skip both languages.
+
+The quality-gate self-test maps existing classifier fixtures into the actual
+workflow conditions and executes the unchanged Bash gate with selected,
+unselected, failed, cancelled, and unexpectedly skipped job results.
 
 `scripts/ci-change-scope.selftest.mjs` owns changed-path classification,
 including full CI for shared/unknown paths and the documentation-only tiers.
