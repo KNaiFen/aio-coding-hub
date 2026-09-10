@@ -1010,6 +1010,7 @@ WHERE id = 1
                             .unwrap();
                     let id = provider_limit_usage::tests::create_limited_provider(&db, "live");
                     let other = provider_limit_usage::tests::create_limited_provider(&db, "other");
+                    providers::default_route_set_order(&db, "codex", vec![id, other]).unwrap();
                     let mut conn = db.open_connection().unwrap();
                     let now: i64 = conn
                         .query_row(
@@ -1154,6 +1155,7 @@ WHERE id = 1
         let db = crate::db::init_for_tests_with_pool_size(&dir.path().join("consecutive.db"), 2)
             .unwrap();
         let id = provider_limit_usage::tests::create_limited_provider(&db, "consecutive");
+        providers::default_route_set_order(&db, "codex", vec![id]).unwrap();
         let mut conn = db.open_connection().unwrap();
         let now: i64 = conn
             .query_row(
@@ -1269,6 +1271,7 @@ WHERE id = 1
         let db =
             crate::db::init_for_tests_with_pool_size(&dir.path().join("daily-dst.db"), 2).unwrap();
         let id = provider_limit_usage::tests::create_limited_provider(&db, "daily-dst");
+        providers::default_route_set_order(&db, "codex", vec![id]).unwrap();
         let conn = db.open_connection().unwrap();
         conn.execute(
             "UPDATE providers SET limit_5h_usd=NULL, limit_weekly_usd=NULL, limit_monthly_usd=NULL, limit_total_usd=NULL, daily_reset_mode='fixed', daily_reset_time='02:30:00' WHERE id=?1",
@@ -1379,6 +1382,7 @@ WHERE id = 1
         let db =
             crate::db::init_for_tests_with_pool_size(&dir.path().join("month-week.db"), 2).unwrap();
         let id = provider_limit_usage::tests::create_limited_provider(&db, "month-week");
+        providers::default_route_set_order(&db, "codex", vec![id]).unwrap();
         let mut conn = db.open_connection().unwrap();
         let now = 1_788_768_000;
         conn.execute("UPDATE providers SET limit_5h_usd=NULL, limit_daily_usd=NULL, limit_total_usd=NULL WHERE id=?1", [id]).unwrap();
@@ -1417,6 +1421,7 @@ WHERE id = 1
         let db =
             crate::db::init_for_tests_with_pool_size(&dir.path().join("zero-total.db"), 2).unwrap();
         let id = provider_limit_usage::tests::create_limited_provider(&db, "zero-total");
+        providers::default_route_set_order(&db, "codex", vec![id]).unwrap();
         let mut conn = db.open_connection().unwrap();
         let now = 1_788_768_000;
         conn.execute("UPDATE providers SET limit_5h_usd=NULL, limit_daily_usd=NULL, limit_weekly_usd=0, limit_monthly_usd=NULL, limit_total_usd=NULL WHERE id=?1", [id]).unwrap();
