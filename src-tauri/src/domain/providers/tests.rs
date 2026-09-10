@@ -568,11 +568,16 @@ fn default_provider_params(name: &str) -> ProviderUpsertParams {
 fn daily_limit_anchor_only_ends_when_saved_schedule_changes() {
     use crate::provider_limit_usage::{read_resets, reset_at, ProviderLimitPeriod};
     let dir = tempfile::tempdir().unwrap();
-    let db = crate::db::init_for_tests_with_pool_size(&dir.path().join("daily-anchor.db"), 2).unwrap();
+    let db =
+        crate::db::init_for_tests_with_pool_size(&dir.path().join("daily-anchor.db"), 2).unwrap();
     let provider = upsert(&db, default_provider_params("daily-anchor")).unwrap();
     let mut conn = db.open_connection().unwrap();
     reset_at(&mut conn, provider.id, ProviderLimitPeriod::Daily, 1000).unwrap();
-    conn.execute("UPDATE provider_limit_resets SET request_log_id_cutoff=17 WHERE provider_id=?1", [provider.id]).unwrap();
+    conn.execute(
+        "UPDATE provider_limit_resets SET request_log_id_cutoff=17 WHERE provider_id=?1",
+        [provider.id],
+    )
+    .unwrap();
     for amount in [Some(10.0), Some(20.0), None] {
         let mut params = default_provider_params("daily-anchor");
         params.provider_id = Some(provider.id);
@@ -582,19 +587,35 @@ fn daily_limit_anchor_only_ends_when_saved_schedule_changes() {
         assert_eq!(marker.reset_at, Some(1000));
         assert_eq!(marker.cutoff, 17);
     }
-    for (mode, time) in [(DailyResetMode::Rolling, "00:00:00"), (DailyResetMode::Rolling, "12:30:00"), (DailyResetMode::Fixed, "12:30:00")] {
+    for (mode, time) in [
+        (DailyResetMode::Rolling, "00:00:00"),
+        (DailyResetMode::Rolling, "12:30:00"),
+        (DailyResetMode::Fixed, "12:30:00"),
+    ] {
         reset_at(&mut conn, provider.id, ProviderLimitPeriod::Daily, 2000).unwrap();
-        conn.execute("UPDATE provider_limit_resets SET request_log_id_cutoff=17 WHERE provider_id=?1", [provider.id]).unwrap();
+        conn.execute(
+            "UPDATE provider_limit_resets SET request_log_id_cutoff=17 WHERE provider_id=?1",
+            [provider.id],
+        )
+        .unwrap();
         let mut params = default_provider_params("daily-anchor");
         params.provider_id = Some(provider.id);
         params.daily_reset_mode = Some(mode);
         params.daily_reset_time = Some(time.to_string());
         upsert(&db, params).unwrap();
-        assert_eq!(read_resets(&conn, Some(provider.id)).unwrap()[&provider.id][1].reset_at, None);
-        assert_eq!(read_resets(&conn, Some(provider.id)).unwrap()[&provider.id][1].cutoff, 17);
+        assert_eq!(
+            read_resets(&conn, Some(provider.id)).unwrap()[&provider.id][1].reset_at,
+            None
+        );
+        assert_eq!(
+            read_resets(&conn, Some(provider.id)).unwrap()[&provider.id][1].cutoff,
+            17
+        );
     }
     let copy = upsert(&db, default_provider_params("daily-anchor-copy")).unwrap();
-    assert!(!read_resets(&conn, Some(copy.id)).unwrap().contains_key(&copy.id));
+    assert!(!read_resets(&conn, Some(copy.id))
+        .unwrap()
+        .contains_key(&copy.id));
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]

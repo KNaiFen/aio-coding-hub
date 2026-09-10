@@ -1,8 +1,8 @@
 //! Usage: Provider spend-limit gating (5h/daily/weekly/monthly/total).
 
 use super::context::CommonCtx;
-use crate::providers;
 use crate::provider_limit_usage::{manual_window, read_resets, LimitReset};
+use crate::providers;
 use crate::shared::error::db_err;
 use rusqlite::{params, Connection};
 
@@ -308,7 +308,11 @@ fn visit_cost_window_rows(
         .map_err(|error| db_err!("failed to prepare provider cost window query: {error}"))?;
     let rows = stmt
         .query_map(params![provider_id, end_ts, min_start], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?))
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
         })
         .map_err(|error| db_err!("failed to query provider cost windows: {error}"))?;
 
@@ -334,7 +338,11 @@ fn append_cost_bucket_rows(
         .map_err(|error| db_err!("failed to prepare provider cost bucket query: {error}"))?;
     let rows = stmt
         .query_map(params![provider_id, start_ts, end_ts], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?))
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
         })
         .map_err(|error| db_err!("failed to query provider cost buckets: {error}"))?;
     for row in rows {
@@ -369,10 +377,13 @@ fn sum_cost_usd_femto_windows(
         if request_log_id > cutoffs[0] && start_5h.is_some_and(|start| created_at >= start) {
             sums.spent_5h = sums.spent_5h.saturating_add(cost);
         }
-        if request_log_id > cutoffs[1] && start_daily_rolling.is_some_and(|start| created_at >= start) {
+        if request_log_id > cutoffs[1]
+            && start_daily_rolling.is_some_and(|start| created_at >= start)
+        {
             sums.spent_daily_rolling = sums.spent_daily_rolling.saturating_add(cost);
         }
-        if request_log_id > cutoffs[1] && start_daily_fixed.is_some_and(|start| created_at >= start) {
+        if request_log_id > cutoffs[1] && start_daily_fixed.is_some_and(|start| created_at >= start)
+        {
             sums.spent_daily_fixed = sums.spent_daily_fixed.saturating_add(cost);
         }
         if request_log_id > cutoffs[2] && start_weekly.is_some_and(|start| created_at >= start) {
@@ -653,9 +664,15 @@ fn evaluate_provider_limits(
     }
 
     let resets = match read_resets(conn, Some(provider.id)) {
-        Ok(rows) => rows.get(&provider.id).copied().unwrap_or([LimitReset::default(); 4]),
+        Ok(rows) => rows
+            .get(&provider.id)
+            .copied()
+            .unwrap_or([LimitReset::default(); 4]),
         Err(error) => {
-            tracing::warn!(provider_id = provider.id, "failed to read provider limit resets: {error}");
+            tracing::warn!(
+                provider_id = provider.id,
+                "failed to read provider limit resets: {error}"
+            );
             return ProviderLimitDecision::Allow;
         }
     };
@@ -665,7 +682,10 @@ fn evaluate_provider_limits(
             match manual_window(conn, period, anchor, now_unix) {
                 Ok(window) => manual[period.index()] = Some(window),
                 Err(error) => {
-                    tracing::warn!(provider_id = provider.id, "failed to compute provider limit window: {error}");
+                    tracing::warn!(
+                        provider_id = provider.id,
+                        "failed to compute provider limit window: {error}"
+                    );
                     return ProviderLimitDecision::Allow;
                 }
             }
@@ -674,7 +694,10 @@ fn evaluate_provider_limits(
 
     // Use fixed window for 5h limit
     let start_5h = if provider.limit_5h_usd.is_some() {
-        match manual[0].map(|window| Ok(window.0)).unwrap_or_else(|| resolve_fixed_5h_start(conn, provider.id, now_unix)) {
+        match manual[0]
+            .map(|window| Ok(window.0))
+            .unwrap_or_else(|| resolve_fixed_5h_start(conn, provider.id, now_unix))
+        {
             Ok(ts) => Some(ts),
             Err(_) => return ProviderLimitDecision::Allow,
         }
@@ -682,28 +705,34 @@ fn evaluate_provider_limits(
         None
     };
 
-    let (start_daily_rolling, start_daily_fixed, next_daily_fixed) =
-        match (provider.limit_daily_usd, manual[1], provider.daily_reset_mode) {
-            (Some(_), Some((start, end)), _) => (None, Some(start), Some(end)),
-            (Some(_), None, providers::DailyResetMode::Rolling) => {
-                (Some(now_unix.saturating_sub(WINDOW_24H_SECS)), None, None)
-            }
-            (Some(_), None, providers::DailyResetMode::Fixed) => {
-                let (start, next) = match compute_daily_fixed_bounds(
-                    conn,
-                    now_unix,
-                    provider.daily_reset_time.as_str(),
-                ) {
-                    Ok(v) => v,
-                    Err(_) => return ProviderLimitDecision::Allow,
-                };
-                (None, Some(start), Some(next))
-            }
-            _ => (None, None, None),
-        };
+    let (start_daily_rolling, start_daily_fixed, next_daily_fixed) = match (
+        provider.limit_daily_usd,
+        manual[1],
+        provider.daily_reset_mode,
+    ) {
+        (Some(_), Some((start, end)), _) => (None, Some(start), Some(end)),
+        (Some(_), None, providers::DailyResetMode::Rolling) => {
+            (Some(now_unix.saturating_sub(WINDOW_24H_SECS)), None, None)
+        }
+        (Some(_), None, providers::DailyResetMode::Fixed) => {
+            let (start, next) = match compute_daily_fixed_bounds(
+                conn,
+                now_unix,
+                provider.daily_reset_time.as_str(),
+            ) {
+                Ok(v) => v,
+                Err(_) => return ProviderLimitDecision::Allow,
+            };
+            (None, Some(start), Some(next))
+        }
+        _ => (None, None, None),
+    };
 
     let (start_weekly, next_weekly) = if provider.limit_weekly_usd.is_some() {
-        match manual[2].map(Ok).unwrap_or_else(|| compute_weekly_bounds(conn, now_unix)) {
+        match manual[2]
+            .map(Ok)
+            .unwrap_or_else(|| compute_weekly_bounds(conn, now_unix))
+        {
             Ok((start, next)) => (Some(start), Some(next)),
             Err(_) => return ProviderLimitDecision::Allow,
         }
@@ -712,7 +741,10 @@ fn evaluate_provider_limits(
     };
 
     let (start_monthly, next_monthly) = if provider.limit_monthly_usd.is_some() {
-        match manual[3].map(Ok).unwrap_or_else(|| compute_monthly_bounds(conn, now_unix)) {
+        match manual[3]
+            .map(Ok)
+            .unwrap_or_else(|| compute_monthly_bounds(conn, now_unix))
+        {
             Ok((start, next)) => (Some(start), Some(next)),
             Err(_) => return ProviderLimitDecision::Allow,
         }
@@ -768,7 +800,11 @@ fn evaluate_provider_limits(
     }
 
     if let Some(limit) = provider.limit_daily_usd {
-        match if manual[1].is_some() { providers::DailyResetMode::Fixed } else { provider.daily_reset_mode } {
+        match if manual[1].is_some() {
+            providers::DailyResetMode::Fixed
+        } else {
+            provider.daily_reset_mode
+        } {
             providers::DailyResetMode::Rolling => {
                 if limit_exceeded(limit, sums.spent_daily_rolling) {
                     exceeded = true;
@@ -815,13 +851,32 @@ fn evaluate_provider_limits(
     }
 
     for (needed, start, limit, seconds, cutoff) in [
-        (need_rolling_5h, start_5h, provider.limit_5h_usd, WINDOW_5H_SECS, resets[0].cutoff),
-        (need_rolling_daily, start_daily_rolling, provider.limit_daily_usd, WINDOW_24H_SECS, resets[1].cutoff),
+        (
+            need_rolling_5h,
+            start_5h,
+            provider.limit_5h_usd,
+            WINDOW_5H_SECS,
+            resets[0].cutoff,
+        ),
+        (
+            need_rolling_daily,
+            start_daily_rolling,
+            provider.limit_daily_usd,
+            WINDOW_24H_SECS,
+            resets[1].cutoff,
+        ),
     ] {
-        if !needed { continue; }
+        if !needed {
+            continue;
+        }
         if let (Some(start), Some(limit_femto)) = (start, limit.and_then(limit_usd_to_femto)) {
             if let Ok(buckets) = fetch_cost_buckets(conn, provider.id, start, end_unix, cutoff) {
-                if let Some(next) = compute_next_available_rolling_from_buckets(&buckets, start, seconds, limit_femto) {
+                if let Some(next) = compute_next_available_rolling_from_buckets(
+                    &buckets,
+                    start,
+                    seconds,
+                    limit_femto,
+                ) {
                     update_latest(&mut provider_next_available, next);
                 }
             }
@@ -991,25 +1046,49 @@ WHERE id = 1
             for daily_mode in ["fixed", "rolling"] {
                 for period in LIMIT_PERIODS {
                     let dir = tempfile::tempdir().unwrap();
-                    let db = crate::db::init_for_tests_with_pool_size(&dir.path().join("live.db"), 2).unwrap();
+                    let db =
+                        crate::db::init_for_tests_with_pool_size(&dir.path().join("live.db"), 2)
+                            .unwrap();
                     let id = provider_limit_usage::tests::create_limited_provider(&db, "live");
                     let other = provider_limit_usage::tests::create_limited_provider(&db, "other");
                     let mut conn = db.open_connection().unwrap();
-                    let now: i64 = conn.query_row("SELECT CAST(strftime('%s', '2026-09-07 12:00:00', 'utc') AS INTEGER)", [], |row| row.get(0)).unwrap();
+                    let now: i64 = conn
+                        .query_row(
+                            "SELECT CAST(strftime('%s', '2026-09-07 12:00:00', 'utc') AS INTEGER)",
+                            [],
+                            |row| row.get(0),
+                        )
+                        .unwrap();
                     conn.execute("UPDATE providers SET limit_5h_usd=100, limit_daily_usd=100, limit_weekly_usd=100, limit_monthly_usd=100, limit_total_usd=100, daily_reset_mode=?1, window_5h_start_ts=?2 WHERE id=?3", params![daily_mode, now - 60, id]).unwrap();
-                    conn.execute(&format!("UPDATE providers SET limit_{}_usd=10 WHERE id=?1", period.as_str()), [id]).unwrap();
+                    conn.execute(
+                        &format!(
+                            "UPDATE providers SET limit_{}_usd=10 WHERE id=?1",
+                            period.as_str()
+                        ),
+                        [id],
+                    )
+                    .unwrap();
                     // This configuration and connection remain alive across the reset commit.
-                    let providers = providers::list_enabled_for_gateway_in_mode(&db, "codex", None).unwrap();
+                    let providers =
+                        providers::list_enabled_for_gateway_in_mode(&db, "codex", None).unwrap();
                     let provider = providers.iter().find(|p| p.id == id).unwrap();
                     insert_request_log_cost(&conn, 1, Some(id), now, 10 * FEMTO, "[]");
                     insert_ledger_cost(&conn, 1, id, now, 10 * FEMTO);
                     insert_request_log_cost(&conn, 2, Some(other), now, FEMTO, "[]");
                     insert_ledger_cost(&conn, 2, other, now, FEMTO);
-                    if !complete { mark_backfill_incomplete(&conn); }
-                    assert!(matches!(evaluate_provider_limits(&conn, provider, now), ProviderLimitDecision::Limited { .. }));
+                    if !complete {
+                        mark_backfill_incomplete(&conn);
+                    }
+                    assert!(matches!(
+                        evaluate_provider_limits(&conn, provider, now),
+                        ProviderLimitDecision::Limited { .. }
+                    ));
                     let before = provider_limit_usage::list_at(&conn, None, now).unwrap();
                     provider_limit_usage::reset_at(&mut conn, id, period, now).unwrap();
-                    assert_eq!(evaluate_provider_limits(&conn, provider, now), ProviderLimitDecision::Allow);
+                    assert_eq!(
+                        evaluate_provider_limits(&conn, provider, now),
+                        ProviderLimitDecision::Allow
+                    );
                     let after = provider_limit_usage::list_at(&conn, None, now).unwrap();
                     let before_row = before.iter().find(|r| r.provider_id == id).unwrap();
                     let after_row = after.iter().find(|r| r.provider_id == id).unwrap();
@@ -1017,33 +1096,93 @@ WHERE id = 1
                     let actual = serde_json::to_value(after_row).unwrap();
                     let (start, end) = manual_window(&conn, period, now, now).unwrap();
                     for (key, value) in [
-                        (format!("usage_{}_usd", period.as_str()), serde_json::json!(0.0)),
-                        (format!("window_{}_start_ts", period.as_str()), serde_json::json!(start)),
-                        (format!("window_{}_end_ts", period.as_str()), serde_json::json!(end)),
-                    ] { expected[&key] = value; }
-                    if period == ProviderLimitPeriod::Daily { expected["daily_manual_anchor"] = serde_json::json!(true); }
+                        (
+                            format!("usage_{}_usd", period.as_str()),
+                            serde_json::json!(0.0),
+                        ),
+                        (
+                            format!("window_{}_start_ts", period.as_str()),
+                            serde_json::json!(start),
+                        ),
+                        (
+                            format!("window_{}_end_ts", period.as_str()),
+                            serde_json::json!(end),
+                        ),
+                    ] {
+                        expected[&key] = value;
+                    }
+                    if period == ProviderLimitPeriod::Daily {
+                        expected["daily_manual_anchor"] = serde_json::json!(true);
+                    }
                     assert_eq!(actual, expected);
-                    assert_eq!(serde_json::to_value(before.iter().find(|r| r.provider_id == other).unwrap()).unwrap(),
-                        serde_json::to_value(after.iter().find(|r| r.provider_id == other).unwrap()).unwrap());
+                    assert_eq!(
+                        serde_json::to_value(
+                            before.iter().find(|r| r.provider_id == other).unwrap()
+                        )
+                        .unwrap(),
+                        serde_json::to_value(
+                            after.iter().find(|r| r.provider_id == other).unwrap()
+                        )
+                        .unwrap()
+                    );
                     let markers = read_resets(&conn, Some(id)).unwrap()[&id];
                     for candidate in LIMIT_PERIODS {
-                        assert_eq!(markers[candidate.index()], if candidate == period { LimitReset { reset_at: Some(now), cutoff: 2 } } else { LimitReset::default() });
+                        assert_eq!(
+                            markers[candidate.index()],
+                            if candidate == period {
+                                LimitReset {
+                                    reset_at: Some(now),
+                                    cutoff: 2,
+                                }
+                            } else {
+                                LimitReset::default()
+                            }
+                        );
                     }
                     insert_request_log_cost(&conn, 3, Some(id), now, 10 * FEMTO, "[]");
                     insert_ledger_cost(&conn, 3, id, now, 10 * FEMTO);
-                    assert_eq!(evaluate_provider_limits(&conn, provider, now), ProviderLimitDecision::Limited { reset_at: Some(end) });
-                    assert_eq!(evaluate_provider_limits(&conn, provider, end), ProviderLimitDecision::Allow);
+                    assert_eq!(
+                        evaluate_provider_limits(&conn, provider, now),
+                        ProviderLimitDecision::Limited {
+                            reset_at: Some(end)
+                        }
+                    );
+                    assert_eq!(
+                        evaluate_provider_limits(&conn, provider, end),
+                        ProviderLimitDecision::Allow
+                    );
                     let new_period = provider_limit_usage::list_at(&conn, None, end).unwrap();
-                    let row = serde_json::to_value(new_period.iter().find(|r| r.provider_id == id).unwrap()).unwrap();
-                    assert_eq!(row[format!("window_{}_start_ts", period.as_str())], serde_json::json!(end));
-                    assert_eq!(row[format!("usage_{}_usd", period.as_str())], serde_json::json!(0.0));
+                    let row = serde_json::to_value(
+                        new_period.iter().find(|r| r.provider_id == id).unwrap(),
+                    )
+                    .unwrap();
+                    assert_eq!(
+                        row[format!("window_{}_start_ts", period.as_str())],
+                        serde_json::json!(end)
+                    );
+                    assert_eq!(
+                        row[format!("usage_{}_usd", period.as_str())],
+                        serde_json::json!(0.0)
+                    );
                     let idle_now = end + 10 * (end - start);
                     let idle_window = manual_window(&conn, period, now, idle_now).unwrap();
                     let idle_rows = provider_limit_usage::list_at(&conn, None, idle_now).unwrap();
-                    let idle_row = serde_json::to_value(idle_rows.iter().find(|r| r.provider_id == id).unwrap()).unwrap();
-                    assert_eq!(idle_row[format!("window_{}_start_ts", period.as_str())], serde_json::json!(idle_window.0));
-                    assert_eq!(idle_row[format!("window_{}_end_ts", period.as_str())], serde_json::json!(idle_window.1));
-                    assert_eq!(evaluate_provider_limits(&conn, provider, idle_now), ProviderLimitDecision::Allow);
+                    let idle_row = serde_json::to_value(
+                        idle_rows.iter().find(|r| r.provider_id == id).unwrap(),
+                    )
+                    .unwrap();
+                    assert_eq!(
+                        idle_row[format!("window_{}_start_ts", period.as_str())],
+                        serde_json::json!(idle_window.0)
+                    );
+                    assert_eq!(
+                        idle_row[format!("window_{}_end_ts", period.as_str())],
+                        serde_json::json!(idle_window.1)
+                    );
+                    assert_eq!(
+                        evaluate_provider_limits(&conn, provider, idle_now),
+                        ProviderLimitDecision::Allow
+                    );
                 }
             }
         }
@@ -1053,7 +1192,8 @@ WHERE id = 1
     fn weekly_reset_preserves_monthly_spend_window_and_gate() {
         const FEMTO: i64 = 1_000_000_000_000_000;
         let dir = tempfile::tempdir().unwrap();
-        let db = crate::db::init_for_tests_with_pool_size(&dir.path().join("month-week.db"), 2).unwrap();
+        let db =
+            crate::db::init_for_tests_with_pool_size(&dir.path().join("month-week.db"), 2).unwrap();
         let id = provider_limit_usage::tests::create_limited_provider(&db, "month-week");
         let mut conn = db.open_connection().unwrap();
         let now = 1_788_768_000;
@@ -1069,17 +1209,29 @@ WHERE id = 1
         let after = provider_limit_usage::list_at(&conn, None, now).unwrap();
         assert_eq!(after[0].usage_weekly_usd, 0.0);
         assert_eq!(after[0].usage_monthly_usd, before[0].usage_monthly_usd);
-        assert_eq!(after[0].window_monthly_start_ts, before[0].window_monthly_start_ts);
-        assert_eq!(after[0].window_monthly_end_ts, before[0].window_monthly_end_ts);
+        assert_eq!(
+            after[0].window_monthly_start_ts,
+            before[0].window_monthly_start_ts
+        );
+        assert_eq!(
+            after[0].window_monthly_end_ts,
+            before[0].window_monthly_end_ts
+        );
         assert_eq!(read_resets(&conn, Some(id)).unwrap()[&id][3], monthly_reset);
-        assert_eq!(evaluate_provider_limits(&conn, provider, now), ProviderLimitDecision::Limited { reset_at: Some(after[0].window_monthly_end_ts) });
+        assert_eq!(
+            evaluate_provider_limits(&conn, provider, now),
+            ProviderLimitDecision::Limited {
+                reset_at: Some(after[0].window_monthly_end_ts)
+            }
+        );
     }
 
     #[test]
     fn reset_preserves_zero_limit_and_total_limit_gates() {
         const FEMTO: i64 = 1_000_000_000_000_000;
         let dir = tempfile::tempdir().unwrap();
-        let db = crate::db::init_for_tests_with_pool_size(&dir.path().join("zero-total.db"), 2).unwrap();
+        let db =
+            crate::db::init_for_tests_with_pool_size(&dir.path().join("zero-total.db"), 2).unwrap();
         let id = provider_limit_usage::tests::create_limited_provider(&db, "zero-total");
         let mut conn = db.open_connection().unwrap();
         let now = 1_788_768_000;
@@ -1087,14 +1239,26 @@ WHERE id = 1
         let providers = providers::list_enabled_for_gateway_in_mode(&db, "codex", None).unwrap();
         let provider = &providers[0];
         provider_limit_usage::reset_at(&mut conn, id, ProviderLimitPeriod::Weekly, now).unwrap();
-        assert_eq!(evaluate_provider_limits(&conn, provider, now), ProviderLimitDecision::Limited { reset_at: Some(now + 604_800) });
-        conn.execute("UPDATE providers SET limit_weekly_usd=10, limit_total_usd=10 WHERE id=?1", [id]).unwrap();
+        assert_eq!(
+            evaluate_provider_limits(&conn, provider, now),
+            ProviderLimitDecision::Limited {
+                reset_at: Some(now + 604_800)
+            }
+        );
+        conn.execute(
+            "UPDATE providers SET limit_weekly_usd=10, limit_total_usd=10 WHERE id=?1",
+            [id],
+        )
+        .unwrap();
         let providers = providers::list_enabled_for_gateway_in_mode(&db, "codex", None).unwrap();
         let provider = &providers[0];
         insert_request_log_cost(&conn, 1, Some(id), now, 10 * FEMTO, "[]");
         insert_ledger_cost(&conn, 1, id, now, 10 * FEMTO);
         provider_limit_usage::reset_at(&mut conn, id, ProviderLimitPeriod::Weekly, now).unwrap();
-        assert_eq!(evaluate_provider_limits(&conn, provider, now), ProviderLimitDecision::Limited { reset_at: None });
+        assert_eq!(
+            evaluate_provider_limits(&conn, provider, now),
+            ProviderLimitDecision::Limited { reset_at: None }
+        );
         let rows = provider_limit_usage::list_at(&conn, None, now).unwrap();
         assert_eq!(rows[0].usage_weekly_usd, 0.0);
         assert_eq!(rows[0].usage_total_usd, 10.0);
@@ -1109,10 +1273,23 @@ WHERE id = 1
             conn.execute("DELETE FROM request_logs", []).unwrap();
             conn.execute("DELETE FROM usage_ledger", []).unwrap();
             insert_request_log_cost(&conn, 1, Some(42), 100, 1_000, "[]");
-            insert_request_log_cost(&conn, 2, None, 101, 60, r#"[{"provider_id":42,"outcome":"success"}]"#);
+            insert_request_log_cost(
+                &conn,
+                2,
+                None,
+                101,
+                60,
+                r#"[{"provider_id":42,"outcome":"success"}]"#,
+            );
             insert_request_log_cost(&conn, 3, Some(42), 102, 50, "[]");
-            for (id, ts, cost) in [(1, 100, 1_000), (2, 101, 60), (3, 102, 50)] { insert_ledger_cost(&conn, id, 42, ts, cost); }
-            conn.execute("UPDATE usage_ledger_backfill_state SET status=?1 WHERE id=1", [if complete { "complete" } else { "incomplete" }]).unwrap();
+            for (id, ts, cost) in [(1, 100, 1_000), (2, 101, 60), (3, 102, 50)] {
+                insert_ledger_cost(&conn, id, 42, ts, cost);
+            }
+            conn.execute(
+                "UPDATE usage_ledger_backfill_state SET status=?1 WHERE id=1",
+                [if complete { "complete" } else { "incomplete" }],
+            )
+            .unwrap();
             let mut bounds = test_spend_bounds(103);
             bounds.cutoffs[1] = 1;
             let sums = sum_cost_usd_femto_windows(&conn, 42, bounds).unwrap();
@@ -1120,7 +1297,10 @@ WHERE id = 1
             assert_eq!(sums.spent_5h, 1_110);
             let buckets = fetch_cost_buckets(&conn, 42, 100, 103, 1).unwrap();
             assert_eq!(buckets, vec![(101, 60), (102, 50)]);
-            assert_eq!(compute_next_available_rolling_from_buckets(&buckets, 100, 86_400, 100), Some(86_502));
+            assert_eq!(
+                compute_next_available_rolling_from_buckets(&buckets, 100, 86_400, 100),
+                Some(86_502)
+            );
         }
     }
 
@@ -1294,7 +1474,8 @@ WHERE excluded_from_stats = 0
             limit_exceeded(10_000.0, sums.spent_total),
             "large ledger spend must block the provider instead of failing open"
         );
-        let buckets = fetch_cost_buckets(&conn, provider_id, 100, 103, 0).expect("fetch cost buckets");
+        let buckets =
+            fetch_cost_buckets(&conn, provider_id, 100, 103, 0).expect("fetch cost buckets");
         assert_eq!(
             buckets.len(),
             2,

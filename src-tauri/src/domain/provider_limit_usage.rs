@@ -67,16 +67,28 @@ pub(crate) fn read_resets(
     } else {
         "SELECT provider_id, period, reset_at, request_log_id_cutoff FROM provider_limit_resets"
     };
-    let mut stmt = conn.prepare_cached(sql).map_err(|e| db_err!("failed to prepare provider limit resets: {e}"))?;
-    let rows = stmt.query_map(params_from_iter(provider_id), |row| {
-        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, LimitReset {
-            reset_at: row.get(2)?, cutoff: row.get(3)?,
-        }))
-    }).map_err(|e| db_err!("failed to read provider limit resets: {e}"))?;
+    let mut stmt = conn
+        .prepare_cached(sql)
+        .map_err(|e| db_err!("failed to prepare provider limit resets: {e}"))?;
+    let rows = stmt
+        .query_map(params_from_iter(provider_id), |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                LimitReset {
+                    reset_at: row.get(2)?,
+                    cutoff: row.get(3)?,
+                },
+            ))
+        })
+        .map_err(|e| db_err!("failed to read provider limit resets: {e}"))?;
     let mut resets = HashMap::new();
     for row in rows {
-        let (id, period, reset) = row.map_err(|e| db_err!("failed to decode provider limit reset: {e}"))?;
-        let index = LIMIT_PERIODS.iter().position(|p| p.as_str() == period)
+        let (id, period, reset) =
+            row.map_err(|e| db_err!("failed to decode provider limit reset: {e}"))?;
+        let index = LIMIT_PERIODS
+            .iter()
+            .position(|p| p.as_str() == period)
             .ok_or_else(|| db_err!("invalid provider limit period: {period}"))?;
         resets.entry(id).or_insert([LimitReset::default(); 4])[index] = reset;
     }
@@ -89,7 +101,12 @@ fn write_reset(
     period: ProviderLimitPeriod,
     now: i64,
 ) -> crate::shared::error::AppResult<()> {
-    let exists: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM providers WHERE id = ?1)", [provider_id], |row| row.get(0))
+    let exists: bool = tx
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM providers WHERE id = ?1)",
+            [provider_id],
+            |row| row.get(0),
+        )
         .map_err(|e| db_err!("failed to find provider for limit reset: {e}"))?;
     if !exists {
         return Err("DB_NOT_FOUND: provider not found".to_string().into());
@@ -101,40 +118,66 @@ ON CONFLICT(provider_id, period) DO UPDATE SET reset_at = excluded.reset_at, req
         params![provider_id, period.as_str(), now],
     ).map_err(|e| db_err!("failed to reset provider limit: {e}"))?;
     if period == ProviderLimitPeriod::FiveHour {
-        tx.execute("UPDATE providers SET window_5h_start_ts = ?1 WHERE id = ?2", params![now, provider_id])
-            .map_err(|e| db_err!("failed to restart provider 5h window: {e}"))?;
+        tx.execute(
+            "UPDATE providers SET window_5h_start_ts = ?1 WHERE id = ?2",
+            params![now, provider_id],
+        )
+        .map_err(|e| db_err!("failed to restart provider 5h window: {e}"))?;
     }
     Ok(())
 }
 
-pub fn reset(db: &db::Db, provider_id: i64, period: ProviderLimitPeriod) -> crate::shared::error::AppResult<()> {
+pub fn reset(
+    db: &db::Db,
+    provider_id: i64,
+    period: ProviderLimitPeriod,
+) -> crate::shared::error::AppResult<()> {
     let mut conn = db.open_connection()?;
-    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)
+    let tx = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|e| db_err!("failed to start provider limit reset transaction: {e}"))?;
     write_reset(&tx, provider_id, period, current_unix_seconds(&tx)?)?;
-    tx.commit().map_err(|e| db_err!("failed to commit provider limit reset: {e}"))?;
+    tx.commit()
+        .map_err(|e| db_err!("failed to commit provider limit reset: {e}"))?;
     Ok(())
 }
 
 #[cfg(test)]
-pub(crate) fn reset_at(conn: &mut Connection, provider_id: i64, period: ProviderLimitPeriod, now: i64) -> crate::shared::error::AppResult<()> {
-    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)
+pub(crate) fn reset_at(
+    conn: &mut Connection,
+    provider_id: i64,
+    period: ProviderLimitPeriod,
+    now: i64,
+) -> crate::shared::error::AppResult<()> {
+    let tx = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|e| db_err!("failed to start provider limit reset transaction: {e}"))?;
     write_reset(&tx, provider_id, period, now)?;
-    tx.commit().map_err(|e| db_err!("failed to commit provider limit reset: {e}"))?;
+    tx.commit()
+        .map_err(|e| db_err!("failed to commit provider limit reset: {e}"))?;
     Ok(())
 }
 
 fn local_datetime(conn: &Connection, unix: i64) -> crate::shared::error::AppResult<NaiveDateTime> {
-    let value: String = conn.query_row("SELECT datetime(?1, 'unixepoch', 'localtime')", [unix], |row| row.get(0))
+    let value: String = conn
+        .query_row(
+            "SELECT datetime(?1, 'unixepoch', 'localtime')",
+            [unix],
+            |row| row.get(0),
+        )
         .map_err(|e| db_err!("failed to read local limit timestamp: {e}"))?;
     NaiveDateTime::parse_from_str(&value, "%Y-%m-%d %H:%M:%S")
         .map_err(|e| db_err!("invalid local limit timestamp: {e}"))
 }
 
-fn monthly_boundary(conn: &Connection, anchor: NaiveDateTime, months: u32) -> crate::shared::error::AppResult<i64> {
+fn monthly_boundary(
+    conn: &Connection,
+    anchor: NaiveDateTime,
+    months: u32,
+) -> crate::shared::error::AppResult<i64> {
     // Always add to the original anchor: chrono clamps month-end without drifting.
-    let target = anchor.checked_add_months(Months::new(months))
+    let target = anchor
+        .checked_add_months(Months::new(months))
         .ok_or_else(|| db_err!("monthly limit timestamp out of range"))?;
     let wall = target.and_utc().timestamp();
     let mut candidates = Vec::new();
@@ -149,7 +192,10 @@ fn monthly_boundary(conn: &Connection, anchor: NaiveDateTime, months: u32) -> cr
             candidates.push((shift, unix));
         }
     }
-    candidates.into_iter().min().map(|(_, unix)| unix)
+    candidates
+        .into_iter()
+        .min()
+        .map(|(_, unix)| unix)
         .ok_or_else(|| db_err!("failed to resolve monthly limit boundary"))
 }
 
@@ -171,12 +217,21 @@ pub(crate) fn manual_window(
     }
     let local_anchor = local_datetime(conn, anchor)?;
     let local_now = local_datetime(conn, now)?;
-    let mut months = ((local_now.year() - local_anchor.year()) * 12
-        + local_now.month() as i32 - local_anchor.month() as i32).max(0) as u32;
-    let mut start = if months == 0 { anchor } else { monthly_boundary(conn, local_anchor, months)? };
+    let mut months = ((local_now.year() - local_anchor.year()) * 12 + local_now.month() as i32
+        - local_anchor.month() as i32)
+        .max(0) as u32;
+    let mut start = if months == 0 {
+        anchor
+    } else {
+        monthly_boundary(conn, local_anchor, months)?
+    };
     if start > now && months > 0 {
         months -= 1;
-        start = if months == 0 { anchor } else { monthly_boundary(conn, local_anchor, months)? };
+        start = if months == 0 {
+            anchor
+        } else {
+            monthly_boundary(conn, local_anchor, months)?
+        };
     }
     let end = monthly_boundary(conn, local_anchor, months + 1)?;
     Ok((start, end))
@@ -335,12 +390,8 @@ fn compute_ts_daily(
     match daily_reset_mode {
         DailyResetMode::Rolling => {
             // Rolling: now - 24 hours
-            conn.query_row(
-                "SELECT ?1 - 86400",
-                [now],
-                |row| row.get::<_, i64>(0),
-            )
-            .map_err(|e| db_err!("failed to compute rolling daily timestamp: {e}"))
+            conn.query_row("SELECT ?1 - 86400", [now], |row| row.get::<_, i64>(0))
+                .map_err(|e| db_err!("failed to compute rolling daily timestamp: {e}"))
         }
         DailyResetMode::Fixed => {
             // Fixed: start of day based on daily_reset_time in local timezone
@@ -387,9 +438,17 @@ fn compute_ts_monthly(conn: &Connection, now: i64) -> crate::shared::error::AppR
     .map_err(|e| db_err!("failed to compute monthly timestamp: {e}"))
 }
 
-fn local_window_end(conn: &Connection, start: i64, modifier: &str) -> crate::shared::error::AppResult<i64> {
-    conn.query_row("SELECT CAST(strftime('%s', ?1, 'unixepoch', 'localtime', ?2, 'utc') AS INTEGER)", params![start, modifier], |row| row.get(0))
-        .map_err(|e| db_err!("failed to compute provider limit window end: {e}"))
+fn local_window_end(
+    conn: &Connection,
+    start: i64,
+    modifier: &str,
+) -> crate::shared::error::AppResult<i64> {
+    conn.query_row(
+        "SELECT CAST(strftime('%s', ?1, 'unixepoch', 'localtime', ?2, 'utc') AS INTEGER)",
+        params![start, modifier],
+        |row| row.get(0),
+    )
+    .map_err(|e| db_err!("failed to compute provider limit window end: {e}"))
 }
 
 #[derive(Debug, Clone)]
@@ -500,8 +559,11 @@ pub fn list_v1(
     list_at(&conn, cli_key, current_unix_seconds(&conn)?)
 }
 
-pub(crate) fn list_at(conn: &Connection, cli_key: Option<&str>, now: i64) -> crate::shared::error::AppResult<Vec<ProviderLimitUsageRow>> {
-
+pub(crate) fn list_at(
+    conn: &Connection,
+    cli_key: Option<&str>,
+    now: i64,
+) -> crate::shared::error::AppResult<Vec<ProviderLimitUsageRow>> {
     // Pre-compute common time windows (5h is computed per-provider below)
     let ts_weekly = compute_ts_weekly(conn, now)?;
     let ts_monthly = compute_ts_monthly(conn, now)?;
@@ -626,7 +688,11 @@ pub(crate) fn list_at(conn: &Connection, cli_key: Option<&str>, now: i64) -> cra
             stored_5h_start_ts,
             ts_daily,
         ));
-        if resets_by_provider.get(&provider_id).and_then(|resets| resets[0].reset_at).is_none() {
+        if resets_by_provider
+            .get(&provider_id)
+            .and_then(|resets| resets[0].reset_at)
+            .is_none()
+        {
             provider_windows.push((provider_id, stored_5h_start_ts));
         }
     }
@@ -653,16 +719,30 @@ pub(crate) fn list_at(conn: &Connection, cli_key: Option<&str>, now: i64) -> cra
         ts_daily,
     ) in raw_rows
     {
-        let resets = resets_by_provider.get(&provider_id).copied().unwrap_or_default();
+        let resets = resets_by_provider
+            .get(&provider_id)
+            .copied()
+            .unwrap_or_default();
         let (ts_5h, end_5h) = match resets[0].reset_at {
             Some(anchor) => manual_window(conn, ProviderLimitPeriod::FiveHour, anchor, now)?,
             None => {
-                let start = starts_5h.get(&provider_id).copied().ok_or_else(|| db_err!("failed to resolve 5h window for provider_id={provider_id}"))?;
+                let start = starts_5h.get(&provider_id).copied().ok_or_else(|| {
+                    db_err!("failed to resolve 5h window for provider_id={provider_id}")
+                })?;
                 (start, start + WINDOW_5H_SECS)
             }
         };
-        let end_daily = if daily_reset_mode_raw == "rolling" { now + 1 } else { local_window_end(conn, ts_daily, "+1 day")? };
-        let mut windows = [(ts_5h, end_5h), (ts_daily, end_daily), (ts_weekly, end_weekly), (ts_monthly, end_monthly)];
+        let end_daily = if daily_reset_mode_raw == "rolling" {
+            now + 1
+        } else {
+            local_window_end(conn, ts_daily, "+1 day")?
+        };
+        let mut windows = [
+            (ts_5h, end_5h),
+            (ts_daily, end_daily),
+            (ts_weekly, end_weekly),
+            (ts_monthly, end_monthly),
+        ];
         for period in &LIMIT_PERIODS[1..] {
             if let Some(anchor) = resets[period.index()].reset_at {
                 windows[period.index()] = manual_window(conn, *period, anchor, now)?;
@@ -685,8 +765,7 @@ pub(crate) fn list_at(conn: &Connection, cli_key: Option<&str>, now: i64) -> cra
         });
     }
 
-    let usage_by_provider =
-        aggregate_costs_for_providers(conn, &candidates)?;
+    let usage_by_provider = aggregate_costs_for_providers(conn, &candidates)?;
     let out = candidates
         .into_iter()
         .map(|provider| {
@@ -981,8 +1060,10 @@ WHERE id = last_insert_rowid()
         )
         .unwrap();
         let query = aggregate_costs_sql(2);
-        let parameters = [provider, 400, 1000, 0, 300, 1000, 0, 200, 1000, 0, 100, 1000, 0,
-            empty, 400, 1000, 0, 300, 1000, 0, 200, 1000, 0, 100, 1000, 0];
+        let parameters = [
+            provider, 400, 1000, 0, 300, 1000, 0, 200, 1000, 0, 100, 1000, 0, empty, 400, 1000, 0,
+            300, 1000, 0, 200, 1000, 0, 100, 1000, 0,
+        ];
         for complete in [false, true] {
             if complete {
                 conn.execute(
@@ -1086,7 +1167,12 @@ GROUP BY w.provider_id
     }
 
     fn local_ts(conn: &Connection, value: &str) -> i64 {
-        conn.query_row("SELECT CAST(strftime('%s', ?1, 'utc') AS INTEGER)", [value], |row| row.get(0)).unwrap()
+        conn.query_row(
+            "SELECT CAST(strftime('%s', ?1, 'utc') AS INTEGER)",
+            [value],
+            |row| row.get(0),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -1123,13 +1209,41 @@ GROUP BY w.provider_id
     fn monthly_windows_preserve_original_day_month_end_and_leap_year() {
         let conn = Connection::open_in_memory().unwrap();
         for (anchor, now, start, end) in [
-            ("2026-09-07 13:15:00", "2026-10-06 00:00:00", "2026-09-07 13:15:00", "2026-10-07 13:15:00"),
-            ("2026-01-31 13:15:00", "2026-03-01 00:00:00", "2026-02-28 13:15:00", "2026-03-31 13:15:00"),
-            ("2024-01-31 13:15:00", "2024-03-01 00:00:00", "2024-02-29 13:15:00", "2024-03-31 13:15:00"),
-            ("2024-01-31 13:15:00", "2026-09-01 00:00:00", "2026-08-31 13:15:00", "2026-09-30 13:15:00"),
+            (
+                "2026-09-07 13:15:00",
+                "2026-10-06 00:00:00",
+                "2026-09-07 13:15:00",
+                "2026-10-07 13:15:00",
+            ),
+            (
+                "2026-01-31 13:15:00",
+                "2026-03-01 00:00:00",
+                "2026-02-28 13:15:00",
+                "2026-03-31 13:15:00",
+            ),
+            (
+                "2024-01-31 13:15:00",
+                "2024-03-01 00:00:00",
+                "2024-02-29 13:15:00",
+                "2024-03-31 13:15:00",
+            ),
+            (
+                "2024-01-31 13:15:00",
+                "2026-09-01 00:00:00",
+                "2026-08-31 13:15:00",
+                "2026-09-30 13:15:00",
+            ),
         ] {
-            assert_eq!(manual_window(&conn, ProviderLimitPeriod::Monthly, local_ts(&conn, anchor), local_ts(&conn, now)).unwrap(),
-                (local_ts(&conn, start), local_ts(&conn, end)));
+            assert_eq!(
+                manual_window(
+                    &conn,
+                    ProviderLimitPeriod::Monthly,
+                    local_ts(&conn, anchor),
+                    local_ts(&conn, now)
+                )
+                .unwrap(),
+                (local_ts(&conn, start), local_ts(&conn, end))
+            );
         }
     }
 
@@ -1139,22 +1253,58 @@ GROUP BY w.provider_id
         // other tests and exercises the production localtime conversion.
         if std::env::var_os("AIO_LIMIT_DST_CHILD").is_none() {
             let output = std::process::Command::new(std::env::current_exe().unwrap())
-                .args(["--exact", &format!("{}::monthly_dst_boundaries_use_forward_gap_and_earlier_repeat", module_path!().split_once("::").unwrap().1), "--nocapture"])
+                .args([
+                    "--exact",
+                    &format!(
+                        "{}::monthly_dst_boundaries_use_forward_gap_and_earlier_repeat",
+                        module_path!().split_once("::").unwrap().1
+                    ),
+                    "--nocapture",
+                ])
                 .env("TZ", "America/New_York")
                 .env("AIO_LIMIT_DST_CHILD", "1")
-                .output().unwrap();
-            assert!(output.status.success(), "{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
             assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
             return;
         }
         let conn = Connection::open_in_memory().unwrap();
-        let unix = |value| chrono::DateTime::parse_from_rfc3339(value).unwrap().timestamp();
+        let unix = |value| {
+            chrono::DateTime::parse_from_rfc3339(value)
+                .unwrap()
+                .timestamp()
+        };
         for (anchor, now, start, end) in [
-            ("2026-02-08T02:30:00-05:00", "2026-03-08T03:00:00-04:00", "2026-02-08T02:30:00-05:00", "2026-03-08T03:30:00-04:00"),
-            ("2026-02-08T02:30:00-05:00", "2026-03-08T03:30:00-04:00", "2026-03-08T03:30:00-04:00", "2026-04-08T02:30:00-04:00"),
-            ("2026-10-01T01:30:00-04:00", "2026-11-01T01:45:00-05:00", "2026-11-01T01:30:00-04:00", "2026-12-01T01:30:00-05:00"),
+            (
+                "2026-02-08T02:30:00-05:00",
+                "2026-03-08T03:00:00-04:00",
+                "2026-02-08T02:30:00-05:00",
+                "2026-03-08T03:30:00-04:00",
+            ),
+            (
+                "2026-02-08T02:30:00-05:00",
+                "2026-03-08T03:30:00-04:00",
+                "2026-03-08T03:30:00-04:00",
+                "2026-04-08T02:30:00-04:00",
+            ),
+            (
+                "2026-10-01T01:30:00-04:00",
+                "2026-11-01T01:45:00-05:00",
+                "2026-11-01T01:30:00-04:00",
+                "2026-12-01T01:30:00-05:00",
+            ),
         ] {
-            assert_eq!(manual_window(&conn, ProviderLimitPeriod::Monthly, unix(anchor), unix(now)).unwrap(), (unix(start), unix(end)));
+            assert_eq!(
+                manual_window(&conn, ProviderLimitPeriod::Monthly, unix(anchor), unix(now))
+                    .unwrap(),
+                (unix(start), unix(end))
+            );
         }
     }
 
@@ -1167,21 +1317,34 @@ GROUP BY w.provider_id
         let mut conn = db.open_connection().unwrap();
         let now = local_ts(&conn, "2026-09-07 12:00:00");
         insert_log(&conn, provider, now, FEMTO);
-        conn.execute("UPDATE request_logs SET cost_usd_femto = NULL", []).unwrap();
+        conn.execute("UPDATE request_logs SET cost_usd_femto = NULL", [])
+            .unwrap();
         conn.execute("DELETE FROM usage_ledger", []).unwrap();
         reset_at(&mut conn, provider, ProviderLimitPeriod::Monthly, now).unwrap();
         let marker = read_resets(&conn, Some(provider)).unwrap()[&provider][3];
         assert_eq!(marker.cutoff, 1);
-        conn.execute("UPDATE request_logs SET cost_usd_femto = ?1", [FEMTO]).unwrap();
-        conn.execute("UPDATE usage_ledger_backfill_state SET status = 'incomplete' WHERE id = 1", []).unwrap();
+        conn.execute("UPDATE request_logs SET cost_usd_femto = ?1", [FEMTO])
+            .unwrap();
+        conn.execute(
+            "UPDATE usage_ledger_backfill_state SET status = 'incomplete' WHERE id = 1",
+            [],
+        )
+        .unwrap();
         let before_backfill = list_at(&conn, None, now).unwrap();
         assert_eq!(before_backfill[0].usage_monthly_usd, 0.0);
         assert_eq!(before_backfill[0].usage_total_usd, 1.0);
         conn.execute("INSERT INTO usage_ledger(request_log_id, trace_id, cli_key, created_at, created_at_ms, status, error_present, excluded_from_stats, duration_ms, final_provider_id, cost_usd_femto) SELECT id, trace_id, cli_key, created_at, created_at_ms, status, 0, 0, duration_ms, final_provider_id, cost_usd_femto FROM request_logs", []).unwrap();
-        conn.execute("UPDATE usage_ledger_backfill_state SET status = 'complete' WHERE id = 1", []).unwrap();
+        conn.execute(
+            "UPDATE usage_ledger_backfill_state SET status = 'complete' WHERE id = 1",
+            [],
+        )
+        .unwrap();
         conn.execute("DELETE FROM request_logs", []).unwrap();
         reset_at(&mut conn, provider, ProviderLimitPeriod::Weekly, now).unwrap();
-        assert_eq!(read_resets(&conn, Some(provider)).unwrap()[&provider][2].cutoff, 1);
+        assert_eq!(
+            read_resets(&conn, Some(provider)).unwrap()[&provider][2].cutoff,
+            1
+        );
         insert_log(&conn, provider, now - 1, 2 * FEMTO);
         insert_log(&conn, provider, now, 3 * FEMTO);
         let rows = list_at(&conn, None, now).unwrap();
@@ -1192,7 +1355,10 @@ GROUP BY w.provider_id
         drop(db);
         let reopened = db::init_for_tests(&path).unwrap();
         let conn = reopened.open_connection().unwrap();
-        assert_eq!(read_resets(&conn, Some(provider)).unwrap()[&provider][3], marker);
+        assert_eq!(
+            read_resets(&conn, Some(provider)).unwrap()[&provider][3],
+            marker
+        );
         assert_eq!(list_at(&conn, None, now).unwrap()[0].usage_monthly_usd, 3.0);
     }
 
@@ -1211,7 +1377,8 @@ GROUP BY w.provider_id
         assert_eq!(rows[0].window_daily_end_ts, 87_400);
         assert!(rows[0].daily_manual_anchor);
         assert_eq!(rows[0].limit_daily_usd, None);
-        conn.execute("DELETE FROM providers WHERE id = ?1", [provider]).unwrap();
+        conn.execute("DELETE FROM providers WHERE id = ?1", [provider])
+            .unwrap();
         assert!(read_resets(&conn, None).unwrap().is_empty());
     }
 }

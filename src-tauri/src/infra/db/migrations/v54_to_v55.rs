@@ -2,7 +2,9 @@
 
 use rusqlite::Connection;
 
-pub(super) fn ensure_provider_limit_resets(conn: &Connection) -> crate::shared::error::AppResult<()> {
+pub(super) fn ensure_provider_limit_resets(
+    conn: &Connection,
+) -> crate::shared::error::AppResult<()> {
     conn.execute_batch(
         r#"
 CREATE TABLE IF NOT EXISTS provider_limit_resets (
