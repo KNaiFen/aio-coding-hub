@@ -1151,9 +1151,8 @@ WHERE id = 1
     fn consecutive_resets_preserve_all_other_period_snapshots_and_markers() {
         const FEMTO: i64 = 1_000_000_000_000_000;
         let dir = tempfile::tempdir().unwrap();
-        let db =
-            crate::db::init_for_tests_with_pool_size(&dir.path().join("consecutive.db"), 2)
-                .unwrap();
+        let db = crate::db::init_for_tests_with_pool_size(&dir.path().join("consecutive.db"), 2)
+            .unwrap();
         let id = provider_limit_usage::tests::create_limited_provider(&db, "consecutive");
         let mut conn = db.open_connection().unwrap();
         let now: i64 = conn
@@ -1201,8 +1200,7 @@ WHERE id = 1
             provider_limit_usage::reset_at(&mut conn, id, period, now).unwrap();
 
             expected[format!("usage_{}_usd", period.as_str())] = serde_json::json!(0.0);
-            expected[format!("window_{}_start_ts", period.as_str())] =
-                serde_json::json!(start);
+            expected[format!("window_{}_start_ts", period.as_str())] = serde_json::json!(start);
             expected[format!("window_{}_end_ts", period.as_str())] = serde_json::json!(end);
             if period == ProviderLimitPeriod::Daily {
                 expected["daily_manual_anchor"] = serde_json::json!(true);
@@ -1268,8 +1266,8 @@ WHERE id = 1
 
         const FEMTO: i64 = 1_000_000_000_000_000;
         let dir = tempfile::tempdir().unwrap();
-        let db = crate::db::init_for_tests_with_pool_size(&dir.path().join("daily-dst.db"), 2)
-            .unwrap();
+        let db =
+            crate::db::init_for_tests_with_pool_size(&dir.path().join("daily-dst.db"), 2).unwrap();
         let id = provider_limit_usage::tests::create_limited_provider(&db, "daily-dst");
         let conn = db.open_connection().unwrap();
         conn.execute(
@@ -1367,7 +1365,7 @@ WHERE id = 1
                     ProviderLimitDecision::Allow
                 } else {
                     ProviderLimitDecision::Limited {
-                        reset_at: Some(end)
+                        reset_at: Some(end),
                     }
                 }
             );

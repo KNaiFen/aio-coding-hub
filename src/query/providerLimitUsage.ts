@@ -28,8 +28,8 @@ export function useProviderLimitUsageV1Query(
 }
 
 export class ProviderLimitRefreshError extends Error {
-  constructor(cause: unknown) {
-    super(`周期已重设，但用量刷新失败：${formatUnknownError(cause)}`, { cause });
+  constructor(readonly cause: unknown) {
+    super(`周期已重设，但用量刷新失败：${formatUnknownError(cause)}`);
   }
 }
 
