@@ -2630,6 +2630,20 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async providerLimitReset(
+    providerId: number,
+    period: ProviderLimitPeriod
+  ): Promise<Result<null, string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("provider_limit_reset", { providerId, period }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async workspacesList(cliKey: string): Promise<Result<WorkspacesListResult, string>> {
     try {
       return { status: "ok", data: await TAURI_INVOKE("workspaces_list", { cliKey }) };
@@ -4228,6 +4242,7 @@ export type ProviderExtensionValuesInput = {
   namespace: string;
   values: JsonValue;
 };
+export type ProviderLimitPeriod = "5h" | "daily" | "weekly" | "monthly";
 export type ProviderLimitUsageRow = {
   cli_key: string;
   provider_id: number;
@@ -4249,6 +4264,11 @@ export type ProviderLimitUsageRow = {
   window_daily_start_ts: number;
   window_weekly_start_ts: number;
   window_monthly_start_ts: number;
+  window_5h_end_ts: number;
+  window_daily_end_ts: number;
+  window_weekly_end_ts: number;
+  window_monthly_end_ts: number;
+  daily_manual_anchor: boolean;
 };
 export type ProviderModelCapabilitiesInput = {
   supportedReasoningEfforts: ProviderModelReasoningEffort[];

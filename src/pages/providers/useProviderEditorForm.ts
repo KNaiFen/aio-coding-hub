@@ -422,6 +422,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
   const crossRoutingScopeKeyRef = useRef<string | null>(null);
   const crossRoutingRevisionRef = useRef<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [limitResetPending, setLimitResetPending] = useState(false);
   const [savingWithModelFetch, setSavingWithModelFetch] = useState(false);
   const [copyingApiKey, setCopyingApiKey] = useState(false);
 
@@ -1442,6 +1443,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
 
   const save = useCallback(() => {
     if (
+      limitResetPending ||
       saving ||
       savingWithModelFetch ||
       accountUsageCustomTestPromiseRef.current ||
@@ -1458,10 +1460,12 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
     resetAccountUsageCustomTest,
     saving,
     savingWithModelFetch,
+    limitResetPending,
   ]);
 
   const saveAndFetchModels = useCallback(async () => {
     if (
+      limitResetPending ||
       saving ||
       savingWithModelFetch ||
       accountUsageCustomTestPromiseRef.current ||
@@ -1483,6 +1487,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
     resetAccountUsageCustomTest,
     saving,
     savingWithModelFetch,
+    limitResetPending,
   ]);
 
   return {
@@ -1493,6 +1498,8 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
     onOpenChange: requestOpenChange,
     saving: saving || savingWithModelFetch,
     savingWithModelFetch,
+    limitResetPending,
+    setLimitResetPending,
     title,
     description,
     authMode,
