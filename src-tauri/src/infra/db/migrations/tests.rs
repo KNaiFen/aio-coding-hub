@@ -1,6 +1,37 @@
 use super::*;
 
 #[test]
+fn migrate_v54_to_v55_adds_independent_constrained_resets_without_touching_history() {
+    let mut conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch("PRAGMA foreign_keys=ON; CREATE TABLE providers(id INTEGER PRIMARY KEY); INSERT INTO providers VALUES(7); CREATE TABLE request_logs(id INTEGER PRIMARY KEY AUTOINCREMENT, cost INTEGER); INSERT INTO request_logs(cost) VALUES(123); PRAGMA user_version=54;").unwrap();
+    v54_to_v55::migrate_v54_to_v55(&mut conn).unwrap();
+    assert_eq!(read_user_version(&conn).unwrap(), 55);
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM provider_limit_resets", [], |row| row.get(0)).unwrap();
+    assert_eq!(count, 0);
+    for period in ["5h", "daily", "weekly", "monthly"] {
+        conn.execute("INSERT INTO provider_limit_resets VALUES(7, ?1, 100, 1)", [period]).unwrap();
+    }
+    assert!(conn.execute("INSERT INTO provider_limit_resets VALUES(7, 'total', 100, 1)", []).is_err());
+    assert!(conn.execute("INSERT INTO provider_limit_resets VALUES(8, 'daily', 100, 1)", []).is_err());
+    assert!(conn.execute("UPDATE provider_limit_resets SET request_log_id_cutoff=-1", []).is_err());
+    v54_to_v55::ensure_provider_limit_resets(&conn).unwrap();
+    conn.execute("UPDATE provider_limit_resets SET reset_at=NULL WHERE period='daily'", []).unwrap();
+    assert_eq!(conn.query_row("SELECT request_log_id_cutoff FROM provider_limit_resets WHERE period='daily'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
+    conn.execute("DELETE FROM providers WHERE id=7", []).unwrap();
+    assert_eq!(conn.query_row("SELECT COUNT(*) FROM provider_limit_resets", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+    assert_eq!(conn.query_row("SELECT cost FROM request_logs", [], |row| row.get::<_, i64>(0)).unwrap(), 123);
+}
+
+#[test]
+fn fresh_database_includes_empty_provider_limit_resets() {
+    let mut conn = Connection::open_in_memory().unwrap();
+    apply_migrations(&mut conn).unwrap();
+    apply_runtime_ensure_patches(&mut conn).unwrap();
+    assert_eq!(read_user_version(&conn).unwrap(), LATEST_SCHEMA_VERSION);
+    assert_eq!(conn.query_row("SELECT COUNT(*) FROM provider_limit_resets", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+}
+
+#[test]
 fn migrate_v38_to_v39_converts_valid_retry_overrides_and_preserves_malformed_rows() {
     let mut conn = Connection::open_in_memory().expect("open in-memory sqlite");
     conn.execute_batch(

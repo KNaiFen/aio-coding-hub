@@ -58,6 +58,43 @@ Provider deletion with usage clearing removes both tables in the same
 transaction; without usage clearing, the ledger name snapshot preserves
 historical display.
 
+## Provider Period Resets
+
+`provider_limit_resets` stores independent runtime state for `5h`, `daily`,
+`weekly`, and `monthly`, keyed by provider and period. A reset commits the
+current Unix-second anchor and the `request_logs` AUTOINCREMENT allocation
+high-water mark in one `IMMEDIATE` transaction. It never deletes history,
+changes amounts, resets total spend, OAuth quotas, or circuit state. Only a
+5-hour reset also updates `providers.window_5h_start_ts`. Provider deletion
+cascades these markers; copy, share, and configuration import do not copy them.
+
+Period spend requires both `id > request_log_id_cutoff` and a creation time in
+the period's current half-open window. An already persisted pending request
+cannot return to that period when its cost arrives later, and deleting details
+or completing ledger backfill must not change the reset boundary. Total spend
+continues to read complete history. Requests started before the new anchor
+remain outside it even if persisted later; a same-second request not yet
+persisted at reset may enter the new window.
+
+Manual 5-hour, daily, and weekly windows recur from the original anchor every
+5, 24, and 168 hours, including after idle periods. Monthly windows use the
+original local day and time plus calendar months, clamp to month-end without
+drifting, choose the earlier repeated DST instant, and shift nonexistent times
+forward by the transition gap. Unreset periods keep their existing schedule.
+A saved change to the persisted daily mode or time clears only the daily
+anchor and retains its cutoff; unchanged form saves and amount edits retain
+the anchor.
+
+Every newly started gateway limit evaluation reads committed reset state on
+the existing DB/configuration. Anchored limit release time is the real current
+window end. Rolling daily buckets apply their own retained cutoff. The display
+keeps batched `usage_events` aggregation, while the gateway keeps its indexed
+ledger/request-log source switch and scoped NULL-provider compatibility path.
+IPC returns all four actual start/end pairs and daily anchor status. The
+editor's independent confirmation waits for mounted limit queries to refresh,
+preserves unsaved form values, and distinguishes write failure from a committed
+reset whose read refresh failed.
+
 ## Cursor Pagination
 
 The Logs page uses a versioned opaque Base64URL cursor over

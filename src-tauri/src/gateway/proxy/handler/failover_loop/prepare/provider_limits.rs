@@ -2,6 +2,7 @@
 
 use super::context::CommonCtx;
 use crate::providers;
+use crate::provider_limit_usage::{manual_window, read_resets, LimitReset};
 use crate::shared::error::db_err;
 use rusqlite::{params, Connection};
 
@@ -108,6 +109,7 @@ struct SpendQueryBounds {
     start_monthly: Option<i64>,
     end_ts: i64,
     min_start: Option<i64>,
+    cutoffs: [i64; 4],
 }
 
 /// The ledger is authoritative only after its fixed-high-water backfill has
@@ -123,7 +125,8 @@ enum ProviderCostSource {
 const USAGE_LEDGER_COST_WINDOW_ROWS_SQL: &str = r#"
 SELECT
   created_at,
-  cost_usd_femto
+  cost_usd_femto,
+  request_log_id
 FROM usage_ledger
 WHERE excluded_from_stats = 0
   AND status >= 200 AND status < 300 AND error_present = 0
@@ -136,7 +139,8 @@ WHERE excluded_from_stats = 0
 const REQUEST_LOG_COST_WINDOW_ROWS_SQL: &str = r#"
 SELECT
   created_at,
-  cost_usd_femto
+  cost_usd_femto,
+  id
 FROM request_logs
 WHERE excluded_from_stats = 0
   AND status >= 200 AND status < 300 AND error_code IS NULL
@@ -152,7 +156,8 @@ WHERE excluded_from_stats = 0
 const REQUEST_LOG_NULL_PROVIDER_COST_WINDOW_ROWS_SQL: &str = r#"
 SELECT
   r.created_at,
-  r.cost_usd_femto
+  r.cost_usd_femto,
+  r.id
 FROM request_logs r
 WHERE r.excluded_from_stats = 0
   AND r.status >= 200 AND r.status < 300 AND r.error_code IS NULL
@@ -201,7 +206,8 @@ WHERE r.excluded_from_stats = 0
 const USAGE_LEDGER_COST_BUCKET_ROWS_SQL: &str = r#"
 SELECT
   created_at,
-  cost_usd_femto
+  cost_usd_femto,
+  request_log_id
 FROM usage_ledger
 WHERE excluded_from_stats = 0
   AND status >= 200 AND status < 300 AND error_present = 0
@@ -214,7 +220,8 @@ ORDER BY created_at ASC
 const REQUEST_LOG_COST_BUCKET_ROWS_SQL: &str = r#"
 SELECT
   created_at,
-  cost_usd_femto
+  cost_usd_femto,
+  id
 FROM request_logs
 WHERE excluded_from_stats = 0
   AND status >= 200 AND status < 300 AND error_code IS NULL
@@ -227,7 +234,8 @@ ORDER BY created_at ASC
 const REQUEST_LOG_NULL_PROVIDER_COST_BUCKET_ROWS_SQL: &str = r#"
 SELECT
   r.created_at,
-  r.cost_usd_femto
+  r.cost_usd_femto,
+  r.id
 FROM request_logs r
 WHERE r.excluded_from_stats = 0
   AND r.status >= 200 AND r.status < 300 AND r.error_code IS NULL
@@ -293,21 +301,21 @@ fn visit_cost_window_rows(
     provider_id: i64,
     end_ts: i64,
     min_start: Option<i64>,
-    mut visit: impl FnMut(i64, i128),
+    mut visit: impl FnMut(i64, i128, i64),
 ) -> crate::shared::error::AppResult<()> {
     let mut stmt = conn
         .prepare_cached(sql)
         .map_err(|error| db_err!("failed to prepare provider cost window query: {error}"))?;
     let rows = stmt
         .query_map(params![provider_id, end_ts, min_start], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?))
         })
         .map_err(|error| db_err!("failed to query provider cost windows: {error}"))?;
 
     for row in rows {
-        let (created_at, raw_cost) =
+        let (created_at, raw_cost, request_log_id) =
             row.map_err(|error| db_err!("failed to read provider cost window row: {error}"))?;
-        visit(created_at, i128::from(raw_cost.max(0)));
+        visit(created_at, i128::from(raw_cost.max(0)), request_log_id);
     }
     Ok(())
 }
@@ -318,6 +326,7 @@ fn append_cost_bucket_rows(
     provider_id: i64,
     start_ts: i64,
     end_ts: i64,
+    cutoff: i64,
     rows_out: &mut Vec<(i64, i128)>,
 ) -> crate::shared::error::AppResult<()> {
     let mut stmt = conn
@@ -325,13 +334,15 @@ fn append_cost_bucket_rows(
         .map_err(|error| db_err!("failed to prepare provider cost bucket query: {error}"))?;
     let rows = stmt
         .query_map(params![provider_id, start_ts, end_ts], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?))
         })
         .map_err(|error| db_err!("failed to query provider cost buckets: {error}"))?;
     for row in rows {
-        let (created_at, raw_cost) =
+        let (created_at, raw_cost, request_log_id) =
             row.map_err(|error| db_err!("failed to read provider cost bucket row: {error}"))?;
-        rows_out.push((created_at, i128::from(raw_cost.max(0))));
+        if request_log_id > cutoff {
+            rows_out.push((created_at, i128::from(raw_cost.max(0))));
+        }
     }
     Ok(())
 }
@@ -349,24 +360,25 @@ fn sum_cost_usd_femto_windows(
         start_monthly,
         end_ts,
         min_start,
+        cutoffs,
     } = bounds;
 
     let mut sums = SpendSums::default();
-    let mut accumulate = |created_at: i64, cost: i128| {
+    let mut accumulate = |created_at: i64, cost: i128, request_log_id: i64| {
         sums.spent_total = sums.spent_total.saturating_add(cost);
-        if start_5h.is_some_and(|start| created_at >= start) {
+        if request_log_id > cutoffs[0] && start_5h.is_some_and(|start| created_at >= start) {
             sums.spent_5h = sums.spent_5h.saturating_add(cost);
         }
-        if start_daily_rolling.is_some_and(|start| created_at >= start) {
+        if request_log_id > cutoffs[1] && start_daily_rolling.is_some_and(|start| created_at >= start) {
             sums.spent_daily_rolling = sums.spent_daily_rolling.saturating_add(cost);
         }
-        if start_daily_fixed.is_some_and(|start| created_at >= start) {
+        if request_log_id > cutoffs[1] && start_daily_fixed.is_some_and(|start| created_at >= start) {
             sums.spent_daily_fixed = sums.spent_daily_fixed.saturating_add(cost);
         }
-        if start_weekly.is_some_and(|start| created_at >= start) {
+        if request_log_id > cutoffs[2] && start_weekly.is_some_and(|start| created_at >= start) {
             sums.spent_weekly = sums.spent_weekly.saturating_add(cost);
         }
-        if start_monthly.is_some_and(|start| created_at >= start) {
+        if request_log_id > cutoffs[3] && start_monthly.is_some_and(|start| created_at >= start) {
             sums.spent_monthly = sums.spent_monthly.saturating_add(cost);
         }
     };
@@ -408,6 +420,7 @@ fn fetch_cost_buckets(
     provider_id: i64,
     start_ts: i64,
     end_ts: i64,
+    cutoff: i64,
 ) -> crate::shared::error::AppResult<Vec<(i64, i128)>> {
     let mut raw_rows = Vec::new();
     match provider_cost_source(conn)? {
@@ -417,6 +430,7 @@ fn fetch_cost_buckets(
             provider_id,
             start_ts,
             end_ts,
+            cutoff,
             &mut raw_rows,
         )?,
         ProviderCostSource::RequestLogs => {
@@ -426,6 +440,7 @@ fn fetch_cost_buckets(
                 provider_id,
                 start_ts,
                 end_ts,
+                cutoff,
                 &mut raw_rows,
             )?;
             append_cost_bucket_rows(
@@ -434,6 +449,7 @@ fn fetch_cost_buckets(
                 provider_id,
                 start_ts,
                 end_ts,
+                cutoff,
                 &mut raw_rows,
             )?;
         }
@@ -636,9 +652,29 @@ fn evaluate_provider_limits(
         return ProviderLimitDecision::Allow;
     }
 
+    let resets = match read_resets(conn, Some(provider.id)) {
+        Ok(rows) => rows.get(&provider.id).copied().unwrap_or([LimitReset::default(); 4]),
+        Err(error) => {
+            tracing::warn!(provider_id = provider.id, "failed to read provider limit resets: {error}");
+            return ProviderLimitDecision::Allow;
+        }
+    };
+    let mut manual = [None; 4];
+    for period in crate::provider_limit_usage::LIMIT_PERIODS {
+        if let Some(anchor) = resets[period.index()].reset_at {
+            match manual_window(conn, period, anchor, now_unix) {
+                Ok(window) => manual[period.index()] = Some(window),
+                Err(error) => {
+                    tracing::warn!(provider_id = provider.id, "failed to compute provider limit window: {error}");
+                    return ProviderLimitDecision::Allow;
+                }
+            }
+        }
+    }
+
     // Use fixed window for 5h limit
     let start_5h = if provider.limit_5h_usd.is_some() {
-        match resolve_fixed_5h_start(conn, provider.id, now_unix) {
+        match manual[0].map(|window| Ok(window.0)).unwrap_or_else(|| resolve_fixed_5h_start(conn, provider.id, now_unix)) {
             Ok(ts) => Some(ts),
             Err(_) => return ProviderLimitDecision::Allow,
         }
@@ -647,11 +683,12 @@ fn evaluate_provider_limits(
     };
 
     let (start_daily_rolling, start_daily_fixed, next_daily_fixed) =
-        match (provider.limit_daily_usd, provider.daily_reset_mode) {
-            (Some(_), providers::DailyResetMode::Rolling) => {
+        match (provider.limit_daily_usd, manual[1], provider.daily_reset_mode) {
+            (Some(_), Some((start, end)), _) => (None, Some(start), Some(end)),
+            (Some(_), None, providers::DailyResetMode::Rolling) => {
                 (Some(now_unix.saturating_sub(WINDOW_24H_SECS)), None, None)
             }
-            (Some(_), providers::DailyResetMode::Fixed) => {
+            (Some(_), None, providers::DailyResetMode::Fixed) => {
                 let (start, next) = match compute_daily_fixed_bounds(
                     conn,
                     now_unix,
@@ -666,7 +703,7 @@ fn evaluate_provider_limits(
         };
 
     let (start_weekly, next_weekly) = if provider.limit_weekly_usd.is_some() {
-        match compute_weekly_bounds(conn, now_unix) {
+        match manual[2].map(Ok).unwrap_or_else(|| compute_weekly_bounds(conn, now_unix)) {
             Ok((start, next)) => (Some(start), Some(next)),
             Err(_) => return ProviderLimitDecision::Allow,
         }
@@ -675,7 +712,7 @@ fn evaluate_provider_limits(
     };
 
     let (start_monthly, next_monthly) = if provider.limit_monthly_usd.is_some() {
-        match compute_monthly_bounds(conn, now_unix) {
+        match manual[3].map(Ok).unwrap_or_else(|| compute_monthly_bounds(conn, now_unix)) {
             Ok((start, next)) => (Some(start), Some(next)),
             Err(_) => return ProviderLimitDecision::Allow,
         }
@@ -707,6 +744,7 @@ fn evaluate_provider_limits(
             start_monthly,
             end_ts: end_unix,
             min_start,
+            cutoffs: resets.map(|reset| reset.cutoff),
         },
     ) {
         Ok(v) => v,
@@ -721,12 +759,16 @@ fn evaluate_provider_limits(
     if let Some(limit) = provider.limit_5h_usd {
         if limit_exceeded(limit, sums.spent_5h) {
             exceeded = true;
-            need_rolling_5h = true;
+            if let Some((_, end)) = manual[0] {
+                update_latest(&mut provider_next_available, end);
+            } else {
+                need_rolling_5h = true;
+            }
         }
     }
 
     if let Some(limit) = provider.limit_daily_usd {
-        match provider.daily_reset_mode {
+        match if manual[1].is_some() { providers::DailyResetMode::Fixed } else { provider.daily_reset_mode } {
             providers::DailyResetMode::Rolling => {
                 if limit_exceeded(limit, sums.spent_daily_rolling) {
                     exceeded = true;
@@ -772,52 +814,15 @@ fn evaluate_provider_limits(
         return ProviderLimitDecision::Allow;
     }
 
-    if need_rolling_5h || need_rolling_daily {
-        let mut buckets_start: Option<i64> = None;
-        if need_rolling_daily {
-            buckets_start = start_daily_rolling;
-        }
-        if need_rolling_5h {
-            if let Some(start_5h) = start_5h {
-                buckets_start = Some(match buckets_start {
-                    Some(existing) => existing.min(start_5h),
-                    None => start_5h,
-                });
-            }
-        }
-
-        if let Some(buckets_start) = buckets_start {
-            if let Ok(buckets) = fetch_cost_buckets(conn, provider.id, buckets_start, end_unix) {
-                if need_rolling_5h {
-                    if let (Some(start_5h), Some(limit_usd)) = (start_5h, provider.limit_5h_usd) {
-                        if let Some(limit_femto) = limit_usd_to_femto(limit_usd) {
-                            if let Some(next) = compute_next_available_rolling_from_buckets(
-                                &buckets,
-                                start_5h,
-                                WINDOW_5H_SECS,
-                                limit_femto,
-                            ) {
-                                update_latest(&mut provider_next_available, next);
-                            }
-                        }
-                    }
-                }
-
-                if need_rolling_daily {
-                    if let (Some(start_24h), Some(limit_usd)) =
-                        (start_daily_rolling, provider.limit_daily_usd)
-                    {
-                        if let Some(limit_femto) = limit_usd_to_femto(limit_usd) {
-                            if let Some(next) = compute_next_available_rolling_from_buckets(
-                                &buckets,
-                                start_24h,
-                                WINDOW_24H_SECS,
-                                limit_femto,
-                            ) {
-                                update_latest(&mut provider_next_available, next);
-                            }
-                        }
-                    }
+    for (needed, start, limit, seconds, cutoff) in [
+        (need_rolling_5h, start_5h, provider.limit_5h_usd, WINDOW_5H_SECS, resets[0].cutoff),
+        (need_rolling_daily, start_daily_rolling, provider.limit_daily_usd, WINDOW_24H_SECS, resets[1].cutoff),
+    ] {
+        if !needed { continue; }
+        if let (Some(start), Some(limit_femto)) = (start, limit.and_then(limit_usd_to_femto)) {
+            if let Ok(buckets) = fetch_cost_buckets(conn, provider.id, start, end_unix, cutoff) {
+                if let Some(next) = compute_next_available_rolling_from_buckets(&buckets, start, seconds, limit_femto) {
+                    update_latest(&mut provider_next_available, next);
                 }
             }
         }
@@ -833,6 +838,7 @@ pub(in crate::gateway::proxy) fn filter_routing_candidates(
     providers: Vec<providers::ProviderForGateway>,
     now_unix: i64,
 ) -> (Vec<providers::ProviderForGateway>, Vec<i64>) {
+    let now_unix = now_unix.max(crate::shared::time::now_unix_seconds());
     let mut eligible = Vec::with_capacity(providers.len());
     let mut excluded_provider_ids = Vec::new();
 
@@ -863,7 +869,7 @@ pub(super) fn gate_provider<R: tauri::Runtime>(input: ProviderLimitsInput<'_, R>
         Err(_) => return true,
     };
 
-    match evaluate_provider_limits(&conn, provider, ctx.created_at) {
+    match evaluate_provider_limits(&conn, provider, crate::shared::time::now_unix_seconds()) {
         ProviderLimitDecision::Allow => true,
         ProviderLimitDecision::Limited { reset_at } => {
             *limit_exclusions = limit_exclusions.saturating_add(1);
@@ -885,6 +891,7 @@ pub(super) fn gate_provider<R: tauri::Runtime>(input: ProviderLimitsInput<'_, R>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::provider_limit_usage::{self, ProviderLimitPeriod, LIMIT_PERIODS};
     use rusqlite::params;
 
     fn insert_ledger_cost(
@@ -973,6 +980,147 @@ WHERE id = 1
             start_monthly: Some(100),
             end_ts,
             min_start: Some(100),
+            cutoffs: [0; 4],
+        }
+    }
+
+    #[test]
+    fn running_gateway_observes_each_reset_without_reloading_configuration() {
+        const FEMTO: i64 = 1_000_000_000_000_000;
+        for complete in [false, true] {
+            for daily_mode in ["fixed", "rolling"] {
+                for period in LIMIT_PERIODS {
+                    let dir = tempfile::tempdir().unwrap();
+                    let db = crate::db::init_for_tests_with_pool_size(&dir.path().join("live.db"), 2).unwrap();
+                    let id = provider_limit_usage::tests::create_limited_provider(&db, "live");
+                    let other = provider_limit_usage::tests::create_limited_provider(&db, "other");
+                    let mut conn = db.open_connection().unwrap();
+                    let now: i64 = conn.query_row("SELECT CAST(strftime('%s', '2026-09-07 12:00:00', 'utc') AS INTEGER)", [], |row| row.get(0)).unwrap();
+                    conn.execute("UPDATE providers SET limit_5h_usd=100, limit_daily_usd=100, limit_weekly_usd=100, limit_monthly_usd=100, limit_total_usd=100, daily_reset_mode=?1, window_5h_start_ts=?2 WHERE id=?3", params![daily_mode, now - 60, id]).unwrap();
+                    conn.execute(&format!("UPDATE providers SET limit_{}_usd=10 WHERE id=?1", period.as_str()), [id]).unwrap();
+                    // This configuration and connection remain alive across the reset commit.
+                    let providers = providers::list_enabled_for_gateway_in_mode(&db, "codex", None).unwrap();
+                    let provider = providers.iter().find(|p| p.id == id).unwrap();
+                    insert_request_log_cost(&conn, 1, Some(id), now, 10 * FEMTO, "[]");
+                    insert_ledger_cost(&conn, 1, id, now, 10 * FEMTO);
+                    insert_request_log_cost(&conn, 2, Some(other), now, FEMTO, "[]");
+                    insert_ledger_cost(&conn, 2, other, now, FEMTO);
+                    if !complete { mark_backfill_incomplete(&conn); }
+                    assert!(matches!(evaluate_provider_limits(&conn, provider, now), ProviderLimitDecision::Limited { .. }));
+                    let before = provider_limit_usage::list_at(&conn, None, now).unwrap();
+                    provider_limit_usage::reset_at(&mut conn, id, period, now).unwrap();
+                    assert_eq!(evaluate_provider_limits(&conn, provider, now), ProviderLimitDecision::Allow);
+                    let after = provider_limit_usage::list_at(&conn, None, now).unwrap();
+                    let before_row = before.iter().find(|r| r.provider_id == id).unwrap();
+                    let after_row = after.iter().find(|r| r.provider_id == id).unwrap();
+                    let mut expected = serde_json::to_value(before_row).unwrap();
+                    let actual = serde_json::to_value(after_row).unwrap();
+                    let (start, end) = manual_window(&conn, period, now, now).unwrap();
+                    for (key, value) in [
+                        (format!("usage_{}_usd", period.as_str()), serde_json::json!(0.0)),
+                        (format!("window_{}_start_ts", period.as_str()), serde_json::json!(start)),
+                        (format!("window_{}_end_ts", period.as_str()), serde_json::json!(end)),
+                    ] { expected[&key] = value; }
+                    if period == ProviderLimitPeriod::Daily { expected["daily_manual_anchor"] = serde_json::json!(true); }
+                    assert_eq!(actual, expected);
+                    assert_eq!(serde_json::to_value(before.iter().find(|r| r.provider_id == other).unwrap()).unwrap(),
+                        serde_json::to_value(after.iter().find(|r| r.provider_id == other).unwrap()).unwrap());
+                    let markers = read_resets(&conn, Some(id)).unwrap()[&id];
+                    for candidate in LIMIT_PERIODS {
+                        assert_eq!(markers[candidate.index()], if candidate == period { LimitReset { reset_at: Some(now), cutoff: 2 } } else { LimitReset::default() });
+                    }
+                    insert_request_log_cost(&conn, 3, Some(id), now, 10 * FEMTO, "[]");
+                    insert_ledger_cost(&conn, 3, id, now, 10 * FEMTO);
+                    assert_eq!(evaluate_provider_limits(&conn, provider, now), ProviderLimitDecision::Limited { reset_at: Some(end) });
+                    assert_eq!(evaluate_provider_limits(&conn, provider, end), ProviderLimitDecision::Allow);
+                    let new_period = provider_limit_usage::list_at(&conn, None, end).unwrap();
+                    let row = serde_json::to_value(new_period.iter().find(|r| r.provider_id == id).unwrap()).unwrap();
+                    assert_eq!(row[format!("window_{}_start_ts", period.as_str())], serde_json::json!(end));
+                    assert_eq!(row[format!("usage_{}_usd", period.as_str())], serde_json::json!(0.0));
+                    let idle_now = end + 10 * (end - start);
+                    let idle_window = manual_window(&conn, period, now, idle_now).unwrap();
+                    let idle_rows = provider_limit_usage::list_at(&conn, None, idle_now).unwrap();
+                    let idle_row = serde_json::to_value(idle_rows.iter().find(|r| r.provider_id == id).unwrap()).unwrap();
+                    assert_eq!(idle_row[format!("window_{}_start_ts", period.as_str())], serde_json::json!(idle_window.0));
+                    assert_eq!(idle_row[format!("window_{}_end_ts", period.as_str())], serde_json::json!(idle_window.1));
+                    assert_eq!(evaluate_provider_limits(&conn, provider, idle_now), ProviderLimitDecision::Allow);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn weekly_reset_preserves_monthly_spend_window_and_gate() {
+        const FEMTO: i64 = 1_000_000_000_000_000;
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::init_for_tests_with_pool_size(&dir.path().join("month-week.db"), 2).unwrap();
+        let id = provider_limit_usage::tests::create_limited_provider(&db, "month-week");
+        let mut conn = db.open_connection().unwrap();
+        let now = 1_788_768_000;
+        conn.execute("UPDATE providers SET limit_5h_usd=NULL, limit_daily_usd=NULL, limit_total_usd=NULL WHERE id=?1", [id]).unwrap();
+        let providers = providers::list_enabled_for_gateway_in_mode(&db, "codex", None).unwrap();
+        let provider = &providers[0];
+        provider_limit_usage::reset_at(&mut conn, id, ProviderLimitPeriod::Monthly, now).unwrap();
+        insert_request_log_cost(&conn, 1, Some(id), now, 10 * FEMTO, "[]");
+        insert_ledger_cost(&conn, 1, id, now, 10 * FEMTO);
+        let before = provider_limit_usage::list_at(&conn, None, now).unwrap();
+        let monthly_reset = read_resets(&conn, Some(id)).unwrap()[&id][3];
+        provider_limit_usage::reset_at(&mut conn, id, ProviderLimitPeriod::Weekly, now).unwrap();
+        let after = provider_limit_usage::list_at(&conn, None, now).unwrap();
+        assert_eq!(after[0].usage_weekly_usd, 0.0);
+        assert_eq!(after[0].usage_monthly_usd, before[0].usage_monthly_usd);
+        assert_eq!(after[0].window_monthly_start_ts, before[0].window_monthly_start_ts);
+        assert_eq!(after[0].window_monthly_end_ts, before[0].window_monthly_end_ts);
+        assert_eq!(read_resets(&conn, Some(id)).unwrap()[&id][3], monthly_reset);
+        assert_eq!(evaluate_provider_limits(&conn, provider, now), ProviderLimitDecision::Limited { reset_at: Some(after[0].window_monthly_end_ts) });
+    }
+
+    #[test]
+    fn reset_preserves_zero_limit_and_total_limit_gates() {
+        const FEMTO: i64 = 1_000_000_000_000_000;
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::init_for_tests_with_pool_size(&dir.path().join("zero-total.db"), 2).unwrap();
+        let id = provider_limit_usage::tests::create_limited_provider(&db, "zero-total");
+        let mut conn = db.open_connection().unwrap();
+        let now = 1_788_768_000;
+        conn.execute("UPDATE providers SET limit_5h_usd=NULL, limit_daily_usd=NULL, limit_weekly_usd=0, limit_monthly_usd=NULL, limit_total_usd=NULL WHERE id=?1", [id]).unwrap();
+        let providers = providers::list_enabled_for_gateway_in_mode(&db, "codex", None).unwrap();
+        let provider = &providers[0];
+        provider_limit_usage::reset_at(&mut conn, id, ProviderLimitPeriod::Weekly, now).unwrap();
+        assert_eq!(evaluate_provider_limits(&conn, provider, now), ProviderLimitDecision::Limited { reset_at: Some(now + 604_800) });
+        conn.execute("UPDATE providers SET limit_weekly_usd=10, limit_total_usd=10 WHERE id=?1", [id]).unwrap();
+        let providers = providers::list_enabled_for_gateway_in_mode(&db, "codex", None).unwrap();
+        let provider = &providers[0];
+        insert_request_log_cost(&conn, 1, Some(id), now, 10 * FEMTO, "[]");
+        insert_ledger_cost(&conn, 1, id, now, 10 * FEMTO);
+        provider_limit_usage::reset_at(&mut conn, id, ProviderLimitPeriod::Weekly, now).unwrap();
+        assert_eq!(evaluate_provider_limits(&conn, provider, now), ProviderLimitDecision::Limited { reset_at: None });
+        let rows = provider_limit_usage::list_at(&conn, None, now).unwrap();
+        assert_eq!(rows[0].usage_weekly_usd, 0.0);
+        assert_eq!(rows[0].usage_total_usd, 10.0);
+    }
+
+    #[test]
+    fn retained_daily_cutoff_is_applied_to_rolling_release_buckets() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::init_for_tests(&dir.path().join("rolling-cutoff.db")).unwrap();
+        let conn = db.open_connection().unwrap();
+        for complete in [false, true] {
+            conn.execute("DELETE FROM request_logs", []).unwrap();
+            conn.execute("DELETE FROM usage_ledger", []).unwrap();
+            insert_request_log_cost(&conn, 1, Some(42), 100, 1_000, "[]");
+            insert_request_log_cost(&conn, 2, None, 101, 60, r#"[{"provider_id":42,"outcome":"success"}]"#);
+            insert_request_log_cost(&conn, 3, Some(42), 102, 50, "[]");
+            for (id, ts, cost) in [(1, 100, 1_000), (2, 101, 60), (3, 102, 50)] { insert_ledger_cost(&conn, id, 42, ts, cost); }
+            conn.execute("UPDATE usage_ledger_backfill_state SET status=?1 WHERE id=1", [if complete { "complete" } else { "incomplete" }]).unwrap();
+            let mut bounds = test_spend_bounds(103);
+            bounds.cutoffs[1] = 1;
+            let sums = sum_cost_usd_femto_windows(&conn, 42, bounds).unwrap();
+            assert_eq!(sums.spent_daily_rolling, 110);
+            assert_eq!(sums.spent_5h, 1_110);
+            let buckets = fetch_cost_buckets(&conn, 42, 100, 103, 1).unwrap();
+            assert_eq!(buckets, vec![(101, 60), (102, 50)]);
+            assert_eq!(compute_next_available_rolling_from_buckets(&buckets, 100, 86_400, 100), Some(86_502));
         }
     }
 
@@ -1001,6 +1149,7 @@ WHERE id = 1
                 start_monthly: Some(100),
                 end_ts: 102,
                 min_start: Some(100),
+                cutoffs: [0; 4],
             },
         )
         .expect("sum ledger costs");
@@ -1009,7 +1158,7 @@ WHERE id = 1
         assert_eq!(sums.spent_total, 110);
 
         let buckets =
-            fetch_cost_buckets(&conn, provider_id, 100, 102).expect("fetch ledger buckets");
+            fetch_cost_buckets(&conn, provider_id, 100, 102, 0).expect("fetch ledger buckets");
         assert_eq!(buckets, vec![(100, 60), (101, 50)]);
     }
 
@@ -1041,7 +1190,7 @@ WHERE id = 1
         assert_eq!(sums.spent_total, 110);
         assert_eq!(sums.spent_5h, 110);
         assert_eq!(
-            fetch_cost_buckets(&conn, provider_id, 100, 102)
+            fetch_cost_buckets(&conn, provider_id, 100, 102, 0)
                 .expect("read incomplete request-log buckets"),
             vec![(100, 60), (101, 50)]
         );
@@ -1134,6 +1283,7 @@ WHERE excluded_from_stats = 0
                 start_monthly: Some(100),
                 end_ts: 103,
                 min_start: Some(100),
+                cutoffs: [0; 4],
             },
         )
         .expect("exact cost accumulator must not overflow");
@@ -1144,7 +1294,7 @@ WHERE excluded_from_stats = 0
             limit_exceeded(10_000.0, sums.spent_total),
             "large ledger spend must block the provider instead of failing open"
         );
-        let buckets = fetch_cost_buckets(&conn, provider_id, 100, 103).expect("fetch cost buckets");
+        let buckets = fetch_cost_buckets(&conn, provider_id, 100, 103, 0).expect("fetch cost buckets");
         assert_eq!(
             buckets.len(),
             2,
@@ -1170,6 +1320,7 @@ WHERE excluded_from_stats = 0
             start_monthly: Some(100),
             end_ts: 102,
             min_start: Some(100),
+            cutoffs: [0; 4],
         };
         let sums = sum_cost_usd_femto_windows(&conn, provider_id, bounds).expect("sum exact cost");
         assert_eq!(
@@ -1191,7 +1342,7 @@ WHERE excluded_from_stats = 0
             "the exact limit must block the provider"
         );
         assert_eq!(
-            fetch_cost_buckets(&conn, provider_id, 100, 102).expect("read exact buckets"),
+            fetch_cost_buckets(&conn, provider_id, 100, 102, 0).expect("read exact buckets"),
             vec![(100, i128::from(one_femto_below_ten_usd)), (101, 1),]
         );
     }
@@ -1210,6 +1361,7 @@ WHERE excluded_from_stats = 0
                 start_monthly: None,
                 end_ts: 102,
                 min_start: Some(100),
+                cutoffs: [0; 4],
             },
         );
 
