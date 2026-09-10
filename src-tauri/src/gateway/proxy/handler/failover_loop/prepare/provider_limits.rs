@@ -1,7 +1,9 @@
 //! Usage: Provider spend-limit gating (5h/daily/weekly/monthly/total).
 
 use super::context::CommonCtx;
-use crate::provider_limit_usage::{manual_window, read_resets, LimitReset};
+use crate::provider_limit_usage::{
+    compute_daily_fixed_bounds, manual_window, read_resets, LimitReset,
+};
 use crate::providers;
 use crate::shared::error::db_err;
 use rusqlite::{params, Connection};
@@ -517,49 +519,6 @@ fn compute_next_available_rolling_from_buckets(
     }
 
     None
-}
-
-fn parse_reset_time_hms_lossy(input: &str) -> (u8, u8, u8) {
-    let trimmed = input.trim();
-    let mut parts = trimmed.split(':');
-
-    let h_raw = parts.next().unwrap_or("0");
-    let m_raw = parts.next().unwrap_or("0");
-    let s_raw = parts.next().unwrap_or("0");
-
-    let h = h_raw.parse::<u8>().ok().filter(|v| *v <= 23).unwrap_or(0);
-    let m = m_raw.parse::<u8>().ok().filter(|v| *v <= 59).unwrap_or(0);
-    let s = s_raw.parse::<u8>().ok().filter(|v| *v <= 59).unwrap_or(0);
-    (h, m, s)
-}
-
-fn compute_daily_fixed_bounds(
-    conn: &Connection,
-    now_unix: i64,
-    reset_time: &str,
-) -> crate::shared::error::AppResult<(i64, i64)> {
-    let (h, m, s) = parse_reset_time_hms_lossy(reset_time);
-    let mod_h = format!("+{h} hours");
-    let mod_m = format!("+{m} minutes");
-    let mod_s = format!("+{s} seconds");
-
-    conn.query_row(
-        r#"
-WITH bounds AS (
-  SELECT
-    CAST(strftime('%s', ?1, 'unixepoch','localtime','start of day', ?2, ?3, ?4, 'utc') AS INTEGER) AS today_reset,
-    CAST(strftime('%s', ?1, 'unixepoch','localtime','start of day','-1 day', ?2, ?3, ?4, 'utc') AS INTEGER) AS yesterday_reset,
-    CAST(strftime('%s', ?1, 'unixepoch','localtime','start of day','+1 day', ?2, ?3, ?4, 'utc') AS INTEGER) AS tomorrow_reset
-)
-SELECT
-  CASE WHEN ?1 >= today_reset THEN today_reset ELSE yesterday_reset END AS start_ts,
-  CASE WHEN ?1 < today_reset THEN today_reset ELSE tomorrow_reset END AS next_reset
-FROM bounds
-"#,
-        params![now_unix, mod_h, mod_m, mod_s],
-        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
-    )
-    .map_err(|e| db_err!("failed to compute daily reset bounds: {e}"))
 }
 
 fn compute_weekly_bounds(
@@ -1189,6 +1148,233 @@ WHERE id = 1
     }
 
     #[test]
+    fn consecutive_resets_preserve_all_other_period_snapshots_and_markers() {
+        const FEMTO: i64 = 1_000_000_000_000_000;
+        let dir = tempfile::tempdir().unwrap();
+        let db =
+            crate::db::init_for_tests_with_pool_size(&dir.path().join("consecutive.db"), 2)
+                .unwrap();
+        let id = provider_limit_usage::tests::create_limited_provider(&db, "consecutive");
+        let mut conn = db.open_connection().unwrap();
+        let now: i64 = conn
+            .query_row(
+                "SELECT CAST(strftime('%s', '2026-09-07 12:00:00', 'utc') AS INTEGER)",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        conn.execute(
+            "UPDATE providers SET daily_reset_mode='fixed', limit_total_usd=100, window_5h_start_ts=?1 WHERE id=?2",
+            params![now - 60, id],
+        )
+        .unwrap();
+        let providers = providers::list_enabled_for_gateway_in_mode(&db, "codex", None).unwrap();
+        let provider = &providers[0];
+        insert_request_log_cost(&conn, 1, Some(id), now, 10 * FEMTO, "[]");
+        insert_ledger_cost(&conn, 1, id, now, 10 * FEMTO);
+
+        // Every step shares the same connection, configuration, time and growing
+        // reset state. A new same-second request makes prior reset usage nonzero.
+        for (step, period) in [
+            ProviderLimitPeriod::Monthly,
+            ProviderLimitPeriod::Weekly,
+            ProviderLimitPeriod::Daily,
+            ProviderLimitPeriod::FiveHour,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let before = provider_limit_usage::list_at(&conn, None, now).unwrap();
+            let mut expected = serde_json::to_value(&before[0]).unwrap();
+            let mut expected_markers = read_resets(&conn, Some(id))
+                .unwrap()
+                .get(&id)
+                .copied()
+                .unwrap_or_default();
+            assert!(matches!(
+                evaluate_provider_limits(&conn, provider, now),
+                ProviderLimitDecision::Limited { .. }
+            ));
+            assert_eq!(before[0].usage_total_usd, 10.0 * (step + 1) as f64);
+            let (start, end) = manual_window(&conn, period, now, now).unwrap();
+
+            provider_limit_usage::reset_at(&mut conn, id, period, now).unwrap();
+
+            expected[format!("usage_{}_usd", period.as_str())] = serde_json::json!(0.0);
+            expected[format!("window_{}_start_ts", period.as_str())] =
+                serde_json::json!(start);
+            expected[format!("window_{}_end_ts", period.as_str())] = serde_json::json!(end);
+            if period == ProviderLimitPeriod::Daily {
+                expected["daily_manual_anchor"] = serde_json::json!(true);
+            }
+            expected_markers[period.index()] = LimitReset {
+                reset_at: Some(now),
+                cutoff: (step + 1) as i64,
+            };
+            let after = provider_limit_usage::list_at(&conn, None, now).unwrap();
+            assert_eq!(serde_json::to_value(&after[0]).unwrap(), expected);
+            assert_eq!(read_resets(&conn, Some(id)).unwrap()[&id], expected_markers);
+            // From the second reset on, the previously reset month still blocks.
+            assert_eq!(
+                evaluate_provider_limits(&conn, provider, now),
+                ProviderLimitDecision::Limited {
+                    reset_at: Some(if step == 0 {
+                        after[0].window_weekly_end_ts
+                    } else {
+                        after[0].window_monthly_end_ts
+                    })
+                }
+            );
+
+            let request_id = (step + 2) as i64;
+            insert_request_log_cost(&conn, request_id, Some(id), now, 10 * FEMTO, "[]");
+            insert_ledger_cost(&conn, request_id, id, now, 10 * FEMTO);
+            for candidate in LIMIT_PERIODS {
+                let key = format!("usage_{}_usd", candidate.as_str());
+                expected[&key] = serde_json::json!(expected[&key].as_f64().unwrap() + 10.0);
+            }
+            expected["usage_total_usd"] = serde_json::json!(10.0 * (step + 2) as f64);
+            let accumulated = provider_limit_usage::list_at(&conn, None, now).unwrap();
+            assert_eq!(serde_json::to_value(&accumulated[0]).unwrap(), expected);
+            assert_eq!(read_resets(&conn, Some(id)).unwrap()[&id], expected_markers);
+        }
+    }
+
+    #[test]
+    fn fixed_daily_dst_bounds_match_display_usage_and_gateway() {
+        if std::env::var_os("AIO_FIXED_DAILY_DST_CHILD").is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    &format!(
+                        "{}::fixed_daily_dst_bounds_match_display_usage_and_gateway",
+                        module_path!().split_once("::").unwrap().1
+                    ),
+                    "--nocapture",
+                ])
+                .env("TZ", "America/New_York")
+                .env("AIO_FIXED_DAILY_DST_CHILD", "1")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+            return;
+        }
+
+        const FEMTO: i64 = 1_000_000_000_000_000;
+        let dir = tempfile::tempdir().unwrap();
+        let db = crate::db::init_for_tests_with_pool_size(&dir.path().join("daily-dst.db"), 2)
+            .unwrap();
+        let id = provider_limit_usage::tests::create_limited_provider(&db, "daily-dst");
+        let conn = db.open_connection().unwrap();
+        conn.execute(
+            "UPDATE providers SET limit_5h_usd=NULL, limit_weekly_usd=NULL, limit_monthly_usd=NULL, limit_total_usd=NULL, daily_reset_mode='fixed', daily_reset_time='02:30:00' WHERE id=?1",
+            [id],
+        )
+        .unwrap();
+        let providers = providers::list_enabled_for_gateway_in_mode(&db, "codex", None).unwrap();
+        let provider = &providers[0];
+        let unix = |value| {
+            chrono::DateTime::parse_from_rfc3339(value)
+                .unwrap()
+                .timestamp()
+        };
+        for (step, (now, start, end, add_spend, usage)) in [
+            (
+                "2026-03-07T12:00:00-05:00",
+                "2026-03-07T02:30:00-05:00",
+                "2026-03-08T03:30:00-04:00",
+                true,
+                10.0,
+            ),
+            (
+                "2026-03-08T03:00:00-04:00",
+                "2026-03-07T02:30:00-05:00",
+                "2026-03-08T03:30:00-04:00",
+                false,
+                10.0,
+            ),
+            (
+                "2026-03-08T03:30:00-04:00",
+                "2026-03-08T03:30:00-04:00",
+                "2026-03-09T02:30:00-04:00",
+                false,
+                0.0,
+            ),
+            (
+                "2026-03-08T03:30:01-04:00",
+                "2026-03-08T03:30:00-04:00",
+                "2026-03-09T02:30:00-04:00",
+                true,
+                10.0,
+            ),
+            (
+                "2026-03-09T02:29:59-04:00",
+                "2026-03-08T03:30:00-04:00",
+                "2026-03-09T02:30:00-04:00",
+                false,
+                10.0,
+            ),
+            (
+                "2026-03-09T02:30:00-04:00",
+                "2026-03-09T02:30:00-04:00",
+                "2026-03-10T02:30:00-04:00",
+                false,
+                0.0,
+            ),
+            (
+                "2026-03-09T03:00:00-04:00",
+                "2026-03-09T02:30:00-04:00",
+                "2026-03-10T02:30:00-04:00",
+                true,
+                10.0,
+            ),
+            (
+                "2026-03-10T02:30:00-04:00",
+                "2026-03-10T02:30:00-04:00",
+                "2026-03-11T02:30:00-04:00",
+                false,
+                0.0,
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let (now, start, end) = (unix(now), unix(start), unix(end));
+            if add_spend {
+                let request_id = (step + 1) as i64;
+                insert_request_log_cost(&conn, request_id, Some(id), now, 10 * FEMTO, "[]");
+                insert_ledger_cost(&conn, request_id, id, now, 10 * FEMTO);
+            }
+            assert_eq!(
+                compute_daily_fixed_bounds(&conn, now, &provider.daily_reset_time).unwrap(),
+                (start, end)
+            );
+            let rows = provider_limit_usage::list_at(&conn, None, now).unwrap();
+            let row = &rows[0];
+            assert_eq!(row.window_daily_start_ts, start);
+            assert_eq!(row.window_daily_end_ts, end);
+            assert_eq!(row.usage_daily_usd, usage);
+            assert!(!row.daily_manual_anchor);
+            assert_eq!(
+                evaluate_provider_limits(&conn, provider, now),
+                if usage == 0.0 {
+                    ProviderLimitDecision::Allow
+                } else {
+                    ProviderLimitDecision::Limited {
+                        reset_at: Some(end)
+                    }
+                }
+            );
+        }
+    }
+
+    #[test]
     fn weekly_reset_preserves_monthly_spend_window_and_gate() {
         const FEMTO: i64 = 1_000_000_000_000_000;
         let dir = tempfile::tempdir().unwrap();
@@ -1728,34 +1914,6 @@ WHERE excluded_from_stats = 0
 
         update_latest(&mut latest, -50);
         assert_eq!(latest, Some(100));
-    }
-
-    #[test]
-    fn parse_reset_time_hms_lossy_valid_inputs() {
-        assert_eq!(parse_reset_time_hms_lossy("00:00:00"), (0, 0, 0));
-        assert_eq!(parse_reset_time_hms_lossy("12:30:45"), (12, 30, 45));
-        assert_eq!(parse_reset_time_hms_lossy("23:59:59"), (23, 59, 59));
-        assert_eq!(parse_reset_time_hms_lossy("  09:15:30  "), (9, 15, 30));
-    }
-
-    #[test]
-    fn parse_reset_time_hms_lossy_partial_inputs() {
-        assert_eq!(parse_reset_time_hms_lossy("12"), (12, 0, 0));
-        assert_eq!(parse_reset_time_hms_lossy("12:30"), (12, 30, 0));
-    }
-
-    #[test]
-    fn parse_reset_time_hms_lossy_invalid_inputs() {
-        // Invalid hour (> 23) should default to 0
-        assert_eq!(parse_reset_time_hms_lossy("25:30:00"), (0, 30, 0));
-        // Invalid minute (> 59) should default to 0
-        assert_eq!(parse_reset_time_hms_lossy("12:60:00"), (12, 0, 0));
-        // Invalid second (> 59) should default to 0
-        assert_eq!(parse_reset_time_hms_lossy("12:30:60"), (12, 30, 0));
-        // Non-numeric should default to 0
-        assert_eq!(parse_reset_time_hms_lossy("abc:def:ghi"), (0, 0, 0));
-        // Empty string
-        assert_eq!(parse_reset_time_hms_lossy(""), (0, 0, 0));
     }
 
     #[test]

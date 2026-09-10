@@ -50,6 +50,7 @@ import {
   oauthLimitsKeys,
   providerAccountUsageKeys,
   providerAvailabilityKeys,
+  providerLimitUsageKeys,
   providerModelsKeys,
   providersKeys,
 } from "./keys";
@@ -337,6 +338,7 @@ export function useProviderUpsertMutation() {
         providerId: saved.id,
         providerUuid: saved.provider_uuid,
       });
+      await queryClient.invalidateQueries({ queryKey: providerLimitUsageKeys.all });
       void queryClient.invalidateQueries({ queryKey: providersKeys.list(saved.cli_key) });
       void queryClient.invalidateQueries({ queryKey: gatewayKeys.circuitStatus(saved.cli_key) });
     },

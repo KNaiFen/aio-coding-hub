@@ -380,36 +380,49 @@ GROUP BY c.provider_id
     Ok(out)
 }
 
-/// Computes the start timestamp for the daily window based on reset mode
-fn compute_ts_daily(
+fn parse_reset_time_hms_lossy(input: &str) -> (u8, u8, u8) {
+    let trimmed = input.trim();
+    let mut parts = trimmed.split(':');
+
+    let h_raw = parts.next().unwrap_or("0");
+    let m_raw = parts.next().unwrap_or("0");
+    let s_raw = parts.next().unwrap_or("0");
+
+    let h = h_raw.parse::<u8>().ok().filter(|v| *v <= 23).unwrap_or(0);
+    let m = m_raw.parse::<u8>().ok().filter(|v| *v <= 59).unwrap_or(0);
+    let s = s_raw.parse::<u8>().ok().filter(|v| *v <= 59).unwrap_or(0);
+    (h, m, s)
+}
+
+pub(crate) fn compute_daily_fixed_bounds(
     conn: &Connection,
-    daily_reset_mode: DailyResetMode,
-    daily_reset_time: &str,
-    now: i64,
-) -> crate::shared::error::AppResult<i64> {
-    match daily_reset_mode {
-        DailyResetMode::Rolling => {
-            // Rolling: now - 24 hours
-            conn.query_row("SELECT ?1 - 86400", [now], |row| row.get::<_, i64>(0))
-                .map_err(|e| db_err!("failed to compute rolling daily timestamp: {e}"))
-        }
-        DailyResetMode::Fixed => {
-            // Fixed: start of day based on daily_reset_time in local timezone
-            // daily_reset_time is in format "HH:MM:SS"
-            conn.query_row(
-                r#"
-                SELECT CASE
-                    WHEN strftime('%H:%M:%S', ?2, 'unixepoch', 'localtime') >= ?1
-                    THEN CAST(strftime('%s', date(?2, 'unixepoch', 'localtime') || ' ' || ?1, 'utc') AS INTEGER)
-                    ELSE CAST(strftime('%s', date(?2, 'unixepoch', 'localtime', '-1 day') || ' ' || ?1, 'utc') AS INTEGER)
-                END
-                "#,
-                params![daily_reset_time, now],
-                |row| row.get::<_, i64>(0),
-            )
-            .map_err(|e| db_err!("failed to compute fixed daily timestamp: {e}"))
-        }
-    }
+    now_unix: i64,
+    reset_time: &str,
+) -> crate::shared::error::AppResult<(i64, i64)> {
+    let (h, m, s) = parse_reset_time_hms_lossy(reset_time);
+    let mod_h = format!("+{h} hours");
+    let mod_m = format!("+{m} minutes");
+    let mod_s = format!("+{s} seconds");
+
+    // Resolve each day's configured wall time independently so a DST gap shift
+    // cannot carry into the following day's reset.
+    conn.query_row(
+        r#"
+WITH bounds AS (
+  SELECT
+    CAST(strftime('%s', ?1, 'unixepoch','localtime','start of day', ?2, ?3, ?4, 'utc') AS INTEGER) AS today_reset,
+    CAST(strftime('%s', ?1, 'unixepoch','localtime','start of day','-1 day', ?2, ?3, ?4, 'utc') AS INTEGER) AS yesterday_reset,
+    CAST(strftime('%s', ?1, 'unixepoch','localtime','start of day','+1 day', ?2, ?3, ?4, 'utc') AS INTEGER) AS tomorrow_reset
+)
+SELECT
+  CASE WHEN ?1 >= today_reset THEN today_reset ELSE yesterday_reset END AS start_ts,
+  CASE WHEN ?1 < today_reset THEN today_reset ELSE tomorrow_reset END AS next_reset
+FROM bounds
+"#,
+        params![now_unix, mod_h, mod_m, mod_s],
+        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+    )
+    .map_err(|e| db_err!("failed to compute daily reset bounds: {e}"))
 }
 
 /// Computes the start timestamp for the weekly window (Monday 00:00:00 local time)
@@ -627,7 +640,7 @@ pub(crate) fn list_at(
 
     let mut raw_rows = Vec::new();
     let mut provider_windows = Vec::new();
-    let mut daily_window_cache: HashMap<(String, String), i64> = HashMap::new();
+    let mut daily_window_cache: HashMap<(String, String), (i64, i64)> = HashMap::new();
 
     for row in rows {
         let (
@@ -658,18 +671,23 @@ pub(crate) fn list_at(
             daily_reset_time_raw.clone()
         };
 
-        // Compute daily timestamp based on provider's reset mode. Cache by
+        // Compute daily bounds based on provider's reset mode. Cache by
         // mode/time because most providers share the same reset settings.
         let daily_cache_key = (
             daily_reset_mode.as_str().to_string(),
             daily_reset_time.clone(),
         );
-        let ts_daily = match daily_window_cache.get(&daily_cache_key).copied() {
-            Some(ts) => ts,
+        let daily_window = match daily_window_cache.get(&daily_cache_key).copied() {
+            Some(window) => window,
             None => {
-                let ts = compute_ts_daily(conn, daily_reset_mode, &daily_reset_time, now)?;
-                daily_window_cache.insert(daily_cache_key, ts);
-                ts
+                let window = match daily_reset_mode {
+                    DailyResetMode::Rolling => (now - 86_400, now + 1),
+                    DailyResetMode::Fixed => {
+                        compute_daily_fixed_bounds(conn, now, &daily_reset_time)?
+                    }
+                };
+                daily_window_cache.insert(daily_cache_key, window);
+                window
             }
         };
 
@@ -686,7 +704,7 @@ pub(crate) fn list_at(
             limit_monthly_usd,
             limit_total_usd,
             stored_5h_start_ts,
-            ts_daily,
+            daily_window,
         ));
         if resets_by_provider
             .get(&provider_id)
@@ -716,7 +734,7 @@ pub(crate) fn list_at(
         limit_monthly_usd,
         limit_total_usd,
         _stored_5h_start_ts,
-        ts_daily,
+        daily_window,
     ) in raw_rows
     {
         let resets = resets_by_provider
@@ -732,14 +750,9 @@ pub(crate) fn list_at(
                 (start, start + WINDOW_5H_SECS)
             }
         };
-        let end_daily = if daily_reset_mode_raw == "rolling" {
-            now + 1
-        } else {
-            local_window_end(conn, ts_daily, "+1 day")?
-        };
         let mut windows = [
             (ts_5h, end_5h),
-            (ts_daily, end_daily),
+            daily_window,
             (ts_weekly, end_weekly),
             (ts_monthly, end_monthly),
         ];
@@ -1164,6 +1177,34 @@ GROUP BY w.provider_id
         assert!(!usage_reaches_limit(Some(f64::NAN), 100.0));
         assert!(!usage_reaches_limit(Some(-1.0), 100.0));
         assert!(!usage_reaches_limit(Some(10.0), f64::NAN));
+    }
+
+    #[test]
+    fn parse_reset_time_hms_lossy_valid_inputs() {
+        assert_eq!(parse_reset_time_hms_lossy("00:00:00"), (0, 0, 0));
+        assert_eq!(parse_reset_time_hms_lossy("12:30:45"), (12, 30, 45));
+        assert_eq!(parse_reset_time_hms_lossy("23:59:59"), (23, 59, 59));
+        assert_eq!(parse_reset_time_hms_lossy("  09:15:30  "), (9, 15, 30));
+    }
+
+    #[test]
+    fn parse_reset_time_hms_lossy_partial_inputs() {
+        assert_eq!(parse_reset_time_hms_lossy("12"), (12, 0, 0));
+        assert_eq!(parse_reset_time_hms_lossy("12:30"), (12, 30, 0));
+    }
+
+    #[test]
+    fn parse_reset_time_hms_lossy_invalid_inputs() {
+        // Invalid hour (> 23) should default to 0
+        assert_eq!(parse_reset_time_hms_lossy("25:30:00"), (0, 30, 0));
+        // Invalid minute (> 59) should default to 0
+        assert_eq!(parse_reset_time_hms_lossy("12:60:00"), (12, 0, 0));
+        // Invalid second (> 59) should default to 0
+        assert_eq!(parse_reset_time_hms_lossy("12:30:60"), (12, 30, 0));
+        // Non-numeric should default to 0
+        assert_eq!(parse_reset_time_hms_lossy("abc:def:ghi"), (0, 0, 0));
+        // Empty string
+        assert_eq!(parse_reset_time_hms_lossy(""), (0, 0, 0));
     }
 
     fn local_ts(conn: &Connection, value: &str) -> i64 {
