@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.60.61](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.61) (2026-09-11)
+
+### Highlights
+
+* reset local 5-hour, daily, weekly, and monthly limits independently in provider settings
+* restart each selected window immediately and keep future periods anchored to the reset time
+* preserve other limit windows, total usage, and historical costs without restarting the gateway
+
 ## [0.60.60](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.60) (2026-09-08)
 
 ### Highlights
