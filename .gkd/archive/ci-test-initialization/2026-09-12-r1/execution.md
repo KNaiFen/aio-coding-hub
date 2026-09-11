@@ -2,7 +2,7 @@
 
 - PLAN revision: r1，已由用户“开始执行此PLAN”批准。
 - Execution revision: e1，2026-09-12。
-- 执行 worktree: `/Users/knaifen/Documents/Codex/aio-coding-hub/ci-test-initialization`。
+- 执行 worktree: `<任务工作树>`。
 - 分支: `ci/test-initialization`；baseline: `b03b5ab4d57df5b39348744d5e65d6cc835fbe1b`。
 - 角色: `gkd_execute`，唯一 writer。主工作树和其他任务有用户改动，不还原、不提交、不清理他人内容。禁止派生子代理。
 - 只读执行交接和适用 AGENTS 后读取必要源码；无需读取其他 PLAN/历史 session。若有 `.codegraph` 先用其定位；本工作树未索引则不新建索引。

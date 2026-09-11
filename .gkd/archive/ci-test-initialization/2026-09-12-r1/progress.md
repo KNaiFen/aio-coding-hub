@@ -1,7 +1,7 @@
 # CI 等待与测试初始化优化执行记录
 
 - 日期：2026-09-12；依据：PLAN r1 已获批，execution e1。
-- 工作树：`/Users/knaifen/Documents/Codex/aio-coding-hub/ci-test-initialization`。
+- 工作树：`<任务工作树>`。
 - 分支：`ci/test-initialization`；baseline：`b03b5ab4d57df5b39348744d5e65d6cc835fbe1b`。
 - 环境：交接记录为 M4 MacBook Air / 16GB、约 228 GiB 磁盘；本次轻量结构比较实际使用 Node.js v26.5.1 和 Git，通过 FastCtx 非交互 Bash 执行，所有命令 cwd 显式指定上述工作树。
 - 初始 `git status --short --branch`：目标分支正确，仅 main 创建的 `.gkd/execution.md` 未跟踪；未发现嵌套 AGENTS 或 `.codegraph` 文件，未创建索引。
@@ -36,7 +36,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const cp = require('node:child_process');
 const path = require('node:path');
-const root = '/Users/knaifen/Documents/Codex/aio-coding-hub/ci-test-initialization';
+const root = '<任务工作树>';
 const baseline = 'b03b5ab4d57df5b39348744d5e65d6cc835fbe1b';
 const git = (...args) => cp.execFileSync('git', args, { cwd: root, encoding: 'utf8' });
 const files = ['src-tauri/src/app/plugins/privacy_filter.rs', 'src-tauri/src/app/plugins/privacy_redaction_service.rs', 'src-tauri/src/gateway/routes.rs'];
