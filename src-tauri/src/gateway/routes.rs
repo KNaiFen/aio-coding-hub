@@ -1774,7 +1774,12 @@ INSERT INTO codex_managed_profiles(
         )
         .expect("response JSON");
         let log = recv_terminal_request_log(&mut log_rx).await;
-        assert_eq!(call_count.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(
+            call_count.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "status={status} response={response:?} provider_id={provider_id} log={log:?} upstream_task_finished={}",
+            upstream_task.is_finished()
+        );
         upstream_task.abort();
 
         CodexErrorResponseRuleObservation {

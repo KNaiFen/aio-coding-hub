@@ -14,13 +14,21 @@
 | `release.yml` | 发布标签或手动指定既有标签 | 从成功的 main CI 候选制品发布，不重新构建 |
 | `sync-upstream.yml` | 每日计划或手动 | 使用 GitHub App 创建或更新人工审核 PR，不 push 或 merge |
 
-普通 PR 只等待自动触发的 `ci-gate` 与 `pr-title`。不要对同一 PR commit 再启动 `ci` 的 `workflow_dispatch`；手动 CI 只用于 `main` 恢复或候选构建。
+普通 PR 的 required checks 为自动触发的 `ci-gate` 与 `pr-title`。不要对同一 PR commit 再启动 `ci` 的 `workflow_dispatch`；手动 CI 只用于 `main` 恢复或候选构建。
 
 PR 的 `change-scope` 按 `.github/ci-scope.json` 分别输出 frontend、Rust 与 shared 选择：纯前端源码/样式只运行 frontend，纯 Rust/Cargo 路径只运行 Rust；生成绑定、根依赖、CI/工具脚本、未知路径及前后端混合改动运行两端。纯文档 PR 和 `dev`/`main` push 保留文档分类：`.gkd/` Markdown 与既有根级 plan/progress/review 只运行过程门禁，README、AGENTS 和 active spec 还运行文档合同。包含代码或未知文件的主干 push、main 手动运行仍运行两端。选中的 frontend、Rust 与 observer-macos 等 `contracts` 成功后并行启动；合同失败导致的异常 `skipped` 不能通过 `ci-gate`。`candidate-plan` 保持与合同并行，候选构建依赖不变。`ci-gate` 验证选中 job 成功、未选 job 为 `skipped`；文档优化不会跳过整个 required workflow。
 
 CodeQL 在 PR/push 复用同一分类器，只有分类 job 成功、scope 为 `process-docs` 或 `checked-docs` 且 frontend/Rust 输出均明确为 `false` 时，才跳过双语言分析。单域源码、共享或未知路径、混合改动、空 diff、分类异常及缺失输出仍分析两种语言。每周计划和手动事件跳过分类并直接分析；分类 job 失败仍保留失败结果，整次 workflow 未取消时继续分析。不能用空输出证明纯文档，也不通过 step 条件或忽略失败制造分析成功。
 
 `manual-dispatch-guard` 在自动事件中按设计跳过。依赖它的条件 job 必须用 `always()` 解除 skipped 祖先的传播，并显式检查各直接依赖的 `result == 'success'`；否则 PR 与 push 的重任务会在分类成功后仍被 GitHub 跳过。CodeQL 的 Rust 分支不安装系统依赖或 Rust 工具链，也不调用 Autobuild，因为当前 Rust extractor 只支持 no-build 模式。
+
+## PR 监控交接
+
+普通 PR 使用现有 watcher 的 PR 模式，required 为 `ci-gate`、`pr-title`；任务必要 job 可加入 expected，以便提前观察失败。检查名称以目标 workflow 和 `gh pr checks <PR> -R KNaiFen/aio-coding-hub --json name,bucket,state,workflow` 返回的实际 `name` 为准，不拼接 UI 展示名。
+
+expected 随实际选择域确定：仅修改 Rust 测试与运维文档的 PR 加入 `contracts`、`rust`、`observer-macos`，未选中的 `frontend` 为 `skipped`，不加入；若后续合法生成绑定漂移使 frontend 被选中，再加入 `frontend`。含代码的 main push 运行两端，commit 模式检查包含 `ci-gate`、`contracts`、`frontend`、`rust`、`observer-macos`，不添加 main 上不存在的 `pr-title`。
+
+PR 模式在下一次查询观察到所需检查失败后返回；检查缺失或 pending 时继续待定，不能因名称缺失删减期望。交接分别报告 GitHub 终态、脚本 timeout、调用错误和代理异常，不能因代理异常重触发 CI。默认查询间隔 240 秒、总预算 6 小时不变；run 模式等待整个 run 的终态，不等同于 PR 模式逐 job 观察失败后返回。本约定沿用现有 watcher 与用户级 skills，不新增门禁或修改其实现。
 
 ## 提交与发版
 
