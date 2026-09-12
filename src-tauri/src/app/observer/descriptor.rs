@@ -19,7 +19,7 @@ pub fn path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult<PathBuf> 
 
 pub fn new_descriptor(port: u16, app_version: &str, started_at_ms: i64) -> ObserverDescriptorV1 {
     let mut token_bytes = [0_u8; TOKEN_BYTES];
-    rand::thread_rng().fill_bytes(&mut token_bytes);
+    rand::rng().fill_bytes(&mut token_bytes);
     ObserverDescriptorV1 {
         schema_version: 1,
         protocol_version: aio_observer_protocol::OBSERVER_PROTOCOL_VERSION,

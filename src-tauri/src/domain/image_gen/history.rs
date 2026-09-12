@@ -632,7 +632,7 @@ fn unique_quarantine_name(root: &Path) -> AppResult<String> {
     use rand::RngCore as _;
     for _ in 0..32 {
         let mut random = [0_u8; 16];
-        rand::thread_rng().fill_bytes(&mut random);
+        rand::rng().fill_bytes(&mut random);
         let suffix = random
             .iter()
             .map(|byte| format!("{byte:02x}"))

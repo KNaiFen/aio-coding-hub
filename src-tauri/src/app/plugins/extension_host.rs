@@ -552,7 +552,7 @@ fn write_worker_config(
         js_timeout_ms: call_timeout.as_millis().try_into().unwrap_or(u64::MAX),
     };
     let mut nonce = [0_u8; 8];
-    rand::thread_rng().fill_bytes(&mut nonce);
+    rand::rng().fill_bytes(&mut nonce);
     let path = std::env::temp_dir().join(format!(
         "aio-extension-host-{}-{:016x}.json",
         std::process::id(),

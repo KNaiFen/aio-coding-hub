@@ -755,7 +755,7 @@ pub(super) fn prepare_skill_fs_import(
 fn allocate_import_token() -> String {
     use rand::RngCore as _;
     let mut bytes = [0u8; 16];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    rand::rng().fill_bytes(&mut bytes);
     format!(
         "{}-{}",
         std::process::id(),
@@ -788,7 +788,7 @@ fn create_unique_import_dir(
             Ok(()) => return Ok(candidate),
             Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
                 let mut extra = [0u8; 8];
-                rand::thread_rng().fill_bytes(&mut extra);
+                rand::rng().fill_bytes(&mut extra);
                 candidate = parent.join(format!(
                     "{prefix}-{import_token}-{attempt}-{}",
                     extra.iter().map(|b| format!("{b:02x}")).collect::<String>()

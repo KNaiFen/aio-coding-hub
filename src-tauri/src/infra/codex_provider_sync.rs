@@ -1494,7 +1494,7 @@ fn isolate_provider_sync_backup_candidate(
     use rand::RngCore as _;
 
     for _ in 0..32 {
-        let random = rand::thread_rng().next_u64();
+        let random = rand::rng().next_u64();
         let quarantine_name = OsString::from(format!(
             ".provider-sync-prune-{}-{random:016x}",
             std::process::id()
@@ -2305,7 +2305,7 @@ fn isolate_unix_provider_sync_backup_entry(
     use rand::RngCore as _;
 
     for _ in 0..32 {
-        let random = rand::thread_rng().next_u64();
+        let random = rand::rng().next_u64();
         let tombstone = OsString::from(format!(
             ".provider-sync-delete-{}-{random:016x}",
             std::process::id()

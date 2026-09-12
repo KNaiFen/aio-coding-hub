@@ -288,7 +288,7 @@ fn digest_bytes(bytes: &[u8]) -> [u8; 32] {
 fn generate_unique_token(cache: &PreviewCache) -> String {
     loop {
         let mut random = [0_u8; PREVIEW_TOKEN_BYTES];
-        rand::thread_rng().fill_bytes(&mut random);
+        rand::rng().fill_bytes(&mut random);
         let token = random
             .iter()
             .map(|byte| format!("{byte:02x}"))

@@ -420,7 +420,7 @@ pub(crate) async fn provider_oauth_start_flow(
     // 3. Generate random state
     use rand::RngCore;
     let mut state_bytes = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut state_bytes);
+    rand::rng().fill_bytes(&mut state_bytes);
     let oauth_state = base64::Engine::encode(
         &base64::engine::general_purpose::URL_SAFE_NO_PAD,
         state_bytes,
