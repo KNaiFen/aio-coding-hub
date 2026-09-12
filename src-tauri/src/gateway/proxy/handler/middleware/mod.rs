@@ -160,6 +160,8 @@ impl<R: tauri::Runtime> ProxyContext<R> {
             provider_base_url_ping_cache_ttl_seconds: rs.provider_base_url_ping_cache_ttl_seconds,
             verbose_provider_error: rs.verbose_provider_error,
             enable_codex_session_id_completion: rs.enable_codex_session_id_completion,
+            enable_codex_responses_overload_error_rewrite: rs
+                .enable_codex_responses_overload_error_rewrite,
             max_attempts_per_provider: rs.max_attempts_per_provider,
             max_providers_to_try: rs.max_providers_to_try,
             upstream_retry_policy: rs.upstream_retry_policy,

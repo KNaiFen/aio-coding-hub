@@ -35,6 +35,7 @@ pub(crate) mod cx2cc;
 pub(crate) mod inbound;
 #[allow(dead_code)]
 pub(crate) mod outbound;
+pub(crate) mod probe;
 
 #[cfg(test)]
 mod e2e_tests;

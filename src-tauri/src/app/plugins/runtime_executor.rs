@@ -130,12 +130,6 @@ impl RuntimeGatewayPluginExecutor {
     }
 
     #[cfg(test)]
-    #[allow(dead_code)]
-    pub(crate) fn dispose_runtime_caches_for_tests(&self) {
-        self.lifecycle.dispose_all();
-    }
-
-    #[cfg(test)]
     pub(crate) async fn dispose_extension_host_instances_for_tests(&self) {
         if let Some(registry) = self.extension_host_registry.as_ref() {
             registry.dispose_all().await;

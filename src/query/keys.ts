@@ -450,6 +450,9 @@ export const modelPricesKeys = {
   lists: () => [...modelPricesAllKey, "list"] as const,
   list: (cliKey: CliKey) => [...modelPricesAllKey, "list", cliKey] as const,
   aliases: () => [...modelPricesAllKey, "aliases"] as const,
+  rules: () => [...modelPricesAllKey, "rules"] as const,
+  references: () => [...modelPricesAllKey, "reference"] as const,
+  reference: (cliKey: CliKey, model: string) => [...modelPricesAllKey, "reference", cliKey, model] as const,
 };
 
 const dataManagementAllKey = ["dataManagement"] as const;

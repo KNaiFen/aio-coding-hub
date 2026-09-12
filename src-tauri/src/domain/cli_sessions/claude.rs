@@ -109,11 +109,11 @@ fn file_times(path: &Path) -> (Option<i64>, Option<i64>) {
     (created, modified)
 }
 
-fn home_dir(app: &tauri::AppHandle) -> AppResult<PathBuf> {
+fn home_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult<PathBuf> {
     crate::app_paths::home_dir(app)
 }
 
-fn claude_projects_dir(app: &tauri::AppHandle) -> AppResult<PathBuf> {
+fn claude_projects_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult<PathBuf> {
     Ok(home_dir(app)?.join(".claude").join("projects"))
 }
 
@@ -820,8 +820,8 @@ fn folder_lookup_in_projects_dir(
     Ok(out)
 }
 
-pub fn folder_lookup_by_session_ids(
-    app: &tauri::AppHandle,
+pub fn folder_lookup_by_session_ids<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     target_session_ids: &[String],
 ) -> AppResult<Vec<CliSessionsFolderLookupEntry>> {
     let projects_dir = claude_projects_dir(app)?;

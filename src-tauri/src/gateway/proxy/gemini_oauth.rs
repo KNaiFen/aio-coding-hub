@@ -56,7 +56,7 @@ pub(super) async fn prepare_upstream_request(
     )
 }
 
-fn prepare_upstream_request_with_project(
+pub(super) fn prepare_upstream_request_with_project(
     forwarded_path: &str,
     query: Option<&str>,
     body_value: Value,
@@ -772,6 +772,33 @@ mod tests {
             .and_then(|v| v.get(0))
             .and_then(|v| v.get("parametersJsonSchema"))
             .is_some());
+    }
+
+    #[test]
+    fn probe_request_wraps_project_without_changing_model_or_output_budget() {
+        let prepared = prepare_upstream_request_with_project(
+            "/v1beta/models/gemini-2.0-flash:generateContent",
+            None,
+            serde_json::json!({
+                "contents": [{"role":"user","parts":[{"text":"Reply with the single word OK."}]}],
+                "generationConfig": {"maxOutputTokens":100}
+            }),
+            None,
+            Some("projects/probe-test"),
+        )
+        .unwrap();
+        let body: Value = serde_json::from_slice(&prepared.body_bytes).unwrap();
+        assert_eq!(prepared.forwarded_path, "/v1internal:generateContent");
+        assert_eq!(body["model"], "gemini-2.0-flash");
+        assert_eq!(body["project"], "projects/probe-test");
+        assert_eq!(body["request"]["generationConfig"]["maxOutputTokens"], 100);
+        assert_eq!(
+            body["request"]["contents"][0]["parts"][0]["text"],
+            "Reply with the single word OK."
+        );
+        assert!(body["request"]["generationConfig"]
+            .get("thinkingConfig")
+            .is_none());
     }
 
     #[test]

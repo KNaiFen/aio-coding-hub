@@ -104,13 +104,33 @@ export function computeOutputTokensPerSecond(
   return Number.isFinite(rate) ? rate : null;
 }
 
-export function formatTokensPerSecond(value: number | null | undefined) {
+export function computeEstimatedOutputTokensPerSecond(
+  outputTokens: number | null | undefined,
+  estimatedFinalUpstreamAttemptDurationMs: number | null | undefined
+) {
+  if (outputTokens == null || !Number.isFinite(outputTokens) || outputTokens <= 0) return null;
+  if (
+    estimatedFinalUpstreamAttemptDurationMs == null ||
+    !Number.isFinite(estimatedFinalUpstreamAttemptDurationMs) ||
+    estimatedFinalUpstreamAttemptDurationMs <= 0
+  ) {
+    return null;
+  }
+  const rate = outputTokens / (estimatedFinalUpstreamAttemptDurationMs / 1000);
+  return Number.isFinite(rate) ? rate : null;
+}
+
+export function formatTokensPerSecond(
+  value: number | null | undefined,
+  approximate = false
+) {
   if (value == null || !Number.isFinite(value)) return "—";
   const v = Math.max(0, value);
+  const unit = approximate ? " ≈Token/秒" : " Token/秒";
   try {
-    return `${TOKENS_PER_SECOND_FORMATTER.format(v)} Token/秒`;
+    return `${TOKENS_PER_SECOND_FORMATTER.format(v)}${unit}`;
   } catch {
-    return `${v.toFixed(1)} Token/秒`;
+    return `${v.toFixed(1)}${unit}`;
   }
 }
 
@@ -201,13 +221,17 @@ export function formatBytes(bytes: number | null | undefined) {
   return `${gb.toFixed(2)} GB`;
 }
 
-export function formatTokensPerSecondShort(value: number | null | undefined): string {
+export function formatTokensPerSecondShort(
+  value: number | null | undefined,
+  approximate = false
+): string {
   if (value == null || !Number.isFinite(value)) return "—";
   const v = Math.max(0, value);
+  const unit = approximate ? " ≈t/s" : " t/s";
   if (v >= 1000) {
-    return `${(v / 1000).toFixed(1)}k t/s`;
+    return `${(v / 1000).toFixed(1)}k${unit}`;
   }
-  return `${v.toFixed(1)} t/s`;
+  return `${v.toFixed(1)}${unit}`;
 }
 
 export function formatUsdCompact(value: number | null | undefined): string {

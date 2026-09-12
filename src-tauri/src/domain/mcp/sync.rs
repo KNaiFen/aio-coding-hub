@@ -1,12 +1,11 @@
 //! Usage: Sync enabled MCP servers to supported CLI config files.
 
 use crate::mcp_sync;
+use crate::shared::cli_key::validate_cli_key;
 use crate::shared::error::db_err;
 use crate::workspaces;
 use rusqlite::Connection;
 use std::collections::BTreeMap;
-
-use super::cli_specs::validate_cli_key;
 
 pub(crate) fn list_enabled_for_cli(
     conn: &Connection,

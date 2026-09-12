@@ -62,6 +62,7 @@ export type ProviderEditorDialogProps =
 export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
   const f = useProviderEditorForm(props);
   const saveBlocked =
+    f.limitResetPending ||
     f.saving ||
     (f.routingEditorEnabled && (f.routingPolicyLoading || f.routingPolicyError != null)) ||
     f.accountUsageCustomTestInFlight ||
@@ -71,7 +72,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
     <Dialog
       open={f.open}
       onOpenChange={(nextOpen) => {
-        if (!nextOpen && (f.saving || f.accountUsageCustomTestInFlight)) return;
+        if (!nextOpen && (f.saving || f.limitResetPending || f.accountUsageCustomTestInFlight)) return;
         f.onOpenChange(nextOpen);
       }}
       title={f.title}
@@ -182,7 +183,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
         <ProviderRetryPolicySection form={f} />
         <ProviderModelRoutingPolicySection form={f} />
 
-        <LimitsSection form={f} />
+        <LimitsSection key={`${f.editingProviderId}:${f.open}`} form={f} />
         <ClaudeModelSection form={f} />
 
         <div className="flex items-center justify-between border-t border-border pt-3 dark:border-border">
@@ -198,7 +199,7 @@ export function ProviderEditorDialog(props: ProviderEditorDialogProps) {
             <Button
               onClick={() => f.onOpenChange(false)}
               variant="secondary"
-              disabled={f.saving || f.accountUsageCustomTestInFlight}
+              disabled={f.saving || f.limitResetPending || f.accountUsageCustomTestInFlight}
             >
               取消
             </Button>

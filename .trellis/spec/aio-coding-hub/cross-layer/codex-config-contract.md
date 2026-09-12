@@ -113,12 +113,7 @@ validator for a field whose raw contract requires exact values.
 
 GitHub Actions must run the focused frontend/Rust tests, generate bindings,
 format, lint, type-check, run Clippy, and complete the affected Rust suite.
-Locally, use only the dependency-free repository contract and diff check:
-
-```bash
-node scripts/check-cloud-only-verification.mjs
-git diff --check
-```
+The local resource boundary is recorded in the [cloud-only contract](./cloud-only-verification-contract.md).
 
 ### 7. Wrong vs Correct
 

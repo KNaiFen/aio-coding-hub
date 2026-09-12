@@ -243,30 +243,6 @@ mod tests {
     }
 
     #[test]
-    fn grok_capabilities_match_first_release_scope() {
-        let supported = [
-            CliCapability::Gateway,
-            CliCapability::Provider,
-            CliCapability::Logs,
-            CliCapability::Usage,
-            CliCapability::Pricing,
-            CliCapability::CliProxy,
-            CliCapability::CliManager,
-            CliCapability::Mcp,
-            CliCapability::Skills,
-            CliCapability::Prompts,
-            CliCapability::Workspaces,
-        ];
-        for capability in supported {
-            assert!(CliKey::Grok.supports(capability), "missing {capability:?}");
-        }
-
-        assert!(!CliKey::Grok.supports(CliCapability::Wsl));
-        assert!(!CliKey::Grok.supports(CliCapability::ManagedUpdate));
-        assert!(!CliKey::Grok.supports(CliCapability::ProviderPluginTarget));
-    }
-
-    #[test]
     fn registry_capability_matrix_is_exact() {
         let expected_without_grok_exclusions = EVERY_CAPABILITY.to_vec();
         for cli_key in [CliKey::Claude, CliKey::Codex, CliKey::Gemini] {

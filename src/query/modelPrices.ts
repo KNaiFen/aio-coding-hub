@@ -5,6 +5,10 @@ import {
   getLastModelPricesSync,
   modelPriceAliasesGet,
   modelPriceAliasesSet,
+  modelPriceRulesGet,
+  modelPriceRulesSet,
+  modelPriceReferenceGet,
+  type ModelPriceRules,
   modelPricesList,
   modelPricesSyncBasellm,
   normalizeModelPriceAliases,
@@ -51,6 +55,30 @@ export function useModelPriceAliasesQuery(options?: { enabled?: boolean }) {
   });
 }
 
+export function useModelPriceRulesQuery() {
+  return useQuery({
+    queryKey: modelPricesKeys.rules(), queryFn: modelPriceRulesGet, refetchOnMount: "always",
+  });
+}
+
+export function useModelPriceReferenceQuery(cliKey: CliKey, model: string) {
+  return useQuery({
+    queryKey: modelPricesKeys.reference(cliKey, model),
+    queryFn: () => modelPriceReferenceGet(cliKey, model),
+    enabled: model.trim().length > 0,
+  });
+}
+
+export function useModelPriceRulesSetMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: modelPriceRulesSet,
+    onSuccess: (updated) => {
+      queryClient.setQueryData<ModelPriceRules>(modelPricesKeys.rules(), updated);
+    },
+  });
+}
+
 export function useModelPriceAliasesSetMutation() {
   const queryClient = useQueryClient();
 
@@ -59,6 +87,7 @@ export function useModelPriceAliasesSetMutation() {
       modelPriceAliasesSet(normalizeModelPriceAliases(aliases)),
     onSuccess: (updated) => {
       queryClient.setQueryData<ModelPriceAliases | null>(modelPricesKeys.aliases(), updated);
+      queryClient.invalidateQueries({ queryKey: modelPricesKeys.references() });
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: modelPricesKeys.aliases() });

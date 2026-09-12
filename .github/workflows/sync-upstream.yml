@@ -160,18 +160,19 @@ jobs:
                 --jq '.mergeStateStatus'
             )"
 
-            if [ -z "${merge_state}" ] || [ "${merge_state}" = "DIRTY" ] || [ "${merge_state}" = "UNKNOWN" ]; then
-              {
-                echo "## Sync Upstream"
-                echo ""
-                echo "Created or updated cross-repository sync PR for \`${TARGET_BRANCH}\`."
-                echo ""
-                echo "PR: #${pr_number}"
-                echo ""
-                echo "Manual conflict resolution required; merge state: \`${merge_state:-unavailable}\`."
-              } >> "${GITHUB_STEP_SUMMARY}"
-              echo "PR #${pr_number} merge state is ${merge_state:-unavailable}. Manual conflict resolution required." >&2
+            local pr_url="https://github.com/${GITHUB_REPOSITORY}/pull/${pr_number}"
+            if [ -z "${merge_state}" ]; then
+              echo "::error::PR ${pr_url} exists, but its merge state is unavailable."
               exit 1
+            fi
+
+            local merge_notice=""
+            if [ "${merge_state}" = "DIRTY" ]; then
+              merge_notice="Manual conflict resolution required before review and merge."
+              echo "::warning::${merge_notice} ${pr_url}"
+            elif [ "${merge_state}" = "UNKNOWN" ]; then
+              merge_notice="GitHub has not finished calculating mergeability. Check the PR before review and merge."
+              echo "::warning::${merge_notice} ${pr_url}"
             fi
 
             {
@@ -181,9 +182,10 @@ jobs:
               echo ""
               echo "Reason: ${reason}"
               echo ""
-              echo "PR: #${pr_number}"
+              echo "PR: ${pr_url}"
               echo ""
               echo "Manual review and merge required."
+              echo "Merge state: \`${merge_state}\`. ${merge_notice}"
             } >> "${GITHUB_STEP_SUMMARY}"
           }
 

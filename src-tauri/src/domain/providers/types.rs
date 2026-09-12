@@ -364,7 +364,6 @@ pub const MAX_SESSION_REUSE_PRIORITY: i64 = 1000;
 #[derive(Debug, Clone)]
 pub(crate) struct ProviderForGateway {
     pub id: i64,
-    #[allow(dead_code)] // Read by the stage-5 cross-provider target matcher.
     pub provider_uuid: String,
     pub session_reuse_priority: i64,
     pub name: String,
@@ -383,13 +382,11 @@ pub(crate) struct ProviderForGateway {
     pub auth_mode: String,
     pub oauth_provider_type: Option<String>,
     pub source_provider_id: Option<i64>,
-    #[allow(dead_code)] // Will be read when failover_loop uses bridge_type for dispatch.
     pub bridge_type: Option<String>,
     pub stream_idle_timeout_seconds: Option<u32>,
     pub extension_values: Vec<ProviderExtensionValues>,
     pub upstream_retry_policy_override: Option<crate::settings::UpstreamRetryPolicy>,
     pub model_routing_policy_override: Option<crate::settings::ModelRoutingPolicy>,
-    #[allow(dead_code)] // Read by the stage-5 one-shot cross-provider scheduler.
     pub cross_provider_model_routing_policy:
         Option<crate::settings::CrossProviderModelRoutingPolicy>,
 }

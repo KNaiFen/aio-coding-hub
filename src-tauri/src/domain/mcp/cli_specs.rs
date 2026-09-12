@@ -5,10 +5,6 @@ pub(super) static MCP_CLI_KEYS: std::sync::LazyLock<Vec<&'static str>> =
         crate::shared::cli_key::cli_keys_with(crate::shared::cli_key::CliCapability::Mcp).collect()
     });
 
-pub(super) fn validate_cli_key(cli_key: &str) -> crate::shared::error::AppResult<()> {
-    crate::shared::cli_key::validate_cli_key(cli_key)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

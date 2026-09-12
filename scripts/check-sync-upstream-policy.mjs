@@ -30,7 +30,7 @@ git remote add upstream "https://github.com/\${UPSTREAM_REPO}.git"
 git fetch origin "+refs/heads/\${TARGET_BRANCH}:refs/remotes/origin/\${TARGET_BRANCH}"
 git fetch upstream "+refs/heads/\${TARGET_BRANCH}:refs/remotes/upstream/\${TARGET_BRANCH}"`;
 // The full PR script is locked so indirect shell/API calls cannot bypass token policy.
-const EXPECTED_OPEN_PR_RUN_SHA256 = "f064f98b484d84af6471412a2ab118e6a15f59288fbbed7549cf21a573858a62";
+const EXPECTED_OPEN_PR_RUN_SHA256 = "f99a6295008a9d6d464428cc204f57f8e9b2f56d3e4337551007f80132301acc";
 const EXPECTED_SYNC_STEP_NAMES = [
   "Validate GitHub App credentials",
   "Create GitHub App token",
@@ -748,11 +748,11 @@ export function validateSyncUpstreamPolicy(source) {
   );
   requireCommandText(
     '[ "${merge_state}" = "DIRTY" ]',
-    "workflow must fail closed when the open PR has conflicts"
+    "workflow must distinguish conflicted pull requests"
   );
   requireCommandText(
     '[ "${merge_state}" = "UNKNOWN" ]',
-    "workflow must fail closed when the open PR merge state is unknown"
+    "workflow must distinguish pending mergeability"
   );
   if (commandText.includes('[ "${merge_state}" = "BLOCKED" ]')) {
     failures.push("workflow must leave review-blocked pull requests open for manual review");
@@ -760,6 +760,14 @@ export function validateSyncUpstreamPolicy(source) {
   requireCommandText(
     "Manual conflict resolution required",
     "conflicted sync pull requests must report manual resolution"
+  );
+  requireCommandText(
+    "GitHub has not finished calculating mergeability.",
+    "unknown mergeability must not be reported as a conflict"
+  );
+  requireCommandText(
+    'echo "::warning::${merge_notice} ${pr_url}"',
+    "conflicted or pending pull requests must emit a warning with the PR URL"
   );
 
   const noOpMarker = 'if git merge-base --is-ancestor "${UPSTREAM}" "${LOCAL}"; then';

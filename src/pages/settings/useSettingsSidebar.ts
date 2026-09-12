@@ -95,6 +95,7 @@ export function useSettingsSidebar(
       lastModelPricesSyncReport: controller.lastModelPricesSyncReport,
       lastModelPricesSyncTime: controller.lastModelPricesSyncTime,
       openModelPriceAliasesDialog: controller.openModelPriceAliasesDialog,
+      openModelPriceRulesDialog: controller.openModelPriceRulesDialog,
       todayRequestsAvailable: resolveAvailableStatus(
         todaySummaryQuery.data ?? null,
         todaySummaryQuery.isLoading

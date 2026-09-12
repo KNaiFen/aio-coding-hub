@@ -17,12 +17,12 @@ mod http_util;
 mod logging;
 pub(in crate::gateway) mod model_rewrite;
 pub(in crate::gateway) mod protocol_bridge;
-pub(crate) mod provider_adapters;
 pub(in crate::gateway) mod provider_router;
 mod request_body;
 mod request_context;
 mod request_end;
 mod sse;
+pub(in crate::gateway) use sse::{find_sse_event_end, parse_sse_frame};
 pub(in crate::gateway) mod status_override;
 mod types;
 pub(in crate::gateway) mod upstream_client_error_rules;
@@ -36,6 +36,52 @@ pub(in crate::gateway) use logging::spawn_enqueue_request_log_with_backpressure;
 pub(super) use types::ErrorCategory;
 
 pub(super) use handler::proxy_impl;
+
+pub(super) async fn prepare_gemini_oauth_probe(
+    client: &reqwest::Client,
+    access_token: &str,
+    path: &str,
+    body: &serde_json::Value,
+) -> Result<(String, serde_json::Value), String> {
+    #[cfg(test)]
+    if let Ok(project) = std::env::var("AIO_CODING_HUB_TEST_PROBE_GEMINI_PROJECT") {
+        let request = gemini_oauth::prepare_upstream_request_with_project(
+            path,
+            None,
+            body.clone(),
+            None,
+            Some(&project),
+        )?;
+        let base_url = std::env::var("AIO_CODING_HUB_TEST_PROBE_OAUTH_BASE_URL")
+            .expect("synthetic project requires a mock upstream");
+        let url = crate::gateway::util::build_target_url(
+            &base_url,
+            &request.forwarded_path,
+            request.query.as_deref(),
+        )?;
+        let body = serde_json::from_slice(&request.body_bytes)
+            .map_err(|_| "PROBE_STRUCTURE".to_string())?;
+        return Ok((url.to_string(), body));
+    }
+    let request = gemini_oauth::prepare_upstream_request(
+        client,
+        access_token,
+        path,
+        None,
+        Some(body),
+        &bytes::Bytes::new(),
+        None,
+    )
+    .await?;
+    let url = crate::gateway::util::build_target_url(
+        &request.base_url,
+        &request.forwarded_path,
+        request.query.as_deref(),
+    )?;
+    let body =
+        serde_json::from_slice(&request.body_bytes).map_err(|_| "PROBE_STRUCTURE".to_string())?;
+    Ok((url.to_string(), body))
+}
 
 const CLAUDE_COUNT_TOKENS_PATH: &str = "/v1/messages/count_tokens";
 const CLAUDE_LOGGED_MESSAGES_PATH: &str = "/v1/messages";
@@ -141,6 +187,7 @@ pub(super) struct RequestLogEnqueueArgs {
     pub(super) upstream_stream_timing_version: i64,
     pub(super) final_upstream_attempt_duration_ms: Option<u128>,
     pub(super) final_upstream_attempt_timing_version: i64,
+    pub(super) estimated_final_upstream_attempt_duration_ms: Option<u128>,
     pub(super) attempts_json: String,
     pub(super) requested_model: Option<String>,
     pub(super) created_at_ms: i64,

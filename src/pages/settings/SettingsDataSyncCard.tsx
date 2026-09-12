@@ -26,6 +26,7 @@ export function SettingsDataSyncCard({
   lastModelPricesSyncReport,
   lastModelPricesSyncTime,
   openModelPriceAliasesDialog,
+  openModelPriceRulesDialog,
   todayRequestsAvailable,
   todayRequestsTotal,
   syncingModelPrices,
@@ -38,6 +39,7 @@ export function SettingsDataSyncCard({
   lastModelPricesSyncReport: ModelPricesSyncReport | null;
   lastModelPricesSyncTime: number | null;
   openModelPriceAliasesDialog: () => void;
+  openModelPriceRulesDialog: () => void;
   todayRequestsAvailable: AvailableStatus;
   todayRequestsTotal: number | null;
   syncingModelPrices: boolean;
@@ -82,6 +84,9 @@ export function SettingsDataSyncCard({
           >
             配置
           </Button>
+        </SettingsRow>
+        <SettingsRow label="自定义定价">
+          <Button onClick={openModelPriceRulesDialog} variant="secondary" size="sm" disabled={!about} aria-label="配置自定义定价">配置</Button>
         </SettingsRow>
         <SettingsRow label="今日请求">
           <span className="font-mono text-sm text-foreground">
