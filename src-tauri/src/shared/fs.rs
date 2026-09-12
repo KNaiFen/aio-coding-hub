@@ -413,7 +413,7 @@ fn create_unique_atomic_temp(
 
     let parent = target.parent().unwrap_or_else(|| Path::new("."));
     for _ in 0..32 {
-        let random = rand::thread_rng().next_u64();
+        let random = rand::rng().next_u64();
         let temp_path = parent.join(format!(
             ".aio-atomic-{}-{random:016x}.tmp",
             std::process::id()

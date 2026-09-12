@@ -11,7 +11,7 @@ pub(crate) struct PkcePair {
 pub(crate) fn generate_pkce_pair() -> PkcePair {
     use rand::RngCore;
     let mut buf = [0u8; 64];
-    rand::thread_rng().fill_bytes(&mut buf);
+    rand::rng().fill_bytes(&mut buf);
     let code_verifier = base64_url_encode(&buf);
     let code_challenge = code_challenge_s256(&code_verifier);
     PkcePair {

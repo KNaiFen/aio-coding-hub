@@ -146,7 +146,7 @@ fn apply_codex_quota_headers(
 
 fn generate_redeem_request_id() -> String {
     let mut bytes = [0_u8; 16];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    rand::rng().fill_bytes(&mut bytes);
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     format!(
