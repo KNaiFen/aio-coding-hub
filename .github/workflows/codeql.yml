@@ -18,8 +18,49 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  change-scope:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      scope: ${{ steps.scope.outputs.scope }}
+      frontend_ci: ${{ steps.scope.outputs.frontend_ci }}
+      rust_ci: ${{ steps.scope.outputs.rust_ci }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - id: scope
+        name: Classify changed paths
+        shell: bash
+        env:
+          CI_EVENT_NAME: ${{ github.event_name }}
+          CI_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          CI_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          CI_BEFORE_SHA: ${{ github.event.before || '' }}
+        run: >-
+          node scripts/ci-change-scope.mjs
+          --event "$CI_EVENT_NAME"
+          --base "$CI_BASE_SHA"
+          --head "$CI_HEAD_SHA"
+          --before "$CI_BEFORE_SHA"
+
   analyze:
     name: codeql (${{ matrix.language }})
+    needs: change-scope
+    if: >-
+      ${{ !cancelled() && !(needs.change-scope.result == 'success' &&
+      (needs.change-scope.outputs.scope == 'process-docs' || needs.change-scope.outputs.scope == 'checked-docs') &&
+      needs.change-scope.outputs.frontend_ci == 'false' && needs.change-scope.outputs.rust_ci == 'false') }}
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     strategy:

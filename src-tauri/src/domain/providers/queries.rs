@@ -2269,9 +2269,19 @@ INSERT INTO providers(
             let next_daily_reset_mode = daily_reset_mode.unwrap_or(existing_daily_reset_mode);
 
             let next_daily_reset_time = match daily_reset_time.as_deref() {
-                None => existing_daily_reset_time,
+                None => existing_daily_reset_time.clone(),
                 Some(v) => normalize_reset_time_hms_strict("daily_reset_time", v)?,
             };
+
+            if next_daily_reset_mode != existing_daily_reset_mode
+                || next_daily_reset_time != existing_daily_reset_time
+            {
+                tx.execute(
+                    "UPDATE provider_limit_resets SET reset_at = NULL WHERE provider_id = ?1 AND period = 'daily'",
+                    params![id],
+                )
+                .map_err(|e| db_err!("failed to clear daily limit anchor: {e}"))?;
+            }
 
             let next_tags = match tags {
                 Some(t) => normalize_tags(t),

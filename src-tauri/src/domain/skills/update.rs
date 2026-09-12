@@ -323,23 +323,6 @@ WHERE id = ?7
     get_skill_by_id_for_workspace(&conn, workspace_id, skill_id)
 }
 
-/// Update the installed_commit for a skill in the database.
-#[allow(dead_code)]
-pub(super) fn update_installed_commit(
-    db: &db::Db,
-    skill_id: i64,
-    commit: Option<&str>,
-) -> crate::shared::error::AppResult<()> {
-    let conn = db.open_connection()?;
-    let now = crate::shared::time::now_unix_seconds();
-    conn.execute(
-        "UPDATE skills SET installed_commit = ?1, updated_at = ?2 WHERE id = ?3",
-        params![commit, now, skill_id],
-    )
-    .map_err(|e| crate::shared::error::db_err!("failed to update installed_commit: {e}"))?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

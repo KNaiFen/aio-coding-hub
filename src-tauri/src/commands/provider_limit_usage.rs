@@ -5,6 +5,22 @@ use crate::{blocking, provider_limit_usage};
 
 #[tauri::command]
 #[specta::specta]
+pub(crate) async fn provider_limit_reset(
+    app: tauri::AppHandle,
+    db_state: tauri::State<'_, DbInitState>,
+    provider_id: i64,
+    period: provider_limit_usage::ProviderLimitPeriod,
+) -> Result<(), String> {
+    let db = ensure_db_ready(app, db_state.inner()).await?;
+    blocking::run("provider_limit_reset", move || {
+        provider_limit_usage::reset(&db, provider_id, period)
+    })
+    .await
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+#[specta::specta]
 pub(crate) async fn provider_limit_usage_v1(
     app: tauri::AppHandle,
     db_state: tauri::State<'_, DbInitState>,

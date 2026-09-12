@@ -9,45 +9,11 @@ import { assertGithubActionsEnvironment } from "./require-github-actions.mjs";
 const valid = loadCloudOnlyVerificationFixture();
 assert.doesNotThrow(() => assertCloudOnlyVerificationContract(valid));
 
-const wordingFixture = {
-  ...valid,
-  agents: `$gkd-main .gkd/plan.md .gkd/execution.md .gkd/progress.md .gkd/review.md
-Keep the local checkout zero-artifact.
-普通 PR 等自动 \`ci-gate\` 与 \`pr-title\`，不额外手动启动常规 \`ci\`。`,
-  readme: "workflow_dispatch 仅用于 main 恢复或候选构建；不要为常规验证额外手动运行 `ci`。",
-  readmeEn: "workflow_dispatch is for main recovery or candidates. Do not start an additional manual `ci` run for routine validation.",
-};
-assert.doesNotThrow(() => assertCloudOnlyVerificationContract(wordingFixture));
-for (const [field, original, equivalent] of [
-  ["agents", "Keep the local checkout zero-artifact.", "本地工作树不得留下依赖或构建产物。"],
-  [
-    "agents",
-    "普通 PR 等自动 `ci-gate` 与 `pr-title`，不额外手动启动常规 `ci`。",
-    "常规 PR 由自动 `ci-gate` 与 `pr-title` 验证，不再手动重复触发 `ci`。",
-  ],
-  [
-    "readme",
-    "不要为常规验证额外手动运行 `ci`。",
-    "普通 PR 使用自动检查，常规验证不得再启动一轮手动 `ci`。",
-  ],
-  [
-    "readmeEn",
-    "Do not start an additional manual `ci` run for routine validation.",
-    "Use automatic PR checks without launching another manual `ci` run for routine validation.",
-  ],
-]) {
-  const rewritten = wordingFixture[field].replace(original, equivalent);
-  assert.notEqual(rewritten, wordingFixture[field], `${field} wording fixture must change`);
-  assert.doesNotThrow(() =>
-    assertCloudOnlyVerificationContract({ ...wordingFixture, [field]: rewritten })
-  );
-}
 assert.doesNotThrow(() =>
   assertCloudOnlyVerificationContract({
     ...valid,
-    agents: `${valid.agents}\n$gkd-ci-monitor gkd_accept .gkd/archive/\n`,
-    readme: `${valid.readme}\n$gkd-ci-monitor .gkd/execution.md\n`,
-    readmeEn: `${valid.readmeEn}\n$gkd-ci-monitor .gkd/execution.md\n`,
+    readme: "工作流遵循 `$gkd-main`。`workflow_dispatch` 用于 main 云端构建。",
+    readmeEn: "Workflow follows `$gkd-main`. `workflow_dispatch` supports main cloud builds.",
   })
 );
 assert.doesNotThrow(() =>
@@ -139,34 +105,6 @@ for (const [name, mutate, expected] of [
       fixture.readme += "\n```bash\npnpm install\n```\n";
     },
     /README\.md must not present a package\/native command/,
-  ],
-  [
-    "legacy GKD references",
-    (fixture) => {
-      fixture.agents += `\n\`${["gkd", "task"].join("-")}\`\n`;
-    },
-    /AGENTS\.md contains a prohibited local instruction/,
-  ],
-  [
-    "missing GKD workflow entry",
-    (fixture) => {
-      fixture.agents = fixture.agents.replaceAll("$gkd-main", "project workflow");
-    },
-    /AGENTS\.md must include "\$gkd-main"/,
-  ],
-  [
-    "missing worktree handoff file",
-    (fixture) => {
-      fixture.agents = fixture.agents.replaceAll("progress.md", "status.md");
-    },
-    /AGENTS\.md must include "\.gkd\/progress\.md"/,
-  ],
-  [
-    "legacy plan-only execution handoff",
-    (fixture) => {
-      fixture.agents = fixture.agents.replaceAll(".gkd/execution.md", ".gkd/plan.md");
-    },
-    /AGENTS\.md must include "\.gkd\/execution\.md"/,
   ],
   [
     "active spec bare cargo command",

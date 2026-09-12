@@ -3,6 +3,7 @@ import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
 import {
   providerLimitUsageV1,
+  providerLimitReset,
   validateProviderLimitUsageCliKey,
   type ProviderLimitUsageRow,
 } from "../providerLimitUsage";
@@ -16,6 +17,7 @@ vi.mock("../../../generated/bindings", async () => {
     commands: {
       ...actual.commands,
       providerLimitUsageV1: vi.fn(),
+      providerLimitReset: vi.fn(),
     },
   };
 });
@@ -44,6 +46,11 @@ function makeProviderLimitUsageRow(
     window_daily_start_ts: 0,
     window_weekly_start_ts: 0,
     window_monthly_start_ts: 0,
+    window_5h_end_ts: 18_000,
+    window_daily_end_ts: 86_400,
+    window_weekly_end_ts: 604_800,
+    window_monthly_end_ts: 2_678_400,
+    daily_manual_anchor: false,
     ...overrides,
   };
 }
@@ -57,6 +64,18 @@ vi.mock("../../consoleLog", async () => {
 });
 
 describe("services/providers/providerLimitUsage", () => {
+  it("resets only an allowed period and accepts the generated void success", async () => {
+    vi.mocked(commands.providerLimitReset).mockResolvedValue({ status: "ok", data: null });
+    for (const period of ["5h", "daily", "weekly", "monthly"] as const) {
+      await providerLimitReset(7, period);
+      expect(commands.providerLimitReset).toHaveBeenLastCalledWith(7, period);
+    }
+    await expect(providerLimitReset(0, "daily")).rejects.toThrow("SEC_INVALID_INPUT");
+    await expect(providerLimitReset(7, "total" as never)).rejects.toThrow("SEC_INVALID_INPUT");
+    expect(commands.providerLimitReset).toHaveBeenCalledTimes(4);
+    vi.mocked(commands.providerLimitReset).mockResolvedValueOnce({ status: "error", error: "write failed" });
+    await expect(providerLimitReset(7, "daily")).rejects.toThrow("write failed");
+  });
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -87,6 +106,8 @@ describe("services/providers/providerLimitUsage", () => {
             limit_daily_usd: 10,
             daily_reset_mode: " rolling " as never,
             daily_reset_time: " 00:00:00 ",
+            daily_manual_anchor: true,
+            window_monthly_end_ts: 123_456,
           }),
         ],
       })
@@ -99,6 +120,8 @@ describe("services/providers/providerLimitUsage", () => {
     expect(rows?.[0]?.provider_name).toBe("Fetch");
     expect(rows?.[0]?.daily_reset_mode).toBe("rolling");
     expect(rows?.[0]?.daily_reset_time).toBe("00:00:00");
+    expect(rows[0].daily_manual_anchor).toBe(true);
+    expect(rows[0].window_monthly_end_ts).toBe(123_456);
     expect(allRows).toEqual([]);
     expect(commands.providerLimitUsageV1).toHaveBeenNthCalledWith(1, "claude");
     expect(commands.providerLimitUsageV1).toHaveBeenNthCalledWith(2, null);

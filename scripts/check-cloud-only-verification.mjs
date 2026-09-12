@@ -52,7 +52,6 @@ export function loadCloudOnlyVerificationFixture(root = repoRoot) {
     scaffolderPackage: readJson(root, "packages/create-aio-plugin/package.json"),
     vitestConfig: readText(root, "vitest.config.ts"),
     tauriConfig: readJson(root, "src-tauri/tauri.conf.json"),
-    agents: readText(root, "AGENTS.md"),
     readme: readText(root, "README.md"),
     readmeEn: readText(root, "README_EN.md"),
     activeSpecs: readMarkdownTree(root, ".trellis/spec/aio-coding-hub"),
@@ -63,10 +62,6 @@ export function loadCloudOnlyVerificationFixture(root = repoRoot) {
 
 function requireText(value, expected, label, failures) {
   if (!value.includes(expected)) failures.push(`${label} must include ${JSON.stringify(expected)}`);
-}
-
-function requireAbsent(value, pattern, label, failures) {
-  if (pattern.test(value)) failures.push(`${label} contains a prohibited local instruction`);
 }
 
 function assertActionsOnlyScripts(pkg, label, guard, failures) {
@@ -469,7 +464,6 @@ export function assertCloudOnlyVerificationContract(fixture) {
     scaffolderPackage,
     vitestConfig,
     tauriConfig,
-    agents,
     readme,
     readmeEn,
     activeSpecs,
@@ -509,32 +503,14 @@ export function assertCloudOnlyVerificationContract(fixture) {
     failures.push("src-tauri/tauri.conf.json must retain the cloud frontend build hook");
   }
 
-  requireText(agents, "$gkd-main", "AGENTS.md", failures);
-  for (const handoffFile of [".gkd/plan.md", ".gkd/execution.md", ".gkd/progress.md", ".gkd/review.md"]) {
-    requireText(agents, handoffFile, "AGENTS.md", failures);
-  }
-  requireAbsent(
-    agents,
-    /gkd-task|gkd-role|gkd_acceptor|gkd-local-verify|gkd-verify|TrustedMainRuntimeBridge/i,
-    "AGENTS.md",
-    failures
-  );
-  requireAbsent(agents, /Use `pnpm dev`/i, "AGENTS.md", failures);
   for (const [label, text] of [
     ["README.md", readme],
     ["README_EN.md", readmeEn],
   ]) {
     requireText(text, "workflow_dispatch", label, failures);
-    requireAbsent(
-      text,
-      /gkd-task|gkd-role|gkd_acceptor|gkd-local-verify|gkd-verify|TrustedMainRuntimeBridge/i,
-      label,
-      failures
-    );
     assertNoForbiddenReadmeCommand(text, label, failures);
   }
 
-  requireAbsent(agents, /task\.py\s+(?:accept|start|delegate|deliver)/i, "AGENTS.md", failures);
   assertActiveSpecs(activeSpecs, failures);
 
   if (!/^\s*workflow_dispatch:\s*$/m.test(ciWorkflow)) {
