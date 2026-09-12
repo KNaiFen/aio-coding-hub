@@ -9,4 +9,3 @@
 - #122：验证 head `db0d4dcc54884a3d0560ba4be21f1736b0833301`，`ci-gate`、`pr-title`、`contracts`、`rust`、`observer-macos` 成功；已 squash 合并为 `37d4631189ba1ce7da94aff1c823ac6235a2e325`。
 - #120：验证 head `04ccbb9f1cf802e6f72a6d89aef658487783e552`，`ci-gate`、`pr-title`、`contracts`、`rust`、`observer-macos` 成功；已 squash 合并为 `7d189c17851cbf045b8294bba9093bfa325c864e`。
 - #121：最终合并前将本归档及 `plan.md`、`review.md` 一并加入其 PR；该新 head 的 CI 与 merge 事实在后续交付中确认，本归档不回填其自身最终 SHA。
-
