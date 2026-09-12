@@ -1469,6 +1469,36 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async modelPriceRulesGet(): Promise<Result<ModelPriceRulesV1, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("model_price_rules_get") };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async modelPriceRulesSet(rules: ModelPriceRulesV1): Promise<Result<ModelPriceRulesV1, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("model_price_rules_set", { rules }) };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async modelPriceReferenceGet(
+    cliKey: string,
+    model: string
+  ): Promise<Result<ModelPriceReference | null, string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("model_price_reference_get", { cliKey, model }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async promptsList(workspaceId: number): Promise<Result<PromptSummary[], string>> {
     try {
       return { status: "ok", data: await TAURI_INVOKE("prompts_list", { workspaceId }) };
@@ -2600,6 +2630,20 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async providerLimitReset(
+    providerId: number,
+    period: ProviderLimitPeriod
+  ): Promise<Result<null, string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("provider_limit_reset", { providerId, period }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async workspacesList(cliKey: string): Promise<Result<WorkspacesListResult, string>> {
     try {
       return { status: "ok", data: await TAURI_INVOKE("workspaces_list", { cliKey }) };
@@ -3675,6 +3719,33 @@ export type ModelPriceAliasRuleV1 = {
   enabled: boolean;
 };
 export type ModelPriceAliasesV1 = { version: number; rules: ModelPriceAliasRuleV1[] };
+export type ModelPriceItemV1 = { price: number | null; multiplier: number | null };
+export type ModelPriceReference = {
+  reference_model: string;
+  input: ModelPriceReferenceItem;
+  output: ModelPriceReferenceItem;
+  cache_read: ModelPriceReferenceItem;
+  cache_write_5m: ModelPriceReferenceItem;
+  cache_write_1h: ModelPriceReferenceItem;
+};
+export type ModelPriceReferenceItem = {
+  standard: number | null;
+  priority: number | null;
+  above_200k: number | null;
+  priority_above_200k: number | null;
+};
+export type ModelPriceRuleV1 = {
+  cli_key: string;
+  model: string;
+  enabled: boolean;
+  multiplier: number | null;
+  input: ModelPriceItemV1;
+  output: ModelPriceItemV1;
+  cache_read: ModelPriceItemV1;
+  cache_write_5m: ModelPriceItemV1;
+  cache_write_1h: ModelPriceItemV1;
+};
+export type ModelPriceRulesV1 = { version: number; rules: ModelPriceRuleV1[] };
 export type ModelPriceSummary = {
   id: number;
   cli_key: string;
@@ -4140,6 +4211,8 @@ export type ProviderAvailabilityResult = {
   latency_ms: number;
   error: string | null;
   response_preview: string | null;
+  requested_model?: string | null;
+  tested_model?: string | null;
 };
 export type ProviderAvailabilityState = "healthy" | "degraded" | "unhealthy" | "no_data";
 export type ProviderAvailabilityTimeline = {
@@ -4169,6 +4242,7 @@ export type ProviderExtensionValuesInput = {
   namespace: string;
   values: JsonValue;
 };
+export type ProviderLimitPeriod = "5h" | "daily" | "weekly" | "monthly";
 export type ProviderLimitUsageRow = {
   cli_key: string;
   provider_id: number;
@@ -4190,6 +4264,11 @@ export type ProviderLimitUsageRow = {
   window_daily_start_ts: number;
   window_weekly_start_ts: number;
   window_monthly_start_ts: number;
+  window_5h_end_ts: number;
+  window_daily_end_ts: number;
+  window_weekly_end_ts: number;
+  window_monthly_end_ts: number;
+  daily_manual_anchor: boolean;
 };
 export type ProviderModelCapabilitiesInput = {
   supportedReasoningEfforts: ProviderModelReasoningEffort[];
@@ -4447,6 +4526,7 @@ export type RequestLogDetail = {
   upstream_stream_timing_version: number;
   final_upstream_attempt_duration_ms: number | null;
   final_upstream_attempt_timing_version: number;
+  estimated_final_upstream_attempt_duration_ms: number | null;
   attempts_json: string;
   input_tokens: number | null;
   output_tokens: number | null;
@@ -4527,6 +4607,7 @@ export type RequestLogSummary = {
   upstream_stream_timing_version: number;
   final_upstream_attempt_duration_ms: number | null;
   final_upstream_attempt_timing_version: number;
+  estimated_final_upstream_attempt_duration_ms: number | null;
   attempt_count: number;
   has_failover: boolean;
   start_provider_id: number;
@@ -4626,6 +4707,7 @@ export type SettingsUpdate = {
   codexHomeOverride: string | null;
   codexOauthCompatibleProxyMode: boolean | null;
   codexProviderTestModel: string | null;
+  enableCodexResponsesOverloadErrorRewrite: boolean | null;
   cx2CcFallbackModelOpus: string | null;
   cx2CcFallbackModelSonnet: string | null;
   cx2CcFallbackModelHaiku: string | null;
@@ -4688,6 +4770,7 @@ export type SettingsView = {
   enable_billing_header_rectifier: boolean;
   enable_session_reuse: boolean;
   enable_codex_session_id_completion: boolean;
+  enable_codex_responses_overload_error_rewrite: boolean;
   enable_claude_metadata_user_id_injection: boolean;
   enable_cache_anomaly_monitor: boolean;
   enable_debug_log: boolean;

@@ -16,6 +16,7 @@ pub(super) struct StreamRequestCompletion {
     pub(super) upstream_stream_timing_version: i64,
     pub(super) final_upstream_attempt_duration_ms: Option<u128>,
     pub(super) final_upstream_attempt_timing_version: i64,
+    pub(super) estimated_final_upstream_attempt_duration_ms: Option<u128>,
     pub(super) requested_model: Option<String>,
     pub(super) usage_metrics: Option<crate::usage::UsageMetrics>,
     pub(super) usage: Option<crate::usage::UsageExtract>,
@@ -39,6 +40,7 @@ impl StreamRequestCompletion {
             upstream_stream_timing_version: 0,
             final_upstream_attempt_duration_ms: None,
             final_upstream_attempt_timing_version: 0,
+            estimated_final_upstream_attempt_duration_ms: None,
             requested_model,
             usage_metrics,
             usage,
@@ -63,6 +65,7 @@ impl StreamRequestCompletion {
             upstream_stream_timing_version: 0,
             final_upstream_attempt_duration_ms: None,
             final_upstream_attempt_timing_version: 0,
+            estimated_final_upstream_attempt_duration_ms: None,
             requested_model,
             usage_metrics,
             usage,
@@ -130,6 +133,7 @@ impl StreamRequestCompletion {
         mut self,
         duration_ms: Option<u128>,
         version: i64,
+        estimated_duration_ms: Option<u128>,
     ) -> Self {
         self.final_upstream_attempt_duration_ms = self
             .error_code
@@ -145,6 +149,14 @@ impl StreamRequestCompletion {
             } else {
                 0
             };
+        self.estimated_final_upstream_attempt_duration_ms = self
+            .error_code
+            .is_none()
+            .then_some(estimated_duration_ms)
+            .flatten()
+            .filter(|duration_ms| *duration_ms > 0)
+            .filter(|duration_ms| self.ttfb_ms.is_none_or(|ttfb_ms| *duration_ms >= ttfb_ms))
+            .filter(|duration_ms| self.final_upstream_attempt_duration_ms != Some(*duration_ms));
         self
     }
 }
@@ -307,6 +319,7 @@ pub(super) fn emit_request_event_and_spawn_request_log<R: tauri::Runtime>(
     let log_args = log_args.with_final_upstream_attempt_timing(
         completion.final_upstream_attempt_duration_ms,
         completion.final_upstream_attempt_timing_version,
+        completion.estimated_final_upstream_attempt_duration_ms,
     );
 
     ctx.active_requests.finish(
@@ -474,7 +487,7 @@ mod tests {
     #[test]
     fn stream_final_attempt_timing_requires_a_successful_nonzero_sample() {
         let success = StreamRequestCompletion::success(None, None, None, None, None)
-            .with_final_upstream_attempt_timing(Some(1_250), 1);
+            .with_final_upstream_attempt_timing(Some(1_250), 1, None);
         assert_eq!(success.final_upstream_attempt_duration_ms, Some(1_250));
         assert_eq!(success.final_upstream_attempt_timing_version, 1);
 
@@ -486,18 +499,18 @@ mod tests {
             None,
             None,
         )
-        .with_final_upstream_attempt_timing(Some(1_250), 1);
+        .with_final_upstream_attempt_timing(Some(1_250), 1, None);
         assert_eq!(failure.final_upstream_attempt_duration_ms, None);
         assert_eq!(failure.final_upstream_attempt_timing_version, 0);
 
         let zero = StreamRequestCompletion::success(None, None, None, None, None)
-            .with_final_upstream_attempt_timing(Some(0), 1);
+            .with_final_upstream_attempt_timing(Some(0), 1, None);
         assert_eq!(zero.final_upstream_attempt_duration_ms, None);
         assert_eq!(zero.final_upstream_attempt_timing_version, 0);
 
         let shorter_than_ttft =
             StreamRequestCompletion::success(Some(50), Some(50), None, None, None)
-                .with_final_upstream_attempt_timing(Some(20), 1);
+                .with_final_upstream_attempt_timing(Some(20), 1, None);
         assert_eq!(shorter_than_ttft.final_upstream_attempt_duration_ms, None);
         assert_eq!(shorter_than_ttft.final_upstream_attempt_timing_version, 0);
     }

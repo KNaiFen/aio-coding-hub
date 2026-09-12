@@ -422,6 +422,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
   const crossRoutingScopeKeyRef = useRef<string | null>(null);
   const crossRoutingRevisionRef = useRef<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [limitResetPending, setLimitResetPending] = useState(false);
   const [savingWithModelFetch, setSavingWithModelFetch] = useState(false);
   const [copyingApiKey, setCopyingApiKey] = useState(false);
 
@@ -1036,7 +1037,11 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
         ordinary_policy: modelRoutingPolicyDraft,
         expected_ordinary_policy_revision: ordinaryRoutingRevision,
         cross_policy:
-          routeMode == null || crossRoutingRevision == null ? null : crossRoutingPolicy,
+          routeMode == null || crossRoutingRevision == null
+            ? null
+            : crossRoutingDirty
+              ? crossRoutingPolicy
+              : routingPolicyView.cross_policy,
         expected_cross_policy_revision: routeMode == null ? null : crossRoutingRevision,
       });
       const ordinaryPolicy = cloneModelRoutingPolicy(saved.ordinary_policy);
@@ -1063,6 +1068,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
   }, [
     cliKey,
     adoptCrossRoutingView,
+    crossRoutingDirty,
     crossRoutingPolicy,
     crossRoutingRevision,
     editProvider,
@@ -1437,6 +1443,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
 
   const save = useCallback(() => {
     if (
+      limitResetPending ||
       saving ||
       savingWithModelFetch ||
       accountUsageCustomTestPromiseRef.current ||
@@ -1453,10 +1460,12 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
     resetAccountUsageCustomTest,
     saving,
     savingWithModelFetch,
+    limitResetPending,
   ]);
 
   const saveAndFetchModels = useCallback(async () => {
     if (
+      limitResetPending ||
       saving ||
       savingWithModelFetch ||
       accountUsageCustomTestPromiseRef.current ||
@@ -1478,6 +1487,7 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
     resetAccountUsageCustomTest,
     saving,
     savingWithModelFetch,
+    limitResetPending,
   ]);
 
   return {
@@ -1488,6 +1498,8 @@ export function useProviderEditorForm(props: ProviderEditorDialogProps) {
     onOpenChange: requestOpenChange,
     saving: saving || savingWithModelFetch,
     savingWithModelFetch,
+    limitResetPending,
+    setLimitResetPending,
     title,
     description,
     authMode,

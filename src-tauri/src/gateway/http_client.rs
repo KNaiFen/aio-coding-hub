@@ -668,12 +668,6 @@ pub(crate) fn build_client_with_current_proxy(
         .map_err(|error| format!("Failed to build HTTP client: {error}"))
 }
 
-/// Check if proxy is currently enabled.
-#[allow(dead_code)]
-pub fn is_proxy_enabled() -> bool {
-    get_current_proxy_url().is_some()
-}
-
 fn effective_proxy_url(settings: &AppSettings) -> Result<Option<String>, String> {
     if !settings.upstream_proxy_enabled {
         return Ok(None);

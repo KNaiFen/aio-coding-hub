@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 pub const OBSERVER_PROTOCOL_VERSION: u16 = 1;
 pub const OBSERVER_DESCRIPTOR_FILE_NAME: &str = "observer-v1.json";
 pub const OBSERVER_HISTORY_LIMIT_MAX: u16 = 50;
-pub const OBSERVER_PROVIDER_PROBE_TIMEOUT_MS: u64 = 20_000;
+pub const OBSERVER_PROVIDER_PROBE_TIMEOUT_MS: u64 = 65_000;
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
@@ -193,6 +193,10 @@ pub struct ObserverProviderAvailabilityTestResult {
     pub latency_ms: i64,
     pub error: Option<String>,
     pub response_preview: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tested_model: Option<String>,
 }
 
 #[derive(Clone, Deserialize, Serialize, PartialEq)]
@@ -303,6 +307,8 @@ pub struct ObserverRequest {
     pub final_upstream_attempt_duration_ms: Option<i64>,
     #[serde(default)]
     pub final_upstream_attempt_timing_version: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimated_final_upstream_attempt_duration_ms: Option<i64>,
     pub attempt_count: u32,
     pub retry_count: u32,
     pub provider_switch_count: u32,
@@ -411,6 +417,21 @@ mod tests {
 
     #[test]
     fn provider_probe_timeout_is_an_explicit_protocol_contract() {
-        assert_eq!(OBSERVER_PROVIDER_PROBE_TIMEOUT_MS, 20_000);
+        assert_eq!(OBSERVER_PROVIDER_PROBE_TIMEOUT_MS, 65_000);
+    }
+
+    #[test]
+    fn old_probe_results_without_model_fields_remain_compatible() {
+        let old = serde_json::json!({"ok":true,"providerId":1,"providerName":"test", "baseUrl":"http://example.test",
+            "status":200,"latencyMs":1,"error":null,"responsePreview":null});
+        let result: ObserverProviderAvailabilityTestResult = serde_json::from_value(old).unwrap();
+        assert!(result.requested_model.is_none());
+        assert!(result.tested_model.is_none());
+        let mut result = result;
+        result.requested_model = Some("input".into());
+        result.tested_model = Some("actual".into());
+        let value = serde_json::to_value(result).unwrap();
+        assert_eq!(value["requestedModel"], "input");
+        assert_eq!(value["testedModel"], "actual");
     }
 }

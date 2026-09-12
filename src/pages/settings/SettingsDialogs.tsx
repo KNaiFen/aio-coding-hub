@@ -1,6 +1,7 @@
 import { Button } from "../../ui/Button";
 import { Dialog } from "../../ui/Dialog";
 import { ModelPriceAliasesDialog } from "../../components/settings/ModelPriceAliasesDialog";
+import { ModelPriceRulesDialog } from "../../components/settings/ModelPriceRulesDialog";
 
 type DialogController = {
   open: boolean;
@@ -18,17 +19,20 @@ type ConfigImportDialogController = PendingDialogController & {
 
 export function SettingsDialogs({
   modelPriceAliases,
+  modelPriceRules,
   clearRequestLogs,
   resetAll,
   configImport,
 }: {
   modelPriceAliases: DialogController;
+  modelPriceRules: DialogController;
   clearRequestLogs: PendingDialogController;
   resetAll: PendingDialogController;
   configImport: ConfigImportDialogController;
 }) {
   return (
     <>
+      <ModelPriceRulesDialog open={modelPriceRules.open} onOpenChange={modelPriceRules.setOpen} />
       <ModelPriceAliasesDialog
         open={modelPriceAliases.open}
         onOpenChange={modelPriceAliases.setOpen}

@@ -73,6 +73,8 @@
 - 缓存走势图：分供应商命中率折线，60% 预警线
 - 可用率：供应商时间线点阵，15s 自动刷新
 
+编辑已保存供应商时，在「限流配置」中点击 5 小时、每日、每周或每月旁的刷新图标并确认，可独立清零该周期用量并从现在重新开始整个周期，运行中的网关立即生效。5 小时、日、周分别按 5、24、168 小时持续递推；月按本机时区同日同时刻递推，月末自动取有效日期。历史费用、总累计、金额配置和其他周期不变，未保存表单也会保留。以后修改并保存每日重置模式或时间，会恢复该日调度配置。
+
 ### 工作区管理
 
 - 按项目隔离 Prompts、MCP、Skill 配置
@@ -188,17 +190,13 @@ sudo xattr -cr /Applications/"AIO Coding Hub.app"
 
 </details>
 
-### 本地零产物与云端验证
+### 本地资源约束与云端验证
 
-仓库不在本地安装依赖、启动开发服务，也不在本地运行格式化、类型检查、Lint、测试或构建。允许的本地检查不依赖 `node_modules`，且不会生成 Node/Rust 产物：
+任务流程以用户级 `$gkd-main` skill 为准，本地资源约束与包脚本环境见 [AGENTS.md](AGENTS.md)。依赖安装、完整测试/覆盖率、编译、打包和长时性能检查使用 GitHub Actions。
 
-```bash
-node scripts/check-cloud-only-verification.selftest.mjs
-node scripts/check-cloud-only-verification.mjs
-git diff --check
-```
+普通 PR 与受保护分支推送自动触发 `ci`，PR 需要对应的 `ci-gate` 和独立 `pr-title`；常规 PR 验证不重复触发手动 `ci`。`workflow_dispatch` 仅用于 `main` 的恢复或候选构建，Provider trend release benchmark 由相关自动 CI 路径或独立 `performance` 工作流执行；需要桌面集成制品时，在 Actions 页面按需运行 `dev-build` 并选择目标。
 
-修改 `.mjs` 文件时还可直接运行 `node --check <changed-file.mjs>`。普通 PR 与受保护分支推送会自动触发 `ci`，以对应提交的 `ci-gate` 和 `pr-title` 为准；不要为常规验证额外手动运行 `ci`。`workflow_dispatch` 仅用于 `main` 的恢复或候选构建，Provider trend release benchmark 由相关自动 CI 路径或独立 `performance` 工作流执行；需要桌面集成制品时，在 Actions 页面按需运行 `dev-build` 并选择目标。
+纯文档 PR 与纯文档主干推送保留轻量分类；`.gkd/` Markdown 不触发前端或 Rust 构建，README、AGENTS 和规范变更仍执行文档合同。纯前端或纯 Rust PR 只运行相应域，shared、混合或未知路径运行两端；含代码或未知文件的主干推送仍跑完整 CI，CodeQL 保持独立运行。版本标签只指向已生成成功签名候选的实际 main 合并提交。详见[提交与发版](docs/operations/github-actions-governance.md#提交与发版)。
 
 <!-- SUPPORT_MATRIX_SOURCE_BUILD:START -->
 | 分类 | 云端工作流目标 | 说明 |
@@ -245,9 +243,8 @@ curl http://127.0.0.1:37123/health
 
 - [项目知识库入口](docs/README.md)：产品、架构、插件、运维、任务和历史资料的权威导航。
 - [待处理事项](PENDING.md) 与 [已完成事项](PENDING_COMPLETED.md)：延后工作和交付记录。
-- [Trellis 任务索引](.trellis/tasks/README.md)：实施计划、研究、验证和归档任务。
 
-现行实现和机器可读合同优先于历史审计、旧计划和会话日志；完整文档生命周期见 [知识库维护规则](docs/README.md#维护规则)。
+现行实现优先于历史审计、旧计划和会话日志；完整文档维护规则见 [知识库维护规则](docs/README.md#维护规则)。
 
 ## 技术栈
 
@@ -264,7 +261,7 @@ curl http://127.0.0.1:37123/health
 
 ## 质量保证
 
-GitHub Actions 的完整 CI 负责依赖审计、前端 Lint、TypeScript、插件 SDK/脚手架测试、E2E、覆盖率、Vite build、Rust 格式、`Cargo.lock`、生成绑定、Clippy、Rust 测试与 audit。`ci-gate` 统一收口这些结果；跨平台桌面打包仍是 main 候选或按需 `dev-build`，不是每个 PR 的必需任务。
+GitHub Actions 按改动分类运行相应质量门：前端包括依赖审计、Lint、TypeScript、插件 SDK/脚手架测试、E2E、覆盖率和 Vite build；Rust 包括格式、`Cargo.lock`、生成绑定、Clippy、测试与 audit。`ci-gate` 要求所选 job 成功、未选 job 为 `skipped`；跨平台桌面打包仍是 main 候选或按需 `dev-build`，不是每个 PR 的必需任务。
 
 CI 检测到格式、锁文件或生成绑定漂移时，下载并审查它提供的有界补丁，不要在本地重新生成。
 
@@ -281,13 +278,7 @@ CI 检测到格式、锁文件或生成绑定漂移时，下载并审查它提�
 
 ## 参与贡献
 
-欢迎提交 Issue 和 PR！采用 [Conventional Commits](https://www.conventionalcommits.org/) 规范。
-
-```bash
-feat(ui): add usage heatmap
-fix(gateway): handle timeout correctly
-docs: update installation guide
-```
+欢迎提交 Issue 和 PR！工作流遵循用户级 `$gkd-main`，项目约束见 [AGENTS.md](AGENTS.md)。
 
 ---
 

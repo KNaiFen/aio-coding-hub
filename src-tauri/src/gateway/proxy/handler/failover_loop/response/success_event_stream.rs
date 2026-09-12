@@ -883,6 +883,17 @@ where
 
     if is_event_stream(&response_headers) {
         strip_hop_headers(&mut response_headers);
+        let rewrite_codex_responses_overload_errors = common
+            .enable_codex_responses_overload_error_rewrite
+            && is_native_codex_responses_event_stream_path(
+                common.cli_key.as_str(),
+                common.forwarded_path.as_str(),
+                active_bridge_type,
+                provider_ctx_owned.provider_bridged,
+            );
+        if rewrite_codex_responses_overload_errors {
+            response_headers.remove(header::CONTENT_LENGTH);
+        }
         tracing::info!(
             trace_id = %common.trace_id,
             provider_id,
@@ -1499,6 +1510,7 @@ where
                     ctx,
                     upstream_stream_idle_timeout,
                     initial_first_byte_ms,
+                    rewrite_codex_responses_overload_errors,
                 )
             } else {
                 let stream = UsageSseTeeStream::new(
@@ -1539,6 +1551,7 @@ where
                     ctx,
                     upstream_stream_idle_timeout,
                     initial_first_byte_ms,
+                    rewrite_codex_responses_overload_errors,
                 )
             } else {
                 let stream = UsageSseTeeStream::new(

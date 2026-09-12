@@ -39,11 +39,16 @@ import {
 import type { UpstreamRetryPolicy } from "../../../services/settings/settings";
 import { createTestQueryClient } from "../../../test/utils/reactQuery";
 import type { ProviderEditorInitialValues } from "../providerDuplicate";
+import { providerLimitReset, providerLimitUsageV1, type ProviderLimitUsageRow } from "../../../services/providers/providerLimitUsage";
 
 vi.mock("sonner", () => ({ toast: vi.fn() }));
 vi.mock("../../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
 vi.mock("../../../services/clipboard", () => ({ copyText: vi.fn() }));
 vi.mock("../../../services/desktop/opener", () => ({ openDesktopUrl: vi.fn() }));
+vi.mock("../../../services/providers/providerLimitUsage", async () => {
+  const actual = await vi.importActual<typeof import("../../../services/providers/providerLimitUsage")>("../../../services/providers/providerLimitUsage");
+  return { ...actual, providerLimitReset: vi.fn(), providerLimitUsageV1: vi.fn() };
+});
 
 vi.mock("../../../services/providers/providerModels", async () => {
   const actual = await vi.importActual<typeof import("../../../services/providers/providerModels")>(
@@ -293,6 +298,8 @@ function openAccountUsageDisclosure(dialog: HTMLElement) {
 
 describe("pages/providers/ProviderEditorDialog", () => {
   beforeEach(() => {
+    vi.mocked(providerLimitReset).mockReset().mockResolvedValue(undefined);
+    vi.mocked(providerLimitUsageV1).mockReset().mockResolvedValue([]);
     vi.mocked(providerAccountUsageTestCustomScript).mockReset();
     vi.mocked(providerUpsert).mockReset();
     vi.mocked(providerDelete).mockReset();
@@ -311,6 +318,105 @@ describe("pages/providers/ProviderEditorDialog", () => {
     vi.mocked(logToConsole).mockReset();
     vi.mocked(toast).mockReset();
     vi.mocked(providerModelsRefresh).mockReset();
+  });
+
+  it.each([
+    ["5 小时", "5h"], ["每日", "daily"], ["每周", "weekly"], ["每月", "monthly"],
+  ] as const)("confirms only the selected %s period and preserves the unsaved form", async (label, period) => {
+    const onOpenChange = vi.fn();
+    render(<ProviderEditorDialog mode="edit" provider={makeProvider()} open onOpenChange={onOpenChange} onSaved={vi.fn()} />);
+    const editor = screen.getByRole("dialog");
+    await waitFor(() => expect(providerLimitUsageV1).toHaveBeenCalledTimes(1));
+    fireEvent.click(within(editor).getByText("限流配置"));
+    fireEvent.change(within(editor).getByPlaceholderText("例如: 500"), { target: { value: "777" } });
+    expect(within(editor).getAllByRole("button", { name: /^重设/ })).toHaveLength(4);
+    expect(within(editor).queryByRole("button", { name: /重设.*总|重设.*累计/ })).not.toBeInTheDocument();
+    fireEvent.click(within(editor).getByRole("button", { name: `重设${label}周期` }));
+    let confirmation = screen.getByRole("dialog", { name: `重设${label}周期` });
+    expect(within(confirmation).getByText(/供应商「Existing」.*当前周期用量清零，周期从现在重新开始/)).toBeInTheDocument();
+    fireEvent.click(within(confirmation).getByRole("button", { name: "取消" }));
+    expect(providerLimitReset).not.toHaveBeenCalled();
+    fireEvent.click(within(editor).getByRole("button", { name: `重设${label}周期` }));
+    confirmation = screen.getByRole("dialog", { name: `重设${label}周期` });
+    const write = deferred<void>();
+    const refresh = deferred<ProviderLimitUsageRow[]>();
+    vi.mocked(providerLimitReset).mockReturnValueOnce(write.promise);
+    vi.mocked(providerLimitUsageV1).mockReturnValueOnce(refresh.promise);
+    const confirm = within(confirmation).getByRole("button", { name: "确认重设" });
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+    await waitFor(() => expect(providerLimitReset).toHaveBeenCalledTimes(1));
+    expect(providerLimitReset).toHaveBeenCalledWith(1, period);
+    expect(within(editor).getByText("保存", { selector: "button" })).toBeDisabled();
+    expect(within(editor).getByText("取消", { selector: "button" })).toBeDisabled();
+    fireEvent.click(within(confirmation).getByRole("button", { name: "取消" }));
+    expect(onOpenChange).not.toHaveBeenCalled();
+    await act(async () => { write.resolve(); await write.promise; });
+    expect(screen.getByRole("dialog", { name: `重设${label}周期` })).toBeInTheDocument();
+    expect(toast).not.toHaveBeenCalledWith(`${label}周期已重设`);
+    await act(async () => { refresh.resolve([]); await refresh.promise; });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: `重设${label}周期` })).not.toBeInTheDocument());
+    expect(within(editor).getByPlaceholderText("例如: 500")).toHaveValue(777);
+    expect(providerUpsert).not.toHaveBeenCalled();
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith(`${label}周期已重设`);
+  });
+
+  it.each([false, true])("does not expose period resets for a create or duplicate form (%s)", (duplicate) => {
+    render(<ProviderEditorDialog mode="create" cliKey="codex" initialValues={duplicate ? makeInitialValues() : undefined} open onOpenChange={vi.fn()} onSaved={vi.fn()} />);
+    fireEvent.click(screen.getByText("限流配置"));
+    expect(screen.queryByRole("button", { name: /^重设/ })).not.toBeInTheDocument();
+    expect(providerLimitUsageV1).not.toHaveBeenCalled();
+  });
+
+  it("retries failed writes and retries only reads after a committed reset", async () => {
+    render(<ProviderEditorDialog mode="edit" provider={makeProvider()} open onOpenChange={vi.fn()} onSaved={vi.fn()} />);
+    await waitFor(() => expect(providerLimitUsageV1).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByText("限流配置"));
+    fireEvent.click(screen.getByRole("button", { name: "重设每周周期" }));
+    vi.mocked(providerLimitReset).mockRejectedValueOnce(new Error("write failed"));
+    fireEvent.click(screen.getByRole("button", { name: "确认重设" }));
+    await waitFor(() => expect(screen.getByText("重设失败：write failed")).toBeInTheDocument());
+    vi.mocked(providerLimitUsageV1).mockRejectedValueOnce(new Error("read failed"));
+    fireEvent.click(screen.getByRole("button", { name: "确认重设" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "重试刷新用量" })).toBeEnabled());
+    expect(screen.getByText(/周期已重设，用量刷新失败/)).toBeInTheDocument();
+    expect(providerLimitReset).toHaveBeenCalledTimes(2);
+    vi.mocked(providerLimitUsageV1).mockResolvedValue([]);
+    fireEvent.click(screen.getByRole("button", { name: "重试刷新用量" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "重设每周周期" })).not.toBeInTheDocument());
+    expect(providerLimitReset).toHaveBeenCalledTimes(2);
+    expect(providerUpsert).not.toHaveBeenCalled();
+  });
+
+  it("renders refreshed usage and actual anchored dates without changing draft amounts", async () => {
+    const start = new Date(2026, 8, 7, 13, 15).getTime() / 1000;
+    const end = new Date(2026, 9, 7, 13, 15).getTime() / 1000;
+    const row: ProviderLimitUsageRow = {
+      cli_key: "claude", provider_id: 1, provider_name: "Existing", enabled: true,
+      limit_5h_usd: null, limit_daily_usd: null, daily_reset_mode: "fixed", daily_reset_time: "00:00:00",
+      limit_weekly_usd: null, limit_monthly_usd: 100, limit_total_usd: null,
+      usage_5h_usd: 0, usage_daily_usd: 0, usage_weekly_usd: 0, usage_monthly_usd: 5, usage_total_usd: 5,
+      window_5h_start_ts: start, window_5h_end_ts: start + 18_000,
+      window_daily_start_ts: start, window_daily_end_ts: start + 86_400,
+      window_weekly_start_ts: start, window_weekly_end_ts: start + 604_800,
+      window_monthly_start_ts: start, window_monthly_end_ts: end, daily_manual_anchor: false,
+    };
+    vi.mocked(providerLimitUsageV1).mockResolvedValueOnce([row]);
+    render(<ProviderEditorDialog mode="edit" provider={makeProvider({ limit_monthly_usd: 100 })} open onOpenChange={vi.fn()} onSaved={vi.fn()} />);
+    fireEvent.click(screen.getByText("限流配置"));
+    await waitFor(() => expect(screen.getByText("本期用量 $5 USD")).toBeInTheDocument());
+    const format = (ts: number) => new Date(ts * 1000).toLocaleString(undefined, { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+    expect(screen.getByText(`${format(start)} → ${format(end)}`)).toBeInTheDocument();
+    expect(screen.queryByText("自然月：每月 1 号 00:00:00")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("例如: 2000"), { target: { value: "222" } });
+    vi.mocked(providerLimitUsageV1).mockResolvedValueOnce([{ ...row, usage_monthly_usd: 0 }]);
+    fireEvent.click(screen.getByRole("button", { name: "重设每月周期" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认重设" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "重设每月周期" })).not.toBeInTheDocument());
+    expect(screen.queryByText("本期用量 $5 USD")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("例如: 2000")).toHaveValue(222);
+    expect(providerUpsert).not.toHaveBeenCalled();
   });
 
   it("supports Grok API key and OAuth modes without CX2CC", () => {

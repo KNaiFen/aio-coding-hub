@@ -150,6 +150,7 @@ vi.mock("../../components/cli-manager/tabs/CodexTab", () => ({
     persistCodexConfig,
     persistCodexConfigToml,
     persistCodexHomeSettings,
+    persistCodexResponsesOverloadErrorRewrite,
     pickCodexHomeDirectory,
     syncCodexProvider,
   }: any) => (
@@ -178,6 +179,9 @@ vi.mock("../../components/cli-manager/tabs/CodexTab", () => ({
         onClick={() => persistCodexHomeSettings?.("custom", "D:\\Work\\CodexHome")}
       >
         save-codex-home
+      </button>
+      <button type="button" onClick={() => persistCodexResponsesOverloadErrorRewrite?.(true)}>
+        enable-codex-overload-rewrite
       </button>
     </div>
   ),
@@ -1242,12 +1246,18 @@ describe("pages/CliManagerPage", () => {
     } as any);
 
     const commonMutation = { isPending: false, mutateAsync: vi.fn() };
-    commonMutation.mutateAsync.mockResolvedValue(
-      createSettingsMutationResult({
-        codex_home_mode: "custom",
-        codex_home_override: "D:\\Work\\CodexHome",
-      })
-    );
+    commonMutation.mutateAsync
+      .mockResolvedValueOnce(
+        createSettingsMutationResult({
+          codex_home_mode: "custom",
+          codex_home_override: "D:\\Work\\CodexHome",
+        })
+      )
+      .mockResolvedValueOnce(
+        createSettingsMutationResult({
+          enable_codex_responses_overload_error_rewrite: true,
+        })
+      );
     vi.mocked(useSettingsPatchMutation).mockReturnValue(commonMutation as any);
 
     vi.mocked(useCliManagerClaudeInfoQuery).mockReturnValue({
@@ -1331,6 +1341,18 @@ describe("pages/CliManagerPage", () => {
       cliVersion: "1.2.3",
     });
     expect(toast).toHaveBeenCalledWith("Codex 目录已切换");
+
+    fireEvent.click(screen.getByRole("button", { name: "enable-codex-overload-rewrite" }));
+    await waitFor(() =>
+      expect(commonMutation.mutateAsync).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          enable_codex_responses_overload_error_rewrite: true,
+          upstream_proxy_password: { mode: "preserve" },
+        })
+      )
+    );
+    expect(toast).toHaveBeenCalledWith("已开启 Responses 过载错误自动重试");
   });
 
   it("does not refresh codex queries when codex_home save returns null", async () => {

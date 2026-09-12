@@ -13,6 +13,7 @@ function wrapper({ children }: { children: React.ReactNode }) {
 
 function createDialogsProps(overrides: Partial<React.ComponentProps<typeof SettingsDialogs>> = {}) {
   return {
+    modelPriceRules: { open: false, setOpen: vi.fn() },
     modelPriceAliases: {
       open: false,
       setOpen: vi.fn(),

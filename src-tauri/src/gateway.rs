@@ -86,8 +86,8 @@ pub(crate) fn build_translated_bridge_probe(
         .ok_or_else(|| format!("BRIDGE_UNSUPPORTED_TYPE: unsupported bridge_type={bridge_type}"))?;
     let body = serde_json::json!({
         "model": source_model,
-        "input": "ping",
-        "max_output_tokens": 1,
+        "input": "Reply with the single word OK.",
+        "max_output_tokens": 100,
         "stream": false
     });
     let ctx = proxy::protocol_bridge::BridgeContext {
@@ -101,8 +101,49 @@ pub(crate) fn build_translated_bridge_probe(
         responses_cache_namespace: None,
         responses_cache_input: None,
     };
-    let translated = bridge
+    let mut translated = bridge
         .translate_request(body, &ctx)
         .map_err(|err| format!("BRIDGE_TRANSLATE_FAILED: {err}"))?;
+    if let Some(body) = translated.body.as_object_mut() {
+        body.remove("reasoning");
+        body.remove("reasoning_effort");
+        body.remove("thinking");
+        if translated.target_path.ends_with("/responses") {
+            body.insert("max_output_tokens".into(), serde_json::json!(100));
+        } else if translated.target_path.ends_with("/messages")
+            || translated.target_path.ends_with("/chat/completions")
+        {
+            body.insert("max_tokens".into(), serde_json::json!(100));
+        }
+    }
     Ok((translated.target_path, translated.body))
+}
+
+pub(crate) use proxy::protocol_bridge::cx2cc::codex_chatgpt_request_compat_value as probe_codex_oauth_body;
+pub(crate) use proxy::protocol_bridge::probe::gemini_oauth_frame as probe_gemini_oauth_frame;
+pub(crate) use proxy::protocol_bridge::probe::gemini_oauth_response as probe_gemini_oauth_response;
+pub(crate) use proxy::protocol_bridge::probe::parse_codex_chatgpt_account_id as probe_codex_account_id;
+pub(crate) use proxy::protocol_bridge::probe::{
+    next_frame_end, validate_json as validate_probe_json, ProbeProtocol, ProbeStream,
+};
+
+pub(crate) async fn prepare_gemini_oauth_probe(
+    client: &reqwest::Client,
+    access_token: &str,
+    path: &str,
+    body: &serde_json::Value,
+) -> Result<(String, serde_json::Value), String> {
+    proxy::prepare_gemini_oauth_probe(client, access_token, path, body).await
+}
+
+pub(crate) fn cx2cc_probe_model(
+    source_model: &str,
+    models: &crate::providers::ClaudeModels,
+    settings: &crate::settings::AppSettings,
+) -> String {
+    proxy::protocol_bridge::cx2cc::map_claude_to_openai(
+        source_model,
+        models,
+        &proxy::cx2cc::settings::Cx2ccSettings::from_app_settings(settings),
+    )
 }

@@ -19,6 +19,7 @@ pub(crate) mod gemini_config;
 pub(crate) mod grok_config;
 pub(crate) mod mcp_sync;
 pub(crate) mod model_price_aliases;
+pub(crate) mod model_price_rules;
 pub(crate) mod model_prices;
 pub(crate) mod model_prices_sync;
 pub(crate) mod plugins;

@@ -24,4 +24,4 @@ The lifecycle boundary exists to prevent long-lived plugin state from outliving 
 
 ## Release Guard
 
-Plugin API v1 remains externally stable while the host hardens runtime internals. For changes to plugin runtime loading, hook context budgets, output mutation budgets, SDK validation, or manifest/runtime documentation, the GitHub Actions `contracts` and `frontend` jobs directly run the plugin documentation/API contracts, SDK typecheck/tests, and scaffolder typecheck/tests. Repository contributors must follow the zero-artifact local boundary in `AGENTS.md` and must not run package-manager checks locally.
+Plugin API v1 remains externally stable while the host hardens runtime internals. For changes to plugin runtime loading, hook context budgets, output mutation budgets, SDK validation, or manifest/runtime documentation, the GitHub Actions `contracts` and `frontend` jobs directly run the plugin documentation/API contracts, SDK typecheck/tests, and scaffolder typecheck/tests. See [AGENTS.md](../../../AGENTS.md) for repository resource constraints and the Actions-only package-script environment.

@@ -1668,6 +1668,17 @@ fn migrate_set_request_log_retention_default(
     changed
 }
 
+fn migrate_add_codex_responses_overload_error_rewrite(
+    settings: &mut AppSettings,
+    schema_version_present: bool,
+) -> bool {
+    migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_ADD_CODEX_RESPONSES_OVERLOAD_ERROR_REWRITE,
+    )
+}
+
 type SettingsMigration = fn(&mut AppSettings, bool) -> bool;
 
 const SETTINGS_MIGRATIONS: &[SettingsMigration] = &[
@@ -1713,6 +1724,7 @@ const SETTINGS_MIGRATIONS: &[SettingsMigration] = &[
     migrate_add_provider_availability_hours,
     migrate_add_stream_internal_error_retry,
     migrate_set_request_log_retention_default,
+    migrate_add_codex_responses_overload_error_rewrite,
 ];
 
 fn apply_settings_migrations(settings: &mut AppSettings, schema_version_present: bool) -> bool {
@@ -3007,5 +3019,35 @@ mod tests {
             true
         ));
         assert_eq!(settings.request_log_retention_days, 0);
+    }
+
+    #[test]
+    fn codex_responses_overload_rewrite_migration_defaults_off_and_advances_schema() {
+        let mut settings = AppSettings {
+            schema_version: SCHEMA_VERSION_SET_REQUEST_LOG_RETENTION_DEFAULT,
+            ..Default::default()
+        };
+
+        assert!(migrate_add_codex_responses_overload_error_rewrite(
+            &mut settings,
+            true,
+        ));
+        assert_eq!(
+            settings.schema_version,
+            SCHEMA_VERSION_ADD_CODEX_RESPONSES_OVERLOAD_ERROR_REWRITE
+        );
+        assert!(!settings.enable_codex_responses_overload_error_rewrite);
+    }
+
+    #[test]
+    fn missing_codex_responses_overload_rewrite_field_deserializes_off() {
+        let mut json = serde_json::to_value(AppSettings::default()).expect("settings json");
+        json.as_object_mut()
+            .expect("settings object")
+            .remove("enable_codex_responses_overload_error_rewrite");
+
+        let settings: AppSettings = serde_json::from_value(json).expect("legacy settings");
+
+        assert!(!settings.enable_codex_responses_overload_error_rewrite);
     }
 }

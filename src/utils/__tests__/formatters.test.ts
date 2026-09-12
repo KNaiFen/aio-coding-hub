@@ -68,6 +68,7 @@ describe("utils/formatters", () => {
     expect(computeOutputTokensPerSecond(0, 1000, 1)).toBeNull();
     expect(computeOutputTokensPerSecond(10, 1000, 1)).toBeCloseTo(10 / 1.0);
     expect(formatTokensPerSecond(1.23)).toContain("Token/秒");
+    expect(formatTokensPerSecond(39, true)).toContain("39.0 ≈Token/秒");
   });
 
   it("tokens per second requires a confirmed final-upstream attempt", () => {
@@ -119,6 +120,7 @@ describe("utils/formatters", () => {
     expect(formatTokensPerSecondShort(null)).toBe("—");
     expect(formatTokensPerSecondShort(999.94)).toBe("999.9 t/s");
     expect(formatTokensPerSecondShort(1500)).toBe("1.5k t/s");
+    expect(formatTokensPerSecondShort(39, true)).toBe("39.0 ≈t/s");
 
     expect(formatUsdCompact(null)).toBe("—");
     expect(formatUsdCompact(0)).toBe("$0");

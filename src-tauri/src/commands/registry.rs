@@ -163,6 +163,9 @@ macro_rules! generated_command_registry {
             model_prices_sync_basellm => crate::commands::model_prices::model_prices_sync_basellm,
             model_price_aliases_get => crate::commands::model_prices::model_price_aliases_get,
             model_price_aliases_set => crate::commands::model_prices::model_price_aliases_set,
+            model_price_rules_get => crate::commands::model_prices::model_price_rules_get,
+            model_price_rules_set => crate::commands::model_prices::model_price_rules_set,
+            model_price_reference_get => crate::commands::model_prices::model_price_reference_get,
             // ── prompts ──
             prompts_list => crate::commands::prompts::prompts_list,
             prompts_list_summary => crate::commands::prompts::prompts_list_summary,
@@ -279,6 +282,7 @@ macro_rules! generated_command_registry {
             cli_proxy_rebind_codex_home => crate::commands::cli_proxy::cli_proxy_rebind_codex_home,
             // ── provider_limit_usage ──
             provider_limit_usage_v1 => crate::commands::provider_limit_usage::provider_limit_usage_v1,
+            provider_limit_reset => crate::commands::provider_limit_usage::provider_limit_reset,
             // ── workspaces ──
             workspaces_list => crate::commands::workspaces::workspaces_list,
             workspace_create => crate::commands::workspaces::workspace_create,

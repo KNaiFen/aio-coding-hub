@@ -32,6 +32,7 @@ export type RequestLogRouteHop = GeneratedRequestLogRouteHop;
 type FinalUpstreamAttemptTiming = {
   final_upstream_attempt_duration_ms: number | null;
   final_upstream_attempt_timing_version: number;
+  estimated_final_upstream_attempt_duration_ms: number | null;
 };
 
 export type RequestLogSummary = Override<
@@ -171,6 +172,8 @@ function toRequestLogSummary(value: GeneratedRequestLogSummary): RequestLogSumma
     final_upstream_attempt_duration_ms: timing.final_upstream_attempt_duration_ms ?? null,
     final_upstream_attempt_timing_version:
       timing.final_upstream_attempt_timing_version === 1 ? 1 : 0,
+    estimated_final_upstream_attempt_duration_ms:
+      timing.estimated_final_upstream_attempt_duration_ms ?? null,
   };
 }
 
@@ -182,6 +185,8 @@ function toRequestLogDetail(value: GeneratedRequestLogDetail): RequestLogDetail 
     final_upstream_attempt_duration_ms: timing.final_upstream_attempt_duration_ms ?? null,
     final_upstream_attempt_timing_version:
       timing.final_upstream_attempt_timing_version === 1 ? 1 : 0,
+    estimated_final_upstream_attempt_duration_ms:
+      timing.estimated_final_upstream_attempt_duration_ms ?? null,
   };
 }
 

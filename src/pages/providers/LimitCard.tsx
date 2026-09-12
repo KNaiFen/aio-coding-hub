@@ -13,6 +13,8 @@ export type LimitCardProps = {
   onChange: (value: string) => void;
   placeholder: string;
   disabled?: boolean;
+  action?: React.ReactNode;
+  currentWindow?: React.ReactNode;
 };
 
 export function LimitCard({
@@ -24,6 +26,8 @@ export function LimitCard({
   onChange,
   placeholder,
   disabled,
+  action,
+  currentWindow,
 }: LimitCardProps) {
   return (
     <div className="group relative rounded-xl border border-border bg-white p-4 shadow-sm transition-all hover:border-border hover:shadow-md dark:border-border dark:bg-secondary dark:hover:border-border">
@@ -37,8 +41,11 @@ export function LimitCard({
           {icon}
         </div>
         <div className="min-w-0 flex-1">
-          <label className="text-sm font-medium text-secondary-foreground">{label}</label>
-          {hint ? <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p> : null}
+          <div className="flex min-h-7 items-center justify-between gap-2">
+            <label className="text-sm font-medium text-secondary-foreground">{label}</label>
+            {action}
+          </div>
+          {currentWindow ?? (hint ? <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p> : null)}
           <div className="relative mt-2">
             <Input
               type="number"
