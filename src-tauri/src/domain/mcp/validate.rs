@@ -33,10 +33,6 @@ pub(super) fn validate_server_key(server_key: &str) -> crate::shared::error::App
     Ok(())
 }
 
-pub(super) fn validate_cli_key(cli_key: &str) -> crate::shared::error::AppResult<()> {
-    crate::shared::cli_key::validate_cli_key(cli_key)
-}
-
 pub(super) fn suggest_key(name: &str) -> String {
     let mut out = String::new();
     let mut prev_dash = false;

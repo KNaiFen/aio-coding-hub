@@ -40,7 +40,6 @@ export default defineConfig({
         "src/components/ClaudeModelValidation*.tsx",
         "src/components/claude-model-validation/**",
         "src/services/claude/claudeModelValidation*.ts",
-        "src/services/claude/claudeValidationTemplates.ts",
         "src/test/**",
         "src/generated/**",
         "src/pages/providers/types.ts",

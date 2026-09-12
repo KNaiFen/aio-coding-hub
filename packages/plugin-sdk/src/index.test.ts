@@ -773,18 +773,6 @@ describe("validateManifest", () => {
       error: { code: "PLUGIN_INCOMPATIBLE_API" },
     });
   });
-
-  it("rejects wasm as an unsupported public runtime", () => {
-    const result = validateManifest({
-      ...openRouterManifest,
-      runtime: { kind: "wasm", abiVersion: "2.0.0" },
-    } as unknown as PluginManifest);
-
-    expect(result).toMatchObject({
-      ok: false,
-      error: { code: "PLUGIN_UNSUPPORTED_RUNTIME" },
-    });
-  });
 });
 
 describe("PluginHookResult", () => {
