@@ -577,6 +577,21 @@ mod tests {
         PluginDetail, PluginInstallSource, PluginPermissionRisk, PluginStatus, PluginSummary,
     };
     use serde_json::json;
+    use std::sync::LazyLock;
+
+    static PACKAGED_PRIVACY_FILTER: LazyLock<Arc<PrivacyFilter>> = LazyLock::new(|| {
+        let plugin = privacy_filter_detail(json!({}));
+        Arc::new(load_privacy_filter(&plugin).expect("packaged privacy filter"))
+    });
+
+    fn privacy_redaction_service(plugin: &PluginDetail) -> PrivacyRedactionService {
+        PrivacyRedactionService {
+            cache: Mutex::new(HashMap::from([(
+                privacy_filter_cache_key(plugin),
+                Arc::clone(&PACKAGED_PRIVACY_FILTER),
+            )])),
+        }
+    }
 
     fn privacy_filter_detail(config: serde_json::Value) -> PluginDetail {
         let fixture = crate::app::plugins::official::official_plugin("official.privacy-filter")
@@ -620,8 +635,8 @@ mod tests {
         config: serde_json::Value,
         body: impl Into<String>,
     ) -> serde_json::Value {
-        let service = PrivacyRedactionService::default();
         let plugin = privacy_filter_detail(json!({}));
+        let service = privacy_redaction_service(&plugin);
         let output = service
             .redact_request_body(&plugin, &body.into(), &config)
             .expect("privacy filter request redaction");
@@ -688,8 +703,8 @@ mod tests {
 
     #[test]
     fn privacy_redaction_service_redacts_phone_numbers_in_provider_request_shapes() {
-        let service = PrivacyRedactionService::default();
         let plugin = privacy_filter_detail(json!({}));
+        let service = privacy_redaction_service(&plugin);
         let config = json!({});
 
         for (name, body) in [
@@ -1076,8 +1091,8 @@ mod tests {
 
     #[test]
     fn privacy_redaction_service_respects_legacy_prompt_scope_for_raw_text() {
-        let service = PrivacyRedactionService::default();
         let plugin = privacy_filter_detail(json!({}));
+        let service = privacy_redaction_service(&plugin);
 
         let result = service
             .redact_request_body(
@@ -1095,8 +1110,8 @@ mod tests {
 
     #[test]
     fn privacy_redaction_service_log_redaction_ignores_request_redaction_scopes() {
-        let service = PrivacyRedactionService::default();
         let plugin = privacy_filter_detail(json!({}));
+        let service = privacy_redaction_service(&plugin);
 
         let result = service
             .redact_text(
@@ -1112,8 +1127,8 @@ mod tests {
 
     #[test]
     fn privacy_redaction_service_preserves_claude_tool_use_protocol_ids() {
-        let service = PrivacyRedactionService::default();
         let plugin = privacy_filter_detail(json!({}));
+        let service = privacy_redaction_service(&plugin);
         let tool_use_id = "ghp_abcdefghijklmnopqrstuvwxyzABCDEFGHIJ";
         let tool_use_input_phone = "13344441520";
         let tool_result_phone = "13344441521";
@@ -1163,8 +1178,8 @@ mod tests {
 
     #[test]
     fn privacy_redaction_service_redacts_log_messages_after_request_redaction() {
-        let service = PrivacyRedactionService::default();
         let plugin = privacy_filter_detail(json!({}));
+        let service = privacy_redaction_service(&plugin);
 
         let result = service
             .redact_text(&plugin, "trace log 13344441520", &json!({}))
@@ -1175,8 +1190,8 @@ mod tests {
 
     #[test]
     fn privacy_redaction_service_respects_sensitive_types_config() {
-        let service = PrivacyRedactionService::default();
         let plugin = privacy_filter_detail(json!({}));
+        let service = privacy_redaction_service(&plugin);
 
         let output = service
             .redact_request_body(
@@ -1196,8 +1211,8 @@ mod tests {
 
     #[test]
     fn privacy_redaction_service_allows_disabling_all_sensitive_types() {
-        let service = PrivacyRedactionService::default();
         let plugin = privacy_filter_detail(json!({}));
+        let service = privacy_redaction_service(&plugin);
 
         let result = service
             .redact_request_body(

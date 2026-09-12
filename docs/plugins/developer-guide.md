@@ -4,7 +4,7 @@
 
 Extension Host 是唯一 community runtime。社区插件使用 `runtime.kind = "extensionHost"`，`main` 指向打包后的 JavaScript 输出，并通过 `contributes` 和 `capabilities` 声明自己要接入的 host surface。
 
-> **仓库执行边界：** 本页出现的 `pnpm --filter ...` 只记录 GitHub Actions 中的 monorepo 工具合同，仓库本地 checkout 不得运行任何 `pnpm` 命令，也不得生成 `.aio-plugin` 或其他构建产物。外部插件作者只能在独立于本仓库的插件工作区使用等效工具；AIO Coding Hub 仓库贡献者始终遵循根 `AGENTS.md` 的零产物规则。
+> **仓库工具环境：** 本页出现的 `pnpm --filter ...` 记录 GitHub Actions 中的 monorepo 工具合同，仓库 package scripts 受 Actions 环境 guard 限制。仓库本地 checkout 不得运行任何 `pnpm` 命令。外部插件作者可在独立于本仓库的插件工作区使用等效工具；仓库本地资源约束见 [AGENTS.md](../../AGENTS.md)。
 
 ## 适合做成插件的能力
 

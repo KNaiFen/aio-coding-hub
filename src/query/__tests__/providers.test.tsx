@@ -27,6 +27,10 @@ import {
 import { gatewayCircuitResetProvider } from "../../services/gateway/gateway";
 import { providerModelsRefresh } from "../../services/providers/providerModels";
 import {
+  providerLimitUsageV1,
+  type ProviderLimitUsageRow,
+} from "../../services/providers/providerLimitUsage";
+import {
   fetchProviderOAuthStatus,
   providerAccountUsageQueryOptions,
   readProviderOAuthLimitsCache,
@@ -49,11 +53,13 @@ import {
   writeProviderOAuthStatusCache,
 } from "../providers";
 import { useProviderModelsRefreshMutation } from "../providerModels";
+import { useProviderLimitUsageV1Query } from "../providerLimitUsage";
 import {
   gatewayKeys,
   oauthLimitsKeys,
   providerAccountUsageKeys,
   providerAvailabilityKeys,
+  providerLimitUsageKeys,
   providerModelsKeys,
   providersKeys,
 } from "../keys";
@@ -101,6 +107,13 @@ vi.mock("../../services/providers/providerModels", async () => {
     ...actual,
     providerModelsRefresh: vi.fn(),
   };
+});
+
+vi.mock("../../services/providers/providerLimitUsage", async () => {
+  const actual = await vi.importActual<
+    typeof import("../../services/providers/providerLimitUsage")
+  >("../../services/providers/providerLimitUsage");
+  return { ...actual, providerLimitUsageV1: vi.fn() };
 });
 
 function makeProvider(
@@ -1116,6 +1129,113 @@ describe("query/providers", () => {
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: gatewayKeys.circuitStatus("claude"),
     });
+  });
+
+  it("refreshes fresh limit usage after saving a changed daily schedule", async () => {
+    setTauriRuntime();
+
+    const provider = makeProvider({
+      id: 1,
+      cli_key: "codex",
+      name: "Daily schedule",
+      limit_daily_usd: 10,
+    });
+    const saved = { ...provider, daily_reset_time: "06:00:00" };
+    const before: ProviderLimitUsageRow = {
+      cli_key: "codex",
+      provider_id: provider.id,
+      provider_name: provider.name,
+      enabled: true,
+      limit_5h_usd: null,
+      limit_daily_usd: 10,
+      daily_reset_mode: "fixed",
+      daily_reset_time: "00:00:00",
+      limit_weekly_usd: null,
+      limit_monthly_usd: null,
+      limit_total_usd: null,
+      usage_5h_usd: 2,
+      usage_daily_usd: 1,
+      usage_weekly_usd: 3,
+      usage_monthly_usd: 4,
+      usage_total_usd: 5,
+      window_5h_start_ts: 1_800_000_000,
+      window_5h_end_ts: 1_800_018_000,
+      window_daily_start_ts: 1_800_000_000,
+      window_daily_end_ts: 1_800_086_400,
+      window_weekly_start_ts: 1_800_000_000,
+      window_weekly_end_ts: 1_800_604_800,
+      window_monthly_start_ts: 1_800_000_000,
+      window_monthly_end_ts: 1_802_592_000,
+      daily_manual_anchor: true,
+    };
+    const after = {
+      ...before,
+      daily_reset_time: saved.daily_reset_time,
+      window_daily_start_ts: 1_799_992_800,
+      window_daily_end_ts: 1_800_079_200,
+      daily_manual_anchor: false,
+    };
+    vi.mocked(providerUpsert).mockResolvedValueOnce(saved);
+    const refresh = deferred<ProviderLimitUsageRow[]>();
+    vi.mocked(providerLimitUsageV1).mockClear();
+    vi.mocked(providerLimitUsageV1).mockReturnValue(refresh.promise);
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 5 * 60 * 1000 } },
+    });
+    const cliKey = providerLimitUsageKeys.list("codex");
+    const allKey = providerLimitUsageKeys.list(null);
+    client.setQueryData(providersKeys.list("codex"), [provider]);
+    client.setQueryData(cliKey, [before]);
+    client.setQueryData(allKey, [before]);
+    const wrapper = createQueryWrapper(client);
+    const usage = renderHook(() => useProviderLimitUsageV1Query("codex"), { wrapper });
+    const mutation = renderHook(() => useProviderUpsertMutation(), { wrapper });
+
+    expect(usage.result.current.data).toEqual([before]);
+    expect(usage.result.current.isStale).toBe(false);
+    expect(providerLimitUsageV1).not.toHaveBeenCalled();
+
+    let save!: Promise<ProviderSummary>;
+    act(() => {
+      save = mutation.result.current.mutateAsync({
+        input: {
+          providerId: provider.id,
+          cliKey: "codex",
+          name: provider.name,
+          baseUrls: [],
+          baseUrlMode: "order",
+          enabled: true,
+          costMultiplier: 1,
+          limit5hUsd: null,
+          limitDailyUsd: 10,
+          dailyResetMode: "fixed",
+          dailyResetTime: saved.daily_reset_time,
+          limitWeeklyUsd: null,
+          limitMonthlyUsd: null,
+          limitTotalUsd: null,
+        },
+      });
+    });
+    await waitFor(() => {
+      expect(providerLimitUsageV1).toHaveBeenCalledWith("codex");
+      expect(mutation.result.current.isPending).toBe(true);
+    });
+    expect(client.getQueryState(cliKey)?.isInvalidated).toBe(true);
+    expect(client.getQueryState(allKey)?.isInvalidated).toBe(true);
+
+    await act(async () => {
+      refresh.resolve([after]);
+      await save;
+    });
+    await waitFor(() => expect(usage.result.current.data).toEqual([after]));
+    usage.unmount();
+    const reopened = renderHook(() => useProviderLimitUsageV1Query("codex"), { wrapper });
+    expect(reopened.result.current.data).toEqual([after]);
+    expect(providerLimitUsageV1).toHaveBeenCalledTimes(1);
+    const allUsage = renderHook(() => useProviderLimitUsageV1Query(null), { wrapper });
+    await waitFor(() => expect(allUsage.result.current.data).toEqual([after]));
+    expect(providerLimitUsageV1).toHaveBeenCalledTimes(2);
+    expect(providerLimitUsageV1).toHaveBeenLastCalledWith(null);
   });
 
   it("keeps provider B refresh cached while provider A is being updated", async () => {

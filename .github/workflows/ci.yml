@@ -164,10 +164,11 @@ jobs:
         run: node scripts/check-release-signing-secret-scope.selftest.mjs && node scripts/check-release-signing-secret-scope.mjs
 
   frontend:
-    needs: change-scope
+    needs: [change-scope, contracts]
     if: >-
       always() &&
       needs.change-scope.result == 'success' &&
+      needs.contracts.result == 'success' &&
       needs.change-scope.outputs.frontend_ci == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -214,10 +215,11 @@ jobs:
         run: pnpm build
 
   rust:
-    needs: change-scope
+    needs: [change-scope, contracts]
     if: >-
       always() &&
       needs.change-scope.result == 'success' &&
+      needs.contracts.result == 'success' &&
       needs.change-scope.outputs.rust_ci == 'true'
     runs-on: ubuntu-22.04
     timeout-minutes: 60
@@ -319,10 +321,11 @@ jobs:
         run: cargo audit
 
   observer-macos:
-    needs: change-scope
+    needs: [change-scope, contracts]
     if: >-
       always() &&
       needs.change-scope.result == 'success' &&
+      needs.contracts.result == 'success' &&
       needs.change-scope.outputs.rust_ci == 'true'
     runs-on: macos-latest
     timeout-minutes: 30
