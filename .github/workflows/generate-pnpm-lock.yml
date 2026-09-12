@@ -22,7 +22,10 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      - run: pnpm install --lockfile-only
+      - run: |
+          git fetch origin main --depth=1
+          git show FETCH_HEAD:pnpm-lock.yaml > pnpm-lock.yaml
+          pnpm install --lockfile-only
 
       - run: git diff --binary -- pnpm-lock.yaml > pnpm-lock.patch
 
