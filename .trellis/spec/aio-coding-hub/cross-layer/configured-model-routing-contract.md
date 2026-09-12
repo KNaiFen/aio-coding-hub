@@ -66,6 +66,14 @@ preserves mode/provider UUIDs and cross policy. Single-provider share and local
 provider duplication preserve only ordinary provider policy and never copy
 mode membership or cross policy.
 
+Ordinary saves preserve the backend cross-policy value when the cross draft is
+clean, including null, an explicit empty policy, and stored rules. Disabled
+source members may save ordinary fields without changing that value. A dirty
+cross draft still submits its edits and baseline revision, including after the
+source becomes disabled; rejection must retain the draft and never report a
+successful save. Clean refetches and scope changes adopt policy and revision
+together, while dirty same-scope refetches retain their original revision.
+
 Schema migration, bundle import, and runtime decoding sanitize defensively.
 Malformed rules and non-standard efforts are discarded without blocking
 startup, forwarding, or the rest of a configuration import.
@@ -91,7 +99,11 @@ bounded, final-provider-scoped configured-route projection. Desktop may show a
 compact `A / source -> B / target` audit label only when the request succeeded
 and the final provider equals the marker target. Failed, skipped, malformed,
 oversized, mismatched-provider, and future markers stay non-authoritative and
-fail open. TUI formatting and its TTFB / switch / retry wording are unchanged.
+fail open. The TUI accepts the same valid `provider_cross` projection, labels
+the policy `跨供应商`, and renders source/effective model evidence with its
+existing two-line card and detail helpers. Invalid or future values continue
+to fail open without a target line; TTFB and route-count calculation remain
+unchanged.
 
 ## Verification
 

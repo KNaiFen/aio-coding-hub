@@ -122,6 +122,8 @@ const SETTINGS_VIEW_TO_UPDATE_FIELD_MAP = {
   codexHomeOverride: "codex_home_override",
   codexOauthCompatibleProxyMode: "codex_oauth_compatible_proxy_mode",
   codexProviderTestModel: "codex_provider_test_model",
+  enableCodexResponsesOverloadErrorRewrite:
+    "enable_codex_responses_overload_error_rewrite",
   cx2CcFallbackModelOpus: "cx2cc_fallback_model_opus",
   cx2CcFallbackModelSonnet: "cx2cc_fallback_model_sonnet",
   cx2CcFallbackModelHaiku: "cx2cc_fallback_model_haiku",
@@ -253,6 +255,8 @@ function toGeneratedSettingsUpdate(input: SettingsSetInput): FrontendSettingsUpd
     codexHomeOverride: input.codexHomeOverride ?? null,
     codexOauthCompatibleProxyMode: input.codexOauthCompatibleProxyMode ?? null,
     codexProviderTestModel: input.codexProviderTestModel ?? null,
+    enableCodexResponsesOverloadErrorRewrite:
+      input.enableCodexResponsesOverloadErrorRewrite ?? null,
     cx2CcFallbackModelOpus: input.cx2CcFallbackModelOpus ?? null,
     cx2CcFallbackModelSonnet: input.cx2CcFallbackModelSonnet ?? null,
     cx2CcFallbackModelHaiku: input.cx2CcFallbackModelHaiku ?? null,

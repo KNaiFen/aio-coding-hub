@@ -122,13 +122,13 @@ SELECT
 	  SUM(
 	    CASE WHEN (
 	      status >= 200 AND status < 300 AND error_present = 0 AND
-	      cost_usd_femto IS NOT NULL AND cost_usd_femto > 0
+	      cost_usd_femto IS NOT NULL
 	    ) THEN 1 ELSE 0 END
 	  ) AS cost_covered_success,
 	  TOTAL(
 	    CASE WHEN (
 	      status >= 200 AND status < 300 AND error_present = 0 AND
-	      cost_usd_femto IS NOT NULL AND cost_usd_femto > 0
+	      cost_usd_femto IS NOT NULL
 	    ) THEN cost_usd_femto ELSE 0 END
 	  ) AS total_cost_usd_femto,
 	  SUM(duration_ms) AS total_duration_ms,
@@ -259,13 +259,13 @@ SELECT
 	  SUM(
 	    CASE WHEN (
 	      status >= 200 AND status < 300 AND error_present = 0 AND
-	      cost_usd_femto IS NOT NULL AND cost_usd_femto > 0
+	      cost_usd_femto IS NOT NULL
 	    ) THEN 1 ELSE 0 END
 	  ) AS cost_covered_success,
 	  TOTAL(
 	    CASE WHEN (
 	      status >= 200 AND status < 300 AND error_present = 0 AND
-	      cost_usd_femto IS NOT NULL AND cost_usd_femto > 0
+	      cost_usd_femto IS NOT NULL
 	    ) THEN cost_usd_femto ELSE 0 END
 	  ) AS total_cost_usd_femto,
 	  SUM(duration_ms) AS total_duration_ms,
@@ -396,13 +396,13 @@ SELECT
   SUM(
     CASE WHEN (
       status >= 200 AND status < 300 AND error_present = 0 AND
-      cost_usd_femto IS NOT NULL AND cost_usd_femto > 0
+      cost_usd_femto IS NOT NULL
     ) THEN 1 ELSE 0 END
   ) AS cost_covered_success,
   TOTAL(
     CASE WHEN (
       status >= 200 AND status < 300 AND error_present = 0 AND
-      cost_usd_femto IS NOT NULL AND cost_usd_femto > 0
+      cost_usd_femto IS NOT NULL
     ) THEN cost_usd_femto ELSE 0 END
   ) AS total_cost_usd_femto,
   SUM(duration_ms) AS total_duration_ms,
@@ -541,13 +541,13 @@ SELECT
   SUM(
     CASE WHEN (
       r.status >= 200 AND r.status < 300 AND r.error_present = 0 AND
-      r.cost_usd_femto IS NOT NULL AND r.cost_usd_femto > 0
+      r.cost_usd_femto IS NOT NULL
     ) THEN 1 ELSE 0 END
   ) AS cost_covered_success,
   TOTAL(
     CASE WHEN (
       r.status >= 200 AND r.status < 300 AND r.error_present = 0 AND
-      r.cost_usd_femto IS NOT NULL AND r.cost_usd_femto > 0
+      r.cost_usd_femto IS NOT NULL
     ) THEN r.cost_usd_femto ELSE 0 END
   ) AS total_cost_usd_femto,
   SUM(r.duration_ms) AS total_duration_ms,

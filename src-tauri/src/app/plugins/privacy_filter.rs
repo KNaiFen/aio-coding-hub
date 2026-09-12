@@ -699,12 +699,16 @@ fn shannon_entropy(candidate: &str) -> f64 {
 mod tests {
     use super::*;
 
-    fn filter() -> PrivacyFilter {
+    static FILTER: LazyLock<PrivacyFilter> = LazyLock::new(|| {
         PrivacyFilter::from_gitleaks_toml(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/fixtures/plugins/official/privacy-filter/rules/gitleaks.toml"
         )))
         .expect("privacy filter")
+    });
+
+    fn filter() -> &'static PrivacyFilter {
+        &FILTER
     }
 
     fn redact(filter: &PrivacyFilter, text: &str) -> String {
@@ -715,7 +719,7 @@ mod tests {
     fn privacy_filter_redacts_structured_pii_like_upstream() {
         let filter = filter();
         let output = redact(
-            &filter,
+            filter,
             "邮箱 test.user@example.com 手机 13812345678 身份证 11010519900307743X IP 192.168.1.10",
         );
 
@@ -732,8 +736,8 @@ mod tests {
     #[test]
     fn privacy_filter_uses_luhn_for_bank_cards() {
         let filter = filter();
-        let valid = redact(&filter, "付款卡号 4111111111111111");
-        let invalid = redact(&filter, "订单编号 1234567890123456");
+        let valid = redact(filter, "付款卡号 4111111111111111");
+        let invalid = redact(filter, "订单编号 1234567890123456");
 
         assert!(valid.contains("[银行卡]"));
         assert!(!valid.contains("4111111111111111"));
@@ -750,11 +754,11 @@ mod tests {
             "scp file.txt user@host.example.com:/data/",
             "rsync -av /src/ user@host.example.com:/dst/",
         ] {
-            let output = redact(&filter, input);
+            let output = redact(filter, input);
             assert!(!output.contains("[邮箱]"), "input={input} output={output}");
         }
 
-        assert!(redact(&filter, "我的邮箱是 alice@example.com 请保密").contains("[邮箱]"));
+        assert!(redact(filter, "我的邮箱是 alice@example.com 请保密").contains("[邮箱]"));
     }
 
     #[test]
@@ -767,7 +771,7 @@ mod tests {
             "Authorization: Bearer abcDEF1234567890/xyzABC4567890==",
             "token=aB3xK9pLmN2qR7sT5vW1zYQwErTyUiOp",
         ] {
-            let output = redact(&filter, input);
+            let output = redact(filter, input);
             assert!(output.contains("[密钥]"), "input={input} output={output}");
         }
     }
@@ -788,7 +792,7 @@ mod tests {
             "commit 9f86d081884c7d659a2feaa0c55ad015b1b8a3e6b1d2c4a5e9f8b7d6c5a4b3210",
             "api_key.example.com/AbCdEfGh1234567890XyZ",
         ] {
-            let output = redact(&filter, input);
+            let output = redact(filter, input);
             assert!(!output.contains("[密钥]"), "input={input} output={output}");
         }
     }

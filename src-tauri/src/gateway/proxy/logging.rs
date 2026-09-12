@@ -135,6 +135,7 @@ fn request_log_insert_from_args(
         upstream_stream_timing_version,
         final_upstream_attempt_duration_ms,
         final_upstream_attempt_timing_version,
+        estimated_final_upstream_attempt_duration_ms,
         attempts_json,
         requested_model,
         created_at_ms,
@@ -202,6 +203,21 @@ fn request_log_insert_from_args(
     } else {
         0
     };
+    let estimated_final_upstream_attempt_duration_ms = (successful
+        && metrics
+            .output_tokens
+            .is_some_and(|output_tokens| output_tokens > 0))
+    .then_some(estimated_final_upstream_attempt_duration_ms)
+    .flatten()
+    .and_then(|value| {
+        if value == 0
+            || value > duration_ms as u128
+            || ttfb_ms.is_some_and(|ttfb_ms| value < ttfb_ms as u128)
+        {
+            return None;
+        }
+        Some(value.min(i64::MAX as u128) as i64)
+    });
 
     Some(request_logs::RequestLogInsert {
         trace_id,
@@ -224,6 +240,7 @@ fn request_log_insert_from_args(
         upstream_stream_timing_version,
         final_upstream_attempt_duration_ms,
         final_upstream_attempt_timing_version,
+        estimated_final_upstream_attempt_duration_ms,
         attempts_json: bound_attempts_json(attempts_json),
         input_tokens: metrics.input_tokens,
         output_tokens: metrics.output_tokens,
@@ -781,6 +798,7 @@ WHERE trace_id = ?1
             upstream_stream_timing_version: 0,
             final_upstream_attempt_duration_ms: None,
             final_upstream_attempt_timing_version: 0,
+            estimated_final_upstream_attempt_duration_ms: None,
             attempts_json: "[]".to_string(),
             requested_model: None,
             created_at_ms: 0,
@@ -949,6 +967,8 @@ WHERE trace_id = ?1
     #[test]
     fn request_log_insert_uses_usage_metrics_when_usage_missing() {
         let mut args = base_args();
+        args.duration_ms = 1_000;
+        args.estimated_final_upstream_attempt_duration_ms = Some(250);
         args.usage_metrics = Some(UsageMetrics {
             input_tokens: Some(1),
             output_tokens: Some(2),
@@ -968,7 +988,21 @@ WHERE trace_id = ?1
         assert_eq!(insert.cache_creation_input_tokens, Some(5));
         assert_eq!(insert.cache_creation_5m_input_tokens, Some(6));
         assert_eq!(insert.cache_creation_1h_input_tokens, Some(7));
+        assert_eq!(
+            insert.estimated_final_upstream_attempt_duration_ms,
+            Some(250)
+        );
         assert_eq!(insert.usage_json, None);
+    }
+
+    #[test]
+    fn request_log_insert_drops_estimate_without_output_tokens() {
+        let mut args = base_args();
+        args.estimated_final_upstream_attempt_duration_ms = Some(250);
+
+        let insert = request_log_insert_from_args(args).expect("insert");
+
+        assert_eq!(insert.estimated_final_upstream_attempt_duration_ms, None);
     }
 
     #[test]

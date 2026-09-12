@@ -150,6 +150,11 @@ const PREVIEW_PROVIDER_LIMIT_ROWS: ProviderLimitUsageRow[] = [
     window_daily_start_ts: 1_710_018_000,
     window_weekly_start_ts: 1_709_481_600,
     window_monthly_start_ts: 1_709_395_200,
+    window_5h_end_ts: 1_710_018_000,
+    window_daily_end_ts: 1_710_104_400,
+    window_weekly_end_ts: 1_710_086_400,
+    window_monthly_end_ts: 1_712_073_600,
+    daily_manual_anchor: false,
   },
   {
     cli_key: "codex",
@@ -172,6 +177,11 @@ const PREVIEW_PROVIDER_LIMIT_ROWS: ProviderLimitUsageRow[] = [
     window_daily_start_ts: 1_710_028_800,
     window_weekly_start_ts: 1_709_481_600,
     window_monthly_start_ts: 1_709_395_200,
+    window_5h_end_ts: 1_710_018_000,
+    window_daily_end_ts: 1_710_115_200,
+    window_weekly_end_ts: 1_710_086_400,
+    window_monthly_end_ts: 1_712_073_600,
+    daily_manual_anchor: false,
   },
   {
     cli_key: "gemini",
@@ -194,6 +204,11 @@ const PREVIEW_PROVIDER_LIMIT_ROWS: ProviderLimitUsageRow[] = [
     window_daily_start_ts: 1_710_018_000,
     window_weekly_start_ts: 1_709_481_600,
     window_monthly_start_ts: 1_709_395_200,
+    window_5h_end_ts: 1_710_018_000,
+    window_daily_end_ts: 1_710_104_400,
+    window_weekly_end_ts: 1_710_086_400,
+    window_monthly_end_ts: 1_712_073_600,
+    daily_manual_anchor: false,
   },
 ];
 

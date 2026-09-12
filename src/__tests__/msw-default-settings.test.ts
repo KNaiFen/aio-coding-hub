@@ -6,7 +6,7 @@ describe("MSW defaults", () => {
     resetMswState();
 
     expect(getSettingsState()).toEqual({
-      schema_version: 60,
+      schema_version: 61,
       preferred_port: 37123,
       show_home_heatmap: true,
       show_home_usage: true,
@@ -87,6 +87,7 @@ describe("MSW defaults", () => {
       enable_billing_header_rectifier: false,
       enable_session_reuse: true,
       enable_codex_session_id_completion: true,
+      enable_codex_responses_overload_error_rewrite: false,
       enable_claude_metadata_user_id_injection: true,
       enable_cache_anomaly_monitor: false,
       enable_debug_log: false,

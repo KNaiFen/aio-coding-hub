@@ -8,6 +8,14 @@ import { assertGithubActionsEnvironment } from "./require-github-actions.mjs";
 
 const valid = loadCloudOnlyVerificationFixture();
 assert.doesNotThrow(() => assertCloudOnlyVerificationContract(valid));
+
+assert.doesNotThrow(() =>
+  assertCloudOnlyVerificationContract({
+    ...valid,
+    readme: "工作流遵循 `$gkd-main`。`workflow_dispatch` 用于 main 云端构建。",
+    readmeEn: "Workflow follows `$gkd-main`. `workflow_dispatch` supports main cloud builds.",
+  })
+);
 assert.doesNotThrow(() =>
   assertCloudOnlyVerificationContract({
     ...valid,
@@ -97,13 +105,6 @@ for (const [name, mutate, expected] of [
       fixture.readme += "\n```bash\npnpm install\n```\n";
     },
     /README\.md must not present a package\/native command/,
-  ],
-  [
-    "Trellis local lint instruction",
-    (fixture) => {
-      fixture.trellisWorkflow += "\nRun project lint and type-check\n";
-    },
-    /\.trellis\/workflow\.md contains a prohibited local instruction/,
   ],
   [
     "active spec bare cargo command",

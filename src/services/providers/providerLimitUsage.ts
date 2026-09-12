@@ -3,6 +3,7 @@
 
 import {
   commands,
+  type ProviderLimitPeriod,
   type ProviderLimitUsageRow as GeneratedProviderLimitUsageRow,
 } from "../../generated/bindings";
 import { invokeGeneratedIpc, mapGeneratedCommandResponse } from "../generatedIpc";
@@ -14,6 +15,8 @@ const CLI_KEY_VALUES = CLI_KEYS;
 const DAILY_RESET_MODE_VALUES = ["fixed", "rolling"] as const satisfies readonly DailyResetMode[];
 const PROVIDER_NAME_MAX_CHARS = 256;
 const RESET_TIME_MAX_CHARS = 64;
+
+export type { ProviderLimitPeriod };
 
 export type ProviderLimitUsageRow = Override<
   GeneratedProviderLimitUsageRow,
@@ -173,7 +176,40 @@ function toProviderLimitUsageRow(value: GeneratedProviderLimitUsageRow): Provide
       value.window_monthly_start_ts,
       "provider_limit_usage.window_monthly_start_ts"
     ),
+    window_5h_end_ts: normalizeWindowTs(
+      value.window_5h_end_ts,
+      "provider_limit_usage.window_5h_end_ts"
+    ),
+    window_daily_end_ts: normalizeWindowTs(
+      value.window_daily_end_ts,
+      "provider_limit_usage.window_daily_end_ts"
+    ),
+    window_weekly_end_ts: normalizeWindowTs(
+      value.window_weekly_end_ts,
+      "provider_limit_usage.window_weekly_end_ts"
+    ),
+    window_monthly_end_ts: normalizeWindowTs(
+      value.window_monthly_end_ts,
+      "provider_limit_usage.window_monthly_end_ts"
+    ),
+    daily_manual_anchor: value.daily_manual_anchor,
   };
+}
+
+export async function providerLimitReset(providerId: number, period: ProviderLimitPeriod) {
+  if (!Number.isSafeInteger(providerId) || providerId <= 0) {
+    throw new Error(`SEC_INVALID_INPUT: invalid providerId=${providerId}`);
+  }
+  if (!["5h", "daily", "weekly", "monthly"].includes(period)) {
+    throw new Error(`SEC_INVALID_INPUT: invalid provider limit period=${period}`);
+  }
+  return invokeGeneratedIpc<void>({
+    title: "重设供应商周期限额失败",
+    cmd: "provider_limit_reset",
+    args: { providerId, period },
+    invoke: () => commands.providerLimitReset(providerId, period),
+    nullResultBehavior: "return_fallback",
+  });
 }
 
 export async function providerLimitUsageV1(cliKey?: CliKey | null) {

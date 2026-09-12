@@ -258,6 +258,14 @@ PRAGMA query_only = ON;
 
 #[cfg(test)]
 pub(crate) fn init_for_tests(path: &std::path::Path) -> AppResult<Db> {
+    init_for_tests_with_pool_size(path, 1)
+}
+
+#[cfg(test)]
+pub(crate) fn init_for_tests_with_pool_size(
+    path: &std::path::Path,
+    pool_size: u32,
+) -> AppResult<Db> {
     let config = DbRuntimeConfig::from_env();
     let manager = SqliteConnectionManager::file(path).with_init({
         let config = config.clone();
@@ -268,7 +276,7 @@ pub(crate) fn init_for_tests(path: &std::path::Path) -> AppResult<Db> {
     });
 
     let pool = Pool::builder()
-        .max_size(1)
+        .max_size(pool_size)
         .min_idle(Some(1))
         .connection_timeout(config.pool_connection_timeout)
         .build(manager)

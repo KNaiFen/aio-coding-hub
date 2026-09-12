@@ -1,5 +1,65 @@
 # Changelog
 
+## [0.60.61](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.61) (2026-09-11)
+
+### Highlights
+
+* reset local 5-hour, daily, weekly, and monthly limits independently in provider settings
+* restart each selected window immediately and keep future periods anchored to the reset time
+* preserve other limit windows, total usage, and historical costs without restarting the gateway
+
+## [0.60.60](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.60) (2026-09-08)
+
+### Highlights
+
+* customize model prices with independent input, output, and cache pricing
+* set a model-wide multiplier or individual item multipliers in one form with conflict validation
+* apply pricing changes to new completed requests while preserving historical costs
+
+## [0.60.59](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.59) (2026-09-07)
+
+### Highlights
+
+* keep TUI provider snapshots responsive while the macOS app is in the background or tray
+* preserve unchanged cross-provider routing when editing a disabled route member
+* require a real model answer and valid completion for manual and scheduled provider tests
+* show the requested and tested models with readable failure reasons and bounded probe work
+
+## [0.60.58](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.58) (2026-09-05)
+
+### Highlights
+
+* place the estimated token speed marker before the unit in TUI and desktop request logs
+* remove the abandoned legacy planning task and stale local-verification references
+
+## [0.60.57](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.57) (2026-09-04)
+
+### Highlights
+
+* align estimated output token speed with the final upstream attempt timing boundary
+
+## [0.60.56](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.56) (2026-09-03)
+
+### Highlights
+
+* show an estimated output token speed in TUI request details when precise timing is unavailable
+
+## [0.60.55](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.55) (2026-08-17)
+
+### Highlights
+
+* add opt-in Codex Responses overload retry compatibility for third-party relays
+* preserve original upstream error evidence while rewriting only the client SSE view
+* bound streaming rewrite memory and fail open on oversized or incomplete frames
+
+## [0.60.54](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.54) (2026-08-17)
+
+### Highlights
+
+* preserve local and remote compaction modes across narrow TUI request cards
+* align cross-provider model routing, route outcomes, and request metrics in the TUI
+* split provider availability time and results while tightening multi-worktree verification workflows
+
 ## [0.60.53](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.53) (2026-08-14)
 
 ### Highlights

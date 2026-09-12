@@ -213,8 +213,8 @@ pub fn sessions_list(
     }
 }
 
-pub fn folder_lookup_by_ids(
-    app: &tauri::AppHandle,
+pub fn folder_lookup_by_ids<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     items: &[CliSessionsFolderLookupKey],
     wsl_distro: Option<&str>,
 ) -> AppResult<Vec<CliSessionsFolderLookupEntry>> {

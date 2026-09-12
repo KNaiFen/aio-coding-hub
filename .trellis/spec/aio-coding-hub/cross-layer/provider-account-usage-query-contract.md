@@ -31,8 +31,12 @@ ProviderAccountUsageRuntimeState::fetch(...);
 - The Tauri-managed runtime is the only process-wide owner of fetched results,
   remote refresh timing, and per-provider in-flight state. React Query mirrors
   the backend result for rendering; Observer reads the same backend result.
-- Desktop queries send a five-second heartbeat while their account row is
-  mounted. Observer snapshots with `include_providers=true` renew TUI leases.
+- Desktop queries send a five-second heartbeat while their configured account
+  row is mounted, enabled by its caller, and the document is visible. Hidden
+  documents stop the heartbeat; visible but unfocused documents retain it.
+  Visibility restoration requests one ordinary cached read, never a forced
+  upstream refresh. In-flight shared requests may finish normally.
+  Observer snapshots with `include_providers=true` independently renew TUI leases.
   Leases last 15 seconds; when all relevant desktop and TUI leases expire, no
   new timed remote request may start.
 - A configured provider performs an initial fetch when no reusable result

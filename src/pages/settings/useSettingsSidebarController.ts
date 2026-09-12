@@ -75,6 +75,7 @@ export function useSettingsSidebarController(input: SettingsSidebarControllerInp
   const about = updateMeta.about;
 
   const [modelPriceAliasesDialogOpen, setModelPriceAliasesDialogOpen] = useState(false);
+  const [modelPriceRulesDialogOpen, setModelPriceRulesDialogOpen] = useState(false);
   const [clearRequestLogsDialogOpen, setClearRequestLogsDialogOpen] = useState(false);
   const [resetAllDialogOpen, setResetAllDialogOpen] = useState(false);
   const [configImportDialogOpen, setConfigImportDialogOpen] = useState(false);
@@ -174,6 +175,9 @@ export function useSettingsSidebarController(input: SettingsSidebarControllerInp
 
   const openModelPriceAliasesDialog = useCallback(() => {
     setModelPriceAliasesDialogOpen(true);
+  }, []);
+  const openModelPriceRulesDialog = useCallback(() => {
+    setModelPriceRulesDialogOpen(true);
   }, []);
 
   const clearRequestLogs = useCallback(async () => {
@@ -405,11 +409,13 @@ export function useSettingsSidebarController(input: SettingsSidebarControllerInp
 
   const dialogs = useMemo<{
     modelPriceAliases: DialogController;
+    modelPriceRules: DialogController;
     clearRequestLogs: PendingDialogController;
     resetAll: PendingDialogController;
     configImport: ConfigImportDialogController;
   }>(
     () => ({
+      modelPriceRules: { open: modelPriceRulesDialogOpen, setOpen: setModelPriceRulesDialogOpen },
       modelPriceAliases: {
         open: modelPriceAliasesDialogOpen,
         setOpen: setModelPriceAliasesDialogOpen,
@@ -445,6 +451,7 @@ export function useSettingsSidebarController(input: SettingsSidebarControllerInp
       confirmConfigImport,
       importingConfig,
       modelPriceAliasesDialogOpen,
+      modelPriceRulesDialogOpen,
       pendingConfigImportPath,
       resetAllData,
       resetAllDialogOpen,
@@ -464,6 +471,7 @@ export function useSettingsSidebarController(input: SettingsSidebarControllerInp
     openConfigImport,
     syncModelPrices,
     openModelPriceAliasesDialog,
+    openModelPriceRulesDialog,
     lastModelPricesSyncReport: lastModelPricesSyncState.report,
     lastModelPricesSyncTime: lastModelPricesSyncState.syncedAt,
     lastModelPricesSyncError: lastModelPricesSyncState.error,

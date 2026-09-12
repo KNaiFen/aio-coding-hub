@@ -19,27 +19,6 @@ function formatWindowTs(ts: number): string {
   return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
-/** Calculate window end timestamp based on window type */
-function getWindowEndTs(startTs: number, windowType: string): number {
-  switch (windowType) {
-    case "5h":
-      return startTs + 5 * 60 * 60;
-    case "24h":
-    case "Daily":
-      return startTs + 24 * 60 * 60;
-    case "Weekly":
-      return startTs + 7 * 24 * 60 * 60;
-    case "Monthly": {
-      // Calculate first day of next month
-      const d = new Date(startTs * 1000);
-      const nextMonth = new Date(d.getFullYear(), d.getMonth() + 1, 1, 0, 0, 0);
-      return Math.floor(nextMonth.getTime() / 1000);
-    }
-    default:
-      return startTs;
-  }
-}
-
 export type HomeProviderLimitPanelProps = {
   rows: ProviderLimitUsageRow[];
   loading: boolean;
@@ -55,6 +34,7 @@ type LimitDisplay = {
   percent: number;
   warning: boolean;
   windowStartTs: number | null; // unix seconds, null for "Total"
+  windowEndTs: number | null;
 };
 
 function getLimitDisplays(row: ProviderLimitUsageRow): LimitDisplay[] {
@@ -69,12 +49,13 @@ function getLimitDisplays(row: ProviderLimitUsageRow): LimitDisplay[] {
       percent,
       warning: percent >= 0.8,
       windowStartTs: row.window_5h_start_ts,
+      windowEndTs: row.window_5h_end_ts,
     });
   }
 
   if (row.limit_daily_usd != null) {
     const percent = row.limit_daily_usd > 0 ? row.usage_daily_usd / row.limit_daily_usd : 0;
-    const modeLabel = row.daily_reset_mode === "rolling" ? "24h" : "Daily";
+    const modeLabel = row.daily_reset_mode === "rolling" && !row.daily_manual_anchor ? "24h" : "Daily";
     displays.push({
       label: modeLabel,
       limit: row.limit_daily_usd,
@@ -82,6 +63,7 @@ function getLimitDisplays(row: ProviderLimitUsageRow): LimitDisplay[] {
       percent,
       warning: percent >= 0.8,
       windowStartTs: row.window_daily_start_ts,
+      windowEndTs: row.window_daily_end_ts,
     });
   }
 
@@ -94,6 +76,7 @@ function getLimitDisplays(row: ProviderLimitUsageRow): LimitDisplay[] {
       percent,
       warning: percent >= 0.8,
       windowStartTs: row.window_weekly_start_ts,
+      windowEndTs: row.window_weekly_end_ts,
     });
   }
 
@@ -106,6 +89,7 @@ function getLimitDisplays(row: ProviderLimitUsageRow): LimitDisplay[] {
       percent,
       warning: percent >= 0.8,
       windowStartTs: row.window_monthly_start_ts,
+      windowEndTs: row.window_monthly_end_ts,
     });
   }
 
@@ -118,6 +102,7 @@ function getLimitDisplays(row: ProviderLimitUsageRow): LimitDisplay[] {
       percent,
       warning: percent >= 0.8,
       windowStartTs: null, // Total has no window start
+      windowEndTs: null,
     });
   }
 
@@ -141,14 +126,14 @@ function ProgressBar({ percent, warning }: { percent: number; warning: boolean }
 
 function LimitItem({ display }: { display: LimitDisplay }) {
   const windowLabel =
-    display.windowStartTs != null
-      ? `${formatWindowTs(display.windowStartTs)} → ${formatWindowTs(getWindowEndTs(display.windowStartTs, display.label))}`
+    display.windowStartTs != null && display.windowEndTs != null
+      ? `${formatWindowTs(display.windowStartTs)} → ${formatWindowTs(display.windowEndTs)}`
       : null;
 
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex items-center justify-between text-[10px]">
-        <div className="flex items-center gap-1.5">
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[10px]">
+        <div className="flex flex-wrap items-center gap-1.5">
           <span className="text-muted-foreground font-medium">{display.label}</span>
           {windowLabel && <span className="text-muted-foreground font-mono">{windowLabel}</span>}
         </div>
@@ -232,7 +217,7 @@ export function HomeProviderLimitPanelContent({
   refreshing = false,
 }: HomeProviderLimitPanelContentProps) {
   const sortedRows = useMemo(() => {
-    return rows.slice().sort((a, b) => {
+    return rows.filter((row) => getLimitDisplays(row).length > 0).sort((a, b) => {
       const cliCompare = a.cli_key.localeCompare(b.cli_key);
       if (cliCompare !== 0) return cliCompare;
       return a.provider_name.localeCompare(b.provider_name);
@@ -252,14 +237,14 @@ export function HomeProviderLimitPanelContent({
     return <div className="text-sm text-muted-foreground">数据不可用</div>;
   }
 
-  if (rows.length === 0) {
+  if (sortedRows.length === 0) {
     return <EmptyState title="暂无配置限额的供应商" description="请在供应商编辑界面配置限额。" />;
   }
 
   return (
     <div className="flex flex-col h-full gap-2">
       <div className="flex items-center justify-between shrink-0">
-        <span className="text-xs text-muted-foreground">{rows.length} 个供应商</span>
+        <span className="text-xs text-muted-foreground">{sortedRows.length} 个供应商</span>
         {onRefresh && (
           <button
             type="button"
@@ -289,7 +274,7 @@ export function HomeProviderLimitPanel({
   refreshing,
 }: HomeProviderLimitPanelProps) {
   const sortedRows = useMemo(() => {
-    return rows.slice().sort((a, b) => {
+    return rows.filter((row) => getLimitDisplays(row).length > 0).sort((a, b) => {
       // Sort by CLI key first, then by provider name
       const cliCompare = a.cli_key.localeCompare(b.cli_key);
       if (cliCompare !== 0) return cliCompare;
@@ -302,7 +287,7 @@ export function HomeProviderLimitPanel({
       <div className="flex items-center justify-between gap-2 shrink-0">
         <div className="text-sm font-semibold">供应商限额</div>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">{rows.length} 个供应商</span>
+          <span className="text-xs text-muted-foreground">{sortedRows.length} 个供应商</span>
           <button
             type="button"
             onClick={onRefresh}
@@ -327,7 +312,7 @@ export function HomeProviderLimitPanel({
         </div>
       ) : available === false ? (
         <div className="mt-2 text-sm text-muted-foreground">数据不可用</div>
-      ) : rows.length === 0 ? (
+      ) : sortedRows.length === 0 ? (
         <div className="mt-2">
           <EmptyState title="暂无配置限额的供应商" description="请在供应商编辑界面配置限额。" />
         </div>
