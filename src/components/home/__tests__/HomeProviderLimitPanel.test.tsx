@@ -25,11 +25,27 @@ function makeRow(partial: Partial<ProviderLimitUsageRow>): ProviderLimitUsageRow
     window_daily_start_ts: 1_700_000_000,
     window_weekly_start_ts: 1_700_000_000,
     window_monthly_start_ts: 1_700_000_000,
+    window_5h_end_ts: 1_700_018_000,
+    window_daily_end_ts: 1_700_086_400,
+    window_weekly_end_ts: 1_700_604_800,
+    window_monthly_end_ts: 1_702_678_400,
+    daily_manual_anchor: false,
     ...partial,
   };
 }
 
 describe("components/home/HomeProviderLimitPanel", () => {
+  it("uses the actual monthly end and labels manually anchored daily as fixed", () => {
+    const start = new Date(2026, 8, 7, 13, 15).getTime() / 1000;
+    const end = new Date(2026, 9, 7, 13, 15).getTime() / 1000;
+    render(<HomeProviderLimitPanelContent rows={[makeRow({
+      limit_monthly_usd: 100, window_monthly_start_ts: start, window_monthly_end_ts: end,
+      limit_daily_usd: 10, daily_reset_mode: "rolling", daily_manual_anchor: true,
+    })]} loading={false} available={true} />);
+    expect(screen.getByText("9/7 13:15 → 10/7 13:15")).toBeInTheDocument();
+    expect(screen.getByText("Daily")).toBeInTheDocument();
+    expect(screen.queryByText("24h")).not.toBeInTheDocument();
+  });
   it("renders loading / unavailable / empty states (content)", () => {
     const { rerender } = render(
       <HomeProviderLimitPanelContent rows={[]} loading={true} available={true} />
@@ -41,6 +57,12 @@ describe("components/home/HomeProviderLimitPanel", () => {
 
     rerender(<HomeProviderLimitPanelContent rows={[]} loading={false} available={true} />);
     expect(screen.getByText("暂无配置限额的供应商")).toBeInTheDocument();
+  });
+
+  it("does not render empty limit cards for reset-only providers", () => {
+    render(<HomeProviderLimitPanelContent rows={[makeRow({ daily_manual_anchor: true })]} loading={false} available={true} />);
+    expect(screen.getByText("暂无配置限额的供应商")).toBeInTheDocument();
+    expect(screen.queryByText("P")).not.toBeInTheDocument();
   });
 
   it("renders rows, sorts them, and shows labels + warnings", () => {
@@ -103,7 +125,7 @@ describe("components/home/HomeProviderLimitPanel", () => {
 
   it("supports refresh button and disabled state (wrapper)", () => {
     const onRefresh = vi.fn();
-    const rows = [makeRow({ provider_id: 1 }), makeRow({ provider_id: 2, cli_key: "codex" })];
+    const rows = [makeRow({ provider_id: 1, limit_daily_usd: 10 }), makeRow({ provider_id: 2, cli_key: "codex", limit_daily_usd: 10 })];
 
     const { rerender } = render(
       <HomeProviderLimitPanel

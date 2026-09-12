@@ -52,12 +52,8 @@ export function loadCloudOnlyVerificationFixture(root = repoRoot) {
     scaffolderPackage: readJson(root, "packages/create-aio-plugin/package.json"),
     vitestConfig: readText(root, "vitest.config.ts"),
     tauriConfig: readJson(root, "src-tauri/tauri.conf.json"),
-    agents: readText(root, "AGENTS.md"),
     readme: readText(root, "README.md"),
     readmeEn: readText(root, "README_EN.md"),
-    trellisWorkflow: readText(root, ".trellis/workflow.md"),
-    implementAgent: readText(root, ".trellis/agents/implement.md"),
-    checkAgent: readText(root, ".trellis/agents/check.md"),
     activeSpecs: readMarkdownTree(root, ".trellis/spec/aio-coding-hub"),
     ciWorkflow: readText(root, ".github/workflows/ci.yml"),
     devBuildWorkflow: readText(root, ".github/workflows/dev-build.yml"),
@@ -66,10 +62,6 @@ export function loadCloudOnlyVerificationFixture(root = repoRoot) {
 
 function requireText(value, expected, label, failures) {
   if (!value.includes(expected)) failures.push(`${label} must include ${JSON.stringify(expected)}`);
-}
-
-function requireAbsent(value, pattern, label, failures) {
-  if (pattern.test(value)) failures.push(`${label} contains a prohibited local instruction`);
 }
 
 function assertActionsOnlyScripts(pkg, label, guard, failures) {
@@ -472,12 +464,8 @@ export function assertCloudOnlyVerificationContract(fixture) {
     scaffolderPackage,
     vitestConfig,
     tauriConfig,
-    agents,
     readme,
     readmeEn,
-    trellisWorkflow,
-    implementAgent,
-    checkAgent,
     activeSpecs,
     ciWorkflow,
     devBuildWorkflow,
@@ -515,40 +503,26 @@ export function assertCloudOnlyVerificationContract(fixture) {
     failures.push("src-tauri/tauri.conf.json must retain the cloud frontend build hook");
   }
 
-  requireText(agents, "Keep the local checkout zero-artifact.", "AGENTS.md", failures);
-  requireText(agents, "check-cloud-only-verification.mjs", "AGENTS.md", failures);
-  requireAbsent(agents, /Use `pnpm dev`/i, "AGENTS.md", failures);
   for (const [label, text] of [
     ["README.md", readme],
     ["README_EN.md", readmeEn],
   ]) {
-    requireText(text, "check-cloud-only-verification.mjs", label, failures);
     requireText(text, "workflow_dispatch", label, failures);
     assertNoForbiddenReadmeCommand(text, label, failures);
   }
 
-  requireText(trellisWorkflow, "repository-authorized verification", ".trellis/workflow.md", failures);
-  requireAbsent(trellisWorkflow, /run project lint and type-check|ensure lint and type-check pass|lint \/ type-check \/ tests/i, ".trellis/workflow.md", failures);
-  for (const [label, text] of [
-    [".trellis/agents/implement.md", implementAgent],
-    [".trellis/agents/check.md", checkAgent],
-  ]) {
-    requireText(text, "repository-authorized", label, failures);
-    requireAbsent(text, /Run the project'?s lint and typecheck|Run lint and typecheck/i, label, failures);
-  }
   assertActiveSpecs(activeSpecs, failures);
 
   if (!/^\s*workflow_dispatch:\s*$/m.test(ciWorkflow)) {
     failures.push("ci.yml must retain workflow_dispatch");
   }
-  requireText(agents, "Do not start an additional manual `ci` run for routine PR validation.", "AGENTS.md", failures);
-  requireText(readme, "不要为常规验证额外手动运行 `ci`", "README.md", failures);
-  requireText(readmeEn, "Do not start an additional manual `ci` run for routine validation.", "README_EN.md", failures);
   assertManualCiBoundary(ciWorkflow, failures);
   assertWorkflowRunCommands(
     ciWorkflow,
     "contracts",
-    ["node scripts/check-cloud-only-verification.mjs"],
+    [
+      "node scripts/check-cloud-only-verification.mjs",
+    ],
     failures
   );
   assertCandidatePrBoundary(ciWorkflow, failures);

@@ -16,6 +16,7 @@ pub(super) fn apply_ensure_patches(conn: &mut Connection) -> crate::shared::erro
     ensure_provider_bridge_columns(conn)?;
     ensure_workspace_cluster(conn)?;
     ensure_provider_limits(conn)?;
+    super::v54_to_v55::ensure_provider_limit_resets(conn)?;
     ensure_provider_oauth_columns(conn)?;
     ensure_provider_oauth_limit_snapshots(conn)?;
     ensure_sort_mode_providers_enabled(conn)?;

@@ -109,6 +109,7 @@ const REQUEST_LOG_SUMMARY_FIELDS: &str = "
   upstream_stream_timing_version,
   final_upstream_attempt_duration_ms,
   final_upstream_attempt_timing_version,
+  estimated_final_upstream_attempt_duration_ms,
   attempts_json,
   input_tokens,
   output_tokens,
@@ -147,6 +148,7 @@ const REQUEST_LOG_DETAIL_FIELDS: &str = "
   upstream_stream_timing_version,
   final_upstream_attempt_duration_ms,
   final_upstream_attempt_timing_version,
+  estimated_final_upstream_attempt_duration_ms,
   attempts_json,
   input_tokens,
   output_tokens,
@@ -666,6 +668,8 @@ fn row_to_summary(row: &rusqlite::Row<'_>) -> Result<RequestLogSummary, rusqlite
             .get::<_, Option<i64>>("final_upstream_attempt_timing_version")?
             .filter(|value| *value == 1)
             .unwrap_or(0),
+        estimated_final_upstream_attempt_duration_ms: row
+            .get("estimated_final_upstream_attempt_duration_ms")?,
         attempt_count,
         has_failover,
         start_provider_id,
@@ -731,6 +735,8 @@ fn row_to_detail(row: &rusqlite::Row<'_>) -> Result<RequestLogDetail, rusqlite::
             .get::<_, Option<i64>>("final_upstream_attempt_timing_version")?
             .filter(|value| *value == 1)
             .unwrap_or(0),
+        estimated_final_upstream_attempt_duration_ms: row
+            .get("estimated_final_upstream_attempt_duration_ms")?,
         attempts_json,
         input_tokens: row.get("input_tokens")?,
         output_tokens: row.get("output_tokens")?,

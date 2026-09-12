@@ -941,6 +941,11 @@ export function useProvidersViewDataModel(activeCli: CliKey, availabilityHours =
         });
         if (!result) return;
 
+        const model = result.tested_model
+          ? result.requested_model && result.requested_model !== result.tested_model
+            ? ` [${result.requested_model} -> ${result.tested_model}]`
+            : ` [${result.tested_model}]`
+          : "";
         if (result.ok) {
           const bridgeType = provider.bridge_type ?? "";
           const isExplicitCodexBridge =
@@ -949,11 +954,11 @@ export function useProvidersViewDataModel(activeCli: CliKey, availabilityHours =
             bridgeType === "codex_to_anthropic_messages";
           toast(
             isExplicitCodexBridge
-              ? `${provider.name}: 转译请求可用 (${result.latency_ms}ms)`
-              : `${provider.name}: 可用 (${result.latency_ms}ms)`
+              ? `${provider.name}: 转译请求可用${model} (${result.latency_ms}ms)`
+              : `${provider.name}: 可用${model} (${result.latency_ms}ms)`
           );
         } else {
-          toast(`${provider.name}: 不可用 — ${result.error ?? "未知错误"}`);
+          toast(`${provider.name}: 不可用${model} — ${result.error ?? "未知错误"}`);
         }
         logToConsole("info", "供应商可用性测试", {
           provider_id: provider.id,

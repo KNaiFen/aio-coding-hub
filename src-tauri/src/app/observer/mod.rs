@@ -1,5 +1,6 @@
 //! Authenticated loopback-only observation service for the standalone TUI.
 
+mod activity;
 mod descriptor;
 mod snapshot;
 
@@ -37,16 +38,28 @@ const DB_QUERY_PERMIT_TIMEOUT: Duration = Duration::from_millis(1600);
 const DB_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 const STOP_TIMEOUT: Duration = Duration::from_secs(1);
 
-#[derive(Default)]
-pub(crate) struct ObserverRuntimeState {
-    runtime: Mutex<Option<ObserverRuntime>>,
+pub(crate) type ObserverRuntimeState = ObserverRuntimeStateFor<tauri::Wry>;
+
+pub(crate) struct ObserverRuntimeStateFor<R: tauri::Runtime> {
+    runtime: Mutex<Option<ObserverRuntime<R>>>,
     starting: AtomicBool,
     stopping: AtomicBool,
 }
 
-struct ObserverRuntime {
+impl<R: tauri::Runtime> Default for ObserverRuntimeStateFor<R> {
+    fn default() -> Self {
+        Self {
+            runtime: Mutex::new(None),
+            starting: AtomicBool::new(false),
+            stopping: AtomicBool::new(false),
+        }
+    }
+}
+
+struct ObserverRuntime<R: tauri::Runtime> {
+    activity: Arc<activity::ObserverActivity<R>>,
     shutdown: Option<oneshot::Sender<()>>,
-    task: tauri::async_runtime::JoinHandle<()>,
+    task: tokio::task::JoinHandle<()>,
     descriptor_path: PathBuf,
     pid: u32,
     token: String,
@@ -139,9 +152,9 @@ impl FolderLookupCache {
     }
 }
 
-#[derive(Clone)]
-struct ObserverHttpState {
-    app: tauri::AppHandle,
+struct ObserverHttpState<R: tauri::Runtime> {
+    activity: Arc<activity::ObserverActivity<R>>,
+    app: tauri::AppHandle<R>,
     db: Arc<Mutex<ObserverDbState>>,
     token: Arc<str>,
     limiter: Arc<Semaphore>,
@@ -149,6 +162,22 @@ struct ObserverHttpState {
     db_query_limiter: Arc<Semaphore>,
     cache: Arc<Mutex<HashMap<CacheKey, CachedSnapshot>>>,
     folder_cache: Arc<StdMutex<FolderLookupCache>>,
+}
+
+impl<R: tauri::Runtime> Clone for ObserverHttpState<R> {
+    fn clone(&self) -> Self {
+        Self {
+            activity: self.activity.clone(),
+            app: self.app.clone(),
+            db: self.db.clone(),
+            token: self.token.clone(),
+            limiter: self.limiter.clone(),
+            probe_limiter: self.probe_limiter.clone(),
+            db_query_limiter: self.db_query_limiter.clone(),
+            cache: self.cache.clone(),
+            folder_cache: self.folder_cache.clone(),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -166,8 +195,8 @@ struct SnapshotQuery {
     include_providers: bool,
 }
 
-pub(crate) async fn start_best_effort(app: tauri::AppHandle) {
-    let already_starting = match app.try_state::<ObserverRuntimeState>() {
+pub(crate) async fn start_best_effort<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
+    let already_starting = match app.try_state::<ObserverRuntimeStateFor<R>>() {
         Some(state) => state.starting.swap(true, Ordering::AcqRel),
         None => {
             tracing::warn!("local observer runtime state is unavailable");
@@ -178,7 +207,7 @@ pub(crate) async fn start_best_effort(app: tauri::AppHandle) {
         return;
     }
     let result = start(app.clone()).await;
-    if let Some(state) = app.try_state::<ObserverRuntimeState>() {
+    if let Some(state) = app.try_state::<ObserverRuntimeStateFor<R>>() {
         state.starting.store(false, Ordering::Release);
     }
     if let Err(err) = result {
@@ -186,9 +215,9 @@ pub(crate) async fn start_best_effort(app: tauri::AppHandle) {
     }
 }
 
-async fn start(app: tauri::AppHandle) -> crate::shared::error::AppResult<()> {
+async fn start<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> crate::shared::error::AppResult<()> {
     let state = app
-        .try_state::<ObserverRuntimeState>()
+        .try_state::<ObserverRuntimeStateFor<R>>()
         .ok_or_else(|| "observer runtime state is unavailable".to_string())?;
     if state.stopping.load(Ordering::Acquire) || state.runtime.lock().await.is_some() {
         return Ok(());
@@ -211,7 +240,9 @@ async fn start(app: tauri::AppHandle) -> crate::shared::error::AppResult<()> {
     })
     .await?;
 
+    let activity = Arc::new(activity::ObserverActivity::new(&app));
     let http_state = ObserverHttpState {
+        activity: activity.clone(),
         app: app.clone(),
         db: Arc::new(Mutex::new(ObserverDbState::default())),
         token: Arc::from(descriptor.token.as_str()),
@@ -221,18 +252,12 @@ async fn start(app: tauri::AppHandle) -> crate::shared::error::AppResult<()> {
         cache: Arc::new(Mutex::new(HashMap::new())),
         folder_cache: Arc::new(StdMutex::new(FolderLookupCache::default())),
     };
-    let router = Router::new()
-        .route("/api/observer/v1/health", get(health))
-        .route("/api/observer/v1/snapshot", get(snapshot_handler))
-        .route(
-            "/api/observer/v1/providers/:provider_id/test-availability",
-            post(provider_test_availability_handler),
-        )
-        .with_state(http_state);
+    let router = observer_router(http_state);
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
 
     let mut runtime = state.runtime.lock().await;
     if state.stopping.load(Ordering::Acquire) {
+        activity.close();
         drop(runtime);
         let _ = crate::blocking::run(
             "observer_descriptor_remove_cancelled_start",
@@ -245,10 +270,13 @@ async fn start(app: tauri::AppHandle) -> crate::shared::error::AppResult<()> {
         return Ok(());
     }
     if runtime.is_some() {
+        activity.close();
         return Ok(());
     }
 
-    let task = tauri::async_runtime::spawn(async move {
+    let close_activity = CloseActivity(activity.clone());
+    let task = tokio::spawn(async move {
+        let _close_activity = close_activity;
         let server = axum::serve(listener, router).with_graceful_shutdown(async move {
             let _ = shutdown_rx.await;
         });
@@ -258,6 +286,7 @@ async fn start(app: tauri::AppHandle) -> crate::shared::error::AppResult<()> {
     });
     tracing::info!(port, "local observer service started");
     *runtime = Some(ObserverRuntime {
+        activity,
         shutdown: Some(shutdown_tx),
         task,
         descriptor_path,
@@ -267,8 +296,27 @@ async fn start(app: tauri::AppHandle) -> crate::shared::error::AppResult<()> {
     Ok(())
 }
 
-pub(crate) async fn stop_best_effort(app: &tauri::AppHandle) {
-    let Some(state) = app.try_state::<ObserverRuntimeState>() else {
+struct CloseActivity<R: tauri::Runtime>(Arc<activity::ObserverActivity<R>>);
+
+impl<R: tauri::Runtime> Drop for CloseActivity<R> {
+    fn drop(&mut self) {
+        self.0.close();
+    }
+}
+
+fn observer_router<R: tauri::Runtime>(state: ObserverHttpState<R>) -> Router {
+    Router::new()
+        .route("/api/observer/v1/health", get(health::<R>))
+        .route("/api/observer/v1/snapshot", get(snapshot_handler::<R>))
+        .route(
+            "/api/observer/v1/providers/:provider_id/test-availability",
+            post(provider_test_availability_handler::<R>),
+        )
+        .with_state(state)
+}
+
+pub(crate) async fn stop_best_effort<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let Some(state) = app.try_state::<ObserverRuntimeStateFor<R>>() else {
         return;
     };
     state.stopping.store(true, Ordering::Release);
@@ -276,6 +324,7 @@ pub(crate) async fn stop_best_effort(app: &tauri::AppHandle) {
     let Some(mut runtime) = runtime else {
         return;
     };
+    runtime.activity.close();
     if let Some(shutdown) = runtime.shutdown.take() {
         let _ = shutdown.send(());
     }
@@ -298,7 +347,10 @@ pub(crate) async fn stop_best_effort(app: &tauri::AppHandle) {
     .await;
 }
 
-async fn health(State(state): State<ObserverHttpState>, headers: HeaderMap) -> Response {
+async fn health<R: tauri::Runtime>(
+    State(state): State<ObserverHttpState<R>>,
+    headers: HeaderMap,
+) -> Response {
     if !authorized(&headers, &state.token) {
         return api_error(StatusCode::UNAUTHORIZED, "OBS_UNAUTHORIZED", "unauthorized");
     }
@@ -312,8 +364,8 @@ async fn health(State(state): State<ObserverHttpState>, headers: HeaderMap) -> R
     )
 }
 
-async fn snapshot_handler(
-    State(state): State<ObserverHttpState>,
+async fn snapshot_handler<R: tauri::Runtime>(
+    State(state): State<ObserverHttpState<R>>,
     headers: HeaderMap,
     query: Result<Query<SnapshotQuery>, QueryRejection>,
 ) -> Response {
@@ -348,6 +400,7 @@ async fn snapshot_handler(
             "invalid history limit",
         );
     }
+    state.activity.touch_snapshot().await;
     let _permit = match state.limiter.clone().try_acquire_owned() {
         Ok(permit) => permit,
         Err(_) => {
@@ -368,20 +421,36 @@ async fn snapshot_handler(
         return secured(Json(snapshot).into_response());
     }
     let db = read_only_db(&state).await;
+    let permit_started = Instant::now();
     let db_query_permit = if db.is_some() {
         match wait_for_db_query_permit(state.db_query_limiter.clone()).await {
             Some(permit) => Some(permit),
             None => {
+                tracing::warn!(
+                    cli = scope.as_str(),
+                    include_providers = query.include_providers,
+                    permit_wait_ms = permit_started.elapsed().as_millis(),
+                    error = "OBS_BUSY",
+                    "observer DB permit unavailable"
+                );
                 return api_error(
                     StatusCode::TOO_MANY_REQUESTS,
                     "OBS_BUSY",
                     "observer is busy",
-                )
+                );
             }
         }
     } else {
         None
     };
+    if permit_started.elapsed() >= DB_QUERY_PERMIT_TIMEOUT * 3 / 4 {
+        tracing::warn!(
+            cli = scope.as_str(),
+            include_providers = query.include_providers,
+            permit_wait_ms = permit_started.elapsed().as_millis(),
+            "observer DB permit slow"
+        );
+    }
     if let Some(snapshot) = cached_snapshot(&state, key).await {
         return secured(Json(snapshot).into_response());
     }
@@ -400,8 +469,8 @@ async fn snapshot_handler(
     secured(Json(snapshot).into_response())
 }
 
-async fn provider_test_availability_handler(
-    State(state): State<ObserverHttpState>,
+async fn provider_test_availability_handler<R: tauri::Runtime>(
+    State(state): State<ObserverHttpState<R>>,
     headers: HeaderMap,
     provider_id: Result<Path<i64>, PathRejection>,
 ) -> Response {
@@ -428,6 +497,25 @@ async fn provider_test_availability_handler(
             )
         }
     };
+    match tokio::time::timeout(OBSERVER_PROBE_TIMEOUT, async {
+        let _activity_work = state.activity.work().await;
+        run_provider_test(&state, provider_id).await
+    })
+    .await
+    {
+        Ok(response) => response,
+        Err(_) => api_error(
+            StatusCode::GATEWAY_TIMEOUT,
+            "OBS_PROBE_TIMEOUT",
+            "provider probe timed out",
+        ),
+    }
+}
+
+async fn run_provider_test<R: tauri::Runtime>(
+    state: &ObserverHttpState<R>,
+    provider_id: i64,
+) -> Response {
     let Some(db_state) = state.app.try_state::<crate::app_state::DbInitState>() else {
         return api_error(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -454,41 +542,28 @@ async fn provider_test_availability_handler(
             "provider probe is unavailable",
         );
     };
-    let result = match tokio::time::timeout(
-        OBSERVER_PROBE_TIMEOUT,
-        runtime.probe_manual(state.app.clone(), db, provider_id),
-    )
-    .await
+    let result = match runtime
+        .probe_manual(state.app.clone(), db, provider_id)
+        .await
     {
-        Ok(Ok(result)) => result,
-        Ok(Err(error)) if error.code() == "DB_NOT_FOUND" => {
+        Ok(result) => result,
+        Err(error) if error.code() == "DB_NOT_FOUND" => {
             return api_error(
                 StatusCode::NOT_FOUND,
                 "OBS_PROVIDER_NOT_FOUND",
                 "provider not found",
             )
         }
-        Ok(Err(_)) => {
+        Err(_) => {
             return api_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "OBS_PROBE_FAILED",
                 "provider probe failed",
             )
         }
-        Err(_) => {
-            return api_error(
-                StatusCode::GATEWAY_TIMEOUT,
-                "OBS_PROBE_TIMEOUT",
-                "provider probe timed out",
-            )
-        }
     };
-    let error = (!result.ok).then(|| match result.status {
-        Some(401 | 403) => "认证失败".to_string(),
-        Some(status) if status >= 500 => "上游服务异常".to_string(),
-        Some(_) => "供应商响应不可用".to_string(),
-        None => "连接或请求失败".to_string(),
-    });
+    let error = (!result.ok)
+        .then(|| bounded_observer_text(result.error.as_deref().unwrap_or("PROBE_FAILED"), 128));
     secured(
         Json(ObserverProviderAvailabilityTestResult {
             ok: result.ok,
@@ -502,6 +577,14 @@ async fn provider_test_availability_handler(
                 .response_preview
                 .as_deref()
                 .map(|value| bounded_observer_text(value, 500)),
+            requested_model: result
+                .requested_model
+                .as_deref()
+                .map(|value| bounded_observer_text(value, 256)),
+            tested_model: result
+                .tested_model
+                .as_deref()
+                .map(|value| bounded_observer_text(value, 256)),
         })
         .into_response(),
     )
@@ -539,7 +622,7 @@ async fn wait_for_db_query_permit(limiter: Arc<Semaphore>) -> Option<OwnedSemaph
         .ok()
 }
 
-async fn read_only_db(state: &ObserverHttpState) -> Option<crate::db::Db> {
+async fn read_only_db<R: tauri::Runtime>(state: &ObserverHttpState<R>) -> Option<crate::db::Db> {
     {
         let db_state = state.db.lock().await;
         if let Some(db) = db_state.db.as_ref() {
@@ -574,7 +657,10 @@ async fn read_only_db(state: &ObserverHttpState) -> Option<crate::db::Db> {
     }
 }
 
-async fn cached_snapshot(state: &ObserverHttpState, key: CacheKey) -> Option<ObserverSnapshotV1> {
+async fn cached_snapshot<R: tauri::Runtime>(
+    state: &ObserverHttpState<R>,
+    key: CacheKey,
+) -> Option<ObserverSnapshotV1> {
     let mut cache = state.cache.lock().await;
     get_cached_snapshot(&mut cache, key, Instant::now())
 }

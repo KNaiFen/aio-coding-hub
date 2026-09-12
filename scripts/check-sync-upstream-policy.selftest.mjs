@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -351,15 +352,15 @@ expectRejected(
   /must not merge upstream commits locally/
 );
 expectRejected(
-  "missing conflict failure",
+  "missing conflict warning branch",
   '[ "${merge_state}" = "DIRTY" ]',
   '[ "${merge_state}" = "CLEAN" ]',
-  /fail closed when the open PR has conflicts/
+  /distinguish conflicted pull requests/
 );
 expectRejected(
   "missing unavailable merge-state failure",
-  '[ -z "${merge_state}" ] ||',
-  '[ "${merge_state}" = "CLEAN" ] ||',
+  '[ -z "${merge_state}" ]; then',
+  '[ "${merge_state}" = "CLEAN" ]; then',
   /merge state is unavailable/
 );
 expectRejected(
@@ -367,6 +368,18 @@ expectRejected(
   '[ "${merge_state}" = "UNKNOWN" ]; then',
   '[ "${merge_state}" = "UNKNOWN" ] || [ "${merge_state}" = "BLOCKED" ]; then',
   /leave review-blocked pull requests open/
+);
+expectRejected(
+  "unknown state described as a conflict",
+  "GitHub has not finished calculating mergeability.",
+  "Manual conflict resolution required.",
+  /unknown mergeability must not be reported as a conflict/
+);
+expectRejected(
+  "missing conflict and pending warning",
+  'echo "::warning::${merge_notice} ${pr_url}"',
+  'echo "${merge_notice} ${pr_url}"',
+  /upstream PR creation must retain the approved fail-closed script/
 );
 expectRejected(
   "missing no-op branch",
@@ -393,5 +406,90 @@ expectRejected(
   'echo "upstream fetch removed"',
   /fetch the target branch from upstream/
 );
+
+// Execute the actual PR step with shell function stubs, without files or network access.
+const openPrRun = workflow
+  .split("      - name: Open upstream sync PR\n")[1]
+  .split("        run: |\n")[1]
+  .split("\n")
+  .map((line) => line.slice(10))
+  .join("\n")
+  // Node pipes cannot be reopened through /dev/stdout on Linux.
+  .replaceAll('>> "${GITHUB_STEP_SUMMARY}"', ">&1");
+const commandStubs = `
+git() {
+  [[ "$1 $2" == "merge-base --is-ancestor" ]] || return 99
+  [[ "$TEST_TOPOLOGY" == "noop" && "$3" == "upstream/main" ]] && return 0
+  [[ "$TEST_TOPOLOGY" == "fast-forward" && "$3" == "origin/main" ]] && return 0
+  return 1
+}
+gh() {
+  [[ "$1" == "pr" ]] || return 99
+  echo "called:$2" >&2
+  [[ "$TEST_FAILURE" != "$2" ]] || return 23
+  case "$2" in
+    list) printf '%s' "$TEST_EXISTING_PR" ;;
+    edit) : ;;
+    create) printf '%s' "$TEST_CREATED_URL" ;;
+    view) printf '%s' "$TEST_MERGE_STATE" ;;
+    *) return 99 ;;
+  esac
+}
+`;
+for (const [name, overrides, exitCode, expected] of [
+  ["clean new PR", {}, 0, /PR: https:\/\/github.com\/fixture\/aio\/pull\/123/],
+  [
+    "dirty existing PR", { TEST_EXISTING_PR: "123", TEST_MERGE_STATE: "DIRTY" },
+    0, /::warning::Manual conflict resolution required/,
+  ],
+  [
+    "unknown new PR", { TEST_MERGE_STATE: "UNKNOWN" },
+    0, /::warning::GitHub has not finished calculating mergeability/,
+  ],
+  [
+    "review blocked PR", { TEST_MERGE_STATE: "BLOCKED" },
+    0, /Manual review and merge required/,
+  ],
+  ["no-op", { TEST_TOPOLOGY: "noop" }, 0, /Already up to date/],
+  ["fast-forward", { TEST_TOPOLOGY: "fast-forward" }, 0, /Manual review and merge required/],
+  [
+    "empty merge state", { TEST_MERGE_STATE: "" },
+    1, /::error::.*merge state is unavailable/,
+  ],
+  [
+    "invalid create response", { TEST_CREATED_URL: "invalid" },
+    1, /Failed to resolve sync PR number/,
+  ],
+  ...["list", "create", "view"].map((command) => [
+    `${command} failure`, { TEST_FAILURE: command }, 23, new RegExp(`called:${command}`),
+  ]),
+  ["edit failure", { TEST_EXISTING_PR: "123", TEST_FAILURE: "edit" }, 23, /called:edit/],
+]) {
+  const result = spawnSync("bash", ["--noprofile", "--norc", "-c", commandStubs + openPrRun], {
+    encoding: "utf8",
+    timeout: 5000,
+    env: {
+      PATH: process.env.PATH,
+      GITHUB_REPOSITORY: "fixture/aio",
+      TARGET_BRANCH: "main",
+      UPSTREAM_REPO: "upstream/aio",
+      TEST_TOPOLOGY: "diverged",
+      TEST_EXISTING_PR: "",
+      TEST_CREATED_URL: "https://github.com/fixture/aio/pull/123",
+      TEST_MERGE_STATE: "CLEAN",
+      TEST_FAILURE: "",
+      ...overrides,
+    },
+  });
+  if (result.error) throw result.error;
+  const output = result.stdout + result.stderr;
+  assert.equal(result.status, exitCode, `${name}: ${output}`);
+  assert.match(output, expected, name);
+  if (overrides.TEST_MERGE_STATE === "UNKNOWN") {
+    assert.doesNotMatch(output, /conflict resolution/, name);
+  }
+  if (overrides.TEST_TOPOLOGY === "noop") assert.doesNotMatch(output, /called:/, name);
+  if (overrides.TEST_EXISTING_PR) assert.doesNotMatch(output, /called:create/, name);
+}
 
 console.log("Sync upstream manual-review policy self-test passed.");

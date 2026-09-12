@@ -194,17 +194,13 @@ sudo xattr -cr /Applications/"AIO Coding Hub.app"
 
 </details>
 
-### Zero-Artifact Local Checks and Cloud Validation
+### Local Resource Constraints and Cloud Validation
 
-Do not install repository dependencies, start a development server, or run formatting, type checking, linting, tests, or builds locally. The allowed local checks do not need `node_modules` and do not create Node or Rust artifacts:
+Task workflow follows the user-level `$gkd-main` skill. See [AGENTS.md](AGENTS.md) for local resource constraints and the package-script environment. Dependency installation, full tests and coverage, compilation, packaging, and long-running performance checks use GitHub Actions.
 
-```bash
-node scripts/check-cloud-only-verification.selftest.mjs
-node scripts/check-cloud-only-verification.mjs
-git diff --check
-```
+Regular pull requests and protected-branch pushes trigger `ci`, and PR merges require the corresponding `ci-gate` and independent `pr-title` results. Routine PR validation must not trigger a duplicate manual `ci` run. `workflow_dispatch` is reserved for `main` recovery or candidate builds, while the Provider trend release benchmark runs on relevant automatic CI paths or the standalone `performance` workflow. Run `dev-build` from Actions only when a desktop integration artifact is needed.
 
-For a changed `.mjs` file, `node --check <changed-file.mjs>` is also allowed directly. Regular pull requests and protected-branch pushes trigger `ci` automatically; use the commit's `ci-gate` and `pr-title` results. Do not start an additional manual `ci` run for routine validation. `workflow_dispatch` is reserved for `main` recovery or candidate builds, while the Provider trend release benchmark runs on relevant automatic CI paths or the standalone `performance` workflow. Run `dev-build` from Actions only when a desktop integration artifact is needed.
+Documentation-only PRs and documentation-only protected-branch pushes retain their documentation tier. GKD Markdown skips frontend and Rust builds; README, AGENTS, and specification changes still run documentation contracts. Frontend-only or Rust-only PRs run the affected domain; shared, mixed, or unknown paths run both. Protected-branch pushes with code or unknown files retain complete CI; CodeQL runs independently. Release tags must point to the actual main merge commit with a successful signed candidate. See [commits and releases](docs/operations/github-actions-governance.md#提交与发版).
 
 <!-- SUPPORT_MATRIX_SOURCE_BUILD:START -->
 | Scope | Cloud workflow target | Notes |
@@ -240,9 +236,8 @@ curl http://127.0.0.1:37123/health
 
 - [Project knowledge base](docs/README.md): the canonical map for product, architecture, plugin, operations, task, and historical documentation.
 - [Pending work](PENDING.md) and [completed work](PENDING_COMPLETED.md): deferred items and delivery evidence.
-- [Trellis task index](.trellis/tasks/README.md): plans, research, checks, and archived task context.
 
-Current code and machine-readable contracts take precedence over historical audits, superseded plans, and session journals.
+Current code takes precedence over historical audits, superseded plans, and session journals.
 
 ## Tech Stack
 
@@ -259,7 +254,7 @@ Current code and machine-readable contracts take precedence over historical audi
 
 ## Quality Assurance
 
-GitHub Actions owns dependency auditing, frontend lint, TypeScript, plugin SDK/scaffolder tests, E2E, coverage, the Vite build, Rust formatting, `Cargo.lock`, generated bindings, Clippy, Rust tests, and audit. `ci-gate` closes over those results. Cross-platform desktop packaging remains a main-candidate or on-demand `dev-build` concern, not a required job for every PR.
+GitHub Actions selects quality gates by changed paths. The frontend gate covers dependency auditing, lint, TypeScript, plugin SDK/scaffolder tests, E2E, coverage, and the Vite build; the Rust gate covers formatting, `Cargo.lock`, generated bindings, Clippy, tests, and audit. `ci-gate` requires selected jobs to succeed and unselected jobs to be `skipped`. Cross-platform desktop packaging remains a main-candidate or on-demand `dev-build` concern, not a required job for every PR.
 
 When CI reports formatting, lockfile, or generated-binding drift, download and review its bounded patch instead of regenerating files locally.
 
@@ -276,13 +271,7 @@ When CI reports formatting, lockfile, or generated-binding drift, download and r
 
 ## Contributing
 
-Issues and PRs welcome! We follow [Conventional Commits](https://www.conventionalcommits.org/).
-
-```bash
-feat(ui): add usage heatmap
-fix(gateway): handle timeout correctly
-docs: update installation guide
-```
+Issues and PRs welcome! Follow the user-level `$gkd-main` skill for workflow and [AGENTS.md](AGENTS.md) for AIO constraints.
 
 ---
 

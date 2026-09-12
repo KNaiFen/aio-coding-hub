@@ -5,6 +5,8 @@ TypeScript bindings, frontend adapters, and React UI.
 
 ## Topics
 
+- [Model price rules contract](./model-price-rules-contract.md): exact custom
+  pricing, mutually exclusive multipliers, reference inheritance, and historical cost isolation.
 - [Codex config contract](./codex-config-contract.md): typed config fields,
   patch semantics, raw TOML validation, generated bindings, and UI behavior.
 - [Codex managed model route contract](./codex-managed-model-route-contract.md):
@@ -40,8 +42,6 @@ TypeScript bindings, frontend adapters, and React UI.
 - [Gateway listen and token contract](./gateway-listen-token-contract.md):
   lifecycle-serialized listener rebinding and CLI proxy sync, non-loopback
   Bearer authentication, one-shot plaintext ownership, and frontend rollback.
-- [Trellis task context archive contract](./trellis-task-context-archive-contract.md):
-  exact self-reference rewriting and repository-wide context validation before archive commit.
 - [Request-log retention, usage-ledger, and pagination contract](./request-log-usage-ledger-pagination-contract.md):
   independent detail/statistics lifetimes, non-blocking ledger backfill, and
   opaque cursor pagination without changing the Home realtime feed.
@@ -59,13 +59,15 @@ TypeScript bindings, frontend adapters, and React UI.
   documentation allowlists, rename-aware Git ranges, fail-closed suite
   selection, and a stable required gate.
 - [Cloud-only verification contract](./cloud-only-verification-contract.md):
-  zero-artifact local checks, Actions-only package scripts, complete frontend
-  and Rust CI gates, and bounded generated-file drift handling.
+  local resource constraints, Actions-only package scripts, change-selected
+  CI gates, and bounded generated-file drift handling.
 - [Release promotion contract](./release-promotion-contract.md): remote tag
   identity, immutable main source commits, exact-SHA candidate reuse, and
   trigger-parity regression coverage.
 
-## Pre-Development Checklist
+## Behavior Boundaries
+
+The following boundaries apply to the corresponding behavior or shared inputs.
 
 When changing a Codex `config.toml` field:
 
@@ -193,12 +195,6 @@ gateway access-token presentation:
 4. Keep one page-lifetime reveal owner and test pending, success, `null`, error,
    tab unmount, close-without-ack, copy, acknowledge, and rotate paths.
 
-When changing Trellis task archive or context validation:
-
-1. Read [Trellis task context archive contract](./trellis-task-context-archive-contract.md).
-2. Keep path rewriting JSON-aware and limited to the archived task's exact `file` prefix.
-3. Validate all active and archived manifests before archive auto-commit.
-
 When changing request-log retention, usage statistics, or the Logs page:
 
 1. Read [Request-log retention, usage-ledger, and pagination contract](./request-log-usage-ledger-pagination-contract.md).
@@ -245,26 +241,29 @@ When changing release source validation or candidate promotion:
 3. Verify annotated-tag push and manual dispatch paths without rewriting local
    tag refs or rebuilding promoted assets.
 
-## Quality Check
+## Regression Scenarios
+
+Apply each scenario below only when its behavior or shared inputs are affected.
+Ordinary documentation changes do not trigger business regression scenarios.
 
 - Read [Cloud-only verification contract](./cloud-only-verification-contract.md)
-  before choosing any command. Locally, run only its dependency-free checker,
-  relevant `node --check` parsing, and `git diff --check`.
-- GitHub Actions regenerates and verifies `src/generated/bindings.ts`, tests
-  Rust parsing/write safety and frontend behavior, and runs Clippy for all
-  affected target families. A host-only local check is not equivalent to the
-  CI target matrix.
-- Verify unrelated patches preserve fields that they do not own.
+  for the tool environment, local resource constraints, and cloud gates.
+- For affected cross-layer contracts, GitHub Actions regenerates and verifies
+  `src/generated/bindings.ts`, tests Rust parsing/write safety and frontend
+  behavior, and runs Clippy for all affected target families. A host-only local
+  check is not equivalent to the CI target matrix.
+- When changing field-owned patches, verify they preserve fields they do not own.
 - When changing gateway listener or token flow, verify both listen-direction
   changes complete within a timeout while the runtime transaction stays under
   one lifecycle guard; verify non-loopback authentication and one-shot reveal
   remain unchanged, and frontend failure paths return to canonical settings.
-- GitHub Actions must run a deterministic barrier through a real production
-  settings writer; prove unrelated Image Gen/Grok fields survive and CAS
-  preserves newer owner values.
-- Require the full GitHub Actions frontend and Rust jobs for focused tests,
-  TypeScript, lint, formatting, generated bindings, Clippy, Rust tests, and
-  dependency audit. Do not run their package/native commands locally.
+- When changing a production settings writer, GitHub Actions must run a
+  deterministic barrier through it; prove unrelated Image Gen/Grok fields
+  survive and CAS preserves newer owner values.
+- GitHub Actions retains the full quality requirements inside each selected
+  frontend or Rust job. Shared, mixed, or unknown paths select both domains;
+  single-domain PRs select the affected domain. Do not run their package/native
+  commands locally.
 - When changing gateway selection or failover, verify skipped candidates,
   Ready-provider limits, route projection, and attempt/transition labels together.
 - When changing release promotion, GitHub Actions must run the release-source
@@ -290,24 +289,27 @@ When changing release source validation or candidate promotion:
   all-or-nothing failure. For account mode, separately verify public status plus
   private `user/self`, signed User ID identity, exact success, credential
   isolation, missing-credential zero-request behavior, and no fabricated total.
-- For sub2api `rate_limits`, verify only one exact `1d` window projects to
-  daily fields, arithmetic/timestamps are consistent, unknown windows stay
+- When changing sub2api `rate_limits`, verify only one exact `1d` window projects
+  to daily fields, arithmetic/timestamps are consistent, unknown windows stay
   unknown, and periodic remaining never becomes wallet balance.
-- Audit account-usage diffs for credential, PII, host, upstream-message/body,
-  token-name, and actual-account-value leakage, and verify routing, circuit,
-  availability, order, and enablement remain untouched.
-- Verify usage totals, cost, Session aggregates, folders, trends, and provider
-  limits remain unchanged after request-detail retention deletes old rows.
-- Verify request-log keyset pages have no duplicate or missing rows at equal
-  timestamps and that page caches never receive realtime-feed array shapes.
-- Verify observer failures, read-only DB contention, invalid descriptors,
-  malformed snapshot JSON, and circuit peeks leave gateway forwarding,
+- When changing account usage, audit diffs for credential, PII, host,
+  upstream-message/body, token-name, and actual-account-value leakage, and verify
+  routing, circuit, availability, order, and enablement remain untouched.
+- When changing request-detail retention, verify usage totals, cost, Session
+  aggregates, folders, trends, and provider limits remain unchanged after
+  request-detail retention deletes old rows.
+- When changing request-log pagination, verify keyset pages have no duplicate
+  or missing rows at equal timestamps and that page caches never receive
+  realtime-feed array shapes.
+- When changing the observer, verify failures, read-only DB contention, invalid
+  descriptors, malformed snapshot JSON, and circuit peeks leave gateway forwarding,
   retries, provider health, and shutdown behavior unchanged.
-- Verify notification timers use Codex 120 seconds and other CLIs 30 seconds,
-  suppress while the same CLI has an active inference request, and skip safely
-  on snapshot failure or stale async completion.
-- Verify preferred-provider spend/OAuth eligibility failures mark only that
-  observer section unavailable and never mutate limits, circuit, or routing.
+- When changing task-complete notifications, verify timers use Codex 120 seconds
+  and other CLIs 30 seconds, suppress while the same CLI has an active inference
+  request, and skip safely on snapshot failure or stale async completion.
+- When changing preferred-provider projection, verify spend/OAuth eligibility
+  failures mark only that observer section unavailable and never mutate limits,
+  circuit, or routing.
 - When changing config migration payloads, verify export/import boundary
   symmetry, failure before target-directory creation or file writes, v1/v2 and
   installed/local compatibility, and file-count, total-size, Base64, path,

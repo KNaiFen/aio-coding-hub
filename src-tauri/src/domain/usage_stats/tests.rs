@@ -798,6 +798,39 @@ fn cost_aggregates_above_sqlite_integer_ceiling_across_leaderboard_and_folder_pa
 }
 
 #[test]
+fn zero_cost_remains_covered_in_every_leaderboard_scope() {
+    let conn = setup_conn();
+    insert_usage_log(
+        &conn,
+        TestUsageLog {
+            cost_usd_femto: Some(0),
+            session_id: Some("codex-alpha-1"),
+            ..base_usage_log(1001)
+        },
+    );
+    for scope in [
+        UsageScopeV2::Provider,
+        UsageScopeV2::Model,
+        UsageScopeV2::Cli,
+        UsageScopeV2::Day,
+    ] {
+        let rows = leaderboard_v2_with_conn(
+            &conn,
+            scope,
+            Some(1000),
+            Some(2000),
+            None,
+            None,
+            Some(50),
+            false,
+        )
+        .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].cost_usd, Some(0.0));
+    }
+}
+
+#[test]
 fn cx2cc_gateway_bridge_filter_covers_overview_and_home_usage_queries() {
     let (_dir, db) = setup_temp_db();
     let conn = db.open_connection().expect("open test db connection");

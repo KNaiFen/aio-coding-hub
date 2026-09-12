@@ -45,7 +45,7 @@ fn file_times(path: &Path) -> (Option<i64>, Option<i64>) {
     (created, modified)
 }
 
-fn scan_all_session_files(app: &tauri::AppHandle) -> AppResult<Vec<PathBuf>> {
+fn scan_all_session_files<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult<Vec<PathBuf>> {
     let sessions_dir = crate::codex_paths::codex_sessions_dir(app)?;
     if !sessions_dir.exists() {
         return Ok(Vec::new());
@@ -672,8 +672,8 @@ fn folder_lookup_in_files(
     out
 }
 
-pub fn folder_lookup_by_session_ids(
-    app: &tauri::AppHandle,
+pub fn folder_lookup_by_session_ids<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
     target_session_ids: &[String],
 ) -> AppResult<Vec<CliSessionsFolderLookupEntry>> {
     let sessions_dir = crate::codex_paths::codex_sessions_dir(app)?;

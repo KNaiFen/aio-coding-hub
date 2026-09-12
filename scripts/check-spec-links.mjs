@@ -6,6 +6,7 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(scriptDir);
 const roots = [
   join(repoRoot, ".trellis", "spec"),
+  join(repoRoot, "docs"),
   join(repoRoot, "src", "templates", "markdown", "spec"),
 ];
 const markdownLinkPattern = /\[[^\]]+\]\(([^)]+)\)/g;
@@ -56,7 +57,7 @@ for (const root of roots) {
 }
 
 if (missingLinks.length > 0) {
-  console.error("Spec markdown links are broken:");
+  console.error("Documentation links are broken:");
   for (const item of missingLinks) {
     console.error(`- ${item.file} -> ${item.target}`);
   }

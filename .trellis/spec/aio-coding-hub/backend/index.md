@@ -24,7 +24,9 @@ Rules for the root application's Rust backend and local gateway runtime.
   final-error matching, fail-open protocol rewriting, and separation from
   provider routing and health facts.
 
-## Pre-Development Checklist
+## Behavior Boundaries
+
+The following boundaries apply to the corresponding behavior or shared inputs.
 
 When changing gateway retry or circuit behavior:
 
@@ -147,7 +149,12 @@ When changing Provider Sync managed-backup pruning:
    or equivalent permissions. Do not document or test these measures as fully
    eliminating that final syscall boundary.
 
-## Quality Check
+## Regression Scenarios
+
+Each item applies only when its corresponding behavior or shared inputs are
+affected. Preserve the contract's expected semantics and necessary regression
+coverage; unrelated changes do not trigger this entire checklist. The tool and
+environment boundary is recorded in the [cloud-only contract](../cross-layer/cloud-only-verification-contract.md).
 
 - Unit-test the attempt-budget calculation at its boundary values.
 - GitHub Actions must run route-level tests that exercise real provider retries
