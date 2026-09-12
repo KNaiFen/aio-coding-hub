@@ -406,14 +406,6 @@ html.dark .tray-provider-mini-surface {
   border-width: 1px !important;
 }
 
-.scrollbar-thick::-webkit-scrollbar {
-  width: 12px !important;
-  height: 12px !important;
-}
-.scrollbar-thick::-webkit-scrollbar-thumb {
-  border-width: 3px !important;
-}
-
 /* Loading bar animation for in-progress indicators */
 @keyframes loading {
   0% {
@@ -425,83 +417,6 @@ html.dark .tray-provider-mini-surface {
   100% {
     transform: translateX(-100%);
   }
-}
-
-/* Gentle glow pulse for in-progress cards - soft breathing effect */
-@keyframes glow-pulse {
-  0%,
-  100% {
-    box-shadow:
-      0 0 0 0 rgba(30, 98, 236, 0),
-      0 1px 2px rgba(15, 23, 42, 0.04);
-  }
-  50% {
-    box-shadow:
-      0 0 0 3px rgba(30, 98, 236, 0.12),
-      0 2px 8px rgba(30, 98, 236, 0.1);
-  }
-}
-
-/* Dark mode glow pulse - adjusted for dark backgrounds */
-.dark .glow-pulse-active {
-  animation-name: glow-pulse-dark;
-}
-
-@keyframes glow-pulse-dark {
-  0%,
-  100% {
-    box-shadow:
-      0 0 0 0 rgba(59, 130, 246, 0),
-      0 1px 2px rgba(0, 0, 0, 0.2);
-  }
-  50% {
-    box-shadow:
-      0 0 0 3px rgba(59, 130, 246, 0.2),
-      0 2px 8px rgba(59, 130, 246, 0.15);
-  }
-}
-
-/* Subtle shimmer for in-progress indicator bar */
-@keyframes indicator-shimmer {
-  0% {
-    background-position: 200% 0;
-  }
-  100% {
-    background-position: -200% 0;
-  }
-}
-
-/* Smooth left-indicator entrance */
-@keyframes indicator-grow {
-  from {
-    transform: scaleY(0);
-    opacity: 0;
-  }
-  to {
-    transform: scaleY(1);
-    opacity: 1;
-  }
-}
-
-.indicator-shimmer-active {
-  background: linear-gradient(
-    90deg,
-    rgba(30, 98, 236, 0.85) 0%,
-    rgba(51, 65, 85, 1) 40%,
-    rgba(30, 98, 236, 0.85) 100%
-  );
-  background-size: 200% 100%;
-  animation: indicator-shimmer 2.5s ease-in-out infinite;
-}
-
-.dark .indicator-shimmer-active {
-  background: linear-gradient(
-    90deg,
-    rgba(59, 130, 246, 0.7) 0%,
-    rgba(148, 163, 184, 0.9) 40%,
-    rgba(59, 130, 246, 0.7) 100%
-  );
-  background-size: 200% 100%;
 }
 
 /* Gradient Mesh - Linear style grid with gradient halos */
