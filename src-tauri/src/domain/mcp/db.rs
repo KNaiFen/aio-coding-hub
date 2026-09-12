@@ -2,6 +2,7 @@
 
 use crate::db;
 use crate::infra::recovery_journal::RecoveryOperation;
+use crate::shared::cli_key::validate_cli_key;
 use crate::shared::error::db_err;
 use crate::shared::time::now_unix_seconds;
 use crate::workspaces;
@@ -9,7 +10,7 @@ use rusqlite::{params, Connection, ErrorCode, OptionalExtension};
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::types::{McpImportServer, McpServerSummary};
-use super::validate::{suggest_key, validate_cli_key, validate_server_key, validate_transport};
+use super::validate::{suggest_key, validate_server_key, validate_transport};
 use crate::shared::text::normalize_name;
 
 const MCP_NAME_MAX_LEN: usize = 256;
