@@ -242,6 +242,7 @@ async fn float_open_settings(app: tauri::AppHandle) -> Result<(), String> {
         .inner_size(420.0, 600.0)
         .min_inner_size(340.0, 420.0)
         .always_on_top(true)
+        .skip_taskbar(cfg!(target_os = "windows"))
         .center()
         .build()
         .map_err(|_| "无法创建设置窗口")?;
@@ -385,6 +386,8 @@ fn main() {
             let window = app
                 .get_webview_window("main")
                 .ok_or("missing main window")?;
+            #[cfg(target_os = "windows")]
+            window.set_skip_taskbar(true)?;
             window.set_size(tauri::LogicalSize::new(config.width, config.height))?;
             if let (Some(x), Some(y)) = (config.x, config.y) {
                 window.set_position(tauri::LogicalPosition::new(x, y))?;

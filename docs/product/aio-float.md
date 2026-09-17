@@ -28,6 +28,10 @@ window hides it. A subtle one-pixel border separates the dashboard from the desk
 remains available). The terminal TUI retains its `q` shortcut. A second launch
 restores the first window.
 
+On Windows, both the dashboard and settings stay out of the taskbar, including
+the first-launch settings window. Use the tray to show the dashboard, open
+settings or exit.
+
 Ctrl/Cmd plus, minus and zero change/reset font size; Ctrl/Cmd-wheel zooms.
 Ordinary wheel movement uses the shared TUI navigation. Font size is 8-32,
 line height is 1.2 and cell width is 0.6. Cascadia Mono and its license are embedded;
@@ -90,6 +94,9 @@ cloud compilation, especially on macOS when no local machine is available.
 再次启动应用恢复已有窗口。悬浮窗忽略 `q` / `Q`，退出使用右键或托盘菜单，
 也保留 Ctrl-C；终端 TUI 的 `q` 不受影响。窗口有低调的 1 像素细边框，
 显示器变化后自动恢复到可见区域。
+
+Windows 下主悬浮窗和设置窗口均不占用任务栏，首次启动打开设置时也一样。
+通过托盘显示窗口、打开设置或退出。
 
 局域网开关、改端口和重置令牌不会影响原 TUI 的动态端口、描述文件或本机令牌。
 新旧观察端共享快照缓存和有界数据库查询，分别限制请求与供应商测试入口。
