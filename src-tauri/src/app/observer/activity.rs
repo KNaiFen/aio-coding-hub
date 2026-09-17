@@ -508,7 +508,9 @@ mod handler_tests {
                 db: None,
                 retry_after: Some(Instant::now() + Duration::from_secs(3600)),
             })),
-            token: Arc::new(std::sync::RwLock::new("synthetic-observer-token".to_string())),
+            token: Arc::new(std::sync::RwLock::new(
+                "synthetic-observer-token".to_string(),
+            )),
             accepting: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             limiter: Arc::new(Semaphore::new(OBSERVER_MAX_CONCURRENT_REQUESTS)),
             probe_limiter: Arc::new(Semaphore::new(OBSERVER_MAX_CONCURRENT_PROBES)),

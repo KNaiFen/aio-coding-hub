@@ -10,6 +10,8 @@ on:
       - 'src-tauri/crates/aio-observer-protocol/**'
       - 'src-tauri/Cargo.lock'
       - '.github/workflows/float-build.yml'
+      - 'scripts/float-visual-check.mjs'
+      - 'src-tauri/Cargo.toml'
   push:
     tags: ['aio-coding-hub-v*']
 
@@ -21,6 +23,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  visual:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Install isolated visual test tools
+        shell: bash
+        run: |
+          npm install --prefix "$RUNNER_TEMP/float-visual" --no-package-lock playwright@1.58.2
+          "$RUNNER_TEMP/float-visual/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Check Float canvas and settings
+        env:
+          AIO_PLAYWRIGHT_MODULE: ${{ runner.temp }}/float-visual/node_modules/playwright/index.mjs
+        run: node scripts/float-visual-check.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: float-visual-${{ github.sha }}
+          path: output/playwright/float
+          if-no-files-found: error
+          retention-days: 7
   build:
     strategy:
       fail-fast: false
@@ -52,6 +78,7 @@ jobs:
       - name: Install frontend tools in Actions
         run: pnpm install --frozen-lockfile
       - name: Check and test Float and shared TUI
+        shell: bash
         run: |
           cargo clippy --manifest-path src-tauri/Cargo.toml -p aio-float -p aio-tui --all-targets --locked -- -D warnings
           cargo test --manifest-path src-tauri/Cargo.toml -p aio-float -p aio-tui --locked

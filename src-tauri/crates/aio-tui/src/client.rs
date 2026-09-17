@@ -62,14 +62,21 @@ impl ObserverClient {
     }
 
     pub fn remote(ip: &str, port: u16, token: &str) -> Result<Self, OfflineReason> {
-        let ip = ip.parse::<std::net::IpAddr>().map_err(|_| OfflineReason::InvalidDescriptor)?;
-        if port == 0 || token.len() < DESCRIPTOR_TOKEN_MIN_BYTES || token.len() > 256
+        let ip = ip
+            .parse::<std::net::IpAddr>()
+            .map_err(|_| OfflineReason::InvalidDescriptor)?;
+        if port == 0
+            || token.len() < DESCRIPTOR_TOKEN_MIN_BYTES
+            || token.len() > 256
             || !token.bytes().all(|byte| byte.is_ascii_graphic())
         {
             return Err(OfflineReason::InvalidDescriptor);
         }
         let mut client = Self::new()?;
-        client.remote = Some((format!("http://{}", std::net::SocketAddr::new(ip, port)), token.to_string()));
+        client.remote = Some((
+            format!("http://{}", std::net::SocketAddr::new(ip, port)),
+            token.to_string(),
+        ));
         Ok(client)
     }
 
@@ -78,7 +85,10 @@ impl ObserverClient {
             return Ok(remote.clone());
         }
         let descriptor = read_descriptor()?;
-        Ok((format!("http://127.0.0.1:{}", descriptor.port), descriptor.token))
+        Ok((
+            format!("http://127.0.0.1:{}", descriptor.port),
+            descriptor.token,
+        ))
     }
 
     pub async fn snapshot(
@@ -116,9 +126,7 @@ impl ObserverClient {
             return Err(OfflineReason::InvalidResponse);
         }
         let (base, token) = self.endpoint()?;
-        let url = format!(
-            "{base}/api/observer/v1/providers/{provider_id}/test-availability"
-        );
+        let url = format!("{base}/api/observer/v1/providers/{provider_id}/test-availability");
         let mut response = provider_probe_request(&self.http, &url, &token)
             .send()
             .await

@@ -84,6 +84,7 @@ fn float_appearance(app: tauri::AppHandle, font_size: f64, background: String, o
     }
     state.config = next;
     drop(state);
+    update_tray(&app)?;
     app.emit("float-config", ()).map_err(|_| "无法刷新窗口")?;
     Ok(())
 }
@@ -101,7 +102,9 @@ fn reveal(app: &tauri::AppHandle, interactive: bool) -> Result<(), String> {
     window.show().map_err(|_| "无法显示窗口")?;
     if interactive { let _ = window.set_focus(); }
     let state = app.state::<Mutex<AppState>>();
-    if let Ok(mut state) = state.lock() { state.dashboard.visible = true; state.dashboard.next_refresh = Instant::now(); }
+    if let Ok(mut state) = state.lock() { state.dashboard.set_visible(true); state.dashboard.next_refresh = Instant::now(); }
+    update_tray(app)?;
+    app.emit("float-config", ()).map_err(|_| "无法刷新窗口")?;
     Ok(())
 }
 
@@ -110,12 +113,22 @@ fn restore_visible_position(window: &tauri::WebviewWindow) -> Result<(), String>
     let size = window.outer_size().map_err(|_| "无法读取窗口尺寸")?;
     let monitors = window.available_monitors().map_err(|_| "无法读取显示器")?;
     let visible = monitors.iter().any(|monitor| {
-        let p = monitor.position(); let s = monitor.size();
-        let width = (i64::from(position.x) + i64::from(size.width)).min(i64::from(p.x) + i64::from(s.width)) - i64::from(position.x).max(i64::from(p.x));
-        let height = (i64::from(position.y) + i64::from(size.height)).min(i64::from(p.y) + i64::from(s.height)) - i64::from(position.y).max(i64::from(p.y));
-        width >= 80 && height >= 80
+        let area = monitor.work_area();
+        position.x >= area.position.x && position.y >= area.position.y
+            && i64::from(position.x) + i64::from(size.width) <= i64::from(area.position.x) + i64::from(area.size.width)
+            && i64::from(position.y) + i64::from(size.height) <= i64::from(area.position.y) + i64::from(area.size.height)
     });
-    if !visible { window.center().map_err(|_| "无法恢复窗口位置")?; }
+    if !visible {
+        if let Some(monitor) = window.current_monitor().ok().flatten().or_else(|| monitors.first().cloned()) {
+            let area = monitor.work_area();
+            let width = size.width.min(area.size.width);
+            let height = size.height.min(area.size.height);
+            window.set_size(tauri::PhysicalSize::new(width, height)).map_err(|_| "无法恢复窗口尺寸")?;
+            let x = position.x.clamp(area.position.x, area.position.x.saturating_add((area.size.width - width) as i32));
+            let y = position.y.clamp(area.position.y, area.position.y.saturating_add((area.size.height - height) as i32));
+            window.set_position(tauri::PhysicalPosition::new(x, y)).map_err(|_| "无法恢复窗口位置")?;
+        }
+    }
     Ok(())
 }
 
@@ -164,7 +177,7 @@ fn run_menu(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
         }
         "hide" => {
             app.get_webview_window("main").ok_or("窗口不存在")?.hide().map_err(|_| "无法隐藏窗口")?;
-            if let Ok(mut state) = app.state::<Mutex<AppState>>().lock() { state.dashboard.visible = false; }
+            if let Ok(mut state) = app.state::<Mutex<AppState>>().lock() { state.dashboard.set_visible(false); }
         }
         "top" | "through" => {
             let config = app.state::<Mutex<AppState>>().lock().map_err(|_| "悬浮窗状态不可用")?.config.clone();
@@ -174,7 +187,13 @@ fn run_menu(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
         }
         _ => {}
     }
-    if let Some(tray) = app.tray_by_id("float") { let _ = tray.set_menu(Some(menu(app).map_err(|_| "无法更新菜单")?)); }
+    update_tray(app)
+}
+
+fn update_tray(app: &tauri::AppHandle) -> Result<(), String> {
+    if let Some(tray) = app.tray_by_id("float") {
+        tray.set_menu(Some(menu(app).map_err(|_| "无法更新菜单")?)).map_err(|_| "无法更新菜单")?;
+    }
     Ok(())
 }
 
@@ -185,7 +204,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![float_settings, float_connect, float_appearance, float_open_settings, float_menu, dashboard::float_frame, dashboard::float_key])
         .setup(|app| {
             #[cfg(target_os = "macos")]
-            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory)?;
             let path = app.path().app_config_dir()?.join("settings.json");
             let (config, error) = match config::load(&path) { Ok(config) => (config, None), Err(error) => (Config::default(), Some(error)) };
             let client = config.credential().ok().and_then(|entry| entry.get_password().ok()).and_then(|token| ObserverClient::remote(&config.ip, config.port, &token).ok());
@@ -225,8 +244,22 @@ fn main() {
             });
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
+                let mut topology = Vec::new();
+                let mut next_window_check = Instant::now();
                 loop {
-                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    if Instant::now() >= next_window_check {
+                        next_window_check = Instant::now() + Duration::from_millis(500);
+                        if let Some(window) = handle.get_webview_window("main") {
+                            let visible = window.is_visible().unwrap_or(false) && !window.is_minimized().unwrap_or(false);
+                            if let Ok(mut state) = handle.state::<Mutex<AppState>>().lock() { state.dashboard.set_visible(visible); }
+                            if let Ok(monitors) = window.available_monitors() {
+                                let current = monitors.iter().map(|m| (m.position().x, m.position().y, m.size().width, m.size().height, m.scale_factor().to_bits())).collect::<Vec<_>>();
+                                if topology != current { topology = current; let _ = restore_visible_position(&window); }
+                            }
+                        }
+                    }
+                    dashboard::refresh(&handle);
                     if let Ok(mut state) = handle.state::<Mutex<AppState>>().lock() {
                         if state.dirty_at.is_some_and(|at| at.elapsed() >= Duration::from_millis(300)) {
                             if let Err(error) = config::save(&state.path, &state.config) { state.dashboard.error = Some(error); }

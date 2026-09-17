@@ -12,8 +12,10 @@ async function refresh() {
   running = true;
   try {
     const size = dimensions(innerWidth, innerHeight, config.fontSize);
-    const frame = await invoke('float_frame', { columns: size.columns, rows: size.rows });
+    let frame = await invoke('float_frame', { columns: size.columns, rows: size.rows });
     config = frame.config;
+    const actual = dimensions(innerWidth, innerHeight, config.fontSize);
+    if (actual.columns !== size.columns || actual.rows !== size.rows) frame = await invoke('float_frame', actual);
     lastFrame = frame;
     drawFrame(canvas, frame, innerWidth, innerHeight, devicePixelRatio);
     document.querySelector('#drag').style.height = `${config.fontSize * 2.4}px`;
@@ -44,11 +46,12 @@ window.addEventListener('wheel', (event) => {
   const down = wheelDelta > 0;
   wheelDelta = 0;
   if (event.ctrlKey || event.metaKey) void appearance(config.fontSize + (down ? -1 : 1));
-  else void invoke('float_key', { key: down ? 'ArrowDown' : 'ArrowUp', control: false }).then(refresh);
+  else void invoke('float_key', { key: down ? 'ArrowDown' : 'ArrowUp', control: false }).then(refresh).catch((error) => { message.textContent = String(error); });
 }, { passive: false });
 window.addEventListener('resize', () => { if (lastFrame) drawFrame(canvas, lastFrame, innerWidth, innerHeight, devicePixelRatio); void refresh(); });
 await window.__TAURI__.event.listen('float-config', () => { void refresh(); });
 await window.__TAURI__.event.listen('float-error', ({payload}) => { transientError = String(payload); message.textContent = transientError; setTimeout(() => { transientError = ''; }, 5000); });
+await document.fonts.load('12px Cascadia');
 await document.fonts.ready;
 await refresh();
 setInterval(refresh, 200);

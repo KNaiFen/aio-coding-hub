@@ -9,7 +9,9 @@ thread_local! {
 pub fn with_capability<T>(capability: ColorCapability, render: impl FnOnce() -> T) -> T {
     struct Restore(Option<ColorCapability>);
     impl Drop for Restore {
-        fn drop(&mut self) { CAPABILITY_OVERRIDE.set(self.0); }
+        fn drop(&mut self) {
+            CAPABILITY_OVERRIDE.set(self.0);
+        }
     }
     let _restore = Restore(CAPABILITY_OVERRIDE.replace(Some(capability)));
     render()
@@ -43,7 +45,11 @@ pub struct Palette {
 impl Palette {
     pub fn detected(enabled: bool) -> Self {
         if let Some(capability) = CAPABILITY_OVERRIDE.get() {
-            return Self::new(if enabled { capability } else { ColorCapability::None });
+            return Self::new(if enabled {
+                capability
+            } else {
+                ColorCapability::None
+            });
         }
         #[cfg(test)]
         let capability = if enabled {

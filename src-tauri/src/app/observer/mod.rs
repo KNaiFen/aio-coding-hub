@@ -732,7 +732,13 @@ fn insert_cached_snapshot(
 
 fn state_authorized<R: tauri::Runtime>(headers: &HeaderMap, state: &ObserverHttpState<R>) -> bool {
     state.accepting.load(Ordering::Acquire)
-        && authorized(headers, &state.token.read().unwrap_or_else(|error| error.into_inner()))
+        && authorized(
+            headers,
+            &state
+                .token
+                .read()
+                .unwrap_or_else(|error| error.into_inner()),
+        )
 }
 
 fn authorized(headers: &HeaderMap, expected: &str) -> bool {

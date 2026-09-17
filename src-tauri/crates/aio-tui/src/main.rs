@@ -1,10 +1,10 @@
 mod args;
 mod terminal;
 
-use aio_tui::{client, config, format, ui};
-use aio_tui::input::{handle_logs_key, should_quit};
 #[cfg(test)]
 use aio_tui::input::next_scope;
+use aio_tui::input::{handle_logs_key, should_quit};
+use aio_tui::{client, config, format, ui};
 
 use aio_observer_protocol::{
     CliScope, ObserverProviderAvailabilityTestResult, ObserverSnapshotV1,
@@ -328,7 +328,6 @@ fn refresh_interval(snapshot: &ObserverSnapshotV1) -> Duration {
         IDLE_REFRESH_INTERVAL
     }
 }
-
 
 #[cfg(test)]
 mod tests {

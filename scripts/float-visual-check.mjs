@@ -1,0 +1,82 @@
+// GitHub Actions installs Playwright in an isolated runner directory.
+import "./require-github-actions.mjs";
+import { createServer } from "node:http";
+import { readFile, mkdir } from "node:fs/promises";
+import { resolve, extname } from "node:path";
+import { pathToFileURL } from "node:url";
+import assert from "node:assert/strict";
+
+const { chromium } = await import(process.env.AIO_PLAYWRIGHT_MODULE ? pathToFileURL(process.env.AIO_PLAYWRIGHT_MODULE).href : "playwright");
+const root = resolve("src-tauri/crates/aio-float/web");
+const output = process.env.AIO_VISUAL_OUTPUT || "output/playwright/float";
+await mkdir(output, { recursive: true });
+const server = createServer(async (request, response) => {
+  try {
+    const path = resolve(root, `.${new URL(request.url, "http://localhost").pathname}`);
+    if (!path.startsWith(`${root}/`) && !path.startsWith(`${root}\\`)) { response.writeHead(403).end(); return; }
+    const mime = { ".js": "text/javascript", ".css": "text/css", ".html": "text/html", ".ttf": "font/ttf" }[extname(path)];
+    const content = await readFile(path);
+    response.writeHead(200, { "Content-Type": mime || "application/octet-stream" });
+    response.end(content);
+  } catch { response.writeHead(404).end(); }
+});
+await new Promise((done) => server.listen(0, "127.0.0.1", done));
+const browser = await chromium.launch({ executablePath: process.env.AIO_CHROME_PATH || undefined, headless: true });
+try {
+  const errors = [];
+  for (const [width, height, scale] of [[280,640,1], [160,300,1], [640,480,2]]) {
+    const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: scale });
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.addInitScript(() => {
+      const config = { ip: "127.0.0.1", port: 13799, fontSize: 12, background: "#272B33", opacity: .35, alwaysOnTop: true, clickThrough: false };
+      const cells = [];
+      window.floatCalls = [];
+      for (const [y, text, fg] of [[0,"并发 0 | 首选 正价PRO20X", "#69aab3"], [1,"Codex | 今日 $187.51", "#71ae7e"], [3,"200 成功 1分钟前", "#71ae7e"], [4,"Codex / gpt-6-astra-xhigh", "#7da0c4"], [5,"正价PRO20X VIBE 无目录", "#b689be"], [6,"直连 5.0s 18.4 t/s", "#69aab3"]]) {
+        let x = 0;
+        for (const char of text) { const width = char.codePointAt(0) > 255 ? 2 : 1; cells.push({x,y,text:char,width,fg,bg:null,bold:false,italic:false,underline:false}); x += width; }
+      }
+      window.__TAURI__ = { core: { invoke: async (command, args) => {
+        window.floatCalls.push({command, args});
+        if (command === "float_frame") return { ...args, cells: cells.filter(cell => cell.x + cell.width <= args.columns), config, connected: true, error: null };
+        if (command === "float_settings") return { config, hasToken: true, error: null };
+        if (command === "float_appearance") Object.assign(config, args);
+      } }, window: { getCurrentWindow: () => ({startDragging: async()=>{},startResizeDragging: async()=>{}}) }, event: {listen: async()=>{}} };
+    });
+    await page.goto(`http://127.0.0.1:${server.address().port}/index.html`);
+    await page.waitForFunction(() => document.querySelector("canvas").width > 1 && document.fonts.check("12px Cascadia"));
+    await page.waitForTimeout(500);
+    const pixels = await page.evaluate(() => {
+      const canvas = document.querySelector("canvas");
+      const data = canvas.getContext("2d").getImageData(0,0,canvas.width,canvas.height).data;
+      let opaque = 0, translucent = 0;
+      for(let i=3;i<data.length;i+=4) { if(data[i]===255) opaque++; if(data[i]>50 && data[i]<150) translucent++; }
+      return {opaque,translucent,overflow:document.documentElement.scrollWidth>innerWidth};
+    });
+    assert(pixels.opaque > 20, "text must remain opaque");
+    assert(pixels.translucent > 1000, "background must be translucent");
+    assert(!pixels.overflow, "dashboard must not overflow");
+    await page.screenshot({ path: `${output}/dashboard-${width}-${scale}x.png`, omitBackground: true });
+    await page.keyboard.press('Control+=');
+    await page.waitForFunction(() => window.floatCalls.some(call => call.command === 'float_appearance' && call.args.fontSize === 13));
+    await page.keyboard.press('Tab');
+    await page.waitForFunction(() => window.floatCalls.some(call => call.command === 'float_key' && call.args.key === 'Tab'));
+    await page.mouse.move(width / 2, height / 2);
+    await page.mouse.wheel(0, 100);
+    await page.waitForFunction(() => window.floatCalls.some(call => call.command === 'float_key' && call.args.key === 'ArrowDown'));
+    await page.mouse.click(width / 2, height / 2, {button:'right'});
+    await page.waitForFunction(() => window.floatCalls.some(call => call.command === 'float_menu'));
+    await page.setViewportSize({width:340,height:600});
+    await page.goto(`http://127.0.0.1:${server.address().port}/settings.html`);
+    await page.getByLabel("IP 地址").fill("192.168.1.2");
+    await page.getByRole("button", {name:"测试并保存连接"}).click();
+    await page.getByText("已连接", {exact:true}).waitFor();
+    await page.getByLabel('字号', {exact:true}).fill('32');
+    await page.getByRole('button', {name:'应用外观'}).click();
+    await page.getByText('已保存', {exact:true}).waitFor();
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    await page.screenshot({ path: `${output}/settings-${scale}x.png`, fullPage:true });
+    await page.close();
+  }
+  assert.deepEqual(errors, []);
+  console.log("Float visual checks passed: narrow/wide grids, DPI, font, alpha and settings.");
+} finally { await browser.close(); await new Promise((done) => server.close(done)); }
