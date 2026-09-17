@@ -65,6 +65,16 @@ try {
     await page.waitForFunction(() => window.floatCalls.some(call => call.command === 'float_key' && call.args.key === 'ArrowDown'));
     await page.mouse.click(width / 2, height / 2, {button:'right'});
     await page.waitForFunction(() => window.floatCalls.some(call => call.command === 'float_menu'));
+    for (const fontSize of [8, 32]) {
+      await page.evaluate(fontSize => window.__TAURI__.core.invoke('float_appearance', {fontSize}), fontSize);
+      await page.waitForFunction(fontSize => {
+        const columns = Math.min(400, Math.max(1, Math.floor((innerWidth - 12) / (fontSize * .6))));
+        return window.floatCalls.some(call => call.command === 'float_frame' && call.args.columns === columns);
+      }, fontSize);
+      await page.waitForTimeout(250);
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+      await page.screenshot({path:`${output}/dashboard-${width}-${scale}x-font${fontSize}.png`, omitBackground:true});
+    }
     await page.setViewportSize({width:340,height:600});
     await page.goto(`http://127.0.0.1:${server.address().port}/settings.html`);
     await page.getByLabel("IP 地址").fill("192.168.1.2");

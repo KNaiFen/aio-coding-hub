@@ -153,6 +153,35 @@ fn replace(from: &Path, to: &Path) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn settings_round_trip_and_atomic_replacement_preserve_window_and_connection() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("aio-float-{}-{unique}", std::process::id()));
+        let path = dir.join("settings.json");
+        let mut config = Config::default();
+        save(&path, &config).unwrap();
+        config.ip = "192.168.1.20".into();
+        config.port = 14000;
+        config.font_size = 24.0;
+        config.opacity = 0.35;
+        config.click_through = true;
+        config.x = Some(-600.0);
+        config.y = Some(100.0);
+        save(&path, &config).unwrap();
+        let restored = load(&path).unwrap();
+        assert_eq!(
+            serde_json::to_value(restored).unwrap(),
+            serde_json::to_value(&config).unwrap()
+        );
+        config.font_size = 0.0;
+        assert!(save(&path, &config).is_err());
+        assert_eq!(load(&path).unwrap().font_size, 24.0);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
     #[test]
     fn defaults_are_valid_and_never_serialize_credentials() {
         let config = Config::default();
