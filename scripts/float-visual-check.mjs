@@ -40,7 +40,7 @@ try {
         window.floatCalls.push({command, args});
         if (command === "float_frame") return { ...args, cells: cells.filter(cell => cell.x + cell.width <= args.columns && cell.y < args.rows), config, connected: true, error: window.floatError };
         if (command === "float_settings") return { config, hasToken: true, error: null };
-        if (command === "float_connect" && window.connectionFailure) throw new Error(window.connectionFailure);
+        if (command === "float_connect" && window.connectionFailure) throw window.connectionFailure;
         if (command === "float_appearance") Object.assign(config, args);
       } }, window: { getCurrentWindow: () => ({startDragging: async()=>{},startResizeDragging: async()=>{}}) }, event: {listen: async()=>{}} };
     });
