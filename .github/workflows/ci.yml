@@ -268,6 +268,7 @@ jobs:
         run: |
           set -euo pipefail
           cargo fmt --manifest-path src-tauri/Cargo.toml --all
+          cargo update --manifest-path src-tauri/Cargo.toml -p rustls --precise 0.23.45
           cargo update --manifest-path src-tauri/Cargo.toml --workspace
           cargo run --manifest-path src-tauri/Cargo.toml --locked --example export-bindings
           pnpm exec prettier --write src/generated/bindings.ts
