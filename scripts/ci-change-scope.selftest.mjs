@@ -6,6 +6,7 @@ import {
   classifyPath,
   classifyPaths,
   collectChangedPaths,
+  floatVersionOnlyLockChange,
   loadPolicy,
   parseNameStatus,
   runClassifier,
@@ -280,6 +281,94 @@ assert.equal(branchPush.frontendCi, true);
 assert.equal(branchPush.rustCi, true);
 assert.equal(branchPush.sharedCi, true);
 assert.equal(branchPush.providerTrendBenchmark, false);
+
+const floatPaths = [
+  "src-tauri/crates/aio-float/src/main.rs",
+  "src-tauri/crates/aio-float/web/renderer.js",
+  "src-tauri/crates/aio-float/web/float.css",
+  "src-tauri/crates/aio-float/web/fonts/CascadiaMono.ttf",
+  "src-tauri/crates/aio-float/Cargo.toml",
+  "src-tauri/crates/aio-float/tauri.conf.json",
+  "src-tauri/crates/aio-tui/src/ui.rs",
+  "scripts/float-visual-check.mjs",
+  ".github/workflows/float-build.yml",
+  ".github/workflows/float-release.yml",
+  ".github/codeql-float.yml",
+  "scripts/float-release.mjs",
+  "scripts/float-release.selftest.mjs",
+];
+for (const eventName of ["pull_request", "push"]) {
+  for (const path of floatPaths) {
+    const result = runClassifier(
+      { eventName, baseSha, beforeSha: baseSha, headSha, policyPath },
+      (args) => args[0] === "merge-base" ? mergeBaseSha : `M\0${path}\0`
+    );
+    assert.equal(result.scope, "float", `${eventName}: ${path}`);
+    assert.equal(result.floatCi, true);
+    assert.equal(result.frontendCi, false);
+    assert.equal(result.rustCi, false);
+    assert.equal(result.fullCi, false);
+  }
+}
+for (const path of ["src-tauri/crates/aio-observer-protocol/src/lib.rs", "src-tauri/Cargo.toml", "src-tauri/Cargo.lock"]) {
+  const result = classifyPaths([path], policy);
+  assert.equal(result.floatCi, true);
+  assert.equal(result.rustCi, true);
+}
+const lockBefore = '[[package]]\nname = "aio-float"\nversion = "0.60.62"\n\n[[package]]\nname = "reqwest"\nversion = "0.12.28"\n';
+const lockAfter = lockBefore.replace("0.60.62", "0.60.63");
+assert.equal(floatVersionOnlyLockChange(lockBefore, lockAfter), true);
+assert.equal(floatVersionOnlyLockChange(lockBefore, lockAfter.replace("0.12.28", "0.12.29")), false);
+assert.equal(floatVersionOnlyLockChange(lockBefore, lockBefore), false);
+for (const eventName of ["pull_request", "push"]) {
+  const classifyLock = (after) => runClassifier(
+    { eventName, baseSha, beforeSha: baseSha, headSha, policyPath },
+    (args) => args[0] === "merge-base" ? mergeBaseSha
+      : args[0] === "show" ? (args[1].startsWith(headSha) ? after : lockBefore)
+      : "M\0src-tauri/Cargo.lock\0M\0src-tauri/crates/aio-float/Cargo.toml\0"
+  );
+  const releaseScope = classifyLock(lockAfter);
+  assert.equal(releaseScope.scope, "float");
+  assert.equal(releaseScope.floatCi, true);
+  assert.equal(releaseScope.frontendCi, false);
+  assert.equal(releaseScope.rustCi, false);
+  assert.equal(releaseScope.fullCi, false);
+  assert.equal(classifyLock(lockAfter.replace("0.12.28", "0.12.29")).rustCi, true);
+}
+
+for (const eventName of ["pull_request", "push"]) {
+  for (const [extraPaths, expected] of [
+    [["CHANGELOG.md", "docs/product/aio-float.md"], [false, false, true]],
+    [["src/main.tsx"], [true, eventName === "push", true]],
+    [["src-tauri/src/app/observer/mod.rs"], [eventName === "push", true, true]],
+    [["src-tauri/crates/aio-observer-protocol/src/lib.rs"], [eventName === "push", true, true]],
+    [[".github/workflows/ci.yml"], [true, true, true]],
+    [["scripts/ci-change-scope.mjs"], [true, true, true]],
+  ]) {
+    const paths = ["src-tauri/crates/aio-float/web/float.css", ...extraPaths];
+    const result = runClassifier(
+      { eventName, baseSha, beforeSha: baseSha, headSha, policyPath },
+      (args) => args[0] === "merge-base" ? mergeBaseSha : paths.map((path) => `M\0${path}\0`).join("")
+    );
+    assert.deepEqual([result.frontendCi, result.rustCi, result.floatCi], expected, `${eventName}: ${paths}`);
+  }
+}
+assert.equal(
+  classifyNameStatus("R100\0src-tauri/src/lib.rs\0src-tauri/crates/aio-float/src/old.rs\0", policy).rustCi,
+  true,
+  "moves out of the desktop must retain desktop validation"
+);
+const missingLock = runClassifier(
+  { eventName: "pull_request", baseSha, headSha, policyPath },
+  (args) => {
+    if (args[0] === "merge-base") return mergeBaseSha;
+    if (args[0] === "show") throw new Error("lockfile unavailable");
+    return "D\0src-tauri/Cargo.lock\0";
+  }
+);
+assert.equal(missingLock.fullCi, true);
+assert.equal(missingLock.floatCi, true);
+assert.equal(missingLock.reason, "classification-error");
 
 for (const eventName of ["pull_request", "push"]) {
   for (const [paths, scope] of [

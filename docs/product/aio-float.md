@@ -46,12 +46,19 @@ connection. Authentication failures require an updated token.
 All dependency installation, generated bindings, tests and native builds run in
 GitHub Actions. `float-build.yml` checks Windows x64 and macOS ARM64, publishes
 an EXE or application ZIP and SHA-256 checksums as workflow artifacts. The workflow
-also runs on version tags and can be dispatched manually. Main CI builds both
-Float packages alongside the signed AIO release candidate. The release workflow
-publishes these exact packages with the shared SHA-256 manifest. Float packages
-are not added to the desktop updater manifest: update AIO through its existing
-updater, and replace Float with the new EXE or app from the release downloads.
-Companion development builds use `dev-build` for the same source revision.
+is called by the path-classified CI and can be dispatched manually. Float and
+shared TUI changes select this workflow without desktop frontend tests, desktop
+Rust tests, binding generation or desktop packaging. Observer protocol, workspace
+dependencies and mixed desktop changes still select the affected desktop checks.
+CodeQL limits its source paths to Float/shared crates for a Float-only change,
+and uses a separate analysis category to preserve desktop scan results.
+
+Float versions are independent of the desktop/TUI version. `aio-float-vX.Y.Z`
+tags invoke `float-release.yml`, validate a main-branch source, build only Float
+for both platforms, and publish EXE/ZIP packages with SHA-256 checksums. These
+releases do not become the repository's latest desktop release or replace the
+desktop updater manifest. Replace Float with the new EXE or app to update it.
+Full desktop releases may continue including the current Float package.
 
 macOS uses the project's existing ad-hoc signing arrangement; this does not claim
 Apple notarization. Native window acceptance must be recorded separately from
@@ -92,10 +99,14 @@ cloud compilation, especially on macOS when no local machine is available.
 
 `float-build.yml` 还提供 Playwright 视觉检查和 `float-visual-*` 截图工件，
 覆盖窄窗口、高 DPI、透明度像素、字体缩放、键盘/滚轮及设置。
-发布版本须同步根包、主程序、协议、TUI、Float 的 Cargo/锁文件与 Tauri 配置；
-版本一致性校验包含 Float。正式版由主 CI 同时构建 AIO 与 Float，发布流程
-复用同一提交的候选包，统一提供校验和。AIO 可使用现有更新入口；Float 无自动
-更新，退出后用发布页的新 EXE 或 app 替换。开发验收包仍可使用同一提交的
-`dev-build` 工作流，分别选择 `windows-x64` 与 `macos-arm64`。
+Float 独立维护 Cargo、锁文件中自身条目及 Tauri 配置的版本，以
+`aio-float-vX.Y.Z` 标签单独发布两个平台包。仅修改锁文件中的 Float 版本时，
+分类器按完整内容差异确认后走 Float 检查；其他依赖变更保留本体检查。
+Float 发布不改变本体的最新版本与自动更新清单。退出后用新 EXE 或 app 替换。
+
+仅 Float 或共享 TUI 改动会跳过本体前端、Rust、绑定生成、macOS 观察服务测试
+和签名打包，保留静态合同、Float/TUI 测试、两平台构建与视觉检查。
+协议、本体及公共依赖变更仍按影响范围检查。公共 CI 规则变更跑完整验证；
+Float 专用构建、发布和扫描配置只触发 Float 检查。
 
 原生验收与云端验证分别记录在 [验收记录](aio-float-acceptance.md)。

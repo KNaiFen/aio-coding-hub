@@ -21,6 +21,15 @@ const CONTROL_PLANE_EXACT_PATHS = new Set([
   "scripts/ci-change-scope.selftest.mjs",
 ]);
 const CONTROL_PLANE_PREFIXES = [".github/"];
+const FLOAT_PREFIXES = ["src-tauri/crates/aio-float/", "src-tauri/crates/aio-tui/"];
+const FLOAT_PATHS = new Set([
+  ".github/workflows/float-build.yml",
+  ".github/workflows/float-release.yml",
+  ".github/codeql-float.yml",
+  "scripts/float-visual-check.mjs",
+  "scripts/float-release.mjs",
+  "scripts/float-release.selftest.mjs",
+]);
 const PROVIDER_TREND_BENCHMARK_EXACT_PATHS = new Set([
   "src-tauri/src/infra/db/migrations/v46_to_v47.rs",
   "src-tauri/src/infra/request_logs.rs",
@@ -130,6 +139,9 @@ export function classifyPath(path, policy) {
   if (!isSafeRepositoryPath(path)) {
     return { path, tier: "shared", reason: "unsafe-path" };
   }
+  if (FLOAT_PATHS.has(path) || FLOAT_PREFIXES.some((prefix) => path.startsWith(prefix))) {
+    return { path, tier: "float", reason: "float-source" };
+  }
   if (
     CONTROL_PLANE_EXACT_PATHS.has(path) ||
     CONTROL_PLANE_PREFIXES.some((prefix) => path.startsWith(prefix))
@@ -178,6 +190,7 @@ export function fullCiResult(reason, error = undefined) {
     fullCi: true,
     frontendCi: true,
     rustCi: true,
+    floatCi: true,
     sharedCi: true,
     docsChecks: false,
     providerTrendBenchmark: true,
@@ -223,11 +236,17 @@ export function classifyPaths(paths, policy) {
   const classifications = uniquePaths.map((path) => classifyPath(path, policy));
   const frontendSource = classifications.some(({ tier }) => tier === "frontend");
   const rustSource = classifications.some(({ tier }) => tier === "rust");
+  const floatSource = classifications.some(({ tier }) => tier === "float");
   const sharedCi =
     classifications.some(({ tier }) => tier === "shared") || (frontendSource && rustSource);
   const fullCi = sharedCi;
   const frontendCi = sharedCi || frontendSource;
   const rustCi = sharedCi || rustSource;
+  const floatCi = sharedCi || floatSource || uniquePaths.some((path) =>
+    path.startsWith("src-tauri/crates/aio-observer-protocol/") ||
+    ["src-tauri/Cargo.lock", "src-tauri/Cargo.toml", "src-tauri/build.rs"].includes(path) ||
+    path.startsWith("src-tauri/icons/") || path.startsWith("src-tauri/patches/")
+  );
   const docsChecks = classifications.some(({ tier }) => tier === "checked-docs");
   return {
     scope: fullCi
@@ -236,12 +255,15 @@ export function classifyPaths(paths, policy) {
         ? "frontend"
         : rustCi
           ? "rust"
-          : docsChecks
-            ? "checked-docs"
-            : "process-docs",
+          : floatCi
+            ? "float"
+            : docsChecks
+              ? "checked-docs"
+              : "process-docs",
     fullCi,
     frontendCi,
     rustCi,
+    floatCi,
     sharedCi,
     docsChecks,
     providerTrendBenchmark: shouldRunProviderTrendBenchmark(uniquePaths),
@@ -251,9 +273,11 @@ export function classifyPaths(paths, policy) {
         ? "frontend-path"
         : rustCi
           ? "rust-path"
-          : docsChecks
-            ? "checked-documentation"
-            : "process-documentation",
+          : floatCi
+            ? "float-path"
+            : docsChecks
+              ? "checked-documentation"
+              : "process-documentation",
     classifications,
   };
 }
@@ -350,6 +374,14 @@ function conciseError(error) {
   return message.split("\n", 1)[0].slice(0, 300);
 }
 
+export function floatVersionOnlyLockChange(before, after) {
+  const normalize = (text) => text.replace(
+    /(\[\[package\]\]\r?\nname = "aio-float"\r?\nversion = ")[^"\r\n]+("\r?\n)/g,
+    "$1<FLOAT_VERSION>$2"
+  );
+  return before !== after && normalize(before) === normalize(after);
+}
+
 export function runClassifier(options, runGit = runGitCommand) {
   try {
     const policy = loadPolicy(options.policyPath || DEFAULT_POLICY_PATH);
@@ -357,7 +389,19 @@ export function runClassifier(options, runGit = runGitCommand) {
     if (changed.forceFull) {
       return changed.reason === "manual-dispatch" ? manualCiResult() : fullCiResult(changed.reason);
     }
-    const result = classifyPaths(changed.paths, policy);
+    let paths = changed.paths;
+    if (paths.includes("src-tauri/Cargo.lock")) {
+      const base = options.eventName === "pull_request"
+        ? runGit(["merge-base", options.baseSha, options.headSha]).trim()
+        : options.beforeSha;
+      const before = runGit(["show", `${base}:src-tauri/Cargo.lock`]);
+      const after = runGit(["show", `${options.headSha}:src-tauri/Cargo.lock`]);
+      if (floatVersionOnlyLockChange(before, after)) {
+        paths = paths.map((path) => path === "src-tauri/Cargo.lock"
+          ? "src-tauri/crates/aio-float/Cargo.toml" : path);
+      }
+    }
+    const result = classifyPaths(paths, policy);
     return options.eventName === "push" && (result.frontendCi || result.rustCi)
       ? forceFullResult(result, "branch-push")
       : result;
@@ -402,6 +446,7 @@ function writeGitHubOutputs(result) {
       `full_ci=${String(result.fullCi)}`,
       `frontend_ci=${String(result.frontendCi)}`,
       `rust_ci=${String(result.rustCi)}`,
+      `float_ci=${String(result.floatCi)}`,
       `shared_ci=${String(result.sharedCi)}`,
       `docs_checks=${String(result.docsChecks)}`,
       `provider_trend_benchmark=${String(result.providerTrendBenchmark)}`,

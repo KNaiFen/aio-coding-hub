@@ -7,6 +7,7 @@ const ACTIONS_GUARD = "node scripts/require-github-actions.mjs && ";
 const ROOT_TEST_INCLUDE = 'include: ["src/**/*.{test,spec}.{ts,tsx}"],';
 const SOURCE_CONTRACT_STEP_IF =
   "needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true'";
+const ALL_SOURCE_CONTRACT_STEP_IF = `${SOURCE_CONTRACT_STEP_IF} || needs.change-scope.outputs.float_ci == 'true'`;
 const PLUGIN_CONTRACT_STEP_IF =
   "needs.change-scope.outputs.docs_checks == 'true' || needs.change-scope.outputs.frontend_ci == 'true'";
 const DOCS_CONTRACT_STEP_IF = "needs.change-scope.outputs.docs_checks == 'true'";
@@ -48,19 +49,21 @@ const CI_GATE_RESULT_ENV = new Map([
   ["FULL_CI", "${{ needs.change-scope.outputs.full_ci }}"],
   ["FRONTEND_CI", "${{ needs.change-scope.outputs.frontend_ci }}"],
   ["RUST_CI", "${{ needs.change-scope.outputs.rust_ci }}"],
+  ["FLOAT_CI", "${{ needs.change-scope.outputs.float_ci }}"],
   ["SHARED_CI", "${{ needs.change-scope.outputs.shared_ci }}"],
   ["DOCS_CHECKS", "${{ needs.change-scope.outputs.docs_checks }}"],
   ["CONTRACTS_RESULT", "${{ needs.contracts.result }}"],
   ["FRONTEND_RESULT", "${{ needs.frontend.result }}"],
   ["RUST_RESULT", "${{ needs.rust.result }}"],
   ["OBSERVER_MACOS_RESULT", "${{ needs.observer-macos.result }}"],
+  ["FLOAT_RESULT", "${{ needs.float.result }}"],
   ["PLAN_RESULT", "${{ needs.candidate-plan.result }}"],
   ["SHOULD_BUILD", "${{ needs.candidate-plan.outputs.should_build }}"],
   ["BUILD_RESULT", "${{ needs.build-release-candidate.result }}"],
   ["TUI_BUILD_RESULT", "${{ needs.build-tui-release-candidate.result }}"],
   ["ASSEMBLE_RESULT", "${{ needs.assemble-release-candidate.result }}"],
 ]);
-const CI_GATE_RUN_SHA256 = "9f33c0c292156d3886a41a4dc5135d2d2ae637abd6dc951db61465254add4b11";
+const CI_GATE_RUN_SHA256 = "48ddcdeb03c522ce7aff49ec6d3864f1f2bcbcc8c4d88ce0352afcb29d5ef9ca";
 const CODEQL_STRATEGY_BLOCK = `strategy:
   fail-fast: false
   matrix:
@@ -74,7 +77,7 @@ const CODEQL_ANALYZE_IF =
 const CI_JOB_CONDITIONS = new Map([
   [
     "contracts",
-    "always() && needs.change-scope.result == 'success' && (needs.change-scope.outputs.docs_checks == 'true' || needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true')",
+    "always() && needs.change-scope.result == 'success' && (needs.change-scope.outputs.docs_checks == 'true' || needs.change-scope.outputs.frontend_ci == 'true' || needs.change-scope.outputs.float_ci == 'true' || needs.change-scope.outputs.rust_ci == 'true')",
   ],
   [
     "frontend",
@@ -87,6 +90,10 @@ const CI_JOB_CONDITIONS = new Map([
   [
     "observer-macos",
     "always() && needs.change-scope.result == 'success' && needs.contracts.result == 'success' && needs.change-scope.outputs.rust_ci == 'true'",
+  ],
+  [
+    "float",
+    "always() && needs.change-scope.result == 'success' && needs.contracts.result == 'success' && needs.change-scope.outputs.float_ci == 'true'",
   ],
   [
     "candidate-plan",
@@ -601,6 +608,7 @@ function assertCodeqlContract(workflow, failures) {
     [
       ["languages", "${{ matrix.language }}"],
       ["build-mode", "${{ matrix.build-mode }}"],
+      ["config-file", "${{ needs.change-scope.outputs.scope == 'float' && './.github/codeql-float.yml' || '' }}"],
     ],
     failures
   );
@@ -609,7 +617,7 @@ function assertCodeqlContract(workflow, failures) {
     "Analyze",
     "github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3",
     undefined,
-    [["category", "/language:${{ matrix.language }}"]],
+    [["category", "${{ needs.change-scope.outputs.scope == 'float' && '/float' || '' }}/language:${{ matrix.language }}"]],
     failures
   );
   if (/pull_request_target|release-signing|TAURI_SIGNING_PRIVATE_KEY/.test(workflow)) {
@@ -618,7 +626,10 @@ function assertCodeqlContract(workflow, failures) {
 }
 
 function assertCiDependencyConditions(workflow, failures) {
-  for (const job of ["frontend", "rust", "observer-macos"]) {
+  if (workflowJobScalar(workflow, "float", "uses") !== "./.github/workflows/float-build.yml") {
+    failures.push("ci.yml float must call the independent Float workflow");
+  }
+  for (const job of ["frontend", "rust", "observer-macos", "float"]) {
     if (workflowJobScalar(workflow, job, "needs") !== "[change-scope, contracts]") {
       failures.push(`ci.yml ${job} must need change-scope and contracts`);
     }
@@ -735,6 +746,7 @@ export function assertCiQualityGates({
     [
       "node scripts/check-cloud-only-verification.mjs",
       "node scripts/check-tui-release-contract.mjs",
+      "node scripts/float-release.selftest.mjs",
     ],
     failures
   );
@@ -744,9 +756,6 @@ export function assertCiQualityGates({
     "contracts",
     [
       "node scripts/check-cloud-only-verification.selftest.mjs",
-      "node scripts/ci-change-scope.selftest.mjs",
-      "node scripts/check-ci-quality-gates.selftest.mjs && node scripts/check-ci-quality-gates.mjs",
-      "node scripts/check-github-actions-pin-policy.selftest.mjs && node scripts/check-github-actions-pin-policy.mjs",
       "node scripts/check-no-instant-now-sub.selftest.mjs && node scripts/check-no-instant-now-sub.mjs",
       "node scripts/check-dev-build-artifacts.selftest.mjs && node scripts/check-dev-build-artifacts.mjs",
       "node scripts/release-source.selftest.mjs",
@@ -758,6 +767,18 @@ export function assertCiQualityGates({
     ],
     failures,
     SOURCE_CONTRACT_STEP_IF
+  );
+  requireWorkflowCommands(
+    ciWorkflow,
+    "ci.yml",
+    "contracts",
+    [
+      "node scripts/ci-change-scope.selftest.mjs",
+      "node scripts/check-ci-quality-gates.selftest.mjs && node scripts/check-ci-quality-gates.mjs",
+      "node scripts/check-github-actions-pin-policy.selftest.mjs && node scripts/check-github-actions-pin-policy.mjs",
+    ],
+    failures,
+    ALL_SOURCE_CONTRACT_STEP_IF
   );
   requireWorkflowCommands(
     ciWorkflow,
@@ -830,7 +851,7 @@ export function assertCiQualityGates({
     failures.push(`ci.yml ci-gate must include name: ${ciGateName}`);
   }
   const ciGateNeeds = workflowJobList(ciWorkflow, "ci-gate", "needs");
-  for (const job of ["manual-dispatch-guard", "contracts", "frontend", "rust", "observer-macos"]) {
+  for (const job of ["manual-dispatch-guard", "contracts", "frontend", "rust", "observer-macos", "float"]) {
     if (!ciGateNeeds.includes(job)) failures.push(`ci.yml ci-gate must include - ${job}`);
   }
   if (workflowJobBody(ciWorkflow, "pr-title") || ciGateNeeds.includes("pr-title")) {
