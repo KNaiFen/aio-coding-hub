@@ -18,6 +18,10 @@ macro_rules! generated_command_registry {
         $callback! {
             // ── settings ──
             settings_get => crate::commands::settings::settings_get,
+            observer_lan_status => crate::commands::observer::observer_lan_status,
+            observer_lan_configure => crate::commands::observer::observer_lan_configure,
+            observer_lan_token_reveal => crate::commands::observer::observer_lan_token_reveal,
+            observer_lan_token_rotate => crate::commands::observer::observer_lan_token_rotate,
             settings_set => crate::commands::settings::settings_set,
             settings_gateway_rectifier_set => crate::commands::settings::settings_gateway_rectifier_set,
             settings_circuit_breaker_notice_set => crate::commands::settings::settings_circuit_breaker_notice_set,

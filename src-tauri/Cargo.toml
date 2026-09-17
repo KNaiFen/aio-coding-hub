@@ -1,13 +1,13 @@
 [package]
 name = "aio-coding-hub"
-version = "0.60.61"
+version = "0.60.62"
 description = "AIO Coding Hub"
 authors = ["dyndynjyxa"]
 edition = "2021"
 default-run = "aio-coding-hub"
 
 [workspace]
-members = [".", "crates/aio-observer-protocol", "crates/aio-tui"]
+members = [".", "crates/aio-observer-protocol", "crates/aio-tui", "crates/aio-float"]
 default-members = ["."]
 resolver = "2"
 

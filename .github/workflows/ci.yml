@@ -554,6 +554,31 @@ jobs:
           }
           Compress-Archive -Path "$portableDir/*" -DestinationPath "stable-assets/${{ matrix.portable_asset_name }}" -Force
 
+      - name: Build Float release application
+        working-directory: src-tauri/crates/aio-float
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: '-'
+        run: |
+          set -euo pipefail
+          if [[ '${{ matrix.target_id }}' == 'windows-x64' ]]; then
+            pnpm exec tauri build --target '${{ matrix.target }}' --no-bundle -- --locked
+          else
+            pnpm exec tauri build --target '${{ matrix.target }}' --bundles app -- --locked
+          fi
+
+      - name: Package Float release application
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ '${{ matrix.target_id }}' == 'windows-x64' ]]; then
+            cp 'src-tauri/target/${{ matrix.target }}/release/aio-float.exe' stable-assets/aio-float-windows-x64.exe
+          else
+            ditto -c -k --sequesterRsrc --keepParent \
+              'src-tauri/target/${{ matrix.target }}/release/bundle/macos/AIO Float.app' \
+              stable-assets/aio-float-macos-arm64.zip
+          fi
+
       - name: Upload platform candidate
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

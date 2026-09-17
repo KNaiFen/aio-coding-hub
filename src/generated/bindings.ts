@@ -14,6 +14,44 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async observerLanStatus(): Promise<Result<ObserverLanStatus, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("observer_lan_status") };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async observerLanConfigure(
+    enabled: boolean,
+    port: number
+  ): Promise<Result<ObserverLanStatus, string>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("observer_lan_configure", { enabled, port }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async observerLanTokenReveal(): Promise<Result<string, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("observer_lan_token_reveal") };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async observerLanTokenRotate(): Promise<Result<string, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("observer_lan_token_rotate") };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async settingsSet(update: SettingsUpdate): Promise<Result<SettingsMutationResult, string>> {
     try {
       return { status: "ok", data: await TAURI_INVOKE("settings_set", { update }) };
@@ -3773,6 +3811,13 @@ export type ModelRoutingRule = {
 };
 export type NoticeLevel = "info" | "success" | "warning" | "error";
 export type NoticeSendInput = { level: NoticeLevel; title: string | null; body: string };
+export type ObserverLanStatus = {
+  enabled: boolean;
+  port: number;
+  running: boolean;
+  addresses: string[];
+  error: string | null;
+};
 export type PluginAuditLog = {
   id: number;
   plugin_id: string | null;

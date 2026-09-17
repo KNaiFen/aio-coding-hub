@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.60.62](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.62) (2026-09-17)
+
+### Highlights
+
+* add AIO Float for Windows x64 and macOS ARM64 with the shared TUI dashboard
+* add opt-in LAN observation with separate credentials while preserving existing local TUI connections
+* redesign Float settings with appearance preview, compact controls, color presets, and connection feedback
+* include Float EXE and app ZIP in release downloads and SHA-256 checksums alongside the AIO updater packages
+
 ## [0.60.61](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.61) (2026-09-11)
 
 ### Highlights

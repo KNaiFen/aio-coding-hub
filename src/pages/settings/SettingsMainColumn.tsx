@@ -22,6 +22,7 @@ import { HomeOverviewVisibilityEditor } from "./HomeOverviewVisibilityEditor";
 import type { NoticePermissionStatus } from "./useSystemNotification";
 import type { CliKey } from "../../services/providers/providers";
 import { ContributionSlot } from "../../plugins/contributions/ContributionSlot";
+import { ObserverLanSettings } from "./ObserverLanSettings";
 
 type PersistKey = "preferred_port" | "log_retention_days" | "request_log_retention_days";
 type BooleanPersistKey = "show_home_usage" | "auto_start" | "start_minimized" | "tray_enabled";
@@ -763,6 +764,7 @@ export function SettingsMainColumn({
       />
 
       <ContributionSlot slotId="settings.sections" />
+      <ObserverLanSettings />
 
       <SettingsConfigCard
         systemSettingsProps={{

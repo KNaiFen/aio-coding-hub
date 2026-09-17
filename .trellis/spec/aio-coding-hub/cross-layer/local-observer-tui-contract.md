@@ -4,12 +4,12 @@
 
 The desktop application exposes an observational, authenticated observer for a
 standalone `aio-tui` process running on the same machine. This surface is for
-SSH and narrow-terminal observability; it is not a second gateway and is not a
-remote administration API.
+SSH, narrow-terminal observability, and the independent AIO Float dashboard;
+it is not a second gateway or a remote administration API.
 
 ## Endpoint and descriptor
 
-- The observer binds only to `127.0.0.1` on an ephemeral port.
+- The existing local observer binds to `127.0.0.1` on an ephemeral port.
 - The descriptor is `~/.aio-coding-hub/observer-v1.json` (the same home and
   dot-directory overrides used by AIO).
 - The descriptor is written atomically and contains only protocol/app version,
@@ -33,6 +33,20 @@ remote administration API.
   credentials, or decoder details.
 
 ## Isolation and fail-open behavior
+
+- An optional independent IPv4 LAN listener binds `0.0.0.0`, defaults to port
+  13799, and is disabled for existing and new installations. Its persistent token
+  is independent of both the local descriptor token and the gateway token.
+  LAN changes never restart the local listener or rewrite its descriptor.
+- LAN and local listeners share bounded snapshots, cache, database query permits
+  and activity ownership, but have independent authentication, admission limits
+  and shutdown. Failed LAN port changes preserve the previous listener/config.
+  LAN shutdown must not close the shared macOS observer activity.
+- LAN settings/status/reveal/rotate use typed desktop IPC. Ordinary status never
+  contains a token. LAN settings persist privately in `observer-lan-v1.json`;
+  invalid state disables LAN startup and surfaces an error, without affecting
+  local observation or gateway operation. Rotation invalidates subsequent requests
+  on existing keep-alive connections as well as new connections.
 
 - The observer never listens on the gateway port, mutates request state, or
   sends IPC commands. Only the explicit manual availability-test POST may call
@@ -266,6 +280,12 @@ remote administration API.
   and vertical scrolling remain unchanged.
 
 ## Release boundary
+
+AIO Float is a separate Tauri application sharing the TUI Rust library and
+rendering its character grid in Canvas. It ships only for Windows x64 and macOS
+ARM64, embeds Cascadia Mono with its license, and stores client tokens in the
+native credential store. Its Actions artifacts are independent of desktop
+installers and updater metadata. See `docs/product/aio-float.md` for operation.
 
 Standalone TUI archives are published for Windows x64, macOS Intel, macOS
 Apple Silicon, and Linux x64. They share the desktop version and checksums but

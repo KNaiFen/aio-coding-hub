@@ -15,6 +15,7 @@
 - [中文项目概览](../README.md)
 - [English project overview](../README_EN.md)
 - [产品定位与设计原则](./product/overview.md)
+- [AIO Float 悬浮窗与局域网连接](./product/aio-float.md)
 - [发布记录](../CHANGELOG.md)
 
 ## 架构与插件
