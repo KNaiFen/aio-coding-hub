@@ -129,6 +129,8 @@ jobs:
             aio-tui-macos-intel.tar.gz \
             aio-tui-macos-arm.tar.gz \
             aio-tui-linux-x64.tar.gz \
+            aio-float-windows-x64.exe \
+            aio-float-macos-arm64.zip \
             latest.json \
             SHA256SUMS.txt; do
             [[ -s "release-assets/$file" ]] || {

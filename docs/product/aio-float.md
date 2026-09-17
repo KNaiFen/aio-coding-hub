@@ -43,9 +43,12 @@ connection. Authentication failures require an updated token.
 All dependency installation, generated bindings, tests and native builds run in
 GitHub Actions. `float-build.yml` checks Windows x64 and macOS ARM64, publishes
 an EXE or application ZIP and SHA-256 checksums as workflow artifacts. The workflow
-also runs on version tags and can be dispatched manually. These are independent
-artifacts and are not added to the desktop updater manifest. Companion AIO builds
-use the existing `dev-build` workflow for the same source revision.
+also runs on version tags and can be dispatched manually. Main CI builds both
+Float packages alongside the signed AIO release candidate. The release workflow
+publishes these exact packages with the shared SHA-256 manifest. Float packages
+are not added to the desktop updater manifest: update AIO through its existing
+updater, and replace Float with the new EXE or app from the release downloads.
+Companion development builds use `dev-build` for the same source revision.
 
 macOS uses the project's existing ad-hoc signing arrangement; this does not claim
 Apple notarization. Native window acceptance must be recorded separately from
@@ -85,7 +88,9 @@ cloud compilation, especially on macOS when no local machine is available.
 `float-build.yml` 还提供 Playwright 视觉检查和 `float-visual-*` 截图工件，
 覆盖窄窗口、高 DPI、透明度像素、字体缩放、键盘/滚轮及设置。
 发布版本须同步根包、主程序、协议、TUI、Float 的 Cargo/锁文件与 Tauri 配置；
-版本一致性校验包含 Float。配套 AIO 使用同一提交的 `dev-build` 工作流，
-分别选择 `windows-x64` 与 `macos-arm64`。
+版本一致性校验包含 Float。正式版由主 CI 同时构建 AIO 与 Float，发布流程
+复用同一提交的候选包，统一提供校验和。AIO 可使用现有更新入口；Float 无自动
+更新，退出后用发布页的新 EXE 或 app 替换。开发验收包仍可使用同一提交的
+`dev-build` 工作流，分别选择 `windows-x64` 与 `macos-arm64`。
 
 原生验收与云端验证分别记录在 [验收记录](aio-float-acceptance.md)。
