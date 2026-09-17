@@ -57,6 +57,15 @@ try {
     assert(pixels.opaque > 20, "text must remain opaque");
     assert(pixels.translucent > 1000, "background must be translucent");
     assert(!pixels.overflow, "dashboard must not overflow");
+    const border = await page.evaluate(() => {
+      const canvas = document.querySelector('canvas');
+      const context = canvas.getContext('2d');
+      return {
+        edgeAlpha: context.getImageData(0, Math.floor(canvas.height / 2), 1, 1).data[3],
+        innerAlpha: context.getImageData(Math.floor(3 * devicePixelRatio), Math.floor(canvas.height / 2), 1, 1).data[3],
+      };
+    });
+    assert(border.edgeAlpha > border.innerAlpha && border.edgeAlpha < 200, 'border must be subtle and visible without changing content opacity');
     await page.screenshot({ path: `${output}/dashboard-${width}-${scale}x.png`, omitBackground: true });
     for (const error of ['认证失败，请更新访问令牌', '连接失败：无法访问提供数据的电脑，请检查 IP 地址、端口和局域网连接']) {
       await page.evaluate(error => { window.floatError = error; }, error);

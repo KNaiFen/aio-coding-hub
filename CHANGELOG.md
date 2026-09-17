@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.60.63](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.63) (2026-09-18)
+
+### Highlights
+
+* add a subtle one-pixel border to distinguish the floating dashboard from the desktop
+* disable q/Q in AIO Float and remove its quit hints from dashboard, details, and help
+* preserve terminal TUI shortcuts, tray/context-menu exit, and Ctrl-C
+
 ## [0.60.62](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.62) (2026-09-17)
 
 ### Highlights

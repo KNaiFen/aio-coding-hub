@@ -23,7 +23,10 @@ restart or reconfigure the local TUI listener. AIO must remain running.
 Drag the top summary to move the window; drag edges or corners to resize it.
 Right-click opens settings, topmost, click-through, hide and exit. The Windows
 tray/macOS menu bar always offers Show / Disable click-through. Closing the main
-window hides it; `q` exits as in the TUI. A second launch restores the first window.
+window hides it. A subtle one-pixel border separates the dashboard from the desktop.
+`q` / `Q` have no action in Float; use the context/tray menu to exit (Ctrl-C also
+remains available). The terminal TUI retains its `q` shortcut. A second launch
+restores the first window.
 
 Ctrl/Cmd plus, minus and zero change/reset font size; Ctrl/Cmd-wheel zooms.
 Ordinary wheel movement uses the shared TUI navigation. Font size is 8-32,
@@ -77,7 +80,9 @@ cloud compilation, especially on macOS when no local machine is available.
 
 “固定”即整个窗口鼠标穿透。Windows 托盘或 macOS 菜单栏始终提供
 “显示窗口 / 取消穿透”入口；打开设置也会解除穿透。关闭主窗口会隐藏，
-再次启动应用恢复已有窗口；`q` 退出应用。显示器变化后自动恢复到可见区域。
+再次启动应用恢复已有窗口。悬浮窗忽略 `q` / `Q`，退出使用右键或托盘菜单，
+也保留 Ctrl-C；终端 TUI 的 `q` 不受影响。窗口有低调的 1 像素细边框，
+显示器变化后自动恢复到可见区域。
 
 局域网开关、改端口和重置令牌不会影响原 TUI 的动态端口、描述文件或本机令牌。
 新旧观察端共享快照缓存和有界数据库查询，分别限制请求与供应商测试入口。
