@@ -17,6 +17,27 @@
 Playwright 使用合成快照与 IPC 桩，验证前端渲染和交互；它不代表原生窗口系统验收。
 截图作为 `float-visual-*` 工件保留。原生可执行文件及校验和作为 `aio-float-*` 工件保留。
 
+## 2026-09-17 云端验收
+
+代码提交：`dfb3c902ab573047d6f290c37bc2301b99c00522`，版本 `0.60.61`。
+PR 工作流检出的合并提交为 `e1c1e0168334ea7c65fe92963ae6678a6b642d75`；
+配套 AIO 的手动构建直接检出上述代码提交，两者代码树一致。
+
+| 检查 | 结果 |
+| --- | --- |
+| [主 CI](https://github.com/KNaiFen/aio-coding-hub/actions/runs/35205501973) | 通过：前端、Rust 测试、Clippy、依赖审计、格式和绑定无漂移、macOS 观察服务测试 |
+| [Float 构建与视觉](https://github.com/KNaiFen/aio-coding-hub/actions/runs/35205501933) | 通过：Windows x64 EXE、macOS ARM64 app ZIP、共享 TUI 测试、Playwright |
+| [CodeQL](https://github.com/KNaiFen/aio-coding-hub/actions/runs/35205501916) | 通过 |
+| [配套 Windows AIO](https://github.com/KNaiFen/aio-coding-hub/actions/runs/35205537995) | EXE 与 MSI 构建成功 |
+| [配套 macOS AIO](https://github.com/KNaiFen/aio-coding-hub/actions/runs/35205558312) | ARM64 app ZIP 构建成功 |
+
+视觉回归另覆盖窄窗口的长离线错误提示，错误区域与 TUI 底部帮助行分开排版。
+修复了审计报告的 `rustls` 问题；`Cargo.lock` 使用该提交前云端生成的
+`rustls 0.23.45` / `rustls-webpki 0.103.15` 解析结果。
+
+以上记录仅表示云端结果。Windows 10 的原生截图工具兼容性限制导致交互验收
+未完成；已有窗口的只读截图和可访问性检查不作为本次提交的完整原生验收。
+
 ## 原生窗口验收
 
 | 项目 | Windows 10/11 AMD64 | macOS ARM64 |
