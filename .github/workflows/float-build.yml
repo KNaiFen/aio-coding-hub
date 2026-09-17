@@ -1,26 +1,15 @@
 name: float-build
 
 on:
+  workflow_call:
   workflow_dispatch:
-  pull_request:
-    branches: [main, dev]
-    paths:
-      - 'src-tauri/crates/aio-float/**'
-      - 'src-tauri/crates/aio-tui/**'
-      - 'src-tauri/crates/aio-observer-protocol/**'
-      - 'src-tauri/Cargo.lock'
-      - '.github/workflows/float-build.yml'
-      - 'scripts/float-visual-check.mjs'
-      - 'src-tauri/Cargo.toml'
-  push:
-    tags: ['aio-coding-hub-v*']
 
 permissions:
   contents: read
 
 concurrency:
-  group: float-${{ github.ref }}
-  cancel-in-progress: true
+  group: float-${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   visual:
@@ -62,27 +51,27 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
-          cache: pnpm
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
           toolchain: 1.90.0
           targets: ${{ matrix.target }}
-          components: clippy
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: src-tauri
       - name: Install frontend tools in Actions
-        run: pnpm install --frozen-lockfile
+        shell: bash
+        run: npm install --prefix "$RUNNER_TEMP/float-tools" --no-package-lock @tauri-apps/cli@2.9.6
       - name: Check application versions
         shell: bash
-        run: node scripts/support-matrix.mjs validate-release-version --tag "aio-coding-hub-v$(node -p 'JSON.parse(require("fs").readFileSync("package.json", "utf8")).version')"
+        run: node scripts/float-release.mjs validate
       - name: Check and test Float and shared TUI
         shell: bash
         run: |
+          cargo fmt --manifest-path src-tauri/Cargo.toml -p aio-float -p aio-tui -- --check
           cargo clippy --manifest-path src-tauri/Cargo.toml -p aio-float -p aio-tui --all-targets --locked -- -D warnings
           cargo test --manifest-path src-tauri/Cargo.toml -p aio-float -p aio-tui --locked
       - name: Build independent application
@@ -92,9 +81,9 @@ jobs:
           APPLE_SIGNING_IDENTITY: '-'
         run: |
           if [[ '${{ matrix.id }}' == 'windows-x64' ]]; then
-            pnpm exec tauri build --target '${{ matrix.target }}' --no-bundle -- --locked
+            "$RUNNER_TEMP/float-tools/node_modules/.bin/tauri" build --target '${{ matrix.target }}' --no-bundle -- --locked
           else
-            pnpm exec tauri build --target '${{ matrix.target }}' --bundles app -- --locked
+            "$RUNNER_TEMP/float-tools/node_modules/.bin/tauri" build --target '${{ matrix.target }}' --bundles app -- --locked
           fi
       - name: Package Windows EXE
         if: matrix.id == 'windows-x64'

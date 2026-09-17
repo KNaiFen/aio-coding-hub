@@ -33,9 +33,10 @@ are recorded in [AGENTS.md](../../../../AGENTS.md).
 semantics. Manual runs are main-only and report `manual-ci-gate`, so they cannot
 replace the protected branch check. Routine PR validation uses the automatic
 workflow rather than a second manual run. Pull requests select frontend, Rust,
-or both from the changed paths. Proven documentation-only PRs and `dev`/`main`
-pushes skip both domains; pushes containing code or unknown paths and main
-manual runs select both domains.
+Float, or their affected combination from changed paths. Proven documentation-only
+PRs and `dev`/`main` pushes skip source domains. Float/TUI-only pushes preserve
+their independent scope; other desktop source pushes and main manual runs select
+both desktop domains. Unknown paths fail closed to all domains.
 
 - `contracts` is the only dependency-free static contract job. It runs the
   cloud-only checker for checked documentation or either selected source
@@ -45,6 +46,19 @@ manual runs select both domains.
   root coverage run discovers `src/e2e`; there is no separate E2E command.
   When selected, it starts only after `contracts` succeeds; the gate requires
   both to succeed. An unselected frontend domain is skipped.
+- `float` calls the reusable `float-build.yml` after contracts. It checks only
+  `aio-float` and `aio-tui`, builds Windows x64/macOS ARM64 packages, and runs
+  Playwright. Float-only changes skip desktop tests, binding generation and
+  desktop candidate builds. The required gate rejects a failed or unexpectedly
+  skipped Float workflow. CodeQL still runs with paths scoped to the Float/TUI
+  crates and observer protocol when the classified scope is Float-only; its
+  separate analysis category does not replace full desktop scan results. Scope,
+  gate and action-pin checks also run for Float-only changes. Float-specific
+  workflow changes select Float; shared CI control changes select all domains.
+- Float versions and `aio-float-v*` releases are independent. A lockfile edit is
+  Float-only only when normalizing the Float package version makes both complete
+  lockfiles identical; dependency changes keep desktop checks. Independent Float
+  releases never replace the desktop latest release or updater metadata.
 - `rust` installs the pinned toolchain, runs Rust formatting and lock/binding
   canonicalization, fails with a bounded drift artifact when files change,
   then runs Clippy, Rust tests, and dependency audit. A frontend-only PR or a

@@ -87,7 +87,6 @@ function validateReleaseVersion(args) {
     "utf8"
   );
   const tuiCargoToml = readFileSync(join(repoRoot, "src-tauri/crates/aio-tui/Cargo.toml"), "utf8");
-  const floatCargoToml = readFileSync(join(repoRoot, "src-tauri/crates/aio-float/Cargo.toml"), "utf8");
   const cargoLock = readFileSync(join(repoRoot, "src-tauri/Cargo.lock"), "utf8");
   const versions = new Map([
     ["package.json", readJson("package.json").version],
@@ -98,9 +97,6 @@ function validateReleaseVersion(args) {
       /^version\s*=\s*"([^"]+)"/m.exec(observerCargoToml)?.[1],
     ],
     ["src-tauri/crates/aio-tui/Cargo.toml", /^version\s*=\s*"([^"]+)"/m.exec(tuiCargoToml)?.[1]],
-    ["src-tauri/crates/aio-float/Cargo.toml", /^version\s*=\s*"([^"]+)"/m.exec(floatCargoToml)?.[1]],
-    ["src-tauri/crates/aio-float/tauri.conf.json", readJson("src-tauri/crates/aio-float/tauri.conf.json").version],
-    ["src-tauri/Cargo.lock (aio-float)", /\[\[package\]\]\s+name\s*=\s*"aio-float"\s+version\s*=\s*"([^"]+)"/m.exec(cargoLock)?.[1]],
     [
       "src-tauri/Cargo.lock",
       /\[\[package\]\]\s+name\s*=\s*"aio-coding-hub"\s+version\s*=\s*"([^"]+)"/m.exec(

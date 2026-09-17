@@ -250,7 +250,7 @@ for (const [name, fixture, expected] of [
     {
       ...valid,
       ciWorkflow: ciWorkflow.replace(
-        "    if: >-\n      always() &&\n      needs.change-scope.result == 'success' &&\n      (needs.change-scope.outputs.docs_checks == 'true' ||\n      needs.change-scope.outputs.frontend_ci == 'true' ||\n      needs.change-scope.outputs.rust_ci == 'true')",
+        "    if: >-\n      always() &&\n      needs.change-scope.result == 'success' &&\n      (needs.change-scope.outputs.docs_checks == 'true' ||\n      needs.change-scope.outputs.frontend_ci == 'true' ||\n      needs.change-scope.outputs.float_ci == 'true' ||\n      needs.change-scope.outputs.rust_ci == 'true')",
         "    if: needs.change-scope.outputs.docs_checks == 'true'"
       ),
     },
@@ -261,7 +261,7 @@ for (const [name, fixture, expected] of [
     {
       ...valid,
       ciWorkflow: ciWorkflow.replace(
-        "      (needs.change-scope.outputs.docs_checks == 'true' ||\n      needs.change-scope.outputs.frontend_ci == 'true' ||\n      needs.change-scope.outputs.rust_ci == 'true')",
+        "      (needs.change-scope.outputs.docs_checks == 'true' ||\n      needs.change-scope.outputs.frontend_ci == 'true' ||\n      needs.change-scope.outputs.float_ci == 'true' ||\n      needs.change-scope.outputs.rust_ci == 'true')",
         "      needs.change-scope.outputs.full_ci == 'true'"
       ),
     },
@@ -500,7 +500,7 @@ for (const [name, fixture, expected] of [
   assert.throws(() => assertCiQualityGates(fixture), expected, name);
 }
 
-for (const job of ["frontend", "rust", "observer-macos"]) {
+for (const job of ["frontend", "rust", "observer-macos", "float"]) {
   for (const needs of ["change-scope", "contracts", "[]"]) {
     assert.throws(
       () => assertCiQualityGates({
@@ -534,6 +534,14 @@ for (const job of ["frontend", "rust", "observer-macos"]) {
   }
 }
 
+assert.throws(
+  () => assertCiQualityGates({
+    ...valid,
+    ciWorkflow: ciWorkflow.replace("uses: ./.github/workflows/float-build.yml", "uses: ./.github/workflows/dev-build.yml"),
+  }),
+  /float must call the independent Float workflow/
+);
+
 for (const [name, from, to, expected] of [
   ["classifier automatic events", "if: github.event_name == 'push' || github.event_name == 'pull_request'", "if: always()", /change-scope must run only for push and pull_request/],
   ["classifier full history", "fetch-depth: 0", "fetch-depth: 1", /change-scope must checkout full history/],
@@ -564,6 +572,8 @@ for (const [name, from, to, expected] of [
     /analyze must contain only checkout, Initialize CodeQL, and Analyze action steps/,
   ],
   ["workflow path filter", "  push:\n", "  push:\n    paths-ignore: ['**/*.md']\n", /must not filter workflow paths/],
+  ["Float scan scope", "config-file: ${{ needs.change-scope.outputs.scope == 'float' && './.github/codeql-float.yml' || '' }}", "config-file: ''", /Initialize CodeQL must retain its approved inputs/],
+  ["Float analysis category", "category: ${{ needs.change-scope.outputs.scope == 'float' && '/float' || '' }}/language:${{ matrix.language }}", "category: /language:${{ matrix.language }}", /Analyze must retain its approved inputs/],
 ]) {
   assert.notEqual(codeqlWorkflow.replace(from, to), codeqlWorkflow, name);
   assert.throws(
@@ -630,6 +640,12 @@ for (const eventName of ["pull_request", "push"]) {
     ["checked documents", "M\0README.md\0M\0AGENTS.md\0M\0.trellis/spec/example/rule.md\0", false],
     ["frontend", "M\0src/main.tsx\0", true],
     ["Rust", "M\0src-tauri/src/lib.rs\0", true],
+    ["Float web", "M\0src-tauri/crates/aio-float/web/renderer.js\0", true],
+    ["Float native", "M\0src-tauri/crates/aio-float/src/dashboard.rs\0", true],
+    ["shared TUI", "M\0src-tauri/crates/aio-tui/src/ui.rs\0", true],
+    ["Float and docs", "M\0src-tauri/crates/aio-float/web/float.css\0M\0docs/product/aio-float.md\0", true],
+    ["Float and frontend", "M\0src-tauri/crates/aio-float/web/renderer.js\0M\0src/main.tsx\0", true],
+    ["observer protocol", "M\0src-tauri/crates/aio-observer-protocol/src/lib.rs\0", true],
     ["shared", "M\0src/generated/bindings.ts\0", true],
     ["unknown", "M\0.gkd/state.json\0", true],
     ["mixed domains", "M\0src/main.tsx\0M\0src-tauri/src/lib.rs\0", true],
@@ -661,6 +677,7 @@ for (const eventName of ["pull_request", "push"]) {
       scope: classified.scope,
       frontend_ci: String(classified.frontendCi),
       rust_ci: String(classified.rustCi),
+      float_ci: String(classified.floatCi),
     };
     const label = `${eventName}: ${name}`;
     assert.equal(jobSelected(codeqlWorkflow, "change-scope", { eventName }), true, label);
@@ -669,6 +686,7 @@ for (const eventName of ["pull_request", "push"]) {
       ["frontend", classified.frontendCi],
       ["rust", classified.rustCi],
       ["observer-macos", classified.rustCi],
+      ["float", classified.floatCi],
     ]) {
       for (const contractsResult of ["success", "failure", "cancelled", "skipped", ""]) {
         for (const result of ["success", "failure", "cancelled", "skipped", ""]) {
@@ -689,12 +707,14 @@ for (const eventName of ["pull_request", "push"]) {
       FULL_CI: String(classified.fullCi),
       FRONTEND_CI: outputs.frontend_ci,
       RUST_CI: outputs.rust_ci,
+      FLOAT_CI: outputs.float_ci,
       SHARED_CI: String(classified.sharedCi),
       DOCS_CHECKS: String(classified.docsChecks),
-      CONTRACTS_RESULT: classified.docsChecks || classified.frontendCi || classified.rustCi ? "success" : "skipped",
+      CONTRACTS_RESULT: classified.docsChecks || classified.frontendCi || classified.rustCi || classified.floatCi ? "success" : "skipped",
       FRONTEND_RESULT: classified.frontendCi ? "success" : "skipped",
       RUST_RESULT: classified.rustCi ? "success" : "skipped",
       OBSERVER_MACOS_RESULT: classified.rustCi ? "success" : "skipped",
+      FLOAT_RESULT: classified.floatCi ? "success" : "skipped",
       PLAN_RESULT: "skipped",
       SHOULD_BUILD: "",
       BUILD_RESULT: "skipped",
@@ -702,13 +722,13 @@ for (const eventName of ["pull_request", "push"]) {
       ASSEMBLE_RESULT: "skipped",
     };
     assert.equal(gateStatus(env), 0, label);
-    for (const key of ["CHANGE_SCOPE_RESULT", "CONTRACTS_RESULT", "FRONTEND_RESULT", "RUST_RESULT", "OBSERVER_MACOS_RESULT"]) {
+    for (const key of ["CHANGE_SCOPE_RESULT", "CONTRACTS_RESULT", "FRONTEND_RESULT", "RUST_RESULT", "OBSERVER_MACOS_RESULT", "FLOAT_RESULT"]) {
       if (env[key] !== "success") continue;
       for (const result of ["failure", "cancelled", "skipped", ""]) {
         assert.notEqual(gateStatus({ ...env, [key]: result }), 0, `${label}: ${key} ${result}`);
       }
     }
-    if (classified.frontendCi || classified.rustCi) {
+    if (classified.frontendCi || classified.rustCi || classified.floatCi) {
       for (const result of ["failure", "cancelled", "skipped"]) {
         assert.notEqual(gateStatus({
           ...env,

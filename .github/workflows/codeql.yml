@@ -82,8 +82,9 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
+          config-file: ${{ needs.change-scope.outputs.scope == 'float' && './.github/codeql-float.yml' || '' }}
 
       - name: Analyze
         uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
         with:
-          category: /language:${{ matrix.language }}
+          category: ${{ needs.change-scope.outputs.scope == 'float' && '/float' || '' }}/language:${{ matrix.language }}

@@ -37,6 +37,7 @@ impl Dashboard {
     pub fn new(config: &Config, client: Option<ObserverClient>) -> Self {
         let mut logs = LogsState::new(CliScope::parse(&config.scope).unwrap_or(CliScope::Codex));
         logs.color = true;
+        logs.quit_on_q = false;
         Self {
             logs,
             client,
@@ -69,6 +70,7 @@ impl Dashboard {
         let scope = self.logs.live.scope;
         self.logs = LogsState::new(scope);
         self.logs.color = true;
+        self.logs.quit_on_q = false;
         self.client = Some(client);
         self.error = None;
     }
@@ -253,6 +255,7 @@ pub fn refresh(app: &tauri::AppHandle) {
 
 pub fn key_event(key: &str, control: bool) -> Option<KeyEvent> {
     let code = match key {
+        "q" | "Q" => return None,
         "ArrowUp" => KeyCode::Up,
         "ArrowDown" => KeyCode::Down,
         "ArrowLeft" => KeyCode::Left,
@@ -322,6 +325,54 @@ pub fn float_key(app: tauri::AppHandle, key: String, control: bool) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn q_is_ignored_while_other_shortcuts_remain_available() {
+        for control in [false, true] {
+            assert!(key_event("q", control).is_none());
+            assert!(key_event("Q", control).is_none());
+        }
+        assert_eq!(key_event("Tab", false).unwrap().code, KeyCode::Tab);
+        assert!(aio_tui::input::should_quit(key_event("c", true).unwrap()));
+        assert!(aio_tui::input::should_quit(KeyEvent::new(
+            KeyCode::Char('q'),
+            KeyModifiers::NONE
+        )));
+    }
+
+    #[test]
+    fn float_omits_q_hints_in_all_views_and_after_reconnection() {
+        let mut dashboard = Dashboard::new(&Config::default(), None);
+        for reconnect in [false, true] {
+            if reconnect {
+                let client = ObserverClient::remote("127.0.0.1", 13799, &"x".repeat(43)).unwrap();
+                dashboard.reconnect(client);
+            }
+            for view in [DashboardView::Requests, DashboardView::Providers] {
+                for (help, detail) in [(false, false), (false, true), (true, false)] {
+                    dashboard.logs.view = view;
+                    dashboard.logs.help = help;
+                    dashboard.logs.detail = detail;
+                    let text: String = render(&mut dashboard.logs, 100, 30)
+                        .unwrap()
+                        .into_iter()
+                        .map(|cell| cell.text)
+                        .collect();
+                    assert!(!text.contains('q'));
+                    if help {
+                        assert!(text.contains("Ctrl-C"));
+                    }
+                }
+            }
+        }
+        let mut terminal_state = LogsState::new(CliScope::Codex);
+        let text: String = render(&mut terminal_state, 100, 30)
+            .unwrap()
+            .into_iter()
+            .map(|cell| cell.text)
+            .collect();
+        assert!(text.contains("q退出"));
+    }
 
     fn snapshot() -> ObserverSnapshotV1 {
         serde_json::from_value(serde_json::json!({

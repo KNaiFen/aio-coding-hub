@@ -14,6 +14,11 @@ export function drawFrame(canvas, frame, width, height, scale = 1) {
   context.globalAlpha = Math.max(0.004, config.opacity);
   context.fillRect(0, 0, width, height);
   context.globalAlpha = 1;
+  context.fillStyle = 'rgba(148, 154, 164, 0.32)';
+  context.fillRect(0, 0, width, 1);
+  context.fillRect(0, height - 1, width, 1);
+  context.fillRect(0, 1, 1, height - 2);
+  context.fillRect(width - 1, 1, 1, height - 2);
   context.textBaseline = 'middle';
   for (const cell of frame.cells) {
     const x = 6 + cell.x * cellWidth, y = 6 + cell.y * cellHeight;

@@ -184,6 +184,7 @@ pub struct LogsState {
     pub detail_scroll: u16,
     pub help: bool,
     pub color: bool,
+    pub quit_on_q: bool,
     provider_probes: HashMap<i64, ProviderProbeState>,
 }
 
@@ -215,6 +216,7 @@ impl LogsState {
             detail_scroll: 0,
             help: false,
             color: std::env::var_os("NO_COLOR").is_none(),
+            quit_on_q: true,
             provider_probes: HashMap::new(),
         }
     }
@@ -691,7 +693,7 @@ pub fn draw_logs(frame: &mut Frame, state: &mut LogsState) {
         return;
     }
     if state.help {
-        draw_help(frame, area, state.color);
+        draw_help(frame, area, state.color, state.quit_on_q);
         return;
     }
     if state.detail {
@@ -718,7 +720,11 @@ pub fn draw_logs(frame: &mut Frame, state: &mut LogsState) {
     }
 
     let footer = truncate_display(
-        "←→视图 ↑↓滚动 Enter详情 Tab切CLI ?帮助 q退出",
+        if state.quit_on_q {
+            "←→视图 ↑↓滚动 Enter详情 Tab切CLI ?帮助 q退出"
+        } else {
+            "←→视图 ↑↓滚动 Enter详情 Tab切CLI ?帮助"
+        },
         usize::from(chunks[3].width),
     );
     frame.render_widget(
@@ -933,9 +939,11 @@ fn draw_detail(frame: &mut Frame, area: Rect, state: &LogsState) {
         chunks[1],
     );
     let footer = truncate_display(
-        match state.view {
-            DashboardView::Requests => "↑↓滚动 Esc返回 r刷新 q退出",
-            DashboardView::Providers => "↑↓滚动 t测试 Esc返回 r刷新 q退出",
+        match (state.view, state.quit_on_q) {
+            (DashboardView::Requests, true) => "↑↓滚动 Esc返回 r刷新 q退出",
+            (DashboardView::Providers, true) => "↑↓滚动 t测试 Esc返回 r刷新 q退出",
+            (DashboardView::Requests, false) => "↑↓滚动 Esc返回 r刷新",
+            (DashboardView::Providers, false) => "↑↓滚动 t测试 Esc返回 r刷新",
         },
         usize::from(chunks[2].width),
     );
@@ -1192,7 +1200,7 @@ fn muted_style(color: bool) -> Style {
     Palette::detected(color).style(Tone::Muted)
 }
 
-fn draw_help(frame: &mut Frame, area: Rect, color: bool) {
+fn draw_help(frame: &mut Frame, area: Rect, color: bool, quit_on_q: bool) {
     let text = [
         "AIO TUI 操作",
         "",
@@ -1207,7 +1215,11 @@ fn draw_help(frame: &mut Frame, area: Rect, color: bool) {
         "t          测试当前供应商",
         "r          立即刷新",
         "?          关闭帮助",
-        "q/Ctrl-C   退出",
+        if quit_on_q {
+            "q/Ctrl-C   退出"
+        } else {
+            "Ctrl-C     退出"
+        },
     ]
     .join("\n");
     let style = Palette::detected(color).style(Tone::Accent);

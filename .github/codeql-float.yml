@@ -1,0 +1,8 @@
+name: Float and shared TUI
+paths:
+  - src-tauri/crates/aio-float
+  - src-tauri/crates/aio-tui
+  - src-tauri/crates/aio-observer-protocol
+  - scripts/float-visual-check.mjs
+  - scripts/float-release.mjs
+  - scripts/float-release.selftest.mjs
