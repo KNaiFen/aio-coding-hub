@@ -1,5 +1,12 @@
 # Changelog
 
+## [AIO Float 0.60.64](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-float-v0.60.64) (2026-09-18)
+
+### Highlights
+
+* keep the Windows dashboard and settings out of the taskbar, including first launch
+* retain tray access to show the dashboard, open settings, disable click-through and exit
+
 ## [AIO Float 0.60.63](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-float-v0.60.63) (2026-09-18)
 
 ### Highlights
