@@ -339,6 +339,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Serializes the test-only home directory across async startup.
     async fn lan_lifecycle_preserves_local_descriptor_auth_cache_and_listener() {
         let _env_lock = crate::test_support::test_env_lock();
         let temp = tempfile::tempdir().unwrap();
