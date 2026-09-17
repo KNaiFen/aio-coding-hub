@@ -1,4 +1,54 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AIO Float 设置</title><link rel="stylesheet" href="float.css"></head>
-<body class="settings"><h1>AIO Float</h1><form id="connection"><section><h2>连接</h2>
-<label>IP 地址<input id="ip" required autocomplete="off" value="127.0.0.1"></label><label>端口<input id="port" type="number" min="1" max="65535" required value="13799"></label><label>访问令牌<input id="token" type="password" autocomplete="off"></label><div class="actions"><button id="connect" type="submit">测试并保存连接</button></div><p id="connection-error" class="error" role="status"></p>
-</section></form><form id="appearance"><section><h2>外观</h2><label>字号<input id="fontSize" type="number" min="8" max="32" step="1" required value="12"></label><label>背景颜色<input id="background" type="color" value="#272b33"></label><label>背景不透明度<span class="range"><input id="opacity" type="range" min="0" max="100" value="100"><output id="opacity-value">100%</output></span></label><label>始终置顶<input id="alwaysOnTop" type="checkbox" checked></label><label>鼠标穿透<input id="clickThrough" type="checkbox"></label><div class="actions"><button type="submit">应用外观</button></div><p id="appearance-error" class="error" role="status"></p></section></form><script type="module" src="settings.js"></script></body></html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AIO Float 设置</title>
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand"><img src="icons/app.png" alt="" width="32" height="32"><div><h1>AIO Float</h1><span class="subtitle">悬浮窗设置</span></div></div>
+    <span id="connection-state" class="connection-state">未配置</span>
+  </header>
+  <nav class="tabs" role="tablist" aria-label="设置分类">
+    <button id="connection-tab" type="button" role="tab" aria-selected="true" aria-controls="connection-panel" tabindex="0"><span class="icon network" aria-hidden="true"></span>连接</button>
+    <button id="appearance-tab" type="button" role="tab" aria-selected="false" aria-controls="appearance-panel" tabindex="-1"><span class="icon sliders" aria-hidden="true"></span>外观</button>
+  </nav>
+  <main>
+    <div id="connection-panel" role="tabpanel" aria-labelledby="connection-tab">
+      <form id="connection">
+        <fieldset id="connection-fields" disabled>
+          <div class="section-heading"><h2>数据源</h2><span class="meta">局域网 · HTTP</span></div>
+          <div class="address-fields">
+            <label class="field" for="ip"><span>IP 地址</span><input id="ip" required autocomplete="off" spellcheck="false" value="127.0.0.1"></label>
+            <label class="field" for="port"><span>端口</span><input id="port" type="number" min="1" max="65535" required value="13799"></label>
+          </div>
+          <label class="field token-field" for="token"><span>访问令牌</span></label>
+          <div class="token-control"><input id="token" type="password" autocomplete="off" spellcheck="false"><button id="token-visibility" class="icon-button" type="button" aria-label="显示令牌" title="显示令牌" aria-pressed="false"><span class="icon eye" aria-hidden="true"></span></button></div>
+          <div class="form-footer"><p id="connection-error" class="feedback" role="status" aria-live="polite"></p><button id="connect" class="primary" type="submit"><span id="connect-label">测试并保存连接</span><span class="icon arrow" aria-hidden="true"></span></button></div>
+        </fieldset>
+      </form>
+    </div>
+    <div id="appearance-panel" role="tabpanel" aria-labelledby="appearance-tab" hidden>
+      <form id="appearance">
+        <fieldset id="appearance-fields" disabled>
+          <div class="section-heading"><h2>实时预览</h2><span class="meta">Cascadia Mono</span></div>
+          <div class="preview"><canvas id="preview" aria-label="悬浮窗外观预览"></canvas></div>
+          <div class="setting-row"><label for="fontSize">字号</label><div class="stepper"><button type="button" class="icon-button" id="font-down" aria-label="减小字号" title="减小字号"><span class="icon minus" aria-hidden="true"></span></button><input id="fontSize" aria-label="字号" type="number" min="8" max="32" step="1" required value="12"><span class="unit">px</span><button type="button" class="icon-button" id="font-up" aria-label="增大字号" title="增大字号"><span class="icon plus" aria-hidden="true"></span></button></div></div>
+          <div class="setting-row color-row"><label for="background">背景颜色</label><div class="color-controls"><div class="swatches" role="group" aria-label="预设背景颜色">
+            <button type="button" class="swatch" data-color="#272B33" style="--swatch:#272B33" aria-label="石墨" aria-pressed="true" title="石墨"></button>
+            <button type="button" class="swatch" data-color="#171918" style="--swatch:#171918" aria-label="墨黑" aria-pressed="false" title="墨黑"></button>
+            <button type="button" class="swatch" data-color="#20332E" style="--swatch:#20332E" aria-label="松绿" aria-pressed="false" title="松绿"></button>
+            <button type="button" class="swatch" data-color="#38292F" style="--swatch:#38292F" aria-label="莓灰" aria-pressed="false" title="莓灰"></button>
+          </div><span class="color-divider"></span><input id="background" type="color" value="#272b33" title="自定义背景颜色"><output id="background-value" for="background">#272B33</output></div></div>
+          <div class="setting-row"><label for="opacity">背景不透明度</label><div class="range"><input id="opacity" type="range" min="0" max="100" value="100"><output id="opacity-value" for="opacity">100%</output></div></div>
+          <div class="window-settings"><label class="setting-row toggle-row" for="alwaysOnTop"><span>始终置顶</span><input id="alwaysOnTop" class="switch" type="checkbox" role="switch" checked></label><label class="setting-row toggle-row" for="clickThrough"><span>鼠标穿透</span><input id="clickThrough" class="switch" type="checkbox" role="switch"></label></div>
+          <div class="form-footer"><p id="appearance-error" class="feedback" role="status" aria-live="polite"></p><button id="apply" class="primary" type="submit"><span>应用外观</span><span class="icon check" aria-hidden="true"></span></button></div>
+        </fieldset>
+      </form>
+    </div>
+  </main>
+  <script type="module" src="settings.js"></script>
+</body>
+</html>

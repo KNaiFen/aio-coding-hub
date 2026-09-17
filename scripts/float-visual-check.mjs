@@ -14,7 +14,7 @@ const server = createServer(async (request, response) => {
   try {
     const path = resolve(root, `.${new URL(request.url, "http://localhost").pathname}`);
     if (!path.startsWith(`${root}/`) && !path.startsWith(`${root}\\`)) { response.writeHead(403).end(); return; }
-    const mime = { ".js": "text/javascript", ".css": "text/css", ".html": "text/html", ".ttf": "font/ttf" }[extname(path)];
+    const mime = { ".js": "text/javascript", ".css": "text/css", ".html": "text/html", ".ttf": "font/ttf", ".svg": "image/svg+xml", ".png": "image/png" }[extname(path)];
     const content = await readFile(path);
     response.writeHead(200, { "Content-Type": mime || "application/octet-stream" });
     response.end(content);
@@ -40,6 +40,7 @@ try {
         window.floatCalls.push({command, args});
         if (command === "float_frame") return { ...args, cells: cells.filter(cell => cell.x + cell.width <= args.columns && cell.y < args.rows), config, connected: true, error: window.floatError };
         if (command === "float_settings") return { config, hasToken: true, error: null };
+        if (command === "float_connect" && window.connectionFailure) throw new Error(window.connectionFailure);
         if (command === "float_appearance") Object.assign(config, args);
       } }, window: { getCurrentWindow: () => ({startDragging: async()=>{},startResizeDragging: async()=>{}}) }, event: {listen: async()=>{}} };
     });
@@ -87,16 +88,53 @@ try {
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
       await page.screenshot({path:`${output}/dashboard-${width}-${scale}x-font${fontSize}.png`, omitBackground:true});
     }
-    await page.setViewportSize({width:340,height:600});
+    const settingsWidth = width === 640 ? 420 : 340;
+    await page.setViewportSize({width:settingsWidth,height:600});
     await page.goto(`http://127.0.0.1:${server.address().port}/settings.html`);
+    await page.getByRole('tab', {name:'外观', selected:true}).waitFor();
+    await page.getByLabel('字号', {exact:true}).fill('12');
+    await page.getByRole('button', {name:'增大字号'}).click();
+    assert.equal(await page.getByLabel('字号', {exact:true}).inputValue(), '13');
+    await page.getByRole('button', {name:'减小字号'}).click();
+    await page.getByRole('button', {name:'松绿', exact:true}).click();
+    assert.equal(await page.getByLabel('背景颜色', {exact:true}).inputValue(), '#20332e');
+    await page.getByRole('button', {name:'石墨', exact:true}).click();
+    await page.getByLabel('背景不透明度', {exact:true}).focus();
+    await page.keyboard.press('End');
+    for (let step = 0; step < 20; step++) await page.keyboard.press('ArrowLeft');
+    await page.waitForFunction(() => document.querySelector('#preview').width > 1);
+    const previewPixels = await page.locator('#preview').evaluate(canvas => {
+      const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+      return pixels.filter((value, index) => index % 4 === 3 && value > 200).length;
+    });
+    assert(previewPixels > 100, 'appearance preview must render');
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    assert(await page.getByRole('button', {name:'应用外观'}).evaluate(button => button.getBoundingClientRect().bottom <= innerHeight), 'default appearance controls fit the window');
+    await page.screenshot({path:`${output}/settings-appearance-${settingsWidth}-${scale}x.png`, fullPage:true});
+    await page.getByRole('tab', {name:'外观'}).focus();
+    await page.keyboard.press('ArrowLeft');
+    await page.getByRole('tab', {name:'连接', selected:true}).waitFor();
+    await page.getByLabel('访问令牌', {exact:true}).fill('example-token-for-visual-check');
+    await page.getByRole('button', {name:'显示令牌'}).click();
+    assert.equal(await page.getByLabel('访问令牌', {exact:true}).getAttribute('type'), 'text');
+    await page.getByRole('button', {name:'隐藏令牌'}).click();
     await page.getByLabel("IP 地址").fill("192.168.1.2");
+    await page.evaluate(() => { window.connectionFailure = '认证失败，请检查访问令牌'; });
+    await page.getByRole("button", {name:"测试并保存连接"}).click();
+    await page.getByText('认证失败，请检查访问令牌', {exact:true}).waitFor();
+    assert(await page.getByRole('button', {name:'测试并保存连接'}).isEnabled());
+    await page.evaluate(() => { window.connectionFailure = null; });
     await page.getByRole("button", {name:"测试并保存连接"}).click();
     await page.getByText("已连接", {exact:true}).waitFor();
+    assert.equal(await page.getByLabel('访问令牌', {exact:true}).inputValue(), '');
+    await page.screenshot({path:`${output}/settings-connection-${settingsWidth}-${scale}x.png`, fullPage:true});
+    await page.getByRole('tab', {name:'外观'}).click();
     await page.getByLabel('字号', {exact:true}).fill('32');
+    assert(await page.getByRole('button', {name:'增大字号'}).isDisabled());
     await page.getByRole('button', {name:'应用外观'}).click();
     await page.getByText('已保存', {exact:true}).waitFor();
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
-    await page.screenshot({ path: `${output}/settings-${scale}x.png`, fullPage:true });
+    await page.screenshot({ path: `${output}/settings-large-font-${settingsWidth}-${scale}x.png`, fullPage:true });
     await page.close();
   }
   assert.deepEqual(errors, []);
