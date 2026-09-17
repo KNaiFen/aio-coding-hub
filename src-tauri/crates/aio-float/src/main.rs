@@ -283,7 +283,7 @@ fn menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
 #[tauri::command]
 fn float_menu(app: tauri::AppHandle) -> Result<(), String> {
     let menu = menu(&app).map_err(|_| "无法创建菜单")?;
-    let window = app.get_webview_window("main").ok_or("窗口不存在")?;
+    let window = app.get_window("main").ok_or("窗口不存在")?;
     menu.popup(window).map_err(|_| "无法显示菜单".into())
 }
 
