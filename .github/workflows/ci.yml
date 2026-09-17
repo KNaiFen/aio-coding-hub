@@ -262,9 +262,6 @@ jobs:
       - name: Install JavaScript formatting dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
 
-      - name: Resolve patched rustls lockfile
-        run: cargo update --manifest-path src-tauri/Cargo.toml -p rustls --precise 0.23.45
-
       - id: canonicalize
         name: Format Rust and generate bindings in the cloud
         shell: bash

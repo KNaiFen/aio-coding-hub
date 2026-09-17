@@ -31,13 +31,14 @@ try {
       const config = { ip: "127.0.0.1", port: 13799, fontSize: 12, background: "#272B33", opacity: .35, alwaysOnTop: true, clickThrough: false };
       const cells = [];
       window.floatCalls = [];
+      window.floatError = null;
       for (const [y, text, fg] of [[0,"并发 0 | 首选 正价PRO20X", "#69aab3"], [1,"Codex | 今日 $187.51", "#71ae7e"], [3,"200 成功 1分钟前", "#71ae7e"], [4,"Codex / gpt-6-astra-xhigh", "#7da0c4"], [5,"正价PRO20X VIBE 无目录", "#b689be"], [6,"直连 5.0s 18.4 t/s", "#69aab3"]]) {
         let x = 0;
         for (const char of text) { const width = char.codePointAt(0) > 255 ? 2 : 1; cells.push({x,y,text:char,width,fg,bg:null,bold:false,italic:false,underline:false}); x += width; }
       }
       window.__TAURI__ = { core: { invoke: async (command, args) => {
         window.floatCalls.push({command, args});
-        if (command === "float_frame") return { ...args, cells: cells.filter(cell => cell.x + cell.width <= args.columns), config, connected: true, error: null };
+        if (command === "float_frame") return { ...args, cells: cells.filter(cell => cell.x + cell.width <= args.columns && cell.y < args.rows), config, connected: true, error: window.floatError };
         if (command === "float_settings") return { config, hasToken: true, error: null };
         if (command === "float_appearance") Object.assign(config, args);
       } }, window: { getCurrentWindow: () => ({startDragging: async()=>{},startResizeDragging: async()=>{}}) }, event: {listen: async()=>{}} };
@@ -56,6 +57,17 @@ try {
     assert(pixels.translucent > 1000, "background must be translucent");
     assert(!pixels.overflow, "dashboard must not overflow");
     await page.screenshot({ path: `${output}/dashboard-${width}-${scale}x.png`, omitBackground: true });
+    for (const error of ['认证失败，请更新访问令牌', '连接失败：无法访问提供数据的电脑，请检查 IP 地址、端口和局域网连接']) {
+      await page.evaluate(error => { window.floatError = error; }, error);
+      await page.waitForFunction(error => {
+        const message = document.querySelector('#message');
+        const frame = window.floatCalls.filter(call => call.command === 'float_frame').at(-1);
+        return message.textContent === error && 6 + frame.args.rows * 12 * 1.2 <= message.getBoundingClientRect().top;
+      }, error);
+    }
+    await page.screenshot({ path: `${output}/offline-${width}-${scale}x.png`, omitBackground: true });
+    await page.evaluate(() => { window.floatError = null; });
+    await page.waitForFunction(() => !document.querySelector('#message').textContent);
     await page.keyboard.press('Control+=');
     await page.waitForFunction(() => window.floatCalls.some(call => call.command === 'float_appearance' && call.args.fontSize === 13));
     await page.keyboard.press('Tab');

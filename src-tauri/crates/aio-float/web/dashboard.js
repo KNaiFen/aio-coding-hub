@@ -7,19 +7,23 @@ let config = { fontSize: 12, background: '#272B33', opacity: 1, alwaysOnTop: tru
 let running = false;
 let lastFrame;
 let transientError = '';
+function gridDimensions() {
+  const statusHeight = message.textContent ? message.getBoundingClientRect().height + 6 : 0;
+  return dimensions(innerWidth, innerHeight - statusHeight, config.fontSize);
+}
 async function refresh() {
   if (running || document.hidden) return;
   running = true;
   try {
-    const size = dimensions(innerWidth, innerHeight, config.fontSize);
+    const size = gridDimensions();
     let frame = await invoke('float_frame', { columns: size.columns, rows: size.rows });
     config = frame.config;
-    const actual = dimensions(innerWidth, innerHeight, config.fontSize);
+    message.textContent = transientError || frame.error || (!frame.connected ? '尚未连接 AIO' : '');
+    const actual = gridDimensions();
     if (actual.columns !== size.columns || actual.rows !== size.rows) frame = await invoke('float_frame', actual);
     lastFrame = frame;
     drawFrame(canvas, frame, innerWidth, innerHeight, devicePixelRatio);
     document.querySelector('#drag').style.height = `${config.fontSize * 2.4}px`;
-    message.textContent = transientError || frame.error || (!frame.connected ? '尚未连接 AIO' : '');
   } catch (error) { message.textContent = String(error); } finally { running = false; }
 }
 async function appearance(fontSize) {
