@@ -41,6 +41,7 @@ impl OfflineReason {
 #[derive(Clone)]
 pub struct ObserverClient {
     http: reqwest::Client,
+    remote: Option<(String, String)>,
 }
 
 enum SnapshotFetch {
@@ -57,7 +58,27 @@ impl ObserverClient {
             .no_proxy()
             .build()
             .map_err(|_| OfflineReason::Unreachable)?;
-        Ok(Self { http })
+        Ok(Self { http, remote: None })
+    }
+
+    pub fn remote(ip: &str, port: u16, token: &str) -> Result<Self, OfflineReason> {
+        let ip = ip.parse::<std::net::IpAddr>().map_err(|_| OfflineReason::InvalidDescriptor)?;
+        if port == 0 || token.len() < DESCRIPTOR_TOKEN_MIN_BYTES || token.len() > 256
+            || !token.bytes().all(|byte| byte.is_ascii_graphic())
+        {
+            return Err(OfflineReason::InvalidDescriptor);
+        }
+        let mut client = Self::new()?;
+        client.remote = Some((format!("http://{}", std::net::SocketAddr::new(ip, port)), token.to_string()));
+        Ok(client)
+    }
+
+    fn endpoint(&self) -> Result<(String, String), OfflineReason> {
+        if let Some(remote) = &self.remote {
+            return Ok(remote.clone());
+        }
+        let descriptor = read_descriptor()?;
+        Ok((format!("http://127.0.0.1:{}", descriptor.port), descriptor.token))
     }
 
     pub async fn snapshot(
@@ -94,12 +115,11 @@ impl ObserverClient {
         if provider_id <= 0 {
             return Err(OfflineReason::InvalidResponse);
         }
-        let descriptor = read_descriptor()?;
+        let (base, token) = self.endpoint()?;
         let url = format!(
-            "http://127.0.0.1:{}/api/observer/v1/providers/{provider_id}/test-availability",
-            descriptor.port
+            "{base}/api/observer/v1/providers/{provider_id}/test-availability"
         );
-        let mut response = provider_probe_request(&self.http, &url, &descriptor.token)
+        let mut response = provider_probe_request(&self.http, &url, &token)
             .send()
             .await
             .map_err(|error| request_error_reason(&error, OfflineReason::Unreachable))?;
@@ -121,10 +141,9 @@ impl ObserverClient {
         history_limit: u16,
         include_providers: bool,
     ) -> Result<SnapshotFetch, OfflineReason> {
-        let descriptor = read_descriptor()?;
+        let (base, token) = self.endpoint()?;
         let mut url = format!(
-            "http://127.0.0.1:{}/api/observer/v1/snapshot?cli={}&history_limit={}",
-            descriptor.port,
+            "{base}/api/observer/v1/snapshot?cli={}&history_limit={}",
             scope.as_str(),
             history_limit
         );
@@ -134,7 +153,7 @@ impl ObserverClient {
         let mut response = self
             .http
             .get(url)
-            .bearer_auth(&descriptor.token)
+            .bearer_auth(&token)
             .send()
             .await
             .map_err(|error| request_error_reason(&error, OfflineReason::Unreachable))?;

@@ -7,7 +7,7 @@ edition = "2021"
 default-run = "aio-coding-hub"
 
 [workspace]
-members = [".", "crates/aio-observer-protocol", "crates/aio-tui"]
+members = [".", "crates/aio-observer-protocol", "crates/aio-tui", "crates/aio-float"]
 default-members = ["."]
 resolver = "2"
 

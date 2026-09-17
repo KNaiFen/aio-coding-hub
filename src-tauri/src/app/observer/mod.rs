@@ -1,7 +1,8 @@
-//! Authenticated loopback-only observation service for the standalone TUI.
+//! Authenticated local observation with an optional independent LAN listener.
 
 mod activity;
 mod descriptor;
+pub(crate) mod lan;
 mod snapshot;
 
 use aio_observer_protocol::{
@@ -19,7 +20,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{Arc, Mutex as StdMutex, RwLock};
 use std::time::{Duration, Instant};
 use tauri::Manager;
 use tokio::sync::{oneshot, Mutex, OwnedSemaphorePermit, Semaphore};
@@ -57,6 +58,8 @@ impl<R: tauri::Runtime> Default for ObserverRuntimeStateFor<R> {
 }
 
 struct ObserverRuntime<R: tauri::Runtime> {
+    http_state: ObserverHttpState<R>,
+    lan: lan::LanRuntime,
     activity: Arc<activity::ObserverActivity<R>>,
     shutdown: Option<oneshot::Sender<()>>,
     task: tokio::task::JoinHandle<()>,
@@ -156,7 +159,8 @@ struct ObserverHttpState<R: tauri::Runtime> {
     activity: Arc<activity::ObserverActivity<R>>,
     app: tauri::AppHandle<R>,
     db: Arc<Mutex<ObserverDbState>>,
-    token: Arc<str>,
+    token: Arc<RwLock<String>>,
+    accepting: Arc<AtomicBool>,
     limiter: Arc<Semaphore>,
     probe_limiter: Arc<Semaphore>,
     db_query_limiter: Arc<Semaphore>,
@@ -171,6 +175,7 @@ impl<R: tauri::Runtime> Clone for ObserverHttpState<R> {
             app: self.app.clone(),
             db: self.db.clone(),
             token: self.token.clone(),
+            accepting: self.accepting.clone(),
             limiter: self.limiter.clone(),
             probe_limiter: self.probe_limiter.clone(),
             db_query_limiter: self.db_query_limiter.clone(),
@@ -245,14 +250,15 @@ async fn start<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> crate::shared::er
         activity: activity.clone(),
         app: app.clone(),
         db: Arc::new(Mutex::new(ObserverDbState::default())),
-        token: Arc::from(descriptor.token.as_str()),
+        token: Arc::new(RwLock::new(descriptor.token.clone())),
+        accepting: Arc::new(AtomicBool::new(true)),
         limiter: Arc::new(Semaphore::new(OBSERVER_MAX_CONCURRENT_REQUESTS)),
         probe_limiter: Arc::new(Semaphore::new(OBSERVER_MAX_CONCURRENT_PROBES)),
         db_query_limiter: Arc::new(Semaphore::new(1)),
         cache: Arc::new(Mutex::new(HashMap::new())),
         folder_cache: Arc::new(StdMutex::new(FolderLookupCache::default())),
     };
-    let router = observer_router(http_state);
+    let router = observer_router(http_state.clone());
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
 
     let mut runtime = state.runtime.lock().await;
@@ -285,7 +291,10 @@ async fn start<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> crate::shared::er
         }
     });
     tracing::info!(port, "local observer service started");
+    let lan = lan::start(&http_state).await;
     *runtime = Some(ObserverRuntime {
+        http_state,
+        lan,
         activity,
         shutdown: Some(shutdown_tx),
         task,
@@ -324,6 +333,7 @@ pub(crate) async fn stop_best_effort<R: tauri::Runtime>(app: &tauri::AppHandle<R
     let Some(mut runtime) = runtime else {
         return;
     };
+    runtime.lan.stop().await;
     runtime.activity.close();
     if let Some(shutdown) = runtime.shutdown.take() {
         let _ = shutdown.send(());
@@ -351,7 +361,7 @@ async fn health<R: tauri::Runtime>(
     State(state): State<ObserverHttpState<R>>,
     headers: HeaderMap,
 ) -> Response {
-    if !authorized(&headers, &state.token) {
+    if !state_authorized(&headers, &state) {
         return api_error(StatusCode::UNAUTHORIZED, "OBS_UNAUTHORIZED", "unauthorized");
     }
     secured(
@@ -369,7 +379,7 @@ async fn snapshot_handler<R: tauri::Runtime>(
     headers: HeaderMap,
     query: Result<Query<SnapshotQuery>, QueryRejection>,
 ) -> Response {
-    if !authorized(&headers, &state.token) {
+    if !state_authorized(&headers, &state) {
         return api_error(StatusCode::UNAUTHORIZED, "OBS_UNAUTHORIZED", "unauthorized");
     }
     let Query(query) = match query {
@@ -474,7 +484,7 @@ async fn provider_test_availability_handler<R: tauri::Runtime>(
     headers: HeaderMap,
     provider_id: Result<Path<i64>, PathRejection>,
 ) -> Response {
-    if !authorized(&headers, &state.token) {
+    if !state_authorized(&headers, &state) {
         return api_error(StatusCode::UNAUTHORIZED, "OBS_UNAUTHORIZED", "unauthorized");
     }
     let provider_id = match provider_id {
@@ -718,6 +728,11 @@ fn insert_cached_snapshot(
             snapshot,
         },
     );
+}
+
+fn state_authorized<R: tauri::Runtime>(headers: &HeaderMap, state: &ObserverHttpState<R>) -> bool {
+    state.accepting.load(Ordering::Acquire)
+        && authorized(headers, &state.token.read().unwrap_or_else(|error| error.into_inner()))
 }
 
 fn authorized(headers: &HeaderMap, expected: &str) -> bool {

@@ -1,0 +1,89 @@
+name: float-build
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - 'src-tauri/crates/aio-float/**'
+      - 'src-tauri/crates/aio-tui/**'
+      - 'src-tauri/crates/aio-observer-protocol/**'
+      - 'src-tauri/Cargo.lock'
+      - '.github/workflows/float-build.yml'
+  push:
+    tags: ['aio-coding-hub-v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: float-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: windows-x64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+          - id: macos-arm64
+            runner: macos-latest
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: 1.90.0
+          targets: ${{ matrix.target }}
+          components: clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: src-tauri
+      - name: Install frontend tools in Actions
+        run: pnpm install --frozen-lockfile
+      - name: Check and test Float and shared TUI
+        run: |
+          cargo clippy --manifest-path src-tauri/Cargo.toml -p aio-float -p aio-tui --all-targets --locked -- -D warnings
+          cargo test --manifest-path src-tauri/Cargo.toml -p aio-float -p aio-tui --locked
+      - name: Build independent application
+        working-directory: src-tauri/crates/aio-float
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: '-'
+        run: |
+          if [[ '${{ matrix.id }}' == 'windows-x64' ]]; then
+            pnpm exec tauri build --target '${{ matrix.target }}' --no-bundle -- --locked
+          else
+            pnpm exec tauri build --target '${{ matrix.target }}' --bundles app -- --locked
+          fi
+      - name: Package Windows EXE
+        if: matrix.id == 'windows-x64'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path float-artifact | Out-Null
+          Copy-Item -LiteralPath 'src-tauri/target/x86_64-pc-windows-msvc/release/aio-float.exe' -Destination 'float-artifact/aio-float-windows-x64.exe'
+      - name: Package macOS application
+        if: matrix.id == 'macos-arm64'
+        shell: bash
+        run: |
+          mkdir float-artifact
+          ditto -c -k --sequesterRsrc --keepParent 'src-tauri/target/aarch64-apple-darwin/release/bundle/macos/AIO Float.app' float-artifact/aio-float-macos-arm64.zip
+      - name: Write checksums
+        shell: bash
+        run: node -e 'const fs=require("fs"),c=require("crypto");fs.writeFileSync("float-artifact/SHA256SUMS.txt",fs.readdirSync("float-artifact").map(n=>c.createHash("sha256").update(fs.readFileSync("float-artifact/"+n)).digest("hex")+"  "+n).join("\n")+"\n")'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: aio-float-${{ matrix.id }}-${{ github.sha }}
+          path: float-artifact/*
+          if-no-files-found: error
+          retention-days: 7

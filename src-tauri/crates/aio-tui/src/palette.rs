@@ -2,6 +2,19 @@
 
 use ratatui::style::{Color, Modifier, Style};
 
+thread_local! {
+    static CAPABILITY_OVERRIDE: std::cell::Cell<Option<ColorCapability>> = const { std::cell::Cell::new(None) };
+}
+
+pub fn with_capability<T>(capability: ColorCapability, render: impl FnOnce() -> T) -> T {
+    struct Restore(Option<ColorCapability>);
+    impl Drop for Restore {
+        fn drop(&mut self) { CAPABILITY_OVERRIDE.set(self.0); }
+    }
+    let _restore = Restore(CAPABILITY_OVERRIDE.replace(Some(capability)));
+    render()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColorCapability {
     None,
@@ -29,6 +42,9 @@ pub struct Palette {
 
 impl Palette {
     pub fn detected(enabled: bool) -> Self {
+        if let Some(capability) = CAPABILITY_OVERRIDE.get() {
+            return Self::new(if enabled { capability } else { ColorCapability::None });
+        }
         #[cfg(test)]
         let capability = if enabled {
             ColorCapability::Ansi16

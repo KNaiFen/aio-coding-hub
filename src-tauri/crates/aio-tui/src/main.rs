@@ -1,10 +1,10 @@
 mod args;
-mod client;
-mod config;
-mod format;
-mod palette;
 mod terminal;
-mod ui;
+
+use aio_tui::{client, config, format, ui};
+use aio_tui::input::{handle_logs_key, should_quit};
+#[cfg(test)]
+use aio_tui::input::next_scope;
 
 use aio_observer_protocol::{
     CliScope, ObserverProviderAvailabilityTestResult, ObserverSnapshotV1,
@@ -12,7 +12,9 @@ use aio_observer_protocol::{
 };
 use args::{Mode, ParseOutcome};
 use client::{ObserverClient, OfflineReason};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+#[cfg(test)]
+use crossterm::event::{KeyEvent, KeyModifiers};
 use std::io::IsTerminal;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -313,144 +315,6 @@ async fn run_logs(client: ObserverClient, scope: CliScope) -> Result<(), String>
     Ok(())
 }
 
-struct KeyAction {
-    redraw: bool,
-    refresh: bool,
-    probe_provider_id: Option<i64>,
-}
-
-fn handle_logs_key(state: &mut LogsState, key: KeyEvent) -> KeyAction {
-    handle_logs_key_at(state, key, Instant::now())
-}
-
-fn handle_logs_key_at(state: &mut LogsState, key: KeyEvent, now: Instant) -> KeyAction {
-    if matches!(key.code, KeyCode::Char('?')) {
-        state.help = !state.help;
-        return KeyAction {
-            redraw: true,
-            refresh: false,
-            probe_provider_id: None,
-        };
-    }
-    if state.help {
-        if matches!(key.code, KeyCode::Esc) {
-            state.help = false;
-            return KeyAction {
-                redraw: true,
-                refresh: false,
-                probe_provider_id: None,
-            };
-        }
-        return KeyAction {
-            redraw: false,
-            refresh: false,
-            probe_provider_id: None,
-        };
-    }
-    if matches!(key.code, KeyCode::Char('r')) {
-        return KeyAction {
-            redraw: false,
-            refresh: true,
-            probe_provider_id: None,
-        };
-    }
-    if state.detail {
-        if matches!(key.code, KeyCode::Char('t')) && state.view == DashboardView::Providers {
-            let provider_id = state.begin_provider_probe();
-            return KeyAction {
-                redraw: provider_id.is_some(),
-                refresh: false,
-                probe_provider_id: provider_id,
-            };
-        }
-        match key.code {
-            KeyCode::Esc => {
-                state.detail = false;
-                state.detail_scroll = 0;
-                state.resume_current_selection_expiry(now);
-            }
-            KeyCode::Up | KeyCode::Char('k') => {
-                state.detail_scroll = state.detail_scroll.saturating_sub(1)
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                state.detail_scroll = state.detail_scroll.saturating_add(1)
-            }
-            KeyCode::PageUp => state.detail_scroll = state.detail_scroll.saturating_sub(8),
-            KeyCode::PageDown => state.detail_scroll = state.detail_scroll.saturating_add(8),
-            KeyCode::Home => state.detail_scroll = 0,
-            _ => {
-                return KeyAction {
-                    redraw: false,
-                    refresh: false,
-                    probe_provider_id: None,
-                }
-            }
-        }
-        return KeyAction {
-            redraw: true,
-            refresh: false,
-            probe_provider_id: None,
-        };
-    }
-
-    match key.code {
-        KeyCode::Left => {
-            state.switch_view(DashboardView::Requests);
-            state.resume_current_selection_expiry(now);
-            return KeyAction {
-                redraw: true,
-                refresh: true,
-                probe_provider_id: None,
-            };
-        }
-        KeyCode::Right => {
-            state.switch_view(DashboardView::Providers);
-            state.resume_current_selection_expiry(now);
-            return KeyAction {
-                redraw: true,
-                refresh: true,
-                probe_provider_id: None,
-            };
-        }
-        KeyCode::Up | KeyCode::Char('k') => state.move_selection(-1, now),
-        KeyCode::Down | KeyCode::Char('j') => state.move_selection(1, now),
-        KeyCode::PageUp => state.move_selection(-5, now),
-        KeyCode::PageDown => state.move_selection(5, now),
-        KeyCode::Home => state.select_current(0, now),
-        KeyCode::End => state.select_current(state.current_count().saturating_sub(1), now),
-        KeyCode::Enter if state.has_selected_item() => {
-            state.detail = true;
-            state.detail_scroll = 0;
-            state.suspend_current_selection_expiry();
-        }
-        KeyCode::Tab => {
-            state.set_scope(next_scope(state.live.scope));
-            return KeyAction {
-                redraw: true,
-                refresh: true,
-                probe_provider_id: None,
-            };
-        }
-        _ => {
-            return KeyAction {
-                redraw: false,
-                refresh: false,
-                probe_provider_id: None,
-            }
-        }
-    }
-    KeyAction {
-        redraw: true,
-        refresh: false,
-        probe_provider_id: None,
-    }
-}
-
-fn should_quit(key: KeyEvent) -> bool {
-    matches!(key.code, KeyCode::Char('q'))
-        || (matches!(key.code, KeyCode::Char('c')) && key.modifiers.contains(KeyModifiers::CONTROL))
-}
-
 fn refresh_interval(snapshot: &ObserverSnapshotV1) -> Duration {
     let active = snapshot.active_inference_count > 0
         || snapshot
@@ -465,13 +329,6 @@ fn refresh_interval(snapshot: &ObserverSnapshotV1) -> Duration {
     }
 }
 
-fn next_scope(scope: CliScope) -> CliScope {
-    let index = CliScope::VALUES
-        .iter()
-        .position(|candidate| *candidate == scope)
-        .unwrap_or(0);
-    CliScope::VALUES[(index + 1) % CliScope::VALUES.len()]
-}
 
 #[cfg(test)]
 mod tests {

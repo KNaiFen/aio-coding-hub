@@ -1,0 +1,14 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "AIO Float",
+  "version": "0.60.61",
+  "identifier": "io.aio.float",
+  "build": { "frontendDist": "web" },
+  "app": {
+    "withGlobalTauri": true,
+    "macOSPrivateApi": true,
+    "windows": [{ "label": "main", "title": "AIO Float", "width": 280, "height": 640, "minWidth": 120, "minHeight": 160, "decorations": false, "transparent": true, "shadow": false, "alwaysOnTop": true, "visible": false, "dragDropEnabled": false }],
+    "security": { "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-src 'none'" }
+  },
+  "bundle": { "active": true, "targets": ["app"], "createUpdaterArtifacts": false, "icon": ["../../icons/32x32.png", "../../icons/128x128.png", "../../icons/icon.icns", "../../icons/icon.ico"] }
+}

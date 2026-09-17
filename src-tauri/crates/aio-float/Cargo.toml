@@ -1,0 +1,28 @@
+[package]
+name = "aio-float"
+version = "0.60.61"
+edition = "2021"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+aio-tui = { path = "../aio-tui" }
+aio-observer-protocol = { path = "../aio-observer-protocol" }
+crossterm = "0.28"
+ratatui = "0.29"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
+tauri-plugin-single-instance = "2"
+keyring = { version = "3.6.3", features = ["apple-native", "windows-native"] }
+unicode-width = "0.2"
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem", "Win32_Foundation"] }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
