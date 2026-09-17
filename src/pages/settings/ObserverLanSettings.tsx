@@ -16,11 +16,16 @@ export function ObserverLanSettings() {
   const [token, setToken] = useState<string | null>(null);
   useEffect(() => {
     let active = true;
+    let initialized = false;
     const refresh = () => observerLanStatus().then((next) => {
-      if (active && next) { setStatus(next); setPort(String(next.port)); }
+      if (active && next) {
+        setStatus(next);
+        if (!initialized) { setPort(String(next.port)); initialized = true; }
+      }
     }).catch((err) => { if (active) setError(formatUnknownError(err)); });
     void refresh();
-    return () => { active = false; };
+    const timer = window.setInterval(() => { void refresh(); }, 3000);
+    return () => { active = false; window.clearInterval(timer); };
   }, []);
   async function action(run: () => Promise<void>) {
     setBusy(true); setError(null);

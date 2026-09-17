@@ -234,7 +234,9 @@ pub(super) async fn start<R: tauri::Runtime>(shared: &ObserverHttpState<R>) -> L
     runtime
 }
 
-pub(crate) async fn status<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<ObserverLanStatus, String> {
+pub(crate) async fn status<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<ObserverLanStatus, String> {
     let state = app.state::<ObserverRuntimeStateFor<R>>();
     let runtime = state.runtime.lock().await;
     Ok(runtime.as_ref().ok_or("观察服务尚未启动")?.lan.status())
@@ -288,7 +290,10 @@ pub(crate) async fn configure<R: tauri::Runtime>(
     Ok(runtime.lan.status())
 }
 
-pub(crate) async fn token<R: tauri::Runtime>(app: tauri::AppHandle<R>, rotate: bool) -> Result<String, String> {
+pub(crate) async fn token<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    rotate: bool,
+) -> Result<String, String> {
     let state = app.state::<ObserverRuntimeStateFor<R>>();
     let mut guard = state.runtime.lock().await;
     let runtime = guard.as_mut().ok_or("观察服务尚未启动")?;
@@ -319,31 +324,54 @@ pub(crate) async fn token<R: tauri::Runtime>(app: tauri::AppHandle<R>, rotate: b
 mod tests {
     use super::*;
 
-    async fn get(client: &reqwest::Client, port: u16, token: &str, path: &str) -> reqwest::Response {
-        client.get(format!("http://127.0.0.1:{port}/api/observer/v1/{path}"))
-            .bearer_auth(token).send().await.unwrap()
+    async fn get(
+        client: &reqwest::Client,
+        port: u16,
+        token: &str,
+        path: &str,
+    ) -> reqwest::Response {
+        client
+            .get(format!("http://127.0.0.1:{port}/api/observer/v1/{path}"))
+            .bearer_auth(token)
+            .send()
+            .await
+            .unwrap()
     }
 
     #[tokio::test]
     async fn lan_lifecycle_preserves_local_descriptor_auth_cache_and_listener() {
         let _env_lock = crate::test_support::test_env_lock();
         let temp = tempfile::tempdir().unwrap();
-        let _home = crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_HOME", temp.path());
+        let _home =
+            crate::test_support::ScopedTestEnvVar::set("AIO_CODING_HUB_TEST_HOME", temp.path());
         let app = tauri::test::mock_app();
         app.manage(ObserverRuntimeStateFor::<tauri::test::MockRuntime>::default());
         super::super::start(app.handle().clone()).await.unwrap();
         let descriptor_path = descriptor::path(app.handle()).unwrap();
         let original = std::fs::read(&descriptor_path).unwrap();
-        let local: aio_observer_protocol::ObserverDescriptorV1 = serde_json::from_slice(&original).unwrap();
-        let client = reqwest::Client::builder().no_proxy().timeout(Duration::from_secs(3)).build().unwrap();
+        let local: aio_observer_protocol::ObserverDescriptorV1 =
+            serde_json::from_slice(&original).unwrap();
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(3))
+            .build()
+            .unwrap();
         let initial = status(app.handle().clone()).await.unwrap();
         assert!(!initial.enabled && !initial.running);
-        assert!(serde_json::to_value(initial).unwrap().get("token").is_none());
+        assert!(serde_json::to_value(initial)
+            .unwrap()
+            .get("token")
+            .is_none());
 
         let available = bind(0).await.unwrap();
         let port = available.local_addr().unwrap().port();
         drop(available);
-        assert!(configure(app.handle().clone(), true, port).await.unwrap().running);
+        assert!(
+            configure(app.handle().clone(), true, port)
+                .await
+                .unwrap()
+                .running
+        );
         let lan_token = token(app.handle().clone(), false).await.unwrap();
         for (target, credential, expected) in [
             (port, lan_token.as_str(), StatusCode::OK),
@@ -351,7 +379,12 @@ mod tests {
             (local.port, lan_token.as_str(), StatusCode::UNAUTHORIZED),
             (local.port, local.token.as_str(), StatusCode::OK),
             (port, "", StatusCode::UNAUTHORIZED),
-        ] { assert_eq!(get(&client, target, credential, "health").await.status(), expected); }
+        ] {
+            assert_eq!(
+                get(&client, target, credential, "health").await.status(),
+                expected
+            );
+        }
 
         let runtime_state = app.state::<ObserverRuntimeStateFor<tauri::test::MockRuntime>>();
         {
@@ -364,25 +397,70 @@ mod tests {
                 "activeInferenceCount": 0, "today": {"available": true},
                 "activeRequests": {"available": true, "value": []}, "recentRequests": {"available": true, "value": []}
             })).unwrap();
-            insert_cached_snapshot(&mut *http.cache.lock().await, CacheKey { scope: CliScope::Codex, history_limit: 0, include_providers: false }, cached, Instant::now());
+            insert_cached_snapshot(
+                &mut *http.cache.lock().await,
+                CacheKey {
+                    scope: CliScope::Codex,
+                    history_limit: 0,
+                    include_providers: false,
+                },
+                cached,
+                Instant::now(),
+            );
         }
         let route = "snapshot?cli=codex&history_limit=0";
-        let (a, b, c) = tokio::join!(get(&client, local.port, &local.token, route), get(&client, port, &lan_token, route), get(&client, port, &lan_token, route));
+        let (a, b, c) = tokio::join!(
+            get(&client, local.port, &local.token, route),
+            get(&client, port, &lan_token, route),
+            get(&client, port, &lan_token, route)
+        );
         for response in [a, b, c] {
             assert_eq!(response.status(), StatusCode::OK);
-            assert_eq!(response.json::<serde_json::Value>().await.unwrap()["generatedAtMs"], 42);
+            assert_eq!(
+                response.json::<serde_json::Value>().await.unwrap()["generatedAtMs"],
+                42
+            );
         }
         let occupied = bind(0).await.unwrap();
-        assert!(configure(app.handle().clone(), true, occupied.local_addr().unwrap().port()).await.is_err());
+        assert!(configure(
+            app.handle().clone(),
+            true,
+            occupied.local_addr().unwrap().port()
+        )
+        .await
+        .is_err());
         assert_eq!(status(app.handle().clone()).await.unwrap().port, port);
-        assert_eq!(get(&client, port, &lan_token, "health").await.status(), StatusCode::OK);
+        assert_eq!(
+            get(&client, port, &lan_token, "health").await.status(),
+            StatusCode::OK
+        );
         let replacement = token(app.handle().clone(), true).await.unwrap();
         assert_ne!(replacement, lan_token);
-        assert_eq!(get(&client, port, &lan_token, "health").await.status(), StatusCode::UNAUTHORIZED);
-        assert_eq!(get(&client, port, &replacement, "health").await.status(), StatusCode::OK);
-        assert!(!configure(app.handle().clone(), false, port).await.unwrap().running);
-        assert!(client.get(format!("http://127.0.0.1:{port}/api/observer/v1/health")).send().await.is_err());
-        assert_eq!(get(&client, local.port, &local.token, "health").await.status(), StatusCode::OK);
+        assert_eq!(
+            get(&client, port, &lan_token, "health").await.status(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            get(&client, port, &replacement, "health").await.status(),
+            StatusCode::OK
+        );
+        assert!(
+            !configure(app.handle().clone(), false, port)
+                .await
+                .unwrap()
+                .running
+        );
+        assert!(client
+            .get(format!("http://127.0.0.1:{port}/api/observer/v1/health"))
+            .send()
+            .await
+            .is_err());
+        assert_eq!(
+            get(&client, local.port, &local.token, "health")
+                .await
+                .status(),
+            StatusCode::OK
+        );
         assert_eq!(std::fs::read(&descriptor_path).unwrap(), original);
 
         configure(app.handle().clone(), true, port).await.unwrap();
@@ -390,8 +468,14 @@ mod tests {
         runtime_state.stopping.store(false, Ordering::Release);
         super::super::start(app.handle().clone()).await.unwrap();
         assert!(status(app.handle().clone()).await.unwrap().running);
-        assert_eq!(token(app.handle().clone(), false).await.unwrap(), replacement);
-        assert_eq!(get(&client, port, &replacement, "health").await.status(), StatusCode::OK);
+        assert_eq!(
+            token(app.handle().clone(), false).await.unwrap(),
+            replacement
+        );
+        assert_eq!(
+            get(&client, port, &replacement, "health").await.status(),
+            StatusCode::OK
+        );
         super::super::stop_best_effort(app.handle()).await;
 
         // A persisted LAN bind failure must still leave the local TUI usable.
@@ -400,8 +484,14 @@ mod tests {
         super::super::start(app.handle().clone()).await.unwrap();
         let failed = status(app.handle().clone()).await.unwrap();
         assert!(failed.enabled && !failed.running && failed.error.is_some());
-        let local: aio_observer_protocol::ObserverDescriptorV1 = serde_json::from_slice(&std::fs::read(&descriptor_path).unwrap()).unwrap();
-        assert_eq!(get(&client, local.port, &local.token, "health").await.status(), StatusCode::OK);
+        let local: aio_observer_protocol::ObserverDescriptorV1 =
+            serde_json::from_slice(&std::fs::read(&descriptor_path).unwrap()).unwrap();
+        assert_eq!(
+            get(&client, local.port, &local.token, "health")
+                .await
+                .status(),
+            StatusCode::OK
+        );
         super::super::stop_best_effort(app.handle()).await;
         drop(blocked);
     }

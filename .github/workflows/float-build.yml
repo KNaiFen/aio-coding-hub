@@ -77,6 +77,9 @@ jobs:
           workspaces: src-tauri
       - name: Install frontend tools in Actions
         run: pnpm install --frozen-lockfile
+      - name: Check application versions
+        shell: bash
+        run: node scripts/support-matrix.mjs validate-release-version --tag "aio-coding-hub-v$(node -p 'JSON.parse(require("fs").readFileSync("package.json", "utf8")).version')"
       - name: Check and test Float and shared TUI
         shell: bash
         run: |
