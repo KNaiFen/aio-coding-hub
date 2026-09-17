@@ -148,7 +148,7 @@ pub(super) async fn start<R: tauri::Runtime>(shared: &ObserverHttpState<R>) -> L
     let app = shared.app.clone();
     let loaded = crate::blocking::run("observer_lan_read", move || {
         let path = crate::app_paths::app_data_dir(&app)?.join(CONFIG_FILE);
-        read_config(&path).map_err(Into::into)
+        read_config(&path).map_err(crate::shared::error::AppError::from)
     }).await;
     match loaded {
         Ok(config) => runtime.config = config,
@@ -179,7 +179,7 @@ pub(crate) async fn configure(app: tauri::AppHandle, enabled: bool, port: u16) -
     let listener = if enabled && !keep { Some(bind(port).await?) } else { None };
     let path = crate::app_paths::app_data_dir(&app).map_err(|_| "无法确定配置目录")?.join(CONFIG_FILE);
     let persisted = next.clone();
-    crate::blocking::run("observer_lan_write", move || write_config(&path, &persisted).map_err(Into::into)).await.map_err(|_| "保存局域网观察配置失败")?;
+    crate::blocking::run("observer_lan_write", move || write_config(&path, &persisted).map_err(crate::shared::error::AppError::from)).await.map_err(|_| "保存局域网观察配置失败")?;
     if !keep { runtime.lan.stop().await; }
     if let Some(listener) = listener { runtime.lan.listener = Some(serve(&runtime.http_state, &next, listener)); }
     runtime.lan.config = next;
@@ -195,7 +195,7 @@ pub(crate) async fn token(app: tauri::AppHandle, rotate: bool) -> Result<String,
     if rotate { next.token = LanConfig::default().token; }
     let path = crate::app_paths::app_data_dir(&app).map_err(|_| "无法确定配置目录")?.join(CONFIG_FILE);
     let persisted = next.clone();
-    crate::blocking::run("observer_lan_token", move || write_config(&path, &persisted).map_err(Into::into)).await.map_err(|_| "保存观察令牌失败")?;
+    crate::blocking::run("observer_lan_token", move || write_config(&path, &persisted).map_err(crate::shared::error::AppError::from)).await.map_err(|_| "保存观察令牌失败")?;
     if let Some(listener) = &runtime.lan.listener {
         *listener.token.write().unwrap_or_else(|error| error.into_inner()) = next.token.clone();
     }
