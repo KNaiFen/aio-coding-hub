@@ -196,7 +196,7 @@ sudo xattr -cr /Applications/"AIO Coding Hub.app"
 
 ### Local Resource Constraints and Cloud Validation
 
-Task workflow follows the user-level `$gkd-main` skill. See [AGENTS.md](AGENTS.md) for local resource constraints and the package-script environment. Dependency installation, full tests and coverage, compilation, packaging, and long-running performance checks use GitHub Actions.
+See [AGENTS.md](AGENTS.md) for task workflow, local resource constraints, and the package-script environment, and [GitHub Actions governance](docs/operations/github-actions-governance.md) for commit and release rules. Dependency installation, full tests and coverage, compilation, packaging, and long-running performance checks use GitHub Actions.
 
 Regular pull requests and protected-branch pushes trigger `ci`, and PR merges require the corresponding `ci-gate` and independent `pr-title` results. Routine PR validation must not trigger a duplicate manual `ci` run. `workflow_dispatch` is reserved for `main` recovery or candidate builds, while the Provider trend release benchmark runs on relevant automatic CI paths or the standalone `performance` workflow. Run `dev-build` from Actions only when a desktop integration artifact is needed.
 
@@ -271,7 +271,7 @@ When CI reports formatting, lockfile, or generated-binding drift, download and r
 
 ## Contributing
 
-Issues and PRs welcome! Follow the user-level `$gkd-main` skill for workflow and [AGENTS.md](AGENTS.md) for AIO constraints.
+Issues and PRs welcome! See [AGENTS.md](AGENTS.md) for AIO constraints and [GitHub Actions governance](docs/operations/github-actions-governance.md) for contribution rules.
 
 ---
 

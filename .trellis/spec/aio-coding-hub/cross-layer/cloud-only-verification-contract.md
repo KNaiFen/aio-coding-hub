@@ -11,8 +11,8 @@ root/workspace package scripts, Tauri build hooks, active AIO specs, `ci.yml`,
 
 Dependency installation, full tests and coverage, compilation, packaging, and
 long-running performance checks use GitHub Actions. Necessary lightweight,
-short-lived checks follow the approved `$gkd-main` plan. Project constraints
-are recorded in [AGENTS.md](../../../../AGENTS.md).
+short-lived checks follow the task scope and repository contracts. Project
+constraints are recorded in [AGENTS.md](../../../../AGENTS.md).
 
 ## 3. Package And Tauri Boundaries
 
@@ -135,7 +135,7 @@ unselected, failed, cancelled, and unexpectedly skipped job results.
 including full CI for shared/unknown paths and the documentation-only tiers.
 
 The cloud-only checker retains README and active-spec checks for unavailable
-local commands. It does not read AGENTS or parse GKD workflow prose. A focused
-positive fixture accepts a concise GKD reference alongside the cloud contract.
+local commands. It does not read AGENTS or parse task workflow prose. A focused
+positive fixture accepts a concise AGENTS reference alongside the cloud contract.
 The fixtures and repository scan use only built-in Node modules and write no
 files.

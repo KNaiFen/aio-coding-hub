@@ -28,13 +28,13 @@ CodeQL 在 PR/push 复用同一分类器，只有分类 job 成功、scope 为 `
 
 expected 随实际选择域确定：仅修改 Rust 测试与运维文档的 PR 加入 `contracts`、`rust`、`observer-macos`，未选中的 `frontend` 为 `skipped`，不加入；若后续合法生成绑定漂移使 frontend 被选中，再加入 `frontend`。含代码的 main push 运行两端，commit 模式检查包含 `ci-gate`、`contracts`、`frontend`、`rust`、`observer-macos`，不添加 main 上不存在的 `pr-title`。
 
-PR 模式在下一次查询观察到所需检查失败后返回；检查缺失或 pending 时继续待定，不能因名称缺失删减期望。交接分别报告 GitHub 终态、脚本 timeout、调用错误和代理异常，不能因代理异常重触发 CI。默认查询间隔 240 秒、总预算 6 小时不变；run 模式等待整个 run 的终态，不等同于 PR 模式逐 job 观察失败后返回。本约定沿用现有 watcher 与用户级 skills，不新增门禁或修改其实现。
+PR 模式在下一次查询观察到所需检查失败后返回；检查缺失或 pending 时继续待定，不能因名称缺失删减期望。交接分别报告 GitHub 终态、脚本 timeout、调用错误和代理异常，不能因代理异常重触发 CI。默认查询间隔 240 秒、总预算 6 小时不变；run 模式等待整个 run 的终态，不等同于 PR 模式逐 job 观察失败后返回。本约定不新增门禁或修改 CI 实现。
 
 ## 提交与发版
 
-工作流遵循用户级 `$gkd-main`，项目约束见 [AGENTS.md](../../AGENTS.md)。任务记录不充当构建或发布输入。
+项目任务遵循 [AGENTS.md](../../AGENTS.md) 与本页规则，不要求安装用户级 Skill。任务记录不充当构建或发布输入。
 
-实现完成后可先依据差异与已有证据审查，并注明最终 CI 待定。审查后由一次收尾角色准备交付前已知的 PLAN、execution、progress、review、说明及活动记录迁移，随最终待验证 head 合批推送，再等待必要 CI，按已有授权合并与清理；主代理不提前归档。合批允许多个本地提交，避免 CI 成功后仅为已知归档再制造新 head。
+实现完成后可先依据差异与已有证据审查，并注明最终 CI 待定。将交付前已知的说明及必要任务记录随最终待验证 head 合批推送，再等待必要 CI，按已有授权合并与清理。合批允许多个本地提交，避免 CI 成功后仅为已知归档再制造新 head。
 
 必要的提前云端反馈与真实修复仍可推送，不要求一次 CI 或一律单 PR。后来才能获知的 CI、merge SHA 与清理事实按真实时间保存到主工作树归档并引用 PR/Actions；不得提前写成功，也不为回填记录自身的 SHA/CI 递归提交。
 
