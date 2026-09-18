@@ -34,18 +34,14 @@ expectScope(["PENDING.md", ".trellis/tasks/08-03-task/task.json", "omx_wiki/guid
   fullCi: false,
   docsChecks: false,
 });
-const gkdDocuments = [
-  ".gkd/plan.md",
-  ".gkd/plan-changes.md",
-  ".gkd/execution.md",
-  ".gkd/progress.md",
-  ".gkd/review.md",
-  ".gkd/archive/workflow/summary.md",
+const processDocuments = [
+  ".trellis/tasks/example/plan.md",
+  ".trellis/tasks/example/progress.md",
   "plan.md",
   "progress.md",
   "review.md",
 ];
-expectScope(gkdDocuments, { scope: "process-docs", fullCi: false, docsChecks: false });
+expectScope(processDocuments, { scope: "process-docs", fullCi: false, docsChecks: false });
 expectScope(["AGENTS.md"], { scope: "checked-docs", fullCi: false, docsChecks: true });
 expectScope(["README.md", "docs/plugins/authoring.md", ".trellis/spec/example/rule.md"], {
   scope: "checked-docs",
@@ -74,9 +70,8 @@ for (const path of [
   "package.json",
   "pnpm-lock.yaml",
   "scripts/check-spec-links.mjs",
-  ".gkd/state.json",
-  ".gkd/scripts/run.mjs",
-  ".gkd/archive/workflow/check.sh",
+  ".trellis/tasks/example/run.mjs",
+  "unknown/state.json",
 ]) {
   assert.equal(classifyPath(path, policy).tier, "shared", path);
 }
@@ -200,12 +195,12 @@ assert.equal(docsToFrontendCopy.frontendCi, true);
 assert.equal(docsToFrontendCopy.rustCi, false);
 assert.equal(classifyNameStatus("D\0src-tauri/src/removed.rs\0", policy).scope, "rust");
 assert.equal(
-  classifyNameStatus("R100\0.gkd/progress.md\0.gkd/archive/workflow/progress.md\0", policy).scope,
+  classifyNameStatus("R100\0.trellis/tasks/example/progress.md\0.trellis/tasks/archive/progress.md\0", policy).scope,
   "process-docs"
 );
-assert.equal(classifyNameStatus("D\0.gkd/execution.md\0", policy).scope, "process-docs");
+assert.equal(classifyNameStatus("D\0.trellis/tasks/example/execution.md\0", policy).scope, "process-docs");
 assert.equal(
-  classifyNameStatus("R100\0src/main.tsx\0.gkd/archive/workflow/main.md\0", policy).scope,
+  classifyNameStatus("R100\0src/main.tsx\0.trellis/tasks/archive/main.md\0", policy).scope,
   "frontend"
 );
 
@@ -372,13 +367,13 @@ assert.equal(missingLock.reason, "classification-error");
 
 for (const eventName of ["pull_request", "push"]) {
   for (const [paths, scope] of [
-    [gkdDocuments, "process-docs"],
-    [["README.md", "AGENTS.md", ".gkd/review.md"], "checked-docs"],
-    [[".gkd/progress.md", "src/main.tsx"], eventName === "push" ? "full" : "frontend"],
-    [[".gkd/progress.md", "src-tauri/src/lib.rs"], eventName === "push" ? "full" : "rust"],
-    [[".gkd/state.json"], "full"],
-    [[".gkd/review.md", ".github/workflows/ci.yml"], "full"],
-    [[".gkd/review.md", "package.json"], "full"],
+    [processDocuments, "process-docs"],
+    [["README.md", "AGENTS.md", ".trellis/tasks/example/review.md"], "checked-docs"],
+    [[".trellis/tasks/example/progress.md", "src/main.tsx"], eventName === "push" ? "full" : "frontend"],
+    [[".trellis/tasks/example/progress.md", "src-tauri/src/lib.rs"], eventName === "push" ? "full" : "rust"],
+    [["unknown/state.json"], "full"],
+    [[".trellis/tasks/example/review.md", ".github/workflows/ci.yml"], "full"],
+    [[".trellis/tasks/example/review.md", "package.json"], "full"],
   ]) {
     const result = runClassifier(
       { eventName, baseSha, beforeSha: baseSha, headSha, policyPath },
