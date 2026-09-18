@@ -11,8 +11,8 @@ root/workspace package scripts, Tauri build hooks, active AIO specs, `ci.yml`,
 
 Dependency installation, full tests and coverage, compilation, packaging, and
 long-running performance checks use GitHub Actions. Necessary lightweight,
-short-lived checks follow the approved `$gkd-main` plan. Project constraints
-are recorded in [AGENTS.md](../../../../AGENTS.md).
+short-lived checks follow the task scope and repository contracts. Project
+constraints are recorded in [AGENTS.md](../../../../AGENTS.md).
 
 ## 3. Package And Tauri Boundaries
 

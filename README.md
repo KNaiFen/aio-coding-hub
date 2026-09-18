@@ -192,7 +192,7 @@ sudo xattr -cr /Applications/"AIO Coding Hub.app"
 
 ### 本地资源约束与云端验证
 
-任务流程以用户级 `$gkd-main` skill 为准，本地资源约束与包脚本环境见 [AGENTS.md](AGENTS.md)。依赖安装、完整测试/覆盖率、编译、打包和长时性能检查使用 GitHub Actions。
+任务流程与本地资源约束见 [AGENTS.md](AGENTS.md)，提交和发布规则见[GitHub Actions 治理](docs/operations/github-actions-governance.md)。依赖安装、完整测试/覆盖率、编译、打包和长时性能检查使用 GitHub Actions。
 
 普通 PR 与受保护分支推送自动触发 `ci`，PR 需要对应的 `ci-gate` 和独立 `pr-title`；常规 PR 验证不重复触发手动 `ci`。`workflow_dispatch` 仅用于 `main` 的恢复或候选构建，Provider trend release benchmark 由相关自动 CI 路径或独立 `performance` 工作流执行；需要桌面集成制品时，在 Actions 页面按需运行 `dev-build` 并选择目标。
 
@@ -278,7 +278,7 @@ CI 检测到格式、锁文件或生成绑定漂移时，下载并审查它提�
 
 ## 参与贡献
 
-欢迎提交 Issue 和 PR！工作流遵循用户级 `$gkd-main`，项目约束见 [AGENTS.md](AGENTS.md)。
+欢迎提交 Issue 和 PR！项目约束见 [AGENTS.md](AGENTS.md)，提交规则见[GitHub Actions 治理](docs/operations/github-actions-governance.md)。
 
 ---
 
