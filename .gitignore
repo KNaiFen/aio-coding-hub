@@ -51,6 +51,10 @@ target/
 src-tauri/target*/
 .pnpm-store/
 .codegraph/
+.gkd/
+.trellis/
+docs/history/
+PENDING_COMPLETED.md
 subagent.md
 .cate/
 .unknowns/

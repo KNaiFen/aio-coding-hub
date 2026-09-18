@@ -8,7 +8,7 @@
 
 项目工作流与资源约束见 [AGENTS.md](../AGENTS.md)，提交和发布规则见 [GitHub Actions 治理](operations/github-actions-governance.md)，模块行为合同见 [项目规范目录](contracts/aio-coding-hub/)。
 
-`PENDING.md` 保存尚未交付的事项；历史审计、旧计划、归档、任务正文和会话日志只解释当时发生了什么，不指导新任务，也不提供新的执行授权。
+`PENDING.md` 保存尚未交付的事项；历史审计、旧计划、归档、任务正文和会话日志仅保存在本地 `dev` 分支，不指导新任务，也不提供新的执行授权。
 
 ## 用户与产品
 
@@ -40,11 +40,6 @@
 ## 任务与决策
 
 - [待处理事项](../PENDING.md)：用户明确要求累积、尚未完成的小问题。
-- [已完成事项](../PENDING_COMPLETED.md)：已交付或明确放弃的 PENDING 历史。
-
-## 历史资料
-
-- [历史资料索引](./history/README.md)：带日期的审计、被替代计划和工程分析。
 
 ## 文档状态
 

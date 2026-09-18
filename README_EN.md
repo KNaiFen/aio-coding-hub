@@ -235,7 +235,7 @@ curl http://127.0.0.1:37123/health
 ## Project Documentation
 
 - [Project knowledge base](docs/README.md): the canonical map for product, architecture, plugin, operations, task, and historical documentation.
-- [Pending work](PENDING.md) and [completed work](PENDING_COMPLETED.md): deferred items and delivery evidence.
+- [Pending work](PENDING.md): deferred items; completed task archives are kept only on the local `dev` branch.
 
 Current code takes precedence over historical audits, superseded plans, and session journals.
 

@@ -1,2 +1,0 @@
-# Local Trellis runtime state is machine-local and never committed.
-.runtime/
