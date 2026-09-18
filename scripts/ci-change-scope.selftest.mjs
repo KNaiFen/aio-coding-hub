@@ -35,6 +35,8 @@ expectScope(["PENDING.md", ".trellis/tasks/08-03-task/task.json", "omx_wiki/guid
   docsChecks: false,
 });
 const processDocuments = [
+  ".gkd/plan.md",
+  ".gkd/archive/workflow/summary.md",
   ".trellis/tasks/example/plan.md",
   ".trellis/tasks/example/progress.md",
   "plan.md",
@@ -71,6 +73,7 @@ for (const path of [
   "pnpm-lock.yaml",
   "scripts/check-spec-links.mjs",
   ".trellis/tasks/example/run.mjs",
+  ".gkd/state.json",
   "unknown/state.json",
 ]) {
   assert.equal(classifyPath(path, policy).tier, "shared", path);
@@ -199,6 +202,7 @@ assert.equal(
   "process-docs"
 );
 assert.equal(classifyNameStatus("D\0.trellis/tasks/example/execution.md\0", policy).scope, "process-docs");
+assert.equal(classifyNameStatus("D\0.gkd/execution.md\0", policy).scope, "process-docs");
 assert.equal(
   classifyNameStatus("R100\0src/main.tsx\0.trellis/tasks/archive/main.md\0", policy).scope,
   "frontend"
@@ -372,6 +376,7 @@ for (const eventName of ["pull_request", "push"]) {
     [[".trellis/tasks/example/progress.md", "src/main.tsx"], eventName === "push" ? "full" : "frontend"],
     [[".trellis/tasks/example/progress.md", "src-tauri/src/lib.rs"], eventName === "push" ? "full" : "rust"],
     [["unknown/state.json"], "full"],
+    [[".gkd/state.json"], "full"],
     [[".trellis/tasks/example/review.md", ".github/workflows/ci.yml"], "full"],
     [[".trellis/tasks/example/review.md", "package.json"], "full"],
   ]) {

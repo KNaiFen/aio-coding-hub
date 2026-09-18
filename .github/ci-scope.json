@@ -11,6 +11,10 @@
     ],
     "prefixRules": [
       {
+        "prefix": ".gkd/",
+        "extensions": [".md"]
+      },
+      {
         "prefix": ".trellis/tasks/",
         "extensions": [".md", ".json", ".jsonl"]
       },

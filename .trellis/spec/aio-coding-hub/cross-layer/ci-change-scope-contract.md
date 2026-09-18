@@ -25,10 +25,11 @@ waiting for a check that never reports.
 
 - Only exact paths and prefix-plus-extension rules in `.github/ci-scope.json`
   may select a documentation, frontend, or Rust-only tier.
-- Task records under `.trellis/tasks/` and the existing root `plan.md`,
-  `progress.md`, and `review.md` are process records with no build or release
-  consumers. `AGENTS.md` is checked documentation so handoff changes run the
-  cloud-only contract.
+- Markdown under `.gkd/`, task records under `.trellis/tasks/`, and the existing
+  root `plan.md`, `progress.md`, and `review.md` are process records with no
+  build or release consumers. Other extensions under `.gkd/` remain unknown
+  and require complete CI. `AGENTS.md` is checked documentation so handoff
+  changes run the cloud-only contract.
 - `.github/**` and the classifier/self-test scripts are immutable control-plane
   exceptions: code hard-codes them to complete CI, so the policy cannot grant
   itself or its interpreter a cheaper route.
