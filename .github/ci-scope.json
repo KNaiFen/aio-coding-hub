@@ -11,6 +11,10 @@
     ],
     "prefixRules": [
       {
+        "prefix": ".gkd/",
+        "extensions": [".md"]
+      },
+      {
         "prefix": ".trellis/tasks/",
         "extensions": [".md", ".json", ".jsonl"]
       },
@@ -23,10 +27,6 @@
   "checkedDocumentation": {
     "exactPaths": ["AGENTS.md", "README.md", "README_EN.md"],
     "prefixRules": [
-      {
-        "prefix": ".trellis/spec/",
-        "extensions": [".md"]
-      },
       {
         "prefix": "docs/",
         "extensions": [".md"]

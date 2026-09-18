@@ -54,7 +54,7 @@ export function loadCloudOnlyVerificationFixture(root = repoRoot) {
     tauriConfig: readJson(root, "src-tauri/tauri.conf.json"),
     readme: readText(root, "README.md"),
     readmeEn: readText(root, "README_EN.md"),
-    activeSpecs: readMarkdownTree(root, ".trellis/spec/aio-coding-hub"),
+    activeSpecs: readMarkdownTree(root, "docs/contracts/aio-coding-hub"),
     ciWorkflow: readText(root, ".github/workflows/ci.yml"),
     devBuildWorkflow: readText(root, ".github/workflows/dev-build.yml"),
   };

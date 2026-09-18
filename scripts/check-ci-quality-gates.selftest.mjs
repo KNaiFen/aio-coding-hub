@@ -637,7 +637,8 @@ function gateStatus(env) {
 for (const eventName of ["pull_request", "push"]) {
   for (const [name, diff, analyze] of [
     ["process documents", "M\0.trellis/tasks/example/plan.md\0M\0.trellis/tasks/example/progress.md\0", false],
-    ["checked documents", "M\0README.md\0M\0AGENTS.md\0M\0.trellis/spec/example/rule.md\0", false],
+    ["GKD process documents", "M\0.gkd/plan.md\0M\0.gkd/archive/workflow/summary.md\0", false],
+    ["checked documents", "M\0README.md\0M\0AGENTS.md\0M\0docs/contracts/aio-coding-hub/example.md\0", false],
     ["frontend", "M\0src/main.tsx\0", true],
     ["Rust", "M\0src-tauri/src/lib.rs\0", true],
     ["Float web", "M\0src-tauri/crates/aio-float/web/renderer.js\0", true],
