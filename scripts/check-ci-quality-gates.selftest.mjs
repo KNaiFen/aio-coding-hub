@@ -636,7 +636,7 @@ function gateStatus(env) {
 
 for (const eventName of ["pull_request", "push"]) {
   for (const [name, diff, analyze] of [
-    ["process documents", "M\0.gkd/plan.md\0M\0.gkd/progress.md\0", false],
+    ["process documents", "M\0.trellis/tasks/example/plan.md\0M\0.trellis/tasks/example/progress.md\0", false],
     ["checked documents", "M\0README.md\0M\0AGENTS.md\0M\0.trellis/spec/example/rule.md\0", false],
     ["frontend", "M\0src/main.tsx\0", true],
     ["Rust", "M\0src-tauri/src/lib.rs\0", true],
@@ -647,15 +647,15 @@ for (const eventName of ["pull_request", "push"]) {
     ["Float and frontend", "M\0src-tauri/crates/aio-float/web/renderer.js\0M\0src/main.tsx\0", true],
     ["observer protocol", "M\0src-tauri/crates/aio-observer-protocol/src/lib.rs\0", true],
     ["shared", "M\0src/generated/bindings.ts\0", true],
-    ["unknown", "M\0.gkd/state.json\0", true],
+    ["unknown", "M\0unknown/state.json\0", true],
     ["mixed domains", "M\0src/main.tsx\0M\0src-tauri/src/lib.rs\0", true],
-    ["mixed documents and source", "M\0.gkd/progress.md\0M\0src/main.tsx\0", true],
+    ["mixed documents and source", "M\0.trellis/tasks/example/progress.md\0M\0src/main.tsx\0", true],
     ["control plane", "M\0.github/workflows/codeql.yml\0", true],
     ["empty diff", "", true],
     ["deleted checked document", "D\0docs/removed.md\0", false],
     ["deleted source", "D\0src-tauri/src/removed.rs\0", true],
-    ["archived process document", "R100\0.gkd/progress.md\0.gkd/archive/workflow/progress.md\0", false],
-    ["source moved to documentation", "R100\0src/main.tsx\0.gkd/archive/workflow/main.md\0", true],
+    ["archived process document", "R100\0.trellis/tasks/example/progress.md\0.trellis/tasks/archive/progress.md\0", false],
+    ["source moved to documentation", "R100\0src/main.tsx\0.trellis/tasks/archive/main.md\0", true],
     ["cross-domain rename", "R100\0src/old.tsx\0src-tauri/src/new.rs\0", true],
     ["cross-domain copy", "C090\0src-tauri/src/old.rs\0src/new.tsx\0", true],
     ["documentation copy", "C090\0README.md\0docs/copy.md\0", false],

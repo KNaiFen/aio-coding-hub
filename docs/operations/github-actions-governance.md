@@ -16,7 +16,7 @@
 
 普通 PR 的 required checks 为自动触发的 `ci-gate` 与 `pr-title`。不要对同一 PR commit 再启动 `ci` 的 `workflow_dispatch`；手动 CI 只用于 `main` 恢复或候选构建。
 
-PR 的 `change-scope` 按 `.github/ci-scope.json` 分别输出 frontend、Rust 与 shared 选择：纯前端源码/样式只运行 frontend，纯 Rust/Cargo 路径只运行 Rust；生成绑定、根依赖、CI/工具脚本、未知路径及前后端混合改动运行两端。纯文档 PR 和 `dev`/`main` push 保留文档分类：`.gkd/` Markdown 与既有根级 plan/progress/review 只运行过程门禁，README、AGENTS 和 active spec 还运行文档合同。包含代码或未知文件的主干 push、main 手动运行仍运行两端。选中的 frontend、Rust 与 observer-macos 等 `contracts` 成功后并行启动；合同失败导致的异常 `skipped` 不能通过 `ci-gate`。`candidate-plan` 保持与合同并行，候选构建依赖不变。`ci-gate` 验证选中 job 成功、未选 job 为 `skipped`；文档优化不会跳过整个 required workflow。
+PR 的 `change-scope` 按 `.github/ci-scope.json` 分别输出 frontend、Rust 与 shared 选择：纯前端源码/样式只运行 frontend，纯 Rust/Cargo 路径只运行 Rust；生成绑定、根依赖、CI/工具脚本、未知路径及前后端混合改动运行两端。纯文档 PR 和 `dev`/`main` push 保留文档分类：任务记录与根级 plan/progress/review 只运行过程门禁，README、AGENTS 和 active spec 还运行文档合同。包含代码或未知文件的主干 push、main 手动运行仍运行两端。选中的 frontend、Rust 与 observer-macos 等 `contracts` 成功后并行启动；合同失败导致的异常 `skipped` 不能通过 `ci-gate`。`candidate-plan` 保持与合同并行，候选构建依赖不变。`ci-gate` 验证选中 job 成功、未选 job 为 `skipped`；文档优化不会跳过整个 required workflow。
 
 CodeQL 在 PR/push 复用同一分类器，只有分类 job 成功、scope 为 `process-docs` 或 `checked-docs` 且 frontend/Rust 输出均明确为 `false` 时，才跳过双语言分析。单域源码、共享或未知路径、混合改动、空 diff、分类异常及缺失输出仍分析两种语言。每周计划和手动事件跳过分类并直接分析；分类 job 失败仍保留失败结果，整次 workflow 未取消时继续分析。不能用空输出证明纯文档，也不通过 step 条件或忽略失败制造分析成功。
 
