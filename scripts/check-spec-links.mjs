@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(scriptDir);
 const roots = [
-  join(repoRoot, ".trellis", "spec"),
+  join(repoRoot, "docs", "contracts"),
   join(repoRoot, "docs"),
   join(repoRoot, "src", "templates", "markdown", "spec"),
 ];

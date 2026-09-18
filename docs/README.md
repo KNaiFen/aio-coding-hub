@@ -6,7 +6,7 @@
 
 核对实现事实时，优先查看当前代码、类型、机器可读合同和自动化校验，再按需阅读本页列出的现行产品、架构、插件与运维文档。文档与代码不一致时记录差异，不能把当前实现自动视为获准行为。
 
-项目工作流与资源约束见 [AGENTS.md](../AGENTS.md)，提交和发布规则见 [GitHub Actions 治理](operations/github-actions-governance.md)，模块行为合同见 `.trellis/spec/aio-coding-hub/`。
+项目工作流与资源约束见 [AGENTS.md](../AGENTS.md)，提交和发布规则见 [GitHub Actions 治理](operations/github-actions-governance.md)，模块行为合同见 [项目规范目录](contracts/aio-coding-hub/)。
 
 `PENDING.md` 保存尚未交付的事项；历史审计、旧计划、归档、任务正文和会话日志只解释当时发生了什么，不指导新任务，也不提供新的执行授权。
 
@@ -33,9 +33,9 @@
 - [Homebrew 发布指南](./release-homebrew.md)
 - [GitHub Actions 治理与远端配置](./operations/github-actions-governance.md)
 - [仓库执行规则](../AGENTS.md)
-- [项目规范目录](../.trellis/spec/)
+- [项目规范目录](contracts/aio-coding-hub/)
 
-包脚本、Tauri hook、CI job 和生成漂移的实际边界见[云端验证合同](../.trellis/spec/aio-coding-hub/cross-layer/cloud-only-verification-contract.md)。
+包脚本、Tauri hook、CI job 和生成漂移的实际边界见[云端验证合同](contracts/aio-coding-hub/cross-layer/cloud-only-verification-contract.md)。
 
 ## 任务与决策
 

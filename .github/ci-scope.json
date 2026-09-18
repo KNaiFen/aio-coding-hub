@@ -28,10 +28,6 @@
     "exactPaths": ["AGENTS.md", "README.md", "README_EN.md"],
     "prefixRules": [
       {
-        "prefix": ".trellis/spec/",
-        "extensions": [".md"]
-      },
-      {
         "prefix": "docs/",
         "extensions": [".md"]
       }

@@ -45,7 +45,7 @@ const processDocuments = [
 ];
 expectScope(processDocuments, { scope: "process-docs", fullCi: false, docsChecks: false });
 expectScope(["AGENTS.md"], { scope: "checked-docs", fullCi: false, docsChecks: true });
-expectScope(["README.md", "docs/plugins/authoring.md", ".trellis/spec/example/rule.md"], {
+expectScope(["README.md", "docs/plugins/authoring.md", "docs/contracts/aio-coding-hub/example.md"], {
   scope: "checked-docs",
   fullCi: false,
   docsChecks: true,
