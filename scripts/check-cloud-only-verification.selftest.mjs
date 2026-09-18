@@ -12,8 +12,8 @@ assert.doesNotThrow(() => assertCloudOnlyVerificationContract(valid));
 assert.doesNotThrow(() =>
   assertCloudOnlyVerificationContract({
     ...valid,
-    readme: "项目工作流见 AGENTS.md。`workflow_dispatch` 用于 main 云端构建。",
-    readmeEn: "See AGENTS.md for the task workflow. `workflow_dispatch` supports main cloud builds.",
+    readme: "工作流遵循 `$gkd-main`。`workflow_dispatch` 用于 main 云端构建。",
+    readmeEn: "Workflow follows `$gkd-main`. `workflow_dispatch` supports main cloud builds.",
   })
 );
 assert.doesNotThrow(() =>
