@@ -2254,6 +2254,7 @@ export type ActiveGatewayHookContribution = {
   priority: number;
   failurePolicy: string | null;
   timeoutMs?: number | null;
+  match?: PluginHookMatch | null;
 };
 export type ActiveProtocolBridgeContribution = {
   pluginId: string;
@@ -2757,6 +2758,7 @@ export type FailoverAttempt = {
   reason: string | null;
   selection_method: string | null;
   reason_code: string | null;
+  plugin_decision?: PluginDecision | null;
   attempt_started_ms: number | null;
   attempt_duration_ms: number | null;
   circuit_state_before: string | null;
@@ -3267,6 +3269,7 @@ export type PluginContributionImpact = {
   capabilities: string[];
 };
 export type PluginContributionImpactItem = { id: string; label: string | null };
+export type PluginDecision = { plugin_id: string; reason_code: string; message: string | null };
 export type PluginDetail = {
   summary: PluginSummary;
   manifest: PluginManifest;
@@ -3310,6 +3313,7 @@ export type PluginHook = {
   priority?: number;
   failurePolicy?: string | null;
   timeoutMs?: number | null;
+  match?: PluginHookMatch | null;
 };
 export type PluginHookExecutionReport = {
   id: number;
@@ -3336,7 +3340,9 @@ export type PluginHookLifecycleSummary = {
   priority: number;
   failurePolicy: string | null;
   timeoutMs?: number | null;
+  match?: PluginHookMatch | null;
 };
+export type PluginHookMatch = { cliKeys: string[]; methods: string[]; paths: string[] };
 export type PluginHostCompatibility = { app: string; pluginApi: string; platforms?: string[] };
 export type PluginInstallFromFileInput = { filePath: string };
 export type PluginInstallPreview = {

@@ -4,7 +4,7 @@ use super::request_context::RequestContext;
 use axum::response::Response;
 
 #[path = "../handler/failover_loop/mod.rs"]
-mod failover_loop;
+pub(in crate::gateway::proxy) mod failover_loop;
 
 pub(super) async fn forward<R>(ctx: RequestContext<R>) -> Response
 where

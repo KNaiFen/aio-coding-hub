@@ -5,7 +5,8 @@ export type ScaffoldTemplate =
   | "rule"
   | "example:prompt-helper"
   | "example:redactor"
-  | "example:response-guard";
+  | "example:response-guard"
+  | "example:response-check";
 
 export type ScaffoldInput = {
   id: string;
@@ -24,6 +25,8 @@ export function createPluginScaffold(input: ScaffoldInput): ScaffoldFiles {
       return promptHelperExampleTemplate(id, name);
     case "example:redactor":
       return redactorExampleTemplate(id, name);
+    case "example:response-check":
+      return responseCheckExampleTemplate(id, name);
     case "example:response-guard":
       return responseGuardExampleTemplate(id, name);
     case "command":
@@ -214,6 +217,47 @@ module.exports.activate = function(api) {
       name,
       id,
       "Marks risky response text for review after the gateway receives the provider response."
+    ),
+  };
+}
+
+function responseCheckExampleTemplate(id: string, name: string): ScaffoldFiles {
+  const hook = "gateway.response.beforeCommit" as const;
+  const manifest = gatewayHookManifest(
+    id,
+    name,
+    "Complete response tail validation with provider fallback.",
+    [hook]
+  );
+  manifest.capabilities = ["gateway.hooks", "gateway.provider.switch"];
+  manifest.contributes!.gatewayHooks = [
+    {
+      name: hook,
+      priority: 100,
+      match: { cliKeys: ["codex"], methods: ["POST"], paths: ["/responses", "/v1/responses"] },
+    },
+  ];
+  return {
+    "plugin.json": jsonFile(manifest),
+    "dist/extension.js": `module.exports.activate = function(api) {
+  api.gateway.registerHook("${hook}", function(ctx) {
+    const body = ctx.context.response.body;
+    return body.trimEnd().endsWith("APPROVED")
+      ? { action: "pass" }
+      : { action: "switchProvider", reasonCode: "tail.not_approved" };
+  });
+};
+`,
+    "fixtures/response-reject.json": jsonFile({
+      response: { body: "Example business output REJECTED" },
+    }),
+    "fixtures/response-pass.json": jsonFile({
+      response: { body: "Example business output APPROVED" },
+    }),
+    "README.md": exampleReadme(
+      name,
+      id,
+      "Checks a synthetic tail marker without reading model fields. Matching requests wait for the complete response before delivery. A rejected attempt asks the host to use the next eligible provider in the current session. This learning fixture is not a production Responses validator."
     ),
   };
 }

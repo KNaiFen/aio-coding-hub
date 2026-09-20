@@ -85,11 +85,12 @@ const SUPPORTED_TEMPLATES: readonly ScaffoldTemplate[] = [
   "example:prompt-helper",
   "example:redactor",
   "example:response-guard",
+  "example:response-check",
 ];
 const UNSUPPORTED_PUBLIC_TEMPLATES = new Set(["wasm", "process", "native"]);
 const USAGE = [
   "Usage:",
-  "  create-aio-plugin <publisher.plugin-name> [command|rule|example:prompt-helper|example:redactor|example:response-guard]",
+  "  create-aio-plugin <publisher.plugin-name> [command|rule|example:prompt-helper|example:redactor|example:response-guard|example:response-check]",
   "  rule is a legacy alias for command and generates an Extension Host command template.",
   "  create-aio-plugin doctor <plugin-dir>",
   "  create-aio-plugin validate [--strict] <plugin-dir>",

@@ -5,6 +5,7 @@ export type ActiveGatewayHookName =
   | "gateway.request.beforeSend"
   | "gateway.response.chunk"
   | "gateway.response.after"
+  | "gateway.response.beforeCommit"
   | "gateway.error"
   | "log.beforePersist";
 
@@ -47,6 +48,7 @@ export type PluginHook = {
   priority?: number;
   failurePolicy?: "fail-open" | "fail-closed";
   timeoutMs?: number;
+  match?: { cliKeys: string[]; methods: string[]; paths: string[] };
 };
 
 export type PluginHostCompatibility = {
@@ -85,7 +87,8 @@ export type PluginCapability =
   | "provider.modelDiscovery"
   | "provider.healthCheck"
   | "protocol.bridge"
-  | "gateway.hooks";
+  | "gateway.hooks"
+  | "gateway.provider.switch";
 
 export type HostRenderedField =
   | { type: "text"; key: string; label: string; placeholder?: string; required?: boolean }
@@ -241,6 +244,32 @@ export type PluginHookResult =
       audit?: JsonValue[];
     };
 
+/** Complete immutable response evidence. Legacy hooks retain their existing wire format. */
+export type ResponseCommitContext = {
+  hook: "gateway.response.beforeCommit";
+  traceId: string;
+  config: JsonValue;
+  context: {
+    hookName: "gateway.response.beforeCommit";
+    traceId: string;
+    request: { cliKey: string; method: string; path: string; requestedModel: string | null };
+    outboundRequest: { model: string | null };
+    attempt: { providerId: number; providerIndex: number; retryIndex: number };
+    response: {
+      status: number;
+      headers: Record<string, string>;
+      contentType: string | null;
+      body: string;
+      complete: true;
+      decodedBytes: number;
+    };
+  };
+};
+
+export type ResponseCommitResult =
+  | { action: "pass" }
+  | { action: "block" | "switchProvider"; reasonCode: string; message?: string };
+
 export type PrivacyRedactionOptions = {
   sensitiveTypes?: string[];
   redactionScopes?: string[];
@@ -259,7 +288,11 @@ export type PrivacyApi = {
 
 export type GatewayApi = {
   registerHook(
-    name: ActiveGatewayHookName,
+    name: "gateway.response.beforeCommit",
+    handler: (context: ResponseCommitContext) => ResponseCommitResult
+  ): void;
+  registerHook(
+    name: Exclude<ActiveGatewayHookName, "gateway.response.beforeCommit">,
     handler: (context: PluginHookContext) => PluginHookResult
   ): void;
 };
@@ -309,6 +342,7 @@ const KNOWN_HOOKS = new Set<GatewayHookName>([
   "gateway.response.headers",
   "gateway.response.chunk",
   "gateway.response.after",
+  "gateway.response.beforeCommit",
   "gateway.error",
   "log.beforePersist",
 ]);
@@ -344,6 +378,7 @@ const KNOWN_CAPABILITIES = new Set<PluginCapability>([
   "provider.healthCheck",
   "protocol.bridge",
   "gateway.hooks",
+  "gateway.provider.switch",
 ]);
 
 const KNOWN_TARGET_CLI_KEYS = new Set(["claude", "codex", "gemini"]);
@@ -590,6 +625,7 @@ function validateGatewayHookContributions(gatewayHooks: unknown): ValidationResu
   if (!Array.isArray(gatewayHooks)) {
     return invalid("PLUGIN_UNKNOWN_HOOK", "gatewayHooks must be an array");
   }
+  let beforeCommitSeen = false;
   for (const hook of gatewayHooks) {
     const record = asRecord(hook);
     if (!record || typeof record.name !== "string") {
@@ -603,6 +639,51 @@ function validateGatewayHookContributions(gatewayHooks: unknown): ValidationResu
     }
     if (!KNOWN_HOOKS.has(record.name as GatewayHookName)) {
       return invalid("PLUGIN_UNKNOWN_HOOK", `unknown hook: ${record.name}`);
+    }
+    if (record.name === "gateway.response.beforeCommit") {
+      if (beforeCommitSeen)
+        return invalid(
+          "PLUGIN_DUPLICATE_HOOK",
+          "beforeCommit may be declared only once per plugin"
+        );
+      beforeCommitSeen = true;
+      if (record.failurePolicy != null && record.failurePolicy !== "fail-closed") {
+        return invalid("PLUGIN_INVALID_HOOK_POLICY", "beforeCommit requires fail-closed");
+      }
+      const scope = asRecord(record.match);
+      if (
+        !scope ||
+        Object.keys(scope).some((key) => !["cliKeys", "methods", "paths"].includes(key))
+      ) {
+        return invalid("PLUGIN_INVALID_HOOK_MATCH", "beforeCommit requires an exact match scope");
+      }
+      for (const name of ["cliKeys", "methods", "paths"]) {
+        const values = scope[name];
+        if (
+          !Array.isArray(values) ||
+          values.length === 0 ||
+          values.length > 32 ||
+          new Set(values).size !== values.length ||
+          values.some(
+            (value) =>
+              typeof value !== "string" ||
+              value.length === 0 ||
+              value.length > 256 ||
+              /[^\x21-\x7e]|[*?#]/.test(value) ||
+              (name === "cliKeys"
+                ? !/^[a-z0-9-]+$/.test(value)
+                : name === "methods"
+                  ? !["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"].includes(value)
+                  : !value.startsWith("/"))
+          )
+        )
+          return invalid(
+            "PLUGIN_INVALID_HOOK_MATCH",
+            `match.${name} must be a nonempty unique exact list of at most 32 values`
+          );
+      }
+    } else if (record.match != null) {
+      return invalid("PLUGIN_INVALID_HOOK_MATCH", "match is only supported by beforeCommit");
     }
     const timeoutMs = record.timeoutMs;
     if (

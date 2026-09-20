@@ -2,6 +2,23 @@ import { describe, expect, it } from "vitest";
 import { parseAttemptsJson } from "../attemptsJson";
 
 describe("services/gateway/attemptsJson", () => {
+  it("preserves optional policy diagnostics and old attempt shapes", () => {
+    const decision = { plugin_id: "community.tail", reason_code: "custom.reject", message: null };
+    const base = { provider_id: 1, provider_name: "P", base_url: "https://p", status: 200 };
+    const attempts = parseAttemptsJson(
+      JSON.stringify([
+        { ...base, outcome: "response_rejected", plugin_decision: decision },
+        { ...base, outcome: "success" },
+      ])
+    );
+    expect(attempts?.[0]).toMatchObject({
+      status: 200,
+      outcome: "response_rejected",
+      plugin_decision: decision,
+    });
+    expect(attempts?.[1]?.plugin_decision).toBeUndefined();
+  });
+
   it("parses a valid attempts array", () => {
     const attempts = parseAttemptsJson(
       JSON.stringify([

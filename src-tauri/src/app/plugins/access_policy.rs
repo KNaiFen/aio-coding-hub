@@ -92,6 +92,7 @@ mod tests {
                 priority: 10,
                 failure_policy: Some("fail-open".to_string()),
                 timeout_ms: None,
+                request_match: None,
             }],
             vec!["gateway.hooks"],
         );
@@ -111,6 +112,7 @@ mod tests {
                 priority: 10,
                 failure_policy: Some("fail-open".to_string()),
                 timeout_ms: None,
+                request_match: None,
             }],
             vec![],
         );

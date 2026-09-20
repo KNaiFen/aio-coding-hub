@@ -324,8 +324,10 @@ if (contract) {
     const contextFields = requireArray(`hookMatrix.${hook}.contextFields`, entry.contextFields);
     requireUniqueArray(`hookMatrix.${hook}.mutationFields`, mutationFields);
     requireUniqueArray(`hookMatrix.${hook}.contextFields`, contextFields);
-    if (entry.defaultFailurePolicy !== contract.defaultFailurePolicy) {
-      failures.push(`hookMatrix.${hook}.defaultFailurePolicy must equal defaultFailurePolicy`);
+    const expectedFailurePolicy =
+      hook === contract.responseCommit?.hook ? "fail-closed" : contract.defaultFailurePolicy;
+    if (entry.defaultFailurePolicy !== expectedFailurePolicy) {
+      failures.push(`hookMatrix.${hook}.defaultFailurePolicy must equal ${expectedFailurePolicy}`);
     }
     if (entry.timeoutMs !== contract.defaultHookTimeoutMs) {
       failures.push(`hookMatrix.${hook}.timeoutMs must equal defaultHookTimeoutMs`);

@@ -79,6 +79,7 @@ fn respond_warmup_intercept<R: tauri::Runtime>(
     }
 
     let warmup_attempts = [FailoverAttempt {
+        plugin_decision: None,
         provider_id: 0,
         provider_name: "Warmup".to_string(),
         base_url: "/__aio__/warmup".to_string(),

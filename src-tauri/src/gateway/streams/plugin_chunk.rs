@@ -24,6 +24,7 @@ where
     trace_id: String,
     sequence: u64,
     pending: Option<PluginChunkFuture>,
+    execution_lease: Option<Arc<tokio::sync::OwnedSemaphorePermit>>,
 }
 
 impl<S> PluginChunkStream<S>
@@ -35,6 +36,7 @@ where
         pipeline: Arc<GatewayPluginPipeline>,
         db: crate::db::Db,
         trace_id: String,
+        execution_lease: Option<Arc<tokio::sync::OwnedSemaphorePermit>>,
     ) -> Self {
         Self {
             upstream,
@@ -43,6 +45,7 @@ where
             trace_id,
             sequence: 0,
             pending: None,
+            execution_lease,
         }
     }
 }
@@ -51,7 +54,10 @@ pub(in crate::gateway) enum MaybePluginChunkStream<S>
 where
     S: Stream<Item = Result<Bytes, reqwest::Error>> + Unpin,
 {
-    Direct(S),
+    Direct {
+        upstream: S,
+        _execution_lease: Option<Arc<tokio::sync::OwnedSemaphorePermit>>,
+    },
     WithPlugins(PluginChunkStream<S>),
 }
 
@@ -64,11 +70,21 @@ where
         pipeline: Arc<GatewayPluginPipeline>,
         db: crate::db::Db,
         trace_id: String,
+        execution_lease: Option<Arc<tokio::sync::OwnedSemaphorePermit>>,
     ) -> Self {
         if pipeline.has_plugins_for_hook(GatewayPluginHookName::ResponseChunk) {
-            Self::WithPlugins(PluginChunkStream::new(upstream, pipeline, db, trace_id))
+            Self::WithPlugins(PluginChunkStream::new(
+                upstream,
+                pipeline,
+                db,
+                trace_id,
+                execution_lease,
+            ))
         } else {
-            Self::Direct(upstream)
+            Self::Direct {
+                upstream,
+                _execution_lease: execution_lease,
+            }
         }
     }
 }
@@ -81,7 +97,7 @@ where
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.as_mut().get_mut() {
-            Self::Direct(upstream) => Pin::new(upstream).poll_next(cx),
+            Self::Direct { upstream, .. } => Pin::new(upstream).poll_next(cx),
             Self::WithPlugins(stream) => Pin::new(stream).poll_next(cx),
         }
     }
@@ -121,8 +137,10 @@ where
             let db = this.db.clone();
             let trace_id = this.trace_id.clone();
             let sequence = this.sequence;
+            let execution_lease = this.execution_lease.clone();
             this.pending = Some(Box::pin(async move {
                 let input = GatewayStreamHookInput {
+                    execution_lease,
                     trace_id: trace_id.clone(),
                     chunk,
                     sequence,
@@ -233,6 +251,7 @@ mod tests {
                         priority: 0,
                         failure_policy: Some("fail-open".to_string()),
                         timeout_ms: None,
+                        request_match: None,
                     }],
                     ui: BTreeMap::new(),
                 }),
@@ -286,9 +305,10 @@ mod tests {
             pipeline,
             db(),
             "trace-no-chunk-plugin".to_string(),
+            None,
         );
 
-        assert!(matches!(stream, MaybePluginChunkStream::Direct(_)));
+        assert!(matches!(stream, MaybePluginChunkStream::Direct { .. }));
     }
 
     #[test]
@@ -307,6 +327,7 @@ mod tests {
             pipeline,
             db(),
             "trace-with-chunk-plugin".to_string(),
+            None,
         );
 
         assert!(matches!(stream, MaybePluginChunkStream::WithPlugins(_)));

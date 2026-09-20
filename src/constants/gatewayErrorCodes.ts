@@ -42,6 +42,11 @@ export const GatewayErrorCodes = {
   REQUEST_LOG_WRITE_THROUGH_RATE_LIMITED: "GW_REQUEST_LOG_WRITE_THROUGH_RATE_LIMITED",
   REQUEST_LOG_DROPPED: "GW_REQUEST_LOG_DROPPED",
   FAKE_200: "GW_FAKE_200",
+  RESPONSE_REJECTED: "GW_RESPONSE_REJECTED",
+  RESPONSE_VALIDATION_FAILED: "GW_RESPONSE_VALIDATION_FAILED",
+  RESPONSE_BUFFER_LIMIT: "GW_RESPONSE_BUFFER_LIMIT",
+  RESPONSE_COMMIT_TIMEOUT: "GW_RESPONSE_COMMIT_TIMEOUT",
+  REQUEST_REPLAY_UNSAFE: "GW_REQUEST_REPLAY_UNSAFE",
 } as const;
 
 export type GatewayErrorCode = (typeof GatewayErrorCodes)[keyof typeof GatewayErrorCodes];
@@ -74,6 +79,11 @@ const GatewayErrorShortLabels = {
   [GatewayErrorCodes.INVALID_BASE_URL]: "无效URL",
   [GatewayErrorCodes.PORT_IN_USE]: "端口占用",
   [GatewayErrorCodes.RESPONSE_BUILD_ERROR]: "响应构建错误",
+  [GatewayErrorCodes.RESPONSE_REJECTED]: "响应被策略拒绝",
+  [GatewayErrorCodes.RESPONSE_VALIDATION_FAILED]: "响应校验失败",
+  [GatewayErrorCodes.RESPONSE_BUFFER_LIMIT]: "完整响应容量不足",
+  [GatewayErrorCodes.RESPONSE_COMMIT_TIMEOUT]: "完整响应等待超时",
+  [GatewayErrorCodes.REQUEST_REPLAY_UNSAFE]: "续接无法安全换家",
   [GatewayErrorCodes.PROVIDER_RATE_LIMITED]: "供应商限额",
   [GatewayErrorCodes.PROVIDER_CIRCUIT_OPEN]: "供应商熔断",
   [GatewayErrorCodes.CLI_PROXY_DISABLED]: "代理未启用",
@@ -194,6 +204,30 @@ export const GatewayErrorDescriptions = {
     desc: "端口被占用",
     suggestion:
       "首选端口已被其他程序占用。网关已自动选择可用端口启动。如需固定端口，请在设置中修改并确保该端口未被占用。",
+  },
+  GW_RESPONSE_REJECTED: {
+    desc: "上游响应未通过插件策略校验",
+    suggestion:
+      "查看调用链中的插件与策略原因。被拒绝的响应未交付；换家仅沿当前会话的合法候选进行，不影响其他会话。",
+  },
+  GW_RESPONSE_VALIDATION_FAILED: {
+    desc: "必需的响应校验未能完成",
+    suggestion:
+      "检查上游响应格式与插件可用状态；若有插件运行报告，可查看具体错误码。网关不会交付未经必需校验的响应。",
+  },
+  GW_RESPONSE_BUFFER_LIMIT: {
+    desc: "完整响应超过容量或并发暂存预算",
+    suggestion: "缩小单次输出或减少同时进行的请求后重试。响应未截断放行。",
+  },
+  GW_RESPONSE_COMMIT_TIMEOUT: {
+    desc: "完整响应读取与校验超过总等待期限",
+    suggestion:
+      "查看调用链的各次耗时及插件运行报告。完整校验需要等待全部响应，超过期限后请求已终止。",
+  },
+  GW_REQUEST_REPLAY_UNSAFE: {
+    desc: "当前续接依赖上一供应商的私有状态，无法安全换家",
+    suggestion:
+      "使用包含完整历史的请求或新会话重试。网关不会删除私有续接 ID 后发送缺少上下文的请求。",
   },
   GW_RESPONSE_BUILD_ERROR: {
     desc: "构建响应失败",

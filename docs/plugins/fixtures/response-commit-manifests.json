@@ -1,0 +1,359 @@
+[
+  {
+    "name": "complete-exact-match",
+    "manifest": {
+      "id": "community.response-check",
+      "name": "Response Check",
+      "version": "1.0.0",
+      "apiVersion": "1.0.0",
+      "runtime": {
+        "kind": "extensionHost",
+        "language": "typescript"
+      },
+      "main": "dist/index.js",
+      "capabilities": ["gateway.hooks", "gateway.provider.switch"],
+      "hostCompatibility": {
+        "app": ">=0.60.0 <1.0.0",
+        "pluginApi": "^1.0.0"
+      },
+      "contributes": {
+        "gatewayHooks": [
+          {
+            "name": "gateway.response.beforeCommit",
+            "match": {
+              "cliKeys": ["codex"],
+              "methods": ["POST"],
+              "paths": ["/responses", "/v1/responses"]
+            }
+          }
+        ]
+      }
+    },
+    "errorCode": null
+  },
+  {
+    "name": "fail-open",
+    "manifest": {
+      "id": "community.response-check",
+      "name": "Response Check",
+      "version": "1.0.0",
+      "apiVersion": "1.0.0",
+      "runtime": {
+        "kind": "extensionHost",
+        "language": "typescript"
+      },
+      "main": "dist/index.js",
+      "capabilities": ["gateway.hooks", "gateway.provider.switch"],
+      "hostCompatibility": {
+        "app": ">=0.60.0 <1.0.0",
+        "pluginApi": "^1.0.0"
+      },
+      "contributes": {
+        "gatewayHooks": [
+          {
+            "name": "gateway.response.beforeCommit",
+            "match": {
+              "cliKeys": ["codex"],
+              "methods": ["POST"],
+              "paths": ["/responses", "/v1/responses"]
+            },
+            "failurePolicy": "fail-open"
+          }
+        ]
+      }
+    },
+    "errorCode": "PLUGIN_INVALID_HOOK_POLICY"
+  },
+  {
+    "name": "empty-paths",
+    "manifest": {
+      "id": "community.response-check",
+      "name": "Response Check",
+      "version": "1.0.0",
+      "apiVersion": "1.0.0",
+      "runtime": {
+        "kind": "extensionHost",
+        "language": "typescript"
+      },
+      "main": "dist/index.js",
+      "capabilities": ["gateway.hooks", "gateway.provider.switch"],
+      "hostCompatibility": {
+        "app": ">=0.60.0 <1.0.0",
+        "pluginApi": "^1.0.0"
+      },
+      "contributes": {
+        "gatewayHooks": [
+          {
+            "name": "gateway.response.beforeCommit",
+            "match": {
+              "cliKeys": ["codex"],
+              "methods": ["POST"],
+              "paths": []
+            }
+          }
+        ]
+      }
+    },
+    "errorCode": "PLUGIN_INVALID_HOOK_MATCH"
+  },
+  {
+    "name": "wildcard",
+    "manifest": {
+      "id": "community.response-check",
+      "name": "Response Check",
+      "version": "1.0.0",
+      "apiVersion": "1.0.0",
+      "runtime": {
+        "kind": "extensionHost",
+        "language": "typescript"
+      },
+      "main": "dist/index.js",
+      "capabilities": ["gateway.hooks", "gateway.provider.switch"],
+      "hostCompatibility": {
+        "app": ">=0.60.0 <1.0.0",
+        "pluginApi": "^1.0.0"
+      },
+      "contributes": {
+        "gatewayHooks": [
+          {
+            "name": "gateway.response.beforeCommit",
+            "match": {
+              "cliKeys": ["codex"],
+              "methods": ["POST"],
+              "paths": ["/responses/*"]
+            }
+          }
+        ]
+      }
+    },
+    "errorCode": "PLUGIN_INVALID_HOOK_MATCH"
+  },
+  {
+    "name": "duplicate-path",
+    "manifest": {
+      "id": "community.response-check",
+      "name": "Response Check",
+      "version": "1.0.0",
+      "apiVersion": "1.0.0",
+      "runtime": {
+        "kind": "extensionHost",
+        "language": "typescript"
+      },
+      "main": "dist/index.js",
+      "capabilities": ["gateway.hooks", "gateway.provider.switch"],
+      "hostCompatibility": {
+        "app": ">=0.60.0 <1.0.0",
+        "pluginApi": "^1.0.0"
+      },
+      "contributes": {
+        "gatewayHooks": [
+          {
+            "name": "gateway.response.beforeCommit",
+            "match": {
+              "cliKeys": ["codex"],
+              "methods": ["POST"],
+              "paths": ["/responses", "/responses"]
+            }
+          }
+        ]
+      }
+    },
+    "errorCode": "PLUGIN_INVALID_HOOK_MATCH"
+  },
+  {
+    "name": "lowercase-method",
+    "manifest": {
+      "id": "community.response-check",
+      "name": "Response Check",
+      "version": "1.0.0",
+      "apiVersion": "1.0.0",
+      "runtime": {
+        "kind": "extensionHost",
+        "language": "typescript"
+      },
+      "main": "dist/index.js",
+      "capabilities": ["gateway.hooks", "gateway.provider.switch"],
+      "hostCompatibility": {
+        "app": ">=0.60.0 <1.0.0",
+        "pluginApi": "^1.0.0"
+      },
+      "contributes": {
+        "gatewayHooks": [
+          {
+            "name": "gateway.response.beforeCommit",
+            "match": {
+              "cliKeys": ["codex"],
+              "methods": ["post"],
+              "paths": ["/responses", "/v1/responses"]
+            }
+          }
+        ]
+      }
+    },
+    "errorCode": "PLUGIN_INVALID_HOOK_MATCH"
+  },
+  {
+    "name": "zero-timeout",
+    "manifest": {
+      "id": "community.response-check",
+      "name": "Response Check",
+      "version": "1.0.0",
+      "apiVersion": "1.0.0",
+      "runtime": {
+        "kind": "extensionHost",
+        "language": "typescript"
+      },
+      "main": "dist/index.js",
+      "capabilities": ["gateway.hooks", "gateway.provider.switch"],
+      "hostCompatibility": {
+        "app": ">=0.60.0 <1.0.0",
+        "pluginApi": "^1.0.0"
+      },
+      "contributes": {
+        "gatewayHooks": [
+          {
+            "name": "gateway.response.beforeCommit",
+            "match": {
+              "cliKeys": ["codex"],
+              "methods": ["POST"],
+              "paths": ["/responses", "/v1/responses"]
+            },
+            "timeoutMs": 0
+          }
+        ]
+      }
+    },
+    "errorCode": "PLUGIN_INVALID_HOOK_TIMEOUT"
+  },
+  {
+    "name": "missing-match",
+    "manifest": {
+      "id": "community.response-check",
+      "name": "Response Check",
+      "version": "1.0.0",
+      "apiVersion": "1.0.0",
+      "runtime": {
+        "kind": "extensionHost",
+        "language": "typescript"
+      },
+      "main": "dist/index.js",
+      "capabilities": ["gateway.hooks", "gateway.provider.switch"],
+      "hostCompatibility": {
+        "app": ">=0.60.0 <1.0.0",
+        "pluginApi": "^1.0.0"
+      },
+      "contributes": {
+        "gatewayHooks": [
+          {
+            "name": "gateway.response.beforeCommit"
+          }
+        ]
+      }
+    },
+    "errorCode": "PLUGIN_INVALID_HOOK_MATCH"
+  },
+  {
+    "name": "duplicate-hook",
+    "manifest": {
+      "id": "community.response-check",
+      "name": "Response Check",
+      "version": "1.0.0",
+      "apiVersion": "1.0.0",
+      "runtime": {
+        "kind": "extensionHost",
+        "language": "typescript"
+      },
+      "main": "dist/index.js",
+      "capabilities": ["gateway.hooks", "gateway.provider.switch"],
+      "hostCompatibility": {
+        "app": ">=0.60.0 <1.0.0",
+        "pluginApi": "^1.0.0"
+      },
+      "contributes": {
+        "gatewayHooks": [
+          {
+            "name": "gateway.response.beforeCommit",
+            "match": {
+              "cliKeys": ["codex"],
+              "methods": ["POST"],
+              "paths": ["/responses", "/v1/responses"]
+            }
+          },
+          {
+            "name": "gateway.response.beforeCommit",
+            "match": {
+              "cliKeys": ["codex"],
+              "methods": ["POST"],
+              "paths": ["/responses", "/v1/responses"]
+            }
+          }
+        ]
+      }
+    },
+    "errorCode": "PLUGIN_DUPLICATE_HOOK"
+  },
+  {
+    "name": "nul-path",
+    "manifest": {
+      "id": "community.response-check",
+      "name": "Response Check",
+      "version": "1.0.0",
+      "apiVersion": "1.0.0",
+      "runtime": {
+        "kind": "extensionHost",
+        "language": "typescript"
+      },
+      "main": "dist/index.js",
+      "capabilities": ["gateway.hooks", "gateway.provider.switch"],
+      "hostCompatibility": {
+        "app": ">=0.60.0 <1.0.0",
+        "pluginApi": "^1.0.0"
+      },
+      "contributes": {
+        "gatewayHooks": [
+          {
+            "name": "gateway.response.beforeCommit",
+            "match": {
+              "cliKeys": ["codex"],
+              "methods": ["POST"],
+              "paths": ["/responses\u0000"]
+            }
+          }
+        ]
+      }
+    },
+    "errorCode": "PLUGIN_INVALID_HOOK_MATCH"
+  },
+  {
+    "name": "del-path",
+    "manifest": {
+      "id": "community.response-check",
+      "name": "Response Check",
+      "version": "1.0.0",
+      "apiVersion": "1.0.0",
+      "runtime": {
+        "kind": "extensionHost",
+        "language": "typescript"
+      },
+      "main": "dist/index.js",
+      "capabilities": ["gateway.hooks", "gateway.provider.switch"],
+      "hostCompatibility": {
+        "app": ">=0.60.0 <1.0.0",
+        "pluginApi": "^1.0.0"
+      },
+      "contributes": {
+        "gatewayHooks": [
+          {
+            "name": "gateway.response.beforeCommit",
+            "match": {
+              "cliKeys": ["codex"],
+              "methods": ["POST"],
+              "paths": ["/responses\u007f"]
+            }
+          }
+        ]
+      }
+    },
+    "errorCode": "PLUGIN_INVALID_HOOK_MATCH"
+  }
+]

@@ -889,6 +889,7 @@ mod tests {
 
     fn sample_attempt() -> FailoverAttempt {
         FailoverAttempt {
+            plugin_decision: None,
             provider_id: 7,
             provider_name: "provider".to_string(),
             base_url: "https://example.com".to_string(),
@@ -926,6 +927,7 @@ mod tests {
         session_reuse: Option<bool>,
     ) -> FailoverAttempt {
         FailoverAttempt {
+            plugin_decision: None,
             provider_id,
             provider_name: format!("provider-{provider_id}"),
             base_url: "http://127.0.0.1:1".to_string(),

@@ -1755,7 +1755,14 @@ mod tests {
         );
         let session = Arc::new(session_manager::SessionManager::new());
         let session_id = "session-bound-circuit-open";
-        session.bind_success("codex", session_id, provider_id, None, now);
+        session.bind_success(
+            "codex",
+            session_id,
+            provider_id,
+            None,
+            now,
+            std::time::Instant::now(),
+        );
 
         let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
         let router = build_router(gateway_state_with_parts(
@@ -1899,6 +1906,7 @@ mod tests {
                         priority: 10,
                         failure_policy: Some("fail-open".to_string()),
                         timeout_ms: None,
+                        request_match: None,
                     }],
                     ui: BTreeMap::new(),
                 }),
@@ -3141,13 +3149,10 @@ module.exports.activate = function activate(api) {
             GatewayPluginPipelineConfig::default(),
         );
 
-        let (log_tx, _log_rx) = tokio::sync::mpsc::channel(4);
-        let router = build_router(gateway_state_with_plugin_pipeline(
-            app_handle,
-            db,
-            log_tx,
-            plugin_pipeline,
-        ));
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+        let state = gateway_state_with_plugin_pipeline(app_handle, db, log_tx, plugin_pipeline);
+        let active = state.active_requests.clone();
+        let router = build_router(state);
         let request = Request::builder()
             .method(Method::POST)
             .uri(format!(
@@ -3174,6 +3179,22 @@ module.exports.activate = function activate(api) {
                 .await
                 .is_err(),
             "fail-closed beforeSend should not send the request upstream"
+        );
+        let log = recv_terminal_request_log(&mut log_rx).await;
+        // Request logs normalize GW_INTERNAL_ERROR to 500; the actual HTTP
+        // response and attempt retain the existing beforeSend 403 contract.
+        assert_eq!(log.status, Some(500));
+        assert_eq!(log.error_code.as_deref(), Some("GW_INTERNAL_ERROR"));
+        let attempts: Value = serde_json::from_str(&log.attempts_json).unwrap();
+        assert_eq!(attempts.as_array().unwrap().len(), 1);
+        assert_eq!(attempts[0]["status"], 403);
+        assert_eq!(attempts[0]["outcome"], "request_plugin_blocked");
+        assert_eq!(attempts[0]["upstream_sent"], false);
+        assert_eq!(attempts[0]["decision"], "abort");
+        assert!(active.snapshot().is_empty());
+        assert!(
+            log_rx.try_recv().is_err(),
+            "no duplicate client-abort terminal log"
         );
         upstream_task.abort();
     }
@@ -3254,6 +3275,15 @@ module.exports.activate = function activate(api) {
         let _env = isolate_app_env(home.path());
         let app = tauri::test::mock_app();
         let app_handle = app.handle().clone();
+        use tauri::Listener;
+        let events = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let observed_events = events.clone();
+        app_handle.listen_any("gateway:attempt", move |event| {
+            observed_events
+                .lock()
+                .unwrap()
+                .push(serde_json::from_str(event.payload()).unwrap());
+        });
 
         let mut app_settings = settings::AppSettings::default();
         app_settings.failover_max_attempts_per_provider = 1;
@@ -3290,13 +3320,10 @@ module.exports.activate = function activate(api) {
             GatewayPluginPipelineConfig::default(),
         );
 
-        let (log_tx, _log_rx) = tokio::sync::mpsc::channel(4);
-        let router = build_router(gateway_state_with_plugin_pipeline(
-            app_handle,
-            db,
-            log_tx,
-            plugin_pipeline,
-        ));
+        let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(4);
+        let state = gateway_state_with_plugin_pipeline(app_handle, db, log_tx, plugin_pipeline);
+        let active_requests = state.active_requests.clone();
+        let router = build_router(state);
         let request = Request::builder()
             .method(Method::POST)
             .uri(format!(
@@ -3319,6 +3346,18 @@ module.exports.activate = function activate(api) {
             Some(crate::gateway::proxy::GatewayErrorCode::InternalError.as_str())
         );
         assert_ne!(payload.get("id").and_then(Value::as_str), Some("original"));
+        let log = recv_terminal_request_log(&mut log_rx).await;
+        assert!(log.error_code.is_some());
+        let attempts: Value = serde_json::from_str(&log.attempts_json).unwrap();
+        assert_ne!(attempts[0]["outcome"], "success");
+        assert!(active_requests.snapshot().is_empty());
+        let outcomes = events
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|event| event["outcome"].as_str().unwrap().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(outcomes, vec!["started", "response_plugin_failed"]);
         upstream_task.abort();
     }
 
@@ -6710,4 +6749,5 @@ module.exports.activate = function activate(api) {
 
         upstream_task.abort();
     }
+    include!("routes_response_commit_tests.rs");
 }

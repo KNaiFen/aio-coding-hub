@@ -13,6 +13,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 pub(super) struct RequestContext<R: tauri::Runtime = tauri::Wry> {
+    pub(super) response_commit:
+        Option<super::forwarder::failover_loop::response_commit::ResponseCommitGuard>,
     pub(super) state: GatewayAppState<R>,
     pub(super) cli_key: String,
     pub(super) forwarded_path: String,
@@ -138,6 +140,7 @@ impl<R: tauri::Runtime> RequestContext<R> {
         let base_headers = build_base_headers(headers);
 
         Self {
+            response_commit: None,
             state,
             cli_key,
             forwarded_path,

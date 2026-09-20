@@ -186,7 +186,7 @@ pub(super) async fn handle_thinking_rectifiers_400<R: tauri::Runtime>(
                         format!("failed to read upstream error body: {err}"),
                         client_attempts,
                     );
-                    emit_request_event_and_enqueue_request_log(
+                    emit_request_event_and_spawn_request_log(
                         RequestEndArgs::from_context(RequestEndContextArgs {
                             deps: RequestEndDeps::new(
                                 &state.app,
@@ -215,8 +215,7 @@ pub(super) async fn handle_thinking_rectifiers_400<R: tauri::Runtime>(
                             Some(ErrorCategory::SystemError.as_str()),
                             GatewayErrorCode::UpstreamBodyReadError.as_str(),
                         )),
-                    )
-                    .await;
+                    );
                     abort_guard.disarm();
                     return LoopControl::Return(resp);
                 }
@@ -417,6 +416,7 @@ pub(super) async fn handle_thinking_rectifiers_400<R: tauri::Runtime>(
         let reason_code = category.reason_code();
 
         attempts.push(FailoverAttempt {
+            plugin_decision: None,
             provider_id,
             provider_name: provider_name_base.clone(),
             base_url: provider_base_url_base.clone(),
@@ -507,7 +507,7 @@ pub(super) async fn handle_thinking_rectifiers_400<R: tauri::Runtime>(
                     response_fixer::special_settings_json(&special_settings);
                 let duration_ms = started.elapsed().as_millis();
 
-                emit_request_event_and_enqueue_request_log(
+                emit_request_event_and_spawn_request_log(
                     RequestEndArgs::from_context(RequestEndContextArgs {
                         deps: RequestEndDeps::new(
                             &state.app,
@@ -537,8 +537,7 @@ pub(super) async fn handle_thinking_rectifiers_400<R: tauri::Runtime>(
                         error_code,
                         duration_ms,
                     )),
-                )
-                .await;
+                );
 
                 abort_guard.disarm();
                 return LoopControl::Return(build_response(

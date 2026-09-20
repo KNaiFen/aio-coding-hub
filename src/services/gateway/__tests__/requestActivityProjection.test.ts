@@ -155,6 +155,62 @@ describe("services/gateway/requestActivityProjection", () => {
     },
   ]);
 
+  it("keeps concurrent session cards separate when only one response is rejected and retried", () => {
+    const nowMs = 1_700_000_900_000;
+    const rejectedA = {
+      ...attempt("trace-a", 1, "P"),
+      session_id: "session-a",
+      outcome: "response_rejected",
+      status: 200,
+    };
+    const nextA = { ...attempt("trace-a", 2, "Q"), session_id: "session-a" };
+    const firstB = { ...attempt("trace-b", 1, "P"), session_id: "session-b" };
+    const activeB = activeRequest({
+      trace_id: "trace-b",
+      session_id: "session-b",
+      current_attempt: firstB,
+    });
+    const traces = [
+      trace({ trace_id: "trace-a", session_id: "session-a", attempts: [rejectedA] }),
+      trace({ trace_id: "trace-b", session_id: "session-b", attempts: [firstB] }),
+    ];
+    const projection = buildRequestActivityProjection({
+      requestLogs: [],
+      traces,
+      nowMs,
+      realtimeCardLimit: 5,
+      activeRequests: [
+        activeRequest({ trace_id: "trace-a", session_id: "session-a", current_attempt: nextA }),
+        activeB,
+      ],
+    });
+    const cards = new Map(projection.realtimeCards.map((card) => [card.trace.trace_id, card]));
+    expect(cards.get("trace-a")?.kind).toBe("active");
+    expect(cards.get("trace-a")?.trace.attempts.map((item) => item.provider_name)).toEqual([
+      "P",
+      "Q",
+    ]);
+    expect(cards.get("trace-b")?.trace.attempts.map((item) => item.provider_name)).toEqual(["P"]);
+    expect(cards.get("trace-b")?.trace.session_id).toBe("session-b");
+    const cancelled = buildRequestActivityProjection({
+      requestLogs: [
+        log({ trace_id: "trace-a", session_id: "session-a", error_code: "GW_REQUEST_ABORTED" }),
+      ],
+      activeRequests: [activeB],
+      traces,
+      nowMs,
+      realtimeCardLimit: 5,
+    });
+    expect(
+      cancelled.realtimeCards
+        .filter((card) => card.kind === "active")
+        .map((card) => card.trace.trace_id)
+    ).toEqual(["trace-b"]);
+    expect(
+      cancelled.requestRows.find((row) => row.log.trace_id === "trace-a")?.log.error_code
+    ).toBe("GW_REQUEST_ABORTED");
+  });
+
   it("keeps old pending logs visible as fallback rows without live traces", () => {
     const projection = buildRequestActivityProjection({
       requestLogs: [

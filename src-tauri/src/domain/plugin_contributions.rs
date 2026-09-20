@@ -28,6 +28,7 @@ const ACTIVE_CAPABILITIES: &[&str] = &[
     "provider.healthCheck",
     "protocol.bridge",
     "gateway.hooks",
+    "gateway.provider.switch",
     "privacy.redact",
 ];
 

@@ -100,6 +100,7 @@ pub(super) fn select_providers_with_session_binding<R: tauri::Runtime>(
     cli_key: &str,
     session_id: Option<&str>,
     created_at: i64,
+    request_started: std::time::Instant,
 ) -> crate::shared::error::AppResult<ProviderSelection> {
     let bound_sort_mode_id = session_id.and_then(|sid| {
         state
@@ -135,6 +136,7 @@ pub(super) fn select_providers_with_session_binding<R: tauri::Runtime>(
             effective_sort_mode_id,
             Some(provider_order),
             created_at,
+            request_started,
         );
 
         bound_provider_order = state
@@ -210,6 +212,7 @@ pub(super) fn resolve_session_bound_provider_id(
     forced_provider_id: Option<i64>,
     providers: &mut Vec<providers::ProviderForGateway>,
     bound_provider_order: Option<&[i64]>,
+    request_started: std::time::Instant,
 ) -> SessionBoundResult {
     let bound_provider_id =
         session_id.and_then(|sid| session.get_bound_provider(cli_key, sid, created_at));
@@ -220,7 +223,7 @@ pub(super) fn resolve_session_bound_provider_id(
                 // The bound provider is no longer eligible for the current session's provider list
                 // (e.g. sort_mode/provider membership changed). Clear the stale binding so it
                 // cannot bypass selection constraints.
-                session.clear_bound_provider(cli_key, session_id, created_at);
+                session.clear_bound_provider(cli_key, session_id, created_at, request_started);
             } else {
                 let check = circuit.should_allow(bound_provider_id, created_at);
                 if !check.allow {

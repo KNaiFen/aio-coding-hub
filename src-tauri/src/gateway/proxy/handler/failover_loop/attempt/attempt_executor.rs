@@ -60,6 +60,7 @@ pub(super) struct AttemptTiming {
     pub(super) attempt_started: Instant,
     pub(super) reasoning_effort: Option<String>,
     pub(super) upstream_sent: bool,
+    pub(super) outbound_model: Option<String>,
 }
 
 /// Result of building + sending one attempt.
@@ -218,6 +219,18 @@ where
     }
 
     headers = semantic_headers;
+    let outbound_model = input.response_commit.as_ref().and_then(|guard| {
+        let final_logical_body = body_state_for_attempt.decoded_clone();
+        guard.observe_outbound(&headers, &final_logical_body);
+        serde_json::from_slice::<serde_json::Value>(&final_logical_body)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("model")
+                    .and_then(|model| model.as_str())
+                    .map(str::to_string)
+            })
+    });
     let reasoning_effort = prepared.reasoning_effort.clone();
     let upstream_body = body_state_for_attempt
         .finalize_for_upstream(&mut headers, crate::gateway::util::max_request_body_bytes());
@@ -237,7 +250,15 @@ where
         attempt_started: Instant::now(),
         reasoning_effort,
         upstream_sent: true,
+        outbound_model,
     };
+
+    // Capture entry into the send operation before awaiting response headers.
+    // Cancellation or the request deadline can end that wait after the upstream
+    // has already received the request.
+    loop_state
+        .abort_guard
+        .update_in_flight_attempt_send_state(timing.reasoning_effort.clone(), true);
 
     let send_result =
         send::send_upstream(ctx, input.req_method.clone(), url, headers, upstream_body).await;
@@ -250,9 +271,8 @@ where
         }
     }
 
-    // The "started" snapshot was captured before the send; refresh the abort
-    // guard so a client abort mid-stream records truthful upstream_sent /
-    // reasoning_effort values instead of the pre-send defaults.
+    // A resolved connection failure can now refine the initial send state;
+    // keep the guard aligned with the attempt before handling the result.
     loop_state
         .abort_guard
         .update_in_flight_attempt_send_state(timing.reasoning_effort.clone(), timing.upstream_sent);
@@ -463,6 +483,7 @@ fn emit_started_event<R: tauri::Runtime>(
     abort_guard: &mut RequestAbortGuard<R>,
 ) {
     let started_attempt = FailoverAttempt {
+        plugin_decision: None,
         provider_id: prepared.provider_id,
         provider_name: prepared.provider_name_base.clone(),
         base_url: prepared.provider_base_url_base.clone(),

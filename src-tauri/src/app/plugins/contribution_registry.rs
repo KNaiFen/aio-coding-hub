@@ -68,6 +68,8 @@ pub struct ActiveGatewayHookContribution {
     pub failure_policy: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u64>,
+    #[serde(rename = "match", default, skip_serializing_if = "Option::is_none")]
+    pub request_match: Option<crate::domain::plugins::PluginHookMatch>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, specta::Type)]
@@ -167,6 +169,7 @@ impl ActiveContributionSnapshot {
                     priority: hook.priority,
                     failure_policy: hook.failure_policy.clone(),
                     timeout_ms: hook.timeout_ms,
+                    request_match: hook.request_match.clone(),
                 });
             }
 

@@ -62,8 +62,12 @@ mod send;
 mod send_timeout;
 
 // --- response/ : upstream response handling & finalization ---
+#[path = "response/complete_response.rs"]
+mod complete_response;
 #[path = "response/finalize.rs"]
 mod finalize;
+#[path = "response/response_commit.rs"]
+pub(in crate::gateway::proxy) mod response_commit;
 #[path = "response/response_router.rs"]
 mod response_router;
 #[path = "response/success_event_stream.rs"]
@@ -99,7 +103,7 @@ use oauth::{
     resolve_oauth_adapter_for_provider,
 };
 use request_end_helpers::{
-    emit_request_event_and_enqueue_request_log, RequestCompletion, RequestEndArgs,
+    emit_request_event_and_spawn_request_log, RequestCompletion, RequestEndArgs,
     RequestEndContextArgs, RequestEndDeps,
 };
 
@@ -173,6 +177,14 @@ where
     let created_at = input.created_at;
 
     let mut abort_guard = input.abort_guard.take();
+    let commit_initialization = response_commit::ResponseCommitGuard::initialize(&input);
+    let commit_error = match commit_initialization {
+        Ok(guard) => {
+            input.response_commit = guard;
+            None
+        }
+        Err(code) => Some(code),
+    };
 
     let introspection_body =
         body_for_introspection(&input.base_headers, input.body_bytes.as_ref()).into_owned();
@@ -207,24 +219,98 @@ where
         introspection_body: introspection_body.as_ref(),
     });
 
+    if let Some(code) = commit_error {
+        return response_commit::finish_failure(
+            ctx,
+            &mut abort_guard,
+            &[],
+            code,
+            "required response validation could not be prepared".to_string(),
+        )
+        .await;
+    }
     let mut run_state = FailoverRunState::new();
 
+    let response = if let Some(guard) = input.response_commit.as_ref() {
+        match tokio::time::timeout_at(
+            guard.deadline.into(),
+            run_with_context(ctx, &input, &mut abort_guard, &mut run_state),
+        )
+        .await
+        {
+            Ok(response) => response,
+            Err(_) => {
+                let attempts = abort_guard.attempts_for_terminal_error(
+                    GatewayErrorCode::ResponseCommitTimeout,
+                    started.elapsed().as_millis(),
+                );
+                response_commit::finish_failure(
+                    ctx,
+                    &mut abort_guard,
+                    &attempts,
+                    GatewayErrorCode::ResponseCommitTimeout,
+                    "complete response request deadline exceeded".to_string(),
+                )
+                .await
+            }
+        }
+    } else {
+        run_with_context(ctx, &input, &mut abort_guard, &mut run_state).await
+    };
+    match input.response_commit.as_ref() {
+        Some(guard) => guard.reserve_delivery(response),
+        None => response,
+    }
+}
+
+async fn run_with_context<R>(
+    ctx: CommonCtx<'_, R>,
+    input: &RequestContext<R>,
+    abort_guard: &mut crate::gateway::proxy::abort_guard::RequestAbortGuard<R>,
+    run_state: &mut FailoverRunState,
+) -> Response
+where
+    R: tauri::Runtime + 'static,
+    R::Handle: Unpin,
+{
+    let started = input.started;
+    let created_at_ms = input.created_at_ms;
+    let created_at = input.created_at;
     let max_providers_to_try = (input.max_providers_to_try as usize).max(1);
     let mut counters = provider_iterator::IterationCounters::new();
     let anthropic_stream_requested =
         original_anthropic_stream_requested(input.introspection_json.as_ref())
-            || stream_flag_from_raw_body(&introspection_body);
+            || stream_flag_from_raw_body(ctx.introspection_body);
 
     let providers: Vec<_> = input.providers.clone();
 
     for provider in providers.iter() {
+        if input
+            .response_commit
+            .as_ref()
+            .is_some_and(|guard| !guard.replay_safe())
+            && run_state
+                .attempts
+                .iter()
+                .any(|attempt| attempt.upstream_sent)
+        {
+            return response_commit::finish_failure(
+                ctx,
+                abort_guard,
+                &run_state.attempts,
+                GatewayErrorCode::RequestReplayUnsafe,
+                "request uses private continuation state and cannot safely switch providers"
+                    .to_string(),
+            )
+            .await;
+        }
         if counters.providers_tried >= max_providers_to_try {
             break;
         }
 
         let preparation = provider_iterator::prepare_provider(
             ctx,
-            &input,
+            input,
             provider,
             &mut counters,
             &mut run_state.attempts,
@@ -242,14 +328,14 @@ where
 
         if let Some(resp) = retry_engine::run_retry_loop(
             ctx,
-            &input,
+            input,
             &mut prepared,
             LoopState::new(
                 &mut run_state.attempts,
                 &mut run_state.failed_provider_ids,
                 &mut run_state.last_outcome,
                 &mut circuit_snapshot,
-                &mut abort_guard,
+                abort_guard,
             ),
         )
         .await
@@ -262,10 +348,10 @@ where
     if should_finalize_as_all_providers_unavailable(&run_state.attempts)
         && !input.providers.is_empty()
     {
-        let owned = finalize_owned_from_input(&input);
+        let owned = finalize_owned_from_input(input);
         return finalize::all_providers_unavailable(finalize::AllUnavailableInput {
             state: &input.state,
-            abort_guard: &mut abort_guard,
+            abort_guard,
             observe: input.observe_request,
             attempts: std::mem::take(&mut run_state.attempts),
             cli_key: owned.cli_key,
@@ -292,10 +378,10 @@ where
         .await;
     }
 
-    let owned = finalize_owned_from_input(&input);
+    let owned = finalize_owned_from_input(input);
     finalize::all_providers_failed(finalize::AllFailedInput {
         state: &input.state,
-        abort_guard: &mut abort_guard,
+        abort_guard,
         observe: input.observe_request,
         attempts: std::mem::take(&mut run_state.attempts),
         last_outcome: run_state.last_outcome,

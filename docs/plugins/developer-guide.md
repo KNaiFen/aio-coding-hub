@@ -52,6 +52,7 @@ pnpm --filter create-aio-plugin cli acme.redactor example:redactor
 pnpm --filter create-aio-plugin cli acme.prompt-helper example:prompt-helper
 pnpm --filter create-aio-plugin cli acme.redactor example:redactor
 pnpm --filter create-aio-plugin cli acme.response-guard example:response-guard
+pnpm --filter create-aio-plugin cli acme.response-check example:response-check
 ```
 
 示例是开发模板，不是默认可安装市场包。它们用于学习 manifest、`dist/extension.js`、fixtures、`validate --strict`、`pack` 和 `publish-check` 的完整路径；Plugins 页面里的同名精选卡片仍保持示例状态，不会绕过宿主安装校验。

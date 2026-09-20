@@ -24,6 +24,8 @@ import type {
   PluginSummary,
   PluginUpdateDiff,
 } from "../services/plugins";
+import { pluginEffectiveDataAccess } from "../services/pluginCapabilities";
+import { PluginResponseCommitNotice } from "./plugins/PluginResponseCommitNotice";
 import { formatActionFailureToast, formatUnknownError } from "../utils/errors";
 import { Button } from "../ui/Button";
 import { PageHeader } from "../ui/PageHeader";
@@ -123,39 +125,6 @@ async function openPluginDocs() {
     toast.error(formatActionFailureToast("打开插件文档", error).toast);
   }
 }
-
-const GATEWAY_HOOK_ACCESS: Record<string, string[]> = {
-  "gateway.request.afterBodyRead": [
-    "request.meta.read",
-    "request.header.read",
-    "request.header.readSensitive",
-    "request.body.read",
-    "request.header.write",
-    "request.body.write",
-  ],
-  "gateway.request.beforeSend": [
-    "request.meta.read",
-    "request.header.read",
-    "request.header.readSensitive",
-    "request.body.read",
-    "request.header.write",
-    "request.body.write",
-  ],
-  "gateway.response.chunk": ["stream.inspect", "stream.modify"],
-  "gateway.response.after": [
-    "response.header.read",
-    "response.body.read",
-    "response.header.write",
-    "response.body.write",
-  ],
-  "gateway.error": [
-    "response.header.read",
-    "response.body.read",
-    "response.header.write",
-    "response.body.write",
-  ],
-  "log.beforePersist": ["log.redact"],
-};
 
 type UpdatePreviewState =
   | {
@@ -296,7 +265,7 @@ function PluginListRow({
 }
 
 function PermissionList({ detail }: { detail: PluginDetail }) {
-  const permissions = effectiveDataAccessPermissions(detail);
+  const permissions = pluginEffectiveDataAccess(detail.manifest);
   if (permissions.length === 0) {
     return (
       <div className="rounded-md border border-dashed border-border px-3 py-3 text-sm text-muted-foreground">
@@ -327,19 +296,6 @@ function PermissionList({ detail }: { detail: PluginDetail }) {
       })}
     </div>
   );
-}
-
-function effectiveDataAccessPermissions(detail: PluginDetail): string[] {
-  if (detail.manifest.runtime.kind !== "extensionHost") return [];
-  if (!(detail.manifest.capabilities ?? []).includes("gateway.hooks")) return [];
-
-  const permissions = new Set<string>();
-  for (const hook of detail.manifest.contributes?.gatewayHooks ?? []) {
-    for (const permission of GATEWAY_HOOK_ACCESS[hook.name] ?? []) {
-      permissions.add(permission);
-    }
-  }
-  return Array.from(permissions).sort();
 }
 
 function PluginDetailPanel({
@@ -417,6 +373,11 @@ function PluginDetailPanel({
           <div className="mt-1 text-xs text-muted-foreground">{runtimeCopy.detail}</div>
         </div>
       </Section>
+
+      <PluginResponseCommitNotice
+        hooks={gatewayHooks}
+        capabilities={detail.manifest.capabilities}
+      />
 
       <Section title="数据访问">
         {detail.summary.permission_risk === "high" ||

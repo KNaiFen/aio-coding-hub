@@ -96,6 +96,30 @@ where
     });
 
     if status.is_success() {
+        let (resp, collected_timing) = if input.response_commit.is_some() {
+            match response_commit::check(
+                ctx,
+                input,
+                provider_ctx,
+                attempt_ctx,
+                loop_state.reborrow(),
+                resp,
+                timing.outbound_model.clone(),
+            )
+            .await
+            {
+                response_commit::CommitOutcome::Accepted(response, timing) => {
+                    (response, Some(timing))
+                }
+                response_commit::CommitOutcome::Control(control) => return control,
+            }
+        } else {
+            (resp, None)
+        };
+        let execution_lease = input
+            .response_commit
+            .as_ref()
+            .map(response_commit::ResponseCommitGuard::execution_lease);
         // When upstream returns SSE, always route to the stream handler.
         // Previous logic required `anthropic_stream_requested` for cx2cc,
         // but that flag is derived from introspection_json which can fail
@@ -104,15 +128,15 @@ where
         // The stream handler already handles cx2cc translation via BridgeStream,
         // and the non-stream handler can still synthesize SSE from buffered JSON
         // when the upstream returns a non-SSE response.
-        if is_event_stream(&response_headers) {
+        if is_event_stream(resp.headers()) {
             return success_event_stream::handle_success_event_stream(
                 ctx,
                 provider_ctx,
                 attempt_ctx,
                 loop_state.reborrow(),
                 resp,
-                status,
-                response_headers,
+                collected_timing,
+                execution_lease,
             )
             .await;
         }
@@ -122,8 +146,8 @@ where
             attempt_ctx,
             loop_state.reborrow(),
             resp,
-            status,
-            response_headers,
+            collected_timing,
+            execution_lease,
         )
         .await;
     }
@@ -196,6 +220,7 @@ where
             provider_ctx,
             attempt_ctx,
             loop_state: loop_state.reborrow(),
+            allow_private_continuation_repair: input.response_commit.is_none(),
             enable_thinking_signature_rectifier: input.enable_thinking_signature_rectifier,
             enable_thinking_budget_rectifier: input.enable_thinking_budget_rectifier,
             enable_thinking_effort_conflict_rectifier: input
