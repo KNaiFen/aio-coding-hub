@@ -845,7 +845,10 @@ fn draw_card_list(
             );
             y += 1;
         }
-        frame.render_widget(Paragraph::new(lines), Rect::new(area.x, y, area.width, height));
+        frame.render_widget(
+            Paragraph::new(lines),
+            Rect::new(area.x, y, area.width, height),
+        );
         y += height;
     }
 }
