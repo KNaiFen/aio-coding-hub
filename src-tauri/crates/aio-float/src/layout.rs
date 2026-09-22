@@ -89,13 +89,12 @@ pub fn geometry(config: &Config, columns: u16, rows: u16, focus: Pane) -> Geomet
     } else {
         &config.vertical
     };
-    // Each pane needs a title and at least one content row.
-    if columns == 0 || body.height < if horizontal { 2 } else { 5 } || (horizontal && columns < 3) {
+    // Each pane needs at least one content row.
+    if columns == 0 || body.height < if horizontal { 1 } else { 3 } || (horizontal && columns < 3) {
         return result;
     }
     let total = if horizontal { body.width } else { body.height } - 1;
-    let minimum = if horizontal { 1 } else { 2 };
-    let first = split_size(total, split.ratio, minimum);
+    let first = split_size(total, split.ratio, 1);
     let (a, divider, b) = if horizontal {
         (
             Rect::new(0, body.y, first, body.height),
@@ -127,16 +126,16 @@ fn split_size(total: u16, ratio: f64, minimum: u16) -> u16 {
 
 pub fn move_divider(config: &mut Config, columns: u16, rows: u16, key: &str) {
     let (split, total, minimum, delta) = match (config.layout, key) {
-        (LayoutMode::Horizontal, "ArrowLeft" | "ArrowRight") if columns >= 3 && rows >= 6 => (
+        (LayoutMode::Horizontal, "ArrowLeft" | "ArrowRight") if columns >= 3 && rows >= 5 => (
             &mut config.horizontal,
             columns - 1,
             1,
             if key == "ArrowLeft" { -1 } else { 1 },
         ),
-        (LayoutMode::Vertical, "ArrowUp" | "ArrowDown") if rows >= 9 => (
+        (LayoutMode::Vertical, "ArrowUp" | "ArrowDown") if rows >= 7 => (
             &mut config.vertical,
             rows - 5,
-            2,
+            1,
             if key == "ArrowUp" { -1 } else { 1 },
         ),
         _ => return,
@@ -207,7 +206,7 @@ mod tests {
                         let g = geometry(&config, columns, rows, Pane::Requests);
                         assert!(g.regions.is_empty() || g.regions.len() == 2);
                         for region in &g.regions {
-                            assert!(region.width > 0 && region.height >= 2);
+                            assert!(region.width > 0 && region.height >= 1);
                             assert!(region.x + region.width <= columns);
                             assert!(region.y + region.height <= rows);
                             assert!(region.area().intersection(g.divider).is_empty());

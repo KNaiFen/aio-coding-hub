@@ -11,7 +11,6 @@ use aio_tui::{
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     backend::TestBackend,
-    layout::Rect,
     style::{Color, Modifier},
     widgets::{Paragraph, Wrap},
     Terminal,
@@ -343,25 +342,7 @@ fn render_dashboard(
             );
         }
         for region in &geometry.regions {
-            let mut area = region.area();
-            if config.layout != LayoutMode::Single {
-                let title = match region.pane {
-                    Pane::Requests => "请求",
-                    Pane::Providers => "供应商",
-                };
-                let style = palette.style(if dashboard.focus == region.pane {
-                    Tone::Accent
-                } else {
-                    Tone::Muted
-                });
-                frame.render_widget(
-                    Paragraph::new(title).style(style),
-                    Rect::new(area.x, area.y, area.width, 1),
-                );
-                area.y += 1;
-                area.height -= 1;
-            }
-            draw_logs_content(frame, area, dashboard.pane(region.pane));
+            draw_logs_content(frame, region.area(), dashboard.pane(region.pane));
         }
         let lock = if config.locked { "已锁定" } else { "锁定" };
         frame.render_widget(
@@ -692,7 +673,7 @@ mod tests {
                 if columns == 80 {
                     let text: String = cells.iter().map(|cell| cell.text.as_str()).collect();
                     assert_eq!(text.matches("并发").count(), 1);
-                    assert!(text.contains("请求") && text.contains("供应商"));
+                    assert!(text.contains("gpt-test") && text.contains("中文供应商"));
                     assert!(cells.iter().any(|cell| cell.text == "e\u{301}"));
                 }
             }
@@ -716,6 +697,31 @@ mod tests {
                     serde_json::to_value(expected).unwrap()
                 );
                 assert_eq!(regions[0].y, if detail { 0 } else { 3 });
+            }
+        }
+    }
+
+    #[test]
+    fn combined_panes_start_with_content_without_section_titles() {
+        for mode in [LayoutMode::Horizontal, LayoutMode::Vertical] {
+            let config = Config {
+                layout: mode,
+                ..Config::default()
+            };
+            let mut dashboard = Dashboard::new(&config, None);
+            dashboard.accept(0, 0, Ok(populated_snapshot()));
+            let (cells, regions) = render_dashboard(&mut dashboard, &config, 80, 40).unwrap();
+            for region in regions {
+                let first_row: String = cells
+                    .iter()
+                    .filter(|cell| {
+                        cell.y == region.y && cell.x >= region.x && cell.x < region.x + region.width
+                    })
+                    .map(|cell| cell.text.as_str())
+                    .collect();
+                assert!(!first_row.is_empty());
+                assert_ne!(first_row, "请求");
+                assert_ne!(first_row, "供应商");
             }
         }
     }
