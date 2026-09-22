@@ -53,6 +53,20 @@ try {
             ...cells.filter(cell => cell.y < 2),
             ...regions.flatMap(region => cells.filter(cell => cell.y >= 3 && cell.x + cell.width <= region.width && cell.y - 2 < region.height).map(cell => ({...cell,x:cell.x+region.x,y:cell.y-2+region.y}))),
           ];
+          if (config.layout !== 'single') {
+            for (const region of regions) {
+              let x = region.x;
+              for (const char of region.pane === 'requests' ? '请求' : '供应商') {
+                if (x + 2 <= region.x + region.width) visibleCells.push({x,y:region.y,text:char,width:2,fg:window.floatFocus===region.pane?'#69aab3':'#8b949e'});
+                x += 2;
+              }
+            }
+            if (horizontal) {
+              for (let y = 3; y < args.rows - 1; y++) visibleCells.push({x:first,y,text:'│',width:1,fg:'#5a6067'});
+            } else {
+              for (let x = 0; x < args.columns; x++) visibleCells.push({x,y:first+3,text:'─',width:1,fg:'#5a6067'});
+            }
+          }
           return { ...args, cells: visibleCells.filter(cell => cell.x + cell.width <= args.columns && cell.y < args.rows), regions, focus:window.floatFocus, macos:!!window.floatMac, config, connected: true, error: window.floatError };
         }
         if (command === "float_settings") return { config, hasToken: true, error: null };

@@ -294,7 +294,11 @@ fn render_dashboard(
     columns: u16,
     rows: u16,
 ) -> Result<(Vec<Cell>, Vec<Region>), String> {
-    let geometry = layout::geometry(config, columns, rows, dashboard.focus);
+    let mut geometry = layout::geometry(config, columns, rows, dashboard.focus);
+    if config.layout == LayoutMode::Single && dashboard.pane(dashboard.focus).detail {
+        geometry.regions[0].y = 0;
+        geometry.regions[0].height = rows;
+    }
     let cells = render_grid(columns, rows, |frame| {
         let palette = Palette::detected(true);
         if dashboard.help {
@@ -310,6 +314,11 @@ fn render_dashboard(
                     .wrap(Wrap { trim: false }),
                 frame.area(),
             );
+            return;
+        }
+        if config.layout == LayoutMode::Single {
+            let pane = dashboard.pane(dashboard.focus);
+            aio_tui::ui::draw_logs(frame, pane);
             return;
         }
         draw_header(frame, geometry.header, &dashboard.logs.live, true);
@@ -686,6 +695,27 @@ mod tests {
                     assert!(text.contains("请求") && text.contains("供应商"));
                     assert!(cells.iter().any(|cell| cell.text == "e\u{301}"));
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn single_view_keeps_the_original_tui_grid_and_full_window_detail() {
+        let config = Config::default();
+        for pane in [Pane::Requests, Pane::Providers] {
+            for detail in [false, true] {
+                let mut dashboard = Dashboard::new(&config, None);
+                dashboard.accept(0, 0, Ok(populated_snapshot()));
+                dashboard.focus = pane;
+                dashboard.pane(pane).select_current(0, Instant::now());
+                dashboard.pane(pane).detail = detail;
+                let (actual, regions) = render_dashboard(&mut dashboard, &config, 80, 30).unwrap();
+                let expected = render(dashboard.pane(pane), 80, 30).unwrap();
+                assert_eq!(
+                    serde_json::to_value(actual).unwrap(),
+                    serde_json::to_value(expected).unwrap()
+                );
+                assert_eq!(regions[0].y, if detail { 0 } else { 3 });
             }
         }
     }
