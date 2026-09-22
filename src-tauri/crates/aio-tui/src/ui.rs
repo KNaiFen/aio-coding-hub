@@ -844,6 +844,13 @@ fn draw_card_list(
         if used + heights[index + 1] > usize::from(area.height) {
             break;
         }
+        // Scrolling a selection into view may stop the List before filling the pane.
+        let next_y = area.y + used as u16;
+        if !(area.x..area.right())
+            .any(|x| !frame.buffer_mut()[(x, next_y)].symbol().trim().is_empty())
+        {
+            break;
+        }
         let line = Rect::new(
             area.x,
             area.y + used as u16 - 1,
@@ -1929,16 +1936,21 @@ mod tests {
     fn card_separators_only_appear_between_visible_requests_or_providers() {
         for view in [DashboardView::Requests, DashboardView::Providers] {
             for count in [1, 3] {
-                for selected in [None, Some(count - 1)] {
+                for selected in [None, Some(count / 2), Some(count - 1)] {
                     for height in [5, 8, 12, 20, 60] {
                         let mut snapshot = empty_snapshot(CliScope::Codex);
                         snapshot.recent_requests = ObserverSection::ready(
-                            (0..count).map(|index| terminal_request(&index.to_string())).collect(),
+                            (0..count)
+                                .map(|index| terminal_request(&index.to_string()))
+                                .collect(),
                         );
-                        snapshot.providers = Some(ObserverSection::ready(ObserverProviderCollection {
-                            items: (0..count).map(|index| provider_status(index as i64, "Provider", false)).collect(),
-                            truncated: false,
-                        }));
+                        snapshot.providers =
+                            Some(ObserverSection::ready(ObserverProviderCollection {
+                                items: (0..count)
+                                    .map(|index| provider_status(index as i64, "Provider", false))
+                                    .collect(),
+                                truncated: false,
+                            }));
                         let mut state = LogsState::new(CliScope::Codex);
                         state.switch_view(view);
                         state.apply_snapshot(snapshot);
@@ -1946,11 +1958,17 @@ mod tests {
                             state.select_current(selected, Instant::now());
                         }
                         let mut terminal = Terminal::new(TestBackend::new(40, height)).unwrap();
-                        terminal.draw(|frame| draw_logs_content(frame, frame.area(), &mut state)).unwrap();
+                        terminal
+                            .draw(|frame| draw_logs_content(frame, frame.area(), &mut state))
+                            .unwrap();
                         let rows = (0..usize::from(height))
                             .map(|row| rendered_row_symbols(&terminal, row))
                             .collect::<Vec<_>>();
-                        let separators = rows.iter().enumerate().filter(|(_, row)| !row.is_empty() && row.chars().all(|c| c == '─')).collect::<Vec<_>>();
+                        let separators = rows
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, row)| !row.is_empty() && row.chars().all(|c| c == '─'))
+                            .collect::<Vec<_>>();
                         if count == 1 {
                             assert!(separators.is_empty());
                         }
@@ -1960,7 +1978,11 @@ mod tests {
                         if count == 3 && height == 60 && selected.is_none() {
                             assert_eq!(separators.len(), 2);
                         }
-                        assert!(!rows.iter().rev().find(|row| !row.is_empty()).is_some_and(|row| row.chars().all(|c| c == '─')));
+                        assert!(!rows
+                            .iter()
+                            .rev()
+                            .find(|row| !row.is_empty())
+                            .is_some_and(|row| row.chars().all(|c| c == '─')));
                     }
                 }
             }

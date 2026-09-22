@@ -704,13 +704,19 @@ mod tests {
     #[test]
     fn combined_panes_start_with_content_without_section_titles() {
         for mode in [LayoutMode::Horizontal, LayoutMode::Vertical] {
-            let config = Config { layout: mode, ..Config::default() };
+            let config = Config {
+                layout: mode,
+                ..Config::default()
+            };
             let mut dashboard = Dashboard::new(&config, None);
             dashboard.accept(0, 0, Ok(populated_snapshot()));
             let (cells, regions) = render_dashboard(&mut dashboard, &config, 80, 40).unwrap();
             for region in regions {
-                let first_row: String = cells.iter()
-                    .filter(|cell| cell.y == region.y && cell.x >= region.x && cell.x < region.x + region.width)
+                let first_row: String = cells
+                    .iter()
+                    .filter(|cell| {
+                        cell.y == region.y && cell.x >= region.x && cell.x < region.x + region.width
+                    })
                     .map(|cell| cell.text.as_str())
                     .collect();
                 assert!(!first_row.is_empty());
