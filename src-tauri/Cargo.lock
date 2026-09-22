@@ -97,7 +97,7 @@ dependencies = [
 
 [[package]]
 name = "aio-float"
-version = "0.60.65"
+version = "0.60.66"
 dependencies = [
  "aio-observer-protocol",
  "aio-tui",

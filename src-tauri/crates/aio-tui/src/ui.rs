@@ -776,7 +776,7 @@ fn draw_request_list(frame: &mut Frame, area: Rect, state: &mut LogsState, width
         .enumerate()
         .map(|(index, request)| {
             let selected = state.selected == Some(index);
-            let mut lines = request_card_lines(request, now_ms, width)
+            request_card_lines(request, now_ms, width)
                 .into_iter()
                 .map(|line| {
                     Line::styled(
@@ -784,17 +784,10 @@ fn draw_request_list(frame: &mut Frame, area: Rect, state: &mut LogsState, width
                         request_line_style(request, line.kind, state.color, selected),
                     )
                 })
-                .collect::<Vec<_>>();
-            lines.push(Line::styled(
-                "─".repeat(width),
-                item_separator_style(state.color),
-            ));
-            ListItem::new(lines)
+                .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
-    let mut list_state = ListState::default();
-    list_state.select(state.selected);
-    frame.render_stateful_widget(List::new(items), area, &mut list_state);
+    draw_card_list(frame, area, items, state.selected, state.color);
 }
 
 fn draw_provider_list(frame: &mut Frame, area: Rect, state: &mut LogsState, width: usize) {
@@ -814,17 +807,51 @@ fn draw_provider_list(frame: &mut Frame, area: Rect, state: &mut LogsState, widt
         .enumerate()
         .map(|(index, provider)| {
             let selected = state.provider_selected == Some(index);
-            let mut lines = provider_card_lines(provider, width, state.color, selected);
-            lines.push(Line::styled(
-                "─".repeat(width),
-                item_separator_style(state.color),
-            ));
+            provider_card_lines(provider, width, state.color, selected)
+        })
+        .collect::<Vec<_>>();
+    draw_card_list(frame, area, items, state.provider_selected, state.color);
+}
+
+fn draw_card_list(
+    frame: &mut Frame,
+    area: Rect,
+    cards: Vec<Vec<Line<'_>>>,
+    selected: Option<usize>,
+    color: bool,
+) {
+    let count = cards.len();
+    let mut heights = Vec::with_capacity(count);
+    let items = cards
+        .into_iter()
+        .enumerate()
+        .map(|(index, mut lines)| {
+            if index + 1 < count {
+                lines.push(Line::default());
+            }
+            heights.push(lines.len());
             ListItem::new(lines)
         })
         .collect::<Vec<_>>();
     let mut list_state = ListState::default();
-    list_state.select(state.provider_selected);
+    list_state.select(selected);
     frame.render_stateful_widget(List::new(items), area, &mut list_state);
+    // Ratatui chooses the visible cards after accounting for selection and height.
+    // Draw a separator only when the following card fits in that same viewport.
+    let mut used = 0;
+    for index in list_state.offset()..heights.len().saturating_sub(1) {
+        used += heights[index];
+        if used + heights[index + 1] > usize::from(area.height) {
+            break;
+        }
+        let line = Rect::new(
+            area.x,
+            area.y + used as u16 - 1,
+            area.width.saturating_sub(1),
+            1,
+        );
+        draw_header_separator(frame, line, color);
+    }
 }
 
 fn provider_empty_message(state: &LogsState) -> String {
@@ -1896,6 +1923,48 @@ mod tests {
         let text = rendered_non_space_symbols(&terminal);
         assert!(text.contains("并发13"));
         assert!(text.contains("暂无请求"));
+    }
+
+    #[test]
+    fn card_separators_only_appear_between_visible_requests_or_providers() {
+        for view in [DashboardView::Requests, DashboardView::Providers] {
+            for count in [1, 3] {
+                for selected in [None, Some(count - 1)] {
+                    for height in [5, 8, 12, 20, 60] {
+                        let mut snapshot = empty_snapshot(CliScope::Codex);
+                        snapshot.recent_requests = ObserverSection::ready(
+                            (0..count).map(|index| terminal_request(&index.to_string())).collect(),
+                        );
+                        snapshot.providers = Some(ObserverSection::ready(ObserverProviderCollection {
+                            items: (0..count).map(|index| provider_status(index as i64, "Provider", false)).collect(),
+                            truncated: false,
+                        }));
+                        let mut state = LogsState::new(CliScope::Codex);
+                        state.switch_view(view);
+                        state.apply_snapshot(snapshot);
+                        if let Some(selected) = selected {
+                            state.select_current(selected, Instant::now());
+                        }
+                        let mut terminal = Terminal::new(TestBackend::new(40, height)).unwrap();
+                        terminal.draw(|frame| draw_logs_content(frame, frame.area(), &mut state)).unwrap();
+                        let rows = (0..usize::from(height))
+                            .map(|row| rendered_row_symbols(&terminal, row))
+                            .collect::<Vec<_>>();
+                        let separators = rows.iter().enumerate().filter(|(_, row)| !row.is_empty() && row.chars().all(|c| c == '─')).collect::<Vec<_>>();
+                        if count == 1 {
+                            assert!(separators.is_empty());
+                        }
+                        for (index, _) in &separators {
+                            assert!(*index + 1 < rows.len() && !rows[*index + 1].is_empty());
+                        }
+                        if count == 3 && height == 60 && selected.is_none() {
+                            assert_eq!(separators.len(), 2);
+                        }
+                        assert!(!rows.iter().rev().find(|row| !row.is_empty()).is_some_and(|row| row.chars().all(|c| c == '─')));
+                    }
+                }
+            }
+        }
     }
 
     #[test]

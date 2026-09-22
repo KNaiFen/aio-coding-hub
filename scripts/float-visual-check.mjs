@@ -51,16 +51,9 @@ try {
             [{pane:names[0],x:0,y:3,width:args.columns,height:first},{pane:names[1],x:0,y:first+4,width:args.columns,height:args.rows-first-5}];
           const visibleCells = config.layout === 'single' ? cells : [
             ...cells.filter(cell => cell.y < 2),
-            ...regions.flatMap(region => cells.filter(cell => cell.y >= 3 && cell.x + cell.width <= region.width && cell.y - 2 < region.height).map(cell => ({...cell,x:cell.x+region.x,y:cell.y-2+region.y}))),
+            ...regions.flatMap(region => cells.filter(cell => cell.y >= 3 && cell.x + cell.width <= region.width && cell.y - 3 < region.height).map(cell => ({...cell,x:cell.x+region.x,y:cell.y-3+region.y}))),
           ];
           if (config.layout !== 'single') {
-            for (const region of regions) {
-              let x = region.x;
-              for (const char of region.pane === 'requests' ? '请求' : '供应商') {
-                if (x + 2 <= region.x + region.width) visibleCells.push({x,y:region.y,text:char,width:2,fg:window.floatFocus===region.pane?'#69aab3':'#8b949e'});
-                x += 2;
-              }
-            }
             if (horizontal) {
               for (let y = 3; y < args.rows - 1; y++) visibleCells.push({x:first,y,text:'│',width:1,fg:'#5a6067'});
             } else {
