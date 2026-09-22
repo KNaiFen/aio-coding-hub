@@ -3,7 +3,10 @@ use aio_tui::{
     client::{ObserverClient, OfflineReason},
     input::{handle_logs_key, next_scope, KeyAction},
     palette::{with_capability, ColorCapability, Palette, Tone},
-    ui::{dashboard_help_text, draw_header, draw_header_separator, draw_logs_content, DashboardView, LogsState},
+    ui::{
+        dashboard_help_text, draw_header, draw_header_separator, draw_logs_content, DashboardView,
+        LogsState,
+    },
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
@@ -21,7 +24,11 @@ use std::{
 use tauri::Manager;
 use unicode_width::UnicodeWidthStr;
 
-use crate::{config::Config, layout::{self, LayoutMode, Pane, Region}, AppState};
+use crate::{
+    config::Config,
+    layout::{self, LayoutMode, Pane, Region},
+    AppState,
+};
 
 pub struct Dashboard {
     pub logs: LogsState,
@@ -113,7 +120,16 @@ impl Dashboard {
                 {
                     interval = Duration::from_millis(500);
                 }
-                self.providers.apply_snapshot(snapshot.clone());
+                let mut provider_snapshot = snapshot.clone();
+                if provider_snapshot.providers.is_none() {
+                    provider_snapshot.providers = self
+                        .providers
+                        .live
+                        .snapshot
+                        .as_ref()
+                        .and_then(|previous| previous.providers.clone());
+                }
+                self.providers.apply_snapshot(provider_snapshot);
                 self.logs.apply_snapshot(snapshot);
                 self.error = None;
             }
@@ -131,28 +147,47 @@ impl Dashboard {
     }
 
     pub fn pane(&mut self, pane: Pane) -> &mut LogsState {
-        match pane { Pane::Requests => &mut self.logs, Pane::Providers => &mut self.providers }
+        match pane {
+            Pane::Requests => &mut self.logs,
+            Pane::Providers => &mut self.providers,
+        }
     }
 
     fn input(&mut self, key: KeyEvent, target: Option<Pane>) -> KeyAction {
-        let none = || KeyAction { redraw: true, refresh: false, probe_provider_id: None };
+        let none = || KeyAction {
+            redraw: true,
+            refresh: false,
+            probe_provider_id: None,
+        };
         if key.code == KeyCode::Char('?') {
             self.help = !self.help;
             return none();
         }
         if self.help {
-            if key.code == KeyCode::Esc { self.help = false; }
+            if key.code == KeyCode::Esc {
+                self.help = false;
+            }
             return none();
         }
         if key.code == KeyCode::Tab {
             let scope = next_scope(self.logs.live.scope);
             self.logs.set_scope(scope);
             self.providers.set_scope(scope);
-            return KeyAction { refresh: true, ..none() };
+            return KeyAction {
+                refresh: true,
+                ..none()
+            };
         }
         if target.is_none() && matches!(key.code, KeyCode::Left | KeyCode::Right) {
-            self.focus = if key.code == KeyCode::Left { Pane::Requests } else { Pane::Providers };
-            return KeyAction { refresh: true, ..none() };
+            self.focus = if key.code == KeyCode::Left {
+                Pane::Requests
+            } else {
+                Pane::Providers
+            };
+            return KeyAction {
+                refresh: true,
+                ..none()
+            };
         }
         handle_logs_key(self.pane(target.unwrap_or(self.focus)), key)
     }
@@ -197,13 +232,15 @@ pub fn render(logs: &mut LogsState, columns: u16, rows: u16) -> Result<Vec<Cell>
     render_grid(columns, rows, |frame| aio_tui::ui::draw_logs(frame, logs))
 }
 
-fn render_grid(columns: u16, rows: u16, draw: impl FnOnce(&mut ratatui::Frame)) -> Result<Vec<Cell>, String> {
+fn render_grid(
+    columns: u16,
+    rows: u16,
+    draw: impl FnOnce(&mut ratatui::Frame),
+) -> Result<Vec<Cell>, String> {
     let mut terminal =
         Terminal::new(TestBackend::new(columns, rows)).map_err(|_| "无法创建字符网格")?;
-    with_capability(ColorCapability::TrueColor, || {
-        terminal.draw(draw)
-    })
-    .map_err(|_| "无法绘制仪表盘")?;
+    with_capability(ColorCapability::TrueColor, || terminal.draw(draw))
+        .map_err(|_| "无法绘制仪表盘")?;
     let buffer = terminal.backend().buffer();
     let mut cells = Vec::new();
     for y in 0..rows {
@@ -251,42 +288,86 @@ fn render_grid(columns: u16, rows: u16, draw: impl FnOnce(&mut ratatui::Frame)) 
     Ok(cells)
 }
 
-fn render_dashboard(dashboard: &mut Dashboard, config: &Config, columns: u16, rows: u16) -> Result<(Vec<Cell>, Vec<Region>), String> {
+fn render_dashboard(
+    dashboard: &mut Dashboard,
+    config: &Config,
+    columns: u16,
+    rows: u16,
+) -> Result<(Vec<Cell>, Vec<Region>), String> {
     let geometry = layout::geometry(config, columns, rows, dashboard.focus);
     let cells = render_grid(columns, rows, |frame| {
         let palette = Palette::detected(true);
         if dashboard.help {
-            let divider_keys = if cfg!(target_os = "macos") { "Cmd+Option+Shift+方向键" } else { "Ctrl+方向键" };
+            let divider_keys = if cfg!(target_os = "macos") {
+                "Cmd+Option+Shift+方向键"
+            } else {
+                "Ctrl+方向键"
+            };
             let text = format!("AIO Float 操作\n\nm 布局：单视图/左右/上下\ns 互换位置   l 锁定窗口\n{divider_keys} 调整分界\n\n{}", dashboard_help_text(false).replace("AIO TUI 操作\n\n", "").replace("请求/供应商视图", "聚焦请求/供应商"));
-            frame.render_widget(Paragraph::new(text).style(palette.style(Tone::Accent)).wrap(Wrap { trim: false }), frame.area());
+            frame.render_widget(
+                Paragraph::new(text)
+                    .style(palette.style(Tone::Accent))
+                    .wrap(Wrap { trim: false }),
+                frame.area(),
+            );
             return;
         }
         draw_header(frame, geometry.header, &dashboard.logs.live, true);
         draw_header_separator(frame, geometry.separator, true);
         if geometry.regions.is_empty() {
-            frame.render_widget(Paragraph::new("空间不足，请放大窗口或减小字号").style(palette.style(Tone::Muted)).wrap(Wrap { trim: false }), geometry.body);
+            frame.render_widget(
+                Paragraph::new("空间不足，请放大窗口或减小字号")
+                    .style(palette.style(Tone::Muted))
+                    .wrap(Wrap { trim: false }),
+                geometry.body,
+            );
         }
         if !geometry.divider.is_empty() {
             let separator = if config.layout == LayoutMode::Horizontal {
                 vec!["│"; usize::from(geometry.divider.height)].join("\n")
-            } else { "─".repeat(usize::from(geometry.divider.width)) };
-            frame.render_widget(Paragraph::new(separator).style(palette.style(Tone::Muted)), geometry.divider);
+            } else {
+                "─".repeat(usize::from(geometry.divider.width))
+            };
+            frame.render_widget(
+                Paragraph::new(separator).style(palette.style(Tone::Muted)),
+                geometry.divider,
+            );
         }
         for region in &geometry.regions {
             let mut area = region.area();
             if config.layout != LayoutMode::Single {
-                let title = match region.pane { Pane::Requests => "请求", Pane::Providers => "供应商" };
-                let style = palette.style(if dashboard.focus == region.pane { Tone::Accent } else { Tone::Muted });
-                frame.render_widget(Paragraph::new(title).style(style), Rect::new(area.x, area.y, area.width, 1));
+                let title = match region.pane {
+                    Pane::Requests => "请求",
+                    Pane::Providers => "供应商",
+                };
+                let style = palette.style(if dashboard.focus == region.pane {
+                    Tone::Accent
+                } else {
+                    Tone::Muted
+                });
+                frame.render_widget(
+                    Paragraph::new(title).style(style),
+                    Rect::new(area.x, area.y, area.width, 1),
+                );
                 area.y += 1;
                 area.height -= 1;
             }
             draw_logs_content(frame, area, dashboard.pane(region.pane));
         }
         let lock = if config.locked { "已锁定" } else { "锁定" };
-        frame.render_widget(Paragraph::new(format!("m布局 s互换 l{lock} ?帮助")).style(palette.style(Tone::Muted)), geometry.footer);
+        frame.render_widget(
+            Paragraph::new(format!("m布局 s互换 l{lock} ?帮助")).style(palette.style(Tone::Muted)),
+            geometry.footer,
+        );
     })?;
-    Ok((cells, if dashboard.help { Vec::new() } else { geometry.regions }))
+    Ok((
+        cells,
+        if dashboard.help {
+            Vec::new()
+        } else {
+            geometry.regions
+        },
+    ))
 }
 
 #[tauri::command]
@@ -300,7 +381,12 @@ pub fn float_focus(app: tauri::AppHandle, pane: Pane) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn float_frame(app: tauri::AppHandle, window: tauri::WebviewWindow, columns: u16, rows: u16) -> Result<Frame, String> {
+pub fn float_frame(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    columns: u16,
+    rows: u16,
+) -> Result<Frame, String> {
     let columns = columns.clamp(1, 400);
     let rows = rows.clamp(1, 240);
     let state = app.state::<Mutex<AppState>>();
@@ -309,8 +395,13 @@ pub fn float_frame(app: tauri::AppHandle, window: tauri::WebviewWindow, columns:
         .dashboard
         .logs
         .expire_inactive_selections(Instant::now());
-    state.dashboard.providers.expire_inactive_selections(Instant::now());
-    if window.label() == "main" { state.grid_size = (columns, rows); }
+    state
+        .dashboard
+        .providers
+        .expire_inactive_selections(Instant::now());
+    if window.label() == "main" {
+        state.grid_size = (columns, rows);
+    }
     let config = state.config.clone();
     let (cells, regions) = render_dashboard(&mut state.dashboard, &config, columns, rows)?;
     Ok(Frame {
@@ -391,7 +482,12 @@ pub fn key_event(key: &str, control: bool) -> Option<KeyEvent> {
 }
 
 #[tauri::command]
-pub fn float_key(app: tauri::AppHandle, key: String, control: bool, target: Option<Pane>) -> Result<(), String> {
+pub fn float_key(
+    app: tauri::AppHandle,
+    key: String,
+    control: bool,
+    target: Option<Pane>,
+) -> Result<(), String> {
     if app
         .get_webview_window("settings")
         .is_some_and(|w| w.is_focused().unwrap_or(false))
@@ -419,7 +515,10 @@ pub fn float_key(app: tauri::AppHandle, key: String, control: bool, target: Opti
             let result = client.test_provider_availability(provider).await;
             if let Ok(mut state) = handle.state::<Mutex<AppState>>().lock() {
                 if state.dashboard.generation == generation {
-                    state.dashboard.providers.finish_provider_probe(provider, result);
+                    state
+                        .dashboard
+                        .providers
+                        .finish_provider_probe(provider, result);
                 }
             }
         });
@@ -522,20 +621,41 @@ mod tests {
         d.input(key("ArrowDown"), None);
         d.input(key("Enter"), None);
         assert!(d.logs.detail && d.providers.detail);
+        // Request-only polling while the provider pane is hidden must not erase it.
+        let mut requests_only = populated_snapshot();
+        requests_only.providers = None;
+        d.accept(0, 0, Ok(requests_only));
+        assert!(d.providers.detail);
+        d.accept(0, 0, Ok(populated_snapshot()));
         assert_eq!(d.logs.detail_scroll, 1);
         assert_eq!(d.input(key("t"), None).probe_provider_id, Some(42));
         assert_eq!(d.input(key("t"), None).probe_provider_id, None);
         d.input(key("ArrowDown"), Some(Pane::Requests));
         assert_eq!(d.focus, Pane::Providers);
         assert_eq!(d.logs.detail_scroll, 2);
-        for mode in [LayoutMode::Single, LayoutMode::Horizontal, LayoutMode::Vertical] {
-            let config = Config { layout: mode, ..Config::default() };
+        for mode in [
+            LayoutMode::Single,
+            LayoutMode::Horizontal,
+            LayoutMode::Vertical,
+        ] {
+            let config = Config {
+                layout: mode,
+                ..Config::default()
+            };
             let (cells, regions) = render_dashboard(&mut d, &config, 80, 40).unwrap();
-            assert_eq!(regions.len(), if mode == LayoutMode::Single { 1 } else { 2 });
-            assert!(cells.iter().all(|cell| usize::from(cell.x) + cell.width <= 80 && cell.y < 40));
+            assert_eq!(
+                regions.len(),
+                if mode == LayoutMode::Single { 1 } else { 2 }
+            );
+            assert!(cells
+                .iter()
+                .all(|cell| usize::from(cell.x) + cell.width <= 80 && cell.y < 40));
         }
         d.input(key("?"), None);
-        assert!(render_dashboard(&mut d, &Config::default(), 80, 40).unwrap().1.is_empty());
+        assert!(render_dashboard(&mut d, &Config::default(), 80, 40)
+            .unwrap()
+            .1
+            .is_empty());
         d.input(key("Escape"), None);
         assert!(d.logs.detail && d.providers.detail);
         d.input(key("Escape"), None);
@@ -552,9 +672,14 @@ mod tests {
         d.accept(0, 0, Ok(populated_snapshot()));
         for mode in [LayoutMode::Horizontal, LayoutMode::Vertical] {
             for (columns, rows) in [(1, 1), (3, 9), (24, 16), (80, 40)] {
-                let config = Config { layout: mode, ..Config::default() };
+                let config = Config {
+                    layout: mode,
+                    ..Config::default()
+                };
                 let (cells, _) = render_dashboard(&mut d, &config, columns, rows).unwrap();
-                assert!(cells.iter().all(|cell| usize::from(cell.x) + cell.width <= usize::from(columns) && cell.y < rows));
+                assert!(cells.iter().all(|cell| usize::from(cell.x) + cell.width
+                    <= usize::from(columns)
+                    && cell.y < rows));
                 if columns == 80 {
                     let text: String = cells.iter().map(|cell| cell.text.as_str()).collect();
                     assert_eq!(text.matches("并发").count(), 1);

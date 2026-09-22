@@ -122,18 +122,24 @@ fn float_layout(app: tauri::AppHandle, action: String) -> Result<(), String> {
     let mut state = state.lock().map_err(|_| "悬浮窗状态不可用")?;
     let previous = state.config.layout;
     match action.as_str() {
-        "cycle" => state.config.layout = match previous {
-            layout::LayoutMode::Single => layout::LayoutMode::Horizontal,
-            layout::LayoutMode::Horizontal => layout::LayoutMode::Vertical,
-            layout::LayoutMode::Vertical => layout::LayoutMode::Single,
-        },
+        "cycle" => {
+            state.config.layout = match previous {
+                layout::LayoutMode::Single => layout::LayoutMode::Horizontal,
+                layout::LayoutMode::Horizontal => layout::LayoutMode::Vertical,
+                layout::LayoutMode::Vertical => layout::LayoutMode::Single,
+            }
+        }
         "single" => state.config.layout = layout::LayoutMode::Single,
         "horizontal" => state.config.layout = layout::LayoutMode::Horizontal,
         "vertical" => state.config.layout = layout::LayoutMode::Vertical,
         "swap" => match previous {
             layout::LayoutMode::Single => return Ok(()),
-            layout::LayoutMode::Horizontal => state.config.horizontal.reversed = !state.config.horizontal.reversed,
-            layout::LayoutMode::Vertical => state.config.vertical.reversed = !state.config.vertical.reversed,
+            layout::LayoutMode::Horizontal => {
+                state.config.horizontal.reversed = !state.config.horizontal.reversed
+            }
+            layout::LayoutMode::Vertical => {
+                state.config.vertical.reversed = !state.config.vertical.reversed
+            }
         },
         "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown" => {
             let (columns, rows) = state.grid_size;
@@ -141,7 +147,9 @@ fn float_layout(app: tauri::AppHandle, action: String) -> Result<(), String> {
         }
         _ => return Err("未知布局操作".into()),
     }
-    if previous != state.config.layout { state.dashboard.invalidate(); }
+    if previous != state.config.layout {
+        state.dashboard.invalidate();
+    }
     state.dirty_at = Some(Instant::now());
     drop(state);
     update_tray(&app)?;
@@ -306,11 +314,45 @@ fn menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         &[
             &MenuItem::with_id(app, "show", "显示窗口 / 取消穿透", true, None::<&str>)?,
             &MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?,
-            &CheckMenuItem::with_id(app, "single", "单视图", true, state.config.layout == layout::LayoutMode::Single, None::<&str>)?,
-            &CheckMenuItem::with_id(app, "horizontal", "左右双列", true, state.config.layout == layout::LayoutMode::Horizontal, None::<&str>)?,
-            &CheckMenuItem::with_id(app, "vertical", "上下单列", true, state.config.layout == layout::LayoutMode::Vertical, None::<&str>)?,
-            &MenuItem::with_id(app, "swap", "互换位置 (s)", state.config.layout != layout::LayoutMode::Single, None::<&str>)?,
-            &CheckMenuItem::with_id(app, "lock", "锁定窗口 (l)", true, state.config.locked, None::<&str>)?,
+            &CheckMenuItem::with_id(
+                app,
+                "single",
+                "单视图",
+                true,
+                state.config.layout == layout::LayoutMode::Single,
+                None::<&str>,
+            )?,
+            &CheckMenuItem::with_id(
+                app,
+                "horizontal",
+                "左右双列",
+                true,
+                state.config.layout == layout::LayoutMode::Horizontal,
+                None::<&str>,
+            )?,
+            &CheckMenuItem::with_id(
+                app,
+                "vertical",
+                "上下单列",
+                true,
+                state.config.layout == layout::LayoutMode::Vertical,
+                None::<&str>,
+            )?,
+            &MenuItem::with_id(
+                app,
+                "swap",
+                "互换位置 (s)",
+                state.config.layout != layout::LayoutMode::Single,
+                None::<&str>,
+            )?,
+            &CheckMenuItem::with_id(
+                app,
+                "lock",
+                "锁定窗口 (l)",
+                true,
+                state.config.locked,
+                None::<&str>,
+            )?,
             &CheckMenuItem::with_id(
                 app,
                 "top",
@@ -385,7 +427,11 @@ fn run_menu(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
                 } else {
                     config.click_through
                 },
-                if id == "lock" { !config.locked } else { config.locked },
+                if id == "lock" {
+                    !config.locked
+                } else {
+                    config.locked
+                },
             )?;
         }
         _ => {}

@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::layout::{LayoutMode, Split};
+use serde::{Deserialize, Serialize};
 use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
@@ -207,7 +207,8 @@ mod tests {
         let value = serde_json::to_value(config).unwrap();
         assert!(value.get("token").is_none());
         assert_eq!(value["port"], 13799);
-        let migrated: Config = serde_json::from_str(r#"{"fontSize":14,"clickThrough":true}"#).unwrap();
+        let migrated: Config =
+            serde_json::from_str(r#"{"fontSize":14,"clickThrough":true}"#).unwrap();
         assert!(!migrated.locked);
         assert_eq!(migrated.layout, LayoutMode::Single);
         assert!(migrated.click_through);
