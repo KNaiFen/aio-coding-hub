@@ -713,11 +713,7 @@ pub fn draw_logs(frame: &mut Frame, state: &mut LogsState) {
     draw_header(frame, chunks[0], &state.live, state.color);
     draw_header_separator(frame, chunks[1], state.color);
 
-    let width = usize::from(chunks[2].width.saturating_sub(1)).max(1);
-    match state.view {
-        DashboardView::Requests => draw_request_list(frame, chunks[2], state, width),
-        DashboardView::Providers => draw_provider_list(frame, chunks[2], state, width),
-    }
+    draw_logs_content(frame, chunks[2], state);
 
     let footer = truncate_display(
         if state.quit_on_q {
@@ -733,7 +729,7 @@ pub fn draw_logs(frame: &mut Frame, state: &mut LogsState) {
     );
 }
 
-fn draw_header_separator(frame: &mut Frame, area: Rect, color: bool) {
+pub fn draw_header_separator(frame: &mut Frame, area: Rect, color: bool) {
     if area.width == 0 || area.height == 0 {
         return;
     }
@@ -741,6 +737,22 @@ fn draw_header_separator(frame: &mut Frame, area: Rect, color: bool) {
         Paragraph::new("─".repeat(usize::from(area.width))).style(item_separator_style(color)),
         area,
     );
+}
+
+/// Draw a list or its detail inside a caller-owned pane, without dashboard chrome.
+pub fn draw_logs_content(frame: &mut Frame, area: Rect, state: &mut LogsState) {
+    if area.is_empty() {
+        return;
+    }
+    if state.detail {
+        draw_detail(frame, area, state);
+        return;
+    }
+    let width = usize::from(area.width.saturating_sub(1)).max(1);
+    match state.view {
+        DashboardView::Requests => draw_request_list(frame, area, state, width),
+        DashboardView::Providers => draw_provider_list(frame, area, state, width),
+    }
 }
 
 fn draw_request_list(frame: &mut Frame, area: Rect, state: &mut LogsState, width: usize) {
@@ -867,7 +879,7 @@ fn dashboard_header_lines(state: &LiveState, width: usize) -> [String; 2] {
     ]
 }
 
-fn draw_header(frame: &mut Frame, area: Rect, state: &LiveState, color: bool) {
+pub fn draw_header(frame: &mut Frame, area: Rect, state: &LiveState, color: bool) {
     let [first, second] = dashboard_header_lines(state, usize::from(area.width));
     let style = Palette::detected(color)
         .style(Tone::Accent)
@@ -1201,7 +1213,16 @@ fn muted_style(color: bool) -> Style {
 }
 
 fn draw_help(frame: &mut Frame, area: Rect, color: bool, quit_on_q: bool) {
-    let text = [
+    let text = dashboard_help_text(quit_on_q);
+    let style = Palette::detected(color).style(Tone::Accent);
+    frame.render_widget(
+        Paragraph::new(text).style(style).wrap(Wrap { trim: false }),
+        area,
+    );
+}
+
+pub fn dashboard_help_text(quit_on_q: bool) -> String {
+    [
         "AIO TUI 操作",
         "",
         "↑/k      上一条",
@@ -1221,12 +1242,7 @@ fn draw_help(frame: &mut Frame, area: Rect, color: bool, quit_on_q: bool) {
             "Ctrl-C     退出"
         },
     ]
-    .join("\n");
-    let style = Palette::detected(color).style(Tone::Accent);
-    frame.render_widget(
-        Paragraph::new(text).style(style).wrap(Wrap { trim: false }),
-        area,
-    );
+    .join("\n")
 }
 
 fn request_line_style(

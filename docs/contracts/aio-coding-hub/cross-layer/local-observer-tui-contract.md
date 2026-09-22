@@ -7,6 +7,13 @@ standalone `aio-tui` process running on the same machine. This surface is for
 SSH, narrow-terminal observability, and the independent AIO Float dashboard;
 it is not a second gateway or a remote administration API.
 
+Float supports single, side-by-side and stacked layouts without changing this
+HTTP protocol. Combined layouts fetch one provider-inclusive snapshot per poll
+and update independent request/provider interaction states together. Pane hit
+testing and one-cell divider movement use the same Rust-computed grid geometry.
+Its persisted window lock disables dragging/resizing but remains independent of
+click-through. The terminal TUI retains its existing layout and input behavior.
+
 ## Endpoint and descriptor
 
 - The existing local observer binds to `127.0.0.1` on an ephemeral port.

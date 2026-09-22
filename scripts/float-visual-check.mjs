@@ -28,21 +28,44 @@ try {
     const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: scale });
     page.on("pageerror", (error) => errors.push(error.message));
     await page.addInitScript(() => {
-      const config = { ip: "127.0.0.1", port: 13799, fontSize: 12, background: "#272B33", opacity: .35, alwaysOnTop: true, clickThrough: false };
+      const config = { ip: "127.0.0.1", port: 13799, fontSize: 12, background: "#272B33", opacity: .35, alwaysOnTop: true, clickThrough: false, locked: false, layout: 'single', horizontal: {ratio:.5,reversed:false}, vertical:{ratio:.5,reversed:false} };
       const cells = [];
       window.floatCalls = [];
       window.floatError = null;
+      window.floatConfig = config;
+      window.floatFocus = 'requests';
       for (const [y, text, fg] of [[0,"并发 0 | 首选 正价PRO20X", "#69aab3"], [1,"Codex | 今日 $187.51", "#71ae7e"], [3,"200 成功 1分钟前", "#71ae7e"], [4,"Codex / gpt-6-astra-xhigh", "#7da0c4"], [5,"正价PRO20X VIBE 无目录", "#b689be"], [6,"直连 5.0s 18.4 t/s", "#69aab3"]]) {
         let x = 0;
         for (const char of text) { const width = char.codePointAt(0) > 255 ? 2 : 1; cells.push({x,y,text:char,width,fg,bg:null,bold:false,italic:false,underline:false}); x += width; }
       }
       window.__TAURI__ = { core: { invoke: async (command, args) => {
         window.floatCalls.push({command, args});
-        if (command === "float_frame") return { ...args, cells: cells.filter(cell => cell.x + cell.width <= args.columns && cell.y < args.rows), config, connected: true, error: window.floatError };
+        if (command === "float_frame") {
+          const horizontal = config.layout === 'horizontal';
+          const split = horizontal ? config.horizontal : config.vertical;
+          const extent = horizontal ? args.columns : Math.max(2, args.rows - 4);
+          const first = Math.max(1, Math.round((extent - 1) * split.ratio));
+          const names = split.reversed ? ['providers','requests'] : ['requests','providers'];
+          const regions = config.layout === 'single' ? [{pane:window.floatFocus,x:0,y:3,width:args.columns,height:args.rows-4}] : horizontal ?
+            [{pane:names[0],x:0,y:3,width:first,height:args.rows-4},{pane:names[1],x:first+1,y:3,width:args.columns-first-1,height:args.rows-4}] :
+            [{pane:names[0],x:0,y:3,width:args.columns,height:first},{pane:names[1],x:0,y:first+4,width:args.columns,height:args.rows-first-5}];
+          const visibleCells = config.layout === 'single' ? cells : [
+            ...cells.filter(cell => cell.y < 2),
+            ...regions.flatMap(region => cells.filter(cell => cell.y >= 3 && cell.x + cell.width <= region.width && cell.y - 2 < region.height).map(cell => ({...cell,x:cell.x+region.x,y:cell.y-2+region.y}))),
+          ];
+          return { ...args, cells: visibleCells.filter(cell => cell.x + cell.width <= args.columns && cell.y < args.rows), regions, focus:window.floatFocus, macos:!!window.floatMac, config, connected: true, error: window.floatError };
+        }
         if (command === "float_settings") return { config, hasToken: true, error: null };
         if (command === "float_connect" && window.connectionFailure) throw window.connectionFailure;
         if (command === "float_appearance") Object.assign(config, args);
-      } }, window: { getCurrentWindow: () => ({startDragging: async()=>{},startResizeDragging: async()=>{}}) }, event: {listen: async()=>{}} };
+        if (command === 'float_focus') window.floatFocus = args.pane;
+        if (command === 'float_toggle_lock') config.locked = !config.locked;
+        if (command === 'float_layout') {
+          if (args.action === 'cycle') config.layout = {single:'horizontal',horizontal:'vertical',vertical:'single'}[config.layout];
+          else if (['single','horizontal','vertical'].includes(args.action)) config.layout = args.action;
+          else if (args.action === 'swap' && config.layout !== 'single') config[config.layout].reversed = !config[config.layout].reversed;
+        }
+      } }, window: { getCurrentWindow: () => ({startDragging: async()=>{window.floatCalls.push({command:'drag'});},startResizeDragging: async()=>{window.floatCalls.push({command:'resize'});}}) }, event: {listen: async()=>{}} };
     });
     await page.goto(`http://127.0.0.1:${server.address().port}/index.html`);
     await page.waitForFunction(() => document.querySelector("canvas").width > 1 && document.fonts.check("12px Cascadia"));
@@ -87,6 +110,52 @@ try {
     await page.waitForFunction(() => window.floatCalls.some(call => call.command === 'float_key' && call.args.key === 'ArrowDown'));
     await page.mouse.click(width / 2, height / 2, {button:'right'});
     await page.waitForFunction(() => window.floatCalls.some(call => call.command === 'float_menu'));
+    await page.keyboard.press('m');
+    await page.waitForFunction(() => window.floatConfig.layout === 'horizontal');
+    await page.keyboard.press('s');
+    await page.waitForFunction(() => window.floatConfig.horizontal.reversed);
+    await page.keyboard.press('Control+ArrowRight');
+    await page.waitForFunction(() => window.floatCalls.some(call => call.command === 'float_layout' && call.args.action === 'ArrowRight'));
+    await page.waitForTimeout(250);
+    await page.screenshot({path:`${output}/horizontal-${width}-${scale}x.png`,omitBackground:true});
+    await page.mouse.click(width * .75, height * .6);
+    await page.waitForFunction(() => window.floatCalls.some(call => call.command === 'float_focus' && call.args.pane === 'requests'));
+    await page.mouse.move(width * .25, height * .6);
+    await page.mouse.wheel(0, 100);
+    await page.waitForFunction(() => window.floatCalls.some(call => call.command === 'float_key' && call.args.target === 'providers'));
+    assert.equal(await page.evaluate(() => window.floatFocus), 'requests', 'wheel must not steal keyboard focus');
+    await page.keyboard.down('m');
+    await page.keyboard.down('m');
+    await page.keyboard.up('m');
+    await page.waitForFunction(() => window.floatConfig.layout === 'vertical');
+    await page.keyboard.press('Control+ArrowUp');
+    await page.waitForFunction(() => window.floatCalls.some(call => call.command === 'float_layout' && call.args.action === 'ArrowUp'));
+    await page.waitForTimeout(250);
+    await page.screenshot({path:`${output}/vertical-${width}-${scale}x.png`,omitBackground:true});
+    await page.evaluate(() => { window.floatMac = true; window.floatCalls = []; });
+    await page.waitForTimeout(250);
+    await page.keyboard.press('Control+ArrowDown');
+    assert(!(await page.evaluate(() => window.floatCalls.some(call => call.command === 'float_layout'))));
+    await page.keyboard.press('Meta+Alt+Shift+ArrowDown');
+    await page.waitForFunction(() => window.floatCalls.some(call => call.command === 'float_layout' && call.args.action === 'ArrowDown'));
+    await page.keyboard.press('l');
+    await page.waitForFunction(() => document.body.classList.contains('locked'));
+    await page.evaluate(() => {
+      document.querySelector('#drag').dispatchEvent(new MouseEvent('mousedown', {button:0}));
+      document.querySelector('[data-edge]').dispatchEvent(new MouseEvent('mousedown', {button:0}));
+    });
+    assert(!(await page.evaluate(() => window.floatCalls.some(call => ['drag','resize'].includes(call.command)))));
+    await page.mouse.click(width / 2, height * .4);
+    await page.waitForFunction(() => window.floatCalls.some(call => call.command === 'float_focus'));
+    await page.keyboard.press('l');
+    await page.waitForFunction(() => !document.body.classList.contains('locked'));
+    await page.evaluate(() => {
+      document.querySelector('#drag').dispatchEvent(new MouseEvent('mousedown', {button:0}));
+      document.querySelector('[data-edge]').dispatchEvent(new MouseEvent('mousedown', {button:0}));
+    });
+    await page.waitForFunction(() => window.floatCalls.some(call => call.command === 'drag') && window.floatCalls.some(call => call.command === 'resize'));
+    await page.keyboard.press('m');
+    await page.waitForFunction(() => window.floatConfig.layout === 'single');
     for (const fontSize of [8, 32]) {
       await page.evaluate(fontSize => window.__TAURI__.core.invoke('float_appearance', {fontSize}), fontSize);
       await page.waitForFunction(fontSize => {
@@ -101,6 +170,14 @@ try {
     await page.setViewportSize({width:settingsWidth,height:600});
     await page.goto(`http://127.0.0.1:${server.address().port}/settings.html`);
     await page.getByRole('tab', {name:'外观', selected:true}).waitFor();
+    await page.getByLabel('显示布局').selectOption('horizontal');
+    await page.getByRole('button', {name:'互换位置',exact:true}).click();
+    await page.getByRole('switch', {name:'锁定窗口'}).check();
+    await page.getByLabel('字号', {exact:true}).focus();
+    const callsBefore = await page.evaluate(() => window.floatCalls.filter(call => ['float_key','float_toggle_lock'].includes(call.command)).length);
+    await page.keyboard.press('m');
+    await page.keyboard.press('l');
+    assert.equal(await page.evaluate(() => window.floatCalls.filter(call => ['float_key','float_toggle_lock'].includes(call.command)).length), callsBefore);
     await page.getByLabel('字号', {exact:true}).fill('12');
     await page.getByRole('button', {name:'增大字号'}).click();
     assert.equal(await page.getByLabel('字号', {exact:true}).inputValue(), '13');

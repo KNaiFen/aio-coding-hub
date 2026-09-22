@@ -22,6 +22,7 @@ async function refresh() {
     const actual = gridDimensions();
     if (actual.columns !== size.columns || actual.rows !== size.rows) frame = await invoke('float_frame', actual);
     lastFrame = frame;
+    document.body.classList.toggle('locked', config.locked);
     drawFrame(canvas, frame, innerWidth, innerHeight, devicePixelRatio);
     document.querySelector('#drag').style.height = `${config.fontSize * 2.4}px`;
   } catch (error) { message.textContent = String(error); } finally { running = false; }
@@ -31,16 +32,39 @@ async function appearance(fontSize) {
   catch(error) { message.textContent = String(error); }
 }
 window.addEventListener('contextmenu', (event) => { event.preventDefault(); void invoke('float_menu').catch((error) => { message.textContent = String(error); }); });
-document.querySelector('#drag').addEventListener('mousedown', (event) => { if (event.button === 0) void currentWindow.startDragging(); });
-document.querySelectorAll('[data-edge]').forEach((edge) => edge.addEventListener('mousedown', (event) => { if (event.button === 0) { event.preventDefault(); void currentWindow.startResizeDragging(edge.dataset.edge); } }));
+document.querySelector('#drag').addEventListener('mousedown', (event) => { if (event.button === 0 && !config.locked) void currentWindow.startDragging().catch(showError); });
+document.querySelectorAll('[data-edge]').forEach((edge) => edge.addEventListener('mousedown', (event) => { if (event.button === 0 && !config.locked) { event.preventDefault(); void currentWindow.startResizeDragging(edge.dataset.edge).catch(showError); } }));
+function showError(error) { message.textContent = String(error); }
+function paneAt(event) {
+  const x = Math.floor((event.clientX - 6) / (config.fontSize * .6));
+  const y = Math.floor((event.clientY - 6) / (config.fontSize * 1.2));
+  return lastFrame?.regions.find(region => x >= region.x && x < region.x + region.width && y >= region.y && y < region.y + region.height)?.pane;
+}
+canvas.addEventListener('mousedown', event => {
+  const pane = paneAt(event);
+  if (event.button === 0 && pane) void invoke('float_focus', { pane }).then(refresh).catch(showError);
+});
 window.addEventListener('keydown', (event) => {
+  if (event.isComposing || !document.hasFocus()) return;
+  const arrows = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'];
+  const divider = lastFrame?.macos
+    ? event.metaKey && event.altKey && event.shiftKey && !event.ctrlKey
+    : event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey;
+  if (divider && arrows.includes(event.key)) {
+    event.preventDefault(); void invoke('float_layout', { action: event.key }).then(refresh).catch(showError); return;
+  }
+  if (!event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && ['m', 's', 'l'].includes(event.key)) {
+    event.preventDefault();
+    if (!event.repeat) void (event.key === 'l' ? invoke('float_toggle_lock') : invoke('float_layout', { action: event.key === 'm' ? 'cycle' : 'swap' })).then(refresh).catch(showError);
+    return;
+  }
   const modifier = event.ctrlKey || event.metaKey;
   if (modifier && ['+', '=', '-', '0'].includes(event.key)) {
     event.preventDefault(); void appearance(event.key === '0' ? 12 : config.fontSize + (event.key === '-' ? -1 : 1)); return;
   }
-  if (event.altKey || event.metaKey) return;
+  if (event.altKey || event.metaKey || (event.ctrlKey && event.key !== 'c')) return;
   event.preventDefault();
-  void invoke('float_key', { key: event.key, control: event.ctrlKey }).then(refresh).catch((error) => { message.textContent = String(error); });
+  void invoke('float_key', { key: event.key, control: event.ctrlKey, target: null }).then(refresh).catch(showError);
 });
 let wheelDelta = 0;
 window.addEventListener('wheel', (event) => {
@@ -50,7 +74,10 @@ window.addEventListener('wheel', (event) => {
   const down = wheelDelta > 0;
   wheelDelta = 0;
   if (event.ctrlKey || event.metaKey) void appearance(config.fontSize + (down ? -1 : 1));
-  else void invoke('float_key', { key: down ? 'ArrowDown' : 'ArrowUp', control: false }).then(refresh).catch((error) => { message.textContent = String(error); });
+  else {
+    const target = paneAt(event);
+    if (target) void invoke('float_key', { key: down ? 'ArrowDown' : 'ArrowUp', control: false, target }).then(refresh).catch(showError);
+  }
 }, { passive: false });
 window.addEventListener('resize', () => { if (lastFrame) drawFrame(canvas, lastFrame, innerWidth, innerHeight, devicePixelRatio); void refresh(); });
 await window.__TAURI__.event.listen('float-config', () => { void refresh(); });

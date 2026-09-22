@@ -68,12 +68,33 @@ jobs:
       - name: Check application versions
         shell: bash
         run: node scripts/float-release.mjs validate
+      - id: format
+        name: Prepare Float formatting fixes in Actions
+        shell: bash
+        run: |
+          cargo fmt --manifest-path src-tauri/Cargo.toml -p aio-float -p aio-tui
+          if ! git diff --quiet -- src-tauri/crates/aio-float src-tauri/crates/aio-tui; then
+            git diff --binary -- src-tauri/crates/aio-float src-tauri/crates/aio-tui > float-format.patch
+            echo "drift=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: steps.format.outputs.drift == 'true'
+        with:
+          name: float-format-${{ matrix.id }}-${{ github.sha }}
+          path: float-format.patch
+          retention-days: 7
       - name: Check and test Float and shared TUI
         shell: bash
         run: |
           cargo fmt --manifest-path src-tauri/Cargo.toml -p aio-float -p aio-tui -- --check
           cargo clippy --manifest-path src-tauri/Cargo.toml -p aio-float -p aio-tui --all-targets --locked -- -D warnings
           cargo test --manifest-path src-tauri/Cargo.toml -p aio-float -p aio-tui --locked
+      - name: Require committed formatting
+        if: steps.format.outputs.drift == 'true'
+        shell: bash
+        run: |
+          echo 'Apply the Float formatting patch from this run.' >&2
+          exit 1
       - name: Build independent application
         working-directory: src-tauri/crates/aio-float
         shell: bash

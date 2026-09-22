@@ -38,6 +38,7 @@ function appearance() {
     opacity: Number(element('opacity').value) / 100,
     alwaysOnTop: element('alwaysOnTop').checked,
     clickThrough: element('clickThrough').checked,
+    locked: element('locked').checked,
   };
 }
 function syncControls() {
@@ -73,7 +74,9 @@ async function load() {
     const { config, hasToken, error } = await invoke('float_settings');
     for (const key of ['ip', 'port', 'fontSize', 'background']) element(key).value = config[key];
     element('opacity').value = Math.round(config.opacity * 100);
-    for (const key of ['alwaysOnTop', 'clickThrough']) element(key).checked = config[key];
+    for (const key of ['alwaysOnTop', 'clickThrough', 'locked']) element(key).checked = config[key];
+    element('layout').value = config.layout;
+    element('swap').disabled = config.layout === 'single';
     element('token').placeholder = hasToken ? '已安全保存' : '输入访问令牌';
     element('connection-state').textContent = hasToken ? '已配置' : '未配置';
     element('connection-state').classList.toggle('configured', hasToken);
@@ -133,5 +136,17 @@ element('appearance').addEventListener('submit', async (event) => {
   finally { element('appearance-fields').disabled = false; }
 });
 new ResizeObserver(() => { void updatePreview(); }).observe(element('preview'));
+async function changeLayout(action) {
+  try {
+    await invoke('float_layout', { action });
+    const { config } = await invoke('float_settings');
+    element('layout').value = config.layout;
+    element('swap').disabled = config.layout === 'single';
+    feedback('appearance-error');
+    void updatePreview();
+  } catch (error) { feedback('appearance-error', String(error)); }
+}
+element('layout').addEventListener('change', () => { void changeLayout(element('layout').value); });
+element('swap').addEventListener('click', () => { void changeLayout('swap'); });
 await document.fonts.load('12px Cascadia');
 await load();
