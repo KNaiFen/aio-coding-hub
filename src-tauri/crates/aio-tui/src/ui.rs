@@ -820,44 +820,33 @@ fn draw_card_list(
     selected: Option<usize>,
     color: bool,
 ) {
-    let count = cards.len();
-    let mut heights = Vec::with_capacity(count);
-    let items = cards
-        .into_iter()
-        .enumerate()
-        .map(|(index, mut lines)| {
-            if index + 1 < count {
-                lines.push(Line::default());
-            }
-            heights.push(lines.len());
-            ListItem::new(lines)
-        })
-        .collect::<Vec<_>>();
-    let mut list_state = ListState::default();
-    list_state.select(selected);
-    frame.render_stateful_widget(List::new(items), area, &mut list_state);
-    // Ratatui chooses the visible cards after accounting for selection and height.
-    // Draw a separator only when the following card fits in that same viewport.
-    let mut used = 0;
-    for index in list_state.offset()..heights.len().saturating_sub(1) {
-        used += heights[index];
-        if used + heights[index + 1] > usize::from(area.height) {
+    // Scroll only far enough to fit the selection. Separators belong between
+    // visible cards, never to the trailing height of an individual card.
+    let mut start = 0;
+    if let Some(selected) = selected {
+        let mut height = cards.iter().take(selected + 1).map(Vec::len).sum::<usize>() + selected;
+        while height > usize::from(area.height) && start < selected {
+            height -= cards[start].len() + 1;
+            start += 1;
+        }
+    }
+    let mut y = area.y;
+    for (index, lines) in cards.into_iter().enumerate().skip(start) {
+        let gap = u16::from(index > start);
+        let height = lines.len() as u16;
+        if height + gap > area.bottom() - y {
             break;
         }
-        // Scrolling a selection into view may stop the List before filling the pane.
-        let next_y = area.y + used as u16;
-        if !(area.x..area.right())
-            .any(|x| !frame.buffer_mut()[(x, next_y)].symbol().trim().is_empty())
-        {
-            break;
+        if gap > 0 {
+            draw_header_separator(
+                frame,
+                Rect::new(area.x, y, area.width.saturating_sub(1), 1),
+                color,
+            );
+            y += 1;
         }
-        let line = Rect::new(
-            area.x,
-            area.y + used as u16 - 1,
-            area.width.saturating_sub(1),
-            1,
-        );
-        draw_header_separator(frame, line, color);
+        frame.render_widget(Paragraph::new(lines), Rect::new(area.x, y, area.width, height));
+        y += height;
     }
 }
 
@@ -1935,9 +1924,13 @@ mod tests {
     #[test]
     fn card_separators_only_appear_between_visible_requests_or_providers() {
         for view in [DashboardView::Requests, DashboardView::Providers] {
+            let card_height = match view {
+                DashboardView::Requests => 5,
+                DashboardView::Providers => 6,
+            };
             for count in [1, 3] {
                 for selected in [None, Some(count / 2), Some(count - 1)] {
-                    for height in [5, 8, 12, 20, 60] {
+                    for height in (1..=20).chain([60]) {
                         let mut snapshot = empty_snapshot(CliScope::Codex);
                         snapshot.recent_requests = ObserverSection::ready(
                             (0..count)
@@ -1947,7 +1940,12 @@ mod tests {
                         snapshot.providers =
                             Some(ObserverSection::ready(ObserverProviderCollection {
                                 items: (0..count)
-                                    .map(|index| provider_status(index as i64, "Provider", false))
+                                    .map(|index| {
+                                        let mut provider =
+                                            provider_status(index as i64, "Provider", false);
+                                        provider.availability = Some(availability_timeline());
+                                        provider
+                                    })
                                     .collect(),
                                 truncated: false,
                             }));
@@ -1964,6 +1962,14 @@ mod tests {
                         let rows = (0..usize::from(height))
                             .map(|row| rendered_row_symbols(&terminal, row))
                             .collect::<Vec<_>>();
+                        // Every complete card that fits must remain visible, including
+                        // an exact fit with no spare row for a trailing separator.
+                        let visible = count.min((usize::from(height) + 1) / (card_height + 1));
+                        assert_eq!(
+                            rows.iter().filter(|row| !row.is_empty()).count(),
+                            visible * card_height + visible.saturating_sub(1),
+                            "{view:?}, count={count}, selected={selected:?}, height={height}"
+                        );
                         let separators = rows
                             .iter()
                             .enumerate()

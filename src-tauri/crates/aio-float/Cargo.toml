@@ -1,6 +1,6 @@
 [package]
 name = "aio-float"
-version = "0.60.66"
+version = "0.60.67"
 edition = "2021"
 publish = false
 
