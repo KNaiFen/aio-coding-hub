@@ -45,6 +45,17 @@ settings file. Hidden windows pause polling. A disconnected dashboard retains it
 last snapshot; changing server clears it and rejects late responses from the old
 connection. Authentication failures require an updated token.
 
+## 组合布局与窗口锁定
+
+- `m` 循环切换单视图、左右双列、上下单列；组合布局用一次观察轮询同时显示请求和供应商。
+- `s` 互换左右或上下位置，不改变分界。两种组合布局分别记住顺序和比例，调整窗口或字号后保持比例。
+- Windows 使用 `Ctrl+←/→` 每次移动一字符列，`Ctrl+↑/↓` 每次移动一行；macOS 使用 `Command+Option+Shift+对应方向键`。
+- 不匹配布局的分界方向无动作。两区各保留至少一行内容；空间不足时提示调整窗口或字号。
+- 点击区域切换键盘焦点；`←/→` 分别聚焦请求/供应商，与位置无关。滚轮操作鼠标所在区域，不改变键盘焦点。
+- 两区分别保存选择、详情和详情滚动；`Enter` 只打开所在区域详情，`Esc` 返回该区域列表。聚焦供应商详情时 `t` 测试，`Tab` 同步切换两区 CLI 并清空旧选择与详情。
+- `l` 锁定/解锁主窗口位置与尺寸。锁定仍可点击、滚动、调字号、调分界及操作内容，与鼠标穿透独立；打开设置不自动解锁。
+- 右键、托盘及设置提供布局、互换、锁定入口。`m/s/l` 长按不重复触发，设置窗口不触发仪表盘快捷键。旧配置默认单视图、未锁定。
+
 ## Build and delivery
 
 All dependency installation, generated bindings, tests and native builds run in

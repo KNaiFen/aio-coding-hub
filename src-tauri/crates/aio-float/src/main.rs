@@ -2,6 +2,7 @@
 
 mod config;
 mod dashboard;
+mod layout;
 
 use aio_tui::client::ObserverClient;
 use config::Config;
@@ -23,6 +24,7 @@ struct AppState {
     path: PathBuf,
     dashboard: Dashboard,
     dirty_at: Option<Instant>,
+    grid_size: (u16, u16),
 }
 
 struct ConnectionGate(tokio::sync::Mutex<()>);
@@ -115,6 +117,52 @@ async fn float_connect(
 }
 
 #[tauri::command]
+fn float_layout(app: tauri::AppHandle, action: String) -> Result<(), String> {
+    let state = app.state::<Mutex<AppState>>();
+    let mut state = state.lock().map_err(|_| "悬浮窗状态不可用")?;
+    let previous = state.config.layout;
+    match action.as_str() {
+        "cycle" => {
+            state.config.layout = match previous {
+                layout::LayoutMode::Single => layout::LayoutMode::Horizontal,
+                layout::LayoutMode::Horizontal => layout::LayoutMode::Vertical,
+                layout::LayoutMode::Vertical => layout::LayoutMode::Single,
+            }
+        }
+        "single" => state.config.layout = layout::LayoutMode::Single,
+        "horizontal" => state.config.layout = layout::LayoutMode::Horizontal,
+        "vertical" => state.config.layout = layout::LayoutMode::Vertical,
+        "swap" => match previous {
+            layout::LayoutMode::Single => return Ok(()),
+            layout::LayoutMode::Horizontal => {
+                state.config.horizontal.reversed = !state.config.horizontal.reversed
+            }
+            layout::LayoutMode::Vertical => {
+                state.config.vertical.reversed = !state.config.vertical.reversed
+            }
+        },
+        "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown" => {
+            let (columns, rows) = state.grid_size;
+            layout::move_divider(&mut state.config, columns, rows, &action);
+        }
+        _ => return Err("未知布局操作".into()),
+    }
+    if previous != state.config.layout {
+        state.dashboard.invalidate();
+    }
+    state.dirty_at = Some(Instant::now());
+    drop(state);
+    update_tray(&app)?;
+    app.emit("float-config", ()).map_err(|_| "无法刷新窗口")?;
+    Ok(())
+}
+
+#[tauri::command]
+fn float_toggle_lock(app: tauri::AppHandle) -> Result<(), String> {
+    run_menu(&app, "lock")
+}
+
+#[tauri::command]
 fn float_appearance(
     app: tauri::AppHandle,
     font_size: f64,
@@ -122,6 +170,7 @@ fn float_appearance(
     opacity: f64,
     always_on_top: bool,
     click_through: bool,
+    locked: bool,
 ) -> Result<(), String> {
     let state = app.state::<Mutex<AppState>>();
     let mut state = state.lock().map_err(|_| "悬浮窗状态不可用")?;
@@ -131,6 +180,7 @@ fn float_appearance(
         opacity,
         always_on_top,
         click_through,
+        locked,
         ..state.config.clone()
     };
     next.validate()?;
@@ -138,13 +188,19 @@ fn float_appearance(
     window
         .set_always_on_top(next.always_on_top)
         .map_err(|_| "无法更改置顶状态")?;
+    if let Err(error) = window.set_resizable(!next.locked) {
+        let _ = window.set_always_on_top(state.config.always_on_top);
+        return Err(error.to_string());
+    }
     if let Err(error) = window.set_ignore_cursor_events(next.click_through) {
         let _ = window.set_always_on_top(state.config.always_on_top);
+        let _ = window.set_resizable(!state.config.locked);
         return Err(error.to_string());
     }
     if let Err(error) = config::save(&state.path, &next) {
         let _ = window.set_always_on_top(state.config.always_on_top);
         let _ = window.set_ignore_cursor_events(state.config.click_through);
+        let _ = window.set_resizable(!state.config.locked);
         return Err(error);
     }
     state.config = next;
@@ -260,6 +316,45 @@ fn menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             &MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?,
             &CheckMenuItem::with_id(
                 app,
+                "single",
+                "单视图",
+                true,
+                state.config.layout == layout::LayoutMode::Single,
+                None::<&str>,
+            )?,
+            &CheckMenuItem::with_id(
+                app,
+                "horizontal",
+                "左右双列",
+                true,
+                state.config.layout == layout::LayoutMode::Horizontal,
+                None::<&str>,
+            )?,
+            &CheckMenuItem::with_id(
+                app,
+                "vertical",
+                "上下单列",
+                true,
+                state.config.layout == layout::LayoutMode::Vertical,
+                None::<&str>,
+            )?,
+            &MenuItem::with_id(
+                app,
+                "swap",
+                "互换位置 (s)",
+                state.config.layout != layout::LayoutMode::Single,
+                None::<&str>,
+            )?,
+            &CheckMenuItem::with_id(
+                app,
+                "lock",
+                "锁定窗口 (l)",
+                true,
+                state.config.locked,
+                None::<&str>,
+            )?,
+            &CheckMenuItem::with_id(
+                app,
                 "top",
                 "始终置顶",
                 true,
@@ -309,7 +404,8 @@ fn run_menu(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
                 state.dashboard.set_visible(false);
             }
         }
-        "top" | "through" => {
+        "single" | "horizontal" | "vertical" | "swap" => float_layout(app.clone(), id.into())?,
+        "top" | "through" | "lock" => {
             let config = app
                 .state::<Mutex<AppState>>()
                 .lock()
@@ -330,6 +426,11 @@ fn run_menu(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
                     !config.click_through
                 } else {
                     config.click_through
+                },
+                if id == "lock" {
+                    !config.locked
+                } else {
+                    config.locked
                 },
             )?;
         }
@@ -359,7 +460,10 @@ fn main() {
             float_open_settings,
             float_menu,
             dashboard::float_frame,
-            dashboard::float_key
+            dashboard::float_key,
+            dashboard::float_focus,
+            float_layout,
+            float_toggle_lock
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -382,6 +486,7 @@ fn main() {
                 path,
                 dashboard,
                 dirty_at: None,
+                grid_size: (1, 1),
             }));
             let window = app
                 .get_webview_window("main")
@@ -393,6 +498,7 @@ fn main() {
                 window.set_position(tauri::LogicalPosition::new(x, y))?;
             }
             window.set_always_on_top(config.always_on_top)?;
+            window.set_resizable(!config.locked)?;
             let mut tray = TrayIconBuilder::with_id("float")
                 .tooltip("AIO Float")
                 .menu(&menu(app.handle())?)

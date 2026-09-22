@@ -46,6 +46,10 @@ input:hover { border-color: #686c77 !important; }
 .preview { height: 80px; overflow: hidden; border: 1px solid #454750; border-radius: 6px; margin-bottom: 8px; background-color: #b8b9bb; background-image: conic-gradient(#96989c 25%, transparent 0 50%, #96989c 0 75%, transparent 0); background-size: 12px 12px; }
 .preview canvas { width: 100%; height: 100%; display: block; }
 .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 38px; font-size: 12px; }
+.layout-controls { display: flex; gap: 8px; align-items: center; }
+select,.secondary { font: inherit; color: #d2d5dc; background: #25262b; border: 1px solid #42444c; border-radius: 5px; padding: 6px 8px; }
+select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.toggle-row small { color: var(--muted); font-size: 10px; margin-left: 6px; }
 .setting-row > label, .toggle-row > span { flex: none; color: #c6c8cf; }
 .stepper { display: flex; align-items: center; height: 34px; border: 1px solid #42444c; border-radius: 5px; background: #25262b; padding: 1px; }
 .stepper input { width: 32px !important; height: 30px !important; padding: 0 !important; text-align: right; border: 0 !important; background: transparent !important; appearance: textfield; -moz-appearance: textfield; }

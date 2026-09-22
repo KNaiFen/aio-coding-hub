@@ -1,3 +1,4 @@
+use crate::layout::{LayoutMode, Split};
 use serde::{Deserialize, Serialize};
 use std::{
     io::{Read, Write},
@@ -14,6 +15,10 @@ pub struct Config {
     pub opacity: f64,
     pub always_on_top: bool,
     pub click_through: bool,
+    pub locked: bool,
+    pub layout: LayoutMode,
+    pub horizontal: Split,
+    pub vertical: Split,
     pub scope: String,
     pub width: f64,
     pub height: f64,
@@ -31,6 +36,10 @@ impl Default for Config {
             opacity: 1.0,
             always_on_top: true,
             click_through: false,
+            locked: false,
+            layout: LayoutMode::Single,
+            horizontal: Split::default(),
+            vertical: Split::default(),
             scope: "codex".into(),
             width: 280.0,
             height: 640.0,
@@ -42,6 +51,11 @@ impl Default for Config {
 
 impl Config {
     pub fn validate(&self) -> Result<(), String> {
+        for split in [&self.horizontal, &self.vertical] {
+            if !split.ratio.is_finite() || !(0.0..=1.0).contains(&split.ratio) {
+                return Err("分界比例无效".into());
+            }
+        }
         self.ip
             .parse::<std::net::IpAddr>()
             .map_err(|_| "请输入有效 IP 地址")?;
@@ -169,6 +183,10 @@ mod tests {
         config.font_size = 24.0;
         config.opacity = 0.35;
         config.click_through = true;
+        config.locked = true;
+        config.layout = LayoutMode::Vertical;
+        config.horizontal.ratio = 0.7;
+        config.vertical.reversed = true;
         config.x = Some(-600.0);
         config.y = Some(100.0);
         save(&path, &config).unwrap();
@@ -189,6 +207,11 @@ mod tests {
         let value = serde_json::to_value(config).unwrap();
         assert!(value.get("token").is_none());
         assert_eq!(value["port"], 13799);
+        let migrated: Config =
+            serde_json::from_str(r#"{"fontSize":14,"clickThrough":true}"#).unwrap();
+        assert!(!migrated.locked);
+        assert_eq!(migrated.layout, LayoutMode::Single);
+        assert!(migrated.click_through);
     }
     #[test]
     fn rejects_invalid_dimensions_colors_and_addresses() {

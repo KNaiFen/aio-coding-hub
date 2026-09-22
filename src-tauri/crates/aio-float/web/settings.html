@@ -35,6 +35,7 @@
         <fieldset id="appearance-fields" disabled>
           <div class="section-heading"><h2>实时预览</h2><span class="meta">Cascadia Mono</span></div>
           <div class="preview"><canvas id="preview" aria-label="悬浮窗外观预览"></canvas></div>
+          <div class="setting-row"><label for="layout">显示布局</label><div class="layout-controls"><select id="layout"><option value="single">单视图</option><option value="horizontal">左右双列</option><option value="vertical">上下单列</option></select><button type="button" id="swap" class="secondary">互换位置</button></div></div>
           <div class="setting-row"><label for="fontSize">字号</label><div class="stepper"><button type="button" class="icon-button" id="font-down" aria-label="减小字号" title="减小字号"><span class="icon minus" aria-hidden="true"></span></button><input id="fontSize" aria-label="字号" type="number" min="8" max="32" step="1" required value="12"><span class="unit">px</span><button type="button" class="icon-button" id="font-up" aria-label="增大字号" title="增大字号"><span class="icon plus" aria-hidden="true"></span></button></div></div>
           <div class="setting-row color-row"><label for="background">背景颜色</label><div class="color-controls"><div class="swatches" role="group" aria-label="预设背景颜色">
             <button type="button" class="swatch" data-color="#272B33" style="--swatch:#272B33" aria-label="石墨" aria-pressed="true" title="石墨"></button>
@@ -43,7 +44,7 @@
             <button type="button" class="swatch" data-color="#38292F" style="--swatch:#38292F" aria-label="莓灰" aria-pressed="false" title="莓灰"></button>
           </div><span class="color-divider"></span><input id="background" type="color" value="#272b33" title="自定义背景颜色"><output id="background-value" for="background">#272B33</output></div></div>
           <div class="setting-row"><label for="opacity">背景不透明度</label><div class="range"><input id="opacity" type="range" min="0" max="100" value="100"><output id="opacity-value" for="opacity">100%</output></div></div>
-          <div class="window-settings"><label class="setting-row toggle-row" for="alwaysOnTop"><span>始终置顶</span><input id="alwaysOnTop" class="switch" type="checkbox" role="switch" checked></label><label class="setting-row toggle-row" for="clickThrough"><span>鼠标穿透</span><input id="clickThrough" class="switch" type="checkbox" role="switch"></label></div>
+          <div class="window-settings"><label class="setting-row toggle-row" for="alwaysOnTop"><span>始终置顶</span><input id="alwaysOnTop" class="switch" type="checkbox" role="switch" checked></label><label class="setting-row toggle-row" for="locked"><span>锁定窗口 <small>仍可点击</small></span><input id="locked" class="switch" type="checkbox" role="switch"></label><label class="setting-row toggle-row" for="clickThrough"><span>鼠标穿透</span><input id="clickThrough" class="switch" type="checkbox" role="switch"></label></div>
           <div class="form-footer"><p id="appearance-error" class="feedback" role="status" aria-live="polite"></p><button id="apply" class="primary" type="submit"><span>应用外观</span><span class="icon check" aria-hidden="true"></span></button></div>
         </fieldset>
       </form>
