@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.60.63](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-coding-hub-v0.60.63) (2026-09-23)
+
+### Highlights
+
+* add a switch to stop forwarding Codex model catalog requests to upstream providers
+* keep the switch enabled by default for existing installations
+
 ## [AIO Float 0.60.64](https://github.com/KNaiFen/aio-coding-hub/releases/tag/aio-float-v0.60.64) (2026-09-18)
 
 ### Highlights
