@@ -21,6 +21,7 @@ describe("MSW defaults", () => {
       codex_home_mode: "user_home_default",
       codex_home_override: "",
       codex_oauth_compatible_proxy_mode: false,
+      forward_codex_model_catalog: true,
       codex_provider_test_model: "gpt-5.4-mini",
       auto_start: false,
       start_minimized: false,
