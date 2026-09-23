@@ -345,6 +345,19 @@ describe("components/cli-manager/tabs/CodexTab", () => {
     expect(persistCodexOauthCompatibleProxyMode).toHaveBeenCalledWith(true);
   });
 
+  it("toggles Codex model catalog forwarding", () => {
+    const persistCodexModelCatalogForwarding = vi.fn().mockResolvedValue(true);
+    renderTab({
+      appSettings: createAppSettings({ forward_codex_model_catalog: true }),
+      persistCodexModelCatalogForwarding,
+    });
+
+    const toggle = screen.getByRole("switch", { name: "切换 Codex 模型目录转发" });
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+    expect(persistCodexModelCatalogForwarding).toHaveBeenCalledWith(false);
+  });
+
   it("persists Responses overload retry through its AIO settings callback", async () => {
     const persistCodexResponsesOverloadErrorRewrite = vi.fn().mockResolvedValue(false);
 
