@@ -72,6 +72,7 @@ pub(crate) struct SettingsUpdate {
     pub codex_home_mode: Option<settings::CodexHomeMode>,
     pub codex_home_override: Option<String>,
     pub codex_oauth_compatible_proxy_mode: Option<bool>,
+    pub forward_codex_model_catalog: Option<bool>,
     pub codex_provider_test_model: Option<String>,
     pub enable_codex_responses_overload_error_rewrite: Option<bool>,
     #[serde(rename = "cx2CcFallbackModelOpus")]
@@ -154,6 +155,7 @@ struct SettingsServiceOwnedToken {
     codex_home_mode: settings::CodexHomeMode,
     codex_home_override: String,
     codex_oauth_compatible_proxy_mode: bool,
+    forward_codex_model_catalog: bool,
     codex_provider_test_model: String,
     enable_codex_responses_overload_error_rewrite: bool,
     cx2cc_fallback_model_opus: String,
@@ -216,6 +218,7 @@ impl SettingsServiceOwnedToken {
             codex_home_mode: settings.codex_home_mode,
             codex_home_override: settings.codex_home_override.clone(),
             codex_oauth_compatible_proxy_mode: settings.codex_oauth_compatible_proxy_mode,
+            forward_codex_model_catalog: settings.forward_codex_model_catalog,
             codex_provider_test_model: settings.codex_provider_test_model.clone(),
             enable_codex_responses_overload_error_rewrite: settings
                 .enable_codex_responses_overload_error_rewrite,
@@ -285,6 +288,7 @@ impl SettingsServiceOwnedToken {
         settings.codex_home_mode = self.codex_home_mode;
         settings.codex_home_override = self.codex_home_override.clone();
         settings.codex_oauth_compatible_proxy_mode = self.codex_oauth_compatible_proxy_mode;
+        settings.forward_codex_model_catalog = self.forward_codex_model_catalog;
         settings.codex_provider_test_model = self.codex_provider_test_model.clone();
         settings.enable_codex_responses_overload_error_rewrite =
             self.enable_codex_responses_overload_error_rewrite;
@@ -331,6 +335,7 @@ pub(crate) struct SettingsView {
     pub codex_home_mode: settings::CodexHomeMode,
     pub codex_home_override: String,
     pub codex_oauth_compatible_proxy_mode: bool,
+    pub forward_codex_model_catalog: bool,
     pub codex_provider_test_model: String,
     pub auto_start: bool,
     pub start_minimized: bool,
@@ -464,6 +469,7 @@ impl From<&settings::AppSettings> for SettingsView {
             codex_home_mode: value.codex_home_mode,
             codex_home_override: value.codex_home_override.clone(),
             codex_oauth_compatible_proxy_mode: value.codex_oauth_compatible_proxy_mode,
+            forward_codex_model_catalog: value.forward_codex_model_catalog,
             codex_provider_test_model: value.codex_provider_test_model.clone(),
             auto_start: value.auto_start,
             start_minimized: value.start_minimized,
@@ -799,6 +805,9 @@ fn apply_settings_update_owned_patch(
     let codex_oauth_compatible_proxy_mode = update
         .codex_oauth_compatible_proxy_mode
         .unwrap_or(previous_token.codex_oauth_compatible_proxy_mode);
+    let forward_codex_model_catalog = update
+        .forward_codex_model_catalog
+        .unwrap_or(previous_token.forward_codex_model_catalog);
     let mut codex_provider_test_model = update
         .codex_provider_test_model
         .clone()
@@ -983,6 +992,7 @@ fn apply_settings_update_owned_patch(
         codex_home_mode,
         codex_home_override,
         codex_oauth_compatible_proxy_mode,
+        forward_codex_model_catalog,
         codex_provider_test_model,
         enable_codex_responses_overload_error_rewrite,
         cx2cc_fallback_model_opus,
@@ -2367,6 +2377,7 @@ mod tests {
             codex_home_mode: Some(settings.codex_home_mode),
             codex_home_override: Some(settings.codex_home_override.clone()),
             codex_oauth_compatible_proxy_mode: Some(settings.codex_oauth_compatible_proxy_mode),
+            forward_codex_model_catalog: Some(settings.forward_codex_model_catalog),
             codex_provider_test_model: Some(settings.codex_provider_test_model.clone()),
             enable_codex_responses_overload_error_rewrite: Some(
                 settings.enable_codex_responses_overload_error_rewrite,

@@ -4751,6 +4751,7 @@ export type SettingsUpdate = {
   codexHomeMode: CodexHomeMode | null;
   codexHomeOverride: string | null;
   codexOauthCompatibleProxyMode: boolean | null;
+  forwardCodexModelCatalog: boolean | null;
   codexProviderTestModel: string | null;
   enableCodexResponsesOverloadErrorRewrite: boolean | null;
   cx2CcFallbackModelOpus: string | null;
@@ -4785,6 +4786,7 @@ export type SettingsView = {
   codex_home_mode: CodexHomeMode;
   codex_home_override: string;
   codex_oauth_compatible_proxy_mode: boolean;
+  forward_codex_model_catalog: boolean;
   codex_provider_test_model: string;
   auto_start: boolean;
   start_minimized: boolean;

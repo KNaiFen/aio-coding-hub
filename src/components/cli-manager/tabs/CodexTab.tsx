@@ -325,6 +325,7 @@ export type CliManagerCodexTabProps = {
     codexHomeOverride: string
   ) => Promise<boolean> | boolean;
   persistCodexOauthCompatibleProxyMode?: (enabled: boolean) => Promise<boolean> | boolean;
+  persistCodexModelCatalogForwarding?: (enabled: boolean) => Promise<boolean> | boolean;
   persistCodexResponsesOverloadErrorRewrite?: (enabled: boolean) => Promise<boolean> | boolean;
   pickCodexHomeDirectory?: (initialPath?: string) => Promise<string | null> | string | null;
 };
@@ -788,13 +789,17 @@ function CodexGatewayCompatibilitySection({
   appSettings,
   proxyModeControlsDisabled,
   overloadRewriteControlsDisabled,
+  modelCatalogControlsDisabled,
+  persistCodexModelCatalogForwarding,
   persistCodexOauthCompatibleProxyMode,
   persistCodexResponsesOverloadErrorRewrite,
 }: {
   appSettings: AppSettings;
   proxyModeControlsDisabled: boolean;
   overloadRewriteControlsDisabled: boolean;
+  modelCatalogControlsDisabled: boolean;
   persistCodexOauthCompatibleProxyMode?: (enabled: boolean) => Promise<boolean> | boolean;
+  persistCodexModelCatalogForwarding?: (enabled: boolean) => Promise<boolean> | boolean;
   persistCodexResponsesOverloadErrorRewrite?: (enabled: boolean) => Promise<boolean> | boolean;
 }) {
   return (
@@ -817,6 +822,22 @@ function CodexGatewayCompatibilitySection({
             checked={appSettings.codex_oauth_compatible_proxy_mode}
             onCheckedChange={(checked) => void persistCodexOauthCompatibleProxyMode?.(checked)}
             disabled={proxyModeControlsDisabled}
+          />
+        </div>
+      </div>
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0 py-4">
+          <div className="text-sm font-semibold text-foreground">转发 Codex 模型目录</div>
+          <div className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            关闭后，Codex 的模型目录请求直接返回失败，不会访问上游供应商。已有缓存可能继续生效；新启动且无可用缓存时使用 CLI 内置目录。
+          </div>
+        </div>
+        <div className="py-4">
+          <Switch
+            aria-label="切换 Codex 模型目录转发"
+            checked={appSettings.forward_codex_model_catalog}
+            onCheckedChange={(checked) => void persistCodexModelCatalogForwarding?.(checked)}
+            disabled={modelCatalogControlsDisabled}
           />
         </div>
       </div>
@@ -1619,6 +1640,7 @@ function useCodexTabController({
   persistCommonSettings,
   persistCodexHomeSettings,
   persistCodexOauthCompatibleProxyMode,
+  persistCodexModelCatalogForwarding,
   persistCodexResponsesOverloadErrorRewrite,
   pickCodexHomeDirectory,
 }: CliManagerCodexTabProps) {
@@ -1781,6 +1803,8 @@ function useCodexTabController({
     commonSettingsSaving || !appSettings || !persistCommonSettings;
   const proxyModeControlsDisabled =
     commonSettingsControlsDisabled || !persistCodexOauthCompatibleProxyMode;
+  const modelCatalogControlsDisabled =
+    commonSettingsSaving || commonSettingsControlsDisabled || !persistCodexModelCatalogForwarding;
   const overloadRewriteControlsDisabled =
     commonSettingsSaving ||
     commonSettingsControlsDisabled ||
@@ -2067,6 +2091,7 @@ function useCodexTabController({
     configLocationControlsDisabled,
     proxyModeControlsDisabled,
     overloadRewriteControlsDisabled,
+    modelCatalogControlsDisabled,
     effectiveSandboxMode,
     effectiveFastModeEnabled,
     modelSuggestions,
@@ -2180,7 +2205,9 @@ export function CliManagerCodexTab(props: CliManagerCodexTabProps) {
               appSettings={appSettings}
               proxyModeControlsDisabled={controller.proxyModeControlsDisabled}
               overloadRewriteControlsDisabled={controller.overloadRewriteControlsDisabled}
+              modelCatalogControlsDisabled={controller.modelCatalogControlsDisabled}
               persistCodexOauthCompatibleProxyMode={props.persistCodexOauthCompatibleProxyMode}
+              persistCodexModelCatalogForwarding={props.persistCodexModelCatalogForwarding}
               persistCodexResponsesOverloadErrorRewrite={
                 props.persistCodexResponsesOverloadErrorRewrite
               }

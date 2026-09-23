@@ -1679,6 +1679,17 @@ fn migrate_add_codex_responses_overload_error_rewrite(
     )
 }
 
+fn migrate_add_codex_model_catalog_forwarding(
+    settings: &mut AppSettings,
+    schema_version_present: bool,
+) -> bool {
+    migrate_bump_schema_version(
+        settings,
+        schema_version_present,
+        SCHEMA_VERSION_ADD_CODEX_MODEL_CATALOG_FORWARDING,
+    )
+}
+
 type SettingsMigration = fn(&mut AppSettings, bool) -> bool;
 
 const SETTINGS_MIGRATIONS: &[SettingsMigration] = &[
@@ -1725,6 +1736,7 @@ const SETTINGS_MIGRATIONS: &[SettingsMigration] = &[
     migrate_add_stream_internal_error_retry,
     migrate_set_request_log_retention_default,
     migrate_add_codex_responses_overload_error_rewrite,
+    migrate_add_codex_model_catalog_forwarding,
 ];
 
 fn apply_settings_migrations(settings: &mut AppSettings, schema_version_present: bool) -> bool {
@@ -3037,6 +3049,17 @@ mod tests {
             SCHEMA_VERSION_ADD_CODEX_RESPONSES_OVERLOAD_ERROR_REWRITE
         );
         assert!(!settings.enable_codex_responses_overload_error_rewrite);
+    }
+
+    #[test]
+    fn missing_codex_model_catalog_forwarding_field_deserializes_on() {
+        let mut json = serde_json::to_value(AppSettings::default()).expect("settings json");
+        json.as_object_mut()
+            .expect("settings object")
+            .remove("forward_codex_model_catalog");
+
+        let settings: AppSettings = serde_json::from_value(json).expect("legacy settings");
+        assert!(settings.forward_codex_model_catalog);
     }
 
     #[test]

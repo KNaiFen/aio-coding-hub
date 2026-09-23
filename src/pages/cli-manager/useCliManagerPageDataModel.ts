@@ -558,6 +558,13 @@ export function useCliManagerPageDataModel() {
     return true;
   }
 
+  async function persistCodexModelCatalogForwarding(enabled: boolean) {
+    const updated = await persistCommonSettings({ forward_codex_model_catalog: enabled });
+    if (!updated) return false;
+    toast(enabled ? "已开启 Codex 模型目录转发" : "已关闭 Codex 模型目录转发");
+    return true;
+  }
+
   async function persistCodexResponsesOverloadErrorRewrite(enabled: boolean) {
     const updated = await persistCommonSettings({
       enable_codex_responses_overload_error_rewrite: enabled,
@@ -800,6 +807,7 @@ export function useCliManagerPageDataModel() {
       persistCommonSettings,
       persistCodexHomeSettings,
       persistCodexOauthCompatibleProxyMode,
+      persistCodexModelCatalogForwarding,
       persistCodexResponsesOverloadErrorRewrite,
       pickCodexHomeDirectory,
     },

@@ -121,6 +121,7 @@ const SETTINGS_VIEW_TO_UPDATE_FIELD_MAP = {
   codexHomeMode: "codex_home_mode",
   codexHomeOverride: "codex_home_override",
   codexOauthCompatibleProxyMode: "codex_oauth_compatible_proxy_mode",
+  forwardCodexModelCatalog: "forward_codex_model_catalog",
   codexProviderTestModel: "codex_provider_test_model",
   enableCodexResponsesOverloadErrorRewrite:
     "enable_codex_responses_overload_error_rewrite",
@@ -254,6 +255,7 @@ function toGeneratedSettingsUpdate(input: SettingsSetInput): FrontendSettingsUpd
     codexHomeMode: input.codexHomeMode ?? null,
     codexHomeOverride: input.codexHomeOverride ?? null,
     codexOauthCompatibleProxyMode: input.codexOauthCompatibleProxyMode ?? null,
+    forwardCodexModelCatalog: input.forwardCodexModelCatalog ?? null,
     codexProviderTestModel: input.codexProviderTestModel ?? null,
     enableCodexResponsesOverloadErrorRewrite:
       input.enableCodexResponsesOverloadErrorRewrite ?? null,

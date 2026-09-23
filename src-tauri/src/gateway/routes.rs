@@ -8712,6 +8712,72 @@ INSERT INTO codex_managed_profiles(
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn codex_model_catalog_forwarding_switch_blocks_upstream_only_for_models() {
+        let _env_lock = crate::test_support::test_env_lock();
+        let home = tempfile::tempdir().expect("home dir");
+        let _env = isolate_app_env(home.path());
+        let app = tauri::test::mock_app();
+        let app_handle = app.handle().clone();
+
+        let mut app_settings = settings::AppSettings::default();
+        app_settings.forward_codex_model_catalog = false;
+        settings::write(&app_handle, &app_settings).expect("write settings");
+        crate::cli_proxy::set_enabled(&app_handle, "codex", true, "http://127.0.0.1:37123")
+            .expect("enable codex cli proxy");
+
+        let db_dir = tempfile::tempdir().expect("db dir");
+        let db = db::init_for_tests(&db_dir.path().join("model-forwarding-switch.sqlite"))
+            .expect("init test db");
+        let (upstream_url, calls, upstream_task) =
+            spawn_counting_status_upstream(StatusCode::OK, r#"{"models":[]}"#).await;
+        insert_codex_provider_with_priority(&db, "Models Stub", upstream_url, 0);
+        let (log_tx, writer_task) =
+            request_logs::start_buffered_writer(app_handle.clone(), db.clone());
+        let router = build_router(gateway_state(app_handle, db, log_tx));
+
+        for path in [
+            "/v1/models?client_version=0.155.0",
+            "/v1/models/",
+            "/codex/v1/models",
+            "/codex/models",
+        ] {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(Method::GET)
+                        .uri(path)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .expect("model route response");
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        }
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+        // Other Codex routes remain on the normal proxy path.
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/v1/other")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("other route response");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        tokio::time::timeout(Duration::from_secs(2), writer_task)
+            .await
+            .expect("writer drain timeout")
+            .expect("writer task joins");
+        upstream_task.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn mock_runtime_router_codex_models_response_is_not_logged() {
         let _env_lock = crate::test_support::test_env_lock();
         let home = tempfile::tempdir().expect("home dir");

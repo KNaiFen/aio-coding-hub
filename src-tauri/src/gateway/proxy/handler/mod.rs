@@ -19,8 +19,8 @@ use crate::gateway::util::{
 };
 use axum::{
     body::{Body, Bytes},
-    http::Request,
-    response::Response,
+    http::{Request, StatusCode},
+    response::{IntoResponse, Response},
 };
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -163,6 +163,17 @@ where
     let is_claude_count_tokens = is_claude_count_tokens_request(&cli_key, &forwarded_path);
     let is_codex_model_discovery =
         is_codex_model_discovery_request(&cli_key, &method, &forwarded_path);
+    if is_codex_model_discovery {
+        match crate::settings::read(&state.app) {
+            Ok(settings) if !settings.forward_codex_model_catalog => {
+                return StatusCode::SERVICE_UNAVAILABLE.into_response();
+            }
+            Err(error) => {
+                return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response();
+            }
+            _ => {}
+        }
+    }
 
     let (headers, body) = {
         let (parts, b) = req.into_parts();
