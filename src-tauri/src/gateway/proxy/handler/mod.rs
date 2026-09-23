@@ -169,7 +169,7 @@ where
                 return StatusCode::SERVICE_UNAVAILABLE.into_response();
             }
             Err(error) => {
-                return (StatusCode::INTERNAL_SERVER_ERROR, error).into_response();
+                return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response();
             }
             _ => {}
         }
