@@ -31,6 +31,3 @@ Reserved permissions for future host-mediated APIs 只作为内部命名保留�
 如果 legacy official runtime history 中出现保留 label，宿主会按内部 runtime policy 拒绝或隔离。社区 Extension Host manifest 中出现 `permissions` 字段会被 `PLUGIN_INVALID_MANIFEST` 拒绝。
 
 面向用户的安装和更新确认以 capabilities、contributions、runtime、package trust 和风险标签为准；新增 capability 需要用户重新确认，Extension Host 不提供 manifest `permissions` 字段。
-
-
-`gateway.provider.switch` 是独立 capability：仅允许 `gateway.response.beforeCommit` 返回 `switchProvider`，不授予任意 URL/Provider 选择、网络请求或预算扩充。该 hook 由 `gateway.hooks` 派生 `request.meta.read`、`response.header.read`、`response.body.read`，没有 mutation permissions；完整读取与必需校验是 hook 固有语义，不另设多档授权。

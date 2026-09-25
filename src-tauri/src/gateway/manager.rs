@@ -133,24 +133,9 @@ mod tests {
             Some(1),
             Some(vec![101, 102]),
             now_unix,
-            std::time::Instant::now(),
         );
-        session.bind_sort_mode(
-            "claude",
-            "session_b",
-            None,
-            None,
-            now_unix,
-            std::time::Instant::now(),
-        );
-        session.bind_sort_mode(
-            "codex",
-            "session_c",
-            Some(2),
-            Some(vec![201]),
-            now_unix,
-            std::time::Instant::now(),
-        );
+        session.bind_sort_mode("claude", "session_b", None, None, now_unix);
+        session.bind_sort_mode("codex", "session_c", Some(2), Some(vec![201]), now_unix);
 
         assert_eq!(
             session.get_bound_sort_mode_id("claude", "session_a", now_unix),
@@ -197,16 +182,8 @@ mod tests {
             Some(1),
             Some(vec![101, 102]),
             now_unix,
-            std::time::Instant::now(),
         );
-        session.bind_sort_mode(
-            "claude",
-            "session_b",
-            Some(2),
-            Some(vec![201]),
-            now_unix,
-            std::time::Instant::now(),
-        );
+        session.bind_sort_mode("claude", "session_b", Some(2), Some(vec![201]), now_unix);
 
         {
             let mut cache = recent_errors.lock().expect("lock recent_errors");

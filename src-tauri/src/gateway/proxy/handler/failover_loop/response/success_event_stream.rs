@@ -11,15 +11,13 @@ pub(super) async fn handle_success_event_stream<R>(
     attempt_ctx: AttemptCtx<'_>,
     loop_state: LoopState<'_, R>,
     resp: reqwest::Response,
-    collected_timing: Option<complete_response::CollectedTiming>,
-    execution_lease: Option<Arc<tokio::sync::OwnedSemaphorePermit>>,
+    status: StatusCode,
+    mut response_headers: HeaderMap,
 ) -> LoopControl
 where
     R: tauri::Runtime,
     R::Handle: Unpin,
 {
-    let status = resp.status();
-    let mut response_headers = resp.headers().clone();
     let common = CommonCtxOwned::from(ctx);
     let provider_ctx_owned = ProviderCtxOwned::from(provider_ctx);
 
@@ -69,9 +67,6 @@ where
 
     if is_event_stream(&response_headers) {
         strip_hop_headers(&mut response_headers);
-        // Bridges, fixers, and chunk plugins can change the accepted replay.
-        // The collected upstream length is not the final HTTP body length.
-        response_headers.remove(header::CONTENT_LENGTH);
         tracing::info!(
             trace_id = %common.trace_id,
             provider_id,
@@ -99,30 +94,24 @@ where
             Timeout,
         }
 
-        let probe = if let Some(collected) = collected_timing {
-            // Already read and checked under the original first-byte deadline.
-            FirstChunkProbe::Ok(None, collected.first_byte_ms)
-        } else {
-            match upstream_first_byte_timeout {
-                Some(total) => {
-                    let elapsed = attempt_started.elapsed();
-                    if elapsed >= total {
-                        FirstChunkProbe::Timeout
-                    } else {
-                        let remaining = total - elapsed;
-                        match tokio::time::timeout(remaining, resp.chunk()).await {
-                            Ok(Ok(Some(chunk))) => FirstChunkProbe::Ok(
-                                Some(chunk),
-                                Some(started.elapsed().as_millis()),
-                            ),
-                            Ok(Ok(None)) => FirstChunkProbe::Ok(None, None),
-                            Ok(Err(err)) => FirstChunkProbe::ReadError(err),
-                            Err(_) => FirstChunkProbe::Timeout,
+        let probe = match upstream_first_byte_timeout {
+            Some(total) => {
+                let elapsed = attempt_started.elapsed();
+                if elapsed >= total {
+                    FirstChunkProbe::Timeout
+                } else {
+                    let remaining = total - elapsed;
+                    match tokio::time::timeout(remaining, resp.chunk()).await {
+                        Ok(Ok(Some(chunk))) => {
+                            FirstChunkProbe::Ok(Some(chunk), Some(started.elapsed().as_millis()))
                         }
+                        Ok(Ok(None)) => FirstChunkProbe::Ok(None, None),
+                        Ok(Err(err)) => FirstChunkProbe::ReadError(err),
+                        Err(_) => FirstChunkProbe::Timeout,
                     }
                 }
-                None => FirstChunkProbe::Skipped,
             }
+            None => FirstChunkProbe::Skipped,
         };
         let probe_is_empty_event_stream = matches!(probe, FirstChunkProbe::Ok(None, None));
 
@@ -209,8 +198,7 @@ where
             common.cli_key.as_str(),
             common.forwarded_path.as_str(),
         );
-        if collected_timing.is_none()
-            && upstream_first_byte_timeout.is_some()
+        if upstream_first_byte_timeout.is_some()
             && first_chunk.is_none()
             && initial_first_byte_ms.is_none()
             && probe_is_empty_event_stream
@@ -255,7 +243,6 @@ where
         let outcome = "success".to_string();
 
         attempts.push(FailoverAttempt {
-            plugin_decision: None,
             provider_id,
             provider_name: provider_ctx_owned.provider_name_base.clone(),
             base_url: provider_ctx_owned.provider_base_url_base.clone(),
@@ -361,7 +348,6 @@ where
                     plugin_pipeline.clone(),
                     plugin_db.clone(),
                     trace_id.clone(),
-                    execution_lease.clone(),
                 );
                 if use_sse_relay {
                     spawn_usage_sse_relay_body(
@@ -400,7 +386,6 @@ where
                     plugin_pipeline.clone(),
                     plugin_db.clone(),
                     trace_id.clone(),
-                    execution_lease.clone(),
                 );
                 if use_sse_relay {
                     spawn_usage_sse_relay_body(
@@ -435,7 +420,6 @@ where
                     plugin_pipeline.clone(),
                     plugin_db.clone(),
                     trace_id.clone(),
-                    execution_lease.clone(),
                 );
                 if use_sse_relay {
                     spawn_usage_sse_relay_body(
@@ -469,7 +453,6 @@ where
                     plugin_pipeline.clone(),
                     plugin_db.clone(),
                     trace_id.clone(),
-                    execution_lease.clone(),
                 );
                 if use_sse_relay {
                     spawn_usage_sse_relay_body(

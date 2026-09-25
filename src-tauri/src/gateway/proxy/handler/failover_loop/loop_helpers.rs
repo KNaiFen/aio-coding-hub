@@ -51,7 +51,6 @@ pub(super) fn push_skipped_provider_attempt(
 ) {
     let circuit = skipped.circuit.as_ref();
     attempts.push(FailoverAttempt {
-        plugin_decision: None,
         provider_id: skipped.provider_id,
         provider_name: skipped.provider_name.to_string(),
         base_url: skipped.base_url.to_string(),

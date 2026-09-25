@@ -34,9 +34,6 @@ where
 
     let mut retry_index = 1u32;
     while retry_index <= retry_state.effective_attempt_limit(prepared.provider_max_attempts) {
-        loop_state
-            .abort_guard
-            .capture_completed_attempts(loop_state.attempts);
         let attempt_index = loop_state.attempts.len().saturating_add(1) as u32;
 
         let send_outcome = attempt_executor::execute_attempt(
@@ -64,9 +61,6 @@ where
         )
         .await;
 
-        loop_state
-            .abort_guard
-            .capture_completed_attempts(loop_state.attempts);
         match ctrl {
             LoopControl::ContinueRetry => {
                 let Some(next_retry_index) = retry_index.checked_add(1) else {
@@ -101,36 +95,13 @@ where
     match send_outcome {
         AttemptSendOutcome::UrlBuildFailed(ctrl) => ctrl,
         AttemptSendOutcome::OAuthInjectFailed => LoopControl::BreakRetry,
-        AttemptSendOutcome::PluginBlocked(reason) => {
-            if let Some(mut attempt) = loop_state.abort_guard.take_in_flight_attempt() {
-                attempt.outcome = "request_plugin_blocked".to_string();
-                attempt.status = Some(StatusCode::FORBIDDEN.as_u16());
-                attempt.error_category = Some(ErrorCategory::SystemError.as_str());
-                attempt.error_code = Some(GatewayErrorCode::InternalError.as_str());
-                attempt.decision = Some("abort");
-                attempt.reason_code = Some("plugin_blocked");
-                attempt.reason = Some("gateway request blocked before upstream send".to_string());
-                attempt.attempt_duration_ms = Some(
-                    input
-                        .started
-                        .elapsed()
-                        .as_millis()
-                        .saturating_sub(attempt.attempt_started_ms.unwrap_or(0)),
-                );
-                loop_state.attempts.push(attempt);
-            }
-            LoopControl::Return(
-                response_commit::finish_failure_with_status(
-                    ctx,
-                    loop_state.abort_guard,
-                    loop_state.attempts,
-                    GatewayErrorCode::InternalError,
-                    reason,
-                    StatusCode::FORBIDDEN,
-                )
-                .await,
-            )
-        }
+        AttemptSendOutcome::PluginBlocked(reason) => LoopControl::Return(error_response(
+            StatusCode::FORBIDDEN,
+            input.trace_id.clone(),
+            GatewayErrorCode::InternalError.as_str(),
+            reason,
+            loop_state.attempts.clone(),
+        )),
         AttemptSendOutcome::Response(resp, timing) => {
             response_router::route_response(
                 ctx,

@@ -9,7 +9,6 @@ use crate::gateway::proxy::GatewayErrorCode;
 
 fn skipped_attempt(reason_code: Option<&'static str>) -> FailoverAttempt {
     FailoverAttempt {
-        plugin_decision: None,
         provider_id: 1,
         provider_name: "provider".to_string(),
         base_url: "https://example.com".to_string(),
@@ -43,7 +42,6 @@ fn skipped_attempt(reason_code: Option<&'static str>) -> FailoverAttempt {
 
 fn real_attempt() -> FailoverAttempt {
     FailoverAttempt {
-        plugin_decision: None,
         provider_id: 1,
         provider_name: "provider".to_string(),
         base_url: "https://example.com".to_string(),
@@ -81,7 +79,6 @@ fn timeout_attempt(
     session_reuse: Option<bool>,
 ) -> FailoverAttempt {
     FailoverAttempt {
-        plugin_decision: None,
         provider_id,
         provider_name: format!("provider-{provider_id}"),
         base_url: "https://example.com".to_string(),

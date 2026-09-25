@@ -57,7 +57,7 @@ impl RuntimeGatewayPluginExecutor {
     }
 
     #[cfg(test)]
-    pub(crate) fn for_tests_with_extension_host_registry(
+    fn for_tests_with_extension_host_registry(
         extension_host_registry: Arc<ExtensionHostInstanceRegistry>,
     ) -> Self {
         Self::with_extension_host_registry(
@@ -116,28 +116,9 @@ impl RuntimeGatewayPluginExecutor {
                 let detail = plugin.clone();
                 let hook = context.hook_name.clone();
                 Box::pin(async move {
-                    let (_cancellation_owner, cancellation) = tokio::sync::watch::channel(false);
-                    let execution_lease = context.execution_lease.clone();
-                    tokio::spawn(async move {
-                        // Accepted response buffers stay reserved until RPC cleanup ends.
-                        let _execution_lease = execution_lease;
-                        registry
-                            .execute_gateway_hook(
-                                detail,
-                                &hook,
-                                context,
-                                hook_timeout,
-                                cancellation,
-                            )
-                            .await
-                    })
-                    .await
-                    .map_err(|_| {
-                        GatewayPluginError::new(
-                            "PLUGIN_EXTENSION_HOST_GATEWAY_FAILED",
-                            "gateway hook executor stopped",
-                        )
-                    })?
+                    registry
+                        .execute_gateway_hook(detail, &hook, context, hook_timeout)
+                        .await
                 })
             }
             Err(err) => Box::pin(async move { Err(err) }),
@@ -162,45 +143,6 @@ impl Default for RuntimeGatewayPluginExecutor {
 }
 
 impl GatewayPluginExecutor for RuntimeGatewayPluginExecutor {
-    fn execute_response_commit_hook(
-        &self,
-        plugin: &PluginDetail,
-        context: crate::gateway::plugins::before_commit::GatewayCommitContext,
-        hook_timeout: Duration,
-    ) -> crate::gateway::plugins::before_commit::GatewayCommitFuture {
-        if let Err(error) = ensure_gateway_hooks_capability(plugin) {
-            return Box::pin(async move { Err(error) });
-        }
-        let Some(registry) = self.extension_host_registry.clone() else {
-            return Box::pin(async {
-                Err(GatewayPluginError::new(
-                    "PLUGIN_COMMIT_UNAVAILABLE",
-                    "extension host registry is not configured",
-                ))
-            });
-        };
-        let detail = plugin.clone();
-        Box::pin(async move {
-            // Closing this sender on caller cancellation wakes queue/RPC cleanup.
-            let (_cancellation_owner, cancellation) = tokio::sync::watch::channel(false);
-            let execution_lease = context.execution_lease.clone();
-            tokio::spawn(async move {
-                // Keep admission reserved until the actual worker cleanup completes.
-                let _execution_lease = execution_lease;
-                registry
-                    .execute_response_commit_hook(detail, context, hook_timeout, Some(cancellation))
-                    .await
-            })
-            .await
-            .map_err(|_| {
-                GatewayPluginError::new(
-                    "PLUGIN_COMMIT_UNAVAILABLE",
-                    "response validation executor stopped",
-                )
-            })?
-        })
-    }
-
     fn retain_runtime_caches_for_plugins(&self, plugins: &[PluginDetail]) {
         self.retain_runtime_caches_for_plugins(plugins);
     }
@@ -523,7 +465,6 @@ mod tests {
 
     fn hook_context(hook_name: &str, trace_id: &str) -> GatewayVisibleHookContext {
         GatewayVisibleHookContext {
-            execution_lease: None,
             hook_name: hook_name.to_string(),
             trace_id: trace_id.to_string(),
             request: GatewayVisibleRequestContext {
@@ -649,7 +590,6 @@ mod tests {
                         priority: 10,
                         failure_policy: Some("fail-open".to_string()),
                         timeout_ms: None,
-                        request_match: None,
                     }],
                     ui: BTreeMap::new(),
                 }),
@@ -682,228 +622,6 @@ mod tests {
             audit_logs: vec![],
             runtime_failures: vec![],
             rollback_versions: vec![],
-        }
-    }
-    fn commit_plugin(root: &Path, result: &str) -> PluginDetail {
-        write_gateway_extension_plugin(root, "gateway.response.beforeCommit", result);
-        let mut detail = extension_host_plugin_detail_with_root("example.extension", root);
-        detail
-            .manifest
-            .capabilities
-            .push("gateway.provider.switch".into());
-        let hook = &mut detail.manifest.contributes.as_mut().unwrap().gateway_hooks[0];
-        hook.name = "gateway.response.beforeCommit".into();
-        hook.failure_policy = None;
-        hook.request_match = Some(crate::domain::plugins::PluginHookMatch {
-            cli_keys: vec!["codex".into()],
-            methods: vec!["POST".into()],
-            paths: vec!["/responses".into()],
-        });
-        std::fs::write(
-            root.join("plugin.json"),
-            serde_json::to_vec(&detail.manifest).unwrap(),
-        )
-        .unwrap();
-        detail
-    }
-
-    fn commit_input(
-        body: String,
-    ) -> crate::gateway::plugins::before_commit::GatewayResponseCommitInput {
-        use crate::gateway::plugins::before_commit::*;
-        let mut headers = HeaderMap::new();
-        headers.insert("content-type", "application/json".parse().unwrap());
-        headers.insert("set-cookie", "must-not-be-visible".parse().unwrap());
-        GatewayResponseCommitInput {
-            trace_id: "trace-worker-contract".into(),
-            request: GatewayCommitRequest {
-                cli_key: "codex".into(),
-                method: "POST".into(),
-                path: "/responses".into(),
-                requested_model: Some("original".into()),
-            },
-            outbound_request: GatewayCommitOutboundRequest {
-                model: Some("expected".into()),
-            },
-            attempt: GatewayCommitAttempt {
-                provider_id: 42,
-                provider_index: 1,
-                retry_index: 0,
-            },
-            status: 200,
-            headers,
-            body: Bytes::from(body),
-            execution_lease: None,
-        }
-    }
-
-    #[tokio::test]
-    async fn runtime_executor_response_commit_real_worker_receives_camel_case_complete_context() {
-        use crate::gateway::plugins::before_commit::*;
-        let temp = tempfile::tempdir().unwrap();
-        let plugin = commit_plugin(
-            temp.path(),
-            r#"(() => {
-            const p=arguments[0]; const c=p.context;
-            if (p.hook !== "gateway.response.beforeCommit" || p.traceId !== "trace-worker-contract" ||
-                c.hookName !== p.hook || c.traceId !== p.traceId || c.request.cliKey !== "codex" ||
-                c.request.requestedModel !== "original" || c.outboundRequest.model !== "expected" ||
-                c.attempt.providerId !== 42 || c.attempt.providerIndex !== 1 ||
-                c.response.complete !== true || c.response.contentType !== "application/json" ||
-                c.response.decodedBytes !== 19 || c.response.body !== '{"tail":"rejected"}' ||
-                Object.keys(c.response.headers).length !== 1 || "body" in c.request) throw new Error("wire contract drift");
-            return {action:"switchProvider",reasonCode:"tail.rejected"};
-        })()"#,
-        );
-        let result = executor()
-            .execute_response_commit_hook(
-                &plugin,
-                commit_input(r#"{"tail":"rejected"}"#.into())
-                    .into_context()
-                    .unwrap(),
-                test_hook_timeout(),
-            )
-            .await
-            .unwrap();
-        assert!(
-            matches!(result,GatewayCommitResult::SwitchProvider {reason_code,..} if reason_code=="tail.rejected")
-        );
-    }
-
-    #[tokio::test]
-    async fn runtime_executor_response_commit_capacity_boundaries_reach_real_worker_without_truncation(
-    ) {
-        use crate::gateway::plugins::before_commit::*;
-        let temp = tempfile::tempdir().unwrap();
-        let plugin = commit_plugin(
-            temp.path(),
-            r#"(() => {
-            const c=arguments[0].context;
-            const parsed=JSON.parse(c.response.body);
-            if (!c.response.complete || parsed.tail !== "complete" || parsed.payload.length === 0) throw new Error("missing tail");
-            return {action:"pass"};
-        })()"#,
-        );
-        let executor = executor();
-        for size in [MAX_COMPLETE_RESPONSE_BYTES - 1, MAX_COMPLETE_RESPONSE_BYTES] {
-            for text in ["\"\\\n\t", "漢😀"] {
-                let mut body =
-                    json!({"payload":text.repeat((size - 64) / (serde_json::to_string(text).unwrap().len() - 2)),"tail":"complete"}).to_string();
-                assert!(body.len() < size);
-                body.push_str(&" ".repeat(size - body.len()));
-                let context = commit_input(body).into_context().unwrap();
-                assert_eq!(context.response.decoded_bytes, size);
-                assert_eq!(
-                    executor
-                        .execute_response_commit_hook(&plugin, context, test_hook_timeout())
-                        .await
-                        .unwrap(),
-                    GatewayCommitResult::Pass
-                );
-            }
-        }
-        assert_eq!(
-            commit_input("x".repeat(MAX_COMPLETE_RESPONSE_BYTES + 1))
-                .into_context()
-                .unwrap_err()
-                .code(),
-            "PLUGIN_COMMIT_RESPONSE_TOO_LARGE"
-        );
-    }
-
-    #[tokio::test]
-    async fn runtime_executor_response_commit_rejects_legacy_mutation_actions() {
-        let temp = tempfile::tempdir().unwrap();
-        let plugin = commit_plugin(
-            temp.path(),
-            r#"{action:"replace",responseBody:"unvalidated"}"#,
-        );
-        let error = executor()
-            .execute_response_commit_hook(
-                &plugin,
-                commit_input("{}".into()).into_context().unwrap(),
-                test_hook_timeout(),
-            )
-            .await
-            .unwrap_err();
-        assert_eq!(error.code(), "PLUGIN_COMMIT_INVALID_OUTPUT");
-    }
-    #[tokio::test]
-    async fn runtime_executor_model_plugin_complete_response_capacity_uses_real_entry() {
-        use crate::gateway::plugins::before_commit::*;
-        let temp = tempfile::tempdir().unwrap();
-        let manifest: PluginManifest = serde_json::from_str(include_str!(
-            "../../../../examples/plugins/codex-model-consistency/plugin.json"
-        ))
-        .unwrap();
-        std::fs::write(
-            temp.path().join("plugin.json"),
-            serde_json::to_vec(&manifest).unwrap(),
-        )
-        .unwrap();
-        std::fs::write(
-            temp.path().join("extension.cjs"),
-            include_str!("../../../../examples/plugins/codex-model-consistency/extension.cjs"),
-        )
-        .unwrap();
-        let mut plugin = extension_host_plugin_detail_with_root(&manifest.id, temp.path());
-        plugin.manifest = manifest;
-        let executor = executor();
-        for size in [MAX_COMPLETE_RESPONSE_BYTES - 1, MAX_COMPLETE_RESPONSE_BYTES] {
-            for unit in ["\"\\\n\t", "漢😀"] {
-                for streaming in [false, true] {
-                    let encoded = serde_json::to_string(unit).unwrap();
-                    let encoded = &encoded[1..encoded.len() - 1];
-                    let (prefix, suffix, content_type) = if streaming {
-                        (
-                            "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"",
-                            "\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"model\":\"expected\"}}\n\n",
-                            "text/event-stream",
-                        )
-                    } else {
-                        (
-                            "{\"output\":[{\"content\":[{\"text\":\"",
-                            "\"}]}],\"status\":\"completed\",\"model\":\"expected\"}",
-                            "application/json",
-                        )
-                    };
-                    let available = size - prefix.len() - suffix.len();
-                    let body = format!(
-                        "{prefix}{}{padding}{suffix}",
-                        encoded.repeat(available / encoded.len()),
-                        padding = "x".repeat(available % encoded.len())
-                    );
-                    assert_eq!(body.len(), size);
-                    let mut input = commit_input(body);
-                    input
-                        .headers
-                        .insert("content-type", content_type.parse().unwrap());
-                    let context = input.into_context().unwrap();
-                    assert_eq!(
-                        executor
-                            .execute_response_commit_hook(
-                                &plugin,
-                                context.clone(),
-                                test_hook_timeout()
-                            )
-                            .await
-                            .unwrap(),
-                        GatewayCommitResult::Pass,
-                        "bytes={size}, streaming={streaming}, unit={unit:?}"
-                    );
-                    // The sole model declaration is at the tail. A changed expected
-                    // model must reject, proving the actual parser saw that tail.
-                    let mut mismatched = context;
-                    mismatched.outbound_request.model = Some("different".into());
-                    let rejected = executor
-                        .execute_response_commit_hook(&plugin, mismatched, test_hook_timeout())
-                        .await
-                        .unwrap();
-                    assert!(
-                        matches!(rejected, GatewayCommitResult::SwitchProvider { reason_code, .. } if reason_code == "codex_model_consistency.model_mismatch")
-                    );
-                }
-            }
         }
     }
 }

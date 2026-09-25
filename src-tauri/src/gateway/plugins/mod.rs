@@ -1,7 +1,6 @@
 //! Usage: Gateway plugin hook context, permissions, and pipeline execution.
 
 pub(crate) mod audit;
-pub(crate) mod before_commit;
 pub(crate) mod context;
 pub(crate) mod contract;
 pub(crate) mod mutation;

@@ -3,8 +3,6 @@
 // - Single contract for the provider chain view and the error-card failure summary.
 // - `timeout_secs` is the structured first-byte timeout; never parse it out of `outcome`.
 
-import type { FailoverAttempt } from "../../generated/bindings";
-
 export type AttemptJsonEntry = {
   provider_id: number;
   provider_name: string;
@@ -31,7 +29,6 @@ export type AttemptJsonEntry = {
   circuit_recover_at_unix?: number | null;
   circuit_trigger_error_code?: string | null;
   timeout_secs?: number | null;
-  plugin_decision?: FailoverAttempt["plugin_decision"];
 };
 
 export function parseAttemptsJson(raw: string | null | undefined): AttemptJsonEntry[] | null {

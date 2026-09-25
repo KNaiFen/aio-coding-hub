@@ -4,10 +4,6 @@ import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
-import {
-  responseCommitPlugin,
-  responseCommitPreview,
-} from "../../test/fixtures/responseCommitPlugin";
 import { PluginsPage } from "../PluginsPage";
 import type {
   PluginDetail,
@@ -432,80 +428,6 @@ describe("pages/PluginsPage", () => {
       isFetching: false,
       error: null,
     } as any);
-  });
-
-  it.each(["community.codex-model-consistency", "community.tail-policy"])(
-    "explains public commit behavior for %s",
-    (pluginId) => {
-      const guarded = responseCommitPlugin(pluginId);
-      vi.mocked(usePluginsListQuery).mockReturnValue({
-        data: [guarded.summary],
-        isLoading: false,
-      } as ReturnType<typeof usePluginsListQuery>);
-      vi.mocked(usePluginQuery).mockReturnValue({ data: guarded, isLoading: false } as ReturnType<
-        typeof usePluginQuery
-      >);
-      renderWithProviders(<PluginsPage />);
-      expect(screen.getByText("完整响应校验")).toBeInTheDocument();
-      expect(
-        screen.getByText(/作用范围：codex · POST · \/responses, \/v1\/responses/)
-      ).toBeInTheDocument();
-      expect(screen.getByText(/首字等待会更长/)).toBeInTheDocument();
-      expect(screen.getByText("response.body.read")).toBeInTheDocument();
-      expect(screen.queryByText("request.body.read")).not.toBeInTheDocument();
-      expect(screen.getByText("此插件没有可编辑配置。")).toBeInTheDocument();
-    }
-  );
-
-  it("shows public complete-wait behavior in local package preview", async () => {
-    vi.mocked(usePluginsListQuery).mockReturnValue({
-      data: [] as PluginSummary[],
-      isLoading: false,
-    } as ReturnType<typeof usePluginsListQuery>);
-    vi.mocked(openDesktopSinglePath).mockResolvedValue("/tmp/policy.aio-plugin");
-    vi.mocked(usePluginPreviewFromFileMutation).mockReturnValue(
-      mutation({
-        mutateAsync: vi.fn().mockResolvedValue(responseCommitPreview()),
-      }) as unknown as ReturnType<typeof usePluginPreviewFromFileMutation>
-    );
-    renderWithProviders(<PluginsPage />);
-    fireEvent.click(screen.getByRole("button", { name: /导入 \.aio-plugin/ }));
-    const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText("完整响应校验")).toBeInTheDocument();
-    expect(within(dialog).getByText(/作用范围：codex · POST/)).toBeInTheDocument();
-    expect(within(dialog).getByText(/其他会话不受该拒绝影响/)).toBeInTheDocument();
-  });
-
-  it("distinguishes policy rejection from required validator execution failure", () => {
-    vi.mocked(usePluginsListQuery).mockReturnValue({
-      data: [summary()],
-      isLoading: false,
-    } as ReturnType<typeof usePluginsListQuery>);
-    vi.mocked(usePluginExtensionRuntimeReportsQuery).mockReturnValue({
-      data: [
-        runtimeReport({
-          id: 91,
-          contributionId: "gateway.response.beforeCommit",
-          status: "switchProvider",
-          failureKind: null,
-          errorCode: null,
-          mutationSummary: { reasonCode: "tail.custom_rejection" },
-        }),
-        runtimeReport({
-          id: 92,
-          contributionId: "gateway.response.beforeCommit",
-          status: "failedClosed",
-          failureKind: "required_validation",
-          errorCode: "PLUGIN_HOOK_TIMEOUT",
-        }),
-      ],
-      isLoading: false,
-    } as ReturnType<typeof usePluginExtensionRuntimeReportsQuery>);
-    renderWithProviders(<PluginsPage />);
-    expect(screen.getByText("策略拒绝，申请下一供应商")).toBeInTheDocument();
-    expect(screen.getByText("校验器执行失败")).toBeInTheDocument();
-    expect(screen.getByText(/tail.custom_rejection/)).toBeInTheDocument();
-    expect(screen.getByText("required_validation · PLUGIN_HOOK_TIMEOUT")).toBeInTheDocument();
   });
 
   it("renders list fields and plugin detail permissions", () => {

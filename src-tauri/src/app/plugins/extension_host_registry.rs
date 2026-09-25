@@ -21,55 +21,6 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, RwLock};
 
-fn gateway_timeout() -> GatewayPluginError {
-    GatewayPluginError::new(
-        "PLUGIN_HOOK_TIMEOUT",
-        "response validation queue or execution deadline expired",
-    )
-}
-fn gateway_timeout_app() -> AppError {
-    AppError::new(
-        "PLUGIN_EXTENSION_HOST_PROCESS_HOOK_TIMEOUT",
-        "response validation queue or execution deadline expired",
-    )
-}
-#[derive(Clone, Default)]
-struct GatewayInvocationBudget {
-    deadline: Option<Instant>,
-    cancellation: Option<tokio::sync::watch::Receiver<bool>>,
-}
-
-impl From<Option<Instant>> for GatewayInvocationBudget {
-    fn from(deadline: Option<Instant>) -> Self {
-        Self {
-            deadline,
-            cancellation: None,
-        }
-    }
-}
-
-impl GatewayInvocationBudget {
-    async fn wait<T>(&self, future: impl Future<Output = T>) -> Result<T, GatewayPluginError> {
-        let timed = async {
-            match self.deadline {
-                Some(deadline) => tokio::time::timeout_at(deadline.into(), future)
-                    .await
-                    .map_err(|_| gateway_timeout()),
-                None => Ok(future.await),
-            }
-        };
-        if let Some(mut cancellation) = self.cancellation.clone() {
-            tokio::select! {
-                biased;
-                _ = cancellation.wait_for(|cancelled| *cancelled) => Err(GatewayPluginError::new("PLUGIN_COMMIT_CANCELLED", "response validation request was cancelled")),
-                result = timed => result,
-            }
-        } else {
-            timed.await
-        }
-    }
-}
-
 const DEFAULT_MAX_WARM_INSTANCES: usize = 8;
 const DEFAULT_IDLE_RECYCLE: Duration = Duration::from_secs(120);
 
@@ -230,23 +181,12 @@ impl ManagedExtensionHostInstance {
         hook: &str,
         context: Value,
         now: Instant,
-        budget: &GatewayInvocationBudget,
     ) -> AppResult<Option<Value>> {
-        let mut process = budget
-            .wait(self.process.lock())
-            .await
-            .map_err(|_| gateway_timeout_app())?;
+        let mut process = self.process.lock().await;
         if !process.is_running() {
             return Ok(None);
         }
-        let value = match budget
-            .wait(process.execute_gateway_hook(hook, context))
-            .await
-        {
-            Ok(Ok(value)) => value,
-            Ok(Err(error)) => return Err(error),
-            Err(_) => return Err(gateway_timeout_app()),
-        };
+        let value = process.execute_gateway_hook(hook, context).await?;
         *self
             .last_used
             .lock()
@@ -387,23 +327,11 @@ impl ExtensionHostInstanceRegistry {
         hook: &str,
         context: GatewayVisibleHookContext,
         call_timeout: Duration,
-        cancellation: tokio::sync::watch::Receiver<bool>,
     ) -> Result<GatewayHookResult, GatewayPluginError> {
-        self.execute_gateway_hook_with_budget(
-            detail,
-            hook,
-            context,
-            call_timeout,
-            Instant::now(),
-            GatewayInvocationBudget {
-                deadline: None,
-                cancellation: Some(cancellation),
-            },
-        )
-        .await
+        self.execute_gateway_hook_with_now(detail, hook, context, call_timeout, Instant::now())
+            .await
     }
 
-    #[cfg(test)]
     async fn execute_gateway_hook_with_now(
         &self,
         detail: PluginDetail,
@@ -411,26 +339,6 @@ impl ExtensionHostInstanceRegistry {
         context: GatewayVisibleHookContext,
         call_timeout: Duration,
         now: Instant,
-    ) -> Result<GatewayHookResult, GatewayPluginError> {
-        self.execute_gateway_hook_with_budget(
-            detail,
-            hook,
-            context,
-            call_timeout,
-            now,
-            GatewayInvocationBudget::default(),
-        )
-        .await
-    }
-
-    async fn execute_gateway_hook_with_budget(
-        &self,
-        detail: PluginDetail,
-        hook: &str,
-        context: GatewayVisibleHookContext,
-        call_timeout: Duration,
-        now: Instant,
-        budget: GatewayInvocationBudget,
     ) -> Result<GatewayHookResult, GatewayPluginError> {
         let context_value = serde_json::to_value(&context).map_err(|err| {
             GatewayPluginError::new(
@@ -444,62 +352,20 @@ impl ExtensionHostInstanceRegistry {
             "config": detail.config.clone(),
             "context": context_value,
         });
-        let value = self
-            .execute_gateway_payload(detail, hook, payload, call_timeout, now, budget)
-            .await?;
-        gateway_hook_result_from_extension_host_output(hook, &context, value)
-    }
-
-    pub(crate) async fn execute_response_commit_hook(
-        &self,
-        detail: PluginDetail,
-        context: crate::gateway::plugins::before_commit::GatewayCommitContext,
-        call_timeout: Duration,
-        cancellation: Option<tokio::sync::watch::Receiver<bool>>,
-    ) -> Result<crate::gateway::plugins::before_commit::GatewayCommitResult, GatewayPluginError>
-    {
-        let now = Instant::now();
-        let deadline = now + call_timeout;
-        let hook = "gateway.response.beforeCommit";
-        let payload = json!({"hook":hook,"traceId":context.trace_id,"config":detail.config,"context":context});
-        let value = self
-            .execute_gateway_payload(
-                detail,
-                hook,
-                payload,
-                call_timeout,
-                now,
-                GatewayInvocationBudget {
-                    deadline: Some(deadline),
-                    cancellation,
-                },
-            )
-            .await?;
-        crate::gateway::plugins::before_commit::GatewayCommitResult::from_value(value)
-    }
-
-    async fn execute_gateway_payload(
-        &self,
-        detail: PluginDetail,
-        hook: &str,
-        payload: Value,
-        call_timeout: Duration,
-        now: Instant,
-        budget: GatewayInvocationBudget,
-    ) -> Result<Value, GatewayPluginError> {
-        let _operation_guard = budget.wait(self.operation_gate.read()).await?;
+        let _operation_guard = self.operation_gate.read().await;
         let key = ExtensionHostInstanceKey::from_gateway_plugin_detail(&detail, call_timeout)
             .map_err(extension_host_gateway_error)?;
-        let plugin_lock = budget.wait(self.plugin_lock_for(&key.plugin_id)).await?;
-        let _plugin_guard = budget.wait(plugin_lock.lock()).await?;
+        let plugin_lock = self.plugin_lock_for(&key.plugin_id).await;
+        let _plugin_guard = plugin_lock.lock().await;
 
         if let Some(value) = self
-            .execute_gateway_hook_warm_instance(&key, hook, payload.clone(), now, &budget)
+            .execute_gateway_hook_warm_instance(&key, hook, payload.clone(), now)
             .await
             .map_err(extension_host_gateway_error)?
         {
-            return Ok(value);
+            return gateway_hook_result_from_extension_host_output(hook, &context, value);
         }
+
         let mut disposals = {
             let mut instances = self.instances.lock().await;
             let mut disposals = remove_same_plugin_with_different_key(&mut instances, &key);
@@ -511,34 +377,20 @@ impl ExtensionHostInstanceRegistry {
             disposals
         };
         dispose_instances(disposals.drain(..)).await;
-        let remaining = budget
-            .deadline
-            .map(|deadline| deadline.saturating_duration_since(Instant::now()))
-            .unwrap_or(call_timeout);
-        if remaining.is_zero() {
-            return Err(gateway_timeout());
-        }
-        // The cached worker's RPC/JS timeout must match its key. Queue time
-        // limits this invocation through budget, not later calls on that worker.
-        let mut process = budget
-            .wait(self.factory.start(detail, self.db.clone(), call_timeout))
-            .await?
+
+        let mut process = self
+            .factory
+            .start(detail, self.db.clone(), call_timeout)
+            .await
             .map_err(extension_host_gateway_error)?;
-        // This owner keeps the process after a timed-out RPC and always disposes it.
-        let result = budget
-            .wait(process.execute_gateway_hook(hook, payload))
-            .await;
-        let value = match result {
-            Ok(Ok(value)) => value,
-            Ok(Err(error)) => {
+        let value = match process.execute_gateway_hook(hook, payload).await {
+            Ok(value) => value,
+            Err(error) => {
                 process.dispose().await;
                 return Err(extension_host_gateway_error(error));
             }
-            Err(error) => {
-                process.dispose().await;
-                return Err(error);
-            }
         };
+        let result = gateway_hook_result_from_extension_host_output(hook, &context, value)?;
         let instance = Arc::new(ManagedExtensionHostInstance::new(process, now));
         let disposals = {
             let mut instances = self.instances.lock().await;
@@ -546,7 +398,8 @@ impl ExtensionHostInstanceRegistry {
             remove_lru_over_limit_locked(&mut instances, self.limits.max_warm_instances)
         };
         dispose_instances(disposals).await;
-        Ok(value)
+
+        Ok(result)
     }
 
     #[allow(dead_code)]
@@ -688,7 +541,6 @@ impl ExtensionHostInstanceRegistry {
         hook: &str,
         context: Value,
         now: Instant,
-        budget: &GatewayInvocationBudget,
     ) -> AppResult<Option<Value>> {
         let instance = { self.instances.lock().await.get(key).cloned() };
         let Some(instance) = instance else {
@@ -696,7 +548,7 @@ impl ExtensionHostInstanceRegistry {
         };
 
         match instance
-            .execute_gateway_hook_if_running(hook, context, now, budget)
+            .execute_gateway_hook_if_running(hook, context, now)
             .await
         {
             Ok(Some(value)) => Ok(Some(value)),
@@ -1407,20 +1259,9 @@ mod tests {
         fn execute_gateway_hook<'a>(
             &'a mut self,
             hook: &'a str,
-            context: Value,
+            _context: Value,
         ) -> BoxFuture<'a, AppResult<Value>> {
             Box::pin(async move {
-                if context["testBlock"] == true
-                    || context["context"]["stream"]["chunk"] == "BLOCK"
-                    || context["context"]["response"]["body"] == "BLOCK"
-                {
-                    self.slow_command.starts.fetch_add(1, Ordering::SeqCst);
-                    self.slow_command.started.notify_one();
-                    self.slow_command.release.notified().await;
-                }
-                if hook == "gateway.response.beforeCommit" {
-                    return Ok(json!({"action":"pass"}));
-                }
                 Ok(json!({
                     "action": "continue",
                     "pluginId": self.plugin_id,
@@ -1437,7 +1278,7 @@ mod tests {
             Box::pin(async move {
                 self.disposals.fetch_add(1, Ordering::SeqCst);
                 if self.plugin_id == "acme.slow" {
-                    self.slow_dispose.started.notify_one();
+                    self.slow_dispose.started.notify_waiters();
                     self.slow_dispose.release.notified().await;
                 }
                 self.running = false;
@@ -1608,7 +1449,6 @@ mod tests {
         );
         let detail = plugin_detail("acme.gateway", "same");
         let context = GatewayVisibleHookContext {
-            execution_lease: None,
             hook_name: GatewayPluginHookName::RequestAfterBodyRead
                 .as_str()
                 .to_string(),
@@ -1671,7 +1511,6 @@ mod tests {
         );
         let detail = plugin_detail("acme.gateway", "same");
         let context = GatewayVisibleHookContext {
-            execution_lease: None,
             hook_name: GatewayPluginHookName::RequestAfterBodyRead
                 .as_str()
                 .to_string(),
@@ -2168,269 +2007,5 @@ mod tests {
 
         assert_eq!(factory.disposed_instance_ids(), vec![1]);
         assert_eq!(registry.instance_count().await, 0);
-    }
-    #[tokio::test]
-    async fn registry_response_commit_queue_deadline_does_not_run_or_dispose_other_call() {
-        let factory = Arc::new(BlockingExtensionHostFactory::default());
-        let registry = Arc::new(ExtensionHostInstanceRegistry::new_for_tests(
-            factory.clone(),
-            ExtensionHostRegistryLimits::default(),
-        ));
-        let first_registry = registry.clone();
-        let first = tokio::spawn(async move {
-            first_registry
-                .execute_gateway_payload(
-                    plugin_detail("acme.commit", "same"),
-                    "gateway.response.beforeCommit",
-                    json!({"testBlock":true}),
-                    Duration::from_secs(2),
-                    Instant::now(),
-                    Some(Instant::now() + Duration::from_secs(2)).into(),
-                )
-                .await
-        });
-        tokio::time::timeout(
-            Duration::from_secs(1),
-            factory.slow_command.started.notified(),
-        )
-        .await
-        .unwrap();
-        let second = tokio::time::timeout(
-            Duration::from_secs(1),
-            registry.execute_gateway_payload(
-                plugin_detail("acme.commit", "same"),
-                "gateway.response.beforeCommit",
-                json!({}),
-                Duration::from_secs(2),
-                Instant::now(),
-                Some(Instant::now() + Duration::from_millis(20)).into(),
-            ),
-        )
-        .await
-        .unwrap()
-        .unwrap_err();
-        assert_eq!(second.code(), "PLUGIN_HOOK_TIMEOUT");
-        assert_eq!(factory.starts.load(Ordering::SeqCst), 1);
-        assert_eq!(factory.disposals.load(Ordering::SeqCst), 0);
-        factory.slow_command.release.notify_one();
-        assert_eq!(first.await.unwrap().unwrap(), json!({"action":"pass"}));
-    }
-
-    #[tokio::test]
-    async fn registry_response_commit_rpc_deadline_disposes_worker_before_reuse() {
-        let factory = Arc::new(BlockingExtensionHostFactory::default());
-        let registry = ExtensionHostInstanceRegistry::new_for_tests(
-            factory.clone(),
-            ExtensionHostRegistryLimits::default(),
-        );
-        for warm in [false, true] {
-            if warm {
-                registry
-                    .execute_gateway_payload(
-                        plugin_detail("acme.commit", "same"),
-                        "gateway.response.beforeCommit",
-                        json!({}),
-                        Duration::from_secs(2),
-                        Instant::now(),
-                        Some(Instant::now() + Duration::from_secs(1)).into(),
-                    )
-                    .await
-                    .unwrap();
-            }
-            let result = registry
-                .execute_gateway_payload(
-                    plugin_detail("acme.commit", "same"),
-                    "gateway.response.beforeCommit",
-                    json!({"testBlock":true}),
-                    Duration::from_secs(2),
-                    Instant::now(),
-                    Some(Instant::now() + Duration::from_millis(20)).into(),
-                )
-                .await;
-            assert!(result.is_err());
-            assert_eq!(registry.instance_count().await, 0);
-        }
-        assert_eq!(factory.disposals.load(Ordering::SeqCst), 2);
-    }
-    #[tokio::test]
-    async fn registry_response_commit_cancellation_closes_rpc_before_releasing_admission() {
-        let factory = Arc::new(BlockingExtensionHostFactory::default());
-        let registry = Arc::new(ExtensionHostInstanceRegistry::new_for_tests(
-            factory.clone(),
-            ExtensionHostRegistryLimits::default(),
-        ));
-        let semaphore = Arc::new(tokio::sync::Semaphore::new(1));
-        let lease = Arc::new(semaphore.clone().acquire_owned().await.unwrap());
-        let (owner, cancellation) = tokio::sync::watch::channel(false);
-        let task_registry = registry.clone();
-        let task = tokio::spawn(async move {
-            let _lease = lease;
-            task_registry
-                .execute_gateway_payload(
-                    plugin_detail("acme.commit", "same"),
-                    "gateway.response.beforeCommit",
-                    json!({"testBlock":true}),
-                    Duration::from_secs(2),
-                    Instant::now(),
-                    GatewayInvocationBudget {
-                        deadline: Some(Instant::now() + Duration::from_secs(2)),
-                        cancellation: Some(cancellation),
-                    },
-                )
-                .await
-        });
-        tokio::time::timeout(
-            Duration::from_secs(1),
-            factory.slow_command.started.notified(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(semaphore.available_permits(), 0);
-        drop(owner);
-        let error = tokio::time::timeout(Duration::from_secs(1), task)
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap_err();
-        assert_eq!(error.code(), "PLUGIN_COMMIT_CANCELLED");
-        assert_eq!(factory.disposals.load(Ordering::SeqCst), 1);
-        assert_eq!(registry.instance_count().await, 0);
-        assert_eq!(semaphore.available_permits(), 1);
-    }
-
-    #[tokio::test]
-    async fn registry_response_commit_cancelled_waiter_never_starts_worker() {
-        let factory = Arc::new(BlockingExtensionHostFactory::default());
-        let registry = Arc::new(ExtensionHostInstanceRegistry::new_for_tests(
-            factory.clone(),
-            ExtensionHostRegistryLimits::default(),
-        ));
-        let plugin_lock = registry.plugin_lock_for("acme.commit").await;
-        let guard = plugin_lock.lock().await;
-        let (owner, cancellation) = tokio::sync::watch::channel(false);
-        drop(owner);
-        let error = registry
-            .execute_gateway_payload(
-                plugin_detail("acme.commit", "same"),
-                "gateway.response.beforeCommit",
-                json!({}),
-                Duration::from_secs(2),
-                Instant::now(),
-                GatewayInvocationBudget {
-                    deadline: Some(Instant::now() + Duration::from_secs(2)),
-                    cancellation: Some(cancellation),
-                },
-            )
-            .await
-            .unwrap_err();
-        assert_eq!(error.code(), "PLUGIN_COMMIT_CANCELLED");
-        assert_eq!(factory.starts.load(Ordering::SeqCst), 0);
-        assert_eq!(factory.disposals.load(Ordering::SeqCst), 0);
-        drop(guard);
-    }
-    #[tokio::test]
-    async fn registry_response_commit_cold_start_preserves_cached_worker_timeout() {
-        let factory = Arc::new(FakeExtensionHostFactory::default());
-        let registry = ExtensionHostInstanceRegistry::new_for_tests(
-            factory.clone(),
-            ExtensionHostRegistryLimits::default(),
-        );
-        let call_timeout = Duration::from_secs(5);
-        // Model a request whose queue wait consumed most of its original budget.
-        // Its quick first hook can finish, but that remaining time must not become
-        // the permanent RPC/JS timeout of the worker cached under the 5s key.
-        for remaining in [Duration::from_millis(500), call_timeout] {
-            registry
-                .execute_gateway_payload(
-                    plugin_detail("acme.commit", "same"),
-                    "gateway.response.beforeCommit",
-                    json!({}),
-                    call_timeout,
-                    Instant::now(),
-                    Some(Instant::now() + remaining).into(),
-                )
-                .await
-                .unwrap();
-        }
-        assert_eq!(factory.executed_instance_ids(), vec![1, 1]);
-        assert_eq!(factory.start_timeouts(), vec![call_timeout]);
-    }
-
-    #[tokio::test]
-    async fn legacy_response_executor_cancellation_keeps_admission_until_cleanup() {
-        use crate::app::plugins::runtime_executor::RuntimeGatewayPluginExecutor;
-        use crate::gateway::plugins::context::{GatewayResponseHookInput, GatewayStreamHookInput};
-        use crate::gateway::plugins::pipeline::GatewayPluginExecutor;
-        use axum::body::Bytes;
-        use axum::http::HeaderMap;
-
-        for hook in [
-            GatewayPluginHookName::ResponseChunk,
-            GatewayPluginHookName::ResponseAfter,
-        ] {
-            let factory = Arc::new(BlockingExtensionHostFactory::default());
-            let registry = Arc::new(ExtensionHostInstanceRegistry::new_for_tests(
-                factory.clone(),
-                ExtensionHostRegistryLimits::default(),
-            ));
-            let executor = RuntimeGatewayPluginExecutor::for_tests_with_extension_host_registry(
-                registry.clone(),
-            );
-            let detail = plugin_detail("acme.slow", "gateway.hooks");
-            let semaphore = Arc::new(tokio::sync::Semaphore::new(1));
-            let execution_lease = Some(Arc::new(semaphore.clone().acquire_owned().await.unwrap()));
-            let context = match hook {
-                GatewayPluginHookName::ResponseChunk => GatewayStreamHookInput {
-                    trace_id: "trace-accepted-replay".into(),
-                    chunk: Bytes::from_static(b"BLOCK"),
-                    sequence: 1,
-                    execution_lease,
-                }
-                .visible_context(&["stream.inspect".into()]),
-                _ => GatewayResponseHookInput {
-                    hook_name: hook,
-                    trace_id: "trace-accepted-json".into(),
-                    status: 200,
-                    headers: HeaderMap::new(),
-                    body: Bytes::from_static(b"BLOCK"),
-                    execution_lease,
-                }
-                .visible_context(&["response.body.read".into()]),
-            };
-            let wire = serde_json::to_value(&context).unwrap();
-            assert!(wire.get("execution_lease").is_none());
-            assert!(wire.get("executionLease").is_none());
-            let future = match hook {
-                GatewayPluginHookName::ResponseChunk => {
-                    executor.execute_stream_hook(&detail, context, Duration::from_secs(5))
-                }
-                _ => executor.execute_response_hook(&detail, context, Duration::from_secs(5)),
-            };
-            let task = tokio::spawn(future);
-            tokio::time::timeout(
-                Duration::from_secs(1),
-                factory.slow_command.started.notified(),
-            )
-            .await
-            .unwrap();
-            task.abort();
-            assert!(task.await.unwrap_err().is_cancelled());
-            tokio::time::timeout(
-                Duration::from_secs(1),
-                factory.slow_dispose.started.notified(),
-            )
-            .await
-            .unwrap();
-            let permits_during_cleanup = semaphore.available_permits();
-            factory.slow_dispose.release.notify_one();
-            let released = tokio::time::timeout(Duration::from_secs(1), semaphore.acquire_owned())
-                .await
-                .unwrap()
-                .unwrap();
-            assert_eq!(permits_during_cleanup, 0, "hook={hook:?}");
-            assert_eq!(factory.disposals.load(Ordering::SeqCst), 1);
-            assert_eq!(registry.instance_count().await, 0);
-            drop(released);
-        }
     }
 }

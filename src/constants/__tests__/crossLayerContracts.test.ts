@@ -154,14 +154,11 @@ describe("cross-layer contracts", () => {
     // claude_model_mapping / model_redirect on FailoverAttempt follow the same
     // space-constraint design: most attempts carry no mapping, and the frontend
     // reads the request-event level fields instead of per-attempt entries.
-    // plugin_decision exists only for policy-rejected attempts; attemptsJson tests
-    // cover both the diagnostic and its absence in old/successful logs.
     const exemptFields = [
       "circuit_recover_at_unix",
       "circuit_trigger_error_code",
       "claude_model_mapping",
       "model_redirect",
-      "plugin_decision",
     ];
     const skippedFields = Array.from(
       gatewayEventsSource.matchAll(

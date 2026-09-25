@@ -11,8 +11,8 @@ use super::context::{
 use super::thinking_signature_rectifier_400;
 use super::{emit_attempt_event_and_log, AttemptCircuitFields};
 use super::{
-    emit_gateway_log, emit_request_event_and_spawn_request_log, RequestCompletion, RequestEndArgs,
-    RequestEndContextArgs, RequestEndDeps,
+    emit_gateway_log, emit_request_event_and_enqueue_request_log, RequestCompletion,
+    RequestEndArgs, RequestEndContextArgs, RequestEndDeps,
 };
 use crate::circuit_breaker;
 use crate::domain::provider_oauth_limits;
@@ -276,7 +276,6 @@ fn remove_codex_previous_response_id(body: &mut Bytes) -> bool {
 }
 
 pub(super) struct HandleNonSuccessResponseInput<'a, R: tauri::Runtime = tauri::Wry> {
-    pub(super) allow_private_continuation_repair: bool,
     pub(super) ctx: CommonCtx<'a, R>,
     pub(super) provider_ctx: ProviderCtx<'a>,
     pub(super) attempt_ctx: AttemptCtx<'a>,
@@ -293,7 +292,6 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
     input: HandleNonSuccessResponseInput<'_, R>,
 ) -> LoopControl {
     let HandleNonSuccessResponseInput {
-        allow_private_continuation_repair,
         ctx,
         provider_ctx,
         attempt_ctx,
@@ -399,8 +397,7 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
     let need_error_body_preview = !is_count_tokens
         && (status.is_client_error() || status.is_server_error())
         && !need_client_error_scan;
-    let need_codex_previous_response_id_scan = allow_private_continuation_repair
-        && !is_count_tokens
+    let need_codex_previous_response_id_scan = !is_count_tokens
         && should_scan_codex_previous_response_id_error(
             ctx.cli_key.as_str(),
             status,
@@ -638,7 +635,6 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
     };
 
     attempts.push(FailoverAttempt {
-        plugin_decision: None,
         provider_id,
         provider_name: provider_name_base.clone(),
         base_url: provider_base_url_base.clone(),
@@ -742,7 +738,7 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
                     response_fixer::special_settings_json(&special_settings);
                 let duration_ms = started.elapsed().as_millis();
 
-                emit_request_event_and_spawn_request_log(
+                emit_request_event_and_enqueue_request_log(
                     RequestEndArgs::from_context(RequestEndContextArgs {
                         deps: RequestEndDeps::new(
                             &state.app,
@@ -772,7 +768,8 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
                         error_code,
                         duration_ms,
                     )),
-                );
+                )
+                .await;
 
                 abort_guard.disarm();
 
@@ -787,7 +784,7 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
             let special_settings_json = response_fixer::special_settings_json(&special_settings);
             let duration_ms = started.elapsed().as_millis();
 
-            emit_request_event_and_spawn_request_log(
+            emit_request_event_and_enqueue_request_log(
                 RequestEndArgs::from_context(RequestEndContextArgs {
                     deps: RequestEndDeps::new(
                         &state.app,
@@ -817,7 +814,8 @@ pub(super) async fn handle_non_success_response<R: tauri::Runtime>(
                     error_code,
                     duration_ms,
                 )),
-            );
+            )
+            .await;
 
             abort_guard.disarm();
 

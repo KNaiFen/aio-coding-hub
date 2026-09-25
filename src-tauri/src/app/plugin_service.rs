@@ -754,7 +754,6 @@ fn hook_lifecycle_summaries(manifest: &PluginManifest) -> Vec<PluginHookLifecycl
             priority: hook.priority,
             failure_policy: hook.failure_policy.clone(),
             timeout_ms: hook.timeout_ms,
-            request_match: hook.request_match.clone(),
         })
         .collect()
 }

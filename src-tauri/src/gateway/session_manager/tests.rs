@@ -11,7 +11,7 @@ fn sliding_ttl_refreshes_on_get_bound_provider() {
     let t0 = 1000;
 
     // Create a binding at t0
-    manager.bind_success("claude", "s1", 42, None, t0, std::time::Instant::now());
+    manager.bind_success("claude", "s1", 42, None, t0);
 
     // Access at t0 + 200 (within TTL) — should succeed and refresh
     let t1 = t0 + 200;
@@ -34,7 +34,7 @@ fn sliding_ttl_expired_without_access() {
     let manager = SessionManager::new(); // TTL = 300s
     let t0 = 1000;
 
-    manager.bind_success("claude", "s1", 42, None, t0, std::time::Instant::now());
+    manager.bind_success("claude", "s1", 42, None, t0);
 
     // No access in between — check after TTL expires
     let t_expired = t0 + 301;
@@ -50,7 +50,7 @@ fn sliding_ttl_chain_of_accesses_extends_lifetime() {
     let manager = SessionManager::new(); // TTL = 300s
     let t0 = 1000;
 
-    manager.bind_success("claude", "s1", 42, None, t0, std::time::Instant::now());
+    manager.bind_success("claude", "s1", 42, None, t0);
 
     // Chain of accesses, each within TTL of the previous
     for i in 1..=5 {
@@ -73,7 +73,7 @@ fn sliding_ttl_refreshes_on_get_bound_sort_mode_id() {
     let manager = SessionManager::new();
     let t0 = 1000;
 
-    manager.bind_sort_mode("claude", "s1", Some(7), None, t0, std::time::Instant::now());
+    manager.bind_sort_mode("claude", "s1", Some(7), None, t0);
 
     // Access at t0 + 200 refreshes TTL
     let t1 = t0 + 200;
@@ -95,14 +95,7 @@ fn sliding_ttl_refreshes_on_get_bound_provider_order() {
     let manager = SessionManager::new();
     let t0 = 1000;
 
-    manager.bind_sort_mode(
-        "claude",
-        "s1",
-        Some(1),
-        Some(vec![10, 20]),
-        t0,
-        std::time::Instant::now(),
-    );
+    manager.bind_sort_mode("claude", "s1", Some(1), Some(vec![10, 20]), t0);
 
     // Access at t0 + 200 refreshes
     let t1 = t0 + 200;
@@ -120,11 +113,11 @@ fn sliding_ttl_bind_success_refreshes_existing_binding() {
     let manager = SessionManager::new();
     let t0 = 1000;
 
-    manager.bind_success("claude", "s1", 42, None, t0, std::time::Instant::now());
+    manager.bind_success("claude", "s1", 42, None, t0);
 
     // bind_success again at t0 + 200 with same session
     let t1 = t0 + 200;
-    manager.bind_success("claude", "s1", 42, None, t1, std::time::Instant::now());
+    manager.bind_success("claude", "s1", 42, None, t1);
 
     // Should survive until t1 + 300 = 1500
     let t2 = t0 + 400;
@@ -138,22 +131,8 @@ fn sliding_ttl_lru_eviction_works_with_refreshed_bindings() {
     let t0 = 1000;
 
     // Create two bindings
-    manager.bind_success(
-        "claude",
-        "old_session",
-        1,
-        None,
-        t0,
-        std::time::Instant::now(),
-    );
-    manager.bind_success(
-        "claude",
-        "new_session",
-        2,
-        None,
-        t0,
-        std::time::Instant::now(),
-    );
+    manager.bind_success("claude", "old_session", 1, None, t0);
+    manager.bind_success("claude", "new_session", 2, None, t0);
 
     // Refresh only new_session at t0 + 100
     let t1 = t0 + 100;
@@ -179,24 +158,9 @@ fn clear_cli_bindings_removes_only_target_cli() {
         Some(1),
         Some(vec![101, 102]),
         now_unix,
-        std::time::Instant::now(),
     );
-    manager.bind_sort_mode(
-        "claude",
-        "session_b",
-        None,
-        None,
-        now_unix,
-        std::time::Instant::now(),
-    );
-    manager.bind_sort_mode(
-        "codex",
-        "session_c",
-        Some(2),
-        Some(vec![201]),
-        now_unix,
-        std::time::Instant::now(),
-    );
+    manager.bind_sort_mode("claude", "session_b", None, None, now_unix);
+    manager.bind_sort_mode("codex", "session_c", Some(2), Some(vec![201]), now_unix);
 
     assert_eq!(manager.clear_cli_bindings(""), 0);
 
@@ -476,54 +440,4 @@ fn sanitize_deterministic_part_removes_log_injection_controls_before_truncating(
 
     assert_eq!(sanitized.len(), MAX_SESSION_ID_LEN);
     assert!(!sanitized.contains('\n'));
-}
-
-#[test]
-fn invalidated_request_cannot_restore_cleared_session() {
-    let manager = SessionManager::new();
-    let old_request = Instant::now();
-    manager.bind_sort_mode("codex", "s1", Some(1), Some(vec![10, 20]), 100, old_request);
-    assert_eq!(manager.clear_cli_bindings("codex"), 1);
-
-    manager.bind_success("codex", "s1", 20, Some(1), 101, old_request);
-    manager.bind_sort_mode("codex", "s1", Some(1), Some(vec![10, 20]), 101, old_request);
-    assert_eq!(manager.get_bound_sort_mode_id("codex", "s1", 101), None);
-    assert_eq!(manager.get_bound_provider("codex", "s1", 101), None);
-}
-
-#[test]
-fn invalidated_request_cannot_overwrite_or_clear_new_session_even_after_same_mode_reorder() {
-    let manager = SessionManager::new();
-    let old_request = Instant::now();
-    manager.bind_sort_mode("codex", "s1", Some(1), Some(vec![10, 20]), 100, old_request);
-    manager.clear_cli_bindings("codex");
-    let new_request = Instant::now();
-    manager.bind_sort_mode("codex", "s1", Some(1), Some(vec![30, 20]), 101, new_request);
-    manager.bind_success("codex", "s1", 30, Some(1), 101, new_request);
-
-    manager.bind_success("codex", "s1", 20, Some(1), 102, old_request);
-    assert!(!manager.clear_bound_provider("codex", "s1", 102, old_request));
-    assert_eq!(manager.get_bound_provider("codex", "s1", 102), Some(30));
-    assert_eq!(
-        manager.get_bound_provider_order("codex", "s1", 102),
-        Some(vec![30, 20])
-    );
-}
-
-#[test]
-fn repeated_route_changes_reject_old_writes_without_invalidating_other_cli() {
-    let manager = SessionManager::new();
-    let old_request = Instant::now();
-    manager.bind_sort_mode("codex", "s1", Some(1), None, 100, old_request);
-    manager.clear_cli_bindings("codex");
-    manager.bind_sort_mode("codex", "s1", Some(2), None, 101, Instant::now());
-    manager.clear_cli_bindings("codex");
-    let current_request = Instant::now();
-    manager.bind_sort_mode("codex", "s1", Some(1), Some(vec![30]), 102, current_request);
-    manager.bind_success("codex", "s1", 30, Some(1), 102, current_request);
-
-    manager.bind_success("codex", "s1", 20, Some(1), 103, old_request);
-    assert_eq!(manager.get_bound_provider("codex", "s1", 103), Some(30));
-    manager.bind_success("claude", "s2", 40, None, 103, old_request);
-    assert_eq!(manager.get_bound_provider("claude", "s2", 103), Some(40));
 }

@@ -28,38 +28,6 @@ function timeoutAttempt(overrides: Partial<AttemptJsonEntry> = {}): AttemptJsonE
 }
 
 describe("components/home/requestLogErrorDetails", () => {
-  it("classifies policy rejection separately from validation failure without credential advice", () => {
-    for (const code of [
-      GatewayErrorCodes.RESPONSE_REJECTED,
-      GatewayErrorCodes.RESPONSE_VALIDATION_FAILED,
-    ]) {
-      const observation = resolveRequestLogErrorObservation(
-        createRequestLogDetail({
-          status: 502,
-          error_code: code,
-          attempts_json: JSON.stringify([
-            createAttempt({ status: 200, outcome: "response_rejected", error_code: code }),
-          ]),
-        })
-      );
-      expect(observation?.attemptFailureSummary?.[0]).toMatchObject({ errorCode: code, count: 1 });
-      expect(observation?.gwDescription?.suggestion).not.toContain("API Key");
-    }
-    expect(
-      resolveRequestLogErrorObservation(
-        createRequestLogDetail({ status: 502, error_code: GatewayErrorCodes.RESPONSE_REJECTED })
-      )?.gwDescription?.desc
-    ).toContain("策略校验");
-    expect(
-      resolveRequestLogErrorObservation(
-        createRequestLogDetail({
-          status: 502,
-          error_code: GatewayErrorCodes.RESPONSE_VALIDATION_FAILED,
-        })
-      )?.gwDescription?.desc
-    ).toContain("未能完成");
-  });
-
   it("returns null when neither details nor summary contain error signal", () => {
     expect(resolveRequestLogErrorObservation(null)).toBeNull();
     expect(resolveRequestLogErrorObservation(undefined)).toBeNull();

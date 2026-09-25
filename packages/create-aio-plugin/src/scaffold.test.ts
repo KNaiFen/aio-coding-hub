@@ -1,4 +1,3 @@
-import { runInNewContext } from "node:vm";
 import { createPublicKey, verify } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -687,7 +686,6 @@ describe("create-aio-plugin example templates", () => {
     ["acme.prompt-helper", "example:prompt-helper"],
     ["acme.redactor", "example:redactor"],
     ["acme.response-guard", "example:response-guard"],
-    ["acme.response-check", "example:response-check"],
   ] as const)("writes %s through the CLI example template %s", (pluginId, template) => {
     const cwd = mkdtempSync(join(tmpdir(), "aio-plugin-example-"));
     const validateOutput: string[] = [];
@@ -757,8 +755,7 @@ describe("create-aio-plugin example templates", () => {
 function expectExampleCanPackAndPublishCheck(
   files: Record<string, string>,
   manifestId: string,
-  hooks: readonly string[],
-  capabilities: readonly string[] = ["gateway.hooks"]
+  hooks: readonly string[]
 ) {
   const packed = packPlugin(files);
   const result = publishCheckPluginBytes(packed.bytes, {
@@ -774,7 +771,7 @@ function expectExampleCanPackAndPublishCheck(
     checksumVerified: true,
     signatureVerified: false,
     unsigned: true,
-    capabilities,
+    capabilities: ["gateway.hooks"],
     hooks,
   });
 }
@@ -906,44 +903,3 @@ function readU32(bytes: Uint8Array, offset: number): number {
     0
   );
 }
-
-it("scaffolds a non-model complete-response validator through the public SDK contract", () => {
-  const files = createPluginScaffold({
-    id: "acme.response-check",
-    name: "Response Check",
-    template: "example:response-check",
-  });
-  const manifest = readManifest(files);
-  expect(manifest.capabilities).toEqual(["gateway.hooks", "gateway.provider.switch"]);
-  expect(manifest.contributes.gatewayHooks).toEqual([
-    {
-      name: "gateway.response.beforeCommit",
-      priority: 100,
-      match: { cliKeys: ["codex"], methods: ["POST"], paths: ["/responses", "/v1/responses"] },
-    },
-  ]);
-  expect(validatePluginFilesStrict(files).ok).toBe(true);
-  expectExampleCanPackAndPublishCheck(
-    files,
-    "acme.response-check",
-    ["gateway.response.beforeCommit"],
-    ["gateway.hooks", "gateway.provider.switch"]
-  );
-  let handler: ((ctx: { context: { response: { body: string } } }) => unknown) | undefined;
-  const module = { exports: {} as { activate?: (api: unknown) => void } };
-  runInNewContext(files["dist/extension.js"], { module });
-  module.exports.activate?.({
-    gateway: {
-      registerHook: (_name: string, fn: typeof handler) => {
-        handler = fn;
-      },
-    },
-  });
-  expect(handler?.({ context: { response: { body: "output APPROVED" } } })).toEqual({
-    action: "pass",
-  });
-  expect(handler?.({ context: { response: { body: "output REJECTED" } } })).toEqual({
-    action: "switchProvider",
-    reasonCode: "tail.not_approved",
-  });
-});

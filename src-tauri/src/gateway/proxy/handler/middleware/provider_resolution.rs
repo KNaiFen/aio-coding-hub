@@ -37,14 +37,12 @@ impl ProviderResolutionMiddleware {
             let cli_key = ctx.cli_key.clone();
             let session_id = ctx.session_id.clone();
             let created_at = ctx.created_at;
-            let request_started = ctx.started;
             crate::blocking::run("gateway_provider_selection", move || {
                 select_providers_with_session_binding(
                     &state,
                     &cli_key,
                     session_id.as_deref(),
                     created_at,
-                    request_started,
                 )
             })
             .await
@@ -123,7 +121,6 @@ impl ProviderResolutionMiddleware {
             ctx.forced_provider_id,
             &mut ctx.providers,
             selection.bound_provider_order.as_deref(),
-            ctx.started,
         );
 
         ctx.session_bound_provider_id = match &binding_outcome {

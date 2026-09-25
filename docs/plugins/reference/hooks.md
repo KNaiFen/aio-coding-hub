@@ -125,7 +125,7 @@ Codex/OpenAI Responses-style fixture：
 - Mutation fields：`streamChunk`。
 - Context fields：`traceId`、`stream.sequence`、`stream.chunk`。
 
-这个 hook 接收有边界的 streaming chunks，而不是完整响应。需要提交前完整检查 JSON/SSE 并丢弃失败 attempt 的插件应使用 `gateway.response.beforeCommit`；non-streaming 内容修改仍使用 `gateway.response.after`。
+这个 hook 接收有边界的 streaming chunks，而不是完整响应。需要完整 response bodies 的插件，应在 non-streaming requests 中使用 `gateway.response.after`。
 
 ## gateway.response.after
 
@@ -164,33 +164,3 @@ Codex/OpenAI Responses-style fixture：
 这个 hook 用于 request logs 入队或写入前的不可逆脱敏。
 
 当前失败边界是 fail-open：如果 hook 执行失败，或返回的 `logMessage` 不是宿主能解析回 request log payload 的 JSON object，宿主会保留原始日志继续入库。隐私插件不能把默认 `log.beforePersist` 当作强制合规日志脱敏保证；需要更强语义时必须先补宿主兜底脱敏、丢弃日志或官方插件专用策略。
-
-
-## gateway.response.beforeCommit
-
-该 hook 只检查上游 HTTP 2xx 成功响应；4xx/5xx 等非成功响应继续走现有错误处理和重试路径。该 hook 固定完整读取、必需执行和 fail-closed。宿主在首个出站前按 manifest 的 `match.cliKeys/methods/paths` 冻结参与者；所有供应商 attempts 复用此列表和配置。完整响应读取后、任何旧响应改写前调用一次，所有插件看到同一不可变证据。已熔断、禁用、更新失效、超时、非法输出和预算不足都不能被解释为通过。
-
-完整解码 UTF-8 body 上限是 **2 MiB**，超限直接失败，不使用旧 hook 的截断 helper。默认 5000 ms hook 预算包含等待同插件队列、启动和执行，另受请求总截止约束。取消的 RPC 由 executor 在该预算内完成清理，不会让其他会话的插件调用丢失回复。响应 headers 仅暴露 `content-type`、`content-language`、`cache-control`；request 不包含 prompt、认证或私有续接 ID。
-
-SDK 的 `ResponseCommitContext` 对应实际 worker payload：
-
-```ts
-api.gateway?.registerHook("gateway.response.beforeCommit", (ctx) => {
-  const { request, outboundRequest, attempt, response } = ctx.context;
-  // request: { cliKey, method, path, requestedModel: string | null }
-  // outboundRequest: { model: string | null } — 所有映射和 beforeSend 后的最终值
-  // attempt: { providerId, providerIndex, retryIndex }
-  // response: { status, headers, contentType: string | null, body, complete: true, decodedBytes }
-  return response.body.endsWith("APPROVED")
-    ? { action: "pass" }
-    : { action: "switchProvider", reasonCode: "tail.not_approved" };
-});
-```
-
-上述 `ctx` 还含 `hook/traceId/config`，`ctx.context` 含 `hookName/traceId`。新增 DTO 的字段全部使用 camelCase，nullable 值是 `null`。旧 hook 已有 wire 字段（如 request.cli_key、requested_model、body_truncated）保持原样；不要把旧 SDK 的 camelCase 类型声明误当作旧 wire 的转换保证。
-
-仅接受 `{action:"pass"}`、`{action:"block",reasonCode,message?}`、`{action:"switchProvider",reasonCode,message?}`。reasonCode 为 1–96 个 ASCII 字母数字或 `_.-`；message 最多 256 UTF-8 bytes、无控制字符。禁止 mutation、未知字段以及旧 action。message 不能包含响应正文或秘密，宿主审计仅保留有限的 reasonCode 和 attempt 元数据。
-
-`switchProvider` 需要 `gateway.provider.switch`。宿主继续执行剩余必需插件；任何 block 或执行故障都终止请求，优先于换家。全 pass 才提交。合法 block/switch 是策略结果，不增加插件执行失败计数，也不改变共享 Provider 健康状态。换家只沿当前请求所属会话的合法候选顺序；不安全的私有续接明确失败，不做有损历史重放。
-
-runtime report 的 status 为 completed、blocked、switchProvider 或 failedClosed，mutationSummary 记录 decision、reasonCode 和 attempt 位置。完整响应不持久化，报告不能当作可独立重放的 body fixture。

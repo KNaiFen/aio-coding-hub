@@ -12,7 +12,6 @@
 | `examples/prompt-helper` | `example:prompt-helper` | 在请求进入 provider 前补充提示词约束 | `gateway.request.afterBodyRead` | `gateway.hooks` | 包含 `fixtures/claude-request.json` 和 `fixtures/codex-request.json`；覆盖 Claude messages 和 Codex/OpenAI Responses request mutation |
 | `examples/redactor` | `example:redactor` | 展示 Extension Host gateway hook 脱敏形态 | `gateway.request.beforeSend`, `log.beforePersist` | `gateway.hooks` | 包含 request hit/miss 和 log redact fixtures；覆盖 pack、publish-check 和市场安装元数据 |
 | `examples/response-guard` | `example:response-guard` | 在 non-stream 响应返回后做轻量检查或标记 | `gateway.response.after` | `gateway.hooks` | 包含 `fixtures/response-warn.json` 和 `fixtures/response-pass.json`；覆盖响应 mutation 和 pass 路径 |
-| `examples/response-check` | `example:response-check` | 完整响应尾部业务标记校验，拒绝后请求换家，不读取模型字段 | `gateway.response.beforeCommit` | `gateway.hooks`, `gateway.provider.switch` | response reject/pass fixtures；经普通 manifest、SDK validator、打包与发布检查 |
 
 `examples/*` 是开发模板，不是默认可安装市场包。生成出的目录可以运行 `validate --strict`、`pack` 和 `publish-check`；Extension Host hook 行为要通过宿主运行报告、导出的 replay fixture 和桌面应用内复测确认。发布为真实 `.aio-plugin` artifact 仍需要单独的 checksum、signature、托管和市场索引流程。
 

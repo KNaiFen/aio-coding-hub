@@ -43,7 +43,6 @@ type ProviderChainAttempt = {
   circuit_failure_threshold: number | null;
   circuit_recover_at_unix: number | null;
   circuit_trigger_error_code: string | null;
-  plugin_decision: AttemptJsonEntry["plugin_decision"];
 };
 
 export function ProviderChainView({
@@ -93,7 +92,6 @@ export function ProviderChainView({
         circuit_failure_threshold: a.circuit_failure_threshold ?? null,
         circuit_recover_at_unix: a.circuit_recover_at_unix ?? null,
         circuit_trigger_error_code: a.circuit_trigger_error_code ?? null,
-        plugin_decision: a.plugin_decision ?? null,
       }));
     }
 
@@ -133,7 +131,6 @@ export function ProviderChainView({
           circuit_failure_threshold: json?.circuit_failure_threshold ?? null,
           circuit_recover_at_unix: json?.circuit_recover_at_unix ?? null,
           circuit_trigger_error_code: json?.circuit_trigger_error_code ?? null,
-          plugin_decision: json?.plugin_decision ?? null,
         };
       });
 
@@ -359,20 +356,6 @@ function AttemptCard({
                   <span className="text-sm text-muted-foreground">
                     {formatCircuitRecovery(attempt.circuit_recover_at_unix)}
                   </span>
-                ) : null}
-              </div>
-            ) : null}
-
-            {attempt.plugin_decision ? (
-              <div className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm">
-                <div className="font-medium text-foreground">响应被插件策略拒绝</div>
-                <div className="mt-1 break-words font-mono text-xs text-muted-foreground">
-                  {attempt.plugin_decision.plugin_id} · {attempt.plugin_decision.reason_code}
-                </div>
-                {attempt.plugin_decision.message ? (
-                  <p className="mt-1 break-words text-xs text-foreground">
-                    {attempt.plugin_decision.message}
-                  </p>
                 ) : null}
               </div>
             ) : null}

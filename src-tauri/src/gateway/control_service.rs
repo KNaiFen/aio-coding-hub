@@ -481,7 +481,6 @@ mod tests {
                         priority: 10,
                         failure_policy: Some("fail-closed".to_string()),
                         timeout_ms: None,
-                        request_match: None,
                     }],
                     ui: BTreeMap::new(),
                 }),

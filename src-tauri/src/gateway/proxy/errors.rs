@@ -166,7 +166,6 @@ pub(super) async fn apply_gateway_error_hook(
     };
 
     let input = GatewayResponseHookInput {
-        execution_lease: None,
         hook_name: GatewayPluginHookName::Error,
         trace_id: trace_id.clone(),
         status: status.as_u16(),

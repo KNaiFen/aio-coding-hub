@@ -43,11 +43,6 @@ pub(in crate::gateway) enum GatewayErrorCode {
     RequestLogWriteThroughRateLimited,
     RequestLogDropped,
     Fake200,
-    ResponseRejected,
-    ResponseValidationFailed,
-    ResponseBufferLimit,
-    ResponseCommitTimeout,
-    RequestReplayUnsafe,
 }
 
 impl GatewayErrorCode {
@@ -94,11 +89,6 @@ impl GatewayErrorCode {
             Self::RequestLogWriteThroughRateLimited => "GW_REQUEST_LOG_WRITE_THROUGH_RATE_LIMITED",
             Self::RequestLogDropped => "GW_REQUEST_LOG_DROPPED",
             Self::Fake200 => "GW_FAKE_200",
-            Self::ResponseRejected => "GW_RESPONSE_REJECTED",
-            Self::ResponseValidationFailed => "GW_RESPONSE_VALIDATION_FAILED",
-            Self::ResponseBufferLimit => "GW_RESPONSE_BUFFER_LIMIT",
-            Self::ResponseCommitTimeout => "GW_RESPONSE_COMMIT_TIMEOUT",
-            Self::RequestReplayUnsafe => "GW_REQUEST_REPLAY_UNSAFE",
         }
     }
 
@@ -145,12 +135,6 @@ impl GatewayErrorCode {
             "GW_REQUEST_LOG_WRITE_THROUGH_RATE_LIMITED" => Self::RequestLogWriteThroughRateLimited,
             "GW_REQUEST_LOG_DROPPED" => Self::RequestLogDropped,
             "GW_FAKE_200" => Self::Fake200,
-            "GW_RESPONSE_REJECTED" => Self::ResponseRejected,
-            "GW_RESPONSE_VALIDATION_FAILED" => Self::ResponseValidationFailed,
-            "GW_RESPONSE_BUFFER_LIMIT" => Self::ResponseBufferLimit,
-            "GW_RESPONSE_COMMIT_TIMEOUT" => Self::ResponseCommitTimeout,
-            "GW_REQUEST_REPLAY_UNSAFE" => Self::RequestReplayUnsafe,
-
             _ => return None,
         })
     }
@@ -204,11 +188,6 @@ mod tests {
         GatewayErrorCode::RequestLogWriteThroughRateLimited,
         GatewayErrorCode::RequestLogDropped,
         GatewayErrorCode::Fake200,
-        GatewayErrorCode::ResponseRejected,
-        GatewayErrorCode::ResponseValidationFailed,
-        GatewayErrorCode::ResponseBufferLimit,
-        GatewayErrorCode::ResponseCommitTimeout,
-        GatewayErrorCode::RequestReplayUnsafe,
     ];
 
     #[test]

@@ -70,13 +70,6 @@ pub(in crate::gateway) mod decision_chain {
 }
 
 #[derive(Debug, Serialize, Clone, specta::Type)]
-pub(super) struct PluginDecision {
-    pub(super) plugin_id: String,
-    pub(super) reason_code: String,
-    pub(super) message: Option<String>,
-}
-
-#[derive(Debug, Serialize, Clone, specta::Type)]
 pub(super) struct FailoverAttempt {
     pub(super) provider_id: i64,
     pub(super) provider_name: String,
@@ -92,8 +85,6 @@ pub(super) struct FailoverAttempt {
     pub(super) reason: Option<String>,
     pub(super) selection_method: Option<&'static str>,
     pub(super) reason_code: Option<&'static str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) plugin_decision: Option<PluginDecision>,
     pub(super) attempt_started_ms: Option<u128>,
     pub(super) attempt_duration_ms: Option<u128>,
     pub(super) circuit_state_before: Option<&'static str>,
@@ -687,7 +678,6 @@ mod tests {
 
     fn sample_attempt(provider_id: i64) -> FailoverAttempt {
         FailoverAttempt {
-            plugin_decision: None,
             provider_id,
             provider_name: format!("Provider {provider_id}"),
             base_url: format!("https://provider-{provider_id}.example"),
@@ -812,7 +802,6 @@ mod tests {
             duration_ms: 2350,
             ttfb_ms: Some(420),
             attempts: vec![FailoverAttempt {
-                plugin_decision: None,
                 provider_id: 7,
                 provider_name: "Provider A".to_string(),
                 base_url: "https://provider-a.example".to_string(),

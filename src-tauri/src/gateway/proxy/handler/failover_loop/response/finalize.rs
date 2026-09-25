@@ -2,7 +2,8 @@
 
 use super::context::AttemptOutcome;
 use super::{
-    emit_request_event_and_spawn_request_log, RequestEndArgs, RequestEndContextArgs, RequestEndDeps,
+    emit_request_event_and_enqueue_request_log, RequestEndArgs, RequestEndContextArgs,
+    RequestEndDeps,
 };
 use crate::gateway::events::FailoverAttempt;
 use crate::gateway::proxy::abort_guard::RequestAbortGuard;
@@ -117,16 +118,8 @@ pub(super) async fn all_providers_unavailable<R: tauri::Runtime>(
         retry_after_seconds,
     );
 
-    let resp = apply_gateway_error_hook(
-        &state.db,
-        state.plugin_pipeline.clone(),
-        trace_id.clone(),
-        resp,
-    )
-    .await;
-
     let duration_ms = started.elapsed().as_millis();
-    emit_request_event_and_spawn_request_log(
+    emit_request_event_and_enqueue_request_log(
         RequestEndArgs::from_context(RequestEndContextArgs {
             deps: RequestEndDeps::new(
                 &state.app,
@@ -155,8 +148,8 @@ pub(super) async fn all_providers_unavailable<R: tauri::Runtime>(
             None,
             GatewayErrorCode::AllProvidersUnavailable.as_str(),
         )),
-    );
-    abort_guard.disarm();
+    )
+    .await;
 
     if let Some(retry_after_seconds) = retry_after_seconds.filter(|v| *v > 0) {
         let mut cache = state.recent_errors.lock_or_recover();
@@ -188,7 +181,8 @@ pub(super) async fn all_providers_unavailable<R: tauri::Runtime>(
         );
     }
 
-    resp
+    abort_guard.disarm();
+    apply_gateway_error_hook(&state.db, state.plugin_pipeline.clone(), trace_id, resp).await
 }
 
 pub(super) struct AllFailedInput<'a, R: tauri::Runtime = tauri::Wry> {
@@ -261,16 +255,8 @@ pub(super) async fn all_providers_failed<R: tauri::Runtime>(
         },
     );
 
-    let resp = apply_gateway_error_hook(
-        &state.db,
-        state.plugin_pipeline.clone(),
-        trace_id.clone(),
-        resp,
-    )
-    .await;
-
     let duration_ms = started.elapsed().as_millis();
-    emit_request_event_and_spawn_request_log(
+    emit_request_event_and_enqueue_request_log(
         RequestEndArgs::from_context(RequestEndContextArgs {
             deps: RequestEndDeps::new(
                 &state.app,
@@ -299,8 +285,9 @@ pub(super) async fn all_providers_failed<R: tauri::Runtime>(
             final_error_category,
             final_error_code,
         )),
-    );
-    abort_guard.disarm();
+    )
+    .await;
 
-    resp
+    abort_guard.disarm();
+    apply_gateway_error_hook(&state.db, state.plugin_pipeline.clone(), trace_id, resp).await
 }

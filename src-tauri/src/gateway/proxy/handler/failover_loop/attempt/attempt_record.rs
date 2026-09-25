@@ -124,7 +124,6 @@ async fn record_system_failure_and_decide_impl<R: tauri::Runtime>(
     }
 
     attempts.push(FailoverAttempt {
-        plugin_decision: None,
         provider_id,
         provider_name: provider_name_base.clone(),
         base_url: provider_base_url_base.clone(),

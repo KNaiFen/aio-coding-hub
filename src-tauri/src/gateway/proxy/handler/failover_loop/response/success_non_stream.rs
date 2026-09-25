@@ -266,15 +266,7 @@ async fn read_non_stream_body_with_limit(
     let mut out = Vec::with_capacity(capacity);
 
     loop {
-        let remaining = match timeout {
-            Some(total) => Some(
-                total
-                    .checked_sub(started.elapsed())
-                    .ok_or(NonStreamBodyReadError::Timeout)?,
-            ),
-            None => None,
-        };
-        let chunk_result = match remaining {
+        let chunk_result = match timeout.and_then(|total| total.checked_sub(started.elapsed())) {
             Some(remaining) if remaining.is_zero() => Err(NonStreamBodyReadError::Timeout),
             Some(remaining) => match tokio::time::timeout(remaining, resp.chunk()).await {
                 Ok(Ok(chunk)) => Ok(chunk),
@@ -356,15 +348,13 @@ pub(super) async fn handle_success_non_stream<R>(
     attempt_ctx: AttemptCtx<'_>,
     loop_state: LoopState<'_, R>,
     resp: reqwest::Response,
-    collected_timing: Option<complete_response::CollectedTiming>,
-    execution_lease: Option<Arc<tokio::sync::OwnedSemaphorePermit>>,
+    status: StatusCode,
+    mut response_headers: HeaderMap,
 ) -> LoopControl
 where
     R: tauri::Runtime,
     R::Handle: Unpin,
 {
-    let status = resp.status();
-    let mut response_headers = resp.headers().clone();
     let common = CommonCtxOwned::from(ctx);
     let provider_ctx_owned = ProviderCtxOwned::from(provider_ctx);
     tracing::debug!(
@@ -424,7 +414,6 @@ where
                 let outcome = "success".to_string();
 
                 attempts.push(FailoverAttempt {
-                    plugin_decision: None,
                     provider_id,
                     provider_name: provider_ctx_owned.provider_name_base.clone(),
                     base_url: provider_ctx_owned.provider_base_url_base.clone(),
@@ -522,7 +511,6 @@ where
                 let outcome = "success".to_string();
 
                 attempts.push(FailoverAttempt {
-                    plugin_decision: None,
                     provider_id,
                     provider_name: provider_ctx_owned.provider_name_base.clone(),
                     base_url: provider_ctx_owned.provider_base_url_base.clone(),
@@ -688,8 +676,7 @@ where
 
     let outcome = "success".to_string();
 
-    let mut pending_attempt = FailoverAttempt {
-        plugin_decision: None,
+    attempts.push(FailoverAttempt {
         provider_id,
         provider_name: provider_ctx_owned.provider_name_base.clone(),
         base_url: provider_ctx_owned.provider_base_url_base.clone(),
@@ -718,7 +705,17 @@ where
         upstream_sent: attempt_ctx.upstream_sent,
         claude_model_mapping: provider_ctx_owned.claude_model_mapping.clone(),
         model_redirect: provider_ctx_owned.model_redirect.clone(),
-    };
+    });
+
+    emit_attempt_event_and_log_with_circuit_before(
+        ctx,
+        provider_ctx,
+        attempt_ctx,
+        outcome,
+        Some(status.as_u16()),
+    )
+    .await;
+
     body_bytes = maybe_gunzip_response_body_bytes_with_limit(
         body_bytes,
         &mut response_headers,
@@ -994,8 +991,7 @@ where
         } else {
             FailoverDecision::Abort
         };
-        {
-            let last = &mut pending_attempt;
+        if let Some(last) = attempts.last_mut() {
             if last.outcome == "success" {
                 last.outcome = format!("body_error: code={error_code}");
             }
@@ -1040,24 +1036,13 @@ where
                 )
                 .with_provider_health_neutral(common.provider_health_neutral),
             );
-            {
-                let last = &mut pending_attempt;
+            if let Some(last) = attempts.last_mut() {
                 last.circuit_state_after = Some(change.after.state.as_str());
                 last.circuit_failure_count = Some(change.after.failure_count);
                 last.circuit_failure_threshold = Some(change.after.failure_threshold);
             }
             *circuit_snapshot = change.after.clone();
         }
-
-        emit_attempt_event_and_log_with_circuit_before(
-            ctx,
-            provider_ctx,
-            attempt_ctx,
-            pending_attempt.outcome.clone(),
-            Some(status.as_u16()),
-        )
-        .await;
-        attempts.push(pending_attempt);
 
         if quota_exhausted {
             if !oauth_quota_exhausted && common.provider_cooldown_secs > 0 {
@@ -1078,7 +1063,7 @@ where
             return LoopControl::BreakRetry;
         }
 
-        emit_request_event_and_spawn_request_log(
+        emit_request_event_and_enqueue_request_log(
             RequestEndArgs::from_context(RequestEndContextArgs {
                 deps: RequestEndDeps::new(
                     &state.app,
@@ -1110,7 +1095,8 @@ where
                 error_code,
                 duration_ms,
             )),
-        );
+        )
+        .await;
 
         abort_guard.disarm();
         return LoopControl::Return(build_response(
@@ -1130,7 +1116,6 @@ where
     );
 
     let hook_input = GatewayResponseHookInput {
-        execution_lease,
         hook_name: GatewayPluginHookName::ResponseAfter,
         trace_id: common.trace_id.clone(),
         status: status.as_u16(),
@@ -1153,30 +1138,14 @@ where
                     reason = %blocked.reason,
                     "plugin blocked gateway response after upstream success"
                 );
-                pending_attempt.outcome = "response_plugin_blocked".to_string();
-                pending_attempt.error_category = Some(ErrorCategory::SystemError.as_str());
-                pending_attempt.error_code = Some(GatewayErrorCode::InternalError.as_str());
-                pending_attempt.decision = Some("abort");
-                pending_attempt.reason_code = Some("plugin_blocked");
-                emit_attempt_event_and_log_with_circuit_before(
-                    ctx,
-                    provider_ctx,
-                    attempt_ctx,
-                    pending_attempt.outcome.clone(),
-                    Some(status.as_u16()),
-                )
-                .await;
-                attempts.push(pending_attempt);
-                return LoopControl::Return(
-                    response_commit::finish_failure(
-                        ctx,
-                        abort_guard,
-                        attempts,
-                        GatewayErrorCode::InternalError,
-                        blocked.reason,
-                    )
-                    .await,
-                );
+                abort_guard.disarm();
+                return LoopControl::Return(error_response(
+                    StatusCode::BAD_GATEWAY,
+                    common.trace_id.clone(),
+                    GatewayErrorCode::InternalError.as_str(),
+                    blocked.reason,
+                    attempts.clone(),
+                ));
             }
             response_headers = output.headers;
             body_bytes = output.body;
@@ -1194,43 +1163,16 @@ where
                 "plugin response.after hook failed: {}",
                 err
             );
-            pending_attempt.outcome = "response_plugin_failed".to_string();
-            pending_attempt.error_category = Some(ErrorCategory::SystemError.as_str());
-            pending_attempt.error_code = Some(GatewayErrorCode::InternalError.as_str());
-            pending_attempt.decision = Some("abort");
-            pending_attempt.reason_code = Some("plugin_blocked");
-            emit_attempt_event_and_log_with_circuit_before(
-                ctx,
-                provider_ctx,
-                attempt_ctx,
-                pending_attempt.outcome.clone(),
-                Some(status.as_u16()),
-            )
-            .await;
-            attempts.push(pending_attempt);
-            return LoopControl::Return(
-                response_commit::finish_failure(
-                    ctx,
-                    abort_guard,
-                    attempts,
-                    GatewayErrorCode::InternalError,
-                    "gateway plugin response hook failed".to_string(),
-                )
-                .await,
-            );
+            abort_guard.disarm();
+            return LoopControl::Return(error_response(
+                StatusCode::BAD_GATEWAY,
+                common.trace_id.clone(),
+                GatewayErrorCode::InternalError.as_str(),
+                format!("gateway plugin response hook failed: {err}"),
+                attempts.clone(),
+            ));
         }
     }
-
-    pending_attempt.attempt_duration_ms = Some(attempt_started.elapsed().as_millis());
-    emit_attempt_event_and_log_with_circuit_before(
-        ctx,
-        provider_ctx,
-        attempt_ctx,
-        pending_attempt.outcome.clone(),
-        Some(status.as_u16()),
-    )
-    .await;
-    attempts.push(pending_attempt);
 
     let usage = usage::parse_usage_from_json_or_sse_bytes(common.cli_key.as_str(), &body_bytes);
     let usage_metrics = usage.as_ref().map(|u| u.metrics.clone());
@@ -1293,14 +1235,13 @@ where
                     provider_id,
                     common.effective_sort_mode_id,
                     now_unix,
-                    common.started,
                 );
             }
         }
     }
 
     let duration_ms = started.elapsed().as_millis();
-    emit_request_event_and_spawn_request_log(
+    emit_request_event_and_enqueue_request_log(
         RequestEndArgs::from_context(RequestEndContextArgs {
             deps: RequestEndDeps::new(
                 &state.app,
@@ -1326,14 +1267,13 @@ where
         })
         .with_completion(RequestCompletion::success(
             status.as_u16(),
-            collected_timing
-                .and_then(|timing| timing.first_byte_ms)
-                .or(Some(duration_ms)),
+            Some(duration_ms),
             usage_metrics,
             None,
             usage,
         )),
-    );
+    )
+    .await;
     abort_guard.disarm();
     LoopControl::Return(out)
 }
@@ -1506,26 +1446,6 @@ mod tests {
         .expect_err("unknown oversized body should be rejected");
 
         assert_eq!(err, NonStreamBodyReadError::TooLarge);
-        task.abort();
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn read_non_stream_body_expired_deadline_is_not_unlimited() {
-        let (response, task) = known_length_response(2, Vec::new(), true).await;
-        let result = tokio::time::timeout(
-            Duration::from_millis(100),
-            read_non_stream_body_with_limit(
-                response,
-                Instant::now()
-                    .checked_sub(Duration::from_secs(2))
-                    .expect("past instant"),
-                Some(Duration::from_secs(1)),
-                64,
-            ),
-        )
-        .await
-        .expect("expired deadline returns without waiting for body");
-        assert_eq!(result.unwrap_err(), NonStreamBodyReadError::Timeout);
         task.abort();
     }
 

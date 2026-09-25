@@ -77,16 +77,6 @@ pub struct PluginHook {
     #[serde(rename = "timeoutMs")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u64>,
-    #[serde(rename = "match", default, skip_serializing_if = "Option::is_none")]
-    pub request_match: Option<PluginHookMatch>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct PluginHookMatch {
-    pub cli_keys: Vec<String>,
-    pub methods: Vec<String>,
-    pub paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, PartialEq, Eq)]
@@ -395,8 +385,6 @@ pub struct PluginHookLifecycleSummary {
     pub failure_policy: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u64>,
-    #[serde(rename = "match", default, skip_serializing_if = "Option::is_none")]
-    pub request_match: Option<PluginHookMatch>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type, PartialEq, Eq)]
@@ -853,17 +841,8 @@ fn validate_contributes(
         }
     }
 
-    let mut before_commit_seen = false;
     for hook in &contributes.gateway_hooks {
         validate_hook(hook)?;
-        if hook.name == "gateway.response.beforeCommit"
-            && std::mem::replace(&mut before_commit_seen, true)
-        {
-            return Err(PluginValidationError::new(
-                "PLUGIN_DUPLICATE_HOOK",
-                "beforeCommit may be declared only once per plugin",
-            ));
-        }
     }
 
     for (slot, ui_contributions) in &contributes.ui {
@@ -1096,62 +1075,6 @@ fn validate_hook(hook: &PluginHook) -> Result<(), PluginValidationError> {
             "hook timeoutMs must be greater than zero",
         ));
     }
-    if hook.name == "gateway.response.beforeCommit" {
-        if hook
-            .failure_policy
-            .as_deref()
-            .is_some_and(|policy| policy != "fail-closed")
-        {
-            return Err(PluginValidationError::new(
-                "PLUGIN_INVALID_HOOK_POLICY",
-                "beforeCommit requires fail-closed",
-            ));
-        }
-        let scope = hook.request_match.as_ref().ok_or_else(|| {
-            PluginValidationError::new("PLUGIN_INVALID_HOOK_MATCH", "beforeCommit requires match")
-        })?;
-        for (name, values) in [
-            ("cliKeys", &scope.cli_keys),
-            ("methods", &scope.methods),
-            ("paths", &scope.paths),
-        ] {
-            let mut seen = std::collections::HashSet::new();
-            if values.is_empty()
-                || values.len() > 32
-                || values.iter().any(|value| {
-                    !seen.insert(value)
-                        || value.is_empty()
-                        || value.len() > 256
-                        || !value.bytes().all(|byte| byte.is_ascii_graphic())
-                        || value
-                            .chars()
-                            .any(|ch| ch.is_whitespace() || ch == '*' || ch == '?' || ch == '#')
-                        || match name {
-                            "cliKeys" => !value.chars().all(|ch| {
-                                ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-'
-                            }),
-                            "methods" => !matches!(
-                                value.as_str(),
-                                "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS"
-                            ),
-                            _ => !value.starts_with('/'),
-                        }
-                })
-            {
-                return Err(PluginValidationError::new(
-                    "PLUGIN_INVALID_HOOK_MATCH",
-                    format!(
-                        "match.{name} must be a nonempty unique exact list of at most 32 values"
-                    ),
-                ));
-            }
-        }
-    } else if hook.request_match.is_some() {
-        return Err(PluginValidationError::new(
-            "PLUGIN_INVALID_HOOK_MATCH",
-            "match is only supported by beforeCommit",
-        ));
-    }
     Ok(())
 }
 
@@ -1363,7 +1286,6 @@ mod tests {
             priority: 100,
             failure_policy: Some("fail-open".to_string()),
             timeout_ms: None,
-            request_match: None,
         }
     }
 
@@ -1884,25 +1806,5 @@ mod tests {
         });
 
         assert_unsupported_or_unknown_runtime(official);
-    }
-    #[test]
-    fn response_commit_manifest_fixtures_match_sdk() {
-        let cases: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../docs/plugins/fixtures/response-commit-manifests.json"
-        ))
-        .unwrap();
-        for case in cases.as_array().unwrap() {
-            let manifest: PluginManifest =
-                serde_json::from_value(case["manifest"].clone()).unwrap();
-            let actual = validate_manifest(&manifest, "0.62.0")
-                .err()
-                .map(|error| error.code.to_string());
-            assert_eq!(
-                actual.as_deref(),
-                case["errorCode"].as_str(),
-                "{}",
-                case["name"]
-            );
-        }
     }
 }

@@ -1,4 +1,3 @@
-import responseCommitFixtures from "../../../docs/plugins/fixtures/response-commit-manifests.json";
 import { describe, expect, it, test } from "vitest";
 import contract from "../../../docs/plugins/plugin-api-v1-contract.json";
 import {
@@ -805,27 +804,5 @@ describe("permissionRisk", () => {
     expect(permissionRisk("file.read")).toBe("high");
     expect(permissionRisk("file.write")).toBe("high");
     expect(permissionRisk("secret.read")).toBe("critical");
-  });
-});
-
-describe("response commit public contract", () => {
-  for (const fixture of responseCommitFixtures) {
-    it(`validates shared manifest fixture: ${fixture.name}`, () => {
-      const result = validateManifest(fixture.manifest as PluginManifest);
-      expect(result.ok ? null : result.error.code).toBe(fixture.errorCode);
-    });
-  }
-  it("exposes the independent camelCase complete-response context", () => {
-    const register = (api: PluginApi) =>
-      api.gateway?.registerHook("gateway.response.beforeCommit", (ctx) => {
-        const expected: string | null = ctx.context.outboundRequest.model;
-        const actual: string = ctx.context.response.body;
-        const complete: true = ctx.context.response.complete;
-        const cli: string = ctx.context.request.cliKey;
-        return complete && cli === "codex" && actual === expected
-          ? { action: "pass" }
-          : { action: "switchProvider", reasonCode: "tail.rejected" };
-      });
-    expect(register).toBeTypeOf("function");
   });
 });

@@ -35,8 +35,7 @@
     "provider.modelDiscovery",
     "provider.healthCheck",
     "protocol.bridge",
-    "gateway.hooks",
-    "gateway.provider.switch"
+    "gateway.hooks"
   ],
   "uiContributionSlots": [
     "app.sidebar.items",
@@ -130,7 +129,6 @@
     "gateway.request.beforeSend",
     "gateway.response.chunk",
     "gateway.response.after",
-    "gateway.response.beforeCommit",
     "gateway.error",
     "log.beforePersist"
   ],
@@ -277,35 +275,6 @@
       "permissionDependencies": {},
       "mutationFields": ["logMessage"],
       "contextFields": ["traceId", "log.message"]
-    },
-    "gateway.response.beforeCommit": {
-      "phase": "after complete upstream response and before any downstream commit",
-      "kind": "response",
-      "status": "active",
-      "defaultFailurePolicy": "fail-closed",
-      "timeoutMs": 5000,
-      "reservedHeaderPolicy": "block-gateway-owned",
-      "readPermissions": ["request.meta.read", "response.header.read", "response.body.read"],
-      "writePermissions": [],
-      "permissionDependencies": {},
-      "mutationFields": [],
-      "contextFields": [
-        "traceId",
-        "request.cliKey",
-        "request.method",
-        "request.path",
-        "request.requestedModel",
-        "outboundRequest.model",
-        "attempt.providerId",
-        "attempt.providerIndex",
-        "attempt.retryIndex",
-        "response.status",
-        "response.headers",
-        "response.contentType",
-        "response.body",
-        "response.complete",
-        "response.decodedBytes"
-      ]
     }
   },
   "extensionHostContract": {
@@ -327,17 +296,5 @@
     "status": "mainline-contract"
   },
   "communityRuntimes": ["extensionHost"],
-  "unsupportedLegacyRuntimes": ["wasm", "process", "native"],
-  "responseCommit": {
-    "hook": "gateway.response.beforeCommit",
-    "required": true,
-    "maxDecodedBytes": 2097152,
-    "matchFields": ["cliKeys", "methods", "paths"],
-    "maxMatchValues": 32,
-    "actions": ["pass", "block", "switchProvider"],
-    "switchCapability": "gateway.provider.switch",
-    "contextNaming": "camelCase",
-    "decisionPrecedence": ["block-or-execution-error", "switchProvider", "pass"],
-    "safeHeaders": ["content-type", "content-language", "cache-control"]
-  }
+  "unsupportedLegacyRuntimes": ["wasm", "process", "native"]
 }

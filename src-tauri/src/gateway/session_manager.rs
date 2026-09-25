@@ -5,7 +5,6 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Mutex;
-use std::time::Instant;
 
 const DEFAULT_SESSION_TTL_SECS: i64 = 300;
 const MAX_SESSION_ID_LEN: usize = 256;
@@ -29,21 +28,7 @@ pub struct ActiveSessionSnapshot {
 #[derive(Debug)]
 pub struct SessionManager {
     ttl_secs: i64,
-    state: Mutex<SessionState>,
-}
-
-#[derive(Debug, Default)]
-struct SessionState {
-    bindings: HashMap<SessionKey, SessionBinding>,
-    invalidated_at: HashMap<String, Instant>,
-}
-
-impl SessionState {
-    fn accepts_request(&self, cli_key: &str, request_started: Instant) -> bool {
-        self.invalidated_at
-            .get(cli_key)
-            .is_none_or(|invalidated_at| request_started > *invalidated_at)
-    }
+    bindings: Mutex<HashMap<SessionKey, SessionBinding>>,
 }
 
 #[derive(Debug, Clone)]
@@ -78,7 +63,7 @@ impl SessionManager {
     pub fn new() -> Self {
         Self {
             ttl_secs: DEFAULT_SESSION_TTL_SECS,
-            state: Mutex::new(SessionState::default()),
+            bindings: Mutex::new(HashMap::new()),
         }
     }
 
@@ -88,13 +73,7 @@ impl SessionManager {
             return 0;
         }
 
-        let mut state = self.state.lock_or_recover();
-        // In-flight requests keep their candidates, but cannot restore routing
-        // preferences that this invalidation has explicitly cleared.
-        state
-            .invalidated_at
-            .insert(cli_key.to_string(), Instant::now());
-        let guard = &mut state.bindings;
+        let mut guard = self.bindings.lock_or_recover();
         let before = guard.len();
         guard.retain(|k, _| k.cli_key != cli_key);
         before.saturating_sub(guard.len())
@@ -193,8 +172,7 @@ impl SessionManager {
             session_id: session_id.to_string(),
         };
 
-        let mut state = self.state.lock_or_recover();
-        let guard = &mut state.bindings;
+        let mut guard = self.bindings.lock_or_recover();
         match guard.get_mut(&key) {
             Some(binding) if binding.expires_at > now_unix => {
                 binding.expires_at = now_unix.saturating_add(binding.ttl_secs.max(1));
@@ -220,8 +198,7 @@ impl SessionManager {
             session_id: session_id.to_string(),
         };
 
-        let mut state = self.state.lock_or_recover();
-        let guard = &mut state.bindings;
+        let mut guard = self.bindings.lock_or_recover();
         match guard.get_mut(&key) {
             Some(binding) if binding.expires_at > now_unix => {
                 binding.expires_at = now_unix.saturating_add(binding.ttl_secs.max(1));
@@ -244,7 +221,6 @@ impl SessionManager {
         sort_mode_id: Option<i64>,
         provider_order: Option<Vec<i64>>,
         now_unix: i64,
-        request_started: Instant,
     ) {
         if cli_key.trim().is_empty() || session_id.trim().is_empty() {
             return;
@@ -255,15 +231,11 @@ impl SessionManager {
             session_id: session_id.to_string(),
         };
 
-        let mut state = self.state.lock_or_recover();
-        if !state.accepts_request(cli_key, request_started) {
-            return;
-        }
-        let guard = &mut state.bindings;
+        let mut guard = self.bindings.lock_or_recover();
         if guard.len() >= MAX_BINDINGS {
-            drop_expired(guard, now_unix);
+            drop_expired(&mut guard, now_unix);
             if guard.len() >= MAX_BINDINGS {
-                evict_oldest_quarter(guard);
+                evict_oldest_quarter(&mut guard);
             }
         }
 
@@ -301,8 +273,7 @@ impl SessionManager {
             session_id: session_id.to_string(),
         };
 
-        let mut state = self.state.lock_or_recover();
-        let guard = &mut state.bindings;
+        let mut guard = self.bindings.lock_or_recover();
         match guard.get_mut(&key) {
             Some(binding) if binding.expires_at > now_unix => {
                 binding.expires_at = now_unix.saturating_add(binding.ttl_secs.max(1));
@@ -323,7 +294,6 @@ impl SessionManager {
         provider_id: i64,
         sort_mode_id: Option<i64>,
         now_unix: i64,
-        request_started: Instant,
     ) {
         if cli_key.trim().is_empty() || session_id.trim().is_empty() || provider_id <= 0 {
             return;
@@ -334,15 +304,11 @@ impl SessionManager {
             session_id: session_id.to_string(),
         };
 
-        let mut state = self.state.lock_or_recover();
-        if !state.accepts_request(cli_key, request_started) {
-            return;
-        }
-        let guard = &mut state.bindings;
+        let mut guard = self.bindings.lock_or_recover();
         if guard.len() >= MAX_BINDINGS {
-            drop_expired(guard, now_unix);
+            drop_expired(&mut guard, now_unix);
             if guard.len() >= MAX_BINDINGS {
-                evict_oldest_quarter(guard);
+                evict_oldest_quarter(&mut guard);
             }
         }
 
@@ -371,13 +337,7 @@ impl SessionManager {
         );
     }
 
-    pub fn clear_bound_provider(
-        &self,
-        cli_key: &str,
-        session_id: &str,
-        now_unix: i64,
-        request_started: Instant,
-    ) -> bool {
+    pub fn clear_bound_provider(&self, cli_key: &str, session_id: &str, now_unix: i64) -> bool {
         if cli_key.trim().is_empty() || session_id.trim().is_empty() {
             return false;
         }
@@ -387,11 +347,7 @@ impl SessionManager {
             session_id: session_id.to_string(),
         };
 
-        let mut state = self.state.lock_or_recover();
-        if !state.accepts_request(cli_key, request_started) {
-            return false;
-        }
-        let guard = &mut state.bindings;
+        let mut guard = self.bindings.lock_or_recover();
         match guard.get_mut(&key) {
             Some(binding) if binding.expires_at > now_unix => {
                 binding.provider_id = 0;
@@ -410,9 +366,8 @@ impl SessionManager {
             return Vec::new();
         }
 
-        let mut state = self.state.lock_or_recover();
-        let guard = &mut state.bindings;
-        drop_expired(guard, now_unix);
+        let mut guard = self.bindings.lock_or_recover();
+        drop_expired(&mut guard, now_unix);
 
         let mut rows: Vec<ActiveSessionSnapshot> = guard
             .iter()

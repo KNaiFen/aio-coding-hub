@@ -90,7 +90,6 @@ fn inject_oauth_auth<R: tauri::Runtime>(
                     "OAuth inject_upstream_headers failed, skipping provider: {e}"
                 );
                 return Err(Box::new(FailoverAttempt {
-                    plugin_decision: None,
                     provider_id: prepared.provider_id,
                     provider_name: prepared.provider_name_base.clone(),
                     base_url: prepared.provider_base_url_display.clone(),
@@ -129,7 +128,6 @@ fn inject_oauth_auth<R: tauri::Runtime>(
                 "oauth_adapter is None at injection point (should have been skipped earlier)"
             );
             Err(Box::new(FailoverAttempt {
-                plugin_decision: None,
                 provider_id: prepared.provider_id,
                 provider_name: prepared.provider_name_base.clone(),
                 base_url: prepared.provider_base_url_display.clone(),

@@ -4,7 +4,6 @@ import { AlertTriangle, CheckCircle2, ShieldAlert } from "lucide-react";
 import type { PluginInstallPreview } from "../../services/plugins";
 import { Button } from "../../ui/Button";
 import { Dialog } from "../../ui/Dialog";
-import { PluginResponseCommitNotice } from "./PluginResponseCommitNotice";
 import { describePluginPermission, pluginRiskLabel } from "./pluginProductCopy";
 
 type PluginInstallPreviewDialogProps = {
@@ -194,11 +193,6 @@ export function PluginInstallPreviewDialog({
               )}
             </div>
           </div>
-
-          <PluginResponseCommitNotice
-            hooks={preview.hooks}
-            capabilities={preview.contributionImpact.capabilities}
-          />
 
           {preview.description ? (
             <div className="rounded-md border border-border px-3 py-2 text-sm text-foreground">

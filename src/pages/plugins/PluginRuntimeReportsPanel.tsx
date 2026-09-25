@@ -65,19 +65,8 @@ function TraceIdButton({ traceId }: { traceId: string | null | undefined }) {
   );
 }
 
-function reportStatusLabel(report: PluginExtensionExecutionReport) {
-  if (report.contributionId !== "gateway.response.beforeCommit") return report.status;
-  const labels: Record<string, string> = {
-    completed: "校验通过",
-    blocked: "策略阻断",
-    switchProvider: "策略拒绝，申请下一供应商",
-    failedClosed: "校验器执行失败",
-  };
-  return labels[report.status] ?? report.status;
-}
-
 function reportFailureLabel(report: PluginExtensionExecutionReport) {
-  return [report.failureKind, report.errorCode].filter(Boolean).join(" · ") || "-";
+  return report.failureKind ?? report.errorCode ?? "-";
 }
 
 export function PluginRuntimeReportsPanel({ detail }: { detail: PluginDetail }) {
@@ -96,7 +85,7 @@ export function PluginRuntimeReportsPanel({ detail }: { detail: PluginDetail }) 
     !reportsQuery.isLoading;
 
   async function handleExportReplayFixture(report: PluginExtensionExecutionReport) {
-    if (!report.traceId || !report.replayable || report.contributionType !== "hook") return;
+    if (!report.traceId || report.contributionType !== "hook") return;
     try {
       const fixture = await replayExportMutation.mutateAsync({
         traceId: report.traceId,
@@ -127,7 +116,7 @@ export function PluginRuntimeReportsPanel({ detail }: { detail: PluginDetail }) 
           {reports.map((report) => (
             <div key={`report-${report.id}`} className="rounded-md border border-border px-3 py-2">
               <div className="flex flex-wrap items-start justify-between gap-2 text-sm">
-                <span className="font-medium text-foreground">{reportStatusLabel(report)}</span>
+                <span className="font-medium text-foreground">{report.status}</span>
                 <span className="rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground">
                   {report.contributionType}
                 </span>
@@ -154,21 +143,14 @@ export function PluginRuntimeReportsPanel({ detail }: { detail: PluginDetail }) 
                   <TraceIdButton traceId={report.traceId} />
                 </div>
               </div>
-              {detailValue(report.mutationSummary, "reasonCode") ? (
-                <div className="mt-2 break-words font-mono text-xs text-muted-foreground">
-                  策略原因：{detailValue(report.mutationSummary, "reasonCode")}
-                </div>
-              ) : null}
               {report.contributionType === "hook" ? (
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <Button
                     size="sm"
                     variant="secondary"
-                    disabled={
-                      !report.traceId || !report.replayable || replayExportMutation.isPending
-                    }
+                    disabled={!report.traceId || replayExportMutation.isPending}
                     onClick={() => void handleExportReplayFixture(report)}
-                    title={report.replayable ? "导出 replay fixture" : "未保留可重放的上下文"}
+                    title="导出 replay fixture"
                   >
                     <Download className="h-3.5 w-3.5" />
                     导出 Replay

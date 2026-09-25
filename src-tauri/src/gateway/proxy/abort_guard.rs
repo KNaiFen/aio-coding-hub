@@ -28,7 +28,6 @@ pub(super) struct RequestAbortGuard<R: tauri::Runtime = tauri::Wry> {
     session_id: Option<String>,
     requested_model: Option<String>,
     special_settings: Arc<Mutex<Vec<serde_json::Value>>>,
-    completed_attempts: Vec<FailoverAttempt>,
     in_flight_attempt: Option<FailoverAttempt>,
     created_at_ms: i64,
     created_at: i64,
@@ -72,7 +71,6 @@ impl<R: tauri::Runtime> RequestAbortGuard<R> {
             session_id,
             requested_model,
             special_settings,
-            completed_attempts: Vec::new(),
             in_flight_attempt: None,
             created_at_ms,
             created_at,
@@ -104,7 +102,6 @@ impl<R: tauri::Runtime> RequestAbortGuard<R> {
             session_id: self.session_id.take(),
             requested_model: self.requested_model.take(),
             special_settings: Arc::clone(&self.special_settings),
-            completed_attempts: std::mem::take(&mut self.completed_attempts),
             in_flight_attempt: self.in_flight_attempt.take(),
             created_at_ms: self.created_at_ms,
             created_at: self.created_at,
@@ -115,41 +112,13 @@ impl<R: tauri::Runtime> RequestAbortGuard<R> {
         taken
     }
 
-    pub(super) fn take_in_flight_attempt(&mut self) -> Option<FailoverAttempt> {
-        self.in_flight_attempt.take()
-    }
-
-    pub(super) fn capture_completed_attempts(&mut self, attempts: &[FailoverAttempt]) {
-        let start = attempts.len().saturating_sub(100);
-        self.completed_attempts = attempts[start..].to_vec();
-        self.in_flight_attempt = None;
-    }
-
     pub(super) fn capture_in_flight_attempt(&mut self, attempt: &FailoverAttempt) {
         self.in_flight_attempt = Some(attempt.clone());
     }
 
-    pub(super) fn attempts_for_terminal_error(
-        &self,
-        code: super::GatewayErrorCode,
-        elapsed_ms: u128,
-    ) -> Vec<FailoverAttempt> {
-        let mut attempts = self.completed_attempts.clone();
-        if let Some(mut attempt) = self.in_flight_attempt.clone() {
-            attempt.outcome = "request_deadline_exceeded".to_string();
-            attempt.error_category = Some(super::ErrorCategory::SystemError.as_str());
-            attempt.error_code = Some(code.as_str());
-            attempt.decision = Some("abort");
-            attempt.reason_code = Some("response_validation_failed");
-            attempt.attempt_duration_ms =
-                Some(elapsed_ms.saturating_sub(attempt.attempt_started_ms.unwrap_or(0)));
-            attempts.push(attempt);
-        }
-        attempts
-    }
-
-    /// Capture send entry before awaiting headers, then refine the state after
-    /// the send resolves (for example, a connection failure never reached upstream).
+    /// Called once the upstream send resolved: the pre-send "started" snapshot
+    /// carries `upstream_sent: false` / no reasoning effort, which would be
+    /// recorded verbatim if the client aborts mid-stream.
     pub(super) fn update_in_flight_attempt_send_state(
         &mut self,
         reasoning_effort: Option<String>,
@@ -172,17 +141,7 @@ impl<R: tauri::Runtime> Drop for RequestAbortGuard<R> {
         }
 
         let duration_ms = self.started.elapsed().as_millis();
-        let mut abort_attempts = self.completed_attempts.clone();
-        if let Some(mut attempt) = self.in_flight_attempt.clone() {
-            attempt.outcome = "client_abort".to_string();
-            attempt.error_category = Some(super::ErrorCategory::ClientAbort.as_str());
-            attempt.error_code = Some(super::GatewayErrorCode::RequestAborted.as_str());
-            attempt.decision = Some("abort");
-            attempt.reason_code = Some("aborted");
-            attempt.attempt_duration_ms =
-                Some(duration_ms.saturating_sub(attempt.attempt_started_ms.unwrap_or(0)));
-            abort_attempts.push(attempt);
-        }
+        let abort_attempts: Vec<FailoverAttempt> = self.in_flight_attempt.iter().cloned().collect();
         emit_request_event_and_spawn_request_log(
             RequestEndArgs::from_context(RequestEndContextArgs {
                 deps: RequestEndDeps::new(
@@ -221,7 +180,6 @@ mod tests {
     #[test]
     fn cloned_abort_attempt_keeps_provider_context() {
         let attempt = FailoverAttempt {
-            plugin_decision: None,
             provider_id: 12,
             provider_name: "Claude Bridge".to_string(),
             base_url: "https://example.com".to_string(),

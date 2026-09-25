@@ -40,7 +40,6 @@ pub(crate) enum GatewayPluginHookName {
     ResponseHeaders,
     ResponseChunk,
     ResponseAfter,
-    ResponseBeforeCommit,
     Error,
     LogBeforePersist,
 }
@@ -55,7 +54,6 @@ impl GatewayPluginHookName {
             Self::ResponseHeaders => "gateway.response.headers",
             Self::ResponseChunk => "gateway.response.chunk",
             Self::ResponseAfter => "gateway.response.after",
-            Self::ResponseBeforeCommit => "gateway.response.beforeCommit",
             Self::Error => "gateway.error",
             Self::LogBeforePersist => "log.beforePersist",
         }
@@ -73,7 +71,6 @@ impl GatewayPluginHookName {
             "gateway.response.headers" => Some(Self::ResponseHeaders),
             "gateway.response.chunk" => Some(Self::ResponseChunk),
             "gateway.response.after" => Some(Self::ResponseAfter),
-            "gateway.response.beforeCommit" => Some(Self::ResponseBeforeCommit),
             "gateway.error" => Some(Self::Error),
             "log.beforePersist" => Some(Self::LogBeforePersist),
             _ => None,
@@ -93,11 +90,7 @@ impl GatewayPluginHookName {
     pub(crate) fn is_response_hook(self) -> bool {
         matches!(
             self,
-            Self::ResponseHeaders
-                | Self::ResponseChunk
-                | Self::ResponseAfter
-                | Self::ResponseBeforeCommit
-                | Self::Error
+            Self::ResponseHeaders | Self::ResponseChunk | Self::ResponseAfter | Self::Error
         )
     }
 }
@@ -160,9 +153,8 @@ impl GatewayRequestHookInput {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct GatewayResponseHookInput {
-    pub(crate) execution_lease: Option<std::sync::Arc<tokio::sync::OwnedSemaphorePermit>>,
     pub(crate) hook_name: GatewayPluginHookName,
     pub(crate) trace_id: String,
     pub(crate) status: u16,
@@ -182,7 +174,6 @@ impl GatewayResponseHookInput {
         budget: GatewayPluginContextBudget,
     ) -> GatewayVisibleHookContext {
         let mut ctx = GatewayVisibleHookContext::new(self.hook_name, self.trace_id.clone());
-        ctx.execution_lease = self.execution_lease.clone();
         if has_permission(permissions, "response.header.read")
             || has_permission(permissions, "response.body.read")
         {
@@ -200,9 +191,8 @@ impl GatewayResponseHookInput {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct GatewayStreamHookInput {
-    pub(crate) execution_lease: Option<std::sync::Arc<tokio::sync::OwnedSemaphorePermit>>,
     pub(crate) trace_id: String,
     pub(crate) chunk: Bytes,
     pub(crate) sequence: u64,
@@ -223,7 +213,6 @@ impl GatewayStreamHookInput {
             GatewayPluginHookName::ResponseChunk,
             self.trace_id.clone(),
         );
-        ctx.execution_lease = self.execution_lease.clone();
         if has_permission(permissions, "stream.inspect") {
             ctx.stream.sequence = Some(self.sequence);
             let (chunk, chunk_truncated) =
@@ -265,10 +254,8 @@ impl GatewayLogHookInput {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct GatewayVisibleHookContext {
-    #[serde(skip)]
-    pub(crate) execution_lease: Option<std::sync::Arc<tokio::sync::OwnedSemaphorePermit>>,
     pub(crate) hook_name: String,
     pub(crate) trace_id: String,
     pub(crate) request: GatewayVisibleRequestContext,
@@ -282,7 +269,6 @@ impl GatewayVisibleHookContext {
         Self {
             hook_name: hook_name.as_str().to_string(),
             trace_id,
-            execution_lease: None,
             request: GatewayVisibleRequestContext::default(),
             response: GatewayVisibleResponseContext::default(),
             stream: GatewayVisibleStreamContext::default(),
@@ -731,7 +717,6 @@ mod tests {
     #[test]
     fn gateway_plugin_context_truncates_stream_and_log_by_budget() {
         let stream = GatewayStreamHookInput {
-            execution_lease: None,
             trace_id: "trace-stream-budget".to_string(),
             chunk: Bytes::from("s".repeat(128)),
             sequence: 1,
@@ -759,7 +744,6 @@ mod tests {
     #[test]
     fn gateway_plugin_context_truncates_response_body_by_budget() {
         let response = GatewayResponseHookInput {
-            execution_lease: None,
             hook_name: GatewayPluginHookName::ResponseAfter,
             trace_id: "trace-response-budget".to_string(),
             status: 200,
@@ -799,7 +783,6 @@ mod tests {
             ..input.clone()
         };
         let stream = GatewayStreamHookInput {
-            execution_lease: None,
             trace_id: "trace-stream-multibyte-budget".to_string(),
             chunk: Bytes::from("你好🙂abc"),
             sequence: 1,
@@ -916,7 +899,6 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("content-type", HeaderValue::from_static("application/json"));
         let response = GatewayResponseHookInput {
-            execution_lease: None,
             hook_name: GatewayPluginHookName::ResponseAfter,
             trace_id: "trace-2".to_string(),
             status: 200,
@@ -935,7 +917,6 @@ mod tests {
         );
 
         let chunk = GatewayStreamHookInput {
-            execution_lease: None,
             trace_id: "trace-3".to_string(),
             chunk: Bytes::from_static(b"data: hello\n\n"),
             sequence: 7,

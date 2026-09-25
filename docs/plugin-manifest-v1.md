@@ -115,7 +115,6 @@ Active hooks in plugin API v1 是当前已经接入 gateway 或 log pipeline 的
 | `gateway.request.beforeSend` | provider resolution 后、reqwest 发送 upstream request 前 | headers 和 request body | 5000 ms | fail-open | `request.meta.read`, `request.header.read`, `request.header.readSensitive`, `request.body.read`, `request.header.write`, `request.body.write` |
 | `gateway.response.chunk` | 每个 bounded streaming response chunk | stream chunk | 5000 ms | fail-open | `stream.inspect`, `stream.modify` |
 | `gateway.response.after` | 大小预算内的完整 non-stream response | headers 和 response body | 5000 ms | fail-open | `response.header.read`, `response.body.read`, `response.header.write`, `response.body.write` |
-| `gateway.response.beforeCommit` | 完整 JSON/SSE 解码读取后、提交任何下游状态或字节前 | 只读响应与当前 attempt 元数据；pass/block/switchProvider | 5000 ms | 固定 fail-closed | `request.meta.read`, `response.header.read`, `response.body.read` |
 | `gateway.error` | gateway error response materialization 后、发送前 | headers 和 error response body | 5000 ms | fail-open | `response.header.read`, `response.body.read`, `response.header.write`, `response.body.write` |
 | `log.beforePersist` | Request 或 audit log 持久化前 | log message | 5000 ms | fail-open | `log.redact` |
 
@@ -325,27 +324,3 @@ module.exports.activate = function(api) {
   }
 }
 ```
-
-
-## Complete response commit validation
-
-`gateway.response.beforeCommit` 是所有 Extension Host 插件可用的必需只读校验。每插件只能声明一次，通过有限精确列表匹配请求：
-
-```json
-{
-  "capabilities": ["gateway.hooks", "gateway.provider.switch"],
-  "contributes": {
-    "gatewayHooks": [{
-      "name": "gateway.response.beforeCommit",
-      "priority": 100,
-      "match": { "cliKeys": ["codex"], "methods": ["POST"], "paths": ["/responses", "/v1/responses"] }
-    }]
-  }
-}
-```
-
-每个 match 列表必须包含 1–32 个唯一值；method 大写，path 是规范化后的精确路径，不支持通配符。`failurePolicy` 省略或 `fail-closed`；`match` 不能用于旧 hooks。申请换家需要额外的 `gateway.provider.switch` capability，插件不能指定供应商或改变重试预算。
-
-完整解码正文上限 2 MiB，UTF-8 非法或超过预算时明确失败，不截断后放行。匹配请求在全部必需校验通过前不返回任何上游 headers 或正文；这会延后首字输出。非匹配请求保留原有流式路径。参与者、manifest 和配置按请求冻结；在途禁用或替换导致无法完成既定校验时明确失败。
-
-新 hook 使用独立 camelCase DTO，字段和动作见 [Hooks](plugins/reference/hooks.md#gatewayresponsebeforecommit)。旧 hooks 的 runtime wire 字段保持兼容，不进行全局重命名。API major 不变；旧宿主将拒绝未知 hook/capability，不能仅凭 `pluginApi: ^1.0.0` 判断宿主支持新能力。

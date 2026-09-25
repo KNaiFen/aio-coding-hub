@@ -58,7 +58,6 @@ pub(super) fn finalize_circuit_and_session<R: tauri::Runtime>(
                 ctx.provider_id,
                 ctx.sort_mode_id,
                 now_unix,
-                ctx.started,
             );
         }
     } else if ctx.fake_200_detected && (200..300).contains(&ctx.status) {
